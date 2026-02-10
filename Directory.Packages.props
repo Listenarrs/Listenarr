@@ -6,7 +6,7 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<PackageVersion Include="AsyncKeyedLock" Version="8.0.1" />
+		<PackageVersion Include="AsyncKeyedLock" Version="8.0.2" />
 		<PackageVersion Include="coverlet.collector" Version="3.2.0" />
 		<PackageVersion Include="HtmlAgilityPack" Version="1.11.67" />
 		<PackageVersion Include="Microsoft.AspNetCore.Authorization" Version="8.0.0" />
