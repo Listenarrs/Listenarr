@@ -687,16 +687,17 @@ namespace Listenarr.Api.Services
                     var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}";
                     _logger.LogInformation("Polling qBittorrent client {ClientName} at {BaseUrl}", client.Name, baseUrl);
 
-                    // Create a new HttpClient with cookie support for this session
+                    // Create an HttpClient with its own CookieContainer so the qBittorrent
+                    // SID cookie from login is stored and sent with subsequent requests.
+                    // The factory "DownloadClient" has UseCookies=false which breaks qBit auth.
                     var cookieJar = new System.Net.CookieContainer();
-                    var handler = new HttpClientHandler
+                    using var handler = new HttpClientHandler
                     {
                         CookieContainer = cookieJar,
                         UseCookies = true,
                         AutomaticDecompression = System.Net.DecompressionMethods.All
                     };
                     using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
-                    _logger.LogInformation("Created HttpClient with cookie support for qbittorrent polling. BaseAddress={BaseAddress}", http.BaseAddress);
 
                     // Login
                     using var loginData = new FormUrlEncodedContent(new[]
@@ -991,21 +992,23 @@ namespace Listenarr.Api.Services
                                     _completionCandidates[dl.Id] = DateTime.UtcNow;
                                     _logger.LogInformation("Download {DownloadId} observed as complete candidate (qBittorrent). Torrent: {TorrentName}, Path: {Path}. Waiting for stability window.",
                                         dl.Id, matched.Name, completionPath);
-                                    
-                                    // Update download status to Completed in database so it stops being re-added to candidates
+
+                                    // Update progress but do NOT set status to Completed yet.
+                                    // Setting Completed here races with DownloadProcessingBackgroundService
+                                    // which picks up Completed downloads and starts importing before the
+                                    // stability window expires. Keep status as Downloading until finalization.
                                     try
                                     {
-                                        dl.Status = DownloadStatus.Completed;
                                         dl.Progress = 100M;
                                         dbContext.Downloads.Update(dl);
                                         await dbContext.SaveChangesAsync(cancellationToken);
-                                        _logger.LogDebug("Updated download {DownloadId} status to Completed in database", dl.Id);
+                                        _logger.LogDebug("Updated download {DownloadId} progress to 100%% in database (status remains {Status})", dl.Id, dl.Status);
                                     }
                                     catch (Exception ex2)
                                     {
-                                        _logger.LogWarning(ex2, "Failed to update download {DownloadId} status to Completed", dl.Id);
+                                        _logger.LogWarning(ex2, "Failed to update download {DownloadId} progress", dl.Id);
                                     }
-                                    
+
                                     // Broadcast candidate so UI can surface it immediately
                                     _ = BroadcastCandidateUpdateAsync(dl, true, cancellationToken);
                                     continue;

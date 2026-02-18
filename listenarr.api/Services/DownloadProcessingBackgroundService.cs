@@ -231,13 +231,20 @@ namespace Listenarr.Api.Services
                         }
 
                         // Use V2 pattern: Call GetImportItem to resolve the accurate path
-                        // Build a basic QueueItem from the download data
+                        // Build a basic QueueItem from the download data.
+                        // Prefer ClientContentPath (the torrent's content_path, i.e. the actual
+                        // file/folder) over DownloadPath (save_path, i.e. the download directory).
+                        // Using save_path for single-file torrents would resolve to the entire
+                        // downloads directory and import every file in it.
+                        var clientContentPath = dl.Metadata?.TryGetValue("ClientContentPath", out var ccp) == true
+                            ? ccp?.ToString()
+                            : null;
                         var preliminaryItem = new QueueItem
                         {
                             Id = dl.Id,
                             Title = dl.Title ?? "Unknown",
                             Status = "completed",
-                            ContentPath = dl.FinalPath ?? dl.DownloadPath,
+                            ContentPath = dl.FinalPath ?? clientContentPath ?? dl.DownloadPath,
                             DownloadClientId = dl.DownloadClientId
                         };
 

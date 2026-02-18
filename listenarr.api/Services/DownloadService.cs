@@ -2340,16 +2340,26 @@ namespace Listenarr.Api.Services
                     try
                     {
                         var clientDownloads = listenarrDownloads.Where(d => d.DownloadClientId == client.Id).ToList();
-                        
+
+                        // SAFETY: Skip purging when the client returned 0 queue items but we have
+                        // active downloads tracked. This prevents accidental deletion when the client
+                        // is temporarily unreachable (GetQueueAsync returns empty list on network errors).
+                        if (clientQueue.Count == 0 && clientDownloads.Any())
+                        {
+                            _logger.LogWarning("Skipping orphan purge for client {ClientName}: client returned 0 queue items but {Count} downloads are tracked. Client may be temporarily unreachable.",
+                                client.Name, clientDownloads.Count);
+                            continue;
+                        }
+
                         // Build set of all client item IDs (both original client IDs and normalized DB IDs)
                         var allClientItemIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                        
+
                         // Add all normalized (mapped) IDs from the processed queue
                         foreach (var mapped in mappedFiltered)
                         {
                             allClientItemIds.Add(mapped.Id);
                         }
-                        
+
                         // Also add original client queue IDs (torrent hashes, etc)
                         foreach (var item in clientQueue)
                         {

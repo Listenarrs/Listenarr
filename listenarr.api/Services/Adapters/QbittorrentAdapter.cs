@@ -868,14 +868,22 @@ namespace Listenarr.Api.Services.Adapters
                     return result;
                 }
 
-                // Extract the first subdirectory from file path (qBittorrent uses / separator even on Windows)
+                // For multi-file torrents, files are inside a subfolder (e.g. "FolderName/file.mkv").
+                // For single-file torrents, the file has no directory component (e.g. "file.m4b").
+                // In both cases, construct the full content path so the import targets the
+                // correct file/folder rather than the entire save_path directory.
                 var pathParts = fileName.Split('/');
-                var subfolder = pathParts.Length > 1 ? pathParts[0] : string.Empty;
-
-                // Construct output path
-                var outputPath = !string.IsNullOrEmpty(subfolder) 
-                    ? System.IO.Path.Combine(savePath, subfolder)
-                    : savePath;
+                string outputPath;
+                if (pathParts.Length > 1)
+                {
+                    // Multi-file torrent: use the top-level subfolder
+                    outputPath = System.IO.Path.Combine(savePath, pathParts[0]);
+                }
+                else
+                {
+                    // Single-file torrent: use the full file path
+                    outputPath = System.IO.Path.Combine(savePath, fileName);
+                }
 
                 // Apply remote path mapping
                 result.OutputPath = await _pathMappingService.TranslatePathAsync(client.Id, outputPath);
@@ -993,14 +1001,22 @@ namespace Listenarr.Api.Services.Adapters
                     return result;
                 }
 
-                // Extract the first subdirectory from file path (qBittorrent uses / separator even on Windows)
+                // For multi-file torrents, files are inside a subfolder (e.g. "FolderName/file.mkv").
+                // For single-file torrents, the file has no directory component (e.g. "file.m4b").
+                // In both cases, construct the full content path so the import targets the
+                // correct file/folder rather than the entire save_path directory.
                 var pathParts = fileName.Split('/');
-                var subfolder = pathParts.Length > 1 ? pathParts[0] : string.Empty;
-
-                // Construct output path
-                var outputPath = !string.IsNullOrEmpty(subfolder) 
-                    ? System.IO.Path.Combine(savePath, subfolder)
-                    : savePath;
+                string outputPath;
+                if (pathParts.Length > 1)
+                {
+                    // Multi-file torrent: use the top-level subfolder
+                    outputPath = System.IO.Path.Combine(savePath, pathParts[0]);
+                }
+                else
+                {
+                    // Single-file torrent: use the full file path
+                    outputPath = System.IO.Path.Combine(savePath, fileName);
+                }
 
                 // ✅ Apply remote path mapping
                 result.ContentPath = await _pathMappingService.TranslatePathAsync(client.Id, outputPath);
