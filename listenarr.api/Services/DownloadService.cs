@@ -2287,6 +2287,17 @@ namespace Listenarr.Api.Services
                     try
                     {
                         var clientDownloads = listenarrDownloads.Where(d => d.DownloadClientId == client.Id).ToList();
+
+                        // SAFETY: Skip purging when the client returned 0 queue items but we have
+                        // active downloads tracked. This prevents accidental deletion when the client
+                        // is temporarily unreachable (GetQueueAsync returns empty list on network errors).
+                        if (clientQueue.Count == 0 && clientDownloads.Any())
+                        {
+                            _logger.LogWarning("Skipping orphan purge for client {ClientName}: client returned 0 queue items but {Count} downloads are tracked. Client may be temporarily unreachable.",
+                                client.Name, clientDownloads.Count);
+                            continue;
+                        }
+
                         var mappedDownloadIds = mappedFiltered.Select(q => q.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
                         var orphanedDownloads = clientDownloads.Where(d =>
