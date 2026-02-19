@@ -54,7 +54,7 @@
     "jsdom": "^27.0.0",
     "npm-run-all2": "^8.0.4",
     "patch-package": "^8.0.1",
-    "prettier": "3.7.4",
+    "prettier": "3.8.1",
     "rollup-plugin-visualizer": "^6.0.5",
     "source-map-explorer": "^2.5.3",
     "start-server-and-test": "^2.1.2",
