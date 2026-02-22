@@ -1391,6 +1391,22 @@ namespace Listenarr.Api.Services
                 }
 
                 var settings = await configService.GetApplicationSettingsAsync();
+
+                // When OutputPath is not configured, fall back to the first root folder path
+                if (string.IsNullOrWhiteSpace(settings.OutputPath))
+                {
+                    var rootFolderService = scope.ServiceProvider.GetService<IRootFolderService>();
+                    if (rootFolderService != null)
+                    {
+                        var rootFolders = await rootFolderService.GetAllAsync();
+                        if (rootFolders.Count > 0)
+                        {
+                            settings.OutputPath = rootFolders[0].Path;
+                            _logger.LogInformation("OutputPath not configured, using first root folder: {OutputPath}", settings.OutputPath);
+                        }
+                    }
+                }
+
                 _logger.LogDebug("Application settings: OutputPath='{OutputPath}', EnableMetadataProcessing={EnableMetadata}, CompletedFileAction={Action}",
                     settings.OutputPath, settings.EnableMetadataProcessing, settings.CompletedFileAction);
 
