@@ -2,8 +2,8 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
-    <Version>0.2.50</Version>
-    <AssemblyVersion>0.2.50</AssemblyVersion>
+    <Version>0.2.51</Version>
+    <AssemblyVersion>0.2.51</AssemblyVersion>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
     <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>  

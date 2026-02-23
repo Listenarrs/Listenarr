@@ -1,5 +1,5 @@
 <template>
-  <form @submit.prevent="onSubmit" ref="formEl" class="modal-form">
+  <form id="modal-form" @submit.prevent="onSubmit" ref="formEl" class="modal-form">
     <slot />
   </form>
 </template>

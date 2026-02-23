@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.2.51] - 2026-02-23
+
+### Fixed
+- **UI (Remote Path Mapping):** Fixed Remote Path Mapping modal Save action by ensuring the shared `ModalForm` includes `id="modal-form"` so footer Save buttons using `form="modal-form"` correctly submit the form.
+
+
 ## [0.2.50] - 2026-02-22
 
 ### Changed
