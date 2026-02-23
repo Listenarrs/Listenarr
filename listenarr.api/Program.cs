@@ -586,6 +586,15 @@ builder.Services.AddListenarrInfrastructure();
 // Register application-level services (moved from Program.cs to keep startup focused)
 builder.Services.AddListenarrAppServices(builder.Configuration);
 // Register hosted/background services (moved from Program.cs). Allow tests to disable these.
+// In local development, disable hosted/background services to avoid activating
+// long-running background workers (and to avoid EF resolution at host start).
+    if (isDev)
+    {
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            { "Listenarr:DisableHostedServices", "true" }
+        });
+    }
 var disableHostedServices = builder.Configuration.GetValue<bool>("Listenarr:DisableHostedServices");
 if (!disableHostedServices)
 {
@@ -718,111 +727,23 @@ if (builder.Environment.IsDevelopment())
 
 var app = builder.Build();
 
-// Ensure database is created and migrations are applied
-using (var scope = app.Services.CreateScope())
+// Ensure database is created and migrations are applied.
+// Use the registered `IDbContextFactory<ListenArrDbContext>` so we do not attempt
+// to resolve scoped EF option configurators from the root provider during startup.
+try
 {
-    var context = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
-    var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-
-    // Ensure the database directory exists (use the absolute path computed above)
-    string dbFullPath = sqliteDbPath;
-    string? dbDirectory = Path.GetDirectoryName(dbFullPath);
-    if (!string.IsNullOrEmpty(dbDirectory) && !Directory.Exists(dbDirectory))
-    {
-        Directory.CreateDirectory(dbDirectory);
-    }
-
-    try
-    {
-        logger.LogInformation("Checking EF Core migrations (available/applied/pending)...");
-
-        try
-        {
-            var available = context.Database.GetMigrations().ToList();
-            var applied = context.Database.GetAppliedMigrations().ToList();
-            var pending = context.Database.GetPendingMigrations().ToList();
-
-            logger.LogInformation("Available migrations: {Count}", available.Count);
-            foreach (var m in available)
-            {
-                logger.LogInformation("  - {Migration}", m);
-            }
-
-            logger.LogInformation("Applied migrations: {Count}", applied.Count);
-            foreach (var m in applied)
-            {
-                logger.LogInformation("  - {Migration}", m);
-            }
-
-            logger.LogInformation("Pending migrations: {Count}", pending.Count);
-            foreach (var m in pending)
-            {
-                logger.LogInformation("  - {Migration}", m);
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Failed to enumerate EF Core migrations before migrating");
-        }
-
-        logger.LogInformation("Applying database migrations...");
-        // Apply any pending migrations (including AddDefaultMetadataSources which adds Audimeta and Audnexus)
-        context.Database.Migrate();
-        logger.LogInformation("Database migrations applied successfully");
-
-        // Apply SQLite PRAGMA settings after database is created
-        SqlitePragmaInitializer.ApplyPragmas(context);
-        logger.LogInformation("SQLite pragmas applied successfully");
-
-            // Migrate legacy single-root configuration (ApplicationSettings.outputPath) into the new RootFolder table
-            try
-            {
-                using var migrScope = app.Services.CreateScope();
-                var migrator = migrScope.ServiceProvider.GetRequiredService<Listenarr.Api.Services.ILegacyOutputPathMigrator>();
-                migrator.MigrateAsync().GetAwaiter().GetResult();
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "Legacy output path migration failed");
-            }
-        // Schema changes should be applied by EF migrations. See Migration:
-        // Migrations/20251125103000_AddDownloadFinalizationSettingsToApplicationSettings.cs
-    }
-    catch (Exception ex)
-    {
-        // Migrations can fail when the database file exists but is missing expected
-        // tables (for example, when an older DB file was copied into the publish
-        // folder). In that case try the cheaper EnsureCreated() path which will
-        // create tables for the current model if no __EFMigrationsHistory table
-        // exists. If EnsureCreated() succeeds, log the fact and continue. If it
-        // fails as well, log full details for debugging but continue so the host
-        // can start (tests may override DbContext configuration).
-        logger.LogError(ex, "Error during database migration attempt. Will try EnsureCreated() fallback.");
-
-        try
-        {
-            logger.LogInformation("Attempting EnsureCreated() as a fallback...");
-            var created = context.Database.EnsureCreated();
-            if (created)
-            {
-                logger.LogInformation("Database created via EnsureCreated() fallback.");
-            }
-            else
-            {
-                logger.LogWarning("EnsureCreated() did not create the database (it may already exist but be missing migrations).");
-            }
-
-            // Try applying pragmas even if EnsureCreated() didn't create the schema
-            SqlitePragmaInitializer.ApplyPragmas(context);
-            logger.LogInformation("SQLite pragmas applied successfully (fallback path)");
-        }
-        catch (Exception innerEx)
-        {
-            // Log full details. We intentionally do not rethrow to avoid breaking
-            // test harnesses that may run with an alternate DbContext.
-            logger.LogError(innerEx, "EnsureCreated() fallback also failed during database initialization");
-        }
-    }
+    Log.Logger.Information("[Startup] Applying EF Core migrations at startup");
+    using var migrateScope = app.Services.CreateScope();
+    var factory = migrateScope.ServiceProvider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+    using var ctx = factory.CreateDbContext();
+    ctx.Database.Migrate();
+    Log.Logger.Information("[Startup] EF Core migrations applied successfully");
+}
+catch (Exception ex)
+{
+    // Do not fail startup if migrations cannot be applied; surface the error in logs
+    // so developers can run `dotnet ef database update` manually if needed.
+    Log.Logger.Error(ex, "[Startup] Failed to apply EF Core migrations at startup. You can run 'dotnet ef database update' manually to apply migrations.");
 }
 
 // Initialize the SignalR sink now that the hub context is available

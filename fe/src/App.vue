@@ -3,8 +3,10 @@
     <!-- Top Navigation Bar -->
     <header v-if="!hideLayout" class="top-nav">
       <div class="nav-brand">
-        <div class="brand-logo" aria-hidden="true"><BrandLogo /></div>
-        <h1>Listenarr</h1>
+        <RouterLink to="/" class="brand-link" @click="closeMobileMenu">
+          <div class="brand-logo-wrap" aria-hidden="true"><BrandLogo /></div>
+          <h1>Listenarr</h1>
+        </RouterLink>
         <span v-if="version && version.length > 0" class="version">v{{ version }}</span>
       </div>
       <div class="nav-actions">
@@ -392,6 +394,7 @@
           </div>
         </nav>
       </aside>
+      <div v-if="mobileMenuOpen" class="sidebar-backdrop" @click="closeMobileMenu" aria-hidden="true"></div>
 
       <!-- Main Content Area -->
       <main :class="['main-content', { 'full-page': hideLayout }]">
@@ -1260,16 +1263,47 @@ these are not present, the Google Fonts import in `fe/index.html` will be used a
   gap: 0.75rem;
 }
 
+.brand-link {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  text-decoration: none;
+  color: inherit;
+}
+
+.brand-link,
+.brand-link:visited {
+  background-color: transparent;
+  padding: 0; /* avoid the global link padding showing hover bg */
+}
+
+.brand-link:hover {
+  background-color: transparent;
+}
+
 .brand-logo {
   width: 40px;
   height: 40px;
-  transition: transform 0.2s;
+  transition: transform 220ms cubic-bezier(.2,.8,.2,1), filter 220ms;
+  transform-origin: center center;
   filter: brightness(0) saturate(100%) invert(51%) sepia(56%) saturate(3237%) hue-rotate(184deg)
     brightness(97%) contrast(97%);
 }
 
-.brand-logo:hover {
-  transform: rotate(5deg) scale(1.05);
+/* Animate the headphones when hovering the brand (logo or H1) */
+.brand-link:hover .brand-logo,
+.brand-link:focus .brand-logo {
+  transform: rotate(6deg) scale(1.06);
+}
+
+/* Respect reduced motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  .brand-logo,
+  .brand-link:hover .brand-logo,
+  .brand-link:focus .brand-logo {
+    transition: none !important;
+    transform: none !important;
+  }
 }
 
 .nav-brand h1 {
@@ -1621,6 +1655,18 @@ these are not present, the Google Fonts import in `fe/index.html` will be used a
     background-color: #2a2a2a !important;
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
+  }
+
+  /* Backdrop for slide-out sidebar on mobile */
+  .sidebar-backdrop {
+    position: fixed;
+    top: 60px; /* below fixed top-nav */
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.34);
+    z-index: 1400; /* below sidebar (1500) but above main content */
+    transition: opacity 180ms ease;
   }
 }
 /* Header search styles */

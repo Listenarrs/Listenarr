@@ -1,0 +1,231 @@
+﻿{
+  "auditReportVersion": 2,
+  "vulnerabilities": {
+    "@typescript-eslint/eslint-plugin": {
+      "name": "@typescript-eslint/eslint-plugin",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "@typescript-eslint/parser",
+        "@typescript-eslint/type-utils",
+        "@typescript-eslint/utils"
+      ],
+      "effects": [],
+      "range": "6.16.0 - 8.56.1-alpha.2",
+      "nodes": [
+        "node_modules/@typescript-eslint/eslint-plugin"
+      ],
+      "fixAvailable": true
+    },
+    "@typescript-eslint/parser": {
+      "name": "@typescript-eslint/parser",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "@typescript-eslint/typescript-estree"
+      ],
+      "effects": [
+        "@typescript-eslint/eslint-plugin",
+        "eslint-plugin-vue",
+        "typescript-eslint"
+      ],
+      "range": "6.16.0 - 8.56.1-alpha.2",
+      "nodes": [
+        "node_modules/@typescript-eslint/parser"
+      ],
+      "fixAvailable": {
+        "name": "@vue/eslint-config-typescript",
+        "version": "14.2.0",
+        "isSemVerMajor": true
+      }
+    },
+    "@typescript-eslint/type-utils": {
+      "name": "@typescript-eslint/type-utils",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "@typescript-eslint/typescript-estree",
+        "@typescript-eslint/utils"
+      ],
+      "effects": [],
+      "range": "6.16.0 - 8.56.1-alpha.2",
+      "nodes": [
+        "node_modules/@typescript-eslint/type-utils"
+      ],
+      "fixAvailable": true
+    },
+    "@typescript-eslint/typescript-estree": {
+      "name": "@typescript-eslint/typescript-estree",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "minimatch"
+      ],
+      "effects": [
+        "@typescript-eslint/parser",
+        "@typescript-eslint/type-utils",
+        "@typescript-eslint/utils",
+        "typescript-eslint"
+      ],
+      "range": "6.16.0 - 8.56.1-alpha.2",
+      "nodes": [
+        "node_modules/@typescript-eslint/typescript-estree"
+      ],
+      "fixAvailable": {
+        "name": "@vue/eslint-config-typescript",
+        "version": "14.2.0",
+        "isSemVerMajor": true
+      }
+    },
+    "@typescript-eslint/utils": {
+      "name": "@typescript-eslint/utils",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "@typescript-eslint/typescript-estree"
+      ],
+      "effects": [
+        "@typescript-eslint/eslint-plugin",
+        "@vitest/eslint-plugin",
+        "@vue/eslint-config-typescript",
+        "typescript-eslint"
+      ],
+      "range": "6.16.0 - 8.56.1-alpha.2",
+      "nodes": [
+        "node_modules/@typescript-eslint/utils"
+      ],
+      "fixAvailable": {
+        "name": "@vue/eslint-config-typescript",
+        "version": "14.2.0",
+        "isSemVerMajor": true
+      }
+    },
+    "@vitest/eslint-plugin": {
+      "name": "@vitest/eslint-plugin",
+      "severity": "high",
+      "isDirect": true,
+      "via": [
+        "@typescript-eslint/utils"
+      ],
+      "effects": [],
+      "range": "*",
+      "nodes": [
+        "node_modules/@vitest/eslint-plugin"
+      ],
+      "fixAvailable": false
+    },
+    "@vue/eslint-config-typescript": {
+      "name": "@vue/eslint-config-typescript",
+      "severity": "high",
+      "isDirect": true,
+      "via": [
+        "@typescript-eslint/utils",
+        "typescript-eslint"
+      ],
+      "effects": [],
+      "range": ">=14.3.0",
+      "nodes": [
+        "node_modules/@vue/eslint-config-typescript"
+      ],
+      "fixAvailable": {
+        "name": "@vue/eslint-config-typescript",
+        "version": "14.2.0",
+        "isSemVerMajor": true
+      }
+    },
+    "eslint-plugin-vue": {
+      "name": "eslint-plugin-vue",
+      "severity": "high",
+      "isDirect": true,
+      "via": [
+        "@typescript-eslint/parser"
+      ],
+      "effects": [],
+      "range": ">=10.3.0",
+      "nodes": [
+        "node_modules/eslint-plugin-vue"
+      ],
+      "fixAvailable": {
+        "name": "eslint-plugin-vue",
+        "version": "10.2.0",
+        "isSemVerMajor": true
+      }
+    },
+    "minimatch": {
+      "name": "minimatch",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1113371,
+          "name": "minimatch",
+          "dependency": "minimatch",
+          "title": "minimatch has a ReDoS via repeated wildcards with non-matching literal in pattern",
+          "url": "https://github.com/advisories/GHSA-3ppc-4f35-3m26",
+          "severity": "high",
+          "cwe": [
+            "CWE-1333"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": "<10.2.1"
+        }
+      ],
+      "effects": [
+        "@typescript-eslint/typescript-estree"
+      ],
+      "range": "<10.2.1",
+      "nodes": [
+        "node_modules/minimatch"
+      ],
+      "fixAvailable": {
+        "name": "@vue/eslint-config-typescript",
+        "version": "14.2.0",
+        "isSemVerMajor": true
+      }
+    },
+    "typescript-eslint": {
+      "name": "typescript-eslint",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "@typescript-eslint/eslint-plugin",
+        "@typescript-eslint/parser",
+        "@typescript-eslint/typescript-estree",
+        "@typescript-eslint/utils"
+      ],
+      "effects": [
+        "@vue/eslint-config-typescript"
+      ],
+      "range": "<=8.56.1-alpha.2",
+      "nodes": [
+        "node_modules/typescript-eslint"
+      ],
+      "fixAvailable": {
+        "name": "@vue/eslint-config-typescript",
+        "version": "14.2.0",
+        "isSemVerMajor": true
+      }
+    }
+  },
+  "metadata": {
+    "vulnerabilities": {
+      "info": 0,
+      "low": 0,
+      "moderate": 0,
+      "high": 10,
+      "critical": 0,
+      "total": 10
+    },
+    "dependencies": {
+      "prod": 124,
+      "dev": 555,
+      "optional": 54,
+      "peer": 0,
+      "peerOptional": 0,
+      "total": 678
+    }
+  }
+}

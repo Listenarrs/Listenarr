@@ -42,7 +42,7 @@
                 <div class="webhook-meta">
                   <div class="triggers-preview">
                     <span
-                      v-for="trigger in webhook.triggers"
+                      v-for="trigger in orderedTriggers(webhook.triggers)"
                       :key="trigger"
                       class="trigger-badge-small"
                       :class="getTriggerClass(trigger)"
@@ -168,7 +168,7 @@
                   <small v-else-if="getServiceHelp()">{{ getServiceHelp() }}</small>
                 </FormRow>
 
-                <FormRow label="Webhook URL *" labelFor="webhook-url">
+                <FormRow v-if="webhookForm.type !== 'Telegram' && webhookForm.type !== 'Pushover' && webhookForm.type !== 'Pushbullet'" label="Webhook URL *" labelFor="webhook-url">
                   <input
                     id="webhook-url"
                     v-model="webhookForm.url"
@@ -179,6 +179,74 @@
                   />
                   <small v-if="webhookFormErrors.url" class="error-text">{{ webhookFormErrors.url }}</small>
                 </FormRow>
+
+                <FormRow v-if="webhookForm.type === 'Telegram'" label="Bot Token *" labelFor="telegram-bot-token">
+                  <input
+                    id="telegram-bot-token"
+                    v-model="webhookForm.telegramBotToken"
+                    type="text"
+                    placeholder="123456:ABCdefGhIJklMNopqRst_uvwxYZ"
+                    required
+                    @blur="validateWebhookField('url')"
+                  />
+                  <small v-if="webhookFormErrors.url" class="error-text">{{ webhookFormErrors.url }}</small>
+                </FormRow>
+                <FormRow v-if="webhookForm.type === 'Pushover'" label="Pushover User Key" labelFor="pushover-user-key">
+                  <input
+                    id="pushover-user-key"
+                    v-model="webhookForm.pushoverUserKey"
+                    type="text"
+                    placeholder="User key (e.g., uQiRzpo4DXghDmr9QzzfQu27cmVRsG)"
+                  />
+                </FormRow>
+
+                <FormRow v-if="webhookForm.type === 'Pushover'" label="Pushover API Token" labelFor="pushover-api-token">
+                  <input
+                    id="pushover-api-token"
+                    v-model="webhookForm.pushoverApiToken"
+                    type="text"
+                    placeholder="Application API token (keep secret)"
+                  />
+                  <small v-if="webhookForm.type === 'Pushover'" class="help-text">You can provide both keys instead of a full webhook URL; they'll be composed on save.</small>
+                </FormRow>
+                <FormRow v-if="webhookForm.type === 'Pushbullet'" label="Pushbullet Access Token" labelFor="pushbullet-access-token">
+                  <input
+                    id="pushbullet-access-token"
+                    v-model="webhookForm.pushbulletAccessToken"
+                    type="text"
+                    placeholder="Access token (keep secret)"
+                    required
+                    @blur="validateWebhookField('url')"
+                  />
+                  <small v-if="webhookForm.type === 'Pushbullet'" class="help-text">Get your Access Token from Pushbullet → Settings → Account → Access Tokens</small>
+                </FormRow>
+                <FormRow v-if="webhookForm.type === 'Telegram'" label="Chat ID (optional)" labelFor="telegram-chat-id">
+                  <input
+                    id="telegram-chat-id"
+                    v-model="webhookForm.telegramChatId"
+                    type="text"
+                    placeholder="e.g., 123456789 or @channelusername"
+                  />
+                  <small class="help-text">Provide a chat ID to target messages. If left blank, include chat_id in the URL.</small>
+                </FormRow>
+              </FormSection>
+
+              <!-- Triggers Section -->
+              <FormSection title="Triggers" :icon="PhBell">
+                  <div class="webhook-triggers triggers-grid">
+                    <CheckboxCard
+                      v-for="t in ['book-added','book-downloading','book-available','book-completed']"
+                      :key="t"
+                      :modelValue="webhookForm.triggers.includes(t)"
+                      @update:modelValue="v => onToggleTrigger(t, v)"
+                      :title="formatTriggerName(t)"
+                    >
+                      <template #default>
+                        <component :is="getTriggerIcon(t)" class="trigger-icon" />
+                      </template>
+                    </CheckboxCard>
+                  </div>
+                  <small v-if="webhookFormErrors.triggers" class="error-text">{{ webhookFormErrors.triggers }}</small>
               </FormSection>
 
             </form>
@@ -189,11 +257,7 @@
             </template>
             <template #default>
               <button
-                v-if="
-                  webhookForm.url &&
-                  webhookForm.type &&
-                  !editingWebhook
-                "
+                v-if="webhookForm.type && !editingWebhook"
                 @click="testWebhookConfig"
                 class="btn btn-info"
                 type="button"
@@ -227,6 +291,7 @@ import {
   PhPlus,
   PhCheckCircle,
   PhXCircle,
+    PhCircleWavyCheck,
   PhToggleRight,
   PhToggleLeft,
   PhSpinner,
@@ -248,10 +313,12 @@ import DeleteConfirmationModal from '@/components/feedback/DeleteConfirmationMod
 import FormSection from '@/components/settings/FormSection.vue'
 import FormRow from '@/components/settings/FormRow.vue'
 import CheckboxCard from '@/components/settings/CheckboxCard.vue'
+import { LoadingState } from '@/components/base'
 import { errorTracking } from '@/services/errorTracking'
 import { useToast } from '@/services/toastService'
 import { useConfigurationStore } from '@/stores/configuration'
 import type { ApplicationSettings } from '@/types'
+import { apiService } from '@/services/api'
 
 // Props
 const props = defineProps<{
@@ -269,6 +336,9 @@ const formatApiError = (err: unknown): string => {
   }
   return 'An unknown error occurred'
 }
+
+/* Triggers grid styles */
+
 
 // State
 const showWebhookForm = ref(false)
@@ -301,6 +371,11 @@ const webhookForm = reactive({
   type: '' as 'Pushbullet' | 'Telegram' | 'Slack' | 'Discord' | 'Pushover' | 'NTFY' | 'Zapier' | '',
   triggers: [] as string[],
   isEnabled: true,
+  telegramChatId: '',
+  telegramBotToken: '',
+  pushoverUserKey: '',
+  pushoverApiToken: '',
+  pushbulletAccessToken: '',
 })
 
 const webhookFormErrors = reactive({
@@ -315,14 +390,24 @@ const savingWebhook = ref(false)
 
 // Computed
 const isWebhookFormValid = computed(() => {
-  return (
-    webhookForm.name.trim().length > 0 &&
-    webhookForm.url.trim().length > 0 &&
-    webhookForm.type !== '' &&
-    !webhookFormErrors.name &&
-    !webhookFormErrors.url &&
-    !webhookFormErrors.type
-  )
+  if (!webhookForm.name.trim() || webhookForm.type === '') return false
+  if (webhookFormErrors.name || webhookFormErrors.url || webhookFormErrors.type) return false
+
+  // Service-specific required fields
+  if (webhookForm.type === 'Telegram') {
+    return !!(webhookForm.telegramBotToken && webhookForm.telegramBotToken.trim().length > 0)
+  }
+
+  if (webhookForm.type === 'Pushover') {
+    return !!(webhookForm.pushoverApiToken && webhookForm.pushoverUserKey && webhookForm.pushoverApiToken.trim().length > 0 && webhookForm.pushoverUserKey.trim().length > 0)
+  }
+
+  if (webhookForm.type === 'Pushbullet') {
+    return !!(webhookForm.pushbulletAccessToken && webhookForm.pushbulletAccessToken.trim().length > 0)
+  }
+
+  // Default: require URL
+  return !!(webhookForm.url && webhookForm.url.trim().length > 0)
 })
 
 // Helper functions
@@ -339,6 +424,7 @@ const getTriggerIcon = (trigger: string) => {
     'book-added': PhPlus,
     'book-downloading': PhDownloadSimple,
     'book-available': PhCheckCircle,
+    'book-completed': PhCircleWavyCheck,
   }
   return iconMap[trigger] || PhBell
 }
@@ -362,8 +448,17 @@ const getTriggerClass = (trigger: string): string => {
     'book-added': 'trigger-added',
     'book-downloading': 'trigger-downloading',
     'book-available': 'trigger-available',
+    'book-completed': 'trigger-completed',
   }
   return classMap[trigger] || ''
+}
+
+// Return triggers in a consistent display order
+const orderedTriggerList = ['book-added', 'book-downloading', 'book-available', 'book-completed']
+
+const orderedTriggers = (triggers: string[] | undefined) => {
+  if (!triggers || triggers.length === 0) return []
+  return orderedTriggerList.filter((t) => triggers.includes(t))
 }
 
 const formatTriggerName = (trigger: string): string => {
@@ -371,6 +466,7 @@ const formatTriggerName = (trigger: string): string => {
     'book-added': 'Book Added',
     'book-downloading': 'Download Started',
     'book-available': 'Download Complete',
+    'book-completed': 'Processing Complete',
   }
   return nameMap[trigger] || trigger
 }
@@ -396,12 +492,35 @@ const validateWebhookField = (field: 'name' | 'url' | 'type' | 'triggers') => {
       }
       break
     case 'url':
-      if (!webhookForm.url || webhookForm.url.trim().length === 0) {
-        webhookFormErrors.url = 'Webhook URL is required'
-      } else if (!isValidUrl(webhookForm.url)) {
-        webhookFormErrors.url = 'Please enter a valid HTTPS URL'
+      // Validation differs by service type
+      if (webhookForm.type === 'Telegram') {
+        if (!webhookForm.telegramBotToken || webhookForm.telegramBotToken.trim().length === 0) {
+          webhookFormErrors.url = 'Bot token is required for Telegram'
+        } else if (!/^[0-9]+:[A-Za-z0-9_-]+$/.test(webhookForm.telegramBotToken.trim())) {
+          webhookFormErrors.url = 'Please enter a valid Telegram bot token (e.g. 123456:ABC...)'
+        } else {
+          webhookFormErrors.url = ''
+        }
+      } else if (webhookForm.type === 'Pushover') {
+        if (!webhookForm.pushoverApiToken || !webhookForm.pushoverUserKey) {
+          webhookFormErrors.url = 'Pushover API Token and User Key are required'
+        } else {
+          webhookFormErrors.url = ''
+        }
+      } else if (webhookForm.type === 'Pushbullet') {
+        if (!webhookForm.pushbulletAccessToken || webhookForm.pushbulletAccessToken.trim().length === 0) {
+          webhookFormErrors.url = 'Pushbullet Access Token is required'
+        } else {
+          webhookFormErrors.url = ''
+        }
       } else {
-        webhookFormErrors.url = ''
+        if (!webhookForm.url || webhookForm.url.trim().length === 0) {
+          webhookFormErrors.url = 'Webhook URL is required'
+        } else if (!isValidUrl(webhookForm.url)) {
+          webhookFormErrors.url = 'Please enter a valid HTTPS URL'
+        } else {
+          webhookFormErrors.url = ''
+        }
       }
       break
     case 'type':
@@ -428,6 +547,12 @@ const resetWebhookFormErrors = () => {
   webhookFormErrors.triggers = ''
 }
 
+const onToggleTrigger = (trigger: string, enabled: boolean) => {
+  const idx = webhookForm.triggers.indexOf(trigger)
+  if (enabled && idx === -1) webhookForm.triggers.push(trigger)
+  if (!enabled && idx !== -1) webhookForm.triggers.splice(idx, 1)
+}
+
 const onServiceTypeChange = () => {
   validateWebhookField('type')
 }
@@ -438,7 +563,7 @@ const getServiceHelp = (): string => {
       'Get your webhook URL from Slack: Settings & administration → Manage apps → Incoming Webhooks',
     Discord: 'Server Settings → Integrations → Webhooks → New Webhook → Copy Webhook URL',
     Telegram:
-      'Create a bot with @BotFather, then get the webhook URL format: https://api.telegram.org/bot{token}/sendMessage',
+      'Create a bot with @BotFather. Enter the bot token (e.g. 123456:ABC...) or the full webhook URL (https://api.telegram.org/bot{token}/sendMessage). Optionally provide a Chat ID below.',
     Pushover: 'Get your User Key and API Token from pushover.net/apps/build',
     Pushbullet: 'Get your Access Token from Settings → Account → Access Tokens',
     NTFY: 'Use format: https://ntfy.sh/{topic} or your self-hosted instance URL',
@@ -456,6 +581,10 @@ const openWebhookForm = () => {
   webhookForm.type = ''
   webhookForm.triggers = []
   webhookForm.isEnabled = true
+  webhookForm.telegramChatId = ''
+  webhookForm.telegramBotToken = ''
+  webhookForm.pushoverUserKey = ''
+  webhookForm.pushoverApiToken = ''
   resetWebhookFormErrors()
   showWebhookForm.value = true
 }
@@ -469,6 +598,7 @@ const closeWebhookForm = () => {
   webhookForm.type = ''
   webhookForm.triggers = []
   webhookForm.isEnabled = true
+  webhookForm.telegramChatId = ''
   resetWebhookFormErrors()
 }
 
@@ -480,6 +610,67 @@ const editWebhook = (webhook: (typeof webhooks.value)[0]) => {
   webhookForm.type = webhook.type
   webhookForm.triggers = [...webhook.triggers]
   webhookForm.isEnabled = webhook.isEnabled
+  // If stored URL contains a Telegram chat_id query param, extract it for editing
+  try {
+    if (webhook.type === 'Telegram' && webhook.url) {
+      try {
+        const u = new URL(webhook.url)
+        // path is like /bot<TOKEN>/sendMessage
+        const segments = u.pathname.split('/')
+        const botSegment = segments.find((s) => s.startsWith('bot')) || ''
+        const token = botSegment.startsWith('bot') ? botSegment.substring(3) : ''
+        const tokenVal = token || ''
+        const params = u.searchParams
+        const cid = params.get('chat_id')
+        webhookForm.telegramChatId = cid || ''
+        webhookForm.telegramBotToken = tokenVal
+        // clear URL field for token-based editing
+        webhookForm.url = ''
+      } catch (e) {
+        webhookForm.telegramChatId = ''
+        webhookForm.telegramBotToken = ''
+      }
+    } else if (webhook.type === 'Pushover' && webhook.url) {
+      try {
+        const u = new URL(webhook.url)
+        const token = u.searchParams.get('token')
+        const user = u.searchParams.get('user')
+        webhookForm.pushoverApiToken = token || ''
+        webhookForm.pushoverUserKey = user || ''
+        // keep only base path in the url field
+        webhookForm.url = u.origin + u.pathname
+      } catch (e) {
+        webhookForm.pushoverApiToken = ''
+        webhookForm.pushoverUserKey = ''
+      }
+    } else {
+      webhookForm.telegramChatId = ''
+    }
+
+    // Extract Pushbullet access token if stored in query string
+    try {
+      if (webhook.type === 'Pushbullet' && webhook.url) {
+        try {
+          const u = new URL(webhook.url)
+          const token = u.searchParams.get('token') || u.searchParams.get('access_token')
+          webhookForm.pushbulletAccessToken = token || ''
+          // keep only base path in the url field
+          webhookForm.url = u.origin + u.pathname
+        } catch (e) {
+          // fallback: support pushbullet://TOKEN format
+          if (webhook.url.startsWith('pushbullet://')) {
+            webhookForm.pushbulletAccessToken = webhook.url.substring('pushbullet://'.length)
+            webhookForm.url = 'https://api.pushbullet.com/v2/pushes'
+          }
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+
+  } catch (e) {
+    webhookForm.telegramChatId = ''
+  }
   resetWebhookFormErrors()
   showWebhookForm.value = true
 }
@@ -499,10 +690,44 @@ const saveWebhook = async () => {
 
   savingWebhook.value = true
   try {
+    // Compose final URL for Telegram when user provided token/chat id separately
+    let finalUrl = webhookForm.url.trim()
+    if (webhookForm.type === 'Telegram') {
+      // Build from bot token field
+      const token = webhookForm.telegramBotToken.trim()
+      finalUrl = `https://api.telegram.org/bot${token}/sendMessage`
+      if (webhookForm.telegramChatId && webhookForm.telegramChatId.trim() !== '') {
+        try {
+          const u = new URL(finalUrl)
+          u.searchParams.set('chat_id', webhookForm.telegramChatId.trim())
+          finalUrl = u.toString()
+        } catch (e) {
+          const sep = finalUrl.includes('?') ? '&' : '?'
+          finalUrl = `${finalUrl}${sep}chat_id=${encodeURIComponent(webhookForm.telegramChatId.trim())}`
+        }
+      }
+    }
+
+    // Compose final URL for Pushbullet when user provided access token
+    if (webhookForm.type === 'Pushbullet') {
+      if (webhookForm.pushbulletAccessToken && webhookForm.pushbulletAccessToken.trim() !== '') {
+        finalUrl = `https://api.pushbullet.com/v2/pushes?token=${encodeURIComponent(webhookForm.pushbulletAccessToken.trim())}`
+      }
+    }
+
+    // Compose final URL for Pushover when user provided token/user separately
+    if (webhookForm.type === 'Pushover') {
+      if (webhookForm.pushoverApiToken && webhookForm.pushoverUserKey) {
+        finalUrl = `https://api.pushover.net/1/messages.json?token=${encodeURIComponent(
+          webhookForm.pushoverApiToken.trim(),
+        )}&user=${encodeURIComponent(webhookForm.pushoverUserKey.trim())}`
+      }
+    }
+
     const webhook = {
       id: webhookForm.id || generateUUID(),
       name: webhookForm.name.trim(),
-      url: webhookForm.url.trim(),
+      url: finalUrl,
       type: webhookForm.type as
         | 'Pushbullet'
         | 'Telegram'
@@ -587,12 +812,15 @@ const toggleWebhook = async (webhook: (typeof webhooks.value)[0]) => {
 const testWebhook = async (webhook: (typeof webhooks.value)[0]) => {
   testingWebhook.value = webhook.id
   try {
-    // NOTE: Test API exists at POST /api/diagnostics/test-notification
-    // Future enhancement: integrate with DiagnosticsController to send real test notifications
-    // For now, just simulate success
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-    toast.success('Test notification', `Test notification sent to ${webhook.name}`)
-    lastWebhookTestResults[webhook.id] = 'success'
+    const payload = { trigger: 'book-available', data: { message: 'Test notification from Listenarr UI' } }
+    const response = await apiService.testNotification(payload.trigger, payload.data, webhook.id, webhook.url)
+    if (response && response.success) {
+      toast.success('Test notification', response.message || `Test notification sent to ${webhook.name}`)
+      lastWebhookTestResults[webhook.id] = 'success'
+    } else {
+      toast.error('Test failed', response?.message || 'Failed to send test notification')
+      lastWebhookTestResults[webhook.id] = 'fail'
+    }
     console.debug('NotificationsTab: lastWebhookTestResults set', webhook.id, lastWebhookTestResults[webhook.id])
     await nextTick()
   } catch (error) {
@@ -613,16 +841,20 @@ const testWebhook = async (webhook: (typeof webhooks.value)[0]) => {
 const testWebhookConfig = async () => {
   testingWebhookConfig.value = true
   try {
-    // NOTE: Test API exists at POST /api/diagnostics/test-notification
-    // Future enhancement: integrate with DiagnosticsController for real webhook testing
-    await new Promise((resolve) => setTimeout(resolve, 1500))
-    toast.success('Test successful', `Test notification sent to ${webhookForm.type}`)
+    const payload = { trigger: 'book-available', data: { message: 'Test notification from Listenarr UI' } }
+    const response = await apiService.testNotification(payload.trigger, payload.data)
+    if (response && response.success) {
+      toast.success('Test successful', response.message || `Test notification sent to ${webhookForm.type}`)
+    } else {
+      toast.error('Test failed', response?.message || 'Failed to send test notification')
+    }
   } catch (error) {
     errorTracking.captureException(error as Error, {
       component: 'NotificationsTab',
       operation: 'testWebhookConfig',
     })
-    toast.error('Test failed', 'Failed to send test notification')
+    const errorMessage = formatApiError(error)
+    toast.error('Test failed', errorMessage)
   } finally {
     testingWebhookConfig.value = false
   }
@@ -973,6 +1205,12 @@ defineExpose({ openWebhookForm })
   border-color: rgba(156, 39, 176, 0.3);
 }
 
+.trigger-badge-small.trigger-completed {
+  background-color: rgba(255, 255, 255, 0.02);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
 .webhook-title {
   display: flex;
   align-items: center;
@@ -1045,6 +1283,56 @@ defineExpose({ openWebhookForm })
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Triggers grid styles */
+.webhook-triggers {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+
+.webhook-triggers .checkbox-group {
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.04);
+  padding: 0.6rem 0.75rem;
+  border-radius: 8px;
+  margin: 0;
+}
+
+.webhook-triggers .input-checkbox {
+  gap: 0.75rem;
+  align-items: center;
+}
+
+/* Layout the label contents with icon on the left and stacked text */
+.webhook-triggers .checkbox-label {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.webhook-triggers .checkbox-text {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  line-height: 1;
+}
+
+.webhook-triggers .trigger-icon {
+  color: var(--color-text-secondary);
+  font-size: 1.05rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.webhook-triggers .checkbox-text small {
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+  margin: 0 0 0 0.25rem;
 }
 
 

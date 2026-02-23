@@ -53,7 +53,7 @@ jobs:
           echo "VERSION=${NEWVERSION}" >> $GITHUB_OUTPUT
 
       - name: Restore .NET
-        run: dotnet restore listenarr.sln
+        run: dotnet restore listenarr.slnx
 
       - name: Persist bumped version to csproj (for build)
         if: steps.resolve-version.outputs.VERSION != ''
@@ -139,7 +139,7 @@ jobs:
             }
 
       - name: Build solution
-        run: dotnet build listenarr.sln -c Release --no-restore
+        run: dotnet build listenarr.slnx -c Release --no-restore
 
       - name: Publish API (linux-x64)
         run: dotnet publish ${{ env.API_PROJECT }} -c Release -r linux-x64 --self-contained true /p:PublishSingleFile=true -o ${{ env.API_OUTPUT }}/linux-x64

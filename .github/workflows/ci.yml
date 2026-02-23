@@ -29,7 +29,7 @@ jobs:
           cache: 'npm'
 
       - name: Restore .NET packages
-        run: dotnet restore listenarr.sln
+        run: dotnet restore listenarr.slnx
 
       - name: Enforce layering rules
         run: |
@@ -69,10 +69,10 @@ jobs:
         run: dotnet test tests/Listenarr.Api.Tests/Listenarr.Api.Tests.csproj --no-build --filter FullyQualifiedName~DependencyInjectionTests --verbosity minimal
 
       - name: Build solution
-        run: dotnet build listenarr.sln --no-restore --configuration Release
+        run: dotnet build listenarr.slnx --no-restore --configuration Release
 
       - name: Run backend tests
-        run: dotnet test listenarr.sln --no-build --verbosity normal
+        run: dotnet test listenarr.slnx --no-build --verbosity normal
 
       - name: Run frontend tests
         working-directory: fe

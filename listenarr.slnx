@@ -1,0 +1,25 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Folder Name="/listenarr.application/">
+    <Project Path="listenarr.application/Listenarr.Application.csproj" />
+  </Folder>
+  <Folder Name="/listenarr.domain/">
+    <Project Path="listenarr.domain/Listenarr.Domain.csproj" />
+  </Folder>
+  <Folder Name="/listenarr.infrastructure/">
+    <Project Path="listenarr.infrastructure/Listenarr.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/Solution Items/">
+    <File Path="Directory.Build.props" />
+    <File Path="Directory.Packages.props" />
+    <File Path="global.json" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Listenarr.Api.Tests/Listenarr.Api.Tests.csproj" />
+  </Folder>
+  <Project Path="listenarr.api/Listenarr.Api.csproj" />
+</Solution>

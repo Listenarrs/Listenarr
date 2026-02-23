@@ -1,6 +1,5 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <EFVersion>8.*</EFVersion>
   </PropertyGroup>
 
   <ItemGroup>
@@ -8,15 +7,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="$(EFVersion)" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="$(EFVersion)" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="$(EFVersion)" />
+    <PackageReference Include="Microsoft.Data.Sqlite.Core" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
   </ItemGroup>
-
-  <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-  </PropertyGroup>
 
 </Project>

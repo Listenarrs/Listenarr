@@ -40,6 +40,15 @@ namespace Listenarr.Api.Middleware
                     return;
                 }
 
+                // Skip if endpoint explicitly opts out of antiforgery via IgnoreAntiforgeryToken
+                // Accept either the MVC attribute or the antiforgery attribute type if present.
+                if (endpoint?.Metadata?.GetMetadata<Microsoft.AspNetCore.Mvc.IgnoreAntiforgeryTokenAttribute>() != null)
+                {
+                    _logger?.LogDebug("AntiforgeryMiddleware: endpoint requests antiforgery be ignored, skipping antiforgery validation");
+                    await _next(context);
+                    return;
+                }
+
                 // Allow some public endpoints without antiforgery (startup config reads, token request itself, login/register)
                 if (path.StartsWith("/api/antiforgery") || path.StartsWith("/api/account/login") || path.StartsWith("/api/account/register") || path.StartsWith("/api/account/logout") || path.StartsWith("/api/startupconfig") || path.StartsWith("/api/configuration/startupconfig") || path.StartsWith("/hubs/")
                     // Also allow Prowlarr-compatible indexer endpoints and system status

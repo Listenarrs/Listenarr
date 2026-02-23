@@ -4,6 +4,35 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.2.50] - 2026-02-22
+
+### Changed
+- **Persistence & EF Core:** Pinned EF Core to 9.0.0 in central package management and refactored persistence registration to avoid resolving scoped EF option-configurators from the root provider. Registered a singleton `DbContextOptions<ListenArrDbContext>` and an `IDbContextFactory<ListenArrDbContext>` (Simple factory) so contexts are created safely at scoped time.
+- **Startup migrations:** Startup now applies EF migrations via the `IDbContextFactory` (migration errors are logged and do not prevent startup in development). Added a development-friendly fallback for safe startup when migrations cannot be applied.
+- **Migrations:** Added an AutoSync migration `20260222154541_SyncModelToCurrent` (no-op `Up` with a preserved `.Designer.cs` model snapshot) to keep tooling/model metadata in sync; `dotnet ef database update` reported the database as already up to date.
+- **Design-time tooling:** Added `ListenArrDesignTimeDbContextFactory` to improve EF tooling support.
+- **Bugfix (DI):** Fixed runtime failures caused by resolving scoped EF configurators from the root provider (controllers and startup no longer throw when activating DbContexts).
+- **Frontend polish:** `fe/src/App.vue` — brand/logo now links to `/`, hover background bleed fixed, headphone animation triggers on brand hover, and a mobile sidebar backdrop was added. `fe/src/views/settings/IndexersTab.vue` — Prowlarr modal inputs updated to use shared `.form-input` styles for consistent visuals.
+- **Build/dev:** Verified solution build succeeded locally and frontend dev server (Vite) ran for visual validation of the UI changes.
+ - **Notifications UI:** Redesigned the Notifications modal to accept service-specific credentials (Telegram Bot Token + Chat ID, Pushover API Token + User Key, Pushbullet Access Token), hide the generic webhook URL for token-only services, and ensure trigger badges render in a consistent order.
+
+### Added
+- **Notifications / NTFY:** Implemented NTFY publish compatibility (plain text POST body plus `Title`, `Tags`, and `Priority` headers) and added a diagnostics endpoint `POST /api/diagnostics/test-notification` to send test notifications. Frontend Test buttons now call the diagnostics endpoint for live testing.
+
+### Fixed
+- **Notifications UI & Webhooks:** Fixed the notification card Test button so it triggers a real test call; added webhook trigger selection in the Notifications settings and aligned `CheckboxCard` layout for consistent visuals.
+ - **Notifications implementations:** Standardized and fixed all notification integrations and payloads (NTFY, Telegram, Pushover, Pushbullet, Slack, and generic/Zapier). Highlights:
+   - NTFY: sends plain-text body with `Title`, `Priority`, and `Tags` headers.
+   - Telegram: sends JSON to `sendMessage` with `chat_id`, `text`, `disable_notification`, and `parse_mode`.
+   - Pushover: posts `application/x-www-form-urlencoded` to `/1/messages.json` with `token`, `user`, `message`, and `title`.
+   - Pushbullet: posts JSON to `/v2/pushes` using `Authorization: Bearer <access_token>` and `type=note` payloads.
+   - Slack: posts `{"text":"..."}` to Incoming Webhooks URLs.
+   - Zapier/Generic: posts the full rich JSON payload produced by the payload builder to the exact configured webhook URL.
+   Temporary redacted request/response logging was added to aid diagnostics during verification.
+
+### Security
+- **DevDependency removal:** Removed `source-map-explorer` from devDependencies to address a transitive `ejs` vulnerability and updated lockfile(s).
+
 ## [0.2.49] - 2026-02-21
 
 ### Fixed

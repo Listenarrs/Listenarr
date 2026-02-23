@@ -167,6 +167,7 @@
                     id="prowlarr-url"
                     v-model="prowlarrUrl"
                     type="text"
+                    class="form-input"
                     placeholder="http://localhost"
                     autocomplete="off"
                   />
@@ -177,6 +178,7 @@
                     id="prowlarr-port"
                     v-model="prowlarrPort"
                     type="number"
+                    class="form-input"
                     min="1"
                     max="65535"
                     placeholder="9696"
@@ -187,6 +189,7 @@
                   <PasswordInput
                     id="prowlarr-key"
                     v-model="prowlarrApiKey"
+                    class="form-input"
                     placeholder="Prowlarr API Key"
                   />
                 </FormRow>

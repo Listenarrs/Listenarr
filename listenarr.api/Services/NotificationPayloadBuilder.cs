@@ -124,8 +124,8 @@ namespace Listenarr.Api.Services
                 embed["thumbnail"] = new JsonObject { ["url"] = Truncate(absoluteImageUrl, 2000) };
             }
 
-            var embeds = new JsonArray();
-            var fields = new JsonArray();
+                        var embeds = new JsonArray();
+                        var fields = new JsonArray();
 
             if (!string.IsNullOrWhiteSpace(author))
             {
@@ -349,11 +349,14 @@ namespace Listenarr.Api.Services
             {
                 try
                 {
+                    Console.WriteLine($"DEBUG: Attempting to download image for attachment: {absoluteImageUrl}");
                     logInfo?.Invoke($"Attempting to download image for attachment: {absoluteImageUrl}");
                     var imageResponse = await httpClient.GetAsync(absoluteImageUrl);
+                    Console.WriteLine($"DEBUG: image GET status: {imageResponse.StatusCode}");
                     if (imageResponse.IsSuccessStatusCode)
                     {
                         var imageData = await imageResponse.Content.ReadAsByteArrayAsync();
+                        Console.WriteLine($"DEBUG: downloaded image data length: {imageData?.Length}");
                         if (imageData != null && imageData.Length > 0)
                         {
                             var contentType = imageResponse.Content.Headers.ContentType?.MediaType ?? "image/jpeg";

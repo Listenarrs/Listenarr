@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using System.Text.Json;
 using Listenarr.Domain.Models;
 using Listenarr.Infrastructure.Models;
 using Microsoft.EntityFrameworkCore;
@@ -243,6 +244,39 @@ namespace Listenarr.Api.Services
                 // Ensure Id is always 1 (singleton pattern)
                 settings.Id = 1;
 
+                // Normalize possible JSON-encoded trigger lists coming from the frontend.
+                // Some UI payloads have been observed to send a JSON stringified array
+                // inside the array (eg. ["[\"book-available\"]"]) which breaks
+                // server-side trigger matching. Detect and decode that case here.
+                //
+                // We keep this defensive normalization server-side for robustness,
+                // but the real fix would be to avoid producing double-encoded JSON
+                // from the frontend. This helper centralizes the detection/decoding
+                // logic so it's consistently applied to both the global triggers
+                // and per-webhook trigger lists.
+                try
+                {
+                    settings.EnabledNotificationTriggers = NormalizeTriggerList(settings.EnabledNotificationTriggers) ?? new List<string>();
+
+                    if (settings.Webhooks != null)
+                    {
+                        foreach (var w in settings.Webhooks)
+                        {
+                            w.Triggers = NormalizeTriggerList(w.Triggers) ?? new List<string>();
+                        }
+                    }
+                }
+                catch (JsonException ex)
+                {
+                    // Malformed JSON when attempting to decode double-encoded trigger lists
+                    _logger.LogWarning(ex, "Failed to normalize notification triggers due to JSON error; saving with original values");
+                }
+                catch (FormatException ex)
+                {
+                    // Catch formatting/parsing issues if any string parsing is introduced in the future
+                    _logger.LogWarning(ex, "Failed to normalize notification triggers due to formatting error; saving with original values");
+                }
+
                 var existing = await _dbContext.ApplicationSettings.FirstOrDefaultAsync(s => s.Id == 1);
 
                 Console.WriteLine($"DEBUG: existing is null? {existing == null}; ReferenceEquals(existing, settings)={ReferenceEquals(existing, settings)}; existingHash={existing?.GetHashCode()}, settingsHash={settings.GetHashCode()}");
@@ -407,6 +441,37 @@ namespace Listenarr.Api.Services
                 // do not attempt to alter the schema automatically here.
                 throw;
             }
+        }
+
+        // Normalize a potentially double-encoded JSON stringified array that
+        // sometimes arrives from the front-end as a single-element list where
+        // the first item is a JSON array string. Example: ["[\"book-available\"]"].
+        // Returns the original list when no decoding is required.
+        private static List<string>? NormalizeTriggerList(List<string>? list)
+        {
+            if (list == null) return null;
+            if (list.Count == 1)
+            {
+                var first = list[0];
+                if (!string.IsNullOrWhiteSpace(first) && first.TrimStart().StartsWith("["))
+                {
+                    try
+                    {
+                        var decoded = System.Text.Json.JsonSerializer.Deserialize<List<string>>(first);
+                        if (decoded != null && decoded.Count > 0) return decoded;
+                    }
+                    catch (JsonException)
+                    {
+                        // Malformed JSON — ignore and fall through to returning original list
+                    }
+                    catch (NotSupportedException)
+                    {
+                        // Unsupported JSON shape — ignore and fall through
+                    }
+                }
+            }
+
+            return list;
         }
 
         // Startup Configuration methods
