@@ -1,8 +1,3 @@
-using System.Text.RegularExpressions;
-using System.Net;
-using HtmlAgilityPack;
-using System.Text.Json;
-using System.Buffers.Binary;
 
 namespace Listenarr.Api.Services
 {
@@ -102,8 +97,7 @@ namespace Listenarr.Api.Services
                     IsAudiobook = true // Assume true since we're searching in Audible category
                 };
             }
-            catch
-            {
+            catch (Exception caughtEx_1) when (caughtEx_1 is not OperationCanceledException && caughtEx_1 is not OutOfMemoryException && caughtEx_1 is not StackOverflowException) {
                 return null;
             }
         }
@@ -173,8 +167,7 @@ namespace Listenarr.Api.Services
 
                 return results;
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error searching Amazon for audiobooks: {Title} by {Author}", title, author);
                 return results;
             }
@@ -230,8 +223,7 @@ namespace Listenarr.Api.Services
                         }
                     }
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogDebug(ex, "Failed to parse incoming query as URL for special handling: {Query}", query);
                 }
 
@@ -319,8 +311,7 @@ namespace Listenarr.Api.Services
                                             productPageFetches++;
                                         }
                                     }
-                                    catch (Exception pex)
-                                    {
+                                    catch (Exception pex) when (pex is not OperationCanceledException && pex is not OutOfMemoryException && pex is not StackOverflowException) {
                                         _logger.LogDebug(pex, "Product page title fetch failed for {Asin}", result.Asin);
                                     }
                                 }
@@ -344,8 +335,7 @@ namespace Listenarr.Api.Services
                                                 productPageFetches++;
                                             }
                                         }
-                                        catch (Exception pex)
-                                        {
+                                        catch (Exception pex) when (pex is not OperationCanceledException && pex is not OutOfMemoryException && pex is not StackOverflowException) {
                                             _logger.LogDebug(pex, "Product page title fetch failed for {Asin}", result.Asin);
                                         }
                                     }
@@ -367,8 +357,7 @@ namespace Listenarr.Api.Services
                                             }
                                             productPageFetches++;
                                         }
-                                        catch (Exception ex)
-                                        {
+                                        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                                             _logger.LogDebug(ex, "Product page author fetch failed for {Asin}", result.Asin);
                                         }
                                     }
@@ -410,8 +399,7 @@ namespace Listenarr.Api.Services
                                             productPageFetches++;
                                         }
                                     }
-                                    catch (Exception dpex)
-                                    {
+                                    catch (Exception dpex) when (dpex is not OperationCanceledException && dpex is not OutOfMemoryException && dpex is not StackOverflowException) {
                                         _logger.LogDebug(dpex, "Failed to fetch product page for ASIN {Asin}", result.Asin);
                                     }
                                 }
@@ -459,8 +447,7 @@ namespace Listenarr.Api.Services
                                         productPageFetches++;
                                     }
                                 }
-                                catch (Exception dpex)
-                                {
+                                catch (Exception dpex) when (dpex is not OperationCanceledException && dpex is not OutOfMemoryException && dpex is not StackOverflowException) {
                                     _logger.LogDebug(dpex, "Failed to fetch product page for ASIN {Asin}", asin);
                                 }
                             }
@@ -482,8 +469,7 @@ namespace Listenarr.Api.Services
                         }
                         _logger.LogInformation("Regex fallback added {Count} results", results.Count);
                     }
-                    catch (Exception rex)
-                    {
+                    catch (Exception rex) when (rex is not OperationCanceledException && rex is not OutOfMemoryException && rex is not StackOverflowException) {
                         _logger.LogWarning(rex, "Regex ASIN fallback failed");
                     }
                 }
@@ -498,8 +484,7 @@ namespace Listenarr.Api.Services
                 }
                 return results;
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error parsing Amazon search results for query: {Query}", LogRedaction.SanitizeText(query));
                 return results;
             }
@@ -623,7 +608,9 @@ namespace Listenarr.Api.Services
                                     }
                                 }
                             }
-                            catch { }
+                            catch (Exception caughtEx_2) when (caughtEx_2 is not OperationCanceledException && caughtEx_2 is not OutOfMemoryException && caughtEx_2 is not StackOverflowException) { 
+                                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                            }
                         }
                         else
                         {
@@ -638,7 +625,9 @@ namespace Listenarr.Api.Services
                                     if (!string.IsNullOrWhiteSpace(url)) candidates.Add(url);
                                 }
                             }
-                            catch { }
+                            catch (Exception caughtEx_3) when (caughtEx_3 is not OperationCanceledException && caughtEx_3 is not OutOfMemoryException && caughtEx_3 is not StackOverflowException) { 
+                                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                            }
                         }
                     }
 
@@ -680,8 +669,7 @@ namespace Listenarr.Api.Services
                                 imageUrl = null;
                             }
                         }
-                        catch (Exception ex)
-                        {
+                        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                             _logger.LogDebug(ex, "Image validation failed for candidate image {Url}", imageUrl);
                         }
                     }
@@ -712,8 +700,7 @@ namespace Listenarr.Api.Services
                     IsAudiobook = isAudiobook
                 };
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogWarning(ex, "Error extracting search result from Amazon node");
                 return null;
             }
@@ -745,8 +732,7 @@ namespace Listenarr.Api.Services
                 if (w <= 1 || h <= 1) return false;
                 return w == h;
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogDebug(ex, "IsImageSquareAsync failed for URL {Url}", imageUrl);
                 return false;
             }
@@ -765,7 +751,7 @@ namespace Listenarr.Api.Services
                     var height = BinaryPrimitives.ReadInt32BigEndian(data.AsSpan(20, 4));
                     return (width, height);
                 }
-                catch { return null; }
+                catch (Exception caughtEx_4) when (caughtEx_4 is not OperationCanceledException && caughtEx_4 is not OutOfMemoryException && caughtEx_4 is not StackOverflowException) { return null; }
             }
 
             // GIF
@@ -777,7 +763,7 @@ namespace Listenarr.Api.Services
                     var height = BitConverter.ToUInt16(data, 8);
                     return ((int)width, (int)height);
                 }
-                catch { return null; }
+                catch (Exception caughtEx_5) when (caughtEx_5 is not OperationCanceledException && caughtEx_5 is not OutOfMemoryException && caughtEx_5 is not StackOverflowException) { return null; }
             }
 
             // JPEG
@@ -798,7 +784,7 @@ namespace Listenarr.Api.Services
                             var width = (data[offset + 7] << 8) + data[offset + 8];
                             return (width, height);
                         }
-                        catch { return null; }
+                        catch (Exception caughtEx_6) when (caughtEx_6 is not OperationCanceledException && caughtEx_6 is not OutOfMemoryException && caughtEx_6 is not StackOverflowException) { return null; }
                     }
                     else
                     {
@@ -844,8 +830,7 @@ namespace Listenarr.Api.Services
                         var pw = await _playwrightFetcher.FetchAsync(url);
                         if (!string.IsNullOrWhiteSpace(pw)) return pw;
                     }
-                    catch (Exception pex)
-                    {
+                    catch (Exception pex) when (pex is not OperationCanceledException && pex is not OutOfMemoryException && pex is not StackOverflowException) {
                         _logger.LogDebug(pex, "Playwright fallback failed for {Url}", LogRedaction.SanitizeUrl(url));
                     }
                 }
@@ -866,14 +851,12 @@ namespace Listenarr.Api.Services
                     var pw = await _playwrightFetcher.FetchAsync(url);
                     return pw;
                 }
-                catch (Exception pex)
-                {
+                catch (Exception pex) when (pex is not OperationCanceledException && pex is not OutOfMemoryException && pex is not StackOverflowException) {
                     _logger.LogWarning(pex, "Playwright fallback also failed for {Url}", LogRedaction.SanitizeUrl(url));
                     return null;
                 }
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error fetching HTML from URL: {Url}", LogRedaction.SanitizeUrl(url));
                 // Try Playwright as a last resort
                 try
@@ -881,8 +864,7 @@ namespace Listenarr.Api.Services
                     var pw = await _playwrightFetcher.FetchAsync(url);
                     return pw;
                 }
-                catch (Exception pex)
-                {
+                catch (Exception pex) when (pex is not OperationCanceledException && pex is not OutOfMemoryException && pex is not StackOverflowException) {
                     _logger.LogDebug(pex, "Playwright fallback failed for {Url}", LogRedaction.SanitizeUrl(url));
                     return null;
                 }
@@ -947,8 +929,7 @@ namespace Listenarr.Api.Services
                 }
                 return title;
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogDebug(ex, "Error fetching product title for {Asin}", asin);
                 return null;
             }
@@ -990,7 +971,9 @@ namespace Listenarr.Api.Services
                         // Also handle cases where parentheses are missing: trailing 'Author,' etc.
                         author = System.Text.RegularExpressions.Regex.Replace(author, @",?\s*Author[,\s]*$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
                     }
-                    catch { }
+                    catch (Exception caughtEx_7) when (caughtEx_7 is not OperationCanceledException && caughtEx_7 is not OutOfMemoryException && caughtEx_7 is not StackOverflowException) { 
+                        System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                    }
 
                     if (!string.IsNullOrWhiteSpace(author))
                     {
@@ -1000,8 +983,7 @@ namespace Listenarr.Api.Services
                 }
                 return null;
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogDebug(ex, "Error fetching product author for {Asin}", asin);
                 return null;
             }
@@ -1058,7 +1040,9 @@ namespace Listenarr.Api.Services
                                             foreach (var prop in root.EnumerateObject()) candidates.Add(prop.Name);
                                         }
                                     }
-                                    catch { }
+                                    catch (Exception caughtEx_8) when (caughtEx_8 is not OperationCanceledException && caughtEx_8 is not OutOfMemoryException && caughtEx_8 is not StackOverflowException) { 
+                                        System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                                    }
                                 }
                                 else if (src.Contains(","))
                                 {
@@ -1069,7 +1053,9 @@ namespace Listenarr.Api.Services
                                             var u = part.Trim().Split(' ')[0]; if (!string.IsNullOrWhiteSpace(u)) candidates.Add(u);
                                         }
                                     }
-                                    catch { }
+                                    catch (Exception caughtEx_9) when (caughtEx_9 is not OperationCanceledException && caughtEx_9 is not OutOfMemoryException && caughtEx_9 is not StackOverflowException) { 
+                                        System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                                    }
                                 }
                                 else
                                 {
@@ -1094,7 +1080,9 @@ namespace Listenarr.Api.Services
                             image = chosen;
                         }
                     }
-                    catch { }
+                    catch (Exception caughtEx_10) when (caughtEx_10 is not OperationCanceledException && caughtEx_10 is not OutOfMemoryException && caughtEx_10 is not StackOverflowException) { 
+                        System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                    }
 
                     // Parse details table / audible product details
                     try
@@ -1166,13 +1154,14 @@ namespace Listenarr.Api.Services
                                             if (!string.IsNullOrWhiteSpace(tdText)) language = tdText;
                                         }
                                     }
-                                    catch { }
+                                    catch (Exception caughtEx_11) when (caughtEx_11 is not OperationCanceledException && caughtEx_11 is not OutOfMemoryException && caughtEx_11 is not StackOverflowException) { 
+                                        System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                                    }
                                 }
                             }
                         }
                     }
-                    catch (Exception parseEx)
-                    {
+                    catch (Exception parseEx) when (parseEx is not OperationCanceledException && parseEx is not OutOfMemoryException && parseEx is not StackOverflowException) {
                         _logger.LogDebug(parseEx, "Failed to parse product details for {Asin}", asin);
                     }
                 }
@@ -1197,8 +1186,7 @@ namespace Listenarr.Api.Services
                     Language = language
                 };
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogDebug(ex, "Error scraping product page for {Asin}", asin);
                 return null;
             }

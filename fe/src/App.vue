@@ -1,10 +1,34 @@
 <template>
-  <div id="app">
+  <div id="app" :style="appShellCssVars">
+    <div
+      v-if="showSecurityWarningBanner"
+      class="security-warning-banner"
+      role="status"
+      aria-live="polite"
+    >
+      <span class="security-warning-text">
+        Authentication is disabled. This mode is intended for trusted local networks only. If this
+        app is exposed to the internet, enable Listenarr authentication or protect it with reverse
+        proxy authentication.
+      </span>
+      <button
+        class="security-warning-dismiss"
+        type="button"
+        @click="dismissSecurityWarning"
+        aria-label="Dismiss security warning"
+        title="Dismiss"
+      >
+        <PhX />
+      </button>
+    </div>
+
     <!-- Top Navigation Bar -->
-    <header v-if="!hideLayout" class="top-nav">
+    <header v-if="!hideLayout" class="top-nav" :class="{ 'auth-warning-visible': showSecurityWarningBanner }">
       <div class="nav-brand">
-        <img src="/logo.svg" alt="Listenarr" class="brand-logo" />
-        <h1>Listenarr</h1>
+        <RouterLink to="/" class="brand-link" @click="closeMobileMenu">
+          <div class="brand-logo-wrap" aria-hidden="true"><BrandLogo /></div>
+          <h1>Listenarr</h1>
+        </RouterLink>
         <span v-if="version && version.length > 0" class="version">v{{ version }}</span>
       </div>
       <div class="nav-actions">
@@ -58,7 +82,7 @@
                 <div style="display: flex; align-items: center; gap: 10px">
                   <img
                     v-if="s.imageUrl"
-                    :src="apiService.getImageUrl(s.imageUrl) || getPlaceholderUrl()"
+                    :src="getProtectedImageSrc(s.imageUrl, `app-suggestion-${s.id}`, getPlaceholderUrl())"
                     @error="handleImageError"
                     alt="cover"
                     class="result-thumb"
@@ -167,14 +191,28 @@
       </div>
     </header>
 
-    <div :class="['app-layout', { 'no-top': hideLayout }]">
+    <div
+      :class="[
+        'app-layout',
+        {
+          'no-top': hideLayout,
+          'auth-warning-visible': showSecurityWarningBanner,
+        },
+      ]"
+    >
       <!-- Sidebar Navigation -->
-      <aside v-if="!hideLayout" class="sidebar" :class="{ open: mobileMenuOpen }" ref="sidebarRef">
+      <aside
+        v-if="!hideLayout"
+        class="sidebar"
+        :class="{ open: mobileMenuOpen, 'auth-warning-visible': showSecurityWarningBanner }"
+        ref="sidebarRef"
+      >
         <nav class="sidebar-nav">
           <div class="nav-section">
             <RouterLink
               :to="{ path: '/audiobooks', query: { group: 'books' } }"
               class="nav-item"
+              :class="{ 'router-link-active': route.name === 'home' || route.name === 'audiobooks' }"
               @mouseenter="preload('home'); onNavMouseEnter('audiobooks')"
               @mouseleave="onNavMouseLeave('audiobooks')"
               @focus="preload('home'); onNavFocus('audiobooks')"
@@ -242,6 +280,17 @@
               <PhPlus />
               <span>Add New</span>
             </RouterLink>
+                        <RouterLink
+              to="/calendar"
+              class="nav-item"
+              @mouseenter="preload('calendar')"
+              @focus="preload('calendar')"
+              @touchstart.passive="preload('calendar')"
+              @click="closeMobileMenu"
+            >
+              <PhCalendar />
+              <span>Calendar</span>
+            </RouterLink>
             <!-- <RouterLink to="/library-import" class="nav-item">
               <PhFolderOpen />
               <span>Library Import</span>
@@ -249,11 +298,6 @@
           </div>
 
           <div class="nav-section">
-            <!-- Calendar temporarily hidden -->
-            <!-- <RouterLink to="/calendar" class="nav-item">
-              <PhCalendar />
-              <span>Calendar</span>
-            </RouterLink> -->
             <RouterLink
               to="/activity"
               class="nav-item"
@@ -264,7 +308,7 @@
             >
               <PhActivity />
               <span>Activity</span>
-              <span class="badge" v-if="activityCount > 0">{{ activityCount }}</span>
+              <Pill variant="count" v-if="activityCount > 0">{{ activityCount }}</Pill>
             </RouterLink>
             <RouterLink
               to="/wanted"
@@ -276,7 +320,7 @@
             >
               <PhHeart />
               <span>Wanted</span>
-              <span class="badge" v-if="wantedCount > 0">{{ wantedCount }}</span>
+              <Pill variant="count" v-if="wantedCount > 0">{{ wantedCount }}</Pill>
             </RouterLink>
           </div>
 
@@ -380,11 +424,12 @@
             >
               <PhMonitor />
               <span>System</span>
-              <span class="badge error" v-if="systemIssues > 0">{{ systemIssues }}</span>
+              <Pill variant="error" v-if="systemIssues > 0">{{ systemIssues }}</Pill>
             </RouterLink>
           </div>
         </nav>
       </aside>
+      <div v-if="mobileMenuOpen" class="sidebar-backdrop" @click="closeMobileMenu" aria-hidden="true"></div>
 
       <!-- Main Content Area -->
       <main :class="['main-content', { 'full-page': hideLayout }]">
@@ -432,6 +477,7 @@ import {
   PhBooks,
   PhPlus,
   PhActivity,
+  PhCalendar,
   PhHeart,
   PhGear,
   PhMonitor,
@@ -445,27 +491,42 @@ import { useEventListener } from '@vueuse/core'
 import { preloadRoute } from '@/router'
 // SignalR indicator moved to System view; session token handled where needed
 import { useRoute, useRouter } from 'vue-router'
-import NotificationModal from '@/components/NotificationModal.vue'
-import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import NotificationModal from '@/components/feedback/NotificationModal.vue'
+import ConfirmDialog from '@/components/feedback/ConfirmDialog.vue'
 import { useConfirmService } from '@/composables/confirmService'
 import { useNotification } from '@/composables/useNotification'
 import { useDownloadsStore } from '@/stores/downloads'
 import { useAuthStore } from '@/stores/auth'
 import { apiService } from '@/services/api'
+import { getStartupConfigCached } from '@/services/startupConfigCache'
 import { handleImageError } from '@/utils/imageFallback'
+import { Pill } from '@/components/base'
 import { getPlaceholderUrl } from '@/utils/placeholder'
+import { useProtectedImages } from '@/composables/useProtectedImages'
 import { logSessionState, clearAllAuthData } from '@/utils/sessionDebug'
 import { signalRService } from '@/services/signalr'
 import type { QueueItem } from '@/types'
 import { ref as vueRef2, reactive } from 'vue'
-import GlobalToast from '@/components/GlobalToast.vue'
+import GlobalToast from '@/components/ui/GlobalToast.vue'
 import { useToast } from '@/services/toastService'
 import { logger } from '@/utils/logger'
+import BrandLogo from '@/components/base/BrandLogo.vue'
+import {
+  SECURITY_WARNING_BANNER_PREF_EVENT,
+  SECURITY_WARNING_BANNER_PREF_KEY,
+  getSecurityWarningBannerHiddenPreference,
+} from '@/utils/securityWarningBannerPreference'
+
+const STARTUP_CONFIG_UPDATED_EVENT = 'listenarr-startup-config-updated'
 
 const { notification, close: closeNotification } = useNotification()
+const { getProtectedImageSrc } = useProtectedImages()
 const downloadsStore = useDownloadsStore()
 const auth = useAuthStore()
 const authEnabled = ref(false)
+const startupConfigLoaded = ref(false)
+const securityWarningDismissed = ref(false)
+const securityWarningPermanentlyHidden = ref(getSecurityWarningBannerHiddenPreference())
 // Hover and persistence state for sidebar subnavs
 const hoverNav = ref<string | null>(null)
 const persistentNav = ref<string | null>(null)
@@ -489,6 +550,8 @@ onMounted(() => {
   } catch {
     isTouchDevice.value = false
   }
+
+  refreshSecurityWarningBannerPreference()
 })
 
 function onNavMouseEnter(name: string) {
@@ -662,8 +725,12 @@ const activeQueueCount = computed(
 )
 
 // Step 3: Count DDL downloads separately (memoized)
+// Treat downloadClientId case-insensitively to be robust against lower/upper-cased values
 const ddlDownloadsCount = computed(
-  () => activeDownloads.value.filter((d) => d.downloadClientId === 'DDL').length,
+  () =>
+    activeDownloads.value.filter((d) =>
+      ((d && d.downloadClientId) || '').toString().toUpperCase() === 'DDL',
+    ).length,
 )
 
 // Step 4: Count external client downloads (memoized)
@@ -923,6 +990,69 @@ watch(
   },
 )
 
+const parseAuthEnabledFromStartupConfig = (raw: unknown): boolean | null => {
+  if (typeof raw === 'boolean') return raw
+  if (typeof raw === 'string') {
+    const normalized = raw.toLowerCase().trim()
+    if (
+      normalized === 'enabled' ||
+      normalized === 'true' ||
+      normalized === 'yes' ||
+      normalized === '1'
+    )
+      return true
+    if (
+      normalized === 'disabled' ||
+      normalized === 'false' ||
+      normalized === 'no' ||
+      normalized === '0'
+    )
+      return false
+  }
+  return null
+}
+
+const refreshAuthPresentationFromStartupConfig = async (force: boolean = false) => {
+  try {
+    // Use cached startup-config helper so unauthenticated 401 is interpreted as
+    // "authentication required" instead of forcing authEnabled=false.
+    let cfg = await getStartupConfigCached(force ? 0 : 5000)
+    // If cache currently holds a transient failure (`null`), force a direct fetch once
+    // so we don't pin authEnabled=false for the whole session.
+    if (!cfg) {
+      try {
+        cfg = await apiService.getStartupConfig()
+      } catch (err) {
+        const status = (err as { status?: number } | null)?.status
+        if (status === 401) {
+          cfg = { authenticationRequired: true } as Record<string, unknown>
+        } else {
+          throw err
+        }
+      }
+    }
+    const obj = cfg as Record<string, unknown> | null
+    const raw = obj ? (obj['authenticationRequired'] ?? obj['AuthenticationRequired']) : undefined
+    const parsedAuthEnabled = parseAuthEnabledFromStartupConfig(raw)
+    // Only show the "auth disabled" banner when startup config explicitly says auth is off.
+    // Unknown/missing/transient states should not be treated as disabled.
+    authEnabled.value = parsedAuthEnabled ?? true
+    logger.debug('Startup config refreshed', { authEnabled: authEnabled.value, cfg, force })
+  } catch {
+    // Avoid false-positive no-auth warning banner when startup config fetch is transiently unavailable.
+    authEnabled.value = true
+  } finally {
+    startupConfigLoaded.value = true
+  }
+}
+
+watch(
+  () => auth.user.authenticated,
+  () => {
+    void refreshAuthPresentationFromStartupConfig(true)
+  },
+)
+
 // (notificationRef and click-outside handler are declared earlier)
 
 // Initialize: Subscribe to SignalR for real-time updates (NO POLLING!)
@@ -1084,6 +1214,9 @@ onMounted(async () => {
                 recentDownloadTitles.value.delete(title)
               }, 30000)
             }
+          } else if (status === 'moved') {
+            // Download was successfully imported - refresh wanted badge to reflect the change
+            refreshWantedBadge()
           } else {
             // Ignore progress/other transient updates
           }
@@ -1121,23 +1254,7 @@ onMounted(async () => {
   startWantedBadgePolling()
 
   logger.info('✅ Real-time updates enabled - Activity badge updates automatically via SignalR!')
-  // Fetch startup config (do this regardless of auth so header/login visibility can be known)
-  try {
-    const cfg = await apiService.getStartupConfig()
-    // Accept both camelCase and PascalCase variants from backend (some responses use PascalCase)
-    const obj = cfg as Record<string, unknown> | null
-    const raw = obj ? (obj['authenticationRequired'] ?? obj['AuthenticationRequired']) : undefined
-    const v = raw as unknown
-    authEnabled.value =
-      typeof v === 'boolean'
-        ? v
-        : typeof v === 'string'
-          ? v.toLowerCase() === 'enabled' || v.toLowerCase() === 'true'
-          : false
-    logger.debug('Startup config fetched', { authEnabled: authEnabled.value, cfg })
-  } catch {
-    authEnabled.value = false
-  }
+  await refreshAuthPresentationFromStartupConfig(true)
 
   // Fetch version from API
   try {
@@ -1159,6 +1276,17 @@ onMounted(async () => {
   useEventListener(document, 'click', handleDocumentClick)
   useEventListener(document, 'click', handleSearchDocumentClick)
   useEventListener(document, 'click', handleNotificationDocumentClick)
+  useEventListener(window, 'storage', (event: StorageEvent) => {
+    if (event.key === SECURITY_WARNING_BANNER_PREF_KEY) {
+      refreshSecurityWarningBannerPreference()
+    }
+  })
+  useEventListener(window, SECURITY_WARNING_BANNER_PREF_EVENT, () => {
+    refreshSecurityWarningBannerPreference()
+  })
+  useEventListener(window, STARTUP_CONFIG_UPDATED_EVENT, () => {
+    void refreshAuthPresentationFromStartupConfig(true)
+  })
 })
 
 onUnmounted(() => {
@@ -1193,6 +1321,41 @@ const hideLayout = computed(() => {
   return !!(meta && meta.hideLayout)
 })
 
+const refreshSecurityWarningBannerPreference = () => {
+  const nextValue = getSecurityWarningBannerHiddenPreference()
+  const wasPermanentlyHidden = securityWarningPermanentlyHidden.value
+  securityWarningPermanentlyHidden.value = nextValue
+
+  if (wasPermanentlyHidden && !nextValue) {
+    securityWarningDismissed.value = false
+  }
+}
+
+const showSecurityWarningBanner = computed(
+  () =>
+    !hideLayout.value &&
+    startupConfigLoaded.value &&
+    !authEnabled.value &&
+    !securityWarningDismissed.value &&
+    !securityWarningPermanentlyHidden.value,
+)
+
+const dismissSecurityWarning = () => {
+  securityWarningDismissed.value = true
+}
+
+const appShellCssVars = computed(() => {
+  const topNavHeightPx = 60
+  const bannerHeightPx = showSecurityWarningBanner.value ? 44 : 0
+  const topOffsetPx = hideLayout.value ? 0 : topNavHeightPx + bannerHeightPx
+
+  return {
+    '--top-nav-height': `${topNavHeightPx}px`,
+    '--security-banner-height': `${bannerHeightPx}px`,
+    '--app-top-offset': `${topOffsetPx}px`,
+  } as Record<string, string>
+})
+
 // Note: Backend connection indicator was moved to the System view.
 </script>
 
@@ -1212,10 +1375,16 @@ these are not present, the Google Fonts import in `fe/index.html` will be used a
 
 <style scoped>
 #app {
+  --top-nav-height: 60px;
+  --security-banner-height: 0px;
+  --app-top-offset: var(--top-nav-height);
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
   margin: 0;
   padding: 0;
-  min-height: calc(100vh - 60px);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 100dvh;
   background-color: #1a1a1a;
   color: white;
 }
@@ -1225,15 +1394,70 @@ these are not present, the Google Fonts import in `fe/index.html` will be used a
   background-color: #2a2a2a;
   border-bottom: 1px solid #3a3a3a;
   padding: 0 1rem;
-  height: 60px;
+  height: var(--top-nav-height);
   display: flex;
   justify-content: space-between;
   align-items: center;
   position: fixed;
-  top: 0;
+  top: var(--security-banner-height);
   left: 0;
   right: 0;
   z-index: 1000;
+}
+
+.top-nav.auth-warning-visible {
+  top: var(--security-banner-height);
+}
+
+.security-warning-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1002;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  background: linear-gradient(180deg, #5f2a1b 0%, #4a2116 100%);
+  border-bottom: 1px solid rgba(255, 183, 77, 0.28);
+  color: #ffd8a8;
+  padding: 0 1rem;
+  font-size: 0.9rem;
+  line-height: 1.3;
+}
+
+.security-warning-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.security-warning-dismiss {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 216, 168, 0.22);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+
+.security-warning-dismiss:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 216, 168, 0.35);
+}
+
+.security-warning-dismiss:focus-visible {
+  outline: 2px solid rgba(255, 216, 168, 0.5);
+  outline-offset: 1px;
 }
 
 .nav-brand {
@@ -1242,22 +1466,53 @@ these are not present, the Google Fonts import in `fe/index.html` will be used a
   gap: 0.75rem;
 }
 
+.brand-link {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  text-decoration: none;
+  color: inherit;
+}
+
+.brand-link,
+.brand-link:visited {
+  background-color: transparent;
+  padding: 0; /* avoid the global link padding showing hover bg */
+}
+
+.brand-link:hover {
+  background-color: transparent;
+}
+
 .brand-logo {
   width: 40px;
   height: 40px;
-  transition: transform 0.2s;
+  transition: transform 220ms cubic-bezier(.2,.8,.2,1), filter 220ms;
+  transform-origin: center center;
   filter: brightness(0) saturate(100%) invert(51%) sepia(56%) saturate(3237%) hue-rotate(184deg)
     brightness(97%) contrast(97%);
 }
 
-.brand-logo:hover {
-  transform: rotate(5deg) scale(1.05);
+/* Animate the headphones when hovering the brand (logo or H1) */
+.brand-link:hover .brand-logo,
+.brand-link:focus .brand-logo {
+  transform: rotate(6deg) scale(1.06);
+}
+
+/* Respect reduced motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  .brand-logo,
+  .brand-link:hover .brand-logo,
+  .brand-link:focus .brand-logo {
+    transition: none !important;
+    transform: none !important;
+  }
 }
 
 .nav-brand h1 {
   margin: 0;
   font-size: 1.5rem;
-  font-weight: 600;
+  font-weight: 500;
   color: #fff;
   /* Use Figtree for the brand heading when available */
   font-family:
@@ -1326,7 +1581,7 @@ these are not present, the Google Fonts import in `fe/index.html` will be used a
 }
 
 .user-menu-item.username {
-  font-weight: 600;
+  font-weight: 500;
   color: #fff;
 }
 
@@ -1396,12 +1651,15 @@ these are not present, the Google Fonts import in `fe/index.html` will be used a
 /* App Layout */
 .app-layout {
   display: flex;
-  margin-top: 60px;
-  min-height: calc(100vh - 60px);
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-top: var(--app-top-offset);
+  min-height: calc(100dvh - var(--app-top-offset));
 }
 
 .app-layout.no-top {
   margin-top: 0;
+  min-height: 100dvh;
 }
 
 /* Sidebar */
@@ -1411,9 +1669,13 @@ these are not present, the Google Fonts import in `fe/index.html` will be used a
   border-right: 1px solid #3a3a3a;
   position: fixed;
   left: 0;
-  top: 60px;
+  top: var(--app-top-offset);
   bottom: 0;
   overflow-y: auto;
+}
+
+.sidebar.auth-warning-visible {
+  top: var(--app-top-offset);
 }
 
 .sidebar-nav {
@@ -1435,13 +1697,24 @@ these are not present, the Google Fonts import in `fe/index.html` will be used a
   gap: 0.75rem;
 }
 
+/* Push count pills to the end of sidebar nav items */
+.sidebar .nav-item .pill-count,
+.sidebar .nav-item .pill.pill-count {
+  margin-left: auto;
+}
+
 .nav-item:hover {
   background-color: #3a3a3a;
   color: white;
 }
 
 .nav-item.router-link-active {
-  background-color: #007acc;
+  background-color: var(--brand-500);
+  color: white;
+}
+
+.sidebar .nav-item.router-link-active svg,
+.sidebar .nav-item.router-link-active .ph {
   color: white;
 }
 
@@ -1452,7 +1725,7 @@ these are not present, the Google Fonts import in `fe/index.html` will be used a
   top: 0;
   bottom: 0;
   width: 3px;
-  background-color: #007acc;
+  background-color: var(--brand-500);
 }
 
 /* Icons */
@@ -1487,24 +1760,15 @@ these are not present, the Google Fonts import in `fe/index.html` will be used a
   content: '🔔';
 }
 
-/* Badges */
-.badge {
-  background-color: #f39c12;
-  color: white;
-  border-radius: 6px;
-  padding: 0.2rem 0.5rem;
-  font-size: 0.75rem;
-  font-weight: bold;
-  margin-left: auto;
-}
-
+/* Badges - Now using Pill component from @/components/base */
+/* Legacy badge styles kept only for notification-badge positioning */
 .notification-badge {
   background-color: #f39c12;
   color: white;
   border-radius: 6px;
   padding: 0.1rem 0.3rem;
   font-size: 0.65rem;
-  font-weight: bold;
+  font-weight: 500;
   position: absolute;
   top: -2px;
   right: -2px;
@@ -1516,30 +1780,13 @@ these are not present, the Google Fonts import in `fe/index.html` will be used a
   z-index: 10;
 }
 
-.badge.error {
-  background-color: #e74c3c;
-}
-
-/* Sidebar-specific badge: branded blue */
-.sidebar .badge {
-  background-color: #007acc;
-  transition:
-    background-color 0.12s ease,
-    box-shadow 0.12s ease;
-}
-
-.sidebar .badge:hover,
-.sidebar .badge:focus {
-  background-color: #005fa3;
-  box-shadow: 0 6px 18px rgba(0, 122, 204, 0.12);
-}
-
 /* Main Content */
 .main-content {
   flex: 1;
   margin-left: 200px;
   background-color: #1a1a1a;
-  min-height: calc(100vh - 60px);
+  min-width: 0;
+  min-height: calc(100dvh - var(--app-top-offset));
   width: calc(100vw - 217px);
 }
 
@@ -1549,8 +1796,8 @@ these are not present, the Google Fonts import in `fe/index.html` will be used a
   display: flex;
   align-items: center;
   justify-content: center;
-  /* Account for the fixed 60px top nav so content centers in remaining viewport */
-  min-height: calc(100vh - 60px);
+  /* Account for the current fixed top chrome (nav + optional security banner). */
+  min-height: calc(100dvh - var(--app-top-offset));
 }
 
 .fullpage-wrapper {
@@ -1619,6 +1866,18 @@ these are not present, the Google Fonts import in `fe/index.html` will be used a
     background-color: #2a2a2a !important;
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
+  }
+
+  /* Backdrop for slide-out sidebar on mobile */
+  .sidebar-backdrop {
+    position: fixed;
+    top: var(--app-top-offset); /* below fixed top chrome */
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.34);
+    z-index: 1400; /* below sidebar (1500) but above main content */
+    transition: opacity 180ms ease;
   }
 }
 /* Header search styles */
@@ -1799,7 +2058,7 @@ these are not present, the Google Fonts import in `fe/index.html` will be used a
 
 .sidebar .nav-subitem.active {
   color: #ffffff;
-  font-weight: 600;
+  font-weight: 500;
   border-left: 3px solid #2196f3; /* Highlighted border for active */
 }
 
@@ -1892,11 +2151,7 @@ these are not present, the Google Fonts import in `fe/index.html` will be used a
   animation: spin 800ms linear infinite;
 }
 
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
+/* @keyframes spin is centralized in src/assets/animations.css */
 
 .search-result {
   display: flex;
@@ -1913,7 +2168,7 @@ these are not present, the Google Fonts import in `fe/index.html` will be used a
 }
 
 .result-title {
-  font-weight: 600;
+  font-weight: 500;
   color: #fff;
   font-size: 0.95rem;
 }
@@ -2069,7 +2324,7 @@ these are not present, the Google Fonts import in `fe/index.html` will be used a
 .dropdown-header strong {
   color: #fff;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .clear-btn {
@@ -2131,7 +2386,7 @@ these are not present, the Google Fonts import in `fe/index.html` will be used a
 
 .notif-title {
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   color: #fff;
   margin-bottom: 2px;
   overflow: hidden;

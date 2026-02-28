@@ -38,8 +38,7 @@ namespace Listenarr.Api.Services
                     }
                 }
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 // If dedupe check fails for any reason, fall back to enqueueing a new job
                 _logger.LogWarning(ex, "Failed while checking existing scan jobs for dedupe; will enqueue new job");
             }
@@ -105,3 +104,4 @@ namespace Listenarr.Api.Services
         }
     }
 }
+

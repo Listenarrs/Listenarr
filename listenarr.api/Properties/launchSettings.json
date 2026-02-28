@@ -1,13 +1,5 @@
 ﻿{
   "$schema": "https://json.schemastore.org/launchsettings.json",
-  "iisSettings": {
-    "windowsAuthentication": false,
-    "anonymousAuthentication": true,
-    "iisExpress": {
-      "applicationUrl": "http://localhost:34525",
-      "sslPort": 44308
-    }
-  },
   "profiles": {
     "http": {
       "commandName": "Project",
@@ -16,7 +8,8 @@
       "launchUrl": "swagger",
       "applicationUrl": "http://localhost:4545",
       "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development"
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "LISTENARR_CONTENT_ROOT": "../../listenarr.api"
       }
     },
     "https": {
@@ -26,7 +19,8 @@
       "launchUrl": "swagger",
       "applicationUrl": "https://localhost:7172;http://localhost:4545",
       "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development"
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "LISTENARR_CONTENT_ROOT": "../../listenarr.api"
       }
     },
     "IIS Express": {

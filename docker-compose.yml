@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   listenarr:
-    image: ghcr.io/therobbiedavis/listenarr:canary ## For Docker Hub, replace the image with docker.io/therobbiedavis/listenarr:canary
+    image: ghcr.io/listenarrs/listenarr:canary ## For Docker Hub, replace the image with docker.io/therobbiedavis/listenarr:canary
     user: "1001:1001"  ## Replace with your desired UID and GID
     ports:
       - "4545:4545"

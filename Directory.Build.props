@@ -1,12 +1,10 @@
 <Project>
-  <PropertyGroup>
-    <EFVersion>8.0.23</EFVersion>
-  </PropertyGroup>
 
-  <ItemGroup>
-    <PackageReference Update="Microsoft.EntityFrameworkCore" Version="$(EFVersion)" />
-    <PackageReference Update="Microsoft.EntityFrameworkCore.Sqlite" Version="$(EFVersion)" />
-    <PackageReference Update="Microsoft.EntityFrameworkCore.Design" Version="$(EFVersion)" />
-    <PackageReference Update="Microsoft.Data.Sqlite.Core" Version="$(EFVersion)" />
-  </ItemGroup>
+	<PropertyGroup>
+		<TargetFramework>net8.0</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<LangVersion>latest</LangVersion>
+	</PropertyGroup>
+
 </Project>

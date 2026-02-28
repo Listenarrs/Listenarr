@@ -1,7 +1,10 @@
 <template>
   <div class="root-folders-settings">
     <div v-if="!props.hideHeader" class="section-header">
-      <h3>Root Folders</h3>
+      <h3>
+        Root Folders
+        <PhSpinner v-if="store.loading" class="ph-spin small-inline-spinner" />
+      </h3>
     </div>
     <div v-if="store.loading" class="loading-state">
       <PhSpinner class="ph-spin" />
@@ -16,10 +19,6 @@
           Add a root folder to organize your audiobook library. You can create multiple named root
           folders for different storage locations.
         </p>
-        <button class="btn primary" @click="openAdd()">
-          <PhPlus />
-          Add Your First Root Folder
-        </button>
       </div>
 
       <div v-else class="folders-list">
@@ -35,13 +34,13 @@
                 <div class="folder-name-row">
                   <h4>{{ folder.name }}</h4>
                   <div class="folder-badges">
-                    <span v-if="folder.isDefault" class="badge default">Default</span>
+                    <Pill variant="success" v-if="folder.isDefault">Default</Pill>
                   </div>
                 </div>
               </div>
               <div class="folder-actions">
                 <button
-                  class="icon-button"
+                  class="icon-button action-edit"
                   @click="edit(folder)"
                   title="Edit"
                   data-cy="edit-root-folder"
@@ -50,14 +49,14 @@
                 </button>
                 <button
                   v-if="!folder.isDefault"
-                  class="icon-button"
+                  class="icon-button action-secondary"
                   @click="setDefaultFolder(folder)"
                   title="Set as Default"
                 >
                   <PhStar />
                 </button>
                 <button
-                  class="icon-button danger"
+                  class="icon-button danger action-delete"
                   @click="confirmDelete(folder)"
                   title="Delete"
                   data-cy="delete-root-folder"
@@ -82,35 +81,16 @@
       @saved="onSaved"
     />
 
-    <!-- Delete Root Folder Confirmation Modal -->
-    <div v-if="folderToDelete" class="modal-overlay" @click="folderToDelete = null">
-      <div class="modal-content" @click.stop>
-        <div class="modal-header">
-          <h3>
-            <PhWarningCircle />
-            Delete Root Folder
-          </h3>
-          <button @click="folderToDelete = null" class="modal-close">
-            <PhX />
-          </button>
-        </div>
-        <div class="modal-body">
-          <p>
-            Are you sure you want to delete the root folder
-            <strong>{{ folderToDelete.name }}</strong
-            >?
-          </p>
-          <p>This will only remove the reference and will not delete files from disk.</p>
-        </div>
-        <div class="modal-actions">
-          <button @click="folderToDelete = null" class="cancel-button">Cancel</button>
-          <button @click="executeDeleteFolder()" class="delete-button">
-            <PhTrash />
-            Delete
-          </button>
-        </div>
-      </div>
-    </div>
+    <!-- Delete Root Folder Confirmation (shared) -->
+    <DeleteConfirmationModal :visible="!!folderToDelete" title="Delete Root Folder" @close="folderToDelete = null" @confirm="executeDeleteFolder">
+      <template v-slot>
+        <p>
+          Are you sure you want to delete the root folder
+          <strong>{{ folderToDelete?.name }}</strong>?
+        </p>
+        <p>This will only remove the reference and will not delete files from disk.</p>
+      </template>
+    </DeleteConfirmationModal>
   </div>
 </template>
 
@@ -118,8 +98,10 @@
 import { ref, onMounted } from 'vue'
 import { useRootFoldersStore } from '@/stores/rootFolders'
 import RootFolderFormModal from '@/components/settings/RootFolderFormModal.vue'
+import DeleteConfirmationModal from '@/components/feedback/DeleteConfirmationModal.vue'
 import { useToast } from '@/services/toastService'
 import { errorTracking } from '@/services/errorTracking'
+import { Pill } from '@/components/base'
 import {
   PhPlus,
   PhFolder,
@@ -229,7 +211,13 @@ defineExpose({
   margin: 0;
   color: #fff;
   font-size: 1.5rem;
-  font-weight: 600;
+  font-weight: 500;
+}
+
+.section-header .small-inline-spinner {
+  margin-left: 0.5rem;
+  width: 18px;
+  height: 18px;
 }
 
 .add-button {
@@ -237,7 +225,7 @@ defineExpose({
   align-items: center;
   gap: 0.5rem;
   padding: 0.75rem 1.5rem;
-  background: linear-gradient(135deg, #1e88e5 0%, #1565c0 100%);
+  background: #1e88e5;
   color: white;
   border: none;
   border-radius: 6px;
@@ -249,7 +237,7 @@ defineExpose({
 }
 
 .add-button:hover {
-  background: linear-gradient(135deg, #1565c0 0%, #0d47a1 100%);
+  background: #1565c0;
   transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(30, 136, 229, 0.4);
 }
@@ -265,16 +253,28 @@ defineExpose({
 }
 
 .empty-state {
-  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   padding: 4rem 2rem;
   color: #868e96;
+  min-height: 40vh; /* center within the tab when empty */
+  gap: 1rem;
+}
+
+.empty-state svg {
+  font-size: 2rem;
+  color: #4dabf7;
+  opacity: 0.9;
+  margin-bottom: 0.25rem;
 }
 
 .empty-state h4 {
-  margin: 1rem 0 0.5rem 0;
+  margin: 0;
   color: #fff;
-  font-size: 1.5rem;
-  font-weight: 600;
+  font-size: 1.6rem;
+  font-weight: 500;
 }
 
 .empty-state p {
@@ -324,7 +324,7 @@ defineExpose({
 .folder-header {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center; /* align actions vertically with title */
   padding: 1.5rem;
   background-color: rgba(0, 0, 0, 0.2);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
@@ -339,30 +339,13 @@ defineExpose({
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0; /* remove extra gap so title centers with actions */
 }
 
+/* Badge styles - Now using Pill component from @/components/base */
 .folder-badges {
   display: flex;
   gap: 0.5rem;
-}
-
-.badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.3rem 0.7rem;
-  border-radius: 6px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.badge.default {
-  background-color: rgba(76, 175, 80, 0.15);
-  color: #51cf66;
-  border: 1px solid rgba(76, 175, 80, 0.3);
 }
 
 .folder-info h4,
@@ -370,7 +353,7 @@ defineExpose({
   margin: 0;
   color: #fff;
   font-size: 1.1rem;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .folder-path {
@@ -397,118 +380,18 @@ defineExpose({
   margin-left: 1rem;
 }
 
-.icon-button {
-  padding: 0.5rem;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 6px;
-  cursor: pointer;
-  color: #adb5bd;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
-  font-size: 1.1rem;
-  width: 36px;
-  height: 36px;
-}
+/* Override global action ordering for folder cards so Edit sits next to Delete */
+.folder-actions .action-secondary { order: 1 }
+.folder-actions .action-edit { order: 2 }
+.folder-actions .action-delete { order: 3 }
 
-.icon-button:hover:not(:disabled) {
-  background: rgba(77, 171, 247, 0.15);
-  border-color: #4dabf7;
-  color: #4dabf7;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(77, 171, 247, 0.3);
-}
+/* Use shared .icon-button in src/assets/buttons.css to avoid duplication */
 
-.icon-button.danger {
-  color: #ff6b6b;
-}
+/* Button visuals are centralized in `src/assets/buttons.css`. Use `.btn` and `.btn-primary`.
+   If a component needs a small override, use a component-scoped helper class like `.folder-btn`. */
+.folder-btn { padding: 0.5rem 1rem; } 
 
-.icon-button.danger:hover:not(:disabled) {
-  background: rgba(255, 107, 107, 0.15);
-  border-color: #ff6b6b;
-  color: #ff6b6b;
-  box-shadow: 0 2px 8px rgba(255, 107, 107, 0.3);
-}
-
-.icon-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-  transform: none;
-}
-
-.btn {
-  padding: 0.5rem 1rem;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  font-weight: 500;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.btn.primary {
-  background-color: #007acc;
-  color: white;
-}
-
-.btn.primary:hover {
-  background-color: #005a9e;
-  transform: translateY(-1px);
-}
-
-/* Modal Styles (canonical) */
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.85);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  backdrop-filter: blur(4px);
-}
-
-.modal-content {
-  background: #2a2a2a;
-  border: 1px solid #444;
-  border-radius: 6px;
-  max-width: 700px;
-  width: 100%;
-  max-height: 90vh;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
-}
-
-.modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1.5rem;
-  border-bottom: 1px solid #444;
-}
-
-.modal-header h3 {
-  margin: 0;
-  color: #fff;
-  font-size: 1.25rem;
-}
-
-.modal-close {
-  background: none;
-  border: none;
-  color: #b3b3b3;
-  cursor: pointer;
-  padding: 0.5rem;
-  border-radius: 6px;
-  transition: all 0.2s;
-}
+/* Modal styles are centralized in `modals.css` */
 
 .modal-close:hover {
   background: #333;
@@ -521,40 +404,8 @@ defineExpose({
   flex: 1;
 }
 
-.modal-actions {
-  display: flex;
-  gap: 1rem;
-  justify-content: flex-end;
-  padding: 1.5rem;
-  border-top: 1px solid #444;
-}
+/* modal-actions and modal delete-button styles are centralized in src/assets/modals.css */
+.modal-footer { display:flex; gap:0.75rem; justify-content:flex-end }
 
-/* Ensure modal context delete buttons are full-size */
-.modal-overlay .modal-content .modal-actions .delete-button,
-.modal-content .modal-actions .delete-button,
-.modal-overlay .modal-content .modal-actions .modal-delete-button,
-.modal-content .modal-actions .modal-delete-button {
-  padding: 0.75rem 1.25rem;
-  background-color: rgba(231, 76, 60, 0.15);
-  color: #ff6b6b;
-  border: 1px solid rgba(231, 76, 60, 0.3);
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.18s ease;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.6rem;
-  font-weight: 700;
-  font-size: 1rem;
-  min-width: 120px;
-  height: auto;
-  box-shadow: 0 6px 16px rgba(231, 76, 60, 0.12);
-}
-
-.modal-overlay .modal-content .modal-actions .delete-button:hover,
-.modal-content .modal-actions .delete-button:hover {
-  background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
-  color: #fff;
-}
+/* If this modal needs special sizing for delete buttons in future, add a small override here. */
 </style>

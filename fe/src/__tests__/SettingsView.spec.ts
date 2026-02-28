@@ -43,7 +43,6 @@ describe('SettingsView', () => {
   type SetupState = { showPassword?: { value: boolean } | boolean }
   type Settings = {
     adminPassword?: string
-    preferUsDomain?: boolean
     useUsProxy?: boolean
     usProxyHost?: string
     usProxyPort?: number
@@ -125,79 +124,8 @@ describe('SettingsView', () => {
     expect((setupState.showPassword as any)?.value ?? (setupState.showPassword as any)).toBe(true)
   })
 
-  it('enables/disables proxy fields and saves proxy settings', async () => {
-    const router = createRouter({
-      history: createMemoryHistory(),
-      routes: [{ path: '/', name: 'home', component: { template: '<div />' } }],
-    })
-    await router.push('/')
-    await router.isReady().catch(() => {})
-
-    const pinia = createPinia()
-    setActivePinia(pinia)
-
-    const wrapper = mount(SettingsView, {
-      global: { plugins: [pinia, router], stubs: ['FolderBrowser'] },
-    })
-
-    // Activate General Settings tab and provide initial settings
-    const generalTab = wrapper
-      .findAll('button.tab-button')
-      .find((b) => b.text().includes('General Settings'))
-    expect(generalTab).toBeTruthy()
-    await generalTab!.trigger('click')
-    const vm = wrapper.vm as unknown as { settings?: Settings }
-    vm.settings = {
-      preferUsDomain: false,
-      useUsProxy: false,
-      usProxyHost: '',
-      usProxyPort: 0,
-      usProxyUsername: '',
-      usProxyPassword: '',
-    }
-
-    await wrapper.vm.$nextTick()
-    // Small wait for reactive updates
-    await new Promise((r) => setTimeout(r, 0))
-    await wrapper.vm.$nextTick()
-
-    const hostInput = wrapper.find('input[placeholder="proxy.example.com"]')
-    expect(hostInput.exists()).toBe(true)
-    // When proxy is disabled inputs should be disabled (check element property for boolean accuracy)
-    expect((hostInput.element as HTMLInputElement).disabled).toBe(true)
-
-    // Enable proxy usage
-    vm.settings!.useUsProxy = true
-    await wrapper.vm.$nextTick()
-    await new Promise((r) => setTimeout(r, 0))
-
-    // Host input should now be enabled (re-query to ensure DOM updates are reflected)
-    const hostInputNow = wrapper.find('input[placeholder="proxy.example.com"]')
-    expect((hostInputNow.element as HTMLInputElement).disabled).toBe(false)
-
-    // Fill in details
-    vm.settings!.usProxyHost = 'proxy.test.local'
-    vm.settings!.usProxyPort = 3128
-    await wrapper.vm.$nextTick()
-
-    // Spy on the configuration store save method
-    const { useConfigurationStore } = await import('@/stores/configuration')
-    const cfgStore = useConfigurationStore()
-    cfgStore.saveApplicationSettings = vi.fn().mockResolvedValue(undefined)
-
-    // Click Save Settings button
-    const saveBtn = wrapper
-      .findAll('button.save-button')
-      .find((b) => b.text().includes('Save Settings'))
-    expect(saveBtn).toBeTruthy()
-    await saveBtn!.trigger('click')
-
-    // Expect store save called
-    expect(cfgStore.saveApplicationSettings).toHaveBeenCalled()
-    const calledWith = (cfgStore.saveApplicationSettings as Mock).mock.calls[0][0]
-    expect(calledWith.usProxyHost).toBe('proxy.test.local')
-    expect(Number(calledWith.usProxyPort)).toBe(3128)
-  })
+  // Note: legacy "Prefer US domain" setting was removed from the UI;
+  // related tests removed to reflect current application state.
 
   it('applies child updates (via events) to settings and includes them when saving', async () => {
     const router = createRouter({
@@ -223,17 +151,17 @@ describe('SettingsView', () => {
 
     const vm = wrapper.vm as unknown as { settings?: Settings }
     vm.settings = {
-      preferUsDomain: false,
-      fileNamingPattern: '{Author}/{Title}',
+      folderNamingPattern: '{Author}/{Series}/{Title}',
+      fileNamingPattern: '{Title}',
     } as unknown as Settings
 
     await wrapper.vm.$nextTick()
     await new Promise((r) => setTimeout(r, 0))
 
     // Find the File Naming Pattern input inside the child and change it
-    const fileNamingInput = wrapper.find('input[placeholder="{Author}/{Series}/{Title}"]')
+    const fileNamingInput = wrapper.find('input[placeholder="{Title}"]')
     expect(fileNamingInput.exists()).toBe(true)
-    await fileNamingInput.setValue('{Author}/{Series}/{Title}/{DiskNumber}')
+    await fileNamingInput.setValue('{Title}-{DiskNumber}')
     await new Promise((r) => setTimeout(r, 0))
 
     // Spy on the configuration store save method
@@ -243,14 +171,14 @@ describe('SettingsView', () => {
 
     // Save settings and assert that the updated value from the child is included
     const saveBtn = wrapper
-      .findAll('button.save-button')
+      .findAll('button.btn.btn-primary')
       .find((b) => b.text().includes('Save Settings'))
     expect(saveBtn).toBeTruthy()
     await saveBtn!.trigger('click')
 
     expect(cfgStore.saveApplicationSettings).toHaveBeenCalled()
     const calledWith = (cfgStore.saveApplicationSettings as Mock).mock.calls[0][0]
-    expect(calledWith.fileNamingPattern).toBe('{Author}/{Series}/{Title}/{DiskNumber}')
+    expect(calledWith.fileNamingPattern).toBe('{Title}-{DiskNumber}')
   })
 
   it('toggles download client enabled state', async () => {

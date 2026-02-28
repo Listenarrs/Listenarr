@@ -143,8 +143,9 @@ namespace Listenarr.Api.Tests
             var clientConfig = new DownloadClientConfiguration { Id = "c-queue-test", Name = "Sabnzbd", Host = "localhost", Port = 8080, UseSSL = false, Settings = new Dictionary<string, object> { { "apiKey", "apikey" } }, DownloadPath = "/downloads/complete" };
 
             var downloads = new List<Download> { download };
+            var appSettings = new ApplicationSettings();
 
-            var task = (Task?)method.Invoke(monitor, new object[] { clientConfig, downloads, db, CancellationToken.None });
+            var task = (Task?)method.Invoke(monitor, new object[] { clientConfig, downloads, db, appSettings, CancellationToken.None });
             if (task != null) await task;
 
             // Verify the DB download was updated with progress ~50.5 (progress is stored as decimal)
@@ -253,9 +254,10 @@ namespace Listenarr.Api.Tests
             var clientConfig = new DownloadClientConfiguration { Id = "1763948475200-ywwemp9kd", Name = "Sabnzbd", Host = "localhost", Port = 8080, UseSSL = false, Settings = new Dictionary<string, object> { { "apiKey", "apikey" } }, DownloadPath = string.Empty };
 
             var downloads = new List<Download> { download };
+            var appSettings = new ApplicationSettings();
 
             // If FinalizeDownloadAsync throws due to unguarded Replace calls when DownloadPath is empty, this will blow up.
-            var task = (Task?)method.Invoke(monitor, new object[] { clientConfig, downloads, db, CancellationToken.None });
+            var task = (Task?)method.Invoke(monitor, new object[] { clientConfig, downloads, db, appSettings, CancellationToken.None });
             if (task != null) await task;
 
             // Finalization should have completed gracefully and candidate should be removed
@@ -398,8 +400,9 @@ namespace Listenarr.Api.Tests
             var clientConfig = new DownloadClientConfiguration { Id = "1763948475200-ywwemp9kd", Name = "Sabnzbd", Host = "localhost", Port = 8080, UseSSL = false, Settings = new Dictionary<string, object> { { "apiKey", "apikey" } } };
 
             var downloads = new List<Download> { download };
+            var appSettings = new ApplicationSettings();
 
-            var task = (Task?)method.Invoke(monitor, new object[] { clientConfig, downloads, db, CancellationToken.None });
+            var task = (Task?)method.Invoke(monitor, new object[] { clientConfig, downloads, db, appSettings, CancellationToken.None });
             if (task != null) await task;
 
             // After finalization, the completion candidate should be removed and the ProcessCompletedDownloadAsync should have been invoked
@@ -579,8 +582,9 @@ namespace Listenarr.Api.Tests
             Assert.NotNull(method);
 
             var downloads = new List<Download> { download };
+            var appSettings = new ApplicationSettings();
 
-            var task = (Task?)method.Invoke(monitor, new object[] { clientConfig, downloads, db, CancellationToken.None });
+            var task = (Task?)method.Invoke(monitor, new object[] { clientConfig, downloads, db, appSettings, CancellationToken.None });
             if (task != null) await task;
 
             // Wait a short time then create the file so the scheduled retry will find it
@@ -912,8 +916,9 @@ namespace Listenarr.Api.Tests
             var clientConfig = new DownloadClientConfiguration { Id = "c3", Name = "Sabnzbd", Host = "localhost", Port = 8080, UseSSL = false, Settings = new Dictionary<string, object> { { "apiKey", "apikey" } } };
 
             var downloads = new List<Download> { download };
+            var appSettings = new ApplicationSettings();
 
-            var task = (Task?)method.Invoke(monitor, new object[] { clientConfig, downloads, db, CancellationToken.None });
+            var task = (Task?)method.Invoke(monitor, new object[] { clientConfig, downloads, db, appSettings, CancellationToken.None });
             if (task != null) await task;
 
             // We expect the completion candidate to be removed (finalization attempted)

@@ -132,8 +132,7 @@ public class SearchResultScorer
             int matchedAuthor = queryTokens.Count(qt => artistTokens.Contains(qt));
             return Math.Min(1.0, (double)matchedAuthor / queryTokens.Count);
         }
-        catch (Exception ex)
-        {
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
             _logger.LogDebug(ex, "Failed to compute author match");
             return 0.0;
         }
@@ -186,3 +185,4 @@ public record ScoredSearchResult(
     double ContainmentScore,
     double FuzzyScore,
     string DropReason);
+

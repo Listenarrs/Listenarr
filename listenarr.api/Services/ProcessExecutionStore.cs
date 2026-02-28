@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using Listenarr.Domain.Models;
@@ -40,9 +40,9 @@ namespace Listenarr.Api.Services
                 _db.ProcessExecutionLogs.Add(entity);
                 await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
             }
-            catch
-            {
+            catch (Exception caughtEx_1) when (caughtEx_1 is not OperationCanceledException && caughtEx_1 is not OutOfMemoryException && caughtEx_1 is not StackOverflowException) {
                 // Swallow errors here - persistence is best-effort to avoid disrupting process flows.
+                            System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
             }
         }
     }

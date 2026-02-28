@@ -42,31 +42,35 @@ namespace Listenarr.Api.Middleware
                             provided = s.Substring("ApiKey ".Length).Trim();
                     }
 
-                    // If headers didn't supply the key, accept query string tokens for browser-driven requests
-                    // (e.g. SignalR access_token or image URLs containing ?access_token=... or ?apikey=...)
+                    // If headers didn't supply the key, only accept query-string token for SignalR hub connections.
+                    // Avoiding query-string auth for normal API routes prevents credential leakage via logs/referrers.
                     if (string.IsNullOrWhiteSpace(provided))
                     {
                         try
                         {
-                            var qs = context.Request.Query;
-                            if (qs.ContainsKey("access_token")) provided = qs["access_token"].FirstOrDefault();
-                            if (string.IsNullOrWhiteSpace(provided) && qs.ContainsKey("apikey")) provided = qs["apikey"].FirstOrDefault();
+                            var path = context.Request.Path.Value ?? string.Empty;
+                            if (path.StartsWith("/hubs/", StringComparison.OrdinalIgnoreCase))
+                            {
+                                var qs = context.Request.Query;
+                                if (qs.TryGetValue("access_token", out var accessTokenValues)) provided = accessTokenValues.FirstOrDefault();
+                            }
                         }
-                        catch
-                        {
-                            // ignore any query parsing errors
+                        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+                            _logger?.LogDebug(ex, "ApiKeyMiddleware: failed reading hub access_token from query string");
                         }
                     }
 
                     if (!string.IsNullOrWhiteSpace(provided))
                     {
-                        // Log that a key was provided (mask the prefix only)
+                        // Log a stable non-reversible fingerprint for troubleshooting without exposing key material.
                         try
                         {
-                            var providedPrefix = provided.Length <= 8 ? provided : provided.Substring(0, 8);
-                            _logger?.LogDebug("ApiKeyMiddleware: provided API key prefix={ProvidedPrefix}", providedPrefix);
+                            var keyHash = SecurityRequestUtils.HashSecretForLog(provided);
+                            _logger?.LogDebug("ApiKeyMiddleware: API key provided ({KeyHash})", keyHash);
                         }
-                        catch { }
+                        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+                            System.Diagnostics.Debug.WriteLine($"ApiKeyMiddleware key fingerprint logging failed: {ex.Message}");
+                        }
 
                         if (provided == configuredKey)
                         {
@@ -84,17 +88,22 @@ namespace Listenarr.Api.Middleware
                             {
                                 _logger?.LogInformation("ApiKeyMiddleware: API key accepted, principal set. PrincipalNameMask={NameMask}, ClaimsCount={ClaimsCount}", "ApiKey", context.User?.Claims?.Count() ?? 0);
                             }
-                            catch { }
+                            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+                                System.Diagnostics.Debug.WriteLine($"ApiKeyMiddleware accepted-key logging failed: {ex.Message}");
+                            }
                         }
                         else
                         {
-                            try { _logger?.LogDebug("ApiKeyMiddleware: API key provided but did not match configured key"); } catch { }
+                            try { _logger?.LogDebug("ApiKeyMiddleware: API key provided but did not match configured key"); }
+                            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+                                System.Diagnostics.Debug.WriteLine($"ApiKeyMiddleware invalid-key logging failed: {ex.Message}");
+                            }
                         }
                     }
                 }
             }
-            catch
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+                _logger?.LogWarning(ex, "ApiKeyMiddleware: failed to read startup config for API key authentication");
                 // Do not fail the request if config cannot be read - just continue without API key auth
             }
 
@@ -102,3 +111,4 @@ namespace Listenarr.Api.Middleware
         }
     }
 }
+

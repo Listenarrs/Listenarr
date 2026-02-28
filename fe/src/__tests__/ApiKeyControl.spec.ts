@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
-import PasswordInput from '@/components/PasswordInput.vue'
+import PasswordInput from '@/components/form/PasswordInput.vue'
 
 import { apiService } from '@/services/api'
 import * as useConfirmModule from '@/composables/useConfirm'
@@ -17,7 +17,7 @@ describe('ApiKeyControl', () => {
     // @ts-ignore - provide fake clipboard
     global.navigator = { clipboard: { writeText: writeMock } } as any
 
-    const { default: ApiKeyControl } = await import('@/components/ApiKeyControl.vue')
+    const { default: ApiKeyControl } = await import('@/components/ui/ApiKeyControl.vue')
     const wrapper = mount(ApiKeyControl, {
       props: { apiKey: 'MYKEY' },
       global: { components: { PasswordInput } },
@@ -45,7 +45,7 @@ describe('ApiKeyControl', () => {
       },
     }))
 
-    const { default: ApiKeyControl } = await import('@/components/ApiKeyControl.vue')
+    const { default: ApiKeyControl } = await import('@/components/ui/ApiKeyControl.vue')
     const wrapper = mount(ApiKeyControl, {
       props: { apiKey: 'OLDKEY' },
       global: { components: { PasswordInput } },
@@ -88,7 +88,7 @@ describe('ApiKeyControl', () => {
       },
     }))
 
-    const { default: ApiKeyControl } = await import('@/components/ApiKeyControl.vue')
+    const { default: ApiKeyControl } = await import('@/components/ui/ApiKeyControl.vue')
     const wrapper = mount(ApiKeyControl, {
       props: { apiKey: '' },
       global: { components: { PasswordInput } },

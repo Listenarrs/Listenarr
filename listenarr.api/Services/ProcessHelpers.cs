@@ -23,7 +23,9 @@ namespace Listenarr.Api.Services
                     var candidateNoExt = Path.Combine(dir, name);
                     if (File.Exists(candidateNoExt)) return candidateNoExt;
                 }
-                catch { }
+                catch (Exception caughtEx_1) when (caughtEx_1 is not OperationCanceledException && caughtEx_1 is not OutOfMemoryException && caughtEx_1 is not StackOverflowException) { 
+                    System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                }
             }
 
             // Also try invoking default shell utilities on Unix-like systems (sh which)
@@ -46,7 +48,9 @@ namespace Listenarr.Api.Services
                         if (!string.IsNullOrEmpty(outp) && File.Exists(outp)) return outp;
                     }
                 }
-                catch { }
+                catch (Exception caughtEx_2) when (caughtEx_2 is not OperationCanceledException && caughtEx_2 is not OutOfMemoryException && caughtEx_2 is not StackOverflowException) { 
+                    System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                }
             }
 
             return null;

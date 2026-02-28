@@ -128,8 +128,7 @@ namespace Listenarr.Api.Services.Scoring
                         }
                     }
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogDebug(ex, "Failed to fetch indexer retention for IndexerId {Id}", searchResult.IndexerId.Value);
                 }
             }
@@ -355,7 +354,7 @@ namespace Listenarr.Api.Services.Scoring
                 }
             }
 
-            // Check minimum score threshold (Sonarr's MinFormatScore equivalent)
+            // Check minimum score threshold
             if (profile.MinimumScore > 0 && score.TotalScore < profile.MinimumScore)
             {
                 score.RejectionReasons.Add($"Score {score.TotalScore} below profile minimum {profile.MinimumScore}");

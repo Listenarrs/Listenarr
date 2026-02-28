@@ -85,7 +85,27 @@ namespace Listenarr.Domain.Models
     {
         public int Id { get; set; } = 1; // Singleton pattern - only one settings record
         public string OutputPath { get; set; } = string.Empty;
-        // Updated for audiobook-oriented naming: {Author}/{Series}/{Title}
+        // Folder naming pattern (base directory structure)
+        // Available variables:
+        // {Author} - Audiobook author/narrator
+        // {Series} - Series name (if applicable)
+        // {SeriesNumber} - Position in series (e.g., "1", "2")
+        // {Title} - Book/audiobook title
+        // {Year} - Publication year
+        public string FolderNamingPattern { get; set; } = "{Author}/{Series}/{Title}";
+
+        // File naming pattern for SINGLE-FILE imports (one audio file per audiobook)
+        // Available variables:
+        // {Author} - Audiobook author/narrator
+        // {Series} - Series name (if applicable)
+        // {SeriesNumber} - Position in series (e.g., "1", "2")
+        // {Title} - Book/audiobook title
+        // {Year} - Publication year
+        // {Quality} - Audio quality (e.g., "64kbps mp3")
+        public string FileNamingPattern { get; set; } = "{Title}";
+
+        // File naming pattern for MULTI-FILE imports (multiple audio files per audiobook)
+        // Use {DiskNumber} or {DiskNumber:00}, {ChapterNumber} or {ChapterNumber:00} to differentiate files
         // Available variables:
         // {Author} - Audiobook author/narrator
         // {Series} - Series name (if applicable)
@@ -95,7 +115,8 @@ namespace Listenarr.Domain.Models
         // {ChapterNumber} or {ChapterNumber:00} - Chapter number (00 = zero-padded)
         // {Year} - Publication year
         // {Quality} - Audio quality (e.g., "64kbps mp3")
-        public string FileNamingPattern { get; set; } = "{Author}/{Series}/{Title}";
+        public string MultiFileNamingPattern { get; set; } = "{Title}-{DiskNumber:00}";
+
         public bool EnableMetadataProcessing { get; set; } = true;
         public bool EnableCoverArtDownload { get; set; } = true;
         public string AudnexusApiUrl { get; set; } = "https://api.audnex.us";
@@ -115,14 +136,6 @@ namespace Listenarr.Domain.Models
         public int MissingSourceRetryInitialDelaySeconds { get; set; } = 30;
         public int MissingSourceMaxRetries { get; set; } = 3;
 
-        // External request settings: control retry behavior for US-domain preference and optional HTTP proxy
-        public bool PreferUsDomain { get; set; } = true;
-        public bool UseUsProxy { get; set; } = false;
-        public string? UsProxyHost { get; set; }
-        public int UsProxyPort { get; set; } = 0;
-        public string? UsProxyUsername { get; set; }
-        public string? UsProxyPassword { get; set; }
-
         // Action to take when a download completes: "Move" or "Copy"
         public string CompletedFileAction { get; set; } = "Move";
 
@@ -131,6 +144,10 @@ namespace Listenarr.Domain.Models
 
         // Whether to show completed downloads from external clients in the Activity view
         public bool ShowCompletedExternalDownloads { get; set; } = false;
+
+        // Failed download handling settings
+        public bool FailedDownloadHandlingEnabled { get; set; } = true;
+        public bool FailedDownloadAutoSearch { get; set; } = false;
 
         /// <summary>
         /// Webhook URL for sending notifications (legacy single webhook).
@@ -226,21 +243,6 @@ namespace Listenarr.Domain.Models
         /// </summary>
         public bool EnableOpenLibrarySearch { get; set; } = true;
 
-        /// <summary>
-        /// Maximum number of unified candidate ASINs to consider when performing intelligent search.
-        /// </summary>
-        public int SearchCandidateCap { get; set; } = 100;
-
-        /// <summary>
-        /// Maximum number of results to return from intelligent search.
-        /// </summary>
-        public int SearchResultCap { get; set; } = 100;
-
-        /// <summary>
-        /// Fuzzy similarity threshold used in relaxed containment mode (0.0 - 1.0).
-        /// </summary>
-        public double SearchFuzzyThreshold { get; set; } = 0.2;
-
-
+        
     }
 }

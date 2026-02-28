@@ -49,12 +49,16 @@ namespace Listenarr.Api.Middleware
                             if (!string.IsNullOrEmpty(pname)) nameMask = pname.Length <= 8 ? pname : pname.Substring(0, 8);
                         }
                     }
-                    catch { }
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+                        _logger?.LogDebug(ex, "Failed capturing logout principal diagnostics");
+                    }
 
                     _logger?.LogInformation("Logout request detected - Method: {Method}, Path: {Path}, Authenticated={Authenticated}, PrincipalNameMask={NameMask}, PrincipalClaims={ClaimsCount}",
                         context.Request.Method, path, authenticated, nameMask, claimsCount);
                 }
-                catch { }
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+                    System.Diagnostics.Debug.WriteLine($"AuthenticationEnforcerMiddleware logout logging failed: {ex.Message}");
+                }
             }
 
             // If endpoint explicitly allows anonymous, skip enforcement
@@ -65,8 +69,15 @@ namespace Listenarr.Api.Middleware
                 return;
             }
 
-            // Allow some public paths used by SPA and startup (swagger/ui, antiforgery token, startup config, initial API key generation, and account login/register)
-            if (path.StartsWith("/swagger") || path.StartsWith("/api/antiforgery") || path.StartsWith("/api/configuration/startupconfig") || path.StartsWith("/api/configuration/apikey/generate-initial") || path.StartsWith("/api/account/login") || path.StartsWith("/api/account/register"))
+            // Allow some public paths used by SPA and startup (swagger/ui, antiforgery token, and account login)
+            if (path.StartsWith("/swagger") || path.StartsWith("/api/antiforgery") || path.StartsWith("/api/account/login"))
+            {
+                await _next(context);
+                return;
+            }
+
+            // The startup config endpoint should only be public when authentication is not required
+            if (path.StartsWith("/api/configuration/startupconfig") && !authRequired)
             {
                 await _next(context);
                 return;
@@ -92,3 +103,4 @@ namespace Listenarr.Api.Middleware
         }
     }
 }
+

@@ -1,5 +1,9 @@
 using System.Xml.Linq;
 using Listenarr.Api.Services;
+using Listenarr.Api.Services.Search;
+using Listenarr.Api.Services.Search.Filters;
+using Listenarr.Api.Services.Search.Strategies;
+using Listenarr.Api.Hubs;
 using Listenarr.Domain.Models;
 using Xunit;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -9,11 +13,57 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.SignalR;
+using Moq;
+using System.Linq;
 
 namespace Listenarr.Api.Tests
 {
     public class IndexersNewznabParsingTests
     {
+      private static SearchService CreateSearchService(HttpClient? httpClient = null)
+      {
+        var client = httpClient ?? new HttpClient();
+        var configuration = Mock.Of<IConfigurationService>();
+        var logger = NullLogger<SearchService>.Instance;
+        var openLibraryService = Mock.Of<IOpenLibraryService>();
+        var imageCache = Mock.Of<IImageCacheService>();
+        ListenArrDbContext dbContext = null!;
+        var hubContext = Mock.Of<IHubContext<DownloadHub>>();
+        var audimeta = new AudimetaService(new HttpClient(), NullLogger<AudimetaService>.Instance);
+        var audnexus = new AudnexusService(new HttpClient(), NullLogger<AudnexusService>.Instance);
+        var converters = new MetadataConverters(imageCache, NullLogger<MetadataConverters>.Instance);
+        var merger = new MetadataMerger(NullLogger<MetadataMerger>.Instance);
+        var progress = new SearchProgressReporter(null, NullLogger<SearchProgressReporter>.Instance);
+        var pipeline = new SearchResultFilterPipeline(Enumerable.Empty<ISearchResultFilter>(), NullLogger<SearchResultFilterPipeline>.Instance);
+        var coordinator = new MetadataStrategyCoordinator(Enumerable.Empty<IMetadataStrategy>(), NullLogger<MetadataStrategyCoordinator>.Instance);
+        var collector = new AsinCandidateCollector(NullLogger<AsinCandidateCollector>.Instance, openLibraryService, converters, progress);
+        var enricher = new AsinEnricher(NullLogger<AsinEnricher>.Instance, coordinator, converters, pipeline, progress);
+        var scorer = new SearchResultScorer(NullLogger<SearchResultScorer>.Instance);
+        var handler = new AsinSearchHandler(NullLogger<AsinSearchHandler>.Instance, configuration, audimeta, Mock.Of<IAudnexusService>(), converters, progress);
+
+        return new SearchService(
+          client,
+          configuration,
+          logger,
+          openLibraryService,
+          imageCache,
+          dbContext,
+          hubContext,
+          audimeta,
+          audnexus,
+          converters,
+          merger,
+          progress,
+          pipeline,
+          coordinator,
+          collector,
+          enricher,
+          scorer,
+          handler,
+          Enumerable.Empty<Listenarr.Api.Services.Search.Providers.IIndexerSearchProvider>());
+      }
+
         [Fact]
         public async Task ParseTorznabResponse_Parses_Filetype_And_Language_Attributes()
         {
@@ -34,7 +84,7 @@ namespace Listenarr.Api.Tests
 </rss>";
 
             var indexer = new Indexer { Name = "test", Url = "https://example.com", Type = "Torrent", Implementation = "torznab" };
-            var service = new SearchService(null, null, NullLogger<SearchService>.Instance, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+            var service = CreateSearchService();
 
             var results = await service.ParseTorznabResponseAsync(xml, indexer);
             Assert.Single(results);
@@ -64,7 +114,7 @@ namespace Listenarr.Api.Tests
 </rss>";
 
             var indexer = new Indexer { Name = "test", Url = "https://example.com", Type = "Torrent", Implementation = "torznab" };
-            var service = new SearchService(null, null, NullLogger<SearchService>.Instance, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+            var service = CreateSearchService();
 
             var results = await service.ParseTorznabResponseAsync(xml, indexer);
             Assert.Single(results);
@@ -114,7 +164,7 @@ namespace Listenarr.Api.Tests
 
             using var httpClient = new System.Net.Http.HttpClient(handler) { BaseAddress = new System.Uri("https://api.althub.co.za") };
 
-            var service = new SearchService(httpClient, null, NullLogger<SearchService>.Instance, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+            var service = CreateSearchService(httpClient);
 
             // Helper delegating handler stub class (DelegatingHandlerStub defined below)
 
@@ -276,7 +326,7 @@ namespace Listenarr.Api.Tests
 ]";
 
             var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse" };
-            var service = new SearchService(null, null, NullLogger<SearchService>.Instance, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+            var service = CreateSearchService();
 
             // Use reflection to call the private parser
             var method = typeof(SearchService).GetMethod("ParseMyAnonamouseResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
@@ -307,7 +357,7 @@ namespace Listenarr.Api.Tests
   }
 ]";
             var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse", AdditionalSettings = "{ \"mam_id\": \"test_mam\" }" };
-            var service = new SearchService(null, null, NullLogger<SearchService>.Instance, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+            var service = CreateSearchService();
 
             var method = typeof(SearchService).GetMethod("ParseMyAnonamouseResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             var results = (List<IndexerSearchResult>)method.Invoke(service, new object[] { json, indexer });
@@ -331,7 +381,7 @@ namespace Listenarr.Api.Tests
             // Case A: raw mam_id with + and = characters
             var indexerRaw = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse", AdditionalSettings = "{ \"mam_id\": \"abc+def==\" }" };
             var method = typeof(SearchService).GetMethod("ParseMyAnonamouseResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var service = new SearchService(null, null, NullLogger<SearchService>.Instance, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+            var service = CreateSearchService();
             var resRaw = (List<IndexerSearchResult>)method.Invoke(service, new object[] { json, indexerRaw });
             Assert.Single(resRaw);
             Assert.Equal("https://www.myanonamouse.net/tor/download.php/abc123?mam_id=abc%2Bdef%3D%3D", resRaw[0].TorrentUrl);
@@ -360,7 +410,7 @@ namespace Listenarr.Api.Tests
 ]";
 
             var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse" };
-            var service = new SearchService(null, null, NullLogger<SearchService>.Instance, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+            var service = CreateSearchService();
 
             // Use reflection to call the private parser
             var method = typeof(SearchService).GetMethod("ParseMyAnonamouseResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
@@ -387,7 +437,7 @@ namespace Listenarr.Api.Tests
 ]"; 
 
             var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse" };
-            var service = new SearchService(null, null, NullLogger<SearchService>.Instance, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+            var service = CreateSearchService();
 
             var method = typeof(SearchService).GetMethod("ParseMyAnonamouseResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             var results = (List<IndexerSearchResult>)method.Invoke(service, new object[] { json, indexer });
@@ -411,7 +461,7 @@ namespace Listenarr.Api.Tests
 ]"; 
 
             var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse" };
-            var service = new SearchService(null, null, NullLogger<SearchService>.Instance, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+            var service = CreateSearchService();
 
             var method = typeof(SearchService).GetMethod("ParseMyAnonamouseResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             var results = (List<IndexerSearchResult>)method.Invoke(service, new object[] { json, indexer });
@@ -432,7 +482,7 @@ namespace Listenarr.Api.Tests
 ]";
 
             var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse" };
-            var service = new SearchService(null, null, NullLogger<SearchService>.Instance, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+            var service = CreateSearchService();
 
             var method = typeof(SearchService).GetMethod("ParseMyAnonamouseResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             var results = (List<IndexerSearchResult>)method.Invoke(service, new object[] { json, indexer });
@@ -457,7 +507,7 @@ namespace Listenarr.Api.Tests
 ]";
 
             var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse" };
-            var service = new SearchService(null, null, NullLogger<SearchService>.Instance, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+            var service = CreateSearchService();
 
             var method = typeof(SearchService).GetMethod("ParseMyAnonamouseResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             var results = (List<IndexerSearchResult>)method.Invoke(service, new object[] { json, indexer });
@@ -485,7 +535,7 @@ namespace Listenarr.Api.Tests
 ]";
 
             var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse" };
-            var service = new SearchService(null, null, NullLogger<SearchService>.Instance, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+            var service = CreateSearchService();
 
             // Use reflection to call the private parser
             var method = typeof(SearchService).GetMethod("ParseMyAnonamouseResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
@@ -513,7 +563,7 @@ namespace Listenarr.Api.Tests
 ]";
 
             var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse" };
-            var service = new SearchService(null, null, NullLogger<SearchService>.Instance, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+            var service = CreateSearchService();
 
             var method = typeof(SearchService).GetMethod("ParseMyAnonamouseResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             var results = (List<IndexerSearchResult>)method.Invoke(service, new object[] { json, indexer });
@@ -559,7 +609,7 @@ namespace Listenarr.Api.Tests
             });
 
             using var httpClient = new HttpClient(handler) { BaseAddress = new System.Uri("https://www.myanonamouse.net") };
-            var service = new SearchService(httpClient, null, NullLogger<SearchService>.Instance, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+            var service = CreateSearchService(httpClient);
 
             var method = typeof(SearchService).GetMethod("SearchMyAnonamouseAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             var task = (Task<List<IndexerSearchResult>>)method.Invoke(service, new object[] { indexer, "Enrich Test", null, new Listenarr.Api.Models.SearchRequest { IncludeEnrichment = true, MyAnonamouse = new Listenarr.Api.Models.MyAnonamouseOptions { EnrichResults = true, EnrichTopResults = 1 } } });

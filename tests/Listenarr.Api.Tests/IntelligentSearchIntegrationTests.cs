@@ -13,11 +13,11 @@ using Xunit;
 
 namespace Listenarr.Api.Tests
 {
-    public class IntelligentSearchIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
+    public class IntelligentSearchIntegrationTests : IClassFixture<ListenarrWebApplicationFactory>
     {
-        private readonly WebApplicationFactory<Program> _factory;
+        private readonly ListenarrWebApplicationFactory _factory;
 
-        public IntelligentSearchIntegrationTests(WebApplicationFactory<Program> factory)
+        public IntelligentSearchIntegrationTests(ListenarrWebApplicationFactory factory)
         {
             _factory = factory;
         }
@@ -115,99 +115,7 @@ namespace Listenarr.Api.Tests
             Assert.Contains(returned!, r => string.Equals(r.Asin, "0563528885", StringComparison.OrdinalIgnoreCase));
         }
 
-        [Fact]
-        public async Task IntelligentSearch_UsesAudibleScraper_WhenAudimetaMissing()
-        {
-            var mockSearch = new Moq.Mock<ISearchService>();
-            mockSearch.Setup(s => s.IntelligentSearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<double>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<System.Threading.CancellationToken>()))
-                .Returns(Task.FromResult(new System.Collections.Generic.List<MetadataSearchResult> { new MetadataSearchResult { Asin = "B0TESTASIN", Title = "Clean Title", MetadataSource = "Audible" } } as System.Collections.Generic.List<MetadataSearchResult>));
-
-            var logger = Mock.Of<Microsoft.Extensions.Logging.ILogger<SearchController>>();
-            var audimeta = new TestEmptyAudimetaService();
-            var metadata = Mock.Of<IAudiobookMetadataService>();
-            var controller = new Listenarr.Api.Controllers.SearchController(mockSearch.Object, logger, audimeta, metadata);
-            controller.ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
-
-            var actionResult = await controller.IntelligentSearch("test-query");
-            List<MetadataSearchResult>? returned = null;
-            if (actionResult.Value != null) returned = actionResult.Value;
-            else if (actionResult.Result is Microsoft.AspNetCore.Mvc.OkObjectResult ok) returned = ok.Value as List<MetadataSearchResult>;
-
-            Assert.NotNull(returned);
-            Assert.NotEmpty(returned!);
-            var audibleMatch = returned!.Find(r => string.Equals(r.Asin, "B0TESTASIN", System.StringComparison.OrdinalIgnoreCase));
-            Assert.NotNull(audibleMatch);
-            Assert.Equal("Clean Title", audibleMatch!.Title);
-            Assert.Equal("Audible", audibleMatch.MetadataSource);
-        }
-    }
-
-    internal class TestAmazonAudioCdSearchService : IAmazonSearchService
-    {
-        public Task<List<AmazonSearchResult>> SearchAudiobooksAsync(string query, string? author = null, System.Threading.CancellationToken ct = default)
-        {
-            var list = new List<AmazonSearchResult>
-            {
-                new AmazonSearchResult
-                {
-                    Asin = "0563528885",
-                    Title = "The Lord of the Rings: The Trilogy: The Complete Collection of the Classic BBC Radio Production (BBC Radio Collection)      Audio CD - Unabridged, October 7, 2002",
-                    ImageUrl = "http://example.com/audio_cd.jpg",
-                    Author = "BBC"
-                }
-            };
-            return Task.FromResult(list);
-        }
-
-        public Task<AmazonSearchResult?> ScrapeProductPageAsync(string asin, System.Threading.CancellationToken ct = default)
-        {
-            return Task.FromResult<AmazonSearchResult?>(null);
-        }
-    }
-
-    internal class TestAmazonPrintOnlySearchService : IAmazonSearchService
-    {
-        public Task<List<AmazonSearchResult>> SearchAudiobooksAsync(string query, string? author = null, System.Threading.CancellationToken ct = default)
-        {
-            var list = new List<AmazonSearchResult>
-            {
-                new AmazonSearchResult
-                {
-                    Asin = "BPRINT1",
-                    Title = "The Fellowship of the Ring (The Lord of the Rings, Part 1)      Mass Market Paperback – August 12, 1986",
-                    ImageUrl = "http://example.com/p1.jpg",
-                    Author = "J. R. R. Tolkien"
-                },
-                new AmazonSearchResult
-                {
-                    Asin = "BPRINT2",
-                    Title = "The Lord of the Rings 3 Books Box Set By J. R. R. Tolkien      Paperback – January 1, 2021",
-                    ImageUrl = "http://example.com/p2.jpg",
-                    Author = "J. R. R. Tolkien"
-                }
-            };
-            return Task.FromResult(list);
-        }
-
-        public Task<AmazonSearchResult?> ScrapeProductPageAsync(string asin, System.Threading.CancellationToken ct = default)
-        {
-            return Task.FromResult<AmazonSearchResult?>(null);
-        }
-    }
-
-    internal class TestEmptyAudibleSearchService : IAudibleSearchService
-    {
-        public Task<List<AudibleSearchResult>> SearchAudiobooksAsync(string query, System.Threading.CancellationToken ct = default)
-        {
-            return Task.FromResult(new List<AudibleSearchResult>());
-        }
-    }
-
-    internal class TestEmptyAudibleMetadataService : IAudibleMetadataService
-    {
-        public Task<AudibleBookMetadata?> ScrapeAudibleMetadataAsync(string asin, System.Threading.CancellationToken ct = default) => Task.FromResult<AudibleBookMetadata?>(null);
-        public Task<AudibleBookMetadata?> ScrapeAmazonMetadataAsync(string asin) => Task.FromResult<AudibleBookMetadata?>(null);
-        public Task<List<AudibleBookMetadata>> PrefetchAsync(List<string> asins) => Task.FromResult(new List<AudibleBookMetadata>());
+        
     }
 
     internal class TestEmptyOpenLibraryService : IOpenLibraryService
@@ -220,66 +128,6 @@ namespace Listenarr.Api.Tests
         public Task<OpenLibrarySearchResponse> SearchBooksAsync(string title, string? author = null, int limit = 10)
         {
             return Task.FromResult(new OpenLibrarySearchResponse { Docs = new List<OpenLibraryBook>() });
-        }
-    }
-
-    // Simple test implementations to avoid network calls in integration tests
-    internal class TestAudibleSearchService : IAudibleSearchService
-    {
-        public Task<List<AudibleSearchResult>> SearchAudiobooksAsync(string query, System.Threading.CancellationToken ct = default)
-        {
-            var list = new List<AudibleSearchResult>
-            {
-                new AudibleSearchResult
-                {
-                    Asin = "B0TESTASIN",
-                    Title = "Noise Title - Audible",
-                    ProductUrl = "https://www.audible.com/pd/test",
-                    ImageUrl = "http://example.com/test.jpg",
-                    Author = "Test Author",
-                }
-            };
-            return Task.FromResult(list);
-        }
-    }
-
-    internal class TestAudibleMetadataService : IAudibleMetadataService
-    {
-        public Task<AudibleBookMetadata?> ScrapeAudibleMetadataAsync(string asin, System.Threading.CancellationToken ct = default)
-        {
-            var m = new AudibleBookMetadata
-            {
-                Asin = asin,
-                Title = "Clean Title",
-                Authors = new List<string> { "Author Name" },
-                ImageUrl = "http://example.com/test.jpg",
-                PublishYear = "2024"
-            };
-            return Task.FromResult<AudibleBookMetadata?>(m);
-        }
-
-        public Task<AudibleBookMetadata?> ScrapeAmazonMetadataAsync(string asin)
-        {
-            var m = new AudibleBookMetadata
-            {
-                Asin = asin,
-                Title = "Clean Title from Amazon",
-                Authors = new List<string> { "Author Name" },
-                ImageUrl = "http://example.com/test.jpg",
-                PublishYear = "2024",
-                Source = "Amazon"
-            };
-            return Task.FromResult<AudibleBookMetadata?>(m);
-        }
-
-        public Task<List<AudibleBookMetadata>> PrefetchAsync(List<string> asins)
-        {
-            var result = new List<AudibleBookMetadata>();
-            foreach (var a in asins)
-            {
-                result.Add(new AudibleBookMetadata { Asin = a, Title = "Clean Title", Authors = new List<string> { "Author Name" } });
-            }
-            return Task.FromResult(result);
         }
     }
 
@@ -313,50 +161,6 @@ namespace Listenarr.Api.Tests
         public Task<Listenarr.Api.Services.AudnexusChapterResponse?> GetChaptersAsync(string asin, string region = "us", bool update = false)
         {
             return Task.FromResult<Listenarr.Api.Services.AudnexusChapterResponse?>(null);
-        }
-    }
-
-    internal class TestAmazonSearchService : IAmazonSearchService
-    {
-        public Task<List<AmazonSearchResult>> SearchAudiobooksAsync(string query, string? author = null, System.Threading.CancellationToken ct = default)
-        {
-            // Return empty list to avoid interference with Audible-only test
-            return Task.FromResult(new List<AmazonSearchResult>());
-        }
-        public Task<AmazonSearchResult?> ScrapeProductPageAsync(string asin, System.Threading.CancellationToken ct = default)
-        {
-            // Tests don't need product page scraping; return null
-            return Task.FromResult<AmazonSearchResult?>(null);
-        }
-    }
-
-    internal class TestAmazonTitlePrefixSearchService : IAmazonSearchService
-    {
-        public Task<List<AmazonSearchResult>> SearchAudiobooksAsync(string query, string? author = null, System.Threading.CancellationToken ct = default)
-        {
-            var list = new List<AmazonSearchResult>
-            {
-                new AmazonSearchResult
-                {
-                    Asin = "B000000001",
-                    Title = "Ingram: A Novel",
-                    ImageUrl = "http://example.com/a1.jpg",
-                    Author = "John Doe"
-                },
-                new AmazonSearchResult
-                {
-                    Asin = "B000000002",
-                    Title = "Different Book",
-                    ImageUrl = "http://example.com/a2.jpg",
-                    Author = "Ingram"
-                }
-            };
-            return Task.FromResult(list);
-        }
-
-        public Task<AmazonSearchResult?> ScrapeProductPageAsync(string asin, System.Threading.CancellationToken ct = default)
-        {
-            return Task.FromResult<AmazonSearchResult?>(null);
         }
     }
 

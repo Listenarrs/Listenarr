@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2025 Robbie Davis
  * 
@@ -95,8 +95,7 @@ namespace Listenarr.Api.Services
                     // Broadcast to all connected clients
                     await hubContext.Clients.All.SendAsync("ReceiveLog", logEntry);
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     // If the host is shutting down the service provider may be disposed.
                     // Swallow disposal-related exceptions (including when wrapped in AggregateException
                     // or InnerExceptions) to avoid noisy CI logs during shutdown.
@@ -137,4 +136,5 @@ namespace Listenarr.Api.Services
         }
     }
 }
+
 

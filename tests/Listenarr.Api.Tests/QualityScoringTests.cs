@@ -54,8 +54,11 @@ namespace Listenarr.Api.Tests
             using var db = new ListenArrDbContext(options);
             var svc = new QualityProfileService(db, NullLogger<QualityProfileService>.Instance);
 
-            // Use default profile to match production behavior
-            var profile = await svc.GetDefaultAsync();
+            // Create a default profile since in-memory DB starts empty
+            var profile = new QualityProfile { Name = "Default", IsDefault = true };
+            db.QualityProfiles.Add(profile);
+            await db.SaveChangesAsync();
+            profile = await svc.GetDefaultAsync();
 
             var result = new SearchResult
             {

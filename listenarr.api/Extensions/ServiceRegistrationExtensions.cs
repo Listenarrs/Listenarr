@@ -135,30 +135,7 @@ namespace Listenarr.Api.Extensions
             services.AddHttpClient("us")
                 .ConfigurePrimaryHttpMessageHandler(() => CreateExternalHandler(config));
 
-            // Typed clients used by scraping/search services. Add consistent handlers + policies.
-            services.AddHttpClient<Listenarr.Api.Services.IAmazonSearchService, Listenarr.Api.Services.AmazonSearchService>()
-                .ConfigurePrimaryHttpMessageHandler(() => CreateExternalHandler(config))
-                .AddPolicyHandler(HttpPolicyExtensions
-                    .HandleTransientHttpError()
-                    .OrResult((HttpResponseMessage r) => r.StatusCode == HttpStatusCode.Forbidden
-                                                         || r.StatusCode == (HttpStatusCode)429
-                                                         || r.StatusCode == HttpStatusCode.ServiceUnavailable)
-                    .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))))
-                .AddPolicyHandler(HttpPolicyExtensions
-                    .HandleTransientHttpError()
-                    .OrResult((HttpResponseMessage r) => r.StatusCode == HttpStatusCode.Forbidden
-                                                         || r.StatusCode == (HttpStatusCode)429
-                                                         || r.StatusCode == HttpStatusCode.ServiceUnavailable)
-                    .CircuitBreakerAsync(6, TimeSpan.FromMinutes(2)));
-
-            services.AddHttpClient<Listenarr.Api.Services.IAudibleSearchService, Listenarr.Api.Services.AudibleSearchService>()
-                .ConfigurePrimaryHttpMessageHandler(() => CreateExternalHandler(config))
-                .AddPolicyHandler(retryPolicy);
-
-            // Misc scraping/metadata clients (Audible metadata, Audimeta, Audnexus)
-            services.AddHttpClient<Listenarr.Api.Services.IAudibleMetadataService, Listenarr.Api.Services.AudibleMetadataService>()
-                .ConfigurePrimaryHttpMessageHandler(() => CreateExternalHandler(config))
-                .AddPolicyHandler(retryPolicy);
+            // Typed clients used by metadata services. Add consistent handlers + policies.
 
             services.AddHttpClient<Listenarr.Api.Services.AudimetaService>()
                 .ConfigurePrimaryHttpMessageHandler(() => CreateExternalHandler(config))
@@ -180,30 +157,7 @@ namespace Listenarr.Api.Extensions
                 UseProxy = false
             };
 
-            try
-            {
-                var section = config.GetSection("ExternalRequests");
-                var useProxy = section.GetValue<bool>("UseUsProxy");
-                if (useProxy)
-                {
-                    var host = section.GetValue<string>("UsProxyHost");
-                    var port = section.GetValue<int>("UsProxyPort");
-                    if (!string.IsNullOrWhiteSpace(host) && port > 0)
-                    {
-                        var proxy = new WebProxy(host, port);
-                        var user = section.GetValue<string>("UsProxyUsername");
-                        var pass = section.GetValue<string>("UsProxyPassword");
-                        if (!string.IsNullOrWhiteSpace(user))
-                            proxy.Credentials = new NetworkCredential(user, pass ?? string.Empty);
-                        handler.Proxy = proxy;
-                        handler.UseProxy = true;
-                    }
-                }
-            }
-            catch
-            {
-                // Swallow here; caller services can detect proxy misconfigurations via failing requests.
-            }
+            // Proxy support removed; always use direct handler without custom proxy
 
             return handler;
         }
@@ -214,24 +168,33 @@ namespace Listenarr.Api.Extensions
         /// </summary>
         public static IServiceCollection AddListenarrPersistence(this IServiceCollection services, IConfiguration configuration, string sqliteDbPath)
         {
-            // Use DbContextFactory for hosted services; also register a scoped DbContext for controllers.
-            services.AddDbContextFactory<ListenArrDbContext>(options =>
+            // Build DbContextOptions once and register as a singleton so factories
+            // and background services can create contexts without forcing EF to
+            // resolve scoped option-configurators from the root provider.
+            var dbOptionsBuilder = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<ListenArrDbContext>();
+            dbOptionsBuilder.UseSqlite($"Data Source={sqliteDbPath}", sqliteOptions =>
             {
-                options.UseSqlite($"Data Source={sqliteDbPath}", sqliteOptions =>
-                {
-                    // Keep migrations assembly pointing to the Infrastructure project so
-                    // migrations authored there are discovered and applied at runtime.
-                    sqliteOptions.MigrationsAssembly(typeof(Listenarr.Infrastructure.Repositories.QualityProfileRepository).Assembly.GetName().Name);
-                });
+                sqliteOptions.MigrationsAssembly(typeof(Listenarr.Infrastructure.Repositories.QualityProfileRepository).Assembly.GetName().Name);
             });
 
+            services.AddSingleton<Microsoft.EntityFrameworkCore.DbContextOptions<ListenArrDbContext>>(sp => dbOptionsBuilder.Options);
+
+            // Provide a simple IDbContextFactory implementation that uses the
+            // singleton DbContextOptions to construct contexts on demand.
+            services.AddSingleton<Microsoft.EntityFrameworkCore.IDbContextFactory<ListenArrDbContext>>(sp =>
+                new SimpleDbContextFactory(sp.GetRequiredService<Microsoft.EntityFrameworkCore.DbContextOptions<ListenArrDbContext>>()));
+
+            // Register the scoped DbContext for controllers but register the
+            // options/configuration with a Singleton lifetime so EF's
+            // CreateDbContextOptions can resolve any IDbContextOptionsConfiguration
+            // instances from the application (root) provider during request handling.
             services.AddDbContext<ListenArrDbContext>(options =>
             {
                 options.UseSqlite($"Data Source={sqliteDbPath}", sqliteOptions =>
                 {
                     sqliteOptions.MigrationsAssembly(typeof(Listenarr.Infrastructure.Repositories.QualityProfileRepository).Assembly.GetName().Name);
                 });
-            });
+            }, ServiceLifetime.Scoped, ServiceLifetime.Singleton);
 
             // Register infrastructure repository implementations
             services.AddScoped<Listenarr.Application.Repositories.IQualityProfileRepository, Listenarr.Infrastructure.Repositories.QualityProfileRepository>();
@@ -265,7 +228,7 @@ namespace Listenarr.Api.Extensions
             // Register the concrete factory as scoped so it can safely resolve scoped adapters via DI.
             services.AddScoped<IDownloadClientAdapterFactory, Listenarr.Api.Services.Adapters.DownloadClientAdapterFactory>();
 
-            // Register import item resolution service (Sonarr's ProvideImportItemService pattern)
+            // Register import item resolution service (ProvideImportItemService pattern)
             services.AddScoped<IImportItemResolutionService, ImportItemResolutionService>();
 
             // Register notification payload builder adapter for DI so callers can inject/mokc payload construction.
@@ -297,12 +260,37 @@ namespace Listenarr.Api.Extensions
                 {
                     return System.Text.Json.JsonSerializer.Deserialize<T>(prop.GetRawText()) ?? defaultValue;
                 }
-                catch
-                {
+                catch (Exception caughtEx_1) when (caughtEx_1 is not OperationCanceledException && caughtEx_1 is not OutOfMemoryException && caughtEx_1 is not StackOverflowException) {
                     return defaultValue;
                 }
             }
             return defaultValue;
+        }
+    }
+
+    /// <summary>
+    /// Lightweight factory that creates ListenArrDbContext instances from a
+    /// pre-built DbContextOptions instance. This avoids EF registering
+    /// IDbContextOptionsConfiguration services with scoped lifetimes that
+    /// would otherwise be resolved from the root provider.
+    /// </summary>
+    internal class SimpleDbContextFactory : Microsoft.EntityFrameworkCore.IDbContextFactory<ListenArrDbContext>
+    {
+        private readonly Microsoft.EntityFrameworkCore.DbContextOptions<ListenArrDbContext> _options;
+
+        public SimpleDbContextFactory(Microsoft.EntityFrameworkCore.DbContextOptions<ListenArrDbContext> options)
+        {
+            _options = options ?? throw new ArgumentNullException(nameof(options));
+        }
+
+        public ListenArrDbContext CreateDbContext()
+        {
+            return new ListenArrDbContext(_options);
+        }
+
+        public System.Threading.Tasks.Task<ListenArrDbContext> CreateDbContextAsync()
+        {
+            return System.Threading.Tasks.Task.FromResult(CreateDbContext());
         }
     }
 }

@@ -1,4 +1,4 @@
-﻿using Listenarr.Domain.Models;
+using Listenarr.Domain.Models;
 using Listenarr.Infrastructure.Models;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Cryptography;
@@ -60,8 +60,7 @@ namespace Listenarr.Api.Services
                 _logger.LogInformation("User created successfully: {Username} (IsAdmin: {IsAdmin})", username, isAdmin);
                 return user;
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error creating user: {Username}", username);
                 throw;
             }
@@ -93,8 +92,7 @@ namespace Listenarr.Api.Services
 
                 _logger.LogInformation("Password updated successfully for user: {Username}", username);
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error updating password for user: {Username}", username);
                 throw;
             }
@@ -136,11 +134,11 @@ namespace Listenarr.Api.Services
                 var computed = pbkdf2.GetBytes(hash.Length);
                 return CryptographicOperations.FixedTimeEquals(computed, hash);
             }
-            catch
-            {
+            catch (Exception caughtEx_1) when (caughtEx_1 is not OperationCanceledException && caughtEx_1 is not OutOfMemoryException && caughtEx_1 is not StackOverflowException) {
                 return false;
             }
         }
     }
 }
+
 

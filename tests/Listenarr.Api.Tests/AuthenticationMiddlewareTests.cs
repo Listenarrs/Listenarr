@@ -1,7 +1,5 @@
-﻿using System.Net;
-using System.Net.Http.Headers;
-using System.Security.Claims;
-using System.Text.Json;
+using System.Net;
+using System.Text;
 using System.Threading.Tasks;
 using Listenarr.Domain.Models;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -10,11 +8,11 @@ using Xunit;
 
 namespace Listenarr.Api.Tests
 {
-    public class AuthenticationMiddlewareTests : IClassFixture<WebApplicationFactory<Program>>
+    public class AuthenticationMiddlewareTests : IClassFixture<ListenarrWebApplicationFactory>
     {
-        private readonly WebApplicationFactory<Program> _factory;
+        private readonly ListenarrWebApplicationFactory _factory;
 
-        public AuthenticationMiddlewareTests(WebApplicationFactory<Program> factory)
+        public AuthenticationMiddlewareTests(ListenarrWebApplicationFactory factory)
         {
             _factory = factory;
         }
@@ -22,11 +20,10 @@ namespace Listenarr.Api.Tests
         [Fact]
         public async Task ProtectedEndpoint_Returns401_WhenUnauthenticated_AndAuthRequired()
         {
-            var client = _factory.WithWebHostBuilder(builder =>
+            using var client = _factory.WithWebHostBuilder(builder =>
             {
                 builder.ConfigureServices(services =>
                 {
-                    // Replace IStartupConfigService to force auth required for the test
                     services.AddSingleton<Listenarr.Api.Services.IStartupConfigService>(sp =>
                     {
                         return new TestStartupConfigService(new StartupConfig { AuthenticationRequired = "Enabled" });
@@ -39,7 +36,7 @@ namespace Listenarr.Api.Tests
         }
 
         [Fact]
-        public async Task AllowAnonymousEndpoint_IsAccessible_WhenAuthRequired()
+        public async Task StartupConfig_Returns401_WhenUnauthenticated_AndAuthRequired()
         {
             var client = _factory.WithWebHostBuilder(builder =>
             {
@@ -52,13 +49,49 @@ namespace Listenarr.Api.Tests
                 });
             }).CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
 
-            // /api/startupconfig is intentionally allowed-anonymous by middleware allow-list
-            var resp = await client.GetAsync("/api/startupconfig");
-            Assert.True(resp.IsSuccessStatusCode, await resp.Content.ReadAsStringAsync());
+            var resp = await client.GetAsync("/api/configuration/startupconfig");
+            Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
+        }
+
+        [Fact]
+        public async Task GenerateInitialApiKey_Returns401_WhenUnauthenticated_AndAuthRequired()
+        {
+            var client = _factory.WithWebHostBuilder(builder =>
+            {
+                builder.ConfigureServices(services =>
+                {
+                    services.AddSingleton<Listenarr.Api.Services.IStartupConfigService>(sp =>
+                    {
+                        return new TestStartupConfigService(new StartupConfig { AuthenticationRequired = "Enabled" });
+                    });
+                });
+            }).CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+
+            using var content = new StringContent("{}", Encoding.UTF8, "application/json");
+            var resp = await client.PostAsync("/api/configuration/apikey/generate-initial", content);
+            Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
+        }
+
+        [Fact]
+        public async Task ProwlarrPostIndexers_Returns401_WhenUnauthenticated_AndAuthRequired()
+        {
+            using var client = _factory.WithWebHostBuilder(builder =>
+            {
+                builder.ConfigureServices(services =>
+                {
+                    services.AddSingleton<Listenarr.Api.Services.IStartupConfigService>(sp =>
+                    {
+                        return new TestStartupConfigService(new StartupConfig { AuthenticationRequired = "Enabled" });
+                    });
+                });
+            }).CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+
+            using var content = new StringContent("[]", Encoding.UTF8, "application/json");
+            var resp = await client.PostAsync("/api/v1/indexers", content);
+            Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
         }
     }
 
-    // Simple test implementation to supply config
     internal class TestStartupConfigService : Listenarr.Api.Services.IStartupConfigService
     {
         private readonly StartupConfig _cfg;
@@ -68,4 +101,3 @@ namespace Listenarr.Api.Tests
         public Task SaveAsync(StartupConfig config) => Task.CompletedTask;
     }
 }
-

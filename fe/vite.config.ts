@@ -33,6 +33,8 @@ export default defineConfig(({ mode }) => ({
     },
   },
   server: {
+    // Use a fixed port so local development URLs remain stable
+    port: 5173,
     proxy: {
       '/api': {
         target: 'http://localhost:4545',

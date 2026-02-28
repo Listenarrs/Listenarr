@@ -11,36 +11,32 @@ export const useLibraryStore = defineStore('library', () => {
   const error = ref<string | null>(null)
   const selectedIds = ref<Set<number>>(new Set())
 
+  function normalizeLibraryImageUrl(book: Audiobook): Audiobook {
+    const current = (book.imageUrl || '').trim()
+    const isMissing = current.length === 0
+    const isPlaceholder =
+      current === '/placeholder.svg' ||
+      current === 'placeholder.svg' ||
+      current.endsWith('/placeholder.svg') ||
+      current.includes('/placeholder.svg?')
+
+    if ((isMissing || isPlaceholder) && book.asin) {
+      return {
+        ...book,
+        imageUrl: `/api/images/${encodeURIComponent(book.asin)}`,
+      }
+    }
+
+    return book
+  }
+
   async function fetchLibrary() {
     loading.value = true
     error.value = null
     try {
       const serverList = await apiService.getLibrary()
-      // Defensive merge: prefer server-provided fields, but avoid wiping local files when server returns empty array
-      const merged = serverList.map((serverItem) => {
-        const local = audiobooks.value.find((b) => b.id === serverItem.id)
-        if (!local) return serverItem
-
-        // If server provided files array is empty but local has files, keep local files
-        const files =
-          serverItem.files && serverItem.files.length > 0
-            ? serverItem.files
-            : local.files && local.files.length > 0
-              ? local.files
-              : serverItem.files
-
-        // Preserve a meaningful basePath: prefer server value when present, otherwise keep local
-        const basePath =
-          serverItem.basePath && serverItem.basePath.length > 0
-            ? serverItem.basePath
-            : local.basePath && local.basePath.length > 0
-              ? local.basePath
-              : serverItem.basePath
-
-        return { ...local, ...serverItem, files, basePath }
-      })
-
-      audiobooks.value = merged
+      // Always trust server data - it includes accurate wanted flags based on File.Exists() checks
+      audiobooks.value = serverList.map(normalizeLibraryImageUrl)
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'Failed to fetch library'
       errorTracking.captureException(err as Error, {
@@ -75,12 +71,21 @@ export const useLibraryStore = defineStore('library', () => {
     if (ids.length === 0) return { success: false, deletedCount: 0 }
 
     try {
-      const result = await apiService.bulkRemoveFromLibrary(ids)
+      // Backend no longer exposes a single bulk-remove endpoint; perform safe per-id removes
+      let deleted = 0
+      for (const id of ids) {
+        try {
+          await apiService.removeFromLibrary(id)
+          deleted++
+        } catch (e) {
+          // Continue attempting remaining deletions even if one fails
+        }
+      }
       // Remove from local state
       audiobooks.value = audiobooks.value.filter((book) => !ids.includes(book.id))
       // Clear selection
       clearSelection()
-      return { success: true, deletedCount: result.deletedCount }
+      return { success: deleted > 0, deletedCount: deleted }
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'Failed to bulk remove audiobooks'
       errorTracking.captureException(err as Error, {
@@ -178,7 +183,7 @@ export const useLibraryStore = defineStore('library', () => {
             ) {
               merged.basePath = prev.basePath
             }
-            audiobooks.value[index] = merged
+            audiobooks.value[index] = normalizeLibraryImageUrl(merged)
           }
         } catch (e) {
           // Defensive: don't allow signal handler errors to break the app

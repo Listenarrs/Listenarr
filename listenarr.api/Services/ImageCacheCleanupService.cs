@@ -38,8 +38,7 @@ namespace Listenarr.Api.Services
                         _logger.LogInformation("Daily image cache cleanup completed successfully");
                     }
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogError(ex, "Error occurred during image cache cleanup");
                 }
 
@@ -85,3 +84,4 @@ namespace Listenarr.Api.Services
         }
     }
 }
+

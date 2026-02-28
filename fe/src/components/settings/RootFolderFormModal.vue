@@ -1,100 +1,63 @@
 <template>
-  <div class="modal-overlay">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h3>{{ root?.id ? 'Edit Root Folder' : 'Add Root Folder' }}</h3>
-        <button @click="close" class="modal-close">
-          <svg
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-          >
-            <line x1="18" y1="6" x2="6" y2="18"></line>
-            <line x1="6" y1="6" x2="18" y2="18"></line>
-          </svg>
-        </button>
-      </div>
+  <Modal :visible="true" size="md" @close="close">
+    <template #header>
+      <ModalHeader :title="root?.id ? 'Edit Root Folder' : 'Add Root Folder'" :icon="PhFolder" @close="close" />
+    </template>
 
-      <div class="modal-body">
-        <div class="form-row">
-          <label>Name</label>
-          <input v-model="form.name" placeholder="Enter a name for this root folder" />
-        </div>
+    <template #default>
+      <FormSection title="Basic Configuration" :icon="PhFolder">
+        <FormRow label="Name">
+          <input v-model="form.name" class="form-input" placeholder="Enter a name for this root folder" />
+        </FormRow>
 
-        <div class="form-row">
-          <label>Path</label>
-          <FolderBrowser v-model="form.path" placeholder="Select or enter a path..." />
-        </div>
-
-        <div class="form-row">
-          <label class="checkbox-label">
-            <input type="checkbox" v-model="form.isDefault" />
-            <span>Set as default root folder</span>
-          </label>
-        </div>
-      </div>
-
-      <div class="modal-actions">
-        <button class="btn" @click="close">Cancel</button>
-        <button class="btn primary" @click="save" :disabled="!form.name || !form.path">Save</button>
-      </div>
-
-      <!-- Rename confirmation modal -->
-      <div v-if="showConfirm" class="modal-overlay confirm-modal" @click.self="showConfirm = false">
-        <div class="modal-content">
-          <div class="modal-header">
-            <h3>Move audiobook files?</h3>
-            <button @click="showConfirm = false" class="modal-close">
-              <svg
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <line x1="18" y1="6" x2="6" y2="18"></line>
-                <line x1="6" y1="6" x2="18" y2="18"></line>
-              </svg>
+        <FormRow label="Path" labelFor="root-path">
+          <div class="path-input-row">
+            <input id="root-path" v-model="form.path" class="form-input" placeholder="Select or enter a path..." />
+            <button
+              type="button"
+              class="icon-btn btn-secondary btn-inline-browse"
+              @click="openBrowser"
+              title="Browse for folder"
+              aria-label="Browse for folder"
+            >
+              <PhFolder :size="16" />
             </button>
           </div>
-          <div class="modal-body">
-            <div class="confirm-body">
-              <p>You're changing the root path and may move all files from:</p>
-              <pre>{{ root?.path || '&lt;none&gt;' }}</pre>
-              <p>to:</p>
-              <pre>{{ form.path || '&lt;none&gt;' }}</pre>
-              <div class="checkbox-row">
-                <label>
-                  <input type="checkbox" v-model="modalMoveFiles" />
-                  <strong>Move files</strong> (recommended)
-                </label>
-              </div>
-              <div class="checkbox-row" v-if="modalMoveFiles">
-                <label>
-                  <input type="checkbox" v-model="modalDeleteEmpty" />
-                  Delete original folder if empty
-                </label>
-              </div>
-            </div>
-          </div>
-          <div class="modal-actions">
-            <button class="btn" @click="showConfirm = false">Cancel</button>
-            <button class="btn" @click="confirmChange(false)">Change without moving</button>
-            <button class="btn primary" @click="confirmChange(true)">Move Files</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
+
+          <!-- Folder browser modal (opens in a centered modal) -->
+          <FolderBrowserModal v-model:visible="showBrowser" v-model:modelValue="form.path" :show-input="false" @close="closeBrowser" />
+        </FormRow>
+
+        <CheckboxCard v-model="form.isDefault" title="Set as default root folder" />
+      </FormSection>
+    </template>
+
+    <template #footer>
+      <!-- Use ModalFooter props for consistent button styles and behavior -->
+      <ModalFooter :showCancel="true" :showSave="true" @cancel="close" @save="save" :saveLabel="'Save'" :showTest="false" />
+    </template>
+  </Modal> 
+
+      <MoveAudiobookModal
+        :visible="showConfirm"
+        :pendingRootPath="form.path"
+        v-model:moveFiles="modalMoveFiles"
+        v-model:deleteEmpty="modalDeleteEmpty"
+        @cancel="showConfirm = false"
+        @confirm="(payload) => confirmChange(Boolean(payload?.moveFiles))"
+      />
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import FolderBrowser from '@/components/FolderBrowser.vue'
+import FolderBrowserModal from '@/components/feedback/FolderBrowserModal.vue'
+import { Modal, ModalHeader, ModalFooter } from '@/components/feedback'
+import MoveAudiobookModal from '@/components/feedback/MoveAudiobookModal.vue'
+// Checkbox not used directly; use CheckboxCard for checkbox UI
+import FormSection from './FormSection.vue'
+import FormRow from '@/components/settings/FormRow.vue'
+import CheckboxCard from '@/components/settings/CheckboxCard.vue'
+import { PhFolder } from '@phosphor-icons/vue'
 import { useRootFoldersStore } from '@/stores/rootFolders'
 import { useToast } from '@/services/toastService'
 import type { RootFolder } from '@/types'
@@ -111,6 +74,15 @@ const showConfirm = ref(false)
 const modalMoveFiles = ref(true)
 const modalDeleteEmpty = ref(true)
 
+// Local state for showing the inline folder browser
+const showBrowser = ref(false)
+
+function openBrowser() {
+  showBrowser.value = true
+}
+function closeBrowser() {
+  showBrowser.value = false
+}
 function close() {
   emit('close')
 }
@@ -175,48 +147,10 @@ async function confirmChange(moveFiles: boolean) {
 </script>
 
 <style scoped>
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.85);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  backdrop-filter: blur(4px);
-  padding: 1rem;
-}
-
-.modal-content {
-  background: #2a2a2a;
-  border: 1px solid #444;
-  border-radius: 6px;
-  max-width: 500px;
-  width: 100%;
-  max-height: 90vh;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
-  overflow: hidden;
-}
-
-.modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1.5rem 2rem;
-  border-bottom: 1px solid #444;
-}
-
-.modal-header h3 {
-  margin: 0;
-  color: #fff;
-  font-size: 1.25rem;
-  font-weight: 600;
-}
+/* Modal-specific styling is now provided by shared `modals.css` */
+.path-row .path-input-row { display:flex; gap:0.5rem; align-items:center }
+.path-row input#root-path { flex:1 }
+.folder-browser-overlay { margin-top:0.75rem }
 
 .modal-close {
   background: none;
@@ -286,6 +220,7 @@ async function confirmChange(moveFiles: boolean) {
   cursor: pointer;
   user-select: none;
   padding: 0.5rem 0;
+  text-align: left;
 }
 
 .checkbox-label input[type='checkbox'] {
@@ -305,18 +240,18 @@ async function confirmChange(moveFiles: boolean) {
 }
 
 .checkbox-label input[type='checkbox']:hover {
-  border-color: #007acc;
+  border-color: var(--brand-500);
 }
 
 .checkbox-label input[type='checkbox']:checked {
-  background-color: #007acc;
-  border-color: #007acc;
+  background-color: var(--brand-500);
+  border-color: var(--brand-500);
 }
 
 .checkbox-label input[type='checkbox']:focus {
-  outline: 2px solid rgba(0, 122, 204, 0.3);
+  outline: 2px solid rgba(var(--brand-rgb), 0.3);
   outline-offset: 2px;
-}
+} 
 
 .checkbox-label span {
   line-height: 1.4;
@@ -324,25 +259,52 @@ async function confirmChange(moveFiles: boolean) {
   margin-left: 0.25rem;
 }
 
-.modal-actions {
+/* Ensure `Checkbox` component aligns vertically with text in this modal */
+.form-row > label.input-checkbox {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
   gap: 0.75rem;
-  padding: 1.5rem 2rem;
-  border-top: 1px solid #444;
+  margin-bottom: 0; /* override .form-row label spacing */
+}
+.form-row > label.input-checkbox .checkbox-box {
+  margin-top: 0;
+}
+.form-row > label.input-checkbox .checkbox-label > :first-child {
+  display: inline-flex;
+  height: auto;
+  align-items: center;
+}
+
+/* Make the inline browse button match input height and be compact in this modal */
+.path-row .btn-inline-browse {
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+}
+.path-row .btn-inline-browse svg {
+  width: 18px;
+  height: 18px;
+}
+.path-row .btn-inline-browse:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(var(--brand-rgb), 0.12);
+}
+.path-row .btn-inline-browse { align-self: center; }
+
+/* modal-footer base styles are centralized in src/assets/modals.css; keep modal-specific background and spacing */
+.modal-footer {
+  justify-content: space-between;
+  gap: 0.75rem;
   background: #2a2a2a;
 }
 
-.btn {
-  padding: 0.75rem 1.25rem;
-  border-radius: 6px;
-  border: none;
-  background: #333;
-  color: #fff;
-  cursor: pointer;
-  font-weight: 500;
-  transition: all 0.2s ease;
-}
+/* Base `.btn` styles are centralized in src/assets/modals.css; avoid duplicating them here. */
 
 .btn:hover:not(:disabled) {
   background: #444;
@@ -354,12 +316,12 @@ async function confirmChange(moveFiles: boolean) {
 }
 
 .btn.primary {
-  background: linear-gradient(135deg, #1e88e5 0%, #1565c0 100%);
+  background: #1e88e5;
   color: white;
 }
 
 .btn.primary:hover:not(:disabled) {
-  background: linear-gradient(135deg, #1976d2 0%, #0d47a1 100%);
+  background: var(--brand-600);
   transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(30, 136, 229, 0.4);
 }
@@ -429,12 +391,12 @@ async function confirmChange(moveFiles: boolean) {
 }
 
 .checkbox-row label input[type='checkbox']:hover {
-  border-color: #007acc;
+  border-color: var(--brand-500);
 }
 
 .checkbox-row label input[type='checkbox']:checked {
-  background-color: #007acc;
-  border-color: #007acc;
+  background-color: var(--brand-500);
+  border-color: var(--brand-500);
 }
 
 .checkbox-row label input[type='checkbox']:checked::after {
@@ -450,7 +412,35 @@ async function confirmChange(moveFiles: boolean) {
 }
 
 .checkbox-row label input[type='checkbox']:focus {
-  outline: 2px solid rgba(0, 122, 204, 0.3);
+  outline: 2px solid rgba(var(--brand-rgb), 0.3);
   outline-offset: 2px;
+}
+
+/* Form input styling to match login and other forms */
+.form-input {
+  padding: 0.75rem;
+  border: 1px solid #444;
+  border-radius: 6px;
+  background-color: #1a1a1a;
+  color: white;
+  font-size: 1rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.form-input:focus {
+  outline: none;
+  border-color: #2196f3;
+  box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.1);
+}
+
+.path-input-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.path-input-row .form-input {
+  flex: 1;
 }
 </style>

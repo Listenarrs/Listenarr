@@ -20,7 +20,7 @@ namespace Listenarr.Api.Services
         Task<List<SearchResult>> SearchAsync(string query, string? category = null, List<string>? apiIds = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false);
 
         /// <summary>
-        /// Performs intelligent search with Amazon and Audible metadata enrichment
+        /// Performs intelligent search with metadata enrichment
         /// </summary>
         /// <param name="query">Search query string</param>
         /// <param name="candidateLimit">Maximum number of ASIN candidates to collect (default 50)</param>
@@ -31,7 +31,7 @@ namespace Listenarr.Api.Services
         /// <param name="region">Region code to prefer when querying metadata providers (default: us)</param>
         /// <param name="language">Optional language code to filter metadata results (e.g. en, de)</param>
         /// <param name="ct">Cancellation token to cancel the intelligent search operation.</param>
-        /// <returns>Search results enriched with metadata from Amazon and Audible</returns>
+        /// <returns>Search results enriched with metadata from configured sources</returns>
         Task<List<MetadataSearchResult>> IntelligentSearchAsync(string query, int candidateLimit = 50, int returnLimit = 50, string containmentMode = "Relaxed", bool requireAuthorAndPublisher = false, double fuzzyThreshold = 0.7, string region = "us", string? language = null, CancellationToken ct = default);
 
         /// <summary>
@@ -67,21 +67,21 @@ namespace Listenarr.Api.Services
         Task<List<IndexerSearchResult>> SearchIndexersAsync(string query, string? category = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false, Listenarr.Api.Models.SearchRequest? request = null);
 
         /// <summary>
-        /// Gets all enabled metadata sources (Amazon, Audible, etc.)
+        /// Gets all enabled metadata sources (Audimeta, Audnexus, OpenLibrary, etc.)
         /// </summary>
         /// <returns>List of enabled metadata source configurations</returns>
         Task<List<ApiConfiguration>> GetEnabledMetadataSourcesAsync();
     }
 
     /// <summary>
-    /// Provides audiobook metadata lookup across configured providers (Audimeta, Audnexus, Audible, etc.).
+    /// Provides audiobook metadata lookup across configured providers (Audimeta, Audnexus, etc.).
     /// </summary>
     public interface IAudiobookMetadataService
     {
         /// <summary>
         /// Gets audiobook metadata from configured providers in priority order.
         /// </summary>
-        /// <param name="asin">Amazon/Audible ASIN.</param>
+        /// <param name="asin">ASIN identifier.</param>
         /// <param name="region">Region code (default: us).</param>
         /// <param name="cache">Whether provider caching should be used.</param>
         /// <returns>Metadata payload (provider-specific shape) or null when unavailable.</returns>
@@ -90,7 +90,7 @@ namespace Listenarr.Api.Services
         /// <summary>
         /// Gets audiobook metadata directly from Audimeta.
         /// </summary>
-        /// <param name="asin">Amazon/Audible ASIN.</param>
+        /// <param name="asin">ASIN identifier.</param>
         /// <param name="region">Region code (default: us).</param>
         /// <param name="cache">Whether provider caching should be used.</param>
         /// <returns>Audimeta metadata or null when unavailable.</returns>
@@ -563,20 +563,6 @@ namespace Listenarr.Api.Services
         /// <param name="limit">Maximum number of results</param>
         /// <returns>Search response with book results</returns>
         Task<OpenLibrarySearchResponse> SearchBooksAsync(string title, string? author = null, int limit = 10);
-    }
-
-    /// <summary>
-    /// Searches Audible for audiobook metadata
-    /// </summary>
-    public interface IAudibleSearchService
-    {
-        /// <summary>
-        /// Searches Audible for audiobooks
-        /// </summary>
-        /// <param name="query">Search query</param>
-        /// <param name="ct">Cancellation token to cancel the Audible search request.</param>
-        /// <returns>List of Audible search results</returns>
-        Task<List<AudibleSearchResult>> SearchAudiobooksAsync(string query, CancellationToken ct = default);
     }
 
     /// <summary>

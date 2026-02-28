@@ -41,8 +41,7 @@ namespace Listenarr.Api.Services
                         _logger.LogInformation("Temp file cleanup completed successfully");
                     }
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogError(ex, "Error occurred during temp file cleanup");
                 }
 

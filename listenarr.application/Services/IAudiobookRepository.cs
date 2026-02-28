@@ -13,6 +13,7 @@ namespace Listenarr.Api.Services
         Task<Audiobook?> GetByAsinAsync(string asin);
         Task<Audiobook?> GetByIsbnAsync(string isbn);
         Task<Audiobook?> GetByIdAsync(int id);
+        Task<string?> GetAuthorAsinByNameAsync(string name);
         Task AddAsync(Audiobook audiobook);
         Task<bool> UpdateAsync(Audiobook audiobook);
         Task<bool> DeleteAsync(Audiobook audiobook);

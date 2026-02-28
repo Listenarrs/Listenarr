@@ -2,7 +2,7 @@ import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { describe, it, expect, vi, afterEach } from 'vitest'
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import ManualSearchModal from '@/components/ManualSearchModal.vue'
+import ManualSearchModal from '@/components/domain/search/ManualSearchModal.vue'
 import * as apiModule from '@/services/api'
 const { apiService } = apiModule
 
@@ -38,15 +38,18 @@ describe('ManualSearchModal - grabs sorting', () => {
     vi.restoreAllMocks()
   })
 
-  const triggerSearchAndWait = async (wrapper, selector: string, timeout = 1000) => {
-    // Manually trigger search then wait for a selector to appear
+  const triggerSearchAndWait = async (wrapper, selector: string, timeout = 3000) => {
+    // Manually trigger search then wait for a selector to appear. Increased
+    // default timeout and ensure a nextTick after starting search so DOM
+    // updates have a moment to apply in jsdom.
     try {
       await (wrapper.vm as unknown as { search?: () => Promise<void> }).search?.()
     } catch {}
+    await nextTick()
     const start = Date.now()
     while (Date.now() - start < timeout) {
       if (wrapper.find(selector).exists()) return
-      await new Promise((r) => setTimeout(r, 10))
+      await new Promise((r) => setTimeout(r, 20))
     }
     throw new Error('timeout waiting for selector')
   }
@@ -110,8 +113,9 @@ describe('ManualSearchModal - grabs sorting', () => {
     // Read grabs values from rows in order
     const rowsAfterDesc = wrapper.findAll('tbody tr')
     const grabsDesc = rowsAfterDesc.map((r) => {
-      const txt = r.find('td.col-grabs .grabs').text()
-      return Number(txt.replace('✚ ', '').trim())
+      const badge = r.find('td.col-grabs .grabs-badge')
+      const txt = badge.exists() ? badge.text() : ''
+      return Number((txt || '').replace(/[^0-9]/g, '').trim())
     })
     expect(grabsDesc).toEqual([100, 50, 10])
 
@@ -122,8 +126,9 @@ describe('ManualSearchModal - grabs sorting', () => {
 
     const rowsAfterAsc = wrapper.findAll('tbody tr')
     const grabsAsc = rowsAfterAsc.map((r) => {
-      const txt = r.find('td.col-grabs .grabs').text()
-      return Number(txt.replace('✚ ', '').trim())
+      const badge = r.find('td.col-grabs .grabs-badge')
+      const txt = badge.exists() ? badge.text() : ''
+      return Number((txt || '').replace(/[^0-9]/g, '').trim())
     })
     expect(grabsAsc).toEqual([10, 50, 100])
   })

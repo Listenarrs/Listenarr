@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2025 Robbie Davis
  * 
@@ -77,8 +77,7 @@ namespace Listenarr.Api.Services
                     // Cancellation requested - exit gracefully
                     break;
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogError(ex, "Error in Queue Monitor Service");
                 }
 
@@ -125,8 +124,7 @@ namespace Listenarr.Api.Services
                     _lastQueueState = currentQueue;
                 }
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Failed to monitor queue");
             }
         }
@@ -187,4 +185,5 @@ namespace Listenarr.Api.Services
         }
     }
 }
+
 

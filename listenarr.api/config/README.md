@@ -71,35 +71,26 @@ Temporary storage for DDL (Direct Download Link) files:
 - Temp and cache directories are automatically managed by background services
 - Log files are rotated daily and older logs may be cleaned up automatically
 
-## ExternalRequests configuration (US domain / optional proxy)
+## ExternalRequests configuration (US domain preference)
 
-The application supports an `ExternalRequests` configuration section that controls retry behavior for external scrapes (Amazon/Audible) and an optional named `us` HttpClient that can be routed through an HTTP proxy.
+The application supports an `ExternalRequests` configuration section that controls retry behavior for external scrapes (Amazon/Audible) and a named `us` HttpClient used for US-domain retries when necessary.
 
 Example settings (see `appsettings.Development.json`):
 
 ```json
 {
     "ExternalRequests": {
-        "PreferUsDomain": true,
-        "UseUsProxy": false,
-        "UsProxyHost": "us-proxy.example.com",
-        "UsProxyPort": 8080,
-        "UsProxyUsername": "",
-        "UsProxyPassword": ""
+        "PreferUsDomain": true
     }
 }
 ```
 
 Notes:
 - `PreferUsDomain`: when true the services will attempt a retry using a `.com` (US) domain if a localized/redirect/noise page is detected.
-- `UseUsProxy`: when true, the named `us` HttpClient is configured to use the proxy host/port and optional credentials (read from `UsProxyUsername`/`UsProxyPassword`).
-- Credentials should be provided securely via environment variables or a secrets store in production. The development sample above leaves them blank to avoid committing secrets.
 
 Auto-created configuration (convenience)
 
-On first startup the application will create a minimal `config/appsettings/appsettings.json` if one does not already exist. This file contains a safe default logging configuration and is intended as a place for administrators to persist settings (logging, proxies, etc.). You can safely edit that file to change settings such as `Serilog:MinimumLevel:Default` or add other configuration sections.
+On first startup the application will create a minimal `config/appsettings/appsettings.json` if one does not already exist. This file contains a safe default logging configuration and is intended as a place for administrators to persist settings (logging, etc.). You can safely edit that file to change settings such as `Serilog:MinimumLevel:Default` or add other configuration sections.
 
 If you prefer to prepare production config ahead of time, copy `config/appsettings/appsettings.Production.json.sample` to `config/appsettings/appsettings.json` and edit values (for example, set `Serilog:MinimumLevel:Default` to `Debug` to enable debug logs).
-
-If you enable proxying, set the values appropriately in `appsettings.Development.json` (for local testing) or in your environment/secret store for production.
 ````

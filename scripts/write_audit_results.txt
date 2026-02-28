@@ -1,0 +1,6 @@
+:: 'Isbn\s*=',
+:: 'Authors\s*=',
+:: 'AuthorAsins\s*=',
+:: 'Narrators\s*=',
+:: 'Genres\s*=',
+:: 'Tags\s*='

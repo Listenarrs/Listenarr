@@ -11,7 +11,7 @@ vi.mock('@/services/api', () => ({
   },
 }))
 
-import AddLibraryModal from '@/components/AddLibraryModal.vue'
+import AddLibraryModal from '@/components/domain/audiobook/AddLibraryModal.vue'
 
 const fakeBook = {
   title: 'Test Title',

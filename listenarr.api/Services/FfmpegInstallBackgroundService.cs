@@ -41,8 +41,7 @@ namespace Listenarr.Api.Services
                     {
                         await _hubContext.Clients.All.SendAsync("FfmpegInstallStatus", new { status = "Installed", path }, cancellationToken: stoppingToken);
                     }
-                    catch (Exception ex)
-                    {
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                         _logger.LogDebug(ex, "Failed to broadcast ffprobe install success message");
                     }
                 }
@@ -53,8 +52,7 @@ namespace Listenarr.Api.Services
                     {
                         await _hubContext.Clients.All.SendAsync("FfmpegInstallStatus", new { status = "NotInstalled" }, cancellationToken: stoppingToken);
                     }
-                    catch (Exception ex)
-                    {
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                         _logger.LogDebug(ex, "Failed to broadcast ffprobe install failure message");
                     }
                 }
@@ -62,16 +60,19 @@ namespace Listenarr.Api.Services
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
                 // Shutdown requested
+                            System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogWarning(ex, "Error while attempting background ffprobe installation");
                 try
                 {
                     await _hubContext.Clients.All.SendAsync("FfmpegInstallStatus", new { status = "Error" });
                 }
-                catch { }
+                catch (Exception caughtEx_1) when (caughtEx_1 is not OperationCanceledException && caughtEx_1 is not OutOfMemoryException && caughtEx_1 is not StackOverflowException) { 
+                    System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                }
             }
         }
     }
 }
+

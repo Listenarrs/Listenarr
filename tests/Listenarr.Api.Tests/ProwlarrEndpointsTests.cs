@@ -8,11 +8,11 @@ using Xunit;
 
 namespace Listenarr.Api.Tests
 {
-    public class ProwlarrEndpointsTests : IClassFixture<WebApplicationFactory<Program>>
+    public class ProwlarrEndpointsTests : IClassFixture<ListenarrWebApplicationFactory>
     {
-        private readonly WebApplicationFactory<Program> _factory;
+        private readonly ListenarrWebApplicationFactory _factory;
 
-        public ProwlarrEndpointsTests(WebApplicationFactory<Program> factory)
+        public ProwlarrEndpointsTests(ListenarrWebApplicationFactory factory)
         {
             _factory = factory;
         }
@@ -76,7 +76,22 @@ namespace Listenarr.Api.Tests
 
             using var stream = await resp.Content.ReadAsStreamAsync();
             var doc = await JsonDocument.ParseAsync(stream);
-            Assert.True(doc.RootElement.TryGetProperty("fields", out var fieldsProp));
+
+            JsonElement schemaObject;
+
+            // Support both object and array shapes: prefer array (one entry per implementation),
+            // otherwise fall back to object with 'fields' and 'implementations'.
+            if (doc.RootElement.ValueKind == JsonValueKind.Array)
+            {
+                Assert.True(doc.RootElement.GetArrayLength() >= 1);
+                schemaObject = doc.RootElement[0];
+            }
+            else
+            {
+                schemaObject = doc.RootElement;
+            }
+
+            Assert.True(schemaObject.TryGetProperty("fields", out var fieldsProp));
             Assert.True(fieldsProp.ValueKind == JsonValueKind.Array);
             Assert.True(fieldsProp.GetArrayLength() >= 1);
 
@@ -88,9 +103,23 @@ namespace Listenarr.Api.Tests
             Assert.Contains("categories", fieldNames);
 
             // Schema must advertise supported implementations (Prowlarr expects at least Newznab or Torznab)
-            Assert.True(doc.RootElement.TryGetProperty("implementations", out var implProp));
-            Assert.True(implProp.ValueKind == JsonValueKind.Array);
-            bool hasImpl = implProp.EnumerateArray().Any(e => (e.GetString() ?? string.Empty) == "Newznab" || (e.GetString() ?? string.Empty) == "Torznab");
+            bool hasImpl = false;
+
+            // If root returned 'implementations' array, use that
+            if (doc.RootElement.ValueKind == JsonValueKind.Object && doc.RootElement.TryGetProperty("implementations", out var implProp))
+            {
+                if (implProp.ValueKind == JsonValueKind.Array)
+                {
+                    hasImpl = implProp.EnumerateArray().Any(e => (e.GetString() ?? string.Empty) == "Newznab" || (e.GetString() ?? string.Empty) == "Torznab");
+                }
+            }
+
+            // Otherwise, if an array of schema entries was returned, check entries for implementation names
+            if (!hasImpl && doc.RootElement.ValueKind == JsonValueKind.Array)
+            {
+                hasImpl = doc.RootElement.EnumerateArray().Any(item => item.ValueKind == JsonValueKind.Object && item.TryGetProperty("implementation", out var impl) && (impl.GetString() == "Newznab" || impl.GetString() == "Torznab"));
+            }
+
             Assert.True(hasImpl, "Schema implementations must include Newznab or Torznab");
         }
 
@@ -246,6 +275,21 @@ namespace Listenarr.Api.Tests
             // Ensure at least one indexer has the name we posted
             bool found = doc.RootElement.EnumerateArray().Any(elem => elem.TryGetProperty("name", out var p) && (p.GetString() ?? string.Empty) == "Prowlarr Single Test Indexer");
             Assert.True(found, "Posted single indexer should be persisted and visible via /api/indexers");
+        }
+
+        [Fact]
+        public async Task Delete_Indexer_WithZeroId_IsNoOp_ReturnsOk()
+        {
+            var client = _factory.CreateClient();
+
+            var resp = await client.DeleteAsync("/api/v1/indexer/0");
+            Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+
+            var body = await resp.Content.ReadAsStringAsync();
+            using var stream = new System.IO.MemoryStream(System.Text.Encoding.UTF8.GetBytes(body ?? ""));
+            var doc = await JsonDocument.ParseAsync(stream);
+            Assert.True(doc.RootElement.ValueKind == JsonValueKind.Object);
+            Assert.Empty(doc.RootElement.EnumerateObject()); // empty object
         }
     }
 }

@@ -41,8 +41,7 @@ namespace Listenarr.Api.Services
                 };
                 await _hub.Clients.All.SendAsync("Notification", notification);
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogWarning(ex, "Failed to publish toast message: {Title}", title);
             }
         }
@@ -63,8 +62,7 @@ namespace Listenarr.Api.Services
 
                 await _hub.Clients.All.SendAsync("Notification", notification);
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogWarning(ex, "Failed to publish notification: {Title}", title);
             }
         }
@@ -81,3 +79,4 @@ namespace Listenarr.Api.Services
         }
     }
 }
+

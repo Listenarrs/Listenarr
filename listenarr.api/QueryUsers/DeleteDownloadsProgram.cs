@@ -42,7 +42,9 @@ static class DeleteDownloadsProgram
                     cmd2.ExecuteNonQuery();
                     Log.Logger.Information("Reset sqlite_sequence for Downloads (if it existed).");
                 }
-                catch { }
+                catch (Exception caughtEx_1) when (caughtEx_1 is not OperationCanceledException && caughtEx_1 is not OutOfMemoryException && caughtEx_1 is not StackOverflowException) { 
+                    System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                }
             }
 
             tx.Commit();
@@ -50,10 +52,10 @@ static class DeleteDownloadsProgram
             Log.Logger.Information("Done.");
             return 0;
         }
-        catch (Exception ex)
-        {
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
             Log.Logger.Error(ex, "Error while deleting downloads");
             return 1;
         }
     }
 }
+

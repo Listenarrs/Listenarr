@@ -6,7 +6,8 @@ import { errorTracking } from '@/services/errorTracking'
 export interface OpenLibraryBook {
   key: string
   title: string
-  author_name?: string[]
+  // runtime responses may include either an array or a single string
+  author_name?: string[] | string
   author_key?: string[]
   first_publish_year?: number
   isbn?: string[]
@@ -297,20 +298,22 @@ export class OpenLibraryService {
    * Format authors for display
    */
   formatAuthors(book: OpenLibraryBook): string {
-    if (!book.author_name || book.author_name.length === 0) {
-      return 'Unknown Author'
+    const names = book.author_name
+
+    if (!names) return 'Unknown Author'
+
+    // If API returned a single string, return it (trim and validate)
+    if (typeof names === 'string') {
+      const t = names.trim()
+      return t.length ? t : 'Unknown Author'
     }
 
-    if (book.author_name.length === 1) {
-      return book.author_name[0] || 'Unknown Author'
-    }
+    // Now `names` is string[]
+    if (names.length === 0) return 'Unknown Author'
+    if (names.length === 1) return names[0] || 'Unknown Author'
+    if (names.length === 2) return names.join(' & ')
 
-    if (book.author_name.length === 2) {
-      return book.author_name.join(' & ')
-    }
-
-    // For more than 2 authors
-    return `${book.author_name.slice(0, -1).join(', ')} & ${book.author_name[book.author_name.length - 1]}`
+    return `${names.slice(0, -1).join(', ')} & ${names[names.length - 1]}`
   }
 
   /**

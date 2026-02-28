@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2025 Robbie Davis
  * 
@@ -52,8 +52,7 @@ public class RemotePathMappingsController : ControllerBase
             var mappings = await _mappingService.GetAllAsync();
             return Ok(mappings);
         }
-        catch (Exception ex)
-        {
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
             _logger.LogError(ex, "Failed to retrieve remote path mappings");
             return StatusCode(500, new { error = "Failed to retrieve remote path mappings", details = ex.Message });
         }
@@ -75,8 +74,7 @@ public class RemotePathMappingsController : ControllerBase
 
             return Ok(mapping);
         }
-        catch (Exception ex)
-        {
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
             _logger.LogError(ex, "Failed to retrieve remote path mapping {MappingId}", id);
             return StatusCode(500, new { error = "Failed to retrieve remote path mapping", details = ex.Message });
         }
@@ -93,8 +91,7 @@ public class RemotePathMappingsController : ControllerBase
             var mappings = await _mappingService.GetByClientIdAsync(downloadClientId);
             return Ok(mappings);
         }
-        catch (Exception ex)
-        {
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
             _logger.LogError(ex, "Failed to retrieve remote path mappings for client {ClientId}", downloadClientId);
             return StatusCode(500, new { error = "Failed to retrieve remote path mappings", details = ex.Message });
         }
@@ -127,8 +124,7 @@ public class RemotePathMappingsController : ControllerBase
             var created = await _mappingService.CreateAsync(mapping);
             return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
         }
-        catch (Exception ex)
-        {
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
             _logger.LogError(ex, "Failed to create remote path mapping");
             return StatusCode(500, new { error = "Failed to create remote path mapping", details = ex.Message });
         }
@@ -170,8 +166,7 @@ public class RemotePathMappingsController : ControllerBase
         {
             return NotFound(new { error = ex.Message });
         }
-        catch (Exception ex)
-        {
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
             _logger.LogError(ex, "Failed to update remote path mapping {MappingId}", id);
             return StatusCode(500, new { error = "Failed to update remote path mapping", details = ex.Message });
         }
@@ -193,8 +188,7 @@ public class RemotePathMappingsController : ControllerBase
 
             return NoContent();
         }
-        catch (Exception ex)
-        {
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
             _logger.LogError(ex, "Failed to delete remote path mapping {MappingId}", id);
             return StatusCode(500, new { error = "Failed to delete remote path mapping", details = ex.Message });
         }
@@ -229,8 +223,7 @@ public class RemotePathMappingsController : ControllerBase
                 translated = requiresTranslation
             });
         }
-        catch (Exception ex)
-        {
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
             _logger.LogError(ex, "Failed to translate path");
             return StatusCode(500, new { error = "Failed to translate path", details = ex.Message });
         }
@@ -245,4 +238,5 @@ public class RemotePathMappingsController : ControllerBase
         public string RemotePath { get; set; } = string.Empty;
     }
 }
+
 

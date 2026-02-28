@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2025 Robbie Davis
  * 
@@ -62,7 +62,18 @@ namespace Listenarr.Api.Services
         public async Task<List<QualityProfile>> GetAllAsync()
         {
             // Delegate persistence concerns to repository which encapsulates defensive JSON handling
-            return await _repository.GetAllAsync();
+            var profiles = await _repository.GetAllAsync();
+
+            // Ensure default profiles have required qualities when listing
+            foreach (var profile in profiles)
+            {
+                if (profile.IsDefault)
+                {
+                    await EnsureProfileHasRequiredQualitiesAsync(profile);
+                }
+            }
+
+            return profiles;
         }
 
         public async Task<QualityProfile?> GetByIdAsync(int id)
@@ -81,67 +92,29 @@ namespace Listenarr.Api.Services
             var profile = await _dbContext.QualityProfiles
                 .FirstOrDefaultAsync(p => p.IsDefault);
 
-            if (profile == null)
-            {
-                _logger.LogInformation("No default quality profile found, creating one");
-                profile = await CreateDefaultProfileAsync();
-            }
-            else
+            if (profile != null)
             {
                 // Ensure existing profiles have all required qualities
                 await EnsureProfileHasRequiredQualitiesAsync(profile);
             }
-
             return profile;
-        }
-
-        private async Task<QualityProfile> CreateDefaultProfileAsync()
-        {
-            var defaultProfile = new QualityProfile
-            {
-                Name = "Default",
-                Description = "Default quality profile for audiobooks",
-                Qualities = new List<QualityDefinition>
-                {
-                    new QualityDefinition { Quality = "FLAC", Allowed = true, Priority = 0 },
-                    new QualityDefinition { Quality = "M4B", Allowed = true, Priority = 1 },
-                    new QualityDefinition { Quality = "MP3 320kbps", Allowed = true, Priority = 2 },
-                    new QualityDefinition { Quality = "MP3 256kbps", Allowed = true, Priority = 3 },
-                    new QualityDefinition { Quality = "MP3 VBR", Allowed = true, Priority = 4 },
-                    new QualityDefinition { Quality = "MP3 192kbps", Allowed = true, Priority = 5 },
-                    new QualityDefinition { Quality = "MP3 128kbps", Allowed = true, Priority = 6 },
-                    new QualityDefinition { Quality = "MP3 64kbps", Allowed = false, Priority = 7 }
-                },
-                CutoffQuality = "MP3 128kbps",
-                MinimumSize = 50, // 50 MB minimum
-                MaximumSize = 2000, // 2 GB maximum
-                PreferredFormats = new List<string> { "m4b", "mp3", "m4a", "flac", "opus" },
-                PreferredWords = new List<string> { "unabridged", "complete" },
-                MustNotContain = new List<string> { "abridged", "sample", "excerpt" },
-                MustContain = new List<string>(),
-                PreferredLanguages = new List<string> { "English" },
-                MinimumSeeders = 1,
-                MinimumScore = 0, // Allow any score (Sonarr behavior)
-                IsDefault = true,
-                PreferNewerReleases = true,
-                MaximumAge = 365 * 2 // 2 years
-            };
-
-            return await CreateAsync(defaultProfile);
         }
 
         private async Task EnsureProfileHasRequiredQualitiesAsync(QualityProfile profile)
         {
             var requiredQualities = new Dictionary<string, int>
             {
-                { "FLAC", 0 },
-                { "M4B", 1 },
-                { "MP3 320kbps", 2 },
-                { "MP3 256kbps", 3 },
-                { "MP3 VBR", 4 },
-                { "MP3 192kbps", 5 },
-                { "MP3 128kbps", 6 },
-                { "MP3 64kbps", 7 }
+                { "AAC 320kbps", 0 },
+                { "AAC 256kbps", 1 },
+                { "AAC 192kbps", 2 },
+                { "AAC 128kbps", 3 },
+                { "AAC 64kbps", 4 },
+                { "MP3 320kbps", 5 },
+                { "MP3 256kbps", 6 },
+                { "MP3 VBR", 7 },
+                { "MP3 192kbps", 8 },
+                { "MP3 128kbps", 9 },
+                { "MP3 64kbps", 10 }
             };
 
             var updated = false;
@@ -149,12 +122,11 @@ namespace Listenarr.Api.Services
             {
                 if (!profile.Qualities.Any(q => q.Quality == qualityName))
                 {
-                    // Add missing quality
-                    var isAllowed = qualityName != "MP3 64kbps"; // Only MP3 64kbps is disabled by default
+                    // Add missing quality - all enabled by default
                     profile.Qualities.Add(new QualityDefinition
                     {
                         Quality = qualityName,
-                        Allowed = isAllowed,
+                        Allowed = true,
                         Priority = priority
                     });
                     updated = true;
@@ -263,8 +235,7 @@ namespace Listenarr.Api.Services
                 score.SmartScore = composite.Total;
                 score.SmartScoreBreakdown = composite.Breakdown.ToDictionary(kv => kv.Key, kv => (int)Math.Round(kv.Value));
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogWarning(ex, "Failed to compute composite smart score for search result {Id}", searchResult.Id);
             }
 
@@ -529,4 +500,5 @@ internal class ApiLocalQualityProfileRepository : Listenarr.Application.Reposito
         return await _db.Audiobooks.CountAsync(a => a.QualityProfileId == profileId);
     }
 }
+
 

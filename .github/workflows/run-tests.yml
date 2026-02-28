@@ -25,11 +25,11 @@ jobs:
           dotnet-version: ${{ matrix.dotnet }}
 
       - name: Restore
-        run: dotnet restore listenarr.sln
+        run: dotnet restore listenarr.slnx
 
       - name: Run unit tests (with Test environment / disable Playwright)
         env:
           ASPNETCORE_ENVIRONMENT: Test
           Playwright__Enabled: 'false'
         run: |
-          dotnet test listenarr.sln -c Release --no-restore --logger "console;verbosity=normal"
+          dotnet test listenarr.slnx -c Release --no-restore --logger "console;verbosity=normal"

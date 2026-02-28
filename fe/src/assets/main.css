@@ -1,4 +1,16 @@
-@import './base.css';
+/* Base styles - Design tokens, typography, resets */
+@import '../styles/base/base.css';
+@import '../styles/base/animations.css';
+
+/* Component styles - Reusable UI patterns */
+@import '../styles/components/components.css';
+@import '../styles/components/buttons.css';
+@import '../styles/components/modals.css';
+@import '../styles/components/toasts.css';
+@import '../styles/components/views.css';
+
+/* Utility classes - Layout and spacing helpers */
+@import '../styles/utilities/utilities.css';
 
 /* Global spinner animation for Phosphor Icons */
 .ph-spin {

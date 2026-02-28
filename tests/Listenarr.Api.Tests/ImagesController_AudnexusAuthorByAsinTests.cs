@@ -29,9 +29,9 @@ namespace Listenarr.Api.Tests
             var audnexusMock = new Mock<IAudnexusService>();
             audnexusMock.Setup(a => a.GetAuthorAsync(identifier, It.IsAny<string>(), It.IsAny<bool>())).ReturnsAsync(new AudnexusAuthorResponse { Asin = identifier, Name = "Author", Image = imageUrl });
 
-            var tempRoot = Path.Combine(Path.GetTempPath(), "listenarr_test_contentroot_audnexus");
-            Directory.CreateDirectory(Path.Combine(tempRoot, "config", "cache", "images", "temp"));
-            var fullPath = Path.Combine(tempRoot, relativePath);
+            var tempRoot = Path.Join(Path.GetTempPath(), "listenarr_test_contentroot_audnexus");
+            Directory.CreateDirectory(Path.Join(tempRoot, "config", "cache", "images", "temp"));
+            var fullPath = Path.Join(tempRoot, relativePath);
             File.WriteAllText(fullPath, "fake author image");
 
             var mockEnv = new Mock<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>();
@@ -57,8 +57,23 @@ namespace Listenarr.Api.Tests
             }
 
             // Cleanup
-            try { File.Delete(fullPath); } catch { }
-            try { Directory.Delete(Path.Combine(tempRoot, "config", "cache", "images", "temp"), true); } catch { }
+            try
+            {
+                File.Delete(fullPath);
+            }
+            catch (System.Exception)
+            {
+                // Best-effort test cleanup; ignore cleanup failures.
+            }
+
+            try
+            {
+                Directory.Delete(Path.Join(tempRoot, "config", "cache", "images", "temp"), true);
+            }
+            catch (System.Exception)
+            {
+                // Best-effort test cleanup; ignore cleanup failures.
+            }
         }
     }
 }

@@ -70,8 +70,7 @@ namespace Listenarr.Api.Services
                     return (updatedUrl, indexer.ApiKey);
                 }
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogDebug(ex, "Failed to append indexer API key to NZB URL for {Title}", result.Title);
             }
 
@@ -79,3 +78,4 @@ namespace Listenarr.Api.Services
         }
     }
 }
+

@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2025 Robbie Davis
  * 
@@ -77,11 +77,11 @@ namespace Listenarr.Api.Hubs
                     await _pushService.HandlePushAsync(download);
                 }
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error processing PushDownloadUpdate");
             }
         }
     }
 }
+
 

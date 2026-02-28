@@ -37,31 +37,63 @@ namespace Listenarr.Api.Services
 
                 // Use SharpCompress to extract safely
                 using var archive = ArchiveFactory.Open(archivePath);
+                var tmpRoot = Path.GetFullPath(tmp);
                 foreach (var entry in archive.Entries.Where(e => !e.IsDirectory))
                 {
                     try
                     {
-                        var destPath = Path.Combine(tmp, entry.Key.Replace('\\', Path.DirectorySeparatorChar));
+                        var entryPath = (entry.Key ?? string.Empty)
+                            .Replace('\\', Path.DirectorySeparatorChar)
+                            .Trim();
+
+                        if (string.IsNullOrWhiteSpace(entryPath))
+                        {
+                            continue;
+                        }
+
+                        var relativeEntryPath = entryPath.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                        if (Path.IsPathRooted(relativeEntryPath))
+                        {
+                            _logger.LogWarning(
+                                "ArchiveExtractor: skipping rooted entry path {Entry} in archive {Archive}",
+                                entry.Key,
+                                archivePath);
+                            continue;
+                        }
+
+                        var combinedPath = tmpRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                            + Path.DirectorySeparatorChar
+                            + relativeEntryPath;
+                        var destPath = Path.GetFullPath(combinedPath);
+                        if (!destPath.StartsWith(tmpRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                            && !string.Equals(destPath, tmpRoot, StringComparison.OrdinalIgnoreCase))
+                        {
+                            _logger.LogWarning(
+                                "ArchiveExtractor: skipping out-of-root entry {Entry} in archive {Archive}",
+                                entry.Key,
+                                archivePath);
+                            continue;
+                        }
+
                         var destDir = Path.GetDirectoryName(destPath) ?? string.Empty;
                         if (!string.IsNullOrEmpty(destDir) && !Directory.Exists(destDir)) Directory.CreateDirectory(destDir);
                         entry.WriteToFile(destPath, new ExtractionOptions() { ExtractFullPath = true, Overwrite = true });
                     }
-                    catch (Exception exEntry)
-                    {
+                    catch (Exception exEntry) when (exEntry is not OperationCanceledException && exEntry is not OutOfMemoryException && exEntry is not StackOverflowException) {
                         _logger.LogDebug(exEntry, "ArchiveExtractor: failed to extract entry {Entry} from archive {Archive}", entry.Key, archivePath);
                     }
                 }
 
                 return await Task.FromResult(tmp);
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogWarning(ex, "ArchiveExtractor: failed to extract archive {Archive}", archivePath);
                 return null;
             }
         }
     }
 }
+
 
 
 

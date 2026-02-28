@@ -2,10 +2,15 @@
   <div class="tab-content">
     <div class="download-clients-tab">
       <div class="section-header">
-        <h3>Download Clients</h3>
+        <h3>
+          Download Clients
+          <PhSpinner v-if="configStore.isLoading" class="ph-spin small-inline-spinner" />
+        </h3>
       </div>
 
-      <div v-if="configStore.downloadClientConfigurations.length === 0" class="empty-state">
+      <LoadingState v-if="configStore.isLoading && configStore.downloadClientConfigurations.length === 0" message="Loading download clients..." />
+
+      <div v-else-if="configStore.downloadClientConfigurations.length === 0" class="empty-state">
         <PhDownloadSimple />
         <p>
           No download clients configured. Add qBittorrent, Transmission, SABnzbd, or NZBGet to
@@ -23,14 +28,40 @@
           <div class="indexer-header">
             <div class="indexer-info">
               <h4>{{ client.name }}</h4>
-              <span class="indexer-type" :class="getClientTypeClass(client.type)">
-                {{ client.type }}
-              </span>
+              <img 
+                v-if="client.type === 'qbittorrent'"
+                src="@/assets/icons/clients/qbittorrent.svg" 
+                alt="qBittorrent" 
+                class="client-type-icon" 
+                title="qBittorrent"
+              />
+              <img 
+                v-else-if="client.type === 'transmission'"
+                src="@/assets/icons/clients/transmission.svg" 
+                alt="Transmission" 
+                class="client-type-icon" 
+                title="Transmission"
+              />
+              <img 
+                v-else-if="client.type === 'sabnzbd'"
+                src="@/assets/icons/clients/sabnzbd.svg" 
+                alt="SABnzbd" 
+                class="client-type-icon" 
+                title="SABnzbd"
+              />
+              <img 
+                v-else-if="client.type === 'nzbget'"
+                src="@/assets/icons/clients/nzbget.svg" 
+                alt="NZBGet" 
+                class="client-type-icon" 
+                title="NZBGet"
+              />
             </div>
             <div class="indexer-actions">
               <button
                 @click="toggleDownloadClientFunc(client)"
-                class="icon-button"
+                class="icon-button action-secondary action-toggle"
+                :class="{ active: client.isEnabled }"
                 :title="client.isEnabled ? 'Disable' : 'Enable'"
               >
                 <template v-if="client.isEnabled">
@@ -40,21 +71,36 @@
                   <PhToggleLeft />
                 </template>
               </button>
-              <button @click="editClientConfig(client)" class="icon-button" title="Edit">
-                <PhPencil />
-              </button>
               <button
                 @click="testClient(client)"
-                class="icon-button"
+                class="icon-button action-secondary"
+                :class="{
+                  'test-success': lastClientTestResults[client.id] === 'success',
+                  'test-fail': lastClientTestResults[client.id] === 'fail'
+                }"
                 title="Test"
                 :disabled="testingClient === client.id"
               >
                 <template v-if="testingClient === client.id">
                   <PhSpinner class="ph-spin" />
                 </template>
-                <template v-else>
+                <template v-else-if="lastClientTestResults[client.id] === 'success'">
                   <PhCheckCircle />
                 </template>
+                <template v-else-if="lastClientTestResults[client.id] === 'fail'">
+                  <PhXCircle />
+                </template>                <!-- Fall back to persisted client.lastTestSuccessful if available -->
+                <template v-else-if="client.lastTestSuccessful === true">
+                  <PhCheckCircle />
+                </template>
+                <template v-else-if="client.lastTestSuccessful === false">
+                  <PhXCircle />
+                </template>                <template v-else>
+                  <PhCheckCircle />
+                </template>
+              </button>
+              <button @click="editClientConfig(client)" class="icon-button action-edit" title="Edit">
+                <PhPencil />
               </button>
               <button
                 @click="confirmDeleteClient(client)"
@@ -76,8 +122,14 @@
               <PhShieldCheck />
               <span class="detail-label">Security:</span>
               <div class="feature-badges">
-                <span class="badge" v-if="client.useSSL"> <PhLock /> SSL </span>
-                <span class="badge" v-else> <PhLockOpen /> No SSL </span>
+                <Pill variant="info" v-if="client.useSSL">
+                  <PhLock />
+                  SSL
+                </Pill>
+                <Pill variant="subtle" v-else>
+                  <PhLockOpen />
+                  No SSL
+                </Pill>
               </div>
             </div>
             <div class="detail-row">
@@ -89,10 +141,14 @@
               <PhLinkSimple />
               <span class="detail-label">Mappings:</span>
               <div class="feature-badges">
-                <span v-for="m in getMappingsForClient(client)" :key="m.id" class="badge">
+                <Pill
+                  variant="primary"
+                  v-for="m in getMappingsForClient(client)"
+                  :key="m.id"
+                >
                   <PhLink />
                   {{ m.name || m.remotePath }}
-                </span>
+                </Pill>
                 <span v-if="getMappingsForClient(client).length === 0" class="detail-value"
                   >(none)</span
                 >
@@ -160,134 +216,57 @@
         @delete="executeDeleteClient"
       />
 
-      <!-- Delete Client Confirmation Modal -->
-      <div v-if="clientToDelete" class="modal-overlay" @click="clientToDelete = null">
-        <div class="modal-content" @click.stop>
-          <div class="modal-header">
-            <h3>
-              <PhWarningCircle />
-              Delete Download Client
-            </h3>
-            <button @click="clientToDelete = null" class="modal-close">
-              <PhX />
-            </button>
-          </div>
-          <div class="modal-body">
-            <p>
-              Are you sure you want to delete the download client
-              <strong>{{ clientToDelete.name }}</strong
-              >?
-            </p>
-            <p>This action cannot be undone.</p>
-          </div>
-          <div class="modal-actions">
-            <button @click="clientToDelete = null" class="cancel-button">Cancel</button>
-            <button @click="executeDeleteClient()" class="delete-button">
-              <PhTrash />
-              Delete
-            </button>
-          </div>
-        </div>
-      </div>
+      <!-- Delete Client Confirmation Modal (shared) -->
+      <DeleteConfirmationModal :visible="!!clientToDelete" title="Delete Download Client" @close="clientToDelete = null" @confirm="executeDeleteClient">
+        <template v-slot>
+          <p>Are you sure you want to delete the download client <strong>{{ clientToDelete?.name }}</strong>?</p>
+          <p>This action cannot be undone.</p>
+        </template>
+      </DeleteConfirmationModal>
 
       <!-- Remote Path Mapping Modal -->
-      <div v-if="showMappingForm" class="modal-overlay" @click="closeMappingForm()">
-        <div class="modal-content" @click.stop>
-          <div class="modal-header">
-            <h3>{{ mappingToEdit ? 'Edit' : 'Add' }} Remote Path Mapping</h3>
-            <button @click="closeMappingForm()" class="modal-close"><PhX /></button>
-          </div>
-          <div class="modal-body">
-            <div class="form-group">
-              <label>Mapping Name (optional)</label>
-              <input
-                v-model="mappingToEditData.name"
-                type="text"
-                placeholder="Friendly name for this mapping"
-              />
-            </div>
-            <div class="form-group">
-              <label>Download Client</label>
-              <select v-model="mappingToEditData.downloadClientId">
-                <option
-                  v-for="c in configStore.downloadClientConfigurations"
-                  :key="c.id"
-                  :value="c.id"
-                >
-                  {{ c.name }} ({{ c.type }})
-                </option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label>Remote Path (from client)</label>
-              <input
-                v-model="mappingToEditData.remotePath"
-                type="text"
-                placeholder="/path/to/complete/downloads"
-              />
-            </div>
-            <div class="form-group">
-              <label>Local Path (server)</label>
-              <FolderBrowser
-                v-model="mappingToEditData.localPath"
-                placeholder="Select a local path..."
-              />
-            </div>
-          </div>
-          <div class="modal-actions">
-            <button @click="closeMappingForm()" class="cancel-button">Cancel</button>
-            <button @click="saveMapping()" class="save-button"><PhCheck /> Save</button>
-          </div>
-        </div>
-      </div>
+      <RemotePathMappingModal
+        :visible="showMappingForm"
+        :editing-mapping="mappingToEdit"
+        :download-clients="configStore.downloadClientConfigurations"
+        @close="closeMappingForm"
+        @save="handleSaveMapping"
+      />
 
-      <!-- Delete Remote Path Mapping Confirmation Modal -->
-      <div v-if="mappingToDelete" class="modal-overlay" @click="mappingToDelete = null">
-        <div class="modal-content" @click.stop>
-          <div class="modal-header">
-            <h3>
-              <PhWarningCircle />
-              Delete Remote Path Mapping
-            </h3>
-            <button @click="mappingToDelete = null" class="modal-close">
-              <PhX />
-            </button>
-          </div>
-          <div class="modal-body">
-            <p>
-              Are you sure you want to delete the remote path mapping
-              <strong>{{ mappingToDelete.name || mappingToDelete.remotePath }}</strong
-              >?
-            </p>
-            <p>This action cannot be undone.</p>
-          </div>
-          <div class="modal-actions">
-            <button @click="mappingToDelete = null" class="cancel-button">Cancel</button>
-            <button @click="executeDeleteMapping()" class="delete-button">
-              <PhTrash />
-              Delete
-            </button>
-          </div>
-        </div>
-      </div>
+      <!-- Delete Remote Path Mapping Confirmation (shared) -->
+      <DeleteConfirmationModal :visible="!!mappingToDelete" title="Delete Remote Path Mapping" @close="mappingToDelete = null" @confirm="executeDeleteMapping">
+        <template v-slot>
+          <p>
+            Are you sure you want to delete the remote path mapping
+            <strong>{{ mappingToDelete?.name || mappingToDelete?.remotePath }}</strong>?
+          </p>
+          <p>This action cannot be undone.</p>
+        </template>
+      </DeleteConfirmationModal>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, reactive, onMounted, nextTick } from 'vue'
 import { useConfigurationStore } from '@/stores/configuration'
 import { useToast } from '@/services/toastService'
 import { errorTracking } from '@/services/errorTracking'
 import type { DownloadClientConfiguration, RemotePathMapping } from '@/types'
-import FolderBrowser from '@/components/FolderBrowser.vue'
-import DownloadClientFormModal from '@/components/DownloadClientFormModal.vue'
+import FolderBrowser from '@/components/ui/FolderBrowser.vue'
+import DownloadClientFormModal from '@/components/domain/download/DownloadClientFormModal.vue'
+import { Modal, ModalHeader, ModalFooter, ModalForm, ModalBody } from '@/components/feedback' 
+import DeleteConfirmationModal from '@/components/feedback/DeleteConfirmationModal.vue'
+import RemotePathMappingModal from '@/components/feedback/RemotePathMappingModal.vue'
+import FormSection from '@/components/settings/FormSection.vue'
+import { Pill, LoadingState } from '@/components/base'
 import {
   PhDownloadSimple,
   PhToggleRight,
   PhToggleLeft,
   PhSpinner,
   PhCheckCircle,
+  PhXCircle,
   PhPencil,
   PhTrash,
   PhLink,
@@ -316,21 +295,12 @@ const showClientForm = ref(false)
 const editingClient = ref<DownloadClientConfiguration | null>(null)
 const clientToDelete = ref<DownloadClientConfiguration | null>(null)
 const testingClient = ref<string | null>(null)
+// Per-client ephemeral test results: 'success' | 'fail' | undefined
+const lastClientTestResults = reactive<Record<string, 'success' | 'fail' | undefined>>({})
 const remotePathMappings = ref<RemotePathMapping[]>([])
 const showMappingForm = ref(false)
 const mappingToEdit = ref<RemotePathMapping | null>(null)
 const mappingToDelete = ref<RemotePathMapping | null>(null)
-const mappingToEditData = ref<{
-  downloadClientId: string
-  remotePath: string
-  localPath: string
-  name?: string
-}>({
-  downloadClientId: '',
-  remotePath: '',
-  localPath: '',
-  name: '',
-})
 
 // Functions
 const formatApiError = (error: unknown): string => {
@@ -418,6 +388,9 @@ const testClient = async (client: DownloadClientConfiguration) => {
       if (index !== -1 && result.client) {
         configStore.downloadClientConfigurations[index] = result.client
       }
+      lastClientTestResults[client.id] = 'success'
+      console.debug('DownloadClientsTab: lastClientTestResults set', client.id, lastClientTestResults[client.id])
+      await nextTick()
     } else {
       const errorMessage = formatApiError({ response: { data: result.message } })
       toast.error('Download client test failed', errorMessage)
@@ -425,6 +398,9 @@ const testClient = async (client: DownloadClientConfiguration) => {
       if (index !== -1 && result.client) {
         configStore.downloadClientConfigurations[index] = result.client
       }
+      lastClientTestResults[client.id] = 'fail'
+      console.debug('DownloadClientsTab: lastClientTestResults set', client.id, lastClientTestResults[client.id])
+      await nextTick()
     }
   } catch (error) {
     errorTracking.captureException(error as Error, {
@@ -433,6 +409,9 @@ const testClient = async (client: DownloadClientConfiguration) => {
     })
     const errorMessage = formatApiError(error)
     toast.error('Download client test failed', errorMessage)
+    lastClientTestResults[client.id] = 'fail'
+    console.debug('DownloadClientsTab: lastClientTestResults set', client.id, lastClientTestResults[client.id])
+    await nextTick()
   } finally {
     testingClient.value = null
   }
@@ -480,47 +459,29 @@ const loadRemotePathMappings = async () => {
 
 const openMappingForm = (mapping?: RemotePathMapping) => {
   mappingToEdit.value = mapping || null
-  if (mapping) {
-    mappingToEditData.value = { ...mapping }
-  } else {
-    mappingToEditData.value = {
-      downloadClientId: configStore.downloadClientConfigurations[0]?.id || '',
-      remotePath: '',
-      localPath: '',
-      name: '',
-    }
-  }
   showMappingForm.value = true
 }
 
 const closeMappingForm = () => {
   showMappingForm.value = false
   mappingToEdit.value = null
-  mappingToEditData.value = { downloadClientId: '', remotePath: '', localPath: '', name: '' }
 }
 
-const saveMapping = async () => {
+const handleSaveMapping = async (mappingData: Omit<RemotePathMapping, 'id' | 'createdAt' | 'updatedAt'>) => {
   try {
-    const payload: Omit<RemotePathMapping, 'id' | 'createdAt' | 'updatedAt'> = {
-      downloadClientId: mappingToEditData.value.downloadClientId || '',
-      remotePath: mappingToEditData.value.remotePath || '',
-      localPath: mappingToEditData.value.localPath || '',
-      name: mappingToEditData.value.name || '',
-    }
-
     if (mappingToEdit.value && mappingToEdit.value.id) {
-      const updated = await updateRemotePathMapping(mappingToEdit.value.id, payload)
+      const updated = await updateRemotePathMapping(mappingToEdit.value.id, mappingData)
       const idx = remotePathMappings.value.findIndex((m) => m.id === updated.id)
       if (idx !== -1) remotePathMappings.value[idx] = updated
       toast.success('Remote path mapping', 'Remote path mapping updated')
     } else {
-      const created = await createRemotePathMapping(payload)
+      const created = await createRemotePathMapping(mappingData)
       remotePathMappings.value.push(created)
 
       // Automatically assign the new mapping to the selected download client
-      if (payload.downloadClientId) {
+      if (mappingData.downloadClientId) {
         const selectedClient = configStore.downloadClientConfigurations.find(
-          (c) => c.id === payload.downloadClientId,
+          (c) => c.id === mappingData.downloadClientId,
         )
         if (selectedClient) {
           const updatedClient = { ...selectedClient }
@@ -530,7 +491,7 @@ const saveMapping = async () => {
           if (!updatedClient.settings.remotePathMappingIds.includes(created.id)) {
             updatedClient.settings.remotePathMappingIds.push(created.id)
             const clientIndex = configStore.downloadClientConfigurations.findIndex(
-              (c) => c.id === payload.downloadClientId,
+              (c) => c.id === mappingData.downloadClientId,
             )
             if (clientIndex !== -1) {
               configStore.downloadClientConfigurations[clientIndex] = updatedClient
@@ -606,16 +567,7 @@ defineExpose({
   animation: fadeIn 0.2s ease;
 }
 
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
+/* @keyframes fadeIn is centralized in src/assets/animations.css */
 
 .download-clients-tab {
   width: 100%;
@@ -637,13 +589,18 @@ defineExpose({
   margin: 0;
   color: #fff;
   font-size: 1.5rem;
-  font-weight: 600;
+  font-weight: 500;
 }
 
-.add-button,
-.save-button {
+.section-header .small-inline-spinner {
+  margin-left: 0.5rem;
+  width: 18px;
+  height: 18px;
+}
+
+.add-button {
   padding: 0.75rem 1.5rem;
-  background: linear-gradient(135deg, #1e88e5 0%, #1565c0 100%);
+  background: #1e88e5;
   color: white;
   border: none;
   border-radius: 6px;
@@ -657,9 +614,8 @@ defineExpose({
   box-shadow: 0 2px 8px rgba(30, 136, 229, 0.3);
 }
 
-.add-button:hover,
-.save-button:hover:not(:disabled) {
-  background: linear-gradient(135deg, #1976d2 0%, #0d47a1 100%);
+.add-button:hover {
+  background: var(--brand-600);
   transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(30, 136, 229, 0.4);
 }
@@ -718,11 +674,24 @@ defineExpose({
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
+.indexer-info {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
 .indexer-info h4 {
-  margin: 0 0 0.5rem 0;
+  margin: 0;
   font-size: 1.1rem;
   color: #fff;
-  font-weight: 600;
+  font-weight: 500;
+}
+
+.client-type-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
 }
 
 .indexer-type {
@@ -730,7 +699,7 @@ defineExpose({
   padding: 0.3rem 0.75rem;
   border-radius: 6px;
   font-size: 0.75rem;
-  font-weight: 600;
+  font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -757,44 +726,7 @@ defineExpose({
   gap: 0.5rem;
 }
 
-.icon-button {
-  padding: 0.5rem;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 6px;
-  cursor: pointer;
-  color: #adb5bd;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
-  font-size: 1.1rem;
-  width: 36px;
-  height: 36px;
-}
-
-.icon-button:hover:not(:disabled) {
-  background: rgba(77, 171, 247, 0.15);
-  border-color: #4dabf7;
-  color: #4dabf7;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(77, 171, 247, 0.3);
-}
-
-.icon-button.danger {
-  color: #ff6b6b;
-}
-
-.icon-button.danger:hover:not(:disabled) {
-  background: rgba(255, 107, 107, 0.15);
-  border-color: #ff6b6b;
-  color: #ff6b6b;
-  box-shadow: 0 2px 8px rgba(255, 107, 107, 0.3);
-}
-.icon-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
+/* Use centralized .icon-button in src/assets/buttons.css for consistent icon buttons */
 
 .indexer-details {
   display: flex;
@@ -840,20 +772,7 @@ defineExpose({
   gap: 0.5rem;
 }
 
-.badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  padding: 0.25rem 0.5rem;
-  background: var(--color-background-tertiary);
-  border-radius: 4px;
-  font-size: 0.75rem;
-}
-
-.badge svg {
-  width: 12px;
-  height: 12px;
-}
+/* Badge styles - Now using Pill component from @/components/base */
 
 .config-list {
   display: flex;
@@ -885,208 +804,31 @@ defineExpose({
 .config-info h4 {
   margin: 0 0 0.75rem 0;
   font-size: 1rem;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .config-actions {
   display: flex;
   gap: 0.5rem;
 }
+/* `.edit-button` and `.delete-button` centralized in `src/assets/buttons.css` */
 
-.edit-button,
-.delete-button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  background: transparent;
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
+/* Modal-specific styling moved to shared `modals.css` */
 
-.edit-button:hover {
-  background: var(--color-background-tertiary);
-  border-color: var(--color-primary);
-}
 
-.delete-button:hover {
-  background: rgba(239, 68, 68, 0.1);
-  border-color: #ef4444;
-  color: #ef4444;
-}
 
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.85);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  backdrop-filter: blur(4px);
-}
-
-.modal-content {
-  background: #2a2a2a;
-  border: 1px solid #444;
-  border-radius: 6px;
-  max-width: 700px;
-  width: 100%;
-  max-height: 90vh;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
-}
-
-/* Ensure modal context delete buttons are full-size */
-.modal-overlay .modal-content .modal-actions .delete-button,
-.modal-content .modal-actions .delete-button,
-.modal-overlay .modal-content .modal-actions .modal-delete-button,
-.modal-content .modal-actions .modal-delete-button {
-  padding: 0.75rem 1.25rem;
-  background-color: rgba(231, 76, 60, 0.15);
-  color: #ff6b6b;
-  border: 1px solid rgba(231, 76, 60, 0.3);
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.18s ease;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.6rem;
-  font-weight: 700;
-  font-size: 1rem;
-  min-width: 120px;
-  height: auto;
-  box-shadow: 0 6px 16px rgba(231, 76, 60, 0.12);
-}
-
-.modal-overlay .modal-content .modal-actions .delete-button:hover,
-.modal-content .modal-actions .delete-button:hover {
-  background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
-  color: #fff;
-}
-
-.modal-close {
-  background: transparent;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  color: var(--color-text-secondary);
-  transition: all 0.2s;
-}
-
-.modal-close:hover {
-  background: var(--color-background-tertiary);
-  color: var(--color-text);
-}
-
-.modal-body {
-  padding: 1.5rem;
-}
-
-.modal-body p {
-  margin: 0 0 1rem 0;
-  line-height: 1.6;
-}
-
-.form-group {
-  margin-bottom: 1rem;
-}
-
-.form-group label {
-  display: block;
-  margin-bottom: 0.5rem;
-  font-weight: 500;
-  font-size: 0.875rem;
-  color: var(--color-text-secondary);
-}
-
-.form-group input,
-.form-group select {
-  width: 100%;
-  padding: 0.5rem;
-  background: var(--color-background-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  font-size: 0.875rem;
-  color: var(--color-text);
-}
-
-.form-group input:focus,
-.form-group select:focus {
-  outline: none;
-  border-color: var(--color-primary);
-}
-
-.modal-actions {
-  display: flex;
-  gap: 0.75rem;
-  padding: 1.5rem;
-  border-top: 1px solid var(--color-border);
-  justify-content: flex-end;
-}
-
-.cancel-button,
-.save-button,
-.delete-button {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 1rem;
-  border: none;
-  border-radius: 6px;
-  font-size: 0.875rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.cancel-button {
-  background: var(--color-background-secondary);
-  color: var(--color-text);
-  border: 1px solid var(--color-border);
-}
-
-.cancel-button:hover {
-  background: var(--color-background-tertiary);
-}
-
-.save-button {
-  background: var(--color-primary);
-  color: white;
-}
-
-.save-button:hover {
-  background: var(--color-primary-dark);
+.btn.btn-primary {
+  /* Use centralized primary button styles; per-component overrides removed */
 }
 
 .delete-button {
-  background: #ef4444;
-  color: white;
-}
-
-.delete-button:hover {
-  background: #dc2626;
+  /* Use centralized modal delete styles in src/assets/modals.css for full-size modal actions.
+     The small icon-style delete button (defined earlier) remains for list actions. */
 }
 
 .ph-spin {
   animation: spin 1s linear infinite;
 }
 
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
+/* @keyframes spin is centralized in src/assets/animations.css */
 </style>

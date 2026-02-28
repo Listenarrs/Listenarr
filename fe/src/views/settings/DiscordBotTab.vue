@@ -6,73 +6,52 @@
       </div>
 
       <div class="form-section">
-        <div class="form-group checkbox-group">
-          <label>
-            <input v-model="settings.discordBotEnabled" type="checkbox" />
-            <span>
-              <strong>Enable Discord Bot Integration</strong>
-              <small
-                >Allow an external Discord bot to read these settings and register slash
-                commands.</small
-              >
-            </span>
-          </label>
-        </div>
+        <CheckboxCard v-model="settings.discordBotEnabled" title="Enable Discord Bot Integration" description="Allow an external Discord bot to read these settings and register slash commands." />
 
-        <div class="form-group">
-          <label>Discord Application ID</label>
+        <FormRow label="Discord Application ID">
           <input
             v-model="settings.discordApplicationId"
             type="text"
             placeholder="Discord Application ID (client id)"
           />
-          <span class="form-help"
-            >Used to register application commands. For per-guild testing, set a Guild ID
-            below.</span
-          >
-        </div>
+          <span class="form-help">Used to register application commands. For per-guild testing, set a Guild ID below.</span>
+        </FormRow>
 
-        <div class="form-group">
-          <label>Discord Guild ID (optional)</label>
+        <FormRow label="Discord Guild ID (optional)">
           <input
             v-model="settings.discordGuildId"
             type="text"
             placeholder="Optional guild id for testing"
           />
-          <span class="form-help"
-            >If provided, commands will be registered to this guild for faster updates (useful for
-            development).</span
-          >
-        </div>
+          <span class="form-help">If provided, commands will be registered to this guild for faster updates (useful for development).</span>
+        </FormRow>
 
-        <div class="form-group">
-          <label>Discord Channel ID (optional)</label>
+        <FormRow label="Discord Channel ID (optional)">
           <input
             v-model="settings.discordChannelId"
             type="text"
             placeholder="Optional channel id to restrict commands"
           />
-          <span class="form-help"
-            >If provided, the bot will only accept request commands from this channel. You can also
-            set this via the bot using the <code>/request-config set-channel</code> command.</span
-          >
-        </div>
+          <span class="form-help">If provided, the bot will only accept request commands from this channel. You can also set this via the bot using the <code>/request-config set-channel</code> command.</span>
+        </FormRow>
 
         <!-- Invite / Register Controls -->
-        <div v-if="settings.discordApplicationId" class="form-group invite-row">
-          <label>Invite Bot to Server</label>
+        <FormRow v-if="settings.discordApplicationId" label="Invite Bot to Server">
+          <label style="display:none">Invite Bot to Server</label>
           <div class="invite-controls">
-            <button @click="openInviteLink" class="invite-button">Open Invite</button>
+            <button @click="openInviteLink" class="invite-button btn btn-primary">Open Invite</button>
             <button @click="copyInviteLink" class="icon-button">Copy Invite Link</button>
             <button @click="checkDiscordStatus" class="icon-button" :disabled="checkingDiscord">
               Check Install
             </button>
             <button
               @click="registerCommands"
-              class="save-button"
+              class="btn btn-primary"
               :disabled="registeringCommands || !settings.discordBotToken"
             >
-              Register commands now
+              <PhSpinner v-if="registeringCommands" class="ph-spin" />
+              <PhCheck v-else />
+              {{ registeringCommands ? 'Registering...' : 'Register commands now' }}
             </button>
           </div>
           <div class="form-help">
@@ -102,10 +81,9 @@
               <span class="status-pill unknown">Token validated</span>
             </template>
           </div>
-        </div>
+        </FormRow>
 
-        <div class="form-group">
-          <label>Bot Token</label>
+        <FormRow label="Bot Token">
           <div class="password-field">
             <input
               :type="showPassword ? 'text' : 'password'"
@@ -128,55 +106,40 @@
               </template>
             </button>
           </div>
-          <span class="form-help"
-            >The bot process will use this token to login. Be careful with this value.</span
-          >
-        </div>
+          <span class="form-help">The bot process will use this token to login. Be careful with this value.</span>
+        </FormRow>
 
-        <div class="form-group">
-          <label>Command Group Name</label>
+        <FormRow label="Command Group Name">
           <input v-model="settings.discordCommandGroupName" type="text" placeholder="request" />
           <span class="form-help">Primary command group (e.g. <code>request</code>)</span>
-        </div>
+        </FormRow>
 
-        <div class="form-group">
-          <label>Subcommand Name</label>
+        <FormRow label="Subcommand Name">
           <input
             v-model="settings.discordCommandSubcommandName"
             type="text"
             placeholder="audiobook"
           />
-          <span class="form-help"
-            >Subcommand for audiobooks (e.g. <code>audiobook</code>) — results in
-            <code>/request audiobook &lt;title&gt;</code></span
-          >
-        </div>
+          <span class="form-help">Subcommand for audiobooks (e.g. <code>audiobook</code>) — results in <code>/request audiobook &lt;title&gt;</code></span>
+        </FormRow>
 
-        <div class="form-group">
-          <label>Bot Username (optional)</label>
+        <FormRow label="Bot Username (optional)">
           <input
             v-model="settings.discordBotUsername"
             type="text"
             placeholder="Custom bot username"
           />
-          <span class="form-help"
-            >Optional custom username for the bot. Leave empty to use the default username from
-            Discord.</span
-          >
-        </div>
+          <span class="form-help">Optional custom username for the bot. Leave empty to use the default username from Discord.</span>
+        </FormRow>
 
-        <div class="form-group">
-          <label>Bot Avatar URL (optional)</label>
+        <FormRow label="Bot Avatar URL (optional)">
           <input
             v-model="settings.discordBotAvatar"
             type="url"
             placeholder="https://example.com/avatar.png"
           />
-          <span class="form-help"
-            >Optional avatar image URL for the bot. Leave empty to use the default avatar from
-            Discord.</span
-          >
-        </div>
+          <span class="form-help">Optional avatar image URL for the bot. Leave empty to use the default avatar from Discord.</span>
+        </FormRow>
       </div>
 
       <!-- Discord Bot Process Controls -->
@@ -196,7 +159,7 @@
           </div>
 
           <div class="bot-controls">
-            <button @click="checkBotStatus" class="status-button" :disabled="checkingBotStatus">
+            <button @click="checkBotStatus" class="status-button btn" :disabled="checkingBotStatus">
               <template v-if="checkingBotStatus">
                 <PhSpinner class="ph-spin" />
               </template>
@@ -264,6 +227,9 @@ import {
   PhPlay,
   PhStop,
 } from '@phosphor-icons/vue'
+import Checkbox from '@/components/form/Checkbox.vue'
+import FormRow from '@/components/settings/FormRow.vue'
+import CheckboxCard from '@/components/settings/CheckboxCard.vue'
 
 interface Props {
   settings: ApplicationSettings
@@ -509,16 +475,7 @@ const stopBot = async () => {
   animation: fadeIn 0.2s ease;
 }
 
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
+/* @keyframes fadeIn is centralized in src/assets/animations.css */
 
 .form-section {
   background: rgba(255, 255, 255, 0.02);
@@ -531,7 +488,7 @@ const stopBot = async () => {
 .form-section h4 {
   margin: 0 0 1.5rem 0;
   font-size: 1.1rem;
-  font-weight: 600;
+  font-weight: 500;
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -552,6 +509,25 @@ const stopBot = async () => {
   font-weight: 500;
   color: #fff;
   font-size: 0.95rem;
+}
+
+/* Checkbox group specific: ensure label stacks heading and help text and aligns with checkbox */
+.form-group.checkbox-group label {
+  display: flex;
+  align-items: baseline; /* center checkbox vertically with stacked text */
+  gap: 0.75rem;
+}
+
+.form-group.checkbox-group label span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.form-group.checkbox-group label span small {
+  margin: 0;
+  font-size: 0.95rem;
+  color: #b3b3b3;
 }
 
 .form-group input[type='text'],
@@ -606,7 +582,7 @@ const stopBot = async () => {
 .invite-button {
   padding: 0.75rem 1.25rem;
   border-radius: 6px;
-  background: linear-gradient(135deg, #51cf66 0%, #37b24d 100%);
+  background: #51cf66;
   color: #fff;
   border: none;
   cursor: pointer;
@@ -616,7 +592,7 @@ const stopBot = async () => {
 }
 
 .invite-button:hover {
-  background: linear-gradient(135deg, #37b24d 0%, #2b8a3e 100%);
+  background: #37b24d;
   transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(81, 207, 102, 0.4);
 }
@@ -679,7 +655,7 @@ const stopBot = async () => {
   padding: 0.5rem 0.85rem;
   border-radius: 999px;
   font-size: 0.85rem;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .status-pill.installed {
@@ -713,13 +689,12 @@ const stopBot = async () => {
   margin: 0;
   color: #fff;
   font-size: 1.5rem;
-  font-weight: 600;
+  font-weight: 500;
 }
 
-.add-button,
-.save-button {
+.add-button {
   padding: 0.75rem 1.5rem;
-  background: linear-gradient(135deg, #1e88e5 0%, #1565c0 100%);
+  background: #1e88e5;
   color: white;
   border: none;
   border-radius: 6px;
@@ -733,37 +708,10 @@ const stopBot = async () => {
   box-shadow: 0 2px 8px rgba(30, 136, 229, 0.3);
 }
 
-.add-button:hover,
-.save-button:hover:not(:disabled) {
-  background: linear-gradient(135deg, #1976d2 0%, #0d47a1 100%);
+.add-button:hover:not(:disabled) {
+  background: var(--brand-600);
   transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(30, 136, 229, 0.4);
-}
-
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.85);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  backdrop-filter: blur(4px);
-}
-
-.modal-content {
-  background: #2a2a2a;
-  border: 1px solid #444;
-  border-radius: 6px;
-  max-width: 700px;
-  width: 100%;
-  max-height: 90vh;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
 }
 
 .bot-status-section {
@@ -854,13 +802,13 @@ const stopBot = async () => {
 }
 
 .start-button {
-  background: linear-gradient(135deg, #51cf66 0%, #37b24d 100%);
+  background: #51cf66;
   color: white;
   box-shadow: 0 2px 8px rgba(81, 207, 102, 0.3);
 }
 
 .start-button:hover:not(:disabled) {
-  background: linear-gradient(135deg, #37b24d 0%, #2b8a3e 100%);
+  background: #37b24d;
   transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(81, 207, 102, 0.4);
 }
@@ -895,7 +843,7 @@ const stopBot = async () => {
   align-items: center;
   gap: 0.5rem;
   padding: 0.75rem 1.25rem;
-  background: linear-gradient(135deg, #5865f2 0%, #4752c4 100%);
+  background: #5865f2;
   color: white;
   border: none;
   border-radius: 6px;
@@ -905,7 +853,7 @@ const stopBot = async () => {
 }
 
 .invite-button:hover {
-  background: linear-gradient(135deg, #4752c4 0%, #3c45a5 100%);
+  background: #4752c4;
   transform: translateY(-1px);
 }
 

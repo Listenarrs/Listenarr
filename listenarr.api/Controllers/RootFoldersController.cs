@@ -49,8 +49,7 @@ namespace Listenarr.Api.Controllers
             {
                 return BadRequest(new { message = ex.Message });
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 return StatusCode(500, new { message = "Failed to create root folder", error = ex.Message });
             }
         }
@@ -72,8 +71,7 @@ namespace Listenarr.Api.Controllers
             {
                 return BadRequest(new { message = ex.Message });
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 return StatusCode(500, new { message = "Failed to update root folder", error = ex.Message });
             }
         }
@@ -94,8 +92,7 @@ namespace Listenarr.Api.Controllers
             {
                 return BadRequest(new { message = ex.Message });
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 return StatusCode(500, new { message = "Failed to delete root folder", error = ex.Message });
             }
         }

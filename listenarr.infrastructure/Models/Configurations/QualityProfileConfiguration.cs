@@ -64,6 +64,17 @@ namespace Listenarr.Infrastructure.Models.Configurations
                 .IsRequired();
 
             mustNotContainProp.Metadata.SetValueComparer(mustNotContainComparer);
+
+            // Configure CustomGroupNames as JSON dictionary (optional field)
+            var customGroupNamesConverter = new JsonValueConverter<Dictionary<string, string>?>();
+            var customGroupNamesComparer = JsonValueComparer.Create<Dictionary<string, string>?>();
+            var customGroupNamesProp = builder.Property(q => q.CustomGroupNames)
+                .HasConversion(customGroupNamesConverter)
+                .HasColumnName("CustomGroupNames")
+                .HasColumnType("TEXT")
+                .IsRequired(false);
+
+            customGroupNamesProp.Metadata.SetValueComparer(customGroupNamesComparer);
         }
     }
 }

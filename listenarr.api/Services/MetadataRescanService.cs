@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -93,8 +93,7 @@ namespace Listenarr.Api.Services
                                 // Cancellation requested - ignore and let the service shutdown gracefully
                                 _logger.LogDebug("Metadata rescan cancelled for file id={Id}", file.Id);
                             }
-                            catch (Exception ex)
-                            {
+                            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                                 _logger.LogWarning(ex, "Failed to rescan metadata for file id={Id} path={Path}", file.Id, file.Path);
                             }
                             finally
@@ -106,8 +105,7 @@ namespace Listenarr.Api.Services
 
                     await Task.WhenAll(tasks);
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogError(ex, "Error while running metadata rescan");
                 }
 
@@ -117,4 +115,5 @@ namespace Listenarr.Api.Services
         }
     }
 }
+
 

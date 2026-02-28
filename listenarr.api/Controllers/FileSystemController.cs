@@ -109,8 +109,7 @@ public class FileSystemController : ControllerBase
                 Items = directories.OrderByDescending(d => d.IsDirectory).ThenBy(d => d.Name).ToList()
             };
         }
-        catch (Exception ex)
-        {
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
             _logger.LogError(ex, "Error browsing directory: {Path}", path);
             return StatusCode(500, new { error = "Error browsing directory" });
         }
@@ -144,8 +143,7 @@ public class FileSystemController : ControllerBase
                     System.IO.File.Delete(testFile);
                     isWritable = true;
                 }
-                catch
-                {
+                catch (Exception caughtEx_1) when (caughtEx_1 is not OperationCanceledException && caughtEx_1 is not OutOfMemoryException && caughtEx_1 is not StackOverflowException) {
                     isWritable = false;
                 }
             }
@@ -160,8 +158,7 @@ public class FileSystemController : ControllerBase
                          "Directory is valid"
             };
         }
-        catch (Exception ex)
-        {
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
             _logger.LogError(ex, "Error validating path: {Path}", path);
             return new FileSystemValidateResponse
             {
@@ -228,6 +225,48 @@ public class FileSystemController : ControllerBase
             Items = items
         };
     }
+
+    [HttpGet("check-volume")]
+    public ActionResult<VolumeCheckResponse> CheckVolume([FromQuery] string? sourcePath, [FromQuery] string? destPath)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(sourcePath) || string.IsNullOrWhiteSpace(destPath))
+            {
+                return Ok(new VolumeCheckResponse
+                {
+                    SameVolume = false,
+                    WillBreakHardlinks = true,
+                    Message = "Source or destination path not provided"
+                });
+            }
+
+            var sourceRoot = Path.GetPathRoot(Path.GetFullPath(sourcePath));
+            var destRoot = Path.GetPathRoot(Path.GetFullPath(destPath));
+
+            var sameVolume = string.Equals(sourceRoot, destRoot, StringComparison.OrdinalIgnoreCase);
+
+            return Ok(new VolumeCheckResponse
+            {
+                SameVolume = sameVolume,
+                WillBreakHardlinks = !sameVolume,
+                SourceVolume = sourceRoot,
+                DestVolume = destRoot,
+                Message = sameVolume 
+                    ? "Paths are on the same volume" 
+                    : "⚠️ Moving across volumes will break hardlinks and create independent copies"
+            });
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+            _logger.LogError(ex, "Error checking volume for paths: {Source} -> {Dest}", sourcePath, destPath);
+            return Ok(new VolumeCheckResponse
+            {
+                SameVolume = false,
+                WillBreakHardlinks = true,
+                Message = "Unable to determine volume information"
+            });
+        }
+    }
 }
 
 public class FileSystemBrowseResponse
@@ -252,3 +291,13 @@ public class FileSystemValidateResponse
     public bool IsWritable { get; set; }
     public string Message { get; set; } = string.Empty;
 }
+
+public class VolumeCheckResponse
+{
+    public bool SameVolume { get; set; }
+    public bool WillBreakHardlinks { get; set; }
+    public string? SourceVolume { get; set; }
+    public string? DestVolume { get; set; }
+    public string? Message { get; set; }
+}
+

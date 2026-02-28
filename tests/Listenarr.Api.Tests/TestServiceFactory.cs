@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using Microsoft.Extensions.Configuration;
 using System.Net.Http;
 using Microsoft.Extensions.DependencyInjection;
@@ -114,6 +115,19 @@ namespace Listenarr.Api.Tests
 
                 // Lightweight fallback that simulates successful imports when no IImportService is registered.
                 return new TestFileFinalizer(import);
+            });
+
+            // Provide a test-friendly IFfmpegService to avoid actual ffprobe extraction in tests
+            // This eliminates race conditions and file access issues in CI environments
+            services.AddSingleton<Listenarr.Api.Services.IFfmpegService>(sp =>
+            {
+                var ffmpegMock = new Mock<Listenarr.Api.Services.IFfmpegService>();
+                var mockPath = Path.Combine(Path.GetTempPath(), "mock-ffprobe");
+                ffmpegMock.Setup(f => f.GetFfprobePathAsync(It.IsAny<bool>()))
+                    .ReturnsAsync(mockPath);
+                ffmpegMock.Setup(f => f.EnsureFfprobeInstalledAsync())
+                    .ReturnsAsync(mockPath);
+                return ffmpegMock.Object;
             });
 
             // Provide a test-friendly IDownloadQueueService so DownloadService can be resolved

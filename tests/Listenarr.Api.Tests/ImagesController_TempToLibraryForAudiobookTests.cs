@@ -19,13 +19,13 @@ namespace Listenarr.Api.Tests
             var identifier = "B002V1OF70";
             var tempRelative = $"config/cache/images/temp/{identifier}.jpg";
             var libRelative = $"config/cache/images/library/{identifier}.jpg";
-            var tempRoot = Path.Combine(Path.GetTempPath(), "listenarr_test_contentroot_temp_to_lib");
+            var tempRoot = Path.Join(Path.GetTempPath(), "listenarr_test_contentroot_temp_to_lib");
 
-            Directory.CreateDirectory(Path.Combine(tempRoot, "config", "cache", "images", "temp"));
-            Directory.CreateDirectory(Path.Combine(tempRoot, "config", "cache", "images", "library"));
+            Directory.CreateDirectory(Path.Join(tempRoot, "config", "cache", "images", "temp"));
+            Directory.CreateDirectory(Path.Join(tempRoot, "config", "cache", "images", "library"));
 
-            var tempFull = Path.Combine(tempRoot, tempRelative);
-            var libFull = Path.Combine(tempRoot, libRelative);
+            var tempFull = Path.Join(tempRoot, tempRelative);
+            var libFull = Path.Join(tempRoot, libRelative);
 
             File.WriteAllText(tempFull, "temp image");
             File.WriteAllText(libFull, "library image");
@@ -64,9 +64,32 @@ namespace Listenarr.Api.Tests
             }
 
             // Cleanup
-            try { File.Delete(tempFull); } catch { }
-            try { File.Delete(libFull); } catch { }
-            try { Directory.Delete(Path.Combine(tempRoot, "config"), true); } catch { }
+            try
+            {
+                File.Delete(tempFull);
+            }
+            catch (System.Exception)
+            {
+                // Best-effort test cleanup; ignore cleanup failures.
+            }
+
+            try
+            {
+                File.Delete(libFull);
+            }
+            catch (System.Exception)
+            {
+                // Best-effort test cleanup; ignore cleanup failures.
+            }
+
+            try
+            {
+                Directory.Delete(Path.Join(tempRoot, "config"), true);
+            }
+            catch (System.Exception)
+            {
+                // Best-effort test cleanup; ignore cleanup failures.
+            }
         }
     }
 }

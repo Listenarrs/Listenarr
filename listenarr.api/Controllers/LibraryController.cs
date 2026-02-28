@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2025 Robbie Davis
  * 
@@ -17,9 +17,11 @@
  */
 
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Http;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Caching.Memory;
 using Listenarr.Domain.Models;
 using Listenarr.Infrastructure.Models;
 using Listenarr.Api.Services;
@@ -40,6 +42,18 @@ namespace Listenarr.Api.Controllers
     [Route("api/library")]
     public class LibraryController : ControllerBase
     {
+        private const int MetadataRescanCooldownSeconds = 15;
+        private const int MetadataRescanWindowMinutes = 10;
+        private const int MetadataRescanMaxRequestsPerWindow = 5;
+        private const int MetadataRescanMaxAsinLookupAttempts = 8;
+        private const int MetadataRescanMaxIsbnConversionAttempts = 5;
+
+        private static string? ToStringOrFirst(object? value)
+        {
+            if (value is List<string> list)
+                return list.FirstOrDefault();
+            return value as string;
+        }
         private readonly IAudiobookRepository _repo;
         private readonly IImageCacheService _imageCacheService;
         private readonly ILogger<LibraryController> _logger;
@@ -84,6 +98,77 @@ namespace Listenarr.Api.Controllers
             _rootFolderService = rootFolderService;
         }
 
+        private bool ComputeWantedFlag(Audiobook audiobook)
+        {
+            if (!audiobook.Monitored)
+            {
+                return false;
+            }
+
+            var files = audiobook.Files;
+            if (files == null || files.Count == 0)
+            {
+                return true;
+            }
+
+            foreach (var file in files)
+            {
+                if (string.IsNullOrWhiteSpace(file.Path))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    var fullPath = ResolvePathWithOptionalBase(audiobook.BasePath, file.Path);
+
+                    if (System.IO.File.Exists(fullPath))
+                    {
+                        return false;
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Failed to evaluate file path while computing wanted flag for audiobook {AudiobookId}, file {FileId}. Treating file as missing.",
+                        audiobook.Id,
+                        file.Id);
+                }
+            }
+
+            return true;
+        }
+
+        private static string ResolvePathWithOptionalBase(string? basePath, string candidatePath)
+        {
+            var normalizedPath = candidatePath.Trim();
+
+            if (string.IsNullOrEmpty(normalizedPath))
+            {
+                return normalizedPath;
+            }
+
+            if (Path.IsPathRooted(normalizedPath) || string.IsNullOrWhiteSpace(basePath))
+            {
+                return normalizedPath;
+            }
+
+            var relativePath = normalizedPath.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+            // Defensive check: if the candidate path is rooted, do not call Path.Combine
+            // because it would discard the base path argument.
+            if (Path.IsPathRooted(relativePath))
+            {
+                return relativePath;
+            }
+
+            var normalizedBasePath = basePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            return string.IsNullOrEmpty(normalizedBasePath)
+                ? relativePath
+                : normalizedBasePath + Path.DirectorySeparatorChar + relativePath;
+        }
+
         public class ScanRequest
         {
             public string? Path { get; set; }
@@ -114,8 +199,7 @@ namespace Listenarr.Api.Controllers
                         _logger.LogWarning("Could not parse PublishedDate as DateTime: {PublishedDate}", request.SearchResult.PublishedDate);
                     }
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogWarning(ex, "Failed to extract publish year from search result publishedDate");
                 }
             }
@@ -130,9 +214,10 @@ namespace Listenarr.Api.Controllers
                 }
             }
 
-            if (!string.IsNullOrEmpty(metadata.Isbn))
+            var firstIsbn = (metadata.Isbn != null && metadata.Isbn.Any()) ? metadata.Isbn.FirstOrDefault(i => !string.IsNullOrWhiteSpace(i)) : null;
+            if (!string.IsNullOrWhiteSpace(firstIsbn))
             {
-                var existingByIsbn = await _repo.GetByIsbnAsync(metadata.Isbn);
+                var existingByIsbn = await _repo.GetByIsbnAsync(firstIsbn);
                 if (existingByIsbn != null)
                 {
                     return Conflict(new { message = "Audiobook already exists in library", audiobook = existingByIsbn });
@@ -145,9 +230,8 @@ namespace Listenarr.Api.Controllers
             {
                 try
                 {
-                    // Pass metadata.ImageUrl so the cache service can download-and-move if the temp file isn't present
                     var libraryImagePath = await _imageCacheService.MoveToLibraryStorageAsync(metadata.Asin, metadata.ImageUrl);
-                    if (libraryImagePath != null)
+                    if (!string.IsNullOrWhiteSpace(libraryImagePath))
                     {
                         imageUrl = $"/{libraryImagePath}";
                         _logger.LogInformation("Moved image for ASIN {Asin} to permanent library storage", metadata.Asin);
@@ -157,21 +241,97 @@ namespace Listenarr.Api.Controllers
                         _logger.LogWarning("Failed to move image for ASIN {Asin}, image may not be in temp cache", metadata.Asin);
                     }
                 }
-                catch (Exception ex)
+                catch (IOException ex)
+                {
+                    _logger.LogWarning(ex, "Error moving image for ASIN {Asin} to library storage", metadata.Asin);
+                    // Continue with original image URL if move fails
+                }
+                catch (UnauthorizedAccessException ex)
+                {
+                    _logger.LogWarning(ex, "Error moving image for ASIN {Asin} to library storage", metadata.Asin);
+                    // Continue with original image URL if move fails
+                }
+                catch (HttpRequestException ex)
+                {
+                    _logger.LogWarning(ex, "Error moving image for ASIN {Asin} to library storage", metadata.Asin);
+                    // Continue with original image URL if move fails
+                }
+                catch (TaskCanceledException ex)
+                {
+                    _logger.LogWarning(ex, "Error moving image for ASIN {Asin} to library storage", metadata.Asin);
+                    // Continue with original image URL if move fails
+                }
+                catch (InvalidOperationException ex)
+                {
+                    _logger.LogWarning(ex, "Error moving image for ASIN {Asin} to library storage", metadata.Asin);
+                    // Continue with original image URL if move fails
+                }
+                catch (UriFormatException ex)
                 {
                     _logger.LogWarning(ex, "Error moving image for ASIN {Asin} to library storage", metadata.Asin);
                     // Continue with original image URL if move fails
                 }
             }
+            else if (metadata.Isbn != null && metadata.Isbn.Any(i => !string.IsNullOrWhiteSpace(i)))
+            {
+                firstIsbn = metadata.Isbn.FirstOrDefault(i => !string.IsNullOrWhiteSpace(i));
+                if (!string.IsNullOrWhiteSpace(firstIsbn))
+                {
+                    var existingByIsbn = await _repo.GetByIsbnAsync(firstIsbn);
+                    if (existingByIsbn != null)
+                    {
+                        return Conflict(new { message = "Audiobook already exists in library", audiobook = existingByIsbn });
+                    }
+                }
+
+                try
+                {
+                    var derivedKey = "img-" + ComputeShortHash(firstIsbn ?? metadata.ImageUrl ?? string.Empty);
+                    var libraryImagePath = await _imageCacheService.MoveToLibraryStorageAsync(derivedKey, metadata.ImageUrl);
+                    if (!string.IsNullOrWhiteSpace(libraryImagePath))
+                    {
+                        imageUrl = $"/{libraryImagePath}";
+                        _logger.LogInformation("Moved image for derived ISBN {Key} to permanent library storage", derivedKey);
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Failed to move image for derived ISBN {Key}, image may not be reachable", derivedKey);
+                    }
+                }
+                catch (IOException ex)
+                {
+                    _logger.LogWarning(ex, "Error moving image for derived ISBN to library storage");
+                }
+                catch (UnauthorizedAccessException ex)
+                {
+                    _logger.LogWarning(ex, "Error moving image for derived ISBN to library storage");
+                }
+                catch (HttpRequestException ex)
+                {
+                    _logger.LogWarning(ex, "Error moving image for derived ISBN to library storage");
+                }
+                catch (TaskCanceledException ex)
+                {
+                    _logger.LogWarning(ex, "Error moving image for derived ISBN to library storage");
+                }
+                catch (InvalidOperationException ex)
+                {
+                    _logger.LogWarning(ex, "Error moving image for derived ISBN to library storage");
+                }
+                catch (UriFormatException ex)
+                {
+                    _logger.LogWarning(ex, "Error moving image for derived ISBN to library storage");
+                }
+            }
             else if (!string.IsNullOrEmpty(metadata.ImageUrl))
             {
-                // No ASIN available; attempt to move/download the image using a derived key
+                // No ASIN or ISBN available; attempt to move/download the image using a derived key
                 try
                 {
                     var rawKey = request.SearchResult?.Id ?? request.SearchResult?.ResultUrl ?? request.SearchResult?.ProductUrl ?? metadata.ImageUrl;
                     var derivedKey = "img-" + ComputeShortHash(rawKey);
                     var libraryImagePath = await _imageCacheService.MoveToLibraryStorageAsync(derivedKey, metadata.ImageUrl);
-                    if (libraryImagePath != null)
+                    if (!string.IsNullOrWhiteSpace(libraryImagePath))
                     {
                         imageUrl = $"/{libraryImagePath}";
                         _logger.LogInformation("Moved image for derived key {Key} to permanent library storage", derivedKey);
@@ -181,7 +341,27 @@ namespace Listenarr.Api.Controllers
                         _logger.LogWarning("Failed to move image for derived key {Key}, image may not be reachable", derivedKey);
                     }
                 }
-                catch (Exception ex)
+                catch (IOException ex)
+                {
+                    _logger.LogWarning(ex, "Error moving image for derived key when ASIN is missing");
+                }
+                catch (UnauthorizedAccessException ex)
+                {
+                    _logger.LogWarning(ex, "Error moving image for derived key when ASIN is missing");
+                }
+                catch (HttpRequestException ex)
+                {
+                    _logger.LogWarning(ex, "Error moving image for derived key when ASIN is missing");
+                }
+                catch (TaskCanceledException ex)
+                {
+                    _logger.LogWarning(ex, "Error moving image for derived key when ASIN is missing");
+                }
+                catch (InvalidOperationException ex)
+                {
+                    _logger.LogWarning(ex, "Error moving image for derived key when ASIN is missing");
+                }
+                catch (UriFormatException ex)
                 {
                     _logger.LogWarning(ex, "Error moving image for derived key when ASIN is missing");
                 }
@@ -196,25 +376,31 @@ namespace Listenarr.Api.Controllers
                           (!string.IsNullOrWhiteSpace(metadata.Author) ? new List<string> { metadata.Author! } : new List<string>()),
                 ImageUrl = imageUrl,
                 // Persist OpenLibrary ID when present (enables OL-only matching in the UI)
-                OpenLibraryId = metadata.OpenLibraryId ?? request.SearchResult?.Id,
+                OpenLibraryId = metadata.OpenLibraryId,
                 PublishYear = metadata.PublishYear,
+                PublishedDate = metadata.PublishedDate, // Store full date from metadata for calendar/timeline features
                 Series = metadata.Series,
-                SeriesNumber = metadata.SeriesNumber,
-                Description = metadata.Description,
-                Genres = metadata.Genres,
+                SeriesNumber = ToStringOrFirst(metadata.SeriesNumber),
+                Description = ToStringOrFirst(metadata.Description),
+                Publisher = ToStringOrFirst(metadata.Publisher),
+                Genres = (metadata.Genres != null && metadata.Genres.Any()) ? metadata.Genres : null,
                 Tags = metadata.Tags,
                 Narrators = (metadata.Narrators != null && metadata.Narrators.Any()) ? metadata.Narrators :
                             (!string.IsNullOrWhiteSpace(metadata.Narrator) ? new List<string> { metadata.Narrator! } : new List<string>()),
-                Isbn = metadata.Isbn,
+                Isbn = metadata.Isbn ?? new List<string>(),
                 Asin = metadata.Asin,
-                Publisher = metadata.Publisher,
+                ExternalIdentifiers = new List<AudiobookExternalIdentifier>(),
+                // Removed duplicate Publisher assignment
                 Language = metadata.Language,
                 Runtime = metadata.Runtime,
                 Version = metadata.Version,
                 Explicit = metadata.Explicit,
                 Abridged = metadata.Abridged,
-                Monitored = request.Monitored  // Use custom monitored setting
+                Monitored = request.Monitored,  // Use custom monitored setting
+                BasePath = null  // Will be computed or set from custom destination below
             };
+
+            SyncImportedIdentifiersFromLegacyFields(audiobook);
 
             _logger.LogInformation("Created Audiobook entity: Title={Title}, Asin={Asin}, PublishYear={PublishYear}",
                 audiobook.Title, audiobook.Asin, audiobook.PublishYear);
@@ -245,6 +431,18 @@ namespace Listenarr.Api.Controllers
                     }
                 }
             }
+
+            // Compute or use custom BasePath (but don't create the directory yet - that happens during import)
+            if (!string.IsNullOrWhiteSpace(request.DestinationPath))
+            {
+                // User provided a custom destination path - store it as BasePath
+                // ImportService will recognize BasePath as set and use filename-only pattern
+                audiobook.BasePath = request.DestinationPath;
+                _logger.LogInformation("Using custom destination path for audiobook '{Title}': {BasePath}",
+                    audiobook.Title, audiobook.BasePath);
+            }
+            // If no custom path provided, leave BasePath null
+            // ImportService will use the default naming pattern from settings
 
             await _repo.AddAsync(audiobook);
 
@@ -279,14 +477,12 @@ namespace Listenarr.Api.Controllers
                                         _logger.LogInformation("Cached author image for {Author} (ASIN: {Asin})", authorName, info.Asin);
                                     }
                                 }
-                                catch (Exception ex)
-                                {
+                                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                                     _logger.LogWarning(ex, "Failed to cache author image for {Author}", authorName);
                                 }
                             }
                         }
-                        catch (Exception ex)
-                        {
+                        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                             _logger.LogWarning(ex, "Author lookup failed for {Author}", authorName);
                         }
                     }
@@ -297,14 +493,12 @@ namespace Listenarr.Api.Controllers
                         _dbContext.Audiobooks.Update(audiobook);
                         await _dbContext.SaveChangesAsync();
                     }
-                    catch (Exception ex)
-                    {
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                         _logger.LogWarning(ex, "Failed to persist author ASINs for audiobook '{Title}'", audiobook.Title);
                     }
                 }
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogWarning(ex, "Error resolving author ASINs for audiobook '{Title}'", audiobook.Title);
             }
 
@@ -330,102 +524,11 @@ namespace Listenarr.Api.Controllers
             }
 
 
-            // Create the expected directory structure for the audiobook (but don't set FilePath)
-            // FilePath should only be set when actual files are found during scanning
-            try
-            {
-                using (var scope = _scopeFactory.CreateScope())
-                {
-                    var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
-                    var settings = await configService.GetApplicationSettingsAsync();
-
-                    // Determine root for base directory: prefer explicit DestinationPath if provided, otherwise use configured OutputPath
-                    var rootForBasePath = !string.IsNullOrEmpty(request.DestinationPath) ? request.DestinationPath : settings.OutputPath;
-
-                    if (!string.IsNullOrEmpty(rootForBasePath))
-                    {
-                        // If caller supplied an explicit DestinationPath that looks like a full path, respect it as the final BasePath.
-                        // The frontend will send the fully-composed destination when the user edits the relative path, so honor that exact value.
-                        if (!string.IsNullOrEmpty(request.DestinationPath) && Path.IsPathRooted(request.DestinationPath))
-                        {
-                            try
-                            {
-                                if (!Directory.Exists(request.DestinationPath))
-                                {
-                                    Directory.CreateDirectory(request.DestinationPath);
-                                    _logger.LogInformation("Created directory for new audiobook '{Title}' (explicit DestinationPath): {Path}", LogRedaction.SanitizeText(audiobook.Title), LogRedaction.SanitizeFilePath(request.DestinationPath));
-                                }
-                                else
-                                {
-                                    _logger.LogInformation("Directory already exists for new audiobook '{Title}' (explicit DestinationPath): {Path}", LogRedaction.SanitizeText(audiobook.Title), LogRedaction.SanitizeFilePath(request.DestinationPath));
-                                }
-
-                                audiobook.BasePath = request.DestinationPath;
-                                _dbContext.Audiobooks.Update(audiobook);
-                                await _dbContext.SaveChangesAsync();
-                                _logger.LogInformation("Set BasePath for new audiobook '{Title}' to explicit DestinationPath: {BasePath}", LogRedaction.SanitizeText(audiobook.Title), LogRedaction.SanitizeFilePath(request.DestinationPath));
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.LogWarning(ex, "Failed to persist explicit DestinationPath for new audiobook '{Title}'", LogRedaction.SanitizeText(audiobook.Title));
-                            }
-                        }
-                        else
-                        {
-                            // Compute expected base directory from root + file naming pattern using the request-supplied metadata
-                            // (use a temporary Audiobook built from the incoming metadata to ensure enriched fields are applied)
-                            var tempForNaming = new Audiobook
-                            {
-                                Title = request.Metadata?.Title,
-                                Authors = (request.Metadata?.Authors != null && request.Metadata.Authors.Any())
-                                            ? request.Metadata.Authors
-                                            : (!string.IsNullOrWhiteSpace(request.Metadata?.Author)
-                                                ? new List<string> { request.Metadata.Author! }
-                                                : null),
-                                Series = request.Metadata?.Series,
-                                SeriesNumber = request.Metadata?.SeriesNumber,
-                                PublishYear = request.Metadata?.PublishYear
-                            };
-
-                            var directoryPath = ComputeAudiobookBaseDirectoryFromPattern(tempForNaming, rootForBasePath, settings.FileNamingPattern);
-
-                            // Create the directory if it doesn't exist
-                            if (!Directory.Exists(directoryPath))
-                            {
-                                Directory.CreateDirectory(directoryPath);
-                                _logger.LogInformation("Created directory for new audiobook '{Title}': {Path}", LogRedaction.SanitizeText(audiobook.Title), LogRedaction.SanitizeFilePath(directoryPath));
-                            }
-                            else
-                            {
-                                _logger.LogInformation("Directory already exists for new audiobook '{Title}': {Path}", LogRedaction.SanitizeText(audiobook.Title), LogRedaction.SanitizeFilePath(directoryPath));
-                            }
-
-                            // Persist a sensible BasePath for this audiobook so the UI can display
-                            // the intended library root right away (even before any files exist).
-                            try
-                            {
-                                audiobook.BasePath = directoryPath;
-                                _dbContext.Audiobooks.Update(audiobook);
-                                await _dbContext.SaveChangesAsync();
-                                _logger.LogInformation("Set BasePath for new audiobook '{Title}' using naming pattern: {BasePath}", LogRedaction.SanitizeText(audiobook.Title), LogRedaction.SanitizeFilePath(directoryPath));
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.LogWarning(ex, "Failed to persist BasePath for new audiobook '{Title}'", LogRedaction.SanitizeText(audiobook.Title));
-                            }
-                        }
-                    }
-                    else
-                    {
-                        _logger.LogWarning("No output path configured, skipping directory creation for new audiobook '{Title}'", audiobook.Title);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to create directory for new audiobook '{Title}'", audiobook.Title);
-                // Continue with the rest of the process even if directory creation fails
-            }
+            // Directory creation has been deferred to file import time to avoid creating empty directories
+            // for audiobooks that may never be downloaded. If a custom destination path was specified when
+            // adding the audiobook, it will be stored in BasePath and used when ImportService processes
+            // the downloaded files. If no custom path was specified, ImportService will use the configured
+            // naming pattern and output path to determine the directory structure.
 
             // Log history entry for the added audiobook
             var historyEntry = new History
@@ -468,7 +571,10 @@ namespace Listenarr.Api.Controllers
                     PublishYear = request.Metadata.PublishYear
                 };
 
-                var full = ComputeAudiobookBaseDirectoryFromPattern(temp, root ?? string.Empty, settings.FileNamingPattern);
+                var namingPattern = !string.IsNullOrWhiteSpace(settings.FolderNamingPattern)
+                    ? settings.FolderNamingPattern
+                    : settings.FileNamingPattern;
+                var full = ComputeAudiobookBaseDirectoryFromPattern(temp, root ?? string.Empty, namingPattern);
 
                 var relative = full;
                 if (!string.IsNullOrEmpty(root) && full.StartsWith(root, StringComparison.OrdinalIgnoreCase))
@@ -478,8 +584,7 @@ namespace Listenarr.Api.Controllers
 
                 return Ok(new { fullPath = full, relativePath = relative, root = root });
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogWarning(ex, "Failed to compute preview path");
                 return StatusCode(500, new { message = "Failed to compute preview path" });
             }
@@ -497,13 +602,12 @@ namespace Listenarr.Api.Controllers
                     .Include(a => a.Files)
                     .ToListAsync();
             }
-            catch (JsonException jex)
-            {
-                // Defensive fallback: if a JSON-backed column contains legacy/non-JSON values
-                // EF's JSON reader can throw during materialization. Retry without the
-                // potentially-problematic navigation (QualityProfile) so the library view
-                // can still render basic audiobook and file information.
-                _logger.LogWarning(jex, "JSON parse error retrieving audiobooks; retrying without QualityProfile include to avoid malformed JSON in DB columns.");
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+                // Defensive fallback: if any JSON-backed column or related navigation
+                // causes materialization errors (EF's JSON reader or coercion), log and
+                // retry without the QualityProfile include so the library view can still
+                // render basic audiobook and file information.
+                _logger.LogWarning(ex, "Error retrieving audiobooks with QualityProfile; retrying without QualityProfile include to avoid malformed JSON or mapping issues in DB columns.");
 
                 audiobooks = await _dbContext.Audiobooks
                     .Include(a => a.Files)
@@ -517,6 +621,7 @@ namespace Listenarr.Api.Controllers
                 subtitle = a.Subtitle,
                 authors = a.Authors,
                 publishYear = a.PublishYear,
+                publishedDate = a.PublishedDate,
                 series = a.Series,
                 seriesNumber = a.SeriesNumber,
                 description = a.Description,
@@ -546,13 +651,15 @@ namespace Listenarr.Api.Controllers
                     size = f.Size,
                     durationSeconds = f.DurationSeconds,
                     format = f.Format,
+                    container = f.Container,
+                    codec = f.Codec,
                     bitrate = f.Bitrate,
                     sampleRate = f.SampleRate,
                     channels = f.Channels,
                     source = f.Source,
                     createdAt = f.CreatedAt
                 }).ToList(),
-                wanted = a.Monitored && (a.Files == null || !a.Files.Any() || !a.Files.Any(f => !string.IsNullOrEmpty(f.Path) && System.IO.File.Exists(f.Path)))
+                wanted = ComputeWantedFlag(a)
             });
 
             return Ok(dto);
@@ -586,6 +693,7 @@ namespace Listenarr.Api.Controllers
             var updated = await _dbContext.Audiobooks
                 .Include(a => a.QualityProfile)
                 .Include(a => a.Files)
+                .Include(a => a.ExternalIdentifiers)
                 .FirstOrDefaultAsync(a => a.Id == id);
 
             if (updated == null)
@@ -595,18 +703,34 @@ namespace Listenarr.Api.Controllers
             {
                 id = updated.Id,
                 title = updated.Title,
+                subtitle = updated.Subtitle,
                 authors = updated.Authors,
+                narrators = updated.Narrators,
                 description = updated.Description,
+                genres = updated.Genres,
+                isbn = updated.Isbn != null ? updated.Isbn.FirstOrDefault() : null,
+                isbns = updated.Isbn,
+                asin = updated.Asin,
                 openLibraryId = updated.OpenLibraryId,
+                identifiers = GetEffectiveIdentifiers(updated).Select(ToIdentifierResponse).ToList(),
                 imageUrl = updated.ImageUrl,
+                publishYear = updated.PublishYear,
+                publisher = updated.Publisher,
+                language = updated.Language,
                 filePath = updated.FilePath,
                 fileSize = updated.FileSize,
                 basePath = updated.BasePath,
                 runtime = updated.Runtime,
+                version = updated.Version,
+                @explicit = updated.Explicit,
+                abridged = updated.Abridged,
                 monitored = updated.Monitored,
                 quality = updated.Quality,
+                qualityProfileId = updated.QualityProfileId,
+                authorAsins = updated.AuthorAsins,
                 series = updated.Series,
                 seriesNumber = updated.SeriesNumber,
+                publishedDate = updated.PublishedDate,
                 tags = updated.Tags,
                 files = updated.Files?.Select(f => new
                 {
@@ -615,16 +739,462 @@ namespace Listenarr.Api.Controllers
                     size = f.Size,
                     durationSeconds = f.DurationSeconds,
                     format = f.Format,
+                    container = f.Container,
+                    codec = f.Codec,
                     bitrate = f.Bitrate,
                     sampleRate = f.SampleRate,
                     channels = f.Channels,
                     source = f.Source,
                     createdAt = f.CreatedAt
                 }).ToList(),
-                wanted = updated.Monitored && (updated.Files == null || !updated.Files.Any() || !updated.Files.Any(f => !string.IsNullOrEmpty(f.Path) && System.IO.File.Exists(f.Path)))
+                wanted = ComputeWantedFlag(updated)
             };
 
             return Ok(audiobookDto);
+        }
+
+        [HttpGet("{id}/identifiers")]
+        public async Task<IActionResult> GetAudiobookIdentifiers(int id)
+        {
+            var audiobook = await _dbContext.Audiobooks
+                .Include(a => a.ExternalIdentifiers)
+                .FirstOrDefaultAsync(a => a.Id == id);
+
+            if (audiobook == null)
+            {
+                return NotFound(new { message = "Audiobook not found" });
+            }
+
+            var identifiers = GetEffectiveIdentifiers(audiobook)
+                .Select(ToIdentifierResponse)
+                .ToList();
+
+            return Ok(new
+            {
+                audiobookId = audiobook.Id,
+                identifiers
+            });
+        }
+
+        [HttpPut("{id}/identifiers")]
+        public async Task<IActionResult> ReplaceAudiobookIdentifiers(int id, [FromBody] ReplaceAudiobookIdentifiersRequest? request)
+        {
+            var audiobook = await _dbContext.Audiobooks
+                .Include(a => a.ExternalIdentifiers)
+                .FirstOrDefaultAsync(a => a.Id == id);
+
+            if (audiobook == null)
+            {
+                return NotFound(new { message = "Audiobook not found" });
+            }
+
+            var incoming = request?.Identifiers ?? new List<AudiobookIdentifierWriteItem>();
+            if (incoming.Count > 50)
+            {
+                return BadRequest(new { message = "Too many identifiers. Maximum is 50." });
+            }
+
+            var validationErrors = new List<object>();
+            var normalized = new List<AudiobookExternalIdentifier>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var primaryCountByType = new Dictionary<AudiobookExternalIdentifierType, int>();
+            var now = DateTime.UtcNow;
+            var existingServerOwnedSourceKeys = new HashSet<string>(
+                (audiobook.ExternalIdentifiers ?? new List<AudiobookExternalIdentifier>())
+                    .Where(i =>
+                        i.Source != AudiobookExternalIdentifierSource.Manual &&
+                        !string.IsNullOrWhiteSpace(i.ValueNormalized))
+                    .Select(IdentifierFullSourceKey),
+                StringComparer.OrdinalIgnoreCase);
+
+            for (var index = 0; index < incoming.Count; index++)
+            {
+                var item = incoming[index];
+                if (!Enum.IsDefined(typeof(AudiobookExternalIdentifierType), item.Type))
+                {
+                    validationErrors.Add(new { index, field = "type", error = "Unsupported identifier type." });
+                    continue;
+                }
+
+                if (!AudiobookIdentifierNormalizer.TryNormalize(item.Type, item.Value, out var normalizedValue, out var error))
+                {
+                    validationErrors.Add(new { index, field = "value", error = error ?? "Invalid identifier value." });
+                    continue;
+                }
+
+                var normalizedRegion = item.Type == AudiobookExternalIdentifierType.Asin
+                    ? AudiobookIdentifierNormalizer.NormalizeRegion(item.Region)
+                    : null;
+
+                var key = $"{item.Type}|{normalizedValue}|{normalizedRegion ?? string.Empty}";
+                if (!seen.Add(key))
+                {
+                    validationErrors.Add(new { index, field = "value", error = "Duplicate identifier." });
+                    continue;
+                }
+
+                if (item.IsPrimary)
+                {
+                    primaryCountByType.TryGetValue(item.Type, out var count);
+                    primaryCountByType[item.Type] = count + 1;
+                }
+
+                var source = item.Source ?? AudiobookExternalIdentifierSource.Manual;
+                if (!Enum.IsDefined(typeof(AudiobookExternalIdentifierSource), source))
+                {
+                    source = AudiobookExternalIdentifierSource.Manual;
+                }
+                else if (source != AudiobookExternalIdentifierSource.Manual)
+                {
+                    // Client writes cannot create or spoof Provider/Imported provenance.
+                    // Preserve server-owned provenance only for exact existing rows.
+                    var requestedKey = IdentifierFullSourceKey(item.Type, normalizedValue, normalizedRegion, source);
+                    if (!existingServerOwnedSourceKeys.Contains(requestedKey))
+                    {
+                        source = AudiobookExternalIdentifierSource.Manual;
+                    }
+                }
+
+                normalized.Add(new AudiobookExternalIdentifier
+                {
+                    AudiobookId = audiobook.Id,
+                    Type = item.Type,
+                    ValueRaw = AudiobookIdentifierNormalizer.NormalizeRawValueForStorage(item.Value),
+                    ValueNormalized = normalizedValue,
+                    Region = normalizedRegion,
+                    IsPrimary = item.IsPrimary,
+                    Source = source,
+                    CreatedAt = now,
+                    UpdatedAt = now
+                });
+            }
+
+            foreach (var kvp in primaryCountByType.Where(kvp => kvp.Value > 1))
+            {
+                validationErrors.Add(new
+                {
+                    field = "isPrimary",
+                    type = kvp.Key,
+                    error = $"Only one primary identifier is allowed for type {kvp.Key}."
+                });
+            }
+
+            if (validationErrors.Count > 0)
+            {
+                return BadRequest(new { message = "Identifier validation failed.", errors = validationErrors });
+            }
+
+            // Ensure a primary ASIN exists when ASINs are present.
+            var asins = normalized.Where(i => i.Type == AudiobookExternalIdentifierType.Asin).ToList();
+            if (asins.Count > 0 && !asins.Any(i => i.IsPrimary))
+            {
+                asins[0].IsPrimary = true;
+            }
+
+            var olids = normalized.Where(i => i.Type == AudiobookExternalIdentifierType.OpenLibraryId).ToList();
+            if (olids.Count == 1)
+            {
+                olids[0].IsPrimary = true;
+            }
+
+            if (audiobook.ExternalIdentifiers != null && audiobook.ExternalIdentifiers.Count > 0)
+            {
+                _dbContext.AudiobookExternalIdentifiers.RemoveRange(audiobook.ExternalIdentifiers);
+            }
+
+            audiobook.ExternalIdentifiers = normalized;
+            SyncLegacyFieldsFromIdentifiers(audiobook);
+
+            await _dbContext.SaveChangesAsync();
+
+            _logger.LogInformation(
+                "Replaced identifiers for audiobook {AudiobookId} ({Title}). Count={Count}",
+                audiobook.Id,
+                audiobook.Title,
+                normalized.Count);
+
+            return Ok(new
+            {
+                message = "Audiobook identifiers updated successfully",
+                audiobook = new
+                {
+                    id = audiobook.Id,
+                    asin = audiobook.Asin,
+                    isbn = audiobook.Isbn,
+                    openLibraryId = audiobook.OpenLibraryId
+                },
+                identifiers = OrderIdentifiers(audiobook.ExternalIdentifiers).Select(ToIdentifierResponse).ToList()
+            });
+        }
+
+        [HttpPost("{id}/rescan-metadata")]
+        public async Task<IActionResult> RescanAudiobookMetadata(int id)
+        {
+            using var rescanScope = _scopeFactory.CreateScope();
+            var metadataService = rescanScope.ServiceProvider.GetService<IAudiobookMetadataService>();
+            var metadataConverters = rescanScope.ServiceProvider.GetService<Listenarr.Api.Services.Search.MetadataConverters>();
+
+            if (metadataService == null || metadataConverters == null)
+            {
+                _logger.LogError(
+                    "Metadata rescan services unavailable. MetadataService={HasMetadataService}, MetadataConverters={HasConverters}",
+                    metadataService != null,
+                    metadataConverters != null);
+                return StatusCode(500, new { message = "Metadata rescan services are not available." });
+            }
+
+            var audiobook = await _dbContext.Audiobooks
+                .Include(a => a.ExternalIdentifiers)
+                .FirstOrDefaultAsync(a => a.Id == id);
+
+            if (audiobook == null)
+            {
+                return NotFound(new { message = "Audiobook not found" });
+            }
+
+            var memoryCache = rescanScope.ServiceProvider.GetService<IMemoryCache>();
+            if (memoryCache != null &&
+                !TryConsumeMetadataRescanQuota(memoryCache, HttpContext, audiobook.Id, out var rateLimitMessage, out var retryAfterSeconds))
+            {
+                try
+                {
+                    Response.Headers["Retry-After"] = retryAfterSeconds.ToString();
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+                    _logger.LogDebug(ex, "Failed to set Retry-After header for metadata rescan rate-limit response");
+                }
+
+                return StatusCode(StatusCodes.Status429TooManyRequests, new
+                {
+                    message = rateLimitMessage,
+                    retryAfterSeconds
+                });
+            }
+
+            var effectiveIdentifiers = GetEffectiveIdentifiers(audiobook);
+            var asinIdentifiers = effectiveIdentifiers
+                .Where(i => i.Type == AudiobookExternalIdentifierType.Asin)
+                .OrderByDescending(i => i.IsPrimary)
+                .ThenBy(i => i.Source)
+                .ThenBy(i => i.ValueNormalized)
+                .ToList();
+
+            var isbnIdentifiers = effectiveIdentifiers
+                .Where(i => i.Type == AudiobookExternalIdentifierType.Isbn)
+                .OrderByDescending(i => i.IsPrimary)
+                .ThenBy(i => i.Source)
+                .ThenBy(i => i.ValueNormalized)
+                .ToList();
+
+            if (!asinIdentifiers.Any() && !isbnIdentifiers.Any())
+            {
+                return BadRequest(new { message = "No ASIN or ISBN identifiers are available for metadata rescan." });
+            }
+
+            var triedAsinKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var triedAsinDebug = new List<object>();
+            var triedIsbnDebug = new List<string>();
+            var asinLookupAttempts = 0;
+            var isbnConversionAttempts = 0;
+            var asinLookupAttemptCapHit = false;
+            var isbnConversionAttemptCapHit = false;
+
+            AudimetaBookResponse? providerMetadata = null;
+            string? providerSource = null;
+            string? resolvedAsin = null;
+            string? resolvedRegion = null;
+
+            async Task<bool> TryMetadataLookupByAsinAsync(string asin, string? preferredRegion, string via)
+            {
+                if (!AudiobookIdentifierNormalizer.TryNormalize(
+                        AudiobookExternalIdentifierType.Asin,
+                        asin,
+                        out var normalizedAsin,
+                        out _))
+                {
+                    return false;
+                }
+
+                foreach (var region in EnumerateMetadataRescanRegions(preferredRegion))
+                {
+                    var regionValue = string.IsNullOrWhiteSpace(region) ? "us" : region!;
+                    var key = $"{normalizedAsin}|{regionValue}";
+                    if (!triedAsinKeys.Add(key))
+                    {
+                        continue;
+                    }
+
+                    triedAsinDebug.Add(new { asin = normalizedAsin, region = regionValue, via });
+
+                    if (asinLookupAttempts >= MetadataRescanMaxAsinLookupAttempts)
+                    {
+                        asinLookupAttemptCapHit = true;
+                        return false;
+                    }
+
+                    asinLookupAttempts++;
+
+                    object? rawResult;
+                    try
+                    {
+                        rawResult = await metadataService.GetMetadataAsync(normalizedAsin, regionValue, cache: false);
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+                        _logger.LogWarning(
+                            ex,
+                            "Metadata rescan lookup failed for audiobook {AudiobookId} ({Title}) ASIN {Asin} region {Region}",
+                            audiobook.Id,
+                            audiobook.Title,
+                            normalizedAsin,
+                            regionValue);
+                        continue;
+                    }
+
+                    if (!TryExtractMetadataLookupResult(rawResult, out var extractedMetadata, out var extractedSource) ||
+                        extractedMetadata == null)
+                    {
+                        continue;
+                    }
+
+                    providerMetadata = extractedMetadata;
+                    providerSource = extractedSource;
+                    resolvedAsin = string.IsNullOrWhiteSpace(extractedMetadata.Asin) ? normalizedAsin : extractedMetadata.Asin;
+                    resolvedRegion = regionValue;
+                    return true;
+                }
+
+                return false;
+            }
+
+            foreach (var asinIdentifier in asinIdentifiers)
+            {
+                var asinValue = FirstNonEmpty(asinIdentifier.ValueRaw, asinIdentifier.ValueNormalized);
+                if (string.IsNullOrWhiteSpace(asinValue)) continue;
+
+                if (await TryMetadataLookupByAsinAsync(asinValue, asinIdentifier.Region, "asin"))
+                {
+                    break;
+                }
+
+                if (asinLookupAttemptCapHit)
+                {
+                    break;
+                }
+            }
+
+            if (providerMetadata == null)
+            {
+                var amazonAsinService = rescanScope.ServiceProvider.GetService<IAmazonAsinService>();
+                if (amazonAsinService == null)
+                {
+                    _logger.LogWarning("IAmazonAsinService not available for ISBN fallback during metadata rescan of audiobook {AudiobookId}", audiobook.Id);
+                }
+
+                foreach (var isbnIdentifier in isbnIdentifiers)
+                {
+                    var isbnValue = FirstNonEmpty(isbnIdentifier.ValueNormalized, isbnIdentifier.ValueRaw);
+                    if (string.IsNullOrWhiteSpace(isbnValue)) continue;
+
+                    if (!triedIsbnDebug.Contains(isbnValue, StringComparer.OrdinalIgnoreCase))
+                    {
+                        triedIsbnDebug.Add(isbnValue);
+                    }
+
+                    try
+                    {
+                        if (isbnConversionAttempts >= MetadataRescanMaxIsbnConversionAttempts)
+                        {
+                            isbnConversionAttemptCapHit = true;
+                            break;
+                        }
+
+                        if (amazonAsinService == null)
+                        {
+                            continue;
+                        }
+
+                        isbnConversionAttempts++;
+                        var (success, asinFromIsbn, _) = await amazonAsinService.GetAsinFromIsbnAsync(isbnValue);
+                        if (!success || string.IsNullOrWhiteSpace(asinFromIsbn))
+                        {
+                            continue;
+                        }
+
+                        if (await TryMetadataLookupByAsinAsync(asinFromIsbn, null, "isbn"))
+                        {
+                            break;
+                        }
+
+                        if (asinLookupAttemptCapHit)
+                        {
+                            break;
+                        }
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+                        _logger.LogWarning(
+                            ex,
+                            "Metadata rescan ASIN conversion failed for audiobook {AudiobookId} ISBN {Isbn}",
+                            audiobook.Id,
+                            isbnValue);
+                    }
+                }
+            }
+
+            if (providerMetadata == null || string.IsNullOrWhiteSpace(resolvedAsin))
+            {
+                _logger.LogDebug(
+                    "Metadata rescan found no metadata for audiobook {AudiobookId}. TriedAsins={TriedAsins}; TriedIsbns={TriedIsbns}; AsinLookups={AsinLookups}/{AsinCap}; IsbnConversions={IsbnConversions}/{IsbnCap}; Capped={Capped}",
+                    audiobook.Id,
+                    triedAsinDebug,
+                    triedIsbnDebug,
+                    asinLookupAttempts,
+                    MetadataRescanMaxAsinLookupAttempts,
+                    isbnConversionAttempts,
+                    MetadataRescanMaxIsbnConversionAttempts,
+                    asinLookupAttemptCapHit || isbnConversionAttemptCapHit);
+
+                return NotFound(new
+                {
+                    message = "No metadata found using the available identifiers."
+                });
+            }
+
+            var convertedMetadata = metadataConverters.ConvertAudimetaToMetadata(
+                providerMetadata,
+                resolvedAsin,
+                string.IsNullOrWhiteSpace(providerSource) ? "Audible" : providerSource!);
+
+            var legacyIdentifierFieldsTouched = ApplyMetadataRescanPatch(audiobook, convertedMetadata);
+
+            if (!string.IsNullOrWhiteSpace(convertedMetadata.ImageUrl))
+            {
+                audiobook.ImageUrl = await MoveMetadataImageToLibraryStorageAsync(audiobook, convertedMetadata.ImageUrl)
+                    ?? convertedMetadata.ImageUrl;
+            }
+
+            if (legacyIdentifierFieldsTouched)
+            {
+                SyncImportedIdentifiersFromLegacyFields(audiobook);
+            }
+
+            await _dbContext.SaveChangesAsync();
+
+            _logger.LogInformation(
+                "Metadata rescan updated audiobook {AudiobookId} ({Title}) using {Source} ASIN {Asin} region {Region}",
+                audiobook.Id,
+                audiobook.Title,
+                providerSource ?? "unknown",
+                resolvedAsin,
+                resolvedRegion ?? "us");
+
+            return Ok(new
+            {
+                message = "Metadata rescanned successfully",
+                audiobookId = audiobook.Id,
+                source = providerSource,
+                asin = resolvedAsin,
+                region = resolvedRegion
+            });
         }
 
         // NOTE: Do not perform ad-hoc schema changes at runtime. Use EF Core migrations to modify the database schema.
@@ -633,6 +1203,9 @@ namespace Listenarr.Api.Controllers
         [HttpGet("{id}/files-debug")]
         public async Task<IActionResult> GetAudiobookFilesDebug(int id)
         {
+            var gate = SensitiveEndpointAccessGuard.RequireLocalOrAdmin(HttpContext, _logger, "library/files-debug");
+            if (gate != null) return gate;
+
             var files = await _dbContext.AudiobookFiles.Where(f => f.AudiobookId == id).ToListAsync();
             return Ok(files);
         }
@@ -642,6 +1215,9 @@ namespace Listenarr.Api.Controllers
         [HttpGet("debug/json-invalid")]
         public async Task<IActionResult> GetInvalidJsonColumns()
         {
+            var gate = SensitiveEndpointAccessGuard.RequireLocalOrAdmin(HttpContext, _logger, "library/debug/json-invalid");
+            if (gate != null) return gate;
+
             // Helper to test first non-whitespace char
             static bool LooksLikeJson(string? s)
             {
@@ -654,67 +1230,204 @@ namespace Listenarr.Api.Controllers
                 return false;
             }
 
+            static string? TruncateSample(string? s)
+            {
+                if (s == null) return null;
+                return s.Length > 200 ? s.Substring(0, 200) : s;
+            }
+
             var problems = new Dictionary<string, object?>();
 
-            // QualityProfiles: Qualities, PreferredFormats, PreferredLanguages, MustContain, MustNotContain
-            var qps = await _dbContext.QualityProfiles
-                .Select(q => new
+            // Helper to execute a raw SQL query and collect non-JSON samples for specified columns
+            async Task<List<object>> ScanTableColumnsAsync(string table, string keyColumn, params string[] columns)
+            {
+                var results = new List<object>();
+                var conn = _dbContext.Database.GetDbConnection();
+                try
                 {
-                    q.Id,
-                    Qualities = EF.Property<string>(q, "Qualities"),
-                    PreferredFormats = EF.Property<string>(q, "PreferredFormats"),
-                    PreferredLanguages = EF.Property<string>(q, "PreferredLanguages"),
-                    MustContain = EF.Property<string>(q, "MustContain"),
-                    MustNotContain = EF.Property<string>(q, "MustNotContain")
-                })
-                .ToListAsync();
+                    if (conn.State != System.Data.ConnectionState.Open) await conn.OpenAsync();
 
-            var qpProblems = qps.SelectMany(q => new[] {
-                new { Table = "QualityProfiles.Qualities", Id = q.Id, Raw = q.Qualities },
-                new { Table = "QualityProfiles.PreferredFormats", Id = q.Id, Raw = q.PreferredFormats },
-                new { Table = "QualityProfiles.PreferredLanguages", Id = q.Id, Raw = q.PreferredLanguages },
-                new { Table = "QualityProfiles.MustContain", Id = q.Id, Raw = q.MustContain },
-                new { Table = "QualityProfiles.MustNotContain", Id = q.Id, Raw = q.MustNotContain }
-            })
-            .Where(x => !LooksLikeJson(x.Raw))
-            .Select(x => new { x.Table, x.Id, Sample = (x.Raw ?? string.Empty).Substring(0, Math.Min(200, (x.Raw ?? string.Empty).Length)) })
-            .ToList();
+                    using var cmd = conn.CreateCommand();
+                    var cols = string.Join(", ", new[] { keyColumn }.Concat(columns));
+                    cmd.CommandText = $"SELECT {cols} FROM {table}";
+                    using var rdr = await cmd.ExecuteReaderAsync();
+                    while (await rdr.ReadAsync())
+                    {
+                        var id = rdr[keyColumn];
+                        foreach (var col in columns)
+                        {
+                            var raw = rdr[col] == DBNull.Value ? null : rdr[col]?.ToString();
+                            // If it doesn't even look like JSON, flag immediately
+                            if (!LooksLikeJson(raw))
+                            {
+                                results.Add(new { Table = $"{table}.{col}", Id = id, Issue = "NotJson", Sample = TruncateSample(raw) });
+                                continue;
+                            }
 
+                            // Try parsing to get root token info for more specific diagnostics
+                            try
+                            {
+                                if (string.IsNullOrWhiteSpace(raw))
+                                {
+                                    continue;
+                                }
+
+                                using var doc = System.Text.Json.JsonDocument.Parse(raw);
+                                var root = doc.RootElement;
+
+                                // Heuristic checks for known columns
+                                if (table == "QualityProfiles" && col == "Qualities")
+                                {
+                                    // Expect an array of objects
+                                    if (root.ValueKind != System.Text.Json.JsonValueKind.Array)
+                                    {
+                                        results.Add(new { Table = $"{table}.{col}", Id = id, Issue = "ExpectedArray", Sample = TruncateSample(raw) });
+                                    }
+                                    else
+                                    {
+                                        var first = root.EnumerateArray().FirstOrDefault();
+                                        if (first.ValueKind != System.Text.Json.JsonValueKind.Object && !first.Equals(default(System.Text.Json.JsonElement)))
+                                        {
+                                            results.Add(new { Table = $"{table}.{col}", Id = id, Issue = "ArrayNotObjects", Sample = TruncateSample(raw) });
+                                        }
+                                    }
+                                }
+                                else if (table == "Downloads" && col == "Metadata")
+                                {
+                                    // Expect an object/map
+                                    if (root.ValueKind != System.Text.Json.JsonValueKind.Object)
+                                    {
+                                        results.Add(new { Table = $"{table}.{col}", Id = id, Issue = "ExpectedObject", Sample = TruncateSample(raw) });
+                                    }
+                                }
+                            }
+                            catch (System.Text.Json.JsonException)
+                            {
+                                results.Add(new { Table = $"{table}.{col}", Id = id, Issue = "ParseError", Sample = TruncateSample(raw) });
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+                    _logger.LogWarning(ex, "Failed to scan table {Table} for JSON columns", table);
+                }
+                return results;
+            }
+
+            // QualityProfiles
+            var qpProblems = await ScanTableColumnsAsync("QualityProfiles", "Id", "Qualities", "PreferredFormats", "PreferredLanguages", "MustContain", "MustNotContain");
             problems["QualityProfiles"] = qpProblems;
 
             // Downloads.Metadata
-            var downloads = await _dbContext.Downloads
-                .Select(d => new { d.Id, Metadata = EF.Property<string>(d, "Metadata") })
-                .ToListAsync();
-            var dlProblems = downloads.Where(d => !LooksLikeJson(d.Metadata))
-                .Select(d => new { Table = "Downloads.Metadata", d.Id, Sample = (d.Metadata ?? string.Empty).Substring(0, Math.Min(200, (d.Metadata ?? string.Empty).Length)) })
-                .ToList();
+            var dlProblems = await ScanTableColumnsAsync("Downloads", "Id", "Metadata");
             problems["Downloads"] = dlProblems;
 
             // DownloadProcessingJobs.JobData
-            var jobs = await _dbContext.DownloadProcessingJobs
-                .Select(j => new { j.Id, JobData = EF.Property<string>(j, "JobData") })
-                .ToListAsync();
-            var jobProblems = jobs.Where(j => !LooksLikeJson(j.JobData))
-                .Select(j => new { Table = "DownloadProcessingJobs.JobData", j.Id, Sample = (j.JobData ?? string.Empty).Substring(0, Math.Min(200, (j.JobData ?? string.Empty).Length)) })
-                .ToList();
+            var jobProblems = await ScanTableColumnsAsync("DownloadProcessingJobs", "Id", "JobData");
             problems["DownloadProcessingJobs"] = jobProblems;
 
             // ApiConfigurations: HeadersJson, ParametersJson
-            var apis = await _dbContext.ApiConfigurations
-                .Select(a => new { a.Id, Headers = EF.Property<string>(a, "HeadersJson"), Parameters = EF.Property<string>(a, "ParametersJson") })
-                .ToListAsync();
-            var apiProblems = apis.SelectMany(a => new[] {
-                new { Table = "ApiConfigurations.HeadersJson", Id = a.Id, Raw = a.Headers },
-                new { Table = "ApiConfigurations.ParametersJson", Id = a.Id, Raw = a.Parameters }
-            })
-            .Where(x => !LooksLikeJson(x.Raw))
-            .Select(x => new { x.Table, x.Id, Sample = (x.Raw ?? string.Empty).Substring(0, Math.Min(200, (x.Raw ?? string.Empty).Length)) })
-            .ToList();
+            var apiProblems = await ScanTableColumnsAsync("ApiConfigurations", "Id", "HeadersJson", "ParametersJson");
             problems["ApiConfigurations"] = apiProblems;
+
+            // Audiobooks: list-of-string properties mapped via JSON TEXT
+            var abProblems = await ScanTableColumnsAsync("Audiobooks", "Id", "Authors", "Genres", "Tags", "Narrators", "AuthorAsins");
+            problems["Audiobooks"] = abProblems;
+
+            // Expanded schema scan: inspect all tables and TEXT-like columns reported by SQLite
+            var expanded = new List<object>();
+            try
+            {
+                var conn = _dbContext.Database.GetDbConnection();
+                if (conn.State != System.Data.ConnectionState.Open) await conn.OpenAsync();
+
+                using var tblCmd = conn.CreateCommand();
+                tblCmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'";
+                using var tblRdr = await tblCmd.ExecuteReaderAsync();
+                var tables = new List<string>();
+                while (await tblRdr.ReadAsync()) tables.Add(tblRdr.GetString(0));
+
+                foreach (var table in tables)
+                {
+                    // Get columns and their types
+                    using var colCmd = conn.CreateCommand();
+                    colCmd.CommandText = $"PRAGMA table_info('{table}')";
+                    using var colRdr = await colCmd.ExecuteReaderAsync();
+                    var cols = new List<(string name, string type, int pk)>();
+                    while (await colRdr.ReadAsync())
+                    {
+                        var name = colRdr.GetString(colRdr.GetOrdinal("name"));
+                        var type = colRdr.IsDBNull(colRdr.GetOrdinal("type")) ? string.Empty : colRdr.GetString(colRdr.GetOrdinal("type"));
+                        var pk = colRdr.GetInt32(colRdr.GetOrdinal("pk"));
+                        cols.Add((name, type, pk));
+                    }
+
+                    // Identify candidate JSON columns: type contains TEXT or name ends with Json (case-insensitive)
+                    var jsonCols = cols.Where(c => (!string.IsNullOrEmpty(c.type) && c.type.IndexOf("TEXT", StringComparison.OrdinalIgnoreCase) >= 0)
+                                                   || c.name.EndsWith("Json", StringComparison.OrdinalIgnoreCase)
+                                                   || c.name.EndsWith("Metadata", StringComparison.OrdinalIgnoreCase)
+                                                   || c.name.Equals("Qualities", StringComparison.OrdinalIgnoreCase)
+                                                   || c.name.Equals("JobData", StringComparison.OrdinalIgnoreCase))
+                                        .Select(c => c.name).ToList();
+
+                    if (!jsonCols.Any()) continue;
+
+                    // Choose a key column (primary key if present, else first column)
+                    var keyCol = cols.FirstOrDefault(c => c.pk > 0).name ?? cols.First().name;
+
+                    using var scanCmd = conn.CreateCommand();
+                    var colsSql = string.Join(", ", new[] { keyCol }.Concat(jsonCols).Select(c => "\"" + c + "\""));
+                    scanCmd.CommandText = $"SELECT {colsSql} FROM \"{table}\"";
+                    try
+                    {
+                        using var scanRdr = await scanCmd.ExecuteReaderAsync();
+                        while (await scanRdr.ReadAsync())
+                        {
+                            var id = scanRdr[keyCol];
+                            foreach (var col in jsonCols)
+                            {
+                                var raw = scanRdr[col] == DBNull.Value ? null : scanRdr[col]?.ToString();
+                                if (!LooksLikeJson(raw))
+                                {
+                                    expanded.Add(new { Table = table + "." + col, Id = id, Issue = "NotJson", Sample = TruncateSample(raw) });
+                                    continue;
+                                }
+
+                                if (!string.IsNullOrWhiteSpace(raw))
+                                {
+                                    try
+                                    {
+                                        using var doc = System.Text.Json.JsonDocument.Parse(raw);
+                                        var root = doc.RootElement;
+                                        // heuristic: if root is Number, flag specifically since EF error mentioned 'Number'
+                                        if (root.ValueKind == System.Text.Json.JsonValueKind.Number)
+                                        {
+                                            expanded.Add(new { Table = table + "." + col, Id = id, Issue = "NumericRoot", Sample = raw });
+                                        }
+                                    }
+                                    catch (System.Text.Json.JsonException je)
+                                    {
+                                        expanded.Add(new { Table = table + "." + col, Id = id, Issue = "ParseError", Sample = TruncateSample(raw), Error = je.Message });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+                        expanded.Add(new { Table = table, Id = "<query-failed>", Issue = "QueryError", Sample = ex.Message });
+                    }
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+                _logger.LogWarning(ex, "Expanded schema scan failed");
+            }
+
+            problems["SchemaScan"] = expanded;
 
             return Ok(problems);
         }
+
+        // Diagnostics endpoints removed - cleanup completed
 
         [HttpPut("{id}")]
         public async Task<IActionResult> UpdateAudiobook(int id, [FromBody] Audiobook updatedAudiobook)
@@ -724,6 +1437,8 @@ namespace Listenarr.Api.Controllers
             {
                 return NotFound(new { message = "Audiobook not found" });
             }
+
+            var legacyIdentifierFieldsTouched = false;
 
             // Only update non-null properties to support partial updates
             if (updatedAudiobook.Title != null) existingAudiobook.Title = updatedAudiobook.Title;
@@ -737,9 +1452,21 @@ namespace Listenarr.Api.Controllers
             if (updatedAudiobook.Genres != null) existingAudiobook.Genres = updatedAudiobook.Genres;
             if (updatedAudiobook.Tags != null) existingAudiobook.Tags = updatedAudiobook.Tags;
             if (updatedAudiobook.Narrators != null) existingAudiobook.Narrators = updatedAudiobook.Narrators;
-            if (updatedAudiobook.Isbn != null) existingAudiobook.Isbn = updatedAudiobook.Isbn;
-            if (updatedAudiobook.Asin != null) existingAudiobook.Asin = updatedAudiobook.Asin;
-            if (updatedAudiobook.OpenLibraryId != null) existingAudiobook.OpenLibraryId = updatedAudiobook.OpenLibraryId;
+            if (updatedAudiobook.Isbn != null)
+            {
+                existingAudiobook.Isbn = updatedAudiobook.Isbn;
+                legacyIdentifierFieldsTouched = true;
+            }
+            if (updatedAudiobook.Asin != null)
+            {
+                existingAudiobook.Asin = updatedAudiobook.Asin;
+                legacyIdentifierFieldsTouched = true;
+            }
+            if (updatedAudiobook.OpenLibraryId != null)
+            {
+                existingAudiobook.OpenLibraryId = updatedAudiobook.OpenLibraryId;
+                legacyIdentifierFieldsTouched = true;
+            }
             if (updatedAudiobook.Publisher != null) existingAudiobook.Publisher = updatedAudiobook.Publisher;
             if (updatedAudiobook.Language != null) existingAudiobook.Language = updatedAudiobook.Language;
             if (updatedAudiobook.Runtime != null) existingAudiobook.Runtime = updatedAudiobook.Runtime;
@@ -792,6 +1519,11 @@ namespace Listenarr.Api.Controllers
                 _logger.LogInformation("Updated BasePath for audiobook '{Title}' to: {BasePath}", LogRedaction.SanitizeText(existingAudiobook.Title), LogRedaction.SanitizeFilePath(updatedAudiobook.BasePath));
             }
 
+            if (legacyIdentifierFieldsTouched)
+            {
+                SyncImportedIdentifiersFromLegacyFields(existingAudiobook);
+            }
+
             await _repo.UpdateAsync(existingAudiobook);
 
             _logger.LogInformation("Updated audiobook '{Title}' (ID: {Id})", existingAudiobook.Title, id);
@@ -817,7 +1549,7 @@ namespace Listenarr.Api.Controllers
                     var imagePath = await _imageCacheService.GetCachedImagePathAsync(audiobook.Asin);
                     if (imagePath != null)
                     {
-                        var fullPath = Path.Combine(Directory.GetCurrentDirectory(), imagePath);
+                        var fullPath = ResolvePathWithOptionalBase(Directory.GetCurrentDirectory(), imagePath);
                         if (System.IO.File.Exists(fullPath))
                         {
                             System.IO.File.Delete(fullPath);
@@ -847,7 +1579,7 @@ namespace Listenarr.Api.Controllers
                                 var imagePath = await _imageCacheService.GetCachedImagePathAsync(identifier);
                                 if (!string.IsNullOrEmpty(imagePath))
                                 {
-                                    var fullPath = Path.Combine(Directory.GetCurrentDirectory(), imagePath);
+                                    var fullPath = ResolvePathWithOptionalBase(Directory.GetCurrentDirectory(), imagePath);
                                     if (System.IO.File.Exists(fullPath))
                                     {
                                         System.IO.File.Delete(fullPath);
@@ -861,14 +1593,12 @@ namespace Listenarr.Api.Controllers
                             }
                         }
                     }
-                    catch (Exception ex)
-                    {
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                         _logger.LogWarning(ex, "Failed to delete cached image based on stored ImageUrl for audiobook id {Id}", audiobook.Id);
                     }
                 }
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogWarning(ex, "Failed to delete cached image for audiobook id {Id}", audiobook.Id);
                 // Continue with deletion even if image cleanup fails
             }
@@ -919,7 +1649,7 @@ namespace Listenarr.Api.Controllers
                                     var imagePath = await _imageCacheService.GetCachedImagePathAsync(audiobook.Asin);
                                     if (imagePath != null)
                                     {
-                                        var fullPath = Path.Combine(Directory.GetCurrentDirectory(), imagePath);
+                                        var fullPath = ResolvePathWithOptionalBase(Directory.GetCurrentDirectory(), imagePath);
                                         if (System.IO.File.Exists(fullPath))
                                         {
                                             System.IO.File.Delete(fullPath);
@@ -947,7 +1677,7 @@ namespace Listenarr.Api.Controllers
                                                 var imagePath = await _imageCacheService.GetCachedImagePathAsync(identifier);
                                                 if (!string.IsNullOrEmpty(imagePath))
                                                 {
-                                                    var fullPath = Path.Combine(Directory.GetCurrentDirectory(), imagePath);
+                                                    var fullPath = ResolvePathWithOptionalBase(Directory.GetCurrentDirectory(), imagePath);
                                                     if (System.IO.File.Exists(fullPath))
                                                     {
                                                         System.IO.File.Delete(fullPath);
@@ -962,14 +1692,12 @@ namespace Listenarr.Api.Controllers
                                             }
                                         }
                                     }
-                                    catch (Exception ex)
-                                    {
+                                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                                         _logger.LogWarning(ex, "Failed to delete cached image based on stored ImageUrl for audiobook id {Id}", audiobook.Id);
                                     }
                                 }
                             }
-                            catch (Exception ex)
-                            {
+                            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                                 _logger.LogWarning(ex, "Failed to delete cached image for audiobook id {Id}", audiobook.Id);
                                 // Continue with deletion even if image cleanup fails
                             }
@@ -999,8 +1727,7 @@ namespace Listenarr.Api.Controllers
                                 errors.Add($"Failed to delete audiobook with ID {id}");
                             }
                         }
-                        catch (Exception ex)
-                        {
+                        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                             _logger.LogError(ex, "Error deleting audiobook with ID {Id}", id);
                             errors.Add($"Error deleting audiobook with ID {id}: {ex.Message}");
                         }
@@ -1017,8 +1744,7 @@ namespace Listenarr.Api.Controllers
                         return BadRequest(new { message = "No audiobooks were successfully deleted", errors });
                     }
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     await transaction.RollbackAsync();
                     _logger.LogError(ex, "Transaction failed during bulk delete operation");
                     return StatusCode(500, new { message = "Bulk delete operation failed", error = ex.Message });
@@ -1069,8 +1795,7 @@ namespace Listenarr.Api.Controllers
                 var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
                 settings = await configService.GetApplicationSettingsAsync();
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogWarning(ex, "Failed to load application settings while performing bulk update");
             }
 
@@ -1122,8 +1847,7 @@ namespace Listenarr.Api.Controllers
                                 Timestamp = DateTime.UtcNow
                             });
                         }
-                        catch (Exception ex)
-                        {
+                        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                             entryErrors.Add($"Invalid monitored value: {ex.Message}");
                         }
                     }
@@ -1157,8 +1881,7 @@ namespace Listenarr.Api.Controllers
                                 Timestamp = DateTime.UtcNow
                             });
                         }
-                        catch (Exception ex)
-                        {
+                        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                             entryErrors.Add($"Invalid qualityProfileId value: {ex.Message}");
                         }
                     }
@@ -1182,7 +1905,9 @@ namespace Listenarr.Api.Controllers
                             if (!string.IsNullOrWhiteSpace(rootPath))
                             {
                                 // Use configured naming pattern to compute full base directory for this audiobook
-                                var fileNamingPattern = settings?.FileNamingPattern ?? string.Empty;
+                                var fileNamingPattern = !string.IsNullOrWhiteSpace(settings?.FolderNamingPattern)
+                                    ? settings!.FolderNamingPattern
+                                    : settings?.FileNamingPattern ?? string.Empty;
                                 var newBase = ComputeAudiobookBaseDirectoryFromPattern(audiobook, rootPath, fileNamingPattern);
 
                                 try
@@ -1206,14 +1931,12 @@ namespace Listenarr.Api.Controllers
                                         Timestamp = DateTime.UtcNow
                                     });
                                 }
-                                catch (Exception ex)
-                                {
+                                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                                     entryErrors.Add($"Failed to apply root folder for audiobook {id}: {ex.Message}");
                                 }
                             }
                         }
-                        catch (Exception ex)
-                        {
+                        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                             entryErrors.Add($"Invalid rootFolder value: {ex.Message}");
                         }
                     }
@@ -1227,8 +1950,7 @@ namespace Listenarr.Api.Controllers
                             await _dbContext.SaveChangesAsync();
                             success = true;
                         }
-                        catch (Exception ex)
-                        {
+                        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                             entryErrors.Add($"Failed to save changes for audiobook {id}: {ex.Message}");
                         }
                     }
@@ -1237,8 +1959,7 @@ namespace Listenarr.Api.Controllers
                         entryErrors.Add("No valid updates provided for this audiobook");
                     }
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     entryErrors.Add($"Unhandled error: {ex.Message}");
                 }
 
@@ -1274,15 +1995,13 @@ namespace Listenarr.Api.Controllers
                         var job = new { jobId = jobId.ToString(), audiobookId = id, status = "Queued", enqueuedAt = DateTime.UtcNow };
                         await hub.Clients.All.SendAsync("ScanJobUpdate", job);
                     }
-                    catch (Exception ex)
-                    {
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                         _logger.LogWarning(ex, "Failed to broadcast ScanJobUpdate for job {JobId}", jobId);
                     }
 
                     return Accepted(new { message = "Scan enqueued", jobId });
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogError(ex, "Failed to enqueue scan job for audiobook {AudiobookId}", id);
                     return StatusCode(500, new { message = "Failed to enqueue scan job", error = ex.Message });
                 }
@@ -1311,8 +2030,7 @@ namespace Listenarr.Api.Controllers
                     {
                         requestedFull = Path.GetFullPath(request.Path!);
                     }
-                    catch (Exception ex)
-                    {
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                         _logger.LogWarning(ex, "Invalid requested scan path provided: {Path}", request.Path);
                         return BadRequest(new { message = "Invalid scan path", path = request.Path });
                     }
@@ -1324,13 +2042,35 @@ namespace Listenarr.Api.Controllers
                         var roots = await _rootFolderService.GetAllAsync();
                         foreach (var r in roots)
                         {
-                            try { allowedRoots.Add(Path.GetFullPath(r.Path)); } catch { }
+                            try
+                            {
+                                allowedRoots.Add(Path.GetFullPath(r.Path));
+                            }
+                            catch (Exception rootPathEx) when (
+                                rootPathEx is ArgumentException
+                                || rootPathEx is NotSupportedException
+                                || rootPathEx is PathTooLongException
+                                || rootPathEx is System.Security.SecurityException)
+                            {
+                                _logger.LogDebug(rootPathEx, "Skipping invalid root folder path during scan allowlist build: {RootPath}", r.Path);
+                            }
                         }
                     }
 
                     if (!string.IsNullOrEmpty(settings?.OutputPath))
                     {
-                        try { allowedRoots.Add(Path.GetFullPath(settings.OutputPath)); } catch { }
+                        try
+                        {
+                            allowedRoots.Add(Path.GetFullPath(settings.OutputPath));
+                        }
+                        catch (Exception outputPathEx) when (
+                            outputPathEx is ArgumentException
+                            || outputPathEx is NotSupportedException
+                            || outputPathEx is PathTooLongException
+                            || outputPathEx is System.Security.SecurityException)
+                        {
+                            _logger.LogDebug(outputPathEx, "Skipping invalid output path during scan allowlist build: {OutputPath}", settings.OutputPath);
+                        }
                     }
 
                     if (allowedRoots.Count == 0)
@@ -1358,8 +2098,7 @@ namespace Listenarr.Api.Controllers
                     scanRoot = !string.IsNullOrEmpty(settings?.OutputPath) ? Path.GetFullPath(settings.OutputPath) : null;
                 }
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogWarning(ex, "Failed to read application settings for scan; cannot validate request path without configured roots");
                 // If BasePath exists prefer it; otherwise, we cannot determine a safe scan root
                 if (!string.IsNullOrEmpty(audiobook.BasePath))
@@ -1419,8 +2158,7 @@ namespace Listenarr.Api.Controllers
                                     continue;
                                 }
                             }
-                            catch (Exception innerFileEx)
-                            {
+                            catch (Exception innerFileEx) when (innerFileEx is not OperationCanceledException && innerFileEx is not OutOfMemoryException && innerFileEx is not StackOverflowException) {
                                 _logger.LogDebug(innerFileEx, "Skipped file while scanning {Dir}", normalizedDir);
                                 continue;
                             }
@@ -1441,15 +2179,13 @@ namespace Listenarr.Api.Controllers
                         _logger.LogWarning(uaEx, "Access denied while enumerating directory during scan: {Dir}", dir);
                         continue;
                     }
-                    catch (Exception ex)
-                    {
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                         _logger.LogWarning(ex, "Unexpected error while enumerating directory during scan: {Dir}", dir);
                         continue;
                     }
                 }
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error while scanning filesystem for audiobook files");
                 return StatusCode(500, new { message = "Error scanning filesystem", error = ex.Message });
             }
@@ -1490,8 +2226,7 @@ namespace Listenarr.Api.Controllers
                         {
                             meta = await metadataService.ExtractFileMetadataAsync(filePath);
                         }
-                        catch (Exception mex)
-                        {
+                        catch (Exception mex) when (mex is not OperationCanceledException && mex is not OutOfMemoryException && mex is not StackOverflowException) {
                             _logger.LogWarning(mex, "Failed to extract metadata for file {File}", filePath);
                         }
 
@@ -1513,8 +2248,7 @@ namespace Listenarr.Api.Controllers
                         db.AudiobookFiles.Add(fileRecord);
                         created.Add(fileRecord);
                     }
-                    catch (Exception ex)
-                    {
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                         _logger.LogWarning(ex, "Failed to create AudiobookFile for {File}", filePath);
                     }
                 }
@@ -1591,8 +2325,7 @@ namespace Listenarr.Api.Controllers
                                 };
                                 db.History.Add(historyEntry);
                             }
-                            catch (Exception ex)
-                            {
+                            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                                 _logger.LogWarning(ex, "Failed to remove AudiobookFile Id={Id} Path={Path}", rem.Id, rem.Path);
                             }
                         }
@@ -1600,8 +2333,7 @@ namespace Listenarr.Api.Controllers
                         await db.SaveChangesAsync();
                     }
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogWarning(ex, "Failed to reconcile audiobook files after scan for audiobook {AudiobookId}", audiobook.Id);
                 }
 
@@ -1632,8 +2364,7 @@ namespace Listenarr.Api.Controllers
                                         created.Add(new AudiobookFile { Path = audiobook.FilePath }); // Add to created list for response
                                     }
                                 }
-                                catch (Exception ex)
-                                {
+                                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                                     _logger.LogWarning(ex, "Failed to migrate legacy filePath for audiobook {AudiobookId}: {Path}", audiobook.Id, audiobook.FilePath);
                                 }
                             }
@@ -1670,8 +2401,7 @@ namespace Listenarr.Api.Controllers
                         await db.SaveChangesAsync();
                     }
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogWarning(ex, "Failed to handle legacy filePath migration for audiobook {AudiobookId}", audiobook.Id);
                 }
 
@@ -1701,8 +2431,7 @@ namespace Listenarr.Api.Controllers
                         };
                         await _notificationService.SendNotificationAsync("book-available", availableData, settings.WebhookUrl, settings.EnabledNotificationTriggers);
                     }
-                    catch (Exception ex)
-                    {
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                         _logger.LogWarning(ex, "Failed to send book-available notification for audiobook {AudiobookId}", audiobook.Id);
                     }
                 }
@@ -1764,8 +2493,7 @@ namespace Listenarr.Api.Controllers
                         _logger.LogInformation("Updated BasePath for audiobook {AudiobookId} without moving files: {BasePath}", id, final);
                         return Ok(new { message = "Destination updated" });
                     }
-                    catch (Exception ex)
-                    {
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                         _logger.LogError(ex, "Failed to update BasePath for audiobook {AudiobookId}", id);
                         return StatusCode(500, new { message = "Failed to update BasePath", error = ex.Message });
                     }
@@ -1799,8 +2527,7 @@ namespace Listenarr.Api.Controllers
                 {
                     if (!Directory.Exists(targetParent)) Directory.CreateDirectory(targetParent);
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogWarning(ex, "Failed to access or create target parent {TargetParent}", targetParent);
                     return BadRequest(new { message = "Target parent path is not writable or unavailable" });
                 }
@@ -1815,9 +2542,14 @@ namespace Listenarr.Api.Controllers
                         return BadRequest(new { message = "Source and target paths are identical; nothing to move." });
                     }
                 }
-                catch
+                catch (Exception normalizeEx) when (
+                    normalizeEx is ArgumentException
+                    || normalizeEx is NotSupportedException
+                    || normalizeEx is PathTooLongException
+                    || normalizeEx is System.Security.SecurityException)
                 {
                     // Ignore errors normalizing paths; background worker will fail if invalid
+                    _logger.LogDebug(normalizeEx, "Unable to normalize move paths for audiobook {AudiobookId}", id);
                 }
 
                 var jobId = await _moveQueueService.EnqueueMoveAsync(id, final, sourcePath);
@@ -1830,15 +2562,13 @@ namespace Listenarr.Api.Controllers
                     var job = new { jobId = jobId.ToString(), audiobookId = id, status = "Queued", enqueuedAt = DateTime.UtcNow };
                     await hub.Clients.All.SendAsync("MoveJobUpdate", job);
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogWarning(ex, "Failed to broadcast MoveJobUpdate for job {JobId}", jobId);
                 }
 
                 return Accepted(new { message = "Move enqueued", jobId });
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Failed to enqueue move job for audiobook {AudiobookId}", id);
                 return StatusCode(500, new { message = "Failed to enqueue move job", error = ex.Message });
             }
@@ -1876,8 +2606,7 @@ namespace Listenarr.Api.Controllers
                 var job = new { jobId = newJobId.ToString(), status = "Queued", enqueuedAt = DateTime.UtcNow };
                 await hub.Clients.All.SendAsync("MoveJobUpdate", job);
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogWarning(ex, "Failed to broadcast MoveJobUpdate for requeued job {JobId}", newJobId);
             }
 
@@ -1903,8 +2632,7 @@ namespace Listenarr.Api.Controllers
                 var job = new { jobId = newJobId.ToString(), status = "Queued", enqueuedAt = DateTime.UtcNow };
                 await hub.Clients.All.SendAsync("ScanJobUpdate", job);
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogWarning(ex, "Failed to broadcast ScanJobUpdate for requeued job {JobId}", newJobId);
             }
 
@@ -1952,8 +2680,7 @@ namespace Listenarr.Api.Controllers
                 // Include a structured payload so clients can distinguish manual vs automatic searches
                 await hub.Clients.All.SendCoreAsync("SearchProgress", new object[] { new { message = $"Manual search query: {searchQuery}", details = new { rawCount = searchResults.Count, rawSamples = rawSummaries }, type = "interactive", audiobookId = audiobook.Id } });
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogDebug(ex, "Failed to broadcast raw search results summary for manual search audiobook {Id}", audiobook.Id);
             }
 
@@ -2018,8 +2745,7 @@ namespace Listenarr.Api.Controllers
                 _logger.LogInformation("Queued download for audiobook '{Title}': {ResultTitle} (Score: {Score})",
                     audiobook.Title, topResult.SearchResult.Title, topResult.TotalScore);
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Failed to queue download for audiobook '{Title}': {ResultTitle}",
                     audiobook.Title, topResult.SearchResult.Title);
             }
@@ -2315,9 +3041,13 @@ namespace Listenarr.Api.Controllers
                     // Fall back to raw string
                     return je.GetRawText();
                 }
-                catch
+                catch (Exception jsonElementConvertEx) when (
+                    jsonElementConvertEx is InvalidOperationException
+                    || jsonElementConvertEx is FormatException
+                    || jsonElementConvertEx is OverflowException)
                 {
                     // continue to other conversion attempts
+                                    System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
                 }
             }
 
@@ -2341,7 +3071,11 @@ namespace Listenarr.Api.Controllers
             {
                 return Convert.ChangeType(value, underlying);
             }
-            catch
+            catch (Exception changeTypeEx) when (
+                changeTypeEx is InvalidCastException
+                || changeTypeEx is FormatException
+                || changeTypeEx is OverflowException
+                || changeTypeEx is ArgumentException)
             {
                 // Final fallback: attempt parse from string
                 var str = value.ToString();
@@ -2428,7 +3162,7 @@ namespace Listenarr.Api.Controllers
             var relative = _fileNamingService.ApplyNamingPattern(directoryPattern, variables, false);
 
             // Combine with root path
-            var combined = string.IsNullOrWhiteSpace(rootPath) ? relative : Path.Combine(rootPath, relative);
+            var combined = ResolvePathWithOptionalBase(rootPath, relative);
 
             return combined;
         }
@@ -2472,9 +3206,15 @@ namespace Listenarr.Api.Controllers
 
                     currentPath = parent;
                 }
-                catch
+                catch (Exception traversalEx) when (
+                    traversalEx is IOException
+                    || traversalEx is UnauthorizedAccessException
+                    || traversalEx is System.Security.SecurityException
+                    || traversalEx is ArgumentException
+                    || traversalEx is NotSupportedException)
                 {
                     // If we can't access the directory, stop here
+                    _logger.LogDebug(traversalEx, "Stopping common-base-path ascent at {Path} due to traversal error", currentPath);
                     break;
                 }
             }
@@ -2557,6 +3297,523 @@ namespace Listenarr.Api.Controllers
             return BitConverter.ToString(hash).Replace("-", "").Substring(0, 16).ToLowerInvariant();
         }
 
+        public sealed class AudiobookIdentifierWriteItem
+        {
+            public AudiobookExternalIdentifierType Type { get; set; }
+            public string Value { get; set; } = string.Empty;
+            public string? Region { get; set; }
+            public bool IsPrimary { get; set; }
+            public AudiobookExternalIdentifierSource? Source { get; set; }
+        }
+
+        public sealed class ReplaceAudiobookIdentifiersRequest
+        {
+            public List<AudiobookIdentifierWriteItem> Identifiers { get; set; } = new();
+        }
+
+        public sealed class AudiobookIdentifierResponseItem
+        {
+            public int Id { get; set; }
+            public AudiobookExternalIdentifierType Type { get; set; }
+            public string Value { get; set; } = string.Empty;
+            public string ValueNormalized { get; set; } = string.Empty;
+            public string? Region { get; set; }
+            public bool IsPrimary { get; set; }
+            public AudiobookExternalIdentifierSource Source { get; set; }
+            public DateTime CreatedAt { get; set; }
+            public DateTime UpdatedAt { get; set; }
+        }
+
+        private static AudiobookIdentifierResponseItem ToIdentifierResponse(AudiobookExternalIdentifier identifier)
+        {
+            return new AudiobookIdentifierResponseItem
+            {
+                Id = identifier.Id,
+                Type = identifier.Type,
+                Value = string.IsNullOrWhiteSpace(identifier.ValueRaw) ? identifier.ValueNormalized : identifier.ValueRaw,
+                ValueNormalized = identifier.ValueNormalized,
+                Region = identifier.Region,
+                IsPrimary = identifier.IsPrimary,
+                Source = identifier.Source,
+                CreatedAt = identifier.CreatedAt,
+                UpdatedAt = identifier.UpdatedAt
+            };
+        }
+
+        private static List<AudiobookExternalIdentifier> OrderIdentifiers(IEnumerable<AudiobookExternalIdentifier>? identifiers)
+        {
+            return (identifiers ?? Enumerable.Empty<AudiobookExternalIdentifier>())
+                .OrderBy(i => i.Type)
+                .ThenByDescending(i => i.IsPrimary)
+                .ThenBy(i => i.Source)
+                .ThenBy(i => i.ValueNormalized)
+                .ToList();
+        }
+
+        private static List<AudiobookExternalIdentifier> BuildLegacyBackfillIdentifiers(Audiobook audiobook, AudiobookExternalIdentifierSource source)
+        {
+            var now = DateTime.UtcNow;
+            var result = new List<AudiobookExternalIdentifier>();
+
+            if (!string.IsNullOrWhiteSpace(audiobook.Asin) &&
+                AudiobookIdentifierNormalizer.TryNormalize(AudiobookExternalIdentifierType.Asin, audiobook.Asin, out var normalizedAsin, out _))
+            {
+                result.Add(new AudiobookExternalIdentifier
+                {
+                    Type = AudiobookExternalIdentifierType.Asin,
+                    ValueRaw = AudiobookIdentifierNormalizer.NormalizeRawValueForStorage(audiobook.Asin),
+                    ValueNormalized = normalizedAsin,
+                    Region = null,
+                    IsPrimary = true,
+                    Source = source,
+                    CreatedAt = now,
+                    UpdatedAt = now
+                });
+            }
+
+            var seenIsbns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var isbn in audiobook.Isbn ?? new List<string>())
+            {
+                if (!AudiobookIdentifierNormalizer.TryNormalize(AudiobookExternalIdentifierType.Isbn, isbn, out var normalizedIsbn, out _))
+                {
+                    continue;
+                }
+
+                if (!seenIsbns.Add(normalizedIsbn)) continue;
+
+                result.Add(new AudiobookExternalIdentifier
+                {
+                    Type = AudiobookExternalIdentifierType.Isbn,
+                    ValueRaw = AudiobookIdentifierNormalizer.NormalizeRawValueForStorage(isbn),
+                    ValueNormalized = normalizedIsbn,
+                    Region = null,
+                    IsPrimary = false,
+                    Source = source,
+                    CreatedAt = now,
+                    UpdatedAt = now
+                });
+            }
+
+            if (!string.IsNullOrWhiteSpace(audiobook.OpenLibraryId) &&
+                AudiobookIdentifierNormalizer.TryNormalize(AudiobookExternalIdentifierType.OpenLibraryId, audiobook.OpenLibraryId, out var normalizedOlid, out _))
+            {
+                result.Add(new AudiobookExternalIdentifier
+                {
+                    Type = AudiobookExternalIdentifierType.OpenLibraryId,
+                    ValueRaw = AudiobookIdentifierNormalizer.NormalizeRawValueForStorage(audiobook.OpenLibraryId),
+                    ValueNormalized = normalizedOlid,
+                    Region = null,
+                    IsPrimary = true,
+                    Source = source,
+                    CreatedAt = now,
+                    UpdatedAt = now
+                });
+            }
+
+            return result;
+        }
+
+        private static string IdentifierTypeValueKey(AudiobookExternalIdentifier item)
+        {
+            return $"{item.Type}|{item.ValueNormalized}";
+        }
+
+        private static string IdentifierFullKey(AudiobookExternalIdentifier item)
+        {
+            return $"{item.Type}|{item.ValueNormalized}|{item.Region ?? string.Empty}";
+        }
+
+        private static string IdentifierFullSourceKey(AudiobookExternalIdentifier item)
+        {
+            return IdentifierFullSourceKey(item.Type, item.ValueNormalized, item.Region, item.Source);
+        }
+
+        private static string IdentifierFullSourceKey(
+            AudiobookExternalIdentifierType type,
+            string? valueNormalized,
+            string? region,
+            AudiobookExternalIdentifierSource source)
+        {
+            return $"{type}|{valueNormalized ?? string.Empty}|{region ?? string.Empty}|{source}";
+        }
+
+        private static List<AudiobookExternalIdentifier> GetEffectiveIdentifiers(Audiobook audiobook)
+        {
+            var merged = new List<AudiobookExternalIdentifier>();
+            var seenFull = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var seenTypeValue = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            void AddIfNew(AudiobookExternalIdentifier item)
+            {
+                if (string.IsNullOrWhiteSpace(item.ValueNormalized)) return;
+
+                var typeValueKey = IdentifierTypeValueKey(item);
+                if (item.Source == AudiobookExternalIdentifierSource.Imported && seenTypeValue.Contains(typeValueKey))
+                {
+                    // Imported identifiers are compatibility aliases; suppress them when a canonical
+                    // identifier with the same normalized value already exists (even if region differs).
+                    return;
+                }
+
+                var fullKey = IdentifierFullKey(item);
+                if (!seenFull.Add(fullKey)) return;
+                merged.Add(item);
+                seenTypeValue.Add(typeValueKey);
+            }
+
+            foreach (var existing in (audiobook.ExternalIdentifiers ?? new List<AudiobookExternalIdentifier>())
+                .OrderBy(i => i.Type)
+                .ThenByDescending(i => i.IsPrimary)
+                .ThenBy(i => i.Source == AudiobookExternalIdentifierSource.Imported ? 1 : 0)
+                .ThenBy(i => i.Source)
+                .ThenBy(i => i.ValueNormalized))
+            {
+                AddIfNew(existing);
+            }
+
+            foreach (var legacy in BuildLegacyBackfillIdentifiers(audiobook, AudiobookExternalIdentifierSource.Imported))
+            {
+                AddIfNew(legacy);
+            }
+
+            return OrderIdentifiers(merged);
+        }
+
+        private static void SyncLegacyFieldsFromIdentifiers(Audiobook audiobook)
+        {
+            var identifiers = OrderIdentifiers(audiobook.ExternalIdentifiers);
+
+            var primaryAsin = identifiers
+                .Where(i => i.Type == AudiobookExternalIdentifierType.Asin)
+                .OrderByDescending(i => i.IsPrimary)
+                .ThenBy(i => i.Source)
+                .FirstOrDefault();
+            audiobook.Asin = primaryAsin?.ValueNormalized;
+
+            audiobook.Isbn = identifiers
+                .Where(i => i.Type == AudiobookExternalIdentifierType.Isbn)
+                .Select(i => i.ValueNormalized)
+                .Where(v => !string.IsNullOrWhiteSpace(v))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var primaryOlid = identifiers
+                .Where(i => i.Type == AudiobookExternalIdentifierType.OpenLibraryId)
+                .OrderByDescending(i => i.IsPrimary)
+                .ThenBy(i => i.Source)
+                .FirstOrDefault();
+            audiobook.OpenLibraryId = primaryOlid?.ValueNormalized;
+        }
+
+        private static void SyncImportedIdentifiersFromLegacyFields(Audiobook audiobook)
+        {
+            audiobook.ExternalIdentifiers ??= new List<AudiobookExternalIdentifier>();
+
+            audiobook.ExternalIdentifiers = audiobook.ExternalIdentifiers
+                .Where(i => i.Source != AudiobookExternalIdentifierSource.Imported)
+                .ToList();
+
+            var existingTypeValueKeys = new HashSet<string>(
+                audiobook.ExternalIdentifiers
+                    .Where(i => !string.IsNullOrWhiteSpace(i.ValueNormalized))
+                    .Select(IdentifierTypeValueKey),
+                StringComparer.OrdinalIgnoreCase);
+            var seenImportedFullKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            var imported = BuildLegacyBackfillIdentifiers(audiobook, AudiobookExternalIdentifierSource.Imported);
+            foreach (var item in imported.Where(item =>
+                         !string.IsNullOrWhiteSpace(item.ValueNormalized) &&
+                         !existingTypeValueKeys.Contains(IdentifierTypeValueKey(item)) &&
+                         seenImportedFullKeys.Add(IdentifierFullKey(item))))
+            {
+                audiobook.ExternalIdentifiers.Add(item);
+            }
+        }
+
+        private static IEnumerable<string> EnumerateMetadataRescanRegions(string? preferredRegion)
+        {
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            var ordered = new List<string>();
+            void AddOrdered(string? region)
+            {
+                var normalized = AudiobookIdentifierNormalizer.NormalizeRegion(region);
+                if (string.IsNullOrWhiteSpace(normalized)) return;
+                if (seen.Add(normalized)) ordered.Add(normalized);
+            }
+
+            AddOrdered(preferredRegion);
+            AddOrdered("us");
+            AddOrdered("uk");
+
+            if (ordered.Count == 0)
+            {
+                ordered.Add("us");
+            }
+
+            return ordered;
+        }
+
+        private static bool TryExtractMetadataLookupResult(
+            object? rawResult,
+            out AudimetaBookResponse? metadata,
+            out string? source)
+        {
+            metadata = null;
+            source = null;
+            if (rawResult == null) return false;
+
+            if (rawResult is AudimetaBookResponse direct)
+            {
+                metadata = direct;
+                return true;
+            }
+
+            var type = rawResult.GetType();
+            var metadataProp = type.GetProperty("metadata", BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+            if (metadataProp != null)
+            {
+                var metadataValue = metadataProp.GetValue(rawResult);
+                if (metadataValue is AudimetaBookResponse audimeta)
+                {
+                    metadata = audimeta;
+                }
+                else if (metadataValue is JsonElement metadataElement && metadataElement.ValueKind == JsonValueKind.Object)
+                {
+                    try
+                    {
+                        metadata = metadataElement.Deserialize<AudimetaBookResponse>();
+                    }
+                    catch (JsonException)
+                    {
+                        metadata = null;
+                    }
+                    catch (NotSupportedException)
+                    {
+                        metadata = null;
+                    }
+                }
+            }
+
+            var sourceProp = type.GetProperty("source", BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+            if (sourceProp != null)
+            {
+                source = sourceProp.GetValue(rawResult)?.ToString();
+            }
+
+            return metadata != null;
+        }
+
+        private static bool ApplyMetadataRescanPatch(Audiobook audiobook, AudibleBookMetadata metadata)
+        {
+            var legacyIdentifierFieldsTouched = false;
+
+            if (!string.IsNullOrWhiteSpace(metadata.Title)) audiobook.Title = metadata.Title;
+            if (!string.IsNullOrWhiteSpace(metadata.Subtitle)) audiobook.Subtitle = metadata.Subtitle;
+            if (!string.IsNullOrWhiteSpace(metadata.PublishYear)) audiobook.PublishYear = metadata.PublishYear;
+            if (!string.IsNullOrWhiteSpace(metadata.PublishedDate)) audiobook.PublishedDate = metadata.PublishedDate;
+            if (!string.IsNullOrWhiteSpace(metadata.Series)) audiobook.Series = metadata.Series;
+            if (!string.IsNullOrWhiteSpace(metadata.SeriesNumber)) audiobook.SeriesNumber = metadata.SeriesNumber;
+            if (!string.IsNullOrWhiteSpace(metadata.Description)) audiobook.Description = metadata.Description;
+            if (!string.IsNullOrWhiteSpace(metadata.Publisher)) audiobook.Publisher = metadata.Publisher;
+            if (!string.IsNullOrWhiteSpace(metadata.Language)) audiobook.Language = metadata.Language;
+            if (metadata.Runtime.HasValue && metadata.Runtime.Value > 0) audiobook.Runtime = metadata.Runtime;
+            if (!string.IsNullOrWhiteSpace(metadata.Version)) audiobook.Version = metadata.Version;
+
+            var authors = NormalizeMetadataStringList(
+                (metadata.Authors != null && metadata.Authors.Any())
+                    ? metadata.Authors
+                    : (!string.IsNullOrWhiteSpace(metadata.Author) ? new List<string> { metadata.Author! } : null));
+            if (authors.Count > 0) audiobook.Authors = authors;
+
+            var narrators = NormalizeMetadataStringList(
+                (metadata.Narrators != null && metadata.Narrators.Any())
+                    ? metadata.Narrators
+                    : (!string.IsNullOrWhiteSpace(metadata.Narrator) ? new List<string> { metadata.Narrator! } : null));
+            if (narrators.Count > 0) audiobook.Narrators = narrators;
+
+            var genres = NormalizeMetadataStringList(metadata.Genres);
+            if (genres.Count > 0) audiobook.Genres = genres;
+
+            var isbns = NormalizeMetadataStringList(metadata.Isbn);
+            if (isbns.Count > 0)
+            {
+                audiobook.Isbn = isbns;
+                legacyIdentifierFieldsTouched = true;
+            }
+
+            if (!string.IsNullOrWhiteSpace(metadata.Asin))
+            {
+                audiobook.Asin = metadata.Asin;
+                legacyIdentifierFieldsTouched = true;
+            }
+
+            if (!string.IsNullOrWhiteSpace(metadata.OpenLibraryId))
+            {
+                audiobook.OpenLibraryId = metadata.OpenLibraryId;
+                legacyIdentifierFieldsTouched = true;
+            }
+
+            return legacyIdentifierFieldsTouched;
+        }
+
+        private async Task<string?> MoveMetadataImageToLibraryStorageAsync(Audiobook audiobook, string imageUrl)
+        {
+            if (string.IsNullOrWhiteSpace(imageUrl)) return null;
+
+            try
+            {
+                var imageKey = !string.IsNullOrWhiteSpace(audiobook.Asin)
+                    ? audiobook.Asin!
+                    : (audiobook.Isbn != null && audiobook.Isbn.Any(i => !string.IsNullOrWhiteSpace(i))
+                        ? "img-" + ComputeShortHash(audiobook.Isbn.First(i => !string.IsNullOrWhiteSpace(i)))
+                        : "img-" + ComputeShortHash($"{audiobook.Title}|{audiobook.Authors?.FirstOrDefault()}"));
+
+                var libraryImagePath = await _imageCacheService.MoveToLibraryStorageAsync(imageKey, imageUrl);
+                if (string.IsNullOrWhiteSpace(libraryImagePath))
+                {
+                    return null;
+                }
+
+                return "/" + libraryImagePath.TrimStart('/');
+            }
+            catch (IOException ex)
+            {
+                _logger.LogWarning(ex, "Failed to move rescanned metadata image for audiobook {AudiobookId}", audiobook.Id);
+                return null;
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                _logger.LogWarning(ex, "Failed to move rescanned metadata image for audiobook {AudiobookId}", audiobook.Id);
+                return null;
+            }
+            catch (HttpRequestException ex)
+            {
+                _logger.LogWarning(ex, "Failed to move rescanned metadata image for audiobook {AudiobookId}", audiobook.Id);
+                return null;
+            }
+            catch (TaskCanceledException ex)
+            {
+                _logger.LogWarning(ex, "Failed to move rescanned metadata image for audiobook {AudiobookId}", audiobook.Id);
+                return null;
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogWarning(ex, "Failed to move rescanned metadata image for audiobook {AudiobookId}", audiobook.Id);
+                return null;
+            }
+            catch (UriFormatException ex)
+            {
+                _logger.LogWarning(ex, "Failed to move rescanned metadata image for audiobook {AudiobookId}", audiobook.Id);
+                return null;
+            }
+        }
+
+        private static List<string> NormalizeMetadataStringList(IEnumerable<string>? values)
+        {
+            if (values == null) return new List<string>();
+
+            return values
+                .Where(v => !string.IsNullOrWhiteSpace(v))
+                .Select(v => v.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private static string? FirstNonEmpty(params string?[] values)
+        {
+            var first = values.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
+            return first?.Trim();
+        }
+
+        private static bool TryConsumeMetadataRescanQuota(
+            IMemoryCache cache,
+            Microsoft.AspNetCore.Http.HttpContext? httpContext,
+            int audiobookId,
+            out string message,
+            out int retryAfterSeconds)
+        {
+            message = string.Empty;
+            retryAfterSeconds = 0;
+
+            var actorKey = BuildMetadataRescanActorKey(httpContext);
+            var cacheKey = $"metadata-rescan-rate:{audiobookId}:{actorKey}";
+            var now = DateTime.UtcNow;
+
+            if (!cache.TryGetValue(cacheKey, out MetadataRescanRateLimitState? state) || state == null)
+            {
+                state = new MetadataRescanRateLimitState
+                {
+                    WindowStartUtc = now,
+                    Count = 0,
+                    LastAttemptUtc = null
+                };
+            }
+
+            if (state.LastAttemptUtc.HasValue)
+            {
+                var cooldownRemaining = TimeSpan.FromSeconds(MetadataRescanCooldownSeconds) - (now - state.LastAttemptUtc.Value);
+                if (cooldownRemaining > TimeSpan.Zero)
+                {
+                    retryAfterSeconds = Math.Max(1, (int)Math.Ceiling(cooldownRemaining.TotalSeconds));
+                    message = $"Rescan cooldown active. Please wait {retryAfterSeconds} seconds before rescanning this audiobook again.";
+                    return false;
+                }
+            }
+
+            if ((now - state.WindowStartUtc) >= TimeSpan.FromMinutes(MetadataRescanWindowMinutes))
+            {
+                state.WindowStartUtc = now;
+                state.Count = 0;
+            }
+
+            if (state.Count >= MetadataRescanMaxRequestsPerWindow)
+            {
+                var windowEndsAt = state.WindowStartUtc.AddMinutes(MetadataRescanWindowMinutes);
+                var remaining = windowEndsAt - now;
+                retryAfterSeconds = Math.Max(1, (int)Math.Ceiling(remaining.TotalSeconds));
+                message = $"Metadata rescan rate limit reached for this audiobook. Try again in {retryAfterSeconds} seconds.";
+                return false;
+            }
+
+            state.Count++;
+            state.LastAttemptUtc = now;
+
+            cache.Set(
+                cacheKey,
+                state,
+                new MemoryCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(MetadataRescanWindowMinutes + 5)
+                });
+
+            return true;
+        }
+
+        private static string BuildMetadataRescanActorKey(Microsoft.AspNetCore.Http.HttpContext? httpContext)
+        {
+            var user = httpContext?.User;
+            var userId =
+                user?.FindFirst("sub")?.Value ??
+                user?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ??
+                user?.Identity?.Name;
+
+            var remoteIp = httpContext?.Connection?.RemoteIpAddress?.ToString() ?? "unknown";
+
+            var actorDescriptor = !string.IsNullOrWhiteSpace(userId)
+                ? $"user:{userId}|ip:{remoteIp}"
+                : $"ip:{remoteIp}";
+
+            return ComputeShortHash(actorDescriptor);
+        }
+
+        private sealed class MetadataRescanRateLimitState
+        {
+            public DateTime WindowStartUtc { get; set; }
+            public int Count { get; set; }
+            public DateTime? LastAttemptUtc { get; set; }
+        }
+
         public class BulkDeleteRequest
         {
             public List<int> Ids { get; set; } = new List<int>();
@@ -2597,4 +3854,5 @@ namespace Listenarr.Api.Controllers
 
     }
 }
+
 

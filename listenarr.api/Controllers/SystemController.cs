@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2025 Robbie Davis
  * 
@@ -44,11 +44,17 @@ namespace Listenarr.Api.Controllers
         {
             try
             {
+                var cfg = _systemService.GetStartupConfig();
+                var authEnabled = cfg?.AuthenticationRequired?.ToLowerInvariant() is "true" or "yes" or "1";
+                if (authEnabled && !(User?.Identity?.IsAuthenticated ?? false))
+                {
+                    return Unauthorized();
+                }
                 var systemInfo = _systemService.GetSystemInfo();
+                // Optionally redact sensitive fields here if needed
                 return Ok(systemInfo);
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error retrieving system info");
                 return StatusCode(500, new { error = "Failed to retrieve system information" });
             }
@@ -62,11 +68,16 @@ namespace Listenarr.Api.Controllers
         {
             try
             {
+                var cfg = _systemService.GetStartupConfig();
+                var authEnabled = cfg?.AuthenticationRequired?.ToLowerInvariant() is "true" or "yes" or "1";
+                if (authEnabled && !(User?.Identity?.IsAuthenticated ?? false))
+                {
+                    return Unauthorized();
+                }
                 var storageInfo = _systemService.GetStorageInfo();
                 return Ok(storageInfo);
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error retrieving storage info");
                 return StatusCode(500, new { error = "Failed to retrieve storage information" });
             }
@@ -76,16 +87,20 @@ namespace Listenarr.Api.Controllers
         /// Get health status of all services including download clients and external APIs
         /// </summary>
         [HttpGet("health")]
-        [AllowAnonymous]
         public async Task<ActionResult<ServiceHealth>> GetServiceHealth()
         {
             try
             {
+                var cfg = _systemService.GetStartupConfig();
+                var authEnabled = cfg?.AuthenticationRequired?.ToLowerInvariant() is "true" or "yes" or "1";
+                if (authEnabled && !(User?.Identity?.IsAuthenticated ?? false))
+                {
+                    return Unauthorized();
+                }
                 var serviceHealth = await _systemService.GetServiceHealthAsync();
                 return Ok(serviceHealth);
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error retrieving service health");
                 return StatusCode(500, new { error = "Failed to retrieve service health" });
             }
@@ -99,11 +114,17 @@ namespace Listenarr.Api.Controllers
         {
             try
             {
+                var cfg = _systemService.GetStartupConfig();
+                var authEnabled = cfg?.AuthenticationRequired?.ToLowerInvariant() is "true" or "yes" or "1";
+                if (authEnabled && !(User?.Identity?.IsAuthenticated ?? false))
+                {
+                    return Unauthorized();
+                }
                 var logs = _systemService.GetRecentLogs(limit);
+                // Optionally redact sensitive log entries here if needed
                 return Ok(logs);
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error retrieving logs");
                 return StatusCode(500, new { error = "Failed to retrieve logs" });
             }
@@ -117,13 +138,18 @@ namespace Listenarr.Api.Controllers
         {
             try
             {
+                var cfg = _systemService.GetStartupConfig();
+                var authEnabled = cfg?.AuthenticationRequired?.ToLowerInvariant() is "true" or "yes" or "1";
+                if (authEnabled && !(User?.Identity?.IsAuthenticated ?? false))
+                {
+                    return Unauthorized();
+                }
                 _logger.LogInformation("Test Info log generated from API");
                 _logger.LogWarning("Test Warning log generated from API");
                 _logger.LogError("Test Error log generated from API");
                 return Ok(new { message = "Test logs generated successfully" });
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error generating test logs");
                 return StatusCode(500, new { error = "Failed to generate test logs" });
             }
@@ -137,6 +163,12 @@ namespace Listenarr.Api.Controllers
         {
             try
             {
+                var cfg = _systemService.GetStartupConfig();
+                var authEnabled = cfg?.AuthenticationRequired?.ToLowerInvariant() is "true" or "yes" or "1";
+                if (authEnabled && !(User?.Identity?.IsAuthenticated ?? false))
+                {
+                    return Unauthorized();
+                }
                 var logFilePath = _systemService.GetLogFilePath();
 
                 // If log file exists, return it
@@ -175,11 +207,11 @@ namespace Listenarr.Api.Controllers
 
                 return File(generatedBytes, "text/plain", generatedFileName);
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error downloading logs");
                 return StatusCode(500, new { error = "Failed to download logs" });
             }
         }
     }
 }
+

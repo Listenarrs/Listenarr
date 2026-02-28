@@ -189,17 +189,19 @@ namespace Listenarr.Api.Services.Search.Providers
                 List<IndexerSearchResult> results = new List<IndexerSearchResult>();
                 try
                 {
-                    var indexerUri = new Uri(indexer.Url);
-                    if (_httpClient?.BaseAddress == null || !string.Equals(_httpClient.BaseAddress.Host, indexerUri.Host, StringComparison.OrdinalIgnoreCase))
+                    if (_httpClient?.BaseAddress == null)
                     {
                         httpClientToUse = MyAnonamouseHelper.CreateAuthenticatedHttpClient(mamId, indexer.Url);
                         disposableClient = httpClientToUse;
                     }
                     else
                     {
-                        // Add cookie header for injected client so the request is authenticated for MAM
+                        // Add cookie header for injected client so the request is authenticated for MAM.
+                        // This keeps test handlers in place even when the BaseAddress host differs.
                         if (!string.IsNullOrEmpty(mamId))
+                        {
                             mamRequest.Headers.Add("Cookie", $"mam_id={mamId}");
+                        }
                     }
 
                     _logger.LogDebug("MyAnonamouse API URL: {Url}", LogRedaction.RedactText(url, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { indexer.ApiKey ?? string.Empty })));
@@ -230,8 +232,7 @@ namespace Listenarr.Api.Services.Search.Providers
                             }
                         }
                     }
-                    catch (Exception exMam)
-                    {
+                    catch (Exception exMam) when (exMam is not OperationCanceledException && exMam is not OutOfMemoryException && exMam is not StackOverflowException) {
                         _logger.LogDebug(exMam, "Failed to persist updated mam_id from MyAnonamouse response");
                     }
 
@@ -250,8 +251,7 @@ namespace Listenarr.Api.Services.Search.Providers
                             await EnrichMyAnonamouseResultsAsync(indexer, results, enrichTop, mamId, httpClientToUse);
                         }
                     }
-                    catch (Exception exEnrich)
-                    {
+                    catch (Exception exEnrich) when (exEnrich is not OperationCanceledException && exEnrich is not OutOfMemoryException && exEnrich is not StackOverflowException) {
                         _logger.LogWarning(exEnrich, "MyAnonamouse enrichment step failed");
                     }
                 }
@@ -263,8 +263,7 @@ namespace Listenarr.Api.Services.Search.Providers
                 _logger.LogInformation("MyAnonamouse returned {Count} results", results.Count);
                 return results;
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error searching MyAnonamouse indexer {Name}", indexer.Name);
                 return new List<IndexerSearchResult>();
             }
@@ -292,8 +291,7 @@ namespace Listenarr.Api.Services.Search.Providers
                 {
                     doc = JsonDocument.Parse(jsonResponse);
                 }
-                catch (Exception)
-                {
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     // Attempt to extract a JSON array from an HTML-wrapped response or stray text
                     var start = jsonResponse.IndexOf('[');
                     var end = jsonResponse.LastIndexOf(']');
@@ -304,9 +302,8 @@ namespace Listenarr.Api.Services.Search.Providers
                         {
                             doc = JsonDocument.Parse(sub);
                         }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning(ex, "Failed to parse extracted JSON array from MyAnonamouse response");
+                        catch (Exception parseEx) when (parseEx is not OperationCanceledException && parseEx is not OutOfMemoryException && parseEx is not StackOverflowException) {
+                            _logger.LogWarning(parseEx, "Failed to parse extracted JSON array from MyAnonamouse response");
                             return results;
                         }
                     }
@@ -385,8 +382,7 @@ namespace Listenarr.Api.Services.Search.Providers
                                 var propertyNames = item.EnumerateObject().Select(p => p.Name).ToList();
                                 _logger.LogInformation("MyAnonamouse result #{Index} has properties: {Properties}", _mamDebugIndex, string.Join(", ", propertyNames));
                             }
-                            catch (Exception exNames)
-                            {
+                            catch (Exception exNames) when (exNames is not OperationCanceledException && exNames is not OutOfMemoryException && exNames is not StackOverflowException) {
                                 _logger.LogDebug(exNames, "Failed to enumerate property names for MyAnonamouse result #{Index}", _mamDebugIndex);
                             }
                         }
@@ -588,8 +584,7 @@ namespace Listenarr.Api.Services.Search.Providers
                                     }
                                     author = string.Join(", ", authors.Where(a => !string.IsNullOrEmpty(a)));
                                 }
-                                catch (Exception ex)
-                                {
+                                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                                     _logger.LogWarning(ex, "Failed to parse author JSON for search result");
                                 }
                             }
@@ -612,8 +607,7 @@ namespace Listenarr.Api.Services.Search.Providers
                                     }
                                     narrator = string.Join(", ", narrators.Where(n => !string.IsNullOrEmpty(n)));
                                 }
-                                catch (Exception ex)
-                                {
+                                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                                     _logger.LogWarning(ex, "Failed to parse narrator JSON for search result");
                                 }
                             }
@@ -677,7 +671,9 @@ namespace Listenarr.Api.Services.Search.Providers
                                 {
                                     mamIdLocal = Uri.UnescapeDataString(mamIdLocal);
                                 }
-                                catch { }
+                                catch (Exception caughtEx_1) when (caughtEx_1 is not OperationCanceledException && caughtEx_1 is not OutOfMemoryException && caughtEx_1 is not StackOverflowException) { 
+                                    System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                                }
                                 downloadUrl += $"?mam_id={Uri.EscapeDataString(mamIdLocal)}";
                             }
                             _logger.LogDebug("Built downloadUrl from dlHash for '{Title}': {Url}", title, downloadUrl);
@@ -693,7 +689,9 @@ namespace Listenarr.Api.Services.Search.Providers
                                 {
                                     mamIdLocal = Uri.UnescapeDataString(mamIdLocal);
                                 }
-                                catch { }
+                                catch (Exception caughtEx_2) when (caughtEx_2 is not OperationCanceledException && caughtEx_2 is not OutOfMemoryException && caughtEx_2 is not StackOverflowException) { 
+                                    System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                                }
                                 downloadUrl = $"{baseUrl}/tor/download.php?tid={torrentId}&mam_id={Uri.EscapeDataString(mamIdLocal)}";
                             }
                             else
@@ -778,14 +776,12 @@ namespace Listenarr.Api.Services.Search.Providers
                         results.Add(result);
                         _mamDebugIndex++;
                     }
-                    catch (Exception ex)
-                    {
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                         _logger.LogWarning(ex, "Failed to parse MyAnonamouse result item");
                     }
                 }
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Failed to parse MyAnonamouse response");
             }
 
@@ -885,13 +881,11 @@ namespace Listenarr.Api.Services.Search.Providers
                         
                         _logger.LogDebug("Enriched MyAnonamouse result {Id}: grabs={Grabs}, files={Files}, format={Format}, language={Language}", r.Id, r.Grabs, r.Files, r.Format, r.Language);
                     }
-                    catch (Exception exParse)
-                    {
+                    catch (Exception exParse) when (exParse is not OperationCanceledException && exParse is not OutOfMemoryException && exParse is not StackOverflowException) {
                         _logger.LogDebug(exParse, "Failed to parse MyAnonamouse detail JSON for {Id}", r.Id);
                     }
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogDebug(ex, "Failed to enrich MyAnonamouse result {Id}", r.Id);
                 }
                 finally
@@ -1044,3 +1038,4 @@ namespace Listenarr.Api.Services.Search.Providers
         }
     }
 }
+

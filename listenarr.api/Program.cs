@@ -37,8 +37,86 @@ using Listenarr.Api.Extensions;
 using Listenarr.Infrastructure.Extensions;
 
 // Check for special CLI helpers before building the web host
-// Pass a non-null args array to satisfy nullable analysis
-var builder = WebApplication.CreateBuilder(args ?? Array.Empty<string>());
+// Set ContentRootPath to a reliable value for local dev, but leave Docker/production unaffected.
+var isDocker = Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER") == "true";
+var isDev = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") == "Development";
+
+// Allow an explicit override via environment variable (robust for CI and custom installs)
+var contentRootOverride = Environment.GetEnvironmentVariable("LISTENARR_CONTENT_ROOT");
+
+WebApplicationBuilder builder;
+string? projectDir = null;
+if (!string.IsNullOrWhiteSpace(contentRootOverride))
+{
+    // Validate the provided override path before using it as ContentRootPath.
+    if (Directory.Exists(contentRootOverride))
+    {
+        builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            Args = args,
+            ContentRootPath = contentRootOverride
+        });
+        projectDir = contentRootOverride;
+    }
+    else
+    {
+        Console.WriteLine($"[Listenarr] Warning: LISTENARR_CONTENT_ROOT '{contentRootOverride}' does not exist; ignoring override.");
+        builder = WebApplication.CreateBuilder(args ?? Array.Empty<string>());
+    }
+}
+else if (isDev && !isDocker)
+{
+    // Resolve to the listenarr.api project directory from the build output.
+    // AppContext.BaseDirectory is typically: <project>/bin/<config>/<tfm>/
+    // Three GetParent calls navigate back to the project root.
+    var baseDir = AppContext.BaseDirectory;
+    projectDir = Directory.GetParent(
+        Directory.GetParent(
+            Directory.GetParent(baseDir)?.FullName ?? baseDir
+        )?.FullName ?? baseDir
+    )?.FullName ?? baseDir;
+
+    // Safety check: if the resolved directory doesn't look like the project root
+    // (i.e. no 'config' sibling or the project file), fall back to default.
+    var looksLikeProjectRoot = Directory.Exists(Path.Join(projectDir, "config"))
+        || File.Exists(Path.Join(projectDir, "listenarr.api.csproj"));
+
+    if (looksLikeProjectRoot && Directory.Exists(projectDir))
+    {
+        try
+        {
+            builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = args, ContentRootPath = projectDir });
+        }
+        catch (Exception ex) when (ex is DirectoryNotFoundException || ex is IOException || ex is UnauthorizedAccessException)
+        {
+            // If for some reason the ContentRootPath cannot be used by CreateBuilder
+            // (for example a transient IO issue or an unexpected path layout), fall
+            // back to the default builder which will use the running assembly's
+            // base directory. Log to console so developers can see the fallback.
+            Console.WriteLine($"[Listenarr] Warning: failed to use content root '{projectDir}' - falling back to default. Error: {ex.Message}");
+            builder = WebApplication.CreateBuilder(args ?? Array.Empty<string>());
+        }
+    }
+    else
+    {
+        builder = WebApplication.CreateBuilder(args ?? Array.Empty<string>());
+    }
+}
+else
+{
+    builder = WebApplication.CreateBuilder(args ?? Array.Empty<string>());
+}
+
+// repoRoot fallback used in other path computations later
+var repoRoot = projectDir ?? AppContext.BaseDirectory;
+// dotnet test hosts are typically `testhost` and may not always set
+// ASPNETCORE_ENVIRONMENT=Test; detect this explicitly to keep tests isolated.
+var processName = Path.GetFileNameWithoutExtension(Environment.ProcessPath ?? string.Empty);
+var isLikelyTestHost =
+    string.Equals(processName, "testhost", StringComparison.OrdinalIgnoreCase) ||
+    string.Equals(Environment.GetEnvironmentVariable("LISTENARR_TEST_MODE"), "true", StringComparison.OrdinalIgnoreCase) ||
+    !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("VSTEST_SESSION_ID")) ||
+    !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DOTNET_TEST_RUNNER"));
 
 // Configure Serilog for structured logging, file rotation and SignalR broadcasting
 var logFilePath = Path.Combine(builder.Environment.ContentRootPath, "config", "logs", "listenarr-.log");
@@ -55,15 +133,21 @@ try
     var dir = Path.GetDirectoryName(externalConfigAbsolute) ?? string.Empty;
     if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
 
-    if (!File.Exists(externalConfigAbsolute))
-    {
-        // Minimal, safe default configuration (non-sensitive)
-        var defaultJson = "{\n  \"Serilog\": {\n    \"MinimumLevel\": {\n      \"Default\": \"Information\",\n      \"Override\": {\n        \"Microsoft\": \"Warning\",\n        \"System\": \"Warning\"\n      }\n    }\n  }\n}";
-        File.WriteAllText(externalConfigAbsolute, defaultJson);
-        Console.WriteLine($"[Listenarr] Created default configuration at '{externalConfigRelative}'. Edit this file to customize app settings.");
-    }
+        if (!File.Exists(externalConfigAbsolute))
+        {
+            // Minimal, safe default configuration (non-sensitive)
+            var defaultJson = "{\n  \"Serilog\": {\n    \"MinimumLevel\": {\n      \"Default\": \"Information\",\n      \"Override\": {\n        \"Microsoft\": \"Warning\",\n        \"System\": \"Warning\"\n      }\n    }\n  }\n}";
+            File.WriteAllText(externalConfigAbsolute, defaultJson);
+            // Log the absolute path so it's clear where the file was created
+            Console.WriteLine($"[Listenarr] Created default configuration at '{externalConfigAbsolute}'. Edit this file to customize app settings.");
+        }
 }
-catch (Exception ex)
+catch (Exception ex) when (
+    ex is IOException
+    || ex is UnauthorizedAccessException
+    || ex is System.Security.SecurityException
+    || ex is ArgumentException
+    || ex is NotSupportedException)
 {
     // Do not fail startup on inability to write sample config; just log to console and continue
     Console.WriteLine($"[Listenarr] Warning: failed to create default config '{externalConfigRelative}': {ex.Message}");
@@ -114,7 +198,7 @@ Log.Logger = new Serilog.LoggerConfiguration()
     .WriteTo.File(
         logFilePath,
         rollingInterval: RollingInterval.Day,
-        retainedFileCountLimit: 30,
+        retainedFileCountLimit: 5,
         outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Exception}")
     .WriteTo.Sink(signalRSink)
     .CreateLogger();
@@ -134,7 +218,7 @@ if (!args?.Any(arg => arg.StartsWith("--urls")) ?? true)
 // If running as an integration test host, allow the test-side partial to apply any
 // additional registrations (for example AddListenarrPersistence so IDbContextFactory<>
 // is available to hosted/background services during tests).
-if (builder.Environment.IsEnvironment("Testing"))
+if (builder.Environment.IsEnvironment("Test") || isLikelyTestHost)
 {
     ApplyTestHostPatches(builder);
 }
@@ -143,7 +227,12 @@ builder.Services.AddControllers()
     {
         // Serialize enums as strings instead of integers for better frontend compatibility
         options.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+        // Only ignore null values (not empty strings or zeros) to reduce payload size while preserving meaningful empty values
+        options.JsonSerializerOptions.DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
     });
+
+// Required for [Authorize] / role policies used by controllers.
+builder.Services.AddAuthorization();
 
 // Add SignalR for real-time updates
 builder.Services.AddSignalR()
@@ -162,18 +251,11 @@ builder.Services.AddScoped<Listenarr.Api.Services.ILegacyOutputPathMigrator, Lis
 // History repository for tracking events
 builder.Services.AddScoped<Listenarr.Infrastructure.Repositories.IHistoryRepository, Listenarr.Infrastructure.Repositories.HistoryRepository>();
 
+// Download history service for idempotency and audit trail
+builder.Services.AddScoped<Listenarr.Application.Services.IDownloadHistoryService, Listenarr.Infrastructure.Services.DownloadHistoryService>();
+
 // Add in-memory cache for metadata prefetch / reuse
 builder.Services.AddMemoryCache();
-
-// Add HTTP client for external API calls with decompression support
-builder.Services.AddHttpClient<IAudibleMetadataService, AudibleMetadataService>()
-    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler()
-    {
-        AutomaticDecompression = System.Net.DecompressionMethods.All
-    });
-
-// Add Amazon metadata service (delegates to AudibleMetadataService for shared logic)
-builder.Services.AddScoped<IAmazonMetadataService, AmazonMetadataService>();
 
 // Add HTTP client for Audimeta service
 builder.Services.AddHttpClient<AudimetaService>()
@@ -217,15 +299,11 @@ builder.Services.AddScoped<AsinCandidateCollector>();
 builder.Services.AddScoped<AsinEnricher>();
 
 // Add fallback scraper
-builder.Services.AddScoped<FallbackScraper>();
-
 // Add search result scorer
 builder.Services.AddScoped<SearchResultScorer>();
 
 // Add ASIN search handler
 builder.Services.AddScoped<AsinSearchHandler>();
-
-// Audible integration removed: AudibleApiService registration omitted
 
 // Add default HTTP client for other services
 builder.Services.AddHttpClient();
@@ -403,13 +481,129 @@ builder.Services.AddHttpClient("DirectDownload")
 // the published exe will create/use the intended config/database path even
 // when the working directory differs.
 // Compute default SQLite DB path (config/database/listenarr.db) relative to content root.
-var sqliteDbPath = Path.Combine(builder.Environment.ContentRootPath, "config", "database", "listenarr.db");
+// Allow tests to override the path via configuration to avoid shared DB state in CI.
+var sqliteDbPathOverride = builder.Configuration["Listenarr:SqliteDbPath"];
+var hasExplicitSqliteDbPathOverride = !string.IsNullOrWhiteSpace(sqliteDbPathOverride);
+var sqliteDbPath = string.IsNullOrWhiteSpace(sqliteDbPathOverride)
+    ? Path.Combine(builder.Environment.ContentRootPath, "config", "database", "listenarr.db")
+    : (Path.IsPathRooted(sqliteDbPathOverride)
+        ? sqliteDbPathOverride
+        : Path.Combine(builder.Environment.ContentRootPath, sqliteDbPathOverride));
+
+// Safety guard: test hosts must never write to the repository DB path.
+if (builder.Environment.IsEnvironment("Test") || isLikelyTestHost)
+{
+    var repoDbPath = Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, "config", "database", "listenarr.db"));
+    var resolvedSqlitePath = Path.GetFullPath(sqliteDbPath);
+    if (string.Equals(resolvedSqlitePath, repoDbPath, StringComparison.OrdinalIgnoreCase))
+    {
+        sqliteDbPath = Path.Combine(Path.GetTempPath(), "listenarr-tests", "program-main", $"listenarr-{Guid.NewGuid():N}.db");
+        Log.Logger.Warning("[Startup] Test environment attempted to use repo sqlite path; forcing isolated test DB path: {SqliteDbPath}", sqliteDbPath);
+    }
+}
+
+// In development, prefer the repository database path so `npm run dev` uses
+// `listenarr.api/config/database/listenarr.db` regardless of the resolved
+// ContentRootPath. This ensures developers see and edit the canonical DB.
+if (builder.Environment.IsDevelopment() && !isDocker && !hasExplicitSqliteDbPathOverride && !isLikelyTestHost)
+{
+    // Search ancestors from the content root for a directory that contains
+    // the `listenarr.api/config` folder. This avoids duplicating `listenarr.api`
+    // when ContentRootPath is already inside a nested build folder.
+    string? repoCandidate = null;
+    try
+    {
+        var dir = new DirectoryInfo(builder.Environment.ContentRootPath);
+        const int maxDepth = 8;
+        int depth = 0;
+        while (dir != null && depth++ < maxDepth)
+        {
+            if (Directory.Exists(Path.Join(dir.FullName, "listenarr.api", "config")))
+            {
+                repoCandidate = dir.FullName;
+                break;
+            }
+            dir = dir.Parent;
+        }
+    }
+    catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is System.Security.SecurityException)
+    {
+        Log.Logger.Debug(ex, "[Startup] Failed to resolve repo candidate from ContentRootPath; continuing with fallback resolution.");
+    }
+
+    // Prefer the current working directory when running dev (npm run dev uses repo root)
+    try
+    {
+        // First, search upward from the current working directory for the repository root
+        // (identified by the presence of listenarr.sln). This is the most reliable
+        // indicator of the repo root regardless of whether the process was started
+        // from a build output folder or the repo directory itself.
+        var cwd = Directory.GetCurrentDirectory();
+        string? repoRootFromCwd = null;
+        try
+        {
+            var dir = new DirectoryInfo(cwd);
+            const int maxDepth2 = 8;
+            int depth2 = 0;
+            while (dir != null && depth2++ < maxDepth2)
+            {
+                if (File.Exists(Path.Join(dir.FullName, "listenarr.sln")))
+                {
+                    repoRootFromCwd = dir.FullName;
+                    break;
+                }
+                dir = dir.Parent;
+            }
+        }
+        catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+        {
+            Log.Logger.Debug(ex, "[Startup] Failed to probe for repo root from current directory '{Cwd}'", cwd);
+        }
+        string devRepoRoot = repoRootFromCwd ?? repoCandidate ?? repoRoot;
+
+        // If the chosen root already points at the listenarr.api folder, avoid adding
+        // an extra 'listenarr.api' segment which previously produced duplicate paths.
+        bool rootIsListenarrApi = string.Equals(
+            Path.GetFileName(devRepoRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)),
+            "listenarr.api",
+            StringComparison.OrdinalIgnoreCase);
+
+        string devRepoDb = rootIsListenarrApi
+            ? Path.Join(devRepoRoot, "config", "database", "listenarr.db")
+            : Path.Join(devRepoRoot, "listenarr.api", "config", "database", "listenarr.db");
+
+        if (File.Exists(devRepoDb) || Directory.Exists(Path.GetDirectoryName(devRepoDb)!))
+        {
+            sqliteDbPath = devRepoDb;
+            Log.Logger.Information("[Startup] Development mode detected - forcing SQLite DB to repo path: {DevRepoDb}", devRepoDb);
+        }
+    }
+    catch (Exception ex) when (
+        ex is IOException ||
+        ex is UnauthorizedAccessException ||
+        ex is DirectoryNotFoundException ||
+        ex is PathTooLongException ||
+        ex is System.Security.SecurityException)
+    {
+        Log.Logger.Warning(ex, "Failed to resolve dev repo DB using working directory; falling back to computed repoRoot");
+        var devRepoDbFallback = Path.Join(repoRoot, "listenarr.api", "config", "database", "listenarr.db");
+        sqliteDbPath = devRepoDbFallback;
+        Log.Logger.Information("[Startup] Development mode detected - forcing SQLite DB to repo path (fallback): {DevRepoDb}", devRepoDbFallback);
+    }
+}
+else if (builder.Environment.IsDevelopment() && hasExplicitSqliteDbPathOverride)
+{
+    Log.Logger.Information("[Startup] Development mode detected but honoring explicit SQLite DB path override: {SqliteDbPathOverride}", sqliteDbPath);
+}
 // Ensure directory exists at startup so EF migrations can create the DB file there
 var sqliteDbDir = Path.GetDirectoryName(sqliteDbPath);
 if (!string.IsNullOrEmpty(sqliteDbDir) && !Directory.Exists(sqliteDbDir))
 {
     Directory.CreateDirectory(sqliteDbDir);
 }
+
+// Log the resolved SQLite DB path so developers can verify which file is used at runtime
+Log.Logger.Information("[Startup] Resolved SQLite DB path: {SqliteDbPath}", sqliteDbPath);
 
 // Register persistence (DbContextFactory + compatibility DbContext + repositories) via extension
 builder.Services.AddListenarrPersistence(builder.Configuration, sqliteDbPath);
@@ -424,73 +618,24 @@ builder.Services.AddListenarrAdapters(builder.Configuration);
 builder.Services.AddListenarrInfrastructure();
 // Register application-level services (moved from Program.cs to keep startup focused)
 builder.Services.AddListenarrAppServices(builder.Configuration);
-// Register hosted/background services (moved from Program.cs)
-builder.Services.AddListenarrHostedServices(builder.Configuration);
-
-// Typed HttpClients with automatic decompression for scraping services
-builder.Services.AddHttpClient<IAmazonSearchService, AmazonSearchService>()
-    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+// Register hosted/background services (moved from Program.cs). Allow tests to disable these.
+// In local development, disable hosted/background services to avoid activating
+// long-running background workers (and to avoid EF resolution at host start).
+    if (isDev)
     {
-        AutomaticDecompression = System.Net.DecompressionMethods.All
-    })
-    // Treat Forbidden/TooManyRequests/ServiceUnavailable as transient-handled results
-    // Retry a few times with exponential backoff before the circuit-breaker sees the failure
-    .AddPolicyHandler(HttpPolicyExtensions
-        .HandleTransientHttpError()
-    .OrResult(r => r.StatusCode == HttpStatusCode.Forbidden
-                     || r.StatusCode == (HttpStatusCode)429
-                     || r.StatusCode == HttpStatusCode.ServiceUnavailable)
-        .WaitAndRetryAsync(
-            retryCount: 3,
-            sleepDurationProvider: retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)),
-            onRetry: (outcome, timespan, retryAttempt, context) =>
-            {
-                var reason = outcome.Result != null ? $"HTTP {(int)outcome.Result.StatusCode}" : outcome.Exception?.Message;
-                Log.Logger.Information("[RETRY] Amazon search retry attempt {Attempt} due to {Reason}. Waiting {Delay}s", retryAttempt, reason, timespan.TotalSeconds);
-            }))
-    // Circuit-breaker: raise threshold slightly to avoid tripping on short throttling bursts
-    .AddPolicyHandler(HttpPolicyExtensions
-        .HandleTransientHttpError()
-    .OrResult(r => r.StatusCode == HttpStatusCode.Forbidden
-                     || r.StatusCode == (HttpStatusCode)429
-                     || r.StatusCode == HttpStatusCode.ServiceUnavailable)
-        .CircuitBreakerAsync(
-            handledEventsAllowedBeforeBreaking: 6,
-            durationOfBreak: TimeSpan.FromMinutes(2),
-            onBreak: (outcome, duration) =>
-            {
-                var reason = outcome.Result != null ? $"HTTP {(int)outcome.Result.StatusCode}" : outcome.Exception?.Message ?? "policy trigger";
-                Log.Logger.Warning("[CIRCUIT BREAKER] Amazon search circuit opened due to {Reason}. Breaking for {Minutes}m", reason, duration.TotalMinutes);
-            },
-            onReset: () =>
-            {
-                Log.Logger.Information("[CIRCUIT BREAKER] Amazon search circuit reset");
-            }
-        ));
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            { "Listenarr:DisableHostedServices", "true" }
+        });
+    }
+var disableHostedServices = builder.Configuration.GetValue<bool>("Listenarr:DisableHostedServices");
+if (!disableHostedServices)
+{
+    builder.Services.AddListenarrHostedServices(builder.Configuration);
+}
 
-builder.Services.AddHttpClient<IAudibleSearchService, AudibleSearchService>()
-    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
-    {
-        AutomaticDecompression = System.Net.DecompressionMethods.All
-    })
-            .AddPolicyHandler(HttpPolicyExtensions
-        .HandleTransientHttpError()
-        .CircuitBreakerAsync(
-            handledEventsAllowedBeforeBreaking: 4,
-            durationOfBreak: TimeSpan.FromMinutes(2),
-            onBreak: (outcome, duration) =>
-            {
-                Log.Logger.Warning("[CIRCUIT BREAKER] Audible search circuit opened. Breaking for {Minutes}m", duration.TotalMinutes);
-            },
-            onReset: () =>
-            {
-                Log.Logger.Information("[CIRCUIT BREAKER] Audible search circuit reset");
-            }
-        ))
-    .AddPolicyHandler(HttpPolicyExtensions
-        .HandleTransientHttpError()
-        .WaitAndRetryAsync(2, retryAttempt => TimeSpan.FromSeconds(1)));
-
+// Startup DB normalizer: run once at startup to idempotently normalize legacy JSON columns
+builder.Services.AddHostedService<Listenarr.Api.Services.StartupDbNormalizer>();
 // External request options (Prefer US domain / optional US proxy)
 builder.Services.Configure<Listenarr.Api.Services.ExternalRequestOptions>(builder.Configuration.GetSection("ExternalRequests"));
 
@@ -502,52 +647,10 @@ builder.Services.AddHttpClient("us").ConfigurePrimaryHttpMessageHandler(() =>
         AutomaticDecompression = System.Net.DecompressionMethods.All
     };
 
-    try
-    {
-        var section = builder.Configuration.GetSection("ExternalRequests");
-        var useProxy = section.GetValue<bool>("UseUsProxy");
-        if (useProxy)
-        {
-            var host = section.GetValue<string>("UsProxyHost");
-            var port = section.GetValue<int>("UsProxyPort");
-            if (!string.IsNullOrWhiteSpace(host) && port > 0)
-            {
-                var proxy = new WebProxy(host, port);
-                var user = section.GetValue<string>("UsProxyUsername");
-                var pass = section.GetValue<string>("UsProxyPassword");
-                if (!string.IsNullOrWhiteSpace(user))
-                    proxy.Credentials = new NetworkCredential(user, pass ?? string.Empty);
-                handler.Proxy = proxy;
-                handler.UseProxy = true;
-            }
-        }
-    }
-    catch (Exception ex)
-    {
-        Log.Logger.Warning("[WARNING] Failed to configure proxy settings: {Message}", ex.Message);
-    }
+    // Proxy configuration removed; keep handler default (no explicit proxy configuration)
 
     return handler;
 });
-
-// Read Playwright enablement flag from config (default true)
-var playwrightEnabled = builder.Configuration.GetValue<bool>("Playwright:Enabled", true);
-
-// Register Playwright services only when enabled in configuration
-if (playwrightEnabled)
-{
-    // Register Playwright page fetcher for JS-rendered pages and bot-workarounds
-    builder.Services.AddSingleton<Listenarr.Api.Services.IPlaywrightPageFetcher, Listenarr.Api.Services.PlaywrightPageFetcher>();
-
-    // Playwright install status and background installer
-    builder.Services.AddSingleton<Listenarr.Api.Services.PlaywrightInstallStatus>();
-    builder.Services.AddHostedService<Listenarr.Api.Services.PlaywrightInstallBackgroundService>();
-    builder.Services.AddSingleton<Listenarr.Api.Services.IPlaywrightInstaller, Listenarr.Api.Services.PlaywrightInstaller>();
-}
-else
-{
-    Log.Logger.Information("Playwright integration is disabled via configuration; skipping Playwright service registration.");
-}
 
 // CORS is handled by reverse proxy (nginx, Traefik, Caddy, etc.)
 // Only add CORS support for local development
@@ -585,7 +688,12 @@ builder.Services.AddSwaggerGen(options =>
             options.IncludeXmlComments(xmlPath);
         }
     }
-    catch (Exception ex)
+    catch (Exception ex) when (
+        ex is IOException
+        || ex is UnauthorizedAccessException
+        || ex is System.Xml.XmlException
+        || ex is InvalidOperationException
+        || ex is ArgumentException)
     {
         Log.Logger.Warning("[WARNING] Failed to include XML comments in Swagger: {Message}", ex.Message);
     }
@@ -659,425 +767,46 @@ if (builder.Environment.IsDevelopment())
 
 var app = builder.Build();
 
-// Ensure database is created and migrations are applied
-using (var scope = app.Services.CreateScope())
+// Ensure database is created and migrations are applied.
+// Use the registered `IDbContextFactory<ListenArrDbContext>` so we do not attempt
+// to resolve scoped EF option configurators from the root provider during startup.
+try
 {
-    var context = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
-    var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-
-    // Ensure the database directory exists (use the absolute path computed above)
-    string dbFullPath = sqliteDbPath;
-    string? dbDirectory = Path.GetDirectoryName(dbFullPath);
-    if (!string.IsNullOrEmpty(dbDirectory) && !Directory.Exists(dbDirectory))
+    Log.Logger.Information("[Startup] Applying EF Core migrations at startup");
+    using var migrateScope = app.Services.CreateScope();
+    var factory = migrateScope.ServiceProvider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+    using var ctx = factory.CreateDbContext();
+    ctx.Database.Migrate();
+    Log.Logger.Information("[Startup] EF Core migrations applied successfully");
+}
+catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+{
+    // Do not fail startup if migrations cannot be applied; surface the error in logs
+    // so developers can run `dotnet ef database update` manually if needed.
+    Log.Logger.Error(ex, "[Startup] Failed to apply EF Core migrations at startup. You can run 'dotnet ef database update' manually to apply migrations.");
+}
+// Warn loudly when authentication is disabled. This mode is convenient for trusted LAN use
+// but unsafe for direct internet exposure without an external auth layer.
+try
+{
+    using var authWarningScope = app.Services.CreateScope();
+    var configurationService = authWarningScope.ServiceProvider.GetService<IConfigurationService>();
+    var startupCfg = configurationService != null ? await configurationService.GetStartupConfigAsync() : null;
+    var authRaw = startupCfg?.AuthenticationRequired;
+    var authEnabled = authRaw?.Trim().ToLowerInvariant() is "true" or "yes" or "1" or "enabled";
+    if (!authEnabled)
     {
-        Directory.CreateDirectory(dbDirectory);
+        Log.Logger.Warning(
+            "[Startup] Authentication is DISABLED. Listenarr should only be exposed on a trusted LAN/VPN in this mode. If exposed to the internet, enable Listenarr authentication or enforce authentication at your reverse proxy.");
     }
-
-    try
-    {
-        logger.LogInformation("Checking EF Core migrations (available/applied/pending)...");
-
-        try
-        {
-            var available = context.Database.GetMigrations().ToList();
-            var applied = context.Database.GetAppliedMigrations().ToList();
-            var pending = context.Database.GetPendingMigrations().ToList();
-
-            logger.LogInformation("Available migrations: {Count}", available.Count);
-            foreach (var m in available)
-            {
-                logger.LogInformation("  - {Migration}", m);
-            }
-
-            logger.LogInformation("Applied migrations: {Count}", applied.Count);
-            foreach (var m in applied)
-            {
-                logger.LogInformation("  - {Migration}", m);
-            }
-
-            logger.LogInformation("Pending migrations: {Count}", pending.Count);
-            foreach (var m in pending)
-            {
-                logger.LogInformation("  - {Migration}", m);
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Failed to enumerate EF Core migrations before migrating");
-        }
-
-        logger.LogInformation("Applying database migrations...");
-        // Apply any pending migrations (including AddDefaultMetadataSources which adds Audimeta and Audnexus)
-        context.Database.Migrate();
-        logger.LogInformation("Database migrations applied successfully");
-
-        // Apply SQLite PRAGMA settings after database is created
-        SqlitePragmaInitializer.ApplyPragmas(context);
-        logger.LogInformation("SQLite pragmas applied successfully");
-
-            // Migrate legacy single-root configuration (ApplicationSettings.outputPath) into the new RootFolder table
-            try
-            {
-                using var migrScope = app.Services.CreateScope();
-                var migrator = migrScope.ServiceProvider.GetRequiredService<Listenarr.Api.Services.ILegacyOutputPathMigrator>();
-                migrator.MigrateAsync().GetAwaiter().GetResult();
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "Legacy output path migration failed");
-            }
-        // Schema changes should be applied by EF migrations. See Migration:
-        // Migrations/20251125103000_AddDownloadFinalizationSettingsToApplicationSettings.cs
-    }
-    catch (Exception ex)
-    {
-        // Migrations can fail when the database file exists but is missing expected
-        // tables (for example, when an older DB file was copied into the publish
-        // folder). In that case try the cheaper EnsureCreated() path which will
-        // create tables for the current model if no __EFMigrationsHistory table
-        // exists. If EnsureCreated() succeeds, log the fact and continue. If it
-        // fails as well, log full details for debugging but continue so the host
-        // can start (tests may override DbContext configuration).
-        logger.LogError(ex, "Error during database migration attempt. Will try EnsureCreated() fallback.");
-
-        try
-        {
-            logger.LogInformation("Attempting EnsureCreated() as a fallback...");
-            var created = context.Database.EnsureCreated();
-            if (created)
-            {
-                logger.LogInformation("Database created via EnsureCreated() fallback.");
-            }
-            else
-            {
-                logger.LogWarning("EnsureCreated() did not create the database (it may already exist but be missing migrations).");
-            }
-
-            // Try applying pragmas even if EnsureCreated() didn't create the schema
-            SqlitePragmaInitializer.ApplyPragmas(context);
-            logger.LogInformation("SQLite pragmas applied successfully (fallback path)");
-        }
-        catch (Exception innerEx)
-        {
-            // Log full details. We intentionally do not rethrow to avoid breaking
-            // test harnesses that may run with an alternate DbContext.
-            logger.LogError(innerEx, "EnsureCreated() fallback also failed during database initialization");
-        }
-    }
+}
+catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+{
+    Log.Logger.Debug(ex, "[Startup] Failed to evaluate authentication-enabled startup warning");
 }
 
 // Initialize the SignalR sink now that the hub context is available
 signalRSink.Initialize(app.Services.GetRequiredService<IHubContext<LogHub>>());
-
-// Attempt to install Playwright browser binaries on startup (blocking with timeout).
-// This reduces repeated missing-executable warnings during runtime by ensuring
-// the browser artifacts are present before handling requests. If installation
-// fails the app will continue to run; Playwright fallbacks will be skipped.
-try
-{
-    using var scope = app.Services.CreateScope();
-    var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-    logger.LogInformation("Attempting Playwright browser install on startup (timeout: 90s)");
-
-    var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
-    var installTask = Task.Run(async () =>
-    {
-        // Local function to check if Playwright browsers are installed
-        static bool ArePlaywrightBrowsersInstalled()
-        {
-            string playwrightPath;
-            if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows))
-            {
-                playwrightPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ms-playwright");
-            }
-            else if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.OSX))
-            {
-                playwrightPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Library", "Caches", "ms-playwright");
-            }
-            else // Linux and others
-            {
-                playwrightPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "ms-playwright");
-            }
-
-            if (!Directory.Exists(playwrightPath)) return false;
-
-            // Check for at least one browser directory (chromium-*, firefox-*, webkit-*)
-            try
-            {
-                var browserDirs = Directory.GetDirectories(playwrightPath, "*-*");
-                return browserDirs.Length > 0;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        try
-        {
-            // Check if Playwright browsers are already installed
-            if (ArePlaywrightBrowsersInstalled())
-            {
-                logger.LogInformation("Playwright browsers are already installed, skipping startup installation");
-                return true;
-            }
-
-            // Try reflection-based InstallAsync if available on the Playwright package
-            try
-            {
-                var playwrightType = typeof(Microsoft.Playwright.Playwright);
-                var installMethod = playwrightType.GetMethod("InstallAsync", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
-                if (installMethod != null)
-                {
-                    logger.LogInformation("Found Playwright.InstallAsync via reflection; invoking to install browsers...");
-                    var installTaskObj = (System.Threading.Tasks.Task?)installMethod.Invoke(null, null);
-                    if (installTaskObj != null)
-                    {
-                        await installTaskObj.ConfigureAwait(false);
-                        logger.LogInformation("Playwright.InstallAsync completed successfully");
-                        return true;
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                logger.LogDebug(ex, "Reflection-based Playwright.InstallAsync attempt failed or not available");
-            }
-
-            // Fallback: try running the platform-specific Playwright install script (no Node.js required)
-            try
-            {
-                // Use AppContext.BaseDirectory instead of Assembly.Location for single-file publish compatibility
-                var assemblyDir = AppContext.BaseDirectory;
-                if (!string.IsNullOrEmpty(assemblyDir))
-                {
-                    string? scriptPath = null;
-                    string arguments;
-                    if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows))
-                    {
-                        scriptPath = Path.Combine(assemblyDir, "playwright.ps1");
-                        arguments = "install";
-                        if (!File.Exists(scriptPath))
-                        {
-                            // Try in bin subfolder
-                            scriptPath = Path.Combine(assemblyDir, "..", "..", "bin", "playwright.ps1");
-                            if (!File.Exists(scriptPath))
-                            {
-                                scriptPath = null;
-                            }
-                        }
-                        if (scriptPath != null)
-                        {
-                            logger.LogInformation("Running PowerShell Playwright install script: {Script}", scriptPath);
-                            var psi = new System.Diagnostics.ProcessStartInfo
-                            {
-                                FileName = "pwsh",
-                                Arguments = $"\"{scriptPath}\" {arguments}",
-                                RedirectStandardOutput = true,
-                                RedirectStandardError = true,
-                                UseShellExecute = false,
-                                CreateNoWindow = true
-                            };
-
-                            var processRunner = scope.ServiceProvider.GetService<Listenarr.Api.Services.IProcessRunner>();
-                            if (processRunner != null)
-                            {
-                                var result = await processRunner.RunAsync(psi, timeoutMs: (int)TimeSpan.FromSeconds(90).TotalMilliseconds, cancellationToken: cts.Token).ConfigureAwait(false);
-                                if (result.TimedOut)
-                                {
-                                    logger.LogWarning("PowerShell Playwright install script timed out after {Timeout}s", TimeSpan.FromSeconds(90).TotalSeconds);
-                                }
-                                else if (result.ExitCode == 0)
-                                {
-                                    logger.LogInformation("PowerShell Playwright install script completed successfully");
-                                    return true;
-                                }
-                                else
-                                {
-                                    logger.LogWarning("PowerShell Playwright install script failed with exit code {ExitCode}. StdErr: {Err}", result.ExitCode, result.Stderr?.Length > 1000 ? result.Stderr.Substring(0, 1000) : result.Stderr);
-                                }
-                            }
-                            else
-                            {
-                                logger.LogWarning("IProcessRunner is not available; skipping PowerShell Playwright install script fallback.");
-                            }
-                        }
-                    }
-                    else
-                    {
-                        scriptPath = Path.Combine(assemblyDir, "playwright.sh");
-                        arguments = "install";
-                        if (!File.Exists(scriptPath))
-                        {
-                            scriptPath = Path.Combine(assemblyDir, "..", "..", "bin", "playwright.sh");
-                            if (!File.Exists(scriptPath))
-                            {
-                                scriptPath = null;
-                            }
-                        }
-                        if (scriptPath != null)
-                        {
-                            logger.LogInformation("Running bash Playwright install script: {Script}", scriptPath);
-                            var psi = new System.Diagnostics.ProcessStartInfo
-                            {
-                                FileName = "bash",
-                                Arguments = $"\"{scriptPath}\" {arguments}",
-                                RedirectStandardOutput = true,
-                                RedirectStandardError = true,
-                                UseShellExecute = false,
-                                CreateNoWindow = true
-                            };
-
-                            var processRunner = scope.ServiceProvider.GetService<Listenarr.Api.Services.IProcessRunner>();
-                            if (processRunner != null)
-                            {
-                                var result = await processRunner.RunAsync(psi, timeoutMs: (int)TimeSpan.FromSeconds(90).TotalMilliseconds, cancellationToken: cts.Token).ConfigureAwait(false);
-                                if (result.TimedOut)
-                                {
-                                    logger.LogWarning("Bash Playwright install script timed out after {Timeout}s", TimeSpan.FromSeconds(90).TotalSeconds);
-                                }
-                                else if (result.ExitCode == 0)
-                                {
-                                    logger.LogInformation("Bash Playwright install script completed successfully");
-                                    return true;
-                                }
-                                else
-                                {
-                                    logger.LogWarning("Bash Playwright install script failed with exit code {ExitCode}. StdErr: {Err}", result.ExitCode, result.Stderr?.Length > 1000 ? result.Stderr.Substring(0, 1000) : result.Stderr);
-                                }
-                            }
-                            else
-                            {
-                                logger.LogWarning("IProcessRunner is not available; skipping bash Playwright install script fallback.");
-                            }
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                logger.LogDebug(ex, "Platform-specific Playwright install script attempt failed");
-            }
-
-            // Fallback: try the configured Playwright installer (which will itself handle npx presence checks)
-            try
-            {
-                logger.LogInformation("Attempting Playwright npx fallback via IPlaywrightInstaller (if available)");
-                var installer = scope.ServiceProvider.GetService<Listenarr.Api.Services.IPlaywrightInstaller>();
-                if (installer != null)
-                {
-                    var result = await installer.InstallOnceAsync(cts.Token).ConfigureAwait(false);
-                    logger.LogDebug("Playwright installer output: {Out}\n{Err}", LogRedaction.RedactText(result.Out, LogRedaction.GetSensitiveValuesFromEnvironment()), LogRedaction.RedactText(result.Err, LogRedaction.GetSensitiveValuesFromEnvironment()));
-                    if (result.Success)
-                    {
-                        logger.LogInformation("Playwright installer completed successfully");
-                        return true;
-                    }
-                    else
-                    {
-                        logger.LogInformation("Playwright installer did not provision browsers: {Err}", result.Err);
-                    }
-                }
-                else
-                {
-                    // Fallback: prior behavior was to attempt 'npx' directly; avoid doing that unless we can resolve the executable.
-                    var resolved = Listenarr.Api.Services.ProcessHelpers.FindExecutableOnPath("npx");
-                    if (string.IsNullOrEmpty(resolved))
-                    {
-                        logger.LogInformation("npx not found on PATH; skipping 'npx playwright install chromium' fallback.");
-                    }
-                    else
-                    {
-                        var psi = new System.Diagnostics.ProcessStartInfo
-                        {
-                            FileName = resolved,
-                            Arguments = "playwright install chromium",
-                            RedirectStandardOutput = true,
-                            RedirectStandardError = true,
-                            UseShellExecute = false,
-                            CreateNoWindow = true
-                        };
-
-                        var processRunner = scope.ServiceProvider.GetService<Listenarr.Api.Services.IProcessRunner>();
-                        if (processRunner != null)
-                        {
-                            var pr = await processRunner.RunAsync(psi, timeoutMs: (int)TimeSpan.FromMinutes(10).TotalMilliseconds, cancellationToken: CancellationToken.None).ConfigureAwait(false);
-                            logger.LogDebug("Playwright npx output: {Out}\n{Err}", LogRedaction.RedactText(pr.Stdout, LogRedaction.GetSensitiveValuesFromEnvironment()), LogRedaction.RedactText(pr.Stderr, LogRedaction.GetSensitiveValuesFromEnvironment()));
-                            if (pr.TimedOut)
-                            {
-                                logger.LogWarning("'npx playwright install chromium' timed out after {Timeout} seconds", TimeSpan.FromMinutes(10).TotalSeconds);
-                            }
-                            else if (pr.ExitCode == 0)
-                            {
-                                logger.LogInformation("'npx playwright install chromium' completed successfully");
-                                return true;
-                            }
-                            else
-                            {
-                                logger.LogWarning("'npx playwright install chromium' did not complete successfully. ExitCode={ExitCode}", pr.ExitCode);
-                            }
-                        }
-                        else
-                        {
-                            logger.LogWarning("IProcessRunner is not available; skipping 'npx playwright install chromium' fallback.");
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                logger.LogDebug(ex, "Playwright npx fallback attempt failed");
-            }
-
-            // As a last resort, ask the PlaywrightPageFetcher to ensure browsers are initialized.
-            // Use the explicit TryEnsureInitializedAsync method so we can reliably detect whether
-            // a browser instance is available instead of inferring success from a swallowed fetch.
-            try
-            {
-                var pwFetcher = scope.ServiceProvider.GetService<Listenarr.Api.Services.IPlaywrightPageFetcher>();
-                if (pwFetcher != null)
-                {
-                    logger.LogInformation("Invoking PlaywrightPageFetcher.TryEnsureInitializedAsync as final fallback");
-                    var initialized = await pwFetcher.TryEnsureInitializedAsync(cts.Token).ConfigureAwait(false);
-                    if (initialized)
-                    {
-                        logger.LogInformation("PlaywrightPageFetcher initialized browsers on fallback");
-                        return true;
-                    }
-                    else
-                    {
-                        logger.LogWarning("PlaywrightPageFetcher fallback did not initialize browsers");
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                logger.LogDebug(ex, "PlaywrightPageFetcher fallback initialization failed");
-            }
-
-            return false;
-        }
-        catch (OperationCanceledException)
-        {
-            logger.LogWarning("Playwright install attempt timed out");
-            return false;
-        }
-    }, cts.Token);
-
-    var finished = installTask.Wait(TimeSpan.FromSeconds(90));
-    if (finished && installTask.IsCompletedSuccessfully && installTask.Result)
-    {
-        logger.LogInformation("Playwright installation succeeded on startup");
-    }
-    else
-    {
-        logger.LogWarning("Playwright installation did not complete successfully on startup. Playwright fallbacks will be skipped until browsers are installed.");
-    }
-}
-catch (Exception ex)
-{
-    try { var l = app.Services.GetRequiredService<ILogger<Program>>(); l.LogWarning(ex, "Playwright installation attempt on startup failed"); } catch { }
-}
 
 // Ensure ffprobe is available on first launch (best-effort). Installation runs in background via
 // the registered hosted service so the app can serve requests immediately.
@@ -1097,8 +826,15 @@ if (app.Environment.IsDevelopment())
 }
 
 // Use forwarded headers middleware (must be early in pipeline)
-// This processes X-Forwarded-For and X-Forwarded-Proto headers from the reverse proxy
-app.UseForwardedHeaders();
+// This processes X-Forwarded-For and X-Forwarded-Proto headers from the reverse proxy.
+// By default, ASP.NET Core will only trust forwarded headers from loopback addresses (127.0.0.1, ::1).
+// This is safe for most self-hosted and direct scenarios, and will work behind a reverse proxy if the proxy runs locally or you set ASPNETCORE_FORWARDEDHEADERS_ENABLED=true.
+// For advanced scenarios, set trusted proxies via KnownProxies/KnownNetworks if needed.
+app.UseForwardedHeaders(new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
+    // Do not set KnownProxies/KnownNetworks here for maximum compatibility
+});
 
 // Note: HTTPS redirection is handled by the reverse proxy, not by this application
 
@@ -1132,8 +868,9 @@ app.MapGet("/placeholder.svg", async context =>
 
         context.Response.StatusCode = 404;
     }
-    catch
+    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
     {
+        Log.Logger.Debug(ex, "Failed to serve fallback placeholder image");
         context.Response.StatusCode = 500;
     }
 });

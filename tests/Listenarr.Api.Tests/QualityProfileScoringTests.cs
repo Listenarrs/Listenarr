@@ -509,7 +509,7 @@ namespace Listenarr.Api.Tests
         [Fact]
         public async Task MinimumScore_ShouldReject_WhenBelowThreshold()
         {
-            // Test Sonarr-style MinFormatScore: reject results below profile's minimum score
+            // Test MinimumScore threshold: reject results below profile's minimum score
             var service = CreateService();
             var profile = new QualityProfile
             {
@@ -546,7 +546,7 @@ namespace Listenarr.Api.Tests
         [Fact]
         public async Task MinimumScore_Zero_ShouldAllow_AnyPositiveScore()
         {
-            // Test default behavior: MinimumScore = 0 allows any non-negative score (Sonarr default)
+            // Test default behavior: MinimumScore = 0 allows any non-negative score
             var service = CreateService();
             var profile = new QualityProfile
             {

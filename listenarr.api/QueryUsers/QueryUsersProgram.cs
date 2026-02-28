@@ -23,7 +23,9 @@ static class QueryUsersProgram
                         .CreateLogger();
                 }
             }
-            catch { }
+            catch (Exception caughtEx_1) when (caughtEx_1 is not OperationCanceledException && caughtEx_1 is not OutOfMemoryException && caughtEx_1 is not StackOverflowException) { 
+                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+            }
         }
         try
         {
@@ -59,9 +61,9 @@ static class QueryUsersProgram
                 Log.Information("No users found in database.");
             }
         }
-        catch (Exception ex)
-        {
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
             Log.Error(ex, "Error querying users database");
         }
     }
 }
+

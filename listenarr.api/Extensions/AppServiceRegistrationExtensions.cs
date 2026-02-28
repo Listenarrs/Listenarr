@@ -52,8 +52,6 @@ namespace Listenarr.Api.Extensions
             // Queue service extracted from DownloadService to encapsulate queue-building and filtering
             services.AddScoped<IDownloadQueueService, DownloadQueueService>();
             services.AddScoped<IFileProcessingHandler, FileProcessingHandler>();
-            // NOTE: IAudibleMetadataService is already registered as a typed HttpClient above.
-            // Removing duplicate scoped registration to avoid overriding the typed client configuration.
             services.AddScoped<IOpenLibraryService, OpenLibraryService>();
             services.AddScoped<IImageCacheService>(sp => new ImageCacheService(
                 sp.GetRequiredService<ILogger<ImageCacheService>>(),

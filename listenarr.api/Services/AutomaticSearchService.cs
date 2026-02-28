@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2025 Robbie Davis
  *
@@ -50,8 +50,7 @@ namespace Listenarr.Api.Services
                 {
                     await PerformAutomaticSearchesAsync(stoppingToken);
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogError(ex, "Error during automatic search cycle");
                 }
 
@@ -120,8 +119,7 @@ namespace Listenarr.Api.Services
                     _logger.LogInformation("Processed audiobook '{Title}' - queued {QueuedCount} downloads",
                         audiobook.Title, downloadsQueuedForBook);
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogError(ex, "Error processing audiobook '{Title}' (ID: {Id})", audiobook.Title, audiobook.Id);
                 }
             }
@@ -166,7 +164,7 @@ namespace Listenarr.Api.Services
             _logger.LogInformation("Audiobook '{Title}': cutoff met={CutoffMet}, best existing quality={BestQuality}",
                 audiobook.Title, cutoffMet, bestExistingQuality ?? "none");
 
-            // Skip automatic search if quality cutoff is already met (matches Sonarr behavior)
+            // Skip automatic search if quality cutoff is already met
             if (cutoffMet)
             {
                 _logger.LogInformation("Quality cutoff already met for audiobook '{Title}', skipping automatic search", audiobook.Title);
@@ -201,8 +199,7 @@ namespace Listenarr.Api.Services
                 // Send structured payload with type and audiobookId so the UI can ignore automatic messages by default
                 await hub.Clients.All.SendCoreAsync("SearchProgress", new object[] { new { message = $"Automatic search query: {searchQuery}", details = new { rawCount = searchResults.Count, rawSamples = rawSummaries }, type = "automatic", audiobookId = audiobook.Id } });
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogDebug(ex, "Failed to broadcast raw search results summary for audiobook {Id}", audiobook.Id);
             }
 
@@ -238,8 +235,7 @@ namespace Listenarr.Api.Services
                 var hub2 = scope2.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<Listenarr.Api.Hubs.DownloadHub>>();
                 await hub2.Clients.All.SendCoreAsync("SearchProgress", new object[] { new { message = $"Scored results for '{audiobook.Title}'", details = new { scoredCount = scoredResults.Count, scoredSamples = scoredSummaries }, type = "automatic", audiobookId = audiobook.Id } });
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogDebug(ex, "Failed to broadcast scored search results for audiobook {Id}", audiobook.Id);
             }
             foreach (var scoredResult in scoredResults.OrderByDescending(s => s.TotalScore))
@@ -256,7 +252,7 @@ namespace Listenarr.Api.Services
             }
 
             var topResult = scoredResults
-                .Where(s => !s.IsRejected) // Only non-rejected results (matches Sonarr's multilayered decision system)
+                .Where(s => !s.IsRejected) // Only non-rejected results
                 .OrderByDescending(s => s.TotalScore)
                 .FirstOrDefault(); // Pick only the top scoring result
 
@@ -310,8 +306,7 @@ namespace Listenarr.Api.Services
                 _logger.LogInformation("Queued download for audiobook '{Title}': {ResultTitle} (Score: {Score})",
                     audiobook.Title, topResult.SearchResult.Title, topResult.TotalScore);
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Failed to queue download for audiobook '{Title}': {ResultTitle}",
                     audiobook.Title, topResult.SearchResult.Title);
             }
@@ -649,3 +644,4 @@ namespace Listenarr.Api.Services
         }
     }
 }
+

@@ -17,6 +17,11 @@
  */
 
 import './assets/main.css'
+// Global toast styles are now included in main.css
+// Global app styles (shared utilities and component fragments)
+import '@/styles/global.css'
+// Consolidated view styles (buttons, badges, forms, layout utilities)
+import '@/styles/views/addnew-consolidated.css'
 // Restore legacy Phosphor CSS classes (e.g. <i class="ph ph-grid-four">)
 // This provides the `.ph` + `.ph-<name>` mappings that many templates use.
 // We keep component-based `@phosphor-icons/vue` for new code, but
@@ -28,8 +33,10 @@ import { createPinia } from 'pinia'
 
 import App from './App.vue'
 import router from './router'
+import { preloadRoute } from './router'
 import { useToast } from './services/toastService'
 import { errorTracking } from './services/errorTracking'
+import { apiService } from '@/services/api'
 
 const app = createApp(App)
 
@@ -73,7 +80,70 @@ window.addEventListener('unhandledrejection', (event) => {
 })
 
 app.use(createPinia())
-app.use(router)
+app.use(router as any);
+
+// Prefetch lazy route chunks when a user hovers or presses a link.
+// This reduces perceived navigation latency by warming the dynamic import.
+(() => {
+  const seen = new Set<string>()
+
+  function getAnchorFromEvent(e: Event) {
+    const target = e.target as Element | null
+    if (!target) return null
+    return target.closest('a') as HTMLAnchorElement | null
+  }
+
+  function handlePrefetch(e: Event) {
+    try {
+      const a = getAnchorFromEvent(e)
+      if (!a) return
+
+      const href = a.getAttribute('href') || a.href
+      if (!href) return
+
+      // Only handle internal links
+      const origin = window.location.origin
+      let path = href
+      if (href.startsWith(origin)) path = href.substring(origin.length)
+      if (!path.startsWith('/')) return
+
+      // Resolve route and prefer the route name for preloading
+      const resolved = router.resolve(path)
+      const key = (resolved && resolved.name) ? String(resolved.name) : path
+      if (seen.has(key)) return
+      seen.add(key)
+
+      // Slight debounce to avoid spamming imports during rapid mouse movements
+      setTimeout(() => {
+        try {
+          preloadRoute(key).catch(() => {})
+        } catch {
+          // ignore
+        }
+      }, 60)
+    } catch {
+      // ignore all errors in this best-effort logic
+    }
+  }
+
+  document.addEventListener('mouseover', handlePrefetch, { passive: true, capture: true })
+  document.addEventListener('mousedown', handlePrefetch, { passive: true, capture: true })
+  document.addEventListener('touchstart', handlePrefetch, { passive: true, capture: true })
+})()
+
+// Prefetch startup configuration, then non-blocking prefetch antiforgery token so
+// subsequent unsafe requests have a token bound to the correct principal (API key / session).
+// We intentionally do not fail the app startup if these requests fail.
+import { getStartupConfigCached } from '@/services/startupConfigCache'
+
+getStartupConfigCached(2000)
+  .catch(() => null)
+  .then(() => {
+    apiService.ensureAntiforgeryForCurrentAuth().catch((e) => {
+      if (import.meta.env.DEV) console.debug('[ApiService] ensureAntiforgery failed', e)
+    })
+  })
+  .catch(() => {})
 
 app.mount('#app')
 

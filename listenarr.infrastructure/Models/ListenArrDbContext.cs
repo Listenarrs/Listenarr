@@ -7,6 +7,7 @@ namespace Listenarr.Infrastructure.Models
     public class ListenArrDbContext : DbContext
     {
         public DbSet<Audiobook> Audiobooks { get; set; }
+        public DbSet<AudiobookExternalIdentifier> AudiobookExternalIdentifiers { get; set; }
         public DbSet<AudiobookFile> AudiobookFiles { get; set; }
         public DbSet<MoveJob> MoveJobs { get; set; }
         public DbSet<ApplicationSettings> ApplicationSettings { get; set; }
@@ -17,6 +18,7 @@ namespace Listenarr.Infrastructure.Models
         public DbSet<User> Users { get; set; }
         public DbSet<Download> Downloads { get; set; }
         public DbSet<DownloadProcessingJob> DownloadProcessingJobs { get; set; }
+        public DbSet<DownloadHistory> DownloadHistories { get; set; }
         public DbSet<QualityProfile> QualityProfiles { get; set; }
         public DbSet<RemotePathMapping> RemotePathMappings { get; set; }
         public DbSet<ProcessExecutionLog> ProcessExecutionLogs { get; set; }
@@ -49,6 +51,11 @@ namespace Listenarr.Infrastructure.Models
             modelBuilder.Entity<Download>().HasIndex(d => d.Status);
             modelBuilder.Entity<Download>().HasIndex(d => d.DownloadClientId);
             modelBuilder.Entity<Download>().HasIndex(d => d.CompletedAt);
+
+            modelBuilder.Entity<DownloadHistory>().HasIndex(dh => dh.DownloadId);
+            modelBuilder.Entity<DownloadHistory>().HasIndex(dh => dh.EventDate);
+            modelBuilder.Entity<DownloadHistory>().HasIndex(dh => dh.AudiobookId);
+            modelBuilder.Entity<DownloadHistory>().HasIndex(dh => new { dh.DownloadId, dh.EventType });
 
             modelBuilder.Entity<DownloadProcessingJob>().HasIndex(j => new { j.DownloadId, j.Status });
             modelBuilder.Entity<DownloadProcessingJob>().HasIndex(j => j.Status);

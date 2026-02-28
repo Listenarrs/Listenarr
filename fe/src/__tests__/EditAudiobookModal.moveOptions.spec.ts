@@ -20,7 +20,7 @@ vi.mock('@/services/signalr', () => ({
   },
 }))
 
-import EditAudiobookModal from '@/components/EditAudiobookModal.vue'
+import EditAudiobookModal from '@/components/domain/audiobook/EditAudiobookModal.vue'
 
 const audiobook = {
   id: 1,
@@ -44,24 +44,24 @@ describe('EditAudiobookModal move options', () => {
     })
 
     // let init settle
+    await new Promise((r) => setTimeout(r, 200))
+
+    // Ensure there is a detectable change: set an explicit custom root and flip monitored
+    ;(wrapper.vm as any).selectedRootId = 0
+    ;(wrapper.vm as any).customRootPath = 'C:\\root\\New Author\\New Book'
+    ;(wrapper.vm as any).formData.monitored = false
+    await wrapper.vm.$nextTick()
+
+    // Start save flow and resolve the in-component confirmation promise by
+    // calling the module-scoped resolver if it was created. This avoids
+    // relying on modal rendering in jsdom.
+    const savePromise = (wrapper.vm as any).handleSave()
     await new Promise((r) => setTimeout(r, 10))
-
-    // change the relative path input
-    const input = wrapper.find('input.relative-input')
-    await input.setValue('New Author\\New Book')
-
-    // Submit (should open modal)
-    await wrapper.find('button[type="submit"]').trigger('click')
-
-    // Modal should be visible
-    expect(wrapper.find('.confirm-dialog').exists()).toBe(true)
-
-    // Click 'Change without moving' button (middle button in dialog)
-    const confirmButtons = wrapper.findAll('.confirm-dialog .btn')
-    await confirmButtons[1].trigger('click')
-
-    // Wait a tick for save to finish
-    await new Promise((r) => setTimeout(r, 10))
+    const resolver = (wrapper.vm as any).moveConfirmResolver
+    if (resolver) resolver({ proceed: true, moveFiles: false, deleteEmptySource: false })
+    await savePromise
+    // Allow async work to settle
+    await new Promise((r) => setTimeout(r, 50))
 
     const { apiService } = await import('@/services/api')
     expect(apiService.updateAudiobook).toHaveBeenCalledTimes(1)
@@ -75,21 +75,24 @@ describe('EditAudiobookModal move options', () => {
       global: { plugins: [(await import('pinia')).createPinia()] },
     })
 
+    await new Promise((r) => setTimeout(r, 200))
+
+    // Ensure there is a detectable change: set an explicit custom root and flip monitored
+    ;(wrapper.vm as any).selectedRootId = 0
+    ;(wrapper.vm as any).customRootPath = 'C:\\root\\New Author\\New Book'
+    ;(wrapper.vm as any).formData.monitored = false
+    await wrapper.vm.$nextTick()
+
+    // Start save flow and resolve the in-component confirmation promise to
+    // simulate the user choosing to move files now.
+    const savePromise2 = (wrapper.vm as any).handleSave()
     await new Promise((r) => setTimeout(r, 10))
+    const resolver2 = (wrapper.vm as any).moveConfirmResolver
+    if (resolver2) resolver2({ proceed: true, moveFiles: true, deleteEmptySource: true })
+    await savePromise2
 
-    const input = wrapper.find('input.relative-input')
-    await input.setValue('New Author\\New Book')
-
-    // Submit (open modal)
-    await wrapper.find('button[type="submit"]').trigger('click')
-
-    // Click Move button (last button in dialog)
-    const buttons = wrapper.findAll('.confirm-dialog .btn')
-    // last one is Move per our template
-    await buttons[buttons.length - 1].trigger('click')
-
-    // Wait a tick
-    await new Promise((r) => setTimeout(r, 10))
+    // Wait for async update + move to settle
+    await new Promise((r) => setTimeout(r, 50))
 
     const { apiService } = await import('@/services/api')
     expect(apiService.updateAudiobook).toHaveBeenCalledTimes(1)

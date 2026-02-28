@@ -187,8 +187,7 @@ private readonly ILogger<RootFolderService>? _logger;
                             _logger?.LogInformation("Root rename move prep: AudiobookId={AudiobookId} Original={Original} Target={Target}", m.audiobookId, m.original, m.target);
                         }
                     }
-                    catch (Exception ex)
-                    {
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                         // Never fail the operation due to logging
                         _logger?.LogDebug(ex, "Failed to emit diagnostics for root rename");
                     }
@@ -204,8 +203,7 @@ private readonly ILogger<RootFolderService>? _logger;
                             {
                                 _ = _moveQueue.EnqueueMoveAsync(m.audiobookId, m.target, m.original);
                             }
-                            catch (Exception ex)
-                            {
+                            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                                 _logger?.LogWarning(ex, "Failed to enqueue move for audiobook {AudiobookId} during root rename", m.audiobookId);
                             }
                         }

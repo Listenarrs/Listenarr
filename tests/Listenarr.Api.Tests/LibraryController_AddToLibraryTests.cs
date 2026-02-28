@@ -95,10 +95,9 @@ namespace Listenarr.Api.Tests
             Assert.NotNull(stored);
             Assert.NotNull(stored.Authors);
             Assert.Contains("Legacy Author", stored.Authors);
-            Assert.False(string.IsNullOrWhiteSpace(stored.BasePath));
-            Assert.StartsWith(tempRoot, stored.BasePath);
-            Assert.Contains("Legacy Author", stored.BasePath);
-            Assert.Contains("Legacy Title", stored.BasePath);
+            // BasePath should only be set when a custom destination path is explicitly provided
+            // When no custom path is given, ImportService uses the default file naming pattern from settings
+            Assert.True(string.IsNullOrWhiteSpace(stored.BasePath), "BasePath should be null when no custom destination is provided");
 
             // Cleanup
             try { Directory.Delete(tempRoot, true); } catch { }
@@ -274,6 +273,72 @@ namespace Listenarr.Api.Tests
 
             // Cleanup
             try { Directory.Delete(tempRoot, true); } catch { }
+        }
+
+        [Fact]
+        public async Task AddToLibrary_WithCustomPath_StoresCustomPathAsBasePath()
+        {
+            // Arrange
+            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+
+            var dbContext = new ListenArrDbContext(options);
+
+            var mockRepo = new Mock<IAudiobookRepository>();
+            mockRepo.Setup(r => r.AddAsync(It.IsAny<Audiobook>()))
+                .Returns<Audiobook>(async (ab) =>
+                {
+                    await dbContext.Audiobooks.AddAsync(ab);
+                    await dbContext.SaveChangesAsync();
+                });
+
+            var mockImageCache = new Mock<IImageCacheService>();
+            var mockLogger = new Mock<ILogger<LibraryController>>();
+            var mockFileNaming = new Mock<IFileNamingService>();
+
+            var mockConfigService = new Mock<IConfigurationService>();
+            mockConfigService.Setup(c => c.GetApplicationSettingsAsync())
+                .ReturnsAsync(new ApplicationSettings { OutputPath = "/default/path", FileNamingPattern = "{Author}/{Title}" });
+
+            var mockQualityProfile = new Mock<IQualityProfileService>();
+            mockQualityProfile.Setup(q => q.GetDefaultAsync()).ReturnsAsync((QualityProfile?)null);
+
+            var services = new ServiceCollection();
+            services.AddSingleton<IConfigurationService>(mockConfigService.Object);
+            services.AddSingleton<IQualityProfileService>(mockQualityProfile.Object);
+            var provider = services.BuildServiceProvider();
+            var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
+
+            var controller = new LibraryController(
+                mockRepo.Object,
+                mockImageCache.Object,
+                mockLogger.Object,
+                dbContext,
+                scopeFactory,
+                mockFileNaming.Object);
+
+            var customPath = "/custom/audiobooks/Author/Series/Title";
+            var request = new LibraryController.AddToLibraryRequest
+            {
+                Metadata = new AudibleBookMetadata
+                {
+                    Title = "Custom Path Test",
+                    Author = "Custom Author"
+                },
+                Monitored = true,
+                DestinationPath = customPath  // Custom path provided
+            };
+
+            // Act
+            var actionResult = await controller.AddToLibrary(request);
+
+            // Assert
+            Assert.IsType<OkObjectResult>(actionResult);
+
+            var stored = await dbContext.Audiobooks.FirstOrDefaultAsync();
+            Assert.NotNull(stored);
+            Assert.Equal(customPath, stored.BasePath);
         }
     }
 }

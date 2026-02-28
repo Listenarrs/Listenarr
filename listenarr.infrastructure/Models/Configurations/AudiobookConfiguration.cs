@@ -50,6 +50,13 @@ namespace Listenarr.Infrastructure.Models.Configurations
                 .HasColumnType("TEXT");
             narratorsProp.Metadata.SetValueComparer(narratorsComparer);
 
+            var isbnConverter = (Microsoft.EntityFrameworkCore.Storage.ValueConversion.ValueConverter<List<string>?, string>) new Listenarr.Infrastructure.Persistence.Converters.JsonValueConverter<List<string>?>();
+            var isbnComparer = Listenarr.Infrastructure.Persistence.Converters.JsonValueComparer.Create<List<string>?>();
+            var isbnProp = builder.Property(e => e.Isbn)
+                .HasConversion(isbnConverter)
+                .HasColumnType("TEXT");
+            isbnProp.Metadata.SetValueComparer(isbnComparer);
+
             // Author ASINs (resolve/cached author images rely on stored ASINs)
             var authorAsinsConverter = (Microsoft.EntityFrameworkCore.Storage.ValueConversion.ValueConverter<List<string>?, string>) new Listenarr.Infrastructure.Persistence.Converters.JsonValueConverter<List<string>?>();
             var authorAsinsComparer = Listenarr.Infrastructure.Persistence.Converters.JsonValueComparer.Create<List<string>?>();
@@ -62,6 +69,12 @@ namespace Listenarr.Infrastructure.Models.Configurations
             builder.HasMany(a => a.Files)
                 .WithOne(f => f.Audiobook)
                 .HasForeignKey(f => f.AudiobookId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // One-to-many: Audiobook -> ExternalIdentifiers
+            builder.HasMany(a => a.ExternalIdentifiers)
+                .WithOne()
+                .HasForeignKey(i => i.AudiobookId)
                 .OnDelete(DeleteBehavior.Cascade);
 
             // Performance indexes commonly used by queries

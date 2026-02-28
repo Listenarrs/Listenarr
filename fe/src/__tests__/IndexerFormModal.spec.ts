@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
-import IndexerFormModal from '@/components/IndexerFormModal.vue'
+import IndexerFormModal from '@/components/settings/IndexerFormModal.vue'
 
 describe('IndexerFormModal', () => {
   it('renders API key input as PasswordInput for Newznab/Torznab', async () => {
@@ -11,18 +11,19 @@ describe('IndexerFormModal', () => {
     })
 
     await wrapper.setProps({
-      editingIndexer: {
-        id: '1',
+      editingIndexer: ({
+        id: 1,
         name: 'Test Indexer',
         implementation: 'Newznab',
         url: 'https://example.test',
         apiKey: 'secret',
-      },
+      } as any),
     })
     await wrapper.vm.$nextTick()
 
-    const apiKeyInput = wrapper.find('input[id="apiKey"]')
-    expect(apiKeyInput.exists()).toBe(true)
-    expect((apiKeyInput.element as HTMLInputElement).value).toBe('secret')
+    // PasswordInput is a child component; assert it exists and its `modelValue` is populated
+    const pwdComp = wrapper.findComponent({ name: 'PasswordInput' })
+    expect(pwdComp.exists()).toBe(true)
+    expect(pwdComp.props('modelValue')).toBe('secret')
   })
 })

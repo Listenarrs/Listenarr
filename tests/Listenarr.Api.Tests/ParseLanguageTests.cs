@@ -17,7 +17,7 @@ namespace Listenarr.Api.Tests
         [InlineData("Book Title FR", "French")]
         [InlineData("[FRE] Bar", "French")]
         [InlineData("No language here", null)]
-        public void ParseLanguageFromText_RecognizesCodes(string input, string expected)
+        public void ParseLanguageFromText_RecognizesCodes(string input, string? expected)
         {
             // Create an uninitialized SearchService instance so we don't have to satisfy constructor dependencies
             var svcObj = System.Runtime.Serialization.FormatterServices.GetUninitializedObject(typeof(SearchService));

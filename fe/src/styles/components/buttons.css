@@ -1,0 +1,506 @@
+/* Shared button utilities (centralized)
+   - Use for small icon-only buttons and inline browse buttons
+   - Keeps small, reusable utilities so components import global styles without duplication
+*/
+
+/* Icon buttons used across components (icon-only, small actions) */
+.icon-btn {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  color: #fff;
+  padding: 0.35rem;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+.icon-btn:hover { background: rgba(255, 255, 255, 0.08); }
+
+.icon-btn.close { background: none; border: none; color: #b3b3b3; padding: 0.35rem; }
+.icon-btn.close:hover { background: #333; color: #fff; }
+
+.icon-btn.delete {
+  background: rgba(231, 76, 60, 0.9);
+  border-color: rgba(192, 57, 43, 0.5);
+}
+.icon-btn.delete:hover { background: rgba(192, 57, 43, 1); }
+
+.icon-btn svg { width: 18px; height: 18px; }
+.icon-btn:focus { outline: none; box-shadow: 0 0 0 3px rgba(var(--brand-rgb), 0.12); }
+
+.icon-btn.btn-primary { background-color: var(--brand-focus); color: white; border: none; }
+.icon-btn.btn-primary:hover:not(:disabled) { background-color: var(--brand-700); transform: translateY(-1px); box-shadow: 0 4px 8px rgba(0,0,0,0.3); }
+.icon-btn.btn-secondary { background-color: #444; color: #fff; border: 1px solid #333; }
+
+/* Backwards-compatible alias used across many components */
+/* Base icon-only buttons: neutral filled grey with white icon
+   Use `.icon-button.primary` for brand actions and `.icon-button.danger` for destructive actions */
+.icon-button {
+  background-color: #3a3a3a;
+  border: 1px solid #555;
+  padding: 0.5rem;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.18s ease;
+  font-size: 1.1rem;
+  width: 36px;
+  height: 36px;
+}
+
+.icon-button svg, .icon-button svg * {
+  width: 18px;
+  height: 18px;
+  color: inherit;
+  fill: currentColor;
+  stroke: currentColor;
+}
+
+.icon-button:hover:not(:disabled) {
+  background-color: #4a4a4a;
+  border-color: #666;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.12);
+}
+
+/* Primary (brand blue) */
+.icon-button.primary {
+  background-color: var(--brand-500);
+  border-color: transparent;
+  color: #ffffff;
+}
+.icon-button.primary:hover:not(:disabled) {
+  background-color: var(--brand-600);
+  box-shadow: 0 4px 12px rgba(var(--brand-rgb), 0.14);
+  transform: translateY(-1px);
+}
+
+/* Danger (red) */
+.icon-button.danger {
+  background-color: #f44336;
+  border-color: transparent;
+  color: #ffffff;
+}
+.icon-button.danger:hover:not(:disabled) {
+  background-color: #e53935;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.16);
+  transform: translateY(-1px);
+}
+
+/* Convenience aliases: semantic action classes used across views */
+.icon-button.action-edit,
+.btn.action-edit,
+.btn.btn-icon.action-edit {
+  background-color: var(--brand-500);
+  border-color: transparent;
+  color: #ffffff;
+}
+.icon-button.action-edit:hover:not(:disabled),
+.btn.action-edit:hover:not(:disabled),
+.btn.btn-icon.action-edit:hover:not(:disabled) {
+  background-color: var(--brand-600);
+  box-shadow: 0 4px 12px rgba(var(--brand-rgb), 0.14);
+  transform: translateY(-1px);
+}
+
+.icon-button.action-delete,
+.btn.action-delete,
+.btn.btn-icon.action-delete {
+  background-color: #f44336;
+  border-color: transparent;
+  color: #ffffff;
+}
+.icon-button.action-delete:hover:not(:disabled),
+.btn.action-delete:hover:not(:disabled),
+.btn.btn-icon.action-delete:hover:not(:disabled) {
+  background-color: #e53935;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.16);
+  transform: translateY(-1px);
+}
+
+/* Action-secondary (used for toggles / test) */
+.icon-button.action-secondary {
+  /* neutral by default (uses base .icon-button) */
+}
+
+.icon-button.action-secondary.active {
+  /* legacy primary fill retained for non-toggle usages; toggles use `.action-toggle` instead */
+}
+
+.icon-button.action-secondary.active:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+/* Ensure test buttons that use action-secondary don't look like toggles */
+.icon-button.action-secondary.test {
+  background-color: rgba(255,255,255,0.03);
+  color: #adb5bd;
+}
+
+.icon-button.action-secondary.test:hover:not(:disabled) {
+  background-color: rgba(255,255,255,0.06);
+  color: #fff;
+}
+
+/* Toggle-specific behavior: show color (not filled background) to indicate state
+   - `.action-toggle.active` -> green
+   - `.action-toggle:not(.active)` -> red */
+.icon-button.action-toggle {
+  background-color: transparent;
+  border-color: transparent;
+  color: #adb5bd; /* neutral */
+}
+.icon-button.action-toggle:hover:not(:disabled) {
+  background-color: rgba(255,255,255,0.03);
+}
+
+.icon-button.action-toggle.active {
+  color: #4caf50; /* green */
+}
+
+.icon-button.action-toggle:not(.active) {
+  color: #f44336; /* red */
+}
+
+.icon-button.action-toggle svg,
+.icon-button.action-toggle svg * {
+  color: inherit;
+  fill: currentColor;
+  stroke: currentColor;
+}
+
+/* Ensure nav-button + icon-button combination shows a filled primary/danger style
+   (use solid flat background with white icon so buttons aren't ghost buttons) */
+.nav-btn.icon-button.primary {
+  background-color: var(--brand-500) !important;
+  border-color: transparent !important;
+  color: #ffffff !important;
+  box-shadow: 0 2px 8px rgba(var(--brand-rgb), 0.12) !important;
+}
+.nav-btn.icon-button.primary:hover:not(:disabled) {
+  background-color: var(--brand-600) !important;
+  transform: translateY(-1px) !important;
+  box-shadow: 0 4px 12px rgba(var(--brand-rgb), 0.14) !important;
+}
+.nav-btn.icon-button.primary svg,
+.nav-btn.icon-button.primary svg * {
+  color: #fff !important;
+  fill: currentColor !important;
+  stroke: currentColor !important;
+}
+
+/* Test result color states for icon-only buttons (color only, no fill) */
+.icon-button.test-success {
+  color: #4caf50 !important; /* green */
+  border-color: transparent !important;
+  background-color: transparent !important;
+}
+.icon-button.test-success svg,
+.icon-button.test-success svg * {
+  color: inherit !important;
+  fill: currentColor !important;
+  stroke: currentColor !important;
+}
+
+.icon-button.test-fail {
+  color: #f44336 !important; /* red */
+  border-color: transparent !important;
+  background-color: transparent !important;
+}
+.icon-button.test-fail svg,
+.icon-button.test-fail svg * {
+  color: inherit !important;
+  fill: currentColor !important;
+  stroke: currentColor !important;
+}
+
+.nav-btn.icon-button.danger {
+  background-color: #f44336 !important;
+  border-color: transparent !important;
+  color: #ffffff !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.12) !important;
+}
+.nav-btn.icon-button.danger:hover:not(:disabled) {
+  background-color: #e53935 !important;
+  transform: translateY(-1px) !important;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.16) !important;
+}
+.nav-btn.icon-button.danger svg,
+.nav-btn.icon-button.danger svg * {
+  color: #fff !important;
+  fill: currentColor !important;
+  stroke: currentColor !important;
+}
+
+/* Neutral (non-primary, non-danger) nav icon buttons: use filled grey background with white icon */
+.nav-btn.icon-button:not(.primary):not(.danger) {
+  background-color: #3a3a3a !important;
+  border-color: #555 !important;
+  color: #ffffff !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+.nav-btn.icon-button:not(.primary):not(.danger) svg,
+.nav-btn.icon-button:not(.primary):not(.danger) svg * {
+  color: #fff !important;
+  fill: currentColor !important;
+  stroke: currentColor !important;
+}
+.nav-btn.icon-button:not(.primary):not(.danger):hover:not(:disabled) {
+  background-color: #4a4a4a !important;
+  border-color: #666 !important;
+  transform: translateY(-1px) !important;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.12) !important;
+}
+
+.icon-button svg { width: 18px; height: 18px; }
+
+.icon-button.copied { color: #4caf50; }
+
+.icon-button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* List & inline edit/delete buttons (use in lists and settings cards) */
+.edit-button,
+.delete-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0.45rem;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.06);
+  background-color: transparent;
+  color: var(--color-text-muted, #adb5bd);
+  cursor: pointer;
+  transition: all 0.18s ease;
+  font-size: 1rem;
+}
+
+/* Edit (brand) - subtle by default, filled on hover */
+.edit-button {
+  background-color: rgba(var(--brand-rgb), 0.12);
+  color: var(--brand-500);
+  border-color: rgba(var(--brand-rgb), 0.18);
+}
+.edit-button:hover:not(:disabled) {
+  background-color: var(--brand-500);
+  color: #fff;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(var(--brand-rgb), 0.14);
+}
+
+/* Delete (danger) - subtle by default, filled on hover */
+.delete-button {
+  background-color: rgba(231,76,60,0.12);
+  color: #ff6b6b;
+  border-color: rgba(231,76,60,0.2);
+}
+.delete-button:hover:not(:disabled) {
+  background-color: #e74c3c;
+  color: #fff;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(231,76,60,0.18);
+}
+
+/* Test button helper (use where a primary-like test action is desired) */
+.test-button {
+  background-color: var(--brand-500);
+  color: #fff;
+  padding: 0.65rem 1rem;
+  border-radius: 6px;
+  border: none;
+  box-shadow: 0 2px 8px rgba(var(--brand-rgb), 0.12);
+}
+.test-button:hover:not(:disabled) {
+  background-color: var(--brand-600);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(var(--brand-rgb), 0.14);
+}
+
+/* Compact tag add button (shared) */
+.btn-add-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem;
+  background-color: var(--brand-focus);
+  color: white;
+  border: none;
+  border-radius: var(--btn-radius);
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  width: var(--control-height);
+  height: var(--control-height);
+}
+.btn-add-tag:hover:not(:disabled) { background-color: #005fa3; transform: translateY(-1px); }
+.btn-add-tag:active:not(:disabled) { transform: translateY(0); }
+.btn-add-tag:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Inline browse button (compact icon-only browse controls) */
+.inline-browse { display: flex; align-items: center; }
+.btn-inline-browse {
+  padding: 0.625rem;
+  color: #fff;
+  border: none;
+  border-radius: var(--btn-radius);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+}
+.btn-inline-browse:hover { background: var(--brand-600); transform: translateY(-1px); box-shadow: 0 4px 8px rgba(0,0,0,0.2); }
+.btn-inline-browse:active { transform: translateY(0); }
+.btn-inline-browse:focus { outline: none; box-shadow: 0 0 0 3px rgba(var(--brand-rgb), 0.24); }
+.btn-inline-browse svg { width: 20px; height: 20px; }
+
+/* Icon-only small button variant: use with .btn-sm.icon-btn or .icon-btn.btn-sm */
+.btn-sm.icon-btn, .icon-btn.btn-sm {
+  padding: 0.35rem;
+  min-width: 40px;
+  min-height: 40px;
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-sm.icon-btn svg, .icon-btn.btn-sm svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* -----------------------------
+   Standardized button system
+   - Provides a single source-of-truth for all button variants used across the app
+   - Alias legacy class names (e.g., .add-button, .toolbar-btn) to centralized styles
+   - Keeps visual consistency and reduces duplication in component styles
+   ----------------------------- */
+
+/* Base button */
+.btn {
+  padding: 1rem 1.5rem;
+  height: var(--control-height);
+  border-radius: var(--btn-radius);
+  border: none;
+  background: var(--button-bg);
+  color: var(--color-text);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 500;
+  transition: all 0.18s ease;
+  font-size: 0.9rem;
+  box-sizing: border-box;
+}
+
+.btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+.btn:focus { outline: none; box-shadow: var(--focus-ring); }
+
+/* Button icon sizing */
+.btn svg { width: 18px; height: 18px; }
+
+/* Primary / accent (flat colors, no gradient) */
+.btn-primary {
+  background-color: var(--brand-500);
+  color: white;
+  border: 1px solid var(--brand-600);
+  box-shadow: 0 2px 8px rgba(var(--brand-rgb), 0.12);
+}
+.btn-primary:hover:not(:disabled) {
+  background-color: var(--brand-600);
+  border-color: var(--brand-700);
+  box-shadow: 0 4px 12px rgba(var(--brand-rgb), 0.14);
+  transform: translateY(-1px);
+  cursor: pointer;
+}
+.btn-primary:active:not(:disabled) { transform: translateY(0); }
+
+/* Secondary / muted */
+.btn-secondary { background-color: #444; color: #fff; border: 1px solid #333; }
+.btn-secondary:hover:not(:disabled) { background-color: #555; }
+
+/* Info / subtle variant */
+.btn-info { background-color: var(--brand-500); color: white; }
+.btn-info:hover:not(:disabled) { background-color: var(--brand-600); }
+
+/* Danger */
+.btn-danger { background-color: #f44336; color: white; }
+.btn-danger:hover:not(:disabled) { background-color: #e53935; transform: translateY(-1px); }
+
+/* Size modifiers */
+.btn-sm { font-size: 0.85rem; padding: 0.4rem 0.6rem; height: calc(var(--control-height) - 10px); }
+.btn-lg, .add-button-large { font-size: 1rem; padding: 0.8rem 1.25rem; height: calc(var(--control-height) + 8px); }
+
+/* Aliases for legacy classes - centralize visuals so components can keep markup */
+.add-button,
+.add-button-large {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background-color: var(--brand-500);
+  color: white;
+  padding: var(--control-padding);
+  border-radius: var(--btn-radius);
+  font-weight: 500;
+  min-height: var(--control-height);
+  cursor: pointer;
+}
+.add-button:hover:not(:disabled), .add-button-large:hover:not(:disabled) { background-color: var(--brand-600); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(var(--brand-rgb), 0.14); }
+.add-button.added { background-color: #4caf50; }
+
+/* Toolbar & icon-style buttons */
+.toolbar-btn,
+.icon-button,
+.icon-btn {
+  background: none;
+  border: none;
+  color: #adb5bd;
+  padding: 0.4rem;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+.toolbar-btn:hover,
+.icon-button:hover,
+.icon-btn:hover { background-color: rgba(255,255,255,0.06); color: white; transform: translateY(-1px); }
+.toolbar-btn.active { background-color: rgba(var(--brand-rgb), 0.06); color: white; }
+.toolbar-btn svg, .icon-button svg, .icon-btn svg { width: 18px; height: 18px; }
+
+/* Cancel / secondary semantic */
+.cancel-button { background-color: #555; color: white; border: 1px solid #444; }
+.cancel-button:hover:not(:disabled) { background-color: #666; }
+
+/* Search / page / small action buttons */
+.search-button, .page-button, .retry-button, .refresh-button, .status-button, .action-button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; padding: 0.5rem 0.75rem; border-radius: 6px; border: none; cursor: pointer; background: var(--button-bg); color: var(--color-text);
+}
+.search-button.cancel-button { background: none; color: #adb5bd; }
+
+/* Start / stop / invite buttons */
+.start-button { background-color: #28a745; color: white; }
+.stop-button { background-color: #e74c3c; color: white; }
+.invite-button { background-color: var(--brand-500); color: white; padding: 0.5rem 0.75rem; border-radius: 6px; }
+
+/* Action variants used in lists */
+.action-btn, .action-button { background: none; border: none; color: #adb5bd; padding: 0.4rem; border-radius: 6px; cursor: pointer; }
+.action-btn:hover, .action-button:hover { background: rgba(255,255,255,0.06); transform: translateY(-1px); }
+
+/* Ensure modal-specific button sizing continues to apply (modal.css has priority for modal footers) */
+/* End of standardized button system */
+

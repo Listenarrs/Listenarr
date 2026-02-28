@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2025 Robbie Davis
  * 
@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using System.Text.Json;
 using Listenarr.Domain.Models;
 using Listenarr.Infrastructure.Models;
 using Microsoft.EntityFrameworkCore;
@@ -46,8 +47,7 @@ namespace Listenarr.Api.Services
                     .OrderBy(c => c.Priority)
                     .ToListAsync();
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error loading API configurations from database");
                 return new List<ApiConfiguration>();
             }
@@ -60,8 +60,7 @@ namespace Listenarr.Api.Services
                 return await _dbContext.ApiConfigurations
                     .FirstOrDefaultAsync(c => c.Id == id);
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error loading API configuration {Id} from database", id);
                 return null;
             }
@@ -91,8 +90,7 @@ namespace Listenarr.Api.Services
                 await _dbContext.SaveChangesAsync();
                 return config.Id;
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error saving API configuration to database");
                 throw;
             }
@@ -112,8 +110,7 @@ namespace Listenarr.Api.Services
 
                 return true;
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error deleting API configuration from database");
                 return false;
             }
@@ -128,8 +125,7 @@ namespace Listenarr.Api.Services
                     .OrderBy(c => c.Name)
                     .ToListAsync();
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error loading download client configurations from database");
                 return new List<DownloadClientConfiguration>();
             }
@@ -142,8 +138,7 @@ namespace Listenarr.Api.Services
                 return await _dbContext.DownloadClientConfigurations
                     .FirstOrDefaultAsync(c => c.Id == id);
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error loading download client configuration {Id} from database", id);
                 return null;
             }
@@ -172,8 +167,7 @@ namespace Listenarr.Api.Services
                 await _dbContext.SaveChangesAsync();
                 return config.Id;
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error saving download client configuration to database");
                 throw;
             }
@@ -193,8 +187,7 @@ namespace Listenarr.Api.Services
 
                 return true;
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error deleting download client configuration from database");
                 return false;
             }
@@ -224,8 +217,7 @@ namespace Listenarr.Api.Services
 
                 return settings;
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 // On error while loading settings we intentionally do NOT perform any
                 // runtime schema changes (eg. ALTER TABLE). Schema changes must be
                 // applied via EF migrations or external DB migration tools.
@@ -242,6 +234,39 @@ namespace Listenarr.Api.Services
             {
                 // Ensure Id is always 1 (singleton pattern)
                 settings.Id = 1;
+
+                // Normalize possible JSON-encoded trigger lists coming from the frontend.
+                // Some UI payloads have been observed to send a JSON stringified array
+                // inside the array (eg. ["[\"book-available\"]"]) which breaks
+                // server-side trigger matching. Detect and decode that case here.
+                //
+                // We keep this defensive normalization server-side for robustness,
+                // but the real fix would be to avoid producing double-encoded JSON
+                // from the frontend. This helper centralizes the detection/decoding
+                // logic so it's consistently applied to both the global triggers
+                // and per-webhook trigger lists.
+                try
+                {
+                    settings.EnabledNotificationTriggers = NormalizeTriggerList(settings.EnabledNotificationTriggers) ?? new List<string>();
+
+                    if (settings.Webhooks != null)
+                    {
+                        foreach (var w in settings.Webhooks)
+                        {
+                            w.Triggers = NormalizeTriggerList(w.Triggers) ?? new List<string>();
+                        }
+                    }
+                }
+                catch (JsonException ex)
+                {
+                    // Malformed JSON when attempting to decode double-encoded trigger lists
+                    _logger.LogWarning(ex, "Failed to normalize notification triggers due to JSON error; saving with original values");
+                }
+                catch (FormatException ex)
+                {
+                    // Catch formatting/parsing issues if any string parsing is introduced in the future
+                    _logger.LogWarning(ex, "Failed to normalize notification triggers due to formatting error; saving with original values");
+                }
 
                 var existing = await _dbContext.ApplicationSettings.FirstOrDefaultAsync(s => s.Id == 1);
 
@@ -361,8 +386,7 @@ namespace Listenarr.Api.Services
                     _logger.LogDebug("Reloaded Webhooks after Save: {Reloaded}", reloadedSerialized);
                     Console.WriteLine($"DEBUG: Reloaded Webhooks after Save: {reloadedSerialized}");
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogDebug(ex, "Error reloading application settings after save for debug purposes");
                 }
 
@@ -393,20 +417,51 @@ namespace Listenarr.Api.Services
                         _logger.LogDebug("No admin credentials provided in settings update");
                     }
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogError(ex, "Failed to create or update admin user '{Username}' from application settings. Settings will still be saved.", settings.AdminUsername);
                     // Do not fail saving settings if user creation fails; log and continue
                     // This prevents the 500 error and allows settings to be saved even if user operations fail
                 }
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error saving application settings to database (no runtime ALTERs will be attempted)");
                 // Re-throw to let higher-level handlers surface the failure. We intentionally
                 // do not attempt to alter the schema automatically here.
                 throw;
             }
+        }
+
+        // Normalize a potentially double-encoded JSON stringified array that
+        // sometimes arrives from the front-end as a single-element list where
+        // the first item is a JSON array string. Example: ["[\"book-available\"]"].
+        // Returns the original list when no decoding is required.
+        private static List<string>? NormalizeTriggerList(List<string>? list)
+        {
+            if (list == null) return null;
+            if (list.Count == 1)
+            {
+                var first = list[0];
+                if (!string.IsNullOrWhiteSpace(first) && first.TrimStart().StartsWith("["))
+                {
+                    try
+                    {
+                        var decoded = System.Text.Json.JsonSerializer.Deserialize<List<string>>(first);
+                        if (decoded != null && decoded.Count > 0) return decoded;
+                    }
+                    catch (JsonException)
+                    {
+                        // Malformed JSON — ignore and fall through to returning original list
+                                            System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                    }
+                    catch (NotSupportedException)
+                    {
+                        // Unsupported JSON shape — ignore and fall through
+                                            System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                    }
+                }
+            }
+
+            return list;
         }
 
         // Startup Configuration methods
@@ -417,8 +472,7 @@ namespace Listenarr.Api.Services
                 var config = _startupConfigService.GetConfig();
                 return Task.FromResult(config ?? new StartupConfig());
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error retrieving startup configuration");
                 return Task.FromResult(new StartupConfig());
             }
@@ -430,8 +484,7 @@ namespace Listenarr.Api.Services
             {
                 await _startupConfigService.SaveAsync(config);
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error saving startup configuration");
                 throw;
             }
@@ -445,11 +498,11 @@ namespace Listenarr.Api.Services
                 var settings = await GetApplicationSettingsAsync();
                 return settings?.Webhooks ?? new List<WebhookConfiguration>();
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error retrieving webhook configurations");
                 return new List<WebhookConfiguration>();
             }
         }
     }
 }
+

@@ -14,26 +14,20 @@ public class AsinEnricher
 {
     private readonly ILogger<AsinEnricher> _logger;
     private readonly MetadataStrategyCoordinator _metadataStrategyCoordinator;
-    private readonly IAudibleMetadataService? _audibleMetadataService;
     private readonly MetadataConverters _metadataConverters;
-    private readonly MetadataMerger _metadataMerger;
     private readonly SearchResultFilterPipeline _filterPipeline;
     private readonly SearchProgressReporter _searchProgressReporter;
 
     public AsinEnricher(
         ILogger<AsinEnricher> logger,
         MetadataStrategyCoordinator metadataStrategyCoordinator,
-        IAudibleMetadataService? audibleMetadataService,
         MetadataConverters metadataConverters,
-        MetadataMerger metadataMerger,
         SearchResultFilterPipeline filterPipeline,
         SearchProgressReporter searchProgressReporter)
     {
         _logger = logger;
         _metadataStrategyCoordinator = metadataStrategyCoordinator;
-        _audibleMetadataService = audibleMetadataService;
         _metadataConverters = metadataConverters;
-        _metadataMerger = metadataMerger;
         _filterPipeline = filterPipeline;
         _searchProgressReporter = searchProgressReporter;
     }
@@ -44,7 +38,6 @@ public class AsinEnricher
     public async Task<EnrichmentResult> EnrichAsinsAsync(
         List<string> asinCandidates,
         Dictionary<string, (string Title, string Author, string? ImageUrl, string? Language)> asinToRawResult,
-        Dictionary<string, AudibleSearchResult> asinToAudibleResult,
         Dictionary<string, string> asinToSource,
         Dictionary<string, OpenLibraryBook> asinToOpenLibrary,
         List<ApiConfiguration> metadataSources,
@@ -70,7 +63,6 @@ public class AsinEnricher
 
                     // Get the original search results
                     asinToRawResult.TryGetValue(asin, out var rawResult);
-                    asinToAudibleResult.TryGetValue(asin, out var audibleResult);
                     asinToSource.TryGetValue(asin, out var originalSource);
 
                     AudibleBookMetadata? metadata = null;
@@ -123,8 +115,7 @@ public class AsinEnricher
                                 asinsNeedingFallback.Add(asin);
                             }
                         }
-                        catch (Exception ex)
-                        {
+                        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                             _logger.LogWarning(ex, "Failed to convert OpenLibrary metadata for ASIN {Asin}", asin);
                         }
 
@@ -149,48 +140,14 @@ public class AsinEnricher
                             asin, metadataSources, originalSource);
                     }
 
-                    // If all metadata sources failed, try the configured audible metadata scraper as a last
-                    // attempt before queuing the ASIN for fallback scraping. Tests commonly replace
-                    // IAudibleMetadataService with a deterministic test implementation and expect
-                    // it to be used when upstream metadata sources are not configured.
+                    // If all metadata sources failed, queue for fallback handling
                     if (metadata == null)
                     {
-                        try
-                        {
-                            if (_audibleMetadataService != null)
-                            {
-                                _logger.LogInformation("No external metadata sources succeeded for ASIN {Asin} - trying audible metadata scraper", asin);
-                                await _searchProgressReporter.BroadcastAsync($"Scraping Audible page for ASIN: {asin}", asin);
-                                ct.ThrowIfCancellationRequested();
-                                    var scrapedMd = await _audibleMetadataService.ScrapeAudibleMetadataAsync(asin, ct);
-                                if (scrapedMd != null)
-                                {
-                                    metadata = scrapedMd;
-                                    metadataSourceName = "Audible";
-                                    _logger.LogInformation("Audible metadata scraper returned data for ASIN {Asin} (title: {Title})", asin, metadata.Title);
-                                    await _searchProgressReporter.BroadcastAsync($"Found: {metadata.Title}", asin);
-                                }
-                            }
+                        asinsNeedingFallback.Add(asin);
+                        // Note that this ASIN has no metadata yet
+                        try { candidateDropReasons[asin] = "queued_for_fallback_no_metadata"; } catch (Exception caughtEx_1) when (caughtEx_1 is not OperationCanceledException && caughtEx_1 is not OutOfMemoryException && caughtEx_1 is not StackOverflowException) { 
+                            System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
                         }
-                        catch (Exception exScrape)
-                        {
-                            _logger.LogWarning(exScrape, "Audible metadata scraper failed for ASIN {Asin}", asin);
-                        }
-
-                        if (metadata == null)
-                        {
-                            asinsNeedingFallback.Add(asin);
-                            // Note that this ASIN has no metadata yet
-                            try { candidateDropReasons[asin] = "queued_for_fallback_no_metadata"; } catch { }
-                        }
-                    }
-
-                    // If we have an Audible search result, merge that data to fill in gaps
-                    if (audibleResult != null && metadata != null)
-                    {
-                        var searchMetadata = _metadataMerger.PopulateMetadataFromSearchResult(audibleResult);
-                        _metadataMerger.MergeMetadata(searchMetadata, metadata);
-                        // Keep the rich metadata (from Audimeta/Audnexus/scraper) - don't replace it
                     }
 
                     if (metadata != null)
@@ -218,18 +175,24 @@ public class AsinEnricher
                             _logger.LogInformation("Filtering out result: {Title} (ASIN: {Asin}) - Reason: {Reason}", 
                                 enrichedResult.Title, asin, filterReason);
                             await _searchProgressReporter.BroadcastAsync($"Filtered out: {enrichedResult.Title}", asin);
-                            try { candidateDropReasons[asin] = filterReason ?? "filtered"; } catch { }
+                            try { candidateDropReasons[asin] = filterReason ?? "filtered"; } catch (Exception caughtEx_2) when (caughtEx_2 is not OperationCanceledException && caughtEx_2 is not OutOfMemoryException && caughtEx_2 is not StackOverflowException) { 
+                                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                            }
                         }
                         else
                         {
                             enriched.Add(enrichedResult);
-                            try { candidateDropReasons[asin] = "enriched_from_metadata"; } catch { }
+                            try { candidateDropReasons[asin] = "enriched_from_metadata"; } catch (Exception caughtEx_3) when (caughtEx_3 is not OperationCanceledException && caughtEx_3 is not OutOfMemoryException && caughtEx_3 is not StackOverflowException) { 
+                                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                            }
                         }
                     }
                     else
                     {
                         _logger.LogWarning("✗ No metadata obtained for ASIN {Asin} after trying all sources and scraping", asin);
-                        try { candidateDropReasons[asin] = "no_metadata_after_sources"; } catch { }
+                        try { candidateDropReasons[asin] = "no_metadata_after_sources"; } catch (Exception caughtEx_4) when (caughtEx_4 is not OperationCanceledException && caughtEx_4 is not OutOfMemoryException && caughtEx_4 is not StackOverflowException) { 
+                            System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                        }
                     }
                 }
                 catch (OperationCanceledException)
@@ -237,8 +200,7 @@ public class AsinEnricher
                     _logger.LogInformation("Metadata enrichment cancelled for ASIN {Asin}", asin);
                     throw;
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogWarning(ex, "Metadata enrichment failed for ASIN {Asin}", asin);
                 }
                 finally
@@ -264,3 +226,4 @@ public record EnrichmentResult(
     List<SearchResult> EnrichedResults,
     List<string> AsinsNeedingFallback,
     ConcurrentDictionary<string, string> CandidateDropReasons);
+

@@ -1,4 +1,4 @@
-﻿using System.Threading.Tasks;
+using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Listenarr.Api.Services;
@@ -38,8 +38,7 @@ namespace Listenarr.Api.Controllers
             {
                 await _antiforgery.ValidateRequestAsync(HttpContext);
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 return BadRequest(new { message = "Invalid or missing CSRF token", detail = ex.Message });
             }
             // Load the tracked entity so we can update it
@@ -60,8 +59,7 @@ namespace Listenarr.Api.Controllers
             {
                 meta = await _metadataService.ExtractFileMetadataAsync(path);
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 return StatusCode(500, new { message = "Metadata extraction failed", detail = ex.Message });
             }
 
@@ -87,8 +85,7 @@ namespace Listenarr.Api.Controllers
             {
                 await _antiforgery.ValidateRequestAsync(HttpContext);
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 return BadRequest(new { message = "Invalid or missing CSRF token", detail = ex.Message });
             }
 
@@ -119,8 +116,7 @@ namespace Listenarr.Api.Controllers
                         updated++;
                     }
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     // log and continue
                     var logger = scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<AdminMetadataController>>();
                     logger.LogWarning(ex, "Failed to re-extract for file id={Id} path={Path}", f.Id, f.Path);
@@ -132,4 +128,5 @@ namespace Listenarr.Api.Controllers
         }
     }
 }
+
 

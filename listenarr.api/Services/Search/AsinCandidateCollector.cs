@@ -7,7 +7,7 @@ using Microsoft.Extensions.Logging;
 namespace Listenarr.Api.Services.Search;
 
 /// <summary>
-/// Collects ASIN candidates from Amazon, Audible, and OpenLibrary sources.
+/// Collects ASIN candidates from OpenLibrary and other non-scraping sources.
 /// </summary>
 public class AsinCandidateCollector
 {
@@ -29,78 +29,16 @@ public class AsinCandidateCollector
     }
 
     /// <summary>
-    /// Collects ASIN candidates from multiple sources.
+    /// Collects ASIN candidates from non-scraping sources.
     /// </summary>
     public async Task<AsinCandidateCollection> CollectCandidatesAsync(
-    List<AmazonSearchResult> amazonResults,
-    List<AudibleSearchResult> audibleResults,
-    string query,
-    bool skipOpenLibrary = false,
-    int amazonProviderCap = 50,
-    int audibleProviderCap = 50,
-    CancellationToken ct = default)
+        string query,
+        bool skipOpenLibrary = false,
+        CancellationToken ct = default)
     {
         var collection = new AsinCandidateCollection();
-        
-        _logger.LogInformation("Collected {AmazonCount} Amazon raw results and {AudibleCount} Audible raw results", 
-            amazonResults.Count, audibleResults.Count);
 
-        // Detect whether this query appears to be an ISBN. If so, loosen strict product/seller
-        // filtering below because ISBN searches often return audiobook entries that don't
-        // include print-book-like author/title tokens and may otherwise be filtered out.
-        var digitsOnly = new string((query ?? string.Empty).Where(char.IsDigit).ToArray());
-        var isIsbnQuery = digitsOnly.Length == 10 || digitsOnly.Length == 13;
-
-        // Populate ASIN candidates from Amazon results with detailed logging
-        foreach (var a in amazonResults.Take(amazonProviderCap))
-        {
-            if (string.IsNullOrEmpty(a.Asin))
-            {
-                _logger.LogInformation("Amazon search result missing ASIN. Title='{Title}', Author='{Author}'", a.Title, a.Author);
-                continue;
-            }
-
-            if (!SearchValidation.IsValidAsin(a.Asin!))
-            {
-                _logger.LogInformation("Amazon search result had invalid ASIN '{Asin}'. Title='{Title}', Author='{Author}'", 
-                    a.Asin, a.Title, a.Author);
-                continue;
-            }
-
-            // Filter obvious non-audiobook product results early, but relax this
-            // check for ISBN queries where strict filtering tends to remove valid matches.
-            if (!isIsbnQuery && (SearchValidation.IsProductLikeTitle(a.Title) || SearchValidation.IsSellerArtist(a.Author)))
-            {
-                _logger.LogInformation("Skipping Amazon ASIN {Asin} because title/author looks like a product or seller: Title='{Title}', Author='{Author}'", 
-                    a.Asin, a.Title, a.Author);
-                continue;
-            }
-
-            collection.AsinCandidates.Add(a.Asin!);
-            collection.AsinToRawResult[a.Asin!] = (a.Title ?? "", a.Author ?? "", a.ImageUrl, a.Language);
-            collection.AsinToSource[a.Asin!] = "Amazon";
-            _logger.LogInformation("Added Amazon ASIN candidate {Asin} Title='{Title}' Author='{Author}' ImageUrl='{ImageUrl}'", 
-                a.Asin, a.Title, a.Author, a.ImageUrl);
-        }
-
-        // Populate from Audible results
-        foreach (var a in audibleResults.Where(a => !string.IsNullOrEmpty(a.Asin) && SearchValidation.IsValidAsin(a.Asin!)).Take(audibleProviderCap))
-        {
-            // Filter obvious non-audiobook results even from Audible (defensive)
-            if (SearchValidation.IsProductLikeTitle(a.Title) || SearchValidation.IsSellerArtist(a.Author))
-            {
-                _logger.LogInformation("Skipping Audible ASIN {Asin} because title/author looks like a product or seller: Title='{Title}', Author='{Author}'", 
-                    a.Asin, a.Title, a.Author);
-                continue;
-            }
-
-            if (collection.AsinToRawResult.TryAdd(a.Asin!, (a.Title ?? "", a.Author ?? "", a.ImageUrl, null)))
-            {
-                collection.AsinCandidates.Add(a.Asin!);
-                collection.AsinToAudibleResult[a.Asin!] = a;  // Store full Audible search result
-                collection.AsinToSource[a.Asin!] = "Audible";
-            }
-        }
+        _logger.LogInformation("Collecting candidates from OpenLibrary (query='{Query}')", query);
 
         // Augment ASIN candidates with OpenLibrary suggestions
         if (!skipOpenLibrary && !string.IsNullOrEmpty(query))
@@ -146,7 +84,8 @@ public class AsinCandidateCollector
                             Publisher = (book.Publisher?.Count > 1) ? "Multiple" : book.Publisher?.FirstOrDefault(),
                             PublishYear = book.FirstPublishYear?.ToString(),
                             Description = null,
-                            ImageUrl = coverUrl
+                            ImageUrl = coverUrl,
+                            OpenLibraryId = book.Key
                         };
 
                         ct.ThrowIfCancellationRequested();
@@ -157,6 +96,9 @@ public class AsinCandidateCollector
                         // If OpenLibrary provides a canonical key (work or edition), expose it
                         if (!string.IsNullOrWhiteSpace(book.Key))
                         {
+                            // Use OpenLibrary Key as the Id instead of random GUID
+                            searchResult.Id = book.Key;
+                            
                             if (book.Key.StartsWith("/works", StringComparison.OrdinalIgnoreCase))
                             {
                                 searchResult.ProductUrl = $"https://openlibrary.org{book.Key}";
@@ -170,17 +112,21 @@ public class AsinCandidateCollector
                         }
 
                         collection.OpenLibraryDerivedResults.Add(searchResult);
-                        collection.AsinToOpenLibrary[book.Key ?? Guid.NewGuid().ToString()] = book;
+                        
+                        // Only store in dictionary if we have a valid OpenLibrary Key
+                        // Don't use GUID fallback as it creates invalid openLibraryId values
+                        if (!string.IsNullOrWhiteSpace(book.Key))
+                        {
+                            collection.AsinToOpenLibrary[book.Key] = book;
+                        }
                     }
-                    catch (Exception exConvert)
-                    {
+                    catch (Exception exConvert) when (exConvert is not OperationCanceledException && exConvert is not OutOfMemoryException && exConvert is not StackOverflowException) {
                         _logger.LogWarning(exConvert, "Failed to convert OpenLibrary book to SearchResult: {Title}", book.Title);
                     }
                 }
             }
         }
-        catch (Exception exOL)
-        {
+        catch (Exception exOL) when (exOL is not OperationCanceledException && exOL is not OutOfMemoryException && exOL is not StackOverflowException) {
             _logger.LogWarning(exOL, "OpenLibrary augmentation failed: {Message}", exOL.Message);
         }
     }
@@ -193,8 +139,8 @@ public class AsinCandidateCollection
 {
     public List<string> AsinCandidates { get; } = new List<string>();
     public Dictionary<string, (string Title, string Author, string? ImageUrl, string? Language)> AsinToRawResult { get; } = new Dictionary<string, (string, string, string?, string?)>(StringComparer.OrdinalIgnoreCase);
-    public Dictionary<string, AudibleSearchResult> AsinToAudibleResult { get; } = new Dictionary<string, AudibleSearchResult>(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, string> AsinToSource { get; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, OpenLibraryBook> AsinToOpenLibrary { get; } = new Dictionary<string, OpenLibraryBook>(StringComparer.OrdinalIgnoreCase);
     public List<SearchResult> OpenLibraryDerivedResults { get; } = new List<SearchResult>();
 }
+

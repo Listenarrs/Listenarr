@@ -2,7 +2,7 @@ import { mount } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
 import { describe, it, beforeEach, expect, vi } from 'vitest'
 import { signalRService } from '@/services/signalr'
-import AudiobookDetailView from '@/views/AudiobookDetailView.vue'
+import AudiobookDetailView from '@/views/library/AudiobookDetailView.vue'
 import { useLibraryStore } from '@/stores/library'
 import type { Audiobook } from '@/types'
 

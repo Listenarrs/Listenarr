@@ -15,7 +15,7 @@ namespace Listenarr.Infrastructure.Migrations
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "8.0.22");
+            modelBuilder.HasAnnotation("ProductVersion", "9.0.0");
 
             modelBuilder.Entity("Listenarr.Domain.Models.ApiConfiguration", b =>
                 {
@@ -141,7 +141,17 @@ namespace Listenarr.Infrastructure.Migrations
                     b.Property<bool>("ExtractArchives")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("FailedDownloadAutoSearch")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("FailedDownloadHandlingEnabled")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("FileNamingPattern")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FolderNamingPattern")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
@@ -154,6 +164,10 @@ namespace Listenarr.Infrastructure.Migrations
                     b.Property<int>("MissingSourceRetryInitialDelaySeconds")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("MultiFileNamingPattern")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("OutputPath")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -161,34 +175,7 @@ namespace Listenarr.Infrastructure.Migrations
                     b.Property<int>("PollingIntervalSeconds")
                         .HasColumnType("INTEGER");
 
-                    b.Property<bool>("PreferUsDomain")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("SearchCandidateCap")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<double>("SearchFuzzyThreshold")
-                        .HasColumnType("REAL");
-
-                    b.Property<int>("SearchResultCap")
-                        .HasColumnType("INTEGER");
-
                     b.Property<bool>("ShowCompletedExternalDownloads")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("UsProxyHost")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("UsProxyPassword")
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("UsProxyPort")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("UsProxyUsername")
-                        .HasColumnType("TEXT");
-
-                    b.Property<bool>("UseUsProxy")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("WebhookUrl")
@@ -242,7 +229,7 @@ namespace Listenarr.Infrastructure.Migrations
                     b.Property<string>("ImageUrl")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("Isbn")
+                    b.PrimitiveCollection<string>("Isbn")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Language")
@@ -261,6 +248,9 @@ namespace Listenarr.Infrastructure.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("PublishYear")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PublishedDate")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Publisher")
@@ -302,6 +292,61 @@ namespace Listenarr.Infrastructure.Migrations
                     b.HasIndex("QualityProfileId");
 
                     b.ToTable("Audiobooks");
+                });
+
+            modelBuilder.Entity("Listenarr.Domain.Models.AudiobookExternalIdentifier", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AudiobookId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsPrimary")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Region")
+                        .HasMaxLength(8)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ValueNormalized")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ValueRaw")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AudiobookId");
+
+                    b.HasIndex("Type", "ValueNormalized");
+
+                    b.HasIndex("AudiobookId", "Type", "IsPrimary");
+
+                    b.HasIndex("Type", "ValueNormalized", "Region");
+
+                    b.ToTable("AudiobookExternalIdentifiers", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Models.AudiobookFile", b =>
@@ -396,10 +441,25 @@ namespace Listenarr.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("HistoryId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ImportAttempts")
+                        .HasColumnType("INTEGER");
+
+                    b.PrimitiveCollection<string>("ImportBlockMessages")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ImportBlockReason")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Isbn")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Language")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastImportedAt")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Metadata")
@@ -505,6 +565,79 @@ namespace Listenarr.Infrastructure.Migrations
                     b.ToTable("DownloadClientConfigurations");
                 });
 
+            modelBuilder.Entity("Listenarr.Domain.Models.DownloadHistory", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("AudiobookId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Data")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DownloadClient")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DownloadClientId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DownloadId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("EventDate")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("EventType")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("ImportedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OutputPath")
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Protocol")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("WasImported")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AudiobookId");
+
+                    b.HasIndex("DownloadId");
+
+                    b.HasIndex("EventDate");
+
+                    b.HasIndex("DownloadId", "EventType");
+
+                    b.ToTable("DownloadHistories", (string)null);
+                });
+
             modelBuilder.Entity("Listenarr.Domain.Models.DownloadProcessingJob", b =>
                 {
                     b.Property<string>("Id")
@@ -546,7 +679,7 @@ namespace Listenarr.Infrastructure.Migrations
                     b.Property<int>("Priority")
                         .HasColumnType("INTEGER");
 
-                    b.Property<string>("ProcessingLog")
+                    b.PrimitiveCollection<string>("ProcessingLog")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
@@ -778,6 +911,10 @@ namespace Listenarr.Infrastructure.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("CustomGroupNames")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("CustomGroupNames");
+
                     b.Property<string>("CutoffQuality")
                         .HasColumnType("TEXT");
 
@@ -830,7 +967,7 @@ namespace Listenarr.Infrastructure.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("PreferredLanguages");
 
-                    b.Property<string>("PreferredWords")
+                    b.PrimitiveCollection<string>("PreferredWords")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
@@ -955,6 +1092,15 @@ namespace Listenarr.Infrastructure.Migrations
                     b.Navigation("QualityProfile");
                 });
 
+            modelBuilder.Entity("Listenarr.Domain.Models.AudiobookExternalIdentifier", b =>
+                {
+                    b.HasOne("Listenarr.Domain.Models.Audiobook", null)
+                        .WithMany("ExternalIdentifiers")
+                        .HasForeignKey("AudiobookId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Listenarr.Domain.Models.AudiobookFile", b =>
                 {
                     b.HasOne("Listenarr.Domain.Models.Audiobook", "Audiobook")
@@ -968,6 +1114,8 @@ namespace Listenarr.Infrastructure.Migrations
 
             modelBuilder.Entity("Listenarr.Domain.Models.Audiobook", b =>
                 {
+                    b.Navigation("ExternalIdentifiers");
+
                     b.Navigation("Files");
                 });
 #pragma warning restore 612, 618

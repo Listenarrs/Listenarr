@@ -86,7 +86,7 @@ namespace Listenarr.Domain.Models
         public int MinimumSeeders { get; set; } = 1;
 
         /// <summary>
-        /// Minimum score threshold for automatic downloads (Sonarr's MinFormatScore equivalent)
+        /// Minimum score threshold for automatic downloads
         /// Releases with TotalScore below this will be rejected. 0 = no minimum (allow any score)
         /// </summary>
         public int MinimumScore { get; set; } = 0;
@@ -106,17 +106,24 @@ namespace Listenarr.Domain.Models
         /// </summary>
         public int MaximumAge { get; set; } = 0;
 
+        /// <summary>
+        /// Custom names for quality groups (codec -> custom name)
+        /// e.g., { "MP3": "Lossy MP3", "FLAC": "High Quality" }
+        /// </summary>
+        public Dictionary<string, string>? CustomGroupNames { get; set; }
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     }
 
     /// <summary>
-    /// Quality definition with priority
+    /// Quality definition with priority - supports both flat (legacy) and grouped structure
     /// </summary>
     public class QualityDefinition : IEquatable<QualityDefinition>
     {
         /// <summary>
-        /// Quality identifier (e.g., "320kbps", "192kbps", "64kbps", "lossless", "unknown")
+        /// Quality identifier (e.g., "MP3 320kbps", "AAC 192kbps", "FLAC")
+        /// For grouped qualities, this is the full quality ID (codec + bitrate)
         /// </summary>
         [Required]
         public string Quality { get; set; } = string.Empty;
@@ -127,9 +134,25 @@ namespace Listenarr.Domain.Models
         public bool Allowed { get; set; } = true;
 
         /// <summary>
-        /// Priority order (lower number = higher priority)
+        /// Priority order (lower number = higher priority, higher in list)
         /// </summary>
         public int Priority { get; set; } = 0;
+
+        /// <summary>
+        /// Codec group (e.g., "MP3", "AAC", "FLAC", "OPUS")
+        /// Used for hierarchical organization in UI
+        /// </summary>
+        public string? Codec { get; set; }
+
+        /// <summary>
+        /// Bitrate in kbps (null for lossless or codecs without specific bitrate)
+        /// </summary>
+        public int? Bitrate { get; set; }
+
+        /// <summary>
+        /// Whether this is a lossless codec
+        /// </summary>
+        public bool IsLossless { get; set; } = false;
 
         public bool Equals(QualityDefinition? other)
         {

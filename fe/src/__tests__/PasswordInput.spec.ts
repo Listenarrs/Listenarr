@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
-import PasswordInput from '@/components/PasswordInput.vue'
+import PasswordInput from '@/components/form/PasswordInput.vue'
 
 describe('PasswordInput', () => {
   it('toggles visibility and binds value', async () => {

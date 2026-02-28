@@ -65,8 +65,7 @@ public class AudimetaStrategy : IMetadataStrategy
                     _logger.LogWarning("✗ Audimeta returned null on retry for ASIN {Asin}", asin);
                 }
             }
-            catch (Exception exRetry)
-            {
+            catch (Exception exRetry) when (exRetry is not OperationCanceledException && exRetry is not OutOfMemoryException && exRetry is not StackOverflowException) {
                 _logger.LogWarning(exRetry, "Audimeta retry without cache failed for ASIN {Asin}", asin);
             }
         }
@@ -74,3 +73,4 @@ public class AudimetaStrategy : IMetadataStrategy
         return null;
     }
 }
+

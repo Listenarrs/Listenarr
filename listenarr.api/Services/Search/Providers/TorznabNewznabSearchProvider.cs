@@ -58,7 +58,7 @@ public class TorznabNewznabSearchProvider : IIndexerSearchProvider
             // Make HTTP request with User-Agent header
             var request_msg = new HttpRequestMessage(HttpMethod.Get, url);
             var version = typeof(TorznabNewznabSearchProvider).Assembly.GetName().Version?.ToString() ?? "0.0.0";
-            var userAgent = $"Listenarr/{version} (+https://github.com/therobbiedavis/listenarr)";
+            var userAgent = $"Listenarr/{version} (+https://github.com/Listenarrs/listenarr)";
             request_msg.Headers.UserAgent.ParseAdd(userAgent);
             
             var response = await _httpClient.SendAsync(request_msg);
@@ -76,8 +76,7 @@ public class TorznabNewznabSearchProvider : IIndexerSearchProvider
             _logger.LogInformation("Indexer {Name} returned {Count} results", indexer.Name, results.Count);
             return results;
         }
-        catch (Exception ex)
-        {
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
             _logger.LogError(ex, "Error searching Torznab/Newznab indexer {Name}", indexer.Name);
             return new List<IndexerSearchResult>();
         }
@@ -86,12 +85,16 @@ public class TorznabNewznabSearchProvider : IIndexerSearchProvider
     private string BuildTorznabUrl(Indexer indexer, string query, string? category)
     {
         var url = indexer.Url.TrimEnd('/');
-        var apiPath = indexer.Implementation.ToLower() switch
-        {
-            "torznab" => "/api",
-            "newznab" => "/api",
-            _ => "/api"
-        };
+        
+        // Don't append /api if URL already ends with it (e.g., Prowlarr proxy URLs)
+        var apiPath = url.EndsWith("/api", StringComparison.OrdinalIgnoreCase) 
+            ? "" 
+            : indexer.Implementation.ToLower() switch
+            {
+                "torznab" => "/api",
+                "newznab" => "/api",
+                _ => "/api"
+            };
 
         var queryParams = new List<string>
         {
@@ -176,6 +179,9 @@ public class TorznabNewznabSearchProvider : IIndexerSearchProvider
                     result.IndexerId = indexer.Id;
                     result.IndexerImplementation = indexer.Implementation;
 
+                    // Track peers value for potential leechers calculation
+                    int? peersValue = null;
+
                     // Parse published date
                     var pubDateStr = item.Element("pubDate")?.Value;
                     if (DateTime.TryParse(pubDateStr, out var pubDate))
@@ -200,6 +206,9 @@ public class TorznabNewznabSearchProvider : IIndexerSearchProvider
                         if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(value))
                             continue;
 
+                        // Debug logging to see what Prowlarr sends
+                        _logger.LogDebug("Torznab attr from {Indexer}: {Name}={Value} for title {Title}", indexer.Name, name, value, result.Title);
+
                         switch (name.ToLower())
                         {
                             case "size":
@@ -219,8 +228,15 @@ public class TorznabNewznabSearchProvider : IIndexerSearchProvider
                                     result.Seeders = seeders;
                                 break;
                             case "peers":
+                                // Peers = seeders + leechers (total peers)
+                                // Store for later calculation if no explicit leechers
                                 if (int.TryParse(value, out var peers))
-                                    result.Leechers = peers;
+                                    peersValue = peers;
+                                break;
+                            case "leechers":
+                                // Explicit leechers attribute takes priority
+                                if (int.TryParse(value, out var leechers))
+                                    result.Leechers = leechers;
                                 break;
                             case "magneturl":
                                 result.MagnetLink = value;
@@ -254,7 +270,9 @@ public class TorznabNewznabSearchProvider : IIndexerSearchProvider
                                     var parsedLang = ParseLanguageFromText(value ?? string.Empty);
                                     if (!string.IsNullOrEmpty(parsedLang)) result.Language = parsedLang;
                                 }
-                                catch { }
+                                catch (Exception caughtEx_1) when (caughtEx_1 is not OperationCanceledException && caughtEx_1 is not OutOfMemoryException && caughtEx_1 is not StackOverflowException) { 
+                                    System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                                }
                                 break;
                             case "language":
                                 // Some indexers use numeric language IDs (e.g., 1 -> ENG)
@@ -270,7 +288,9 @@ public class TorznabNewznabSearchProvider : IIndexerSearchProvider
                                         var pl = ParseLanguageFromText(value ?? string.Empty);
                                         if (!string.IsNullOrEmpty(pl)) result.Language = pl;
                                     }
-                                    catch { }
+                                    catch (Exception caughtEx_2) when (caughtEx_2 is not OperationCanceledException && caughtEx_2 is not OutOfMemoryException && caughtEx_2 is not StackOverflowException) { 
+                                        System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                                    }
                                 }
                                 break;
                             case "grabs":
@@ -290,7 +310,9 @@ public class TorznabNewznabSearchProvider : IIndexerSearchProvider
                                         var dt = DateTimeOffset.FromUnixTimeSeconds(unixSec).UtcDateTime;
                                         result.PublishedDate = dt.ToString("o");
                                     }
-                                    catch { }
+                                    catch (Exception caughtEx_3) when (caughtEx_3 is not OperationCanceledException && caughtEx_3 is not OutOfMemoryException && caughtEx_3 is not StackOverflowException) { 
+                                        System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                                    }
                                 }
                                 else if (DateTime.TryParse(value, out var udt))
                                 {
@@ -355,8 +377,7 @@ public class TorznabNewznabSearchProvider : IIndexerSearchProvider
                                             }
                                         }
                                     }
-                                    catch (Exception ex)
-                                    {
+                                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                                         _logger.LogDebug(ex, "Failed to scrape comments page for {Title}", result.Title);
                                     }
                                 }
@@ -475,7 +496,9 @@ public class TorznabNewznabSearchProvider : IIndexerSearchProvider
                             var lang = ParseLanguageFromText(result.Title + " " + (description ?? string.Empty));
                             if (!string.IsNullOrEmpty(lang)) result.Language = lang;
                         }
-                        catch { /* Non-critical */ }
+                        catch (Exception caughtEx_4) when (caughtEx_4 is not OperationCanceledException && caughtEx_4 is not OutOfMemoryException && caughtEx_4 is not StackOverflowException) { /* Non-critical */ 
+                            System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                        }
                     }
 
                     // Extract author from title if possible (common format: "Author - Title")
@@ -489,6 +512,14 @@ public class TorznabNewznabSearchProvider : IIndexerSearchProvider
                     {
                         result.Artist = "Unknown Author";
                         result.Album = result.Title;
+                    }
+
+                    // Calculate leechers from peers if no explicit leechers was provided
+                    if (!result.Leechers.HasValue && peersValue.HasValue && result.Seeders.HasValue)
+                    {
+                        result.Leechers = Math.Max(0, peersValue.Value - result.Seeders.Value);
+                        _logger.LogDebug("Calculated leechers for {Title}: peers={Peers} - seeders={Seeders} = {Leechers}",
+                            result.Title, peersValue.Value, result.Seeders.Value, result.Leechers.Value);
                     }
 
                     // Only add results that have a valid download link
@@ -513,8 +544,7 @@ public class TorznabNewznabSearchProvider : IIndexerSearchProvider
                         _logger.LogWarning("Skipping result '{Title}' - no download link found", result.Title);
                     }
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogError(ex, "Error parsing indexer result item");
                 }
             }
@@ -537,8 +567,7 @@ public class TorznabNewznabSearchProvider : IIndexerSearchProvider
                 }
             }
         }
-        catch (Exception ex)
-        {
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
             _logger.LogError(ex, "Error parsing Torznab XML response from {IndexerName}", indexer.Name);
         }
 
@@ -620,3 +649,4 @@ public class TorznabNewznabSearchProvider : IIndexerSearchProvider
         return null;
     }
 }
+

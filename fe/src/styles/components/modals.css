@@ -1,0 +1,750 @@
+/* Centralized modal stylesheet - used across all modal components */
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 3000; /* ensure modals appear above other float/overlay components */
+  backdrop-filter: blur(4px);
+}
+
+.modal-content {
+  background: #2a2a2a;
+  border: 1px solid #444;
+  border-radius: 6px;
+  width: 100%;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 2rem;
+  border-bottom: 1px solid #444;
+}
+
+.modal-header h2,
+.modal-header h3 {
+  margin: 0;
+  color: #fff;
+  font-size: 1.25rem;
+}
+
+.close-btn,
+.modal-close {
+  background: none;
+  border: none;
+  color: #999;
+  cursor: pointer;
+  padding: 0.5rem;
+  font-size: 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.close-btn:hover,
+.modal-close:hover {
+  background-color: #333;
+  color: #fff;
+}
+
+.close-btn:focus-visible,
+.modal-close:focus-visible {
+  outline: 2px solid #007acc;
+  outline-offset: 2px;
+}
+
+.modal-body {
+  padding: 2rem;
+  overflow-y: auto;
+  flex: 1;
+}
+
+/* Compact modal body variant for tighter modals (use via <ModalBody compact>) */
+.modal-body--compact { padding: 1rem; }
+.modal-body--tight { padding: 0.75rem; }
+
+/* Ensure form bodies inside modals follow the standardized form-group spacing */
+.modal-content .form-body > .form-group { margin-bottom: 2rem; }
+
+/* Standard spacing for radio/checkbox option groups inside modals */
+.modal-content .radio-group { display: flex; flex-direction: column; gap: 0.75rem; }
+.modal-content .checkbox-group { display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 0.75rem; }
+
+/* Global radio / checkbox card visuals for modals */
+.modal-content .radio-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  background-color: #1a1a1a;
+  border: 1px solid #444;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.modal-content .checkbox-label { display: inline-flex; text-align: left; }
+/* Only apply card visuals to checkboxes when inside a modal checkbox-group (avoids double-card) */
+.modal-content .checkbox-group .input-checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  background-color: #1a1a1a;
+  border: 1px solid #444;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.modal-content .radio-label:hover,
+.modal-content .checkbox-label:hover,
+.modal-content .checkbox-group .input-checkbox:hover {
+  border-color: var(--brand-focus);
+}
+.modal-content .radio-label.active,
+.modal-content .checkbox-label.active {
+  background-color: rgba(var(--brand-rgb), 0.15);
+  border-color: var(--brand-focus);
+}
+/* Use :has to style the card when its inner checkbox is checked */
+.modal-content .checkbox-group .input-checkbox:has(input[type='checkbox']:checked) {
+  background-color: rgba(var(--brand-rgb), 0.15);
+  border-color: var(--brand-focus);
+}
+.modal-content .radio-label input[type='radio'],
+.modal-content .checkbox-label input[type='checkbox'],
+.modal-content .checkbox-group .input-checkbox input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  margin-top: 0.15rem;
+  accent-color: var(--brand-focus);
+  flex-shrink: 0;
+}
+
+/* Ensure the visible checkbox box in our Checkbox component aligns to the top of the card row */
+.modal-content .checkbox-group .input-checkbox .checkbox-box {
+  align-self: flex-start;
+  margin-top: 0.15rem;
+}
+.modal-content .radio-title { color: #fff; font-weight: 500; font-size: 0.95rem; }
+.modal-content .radio-label:not(.active) .radio-title,
+.modal-content .checkbox-label:not(.active) .checkbox-title,
+.modal-content .checkbox-group .input-checkbox:not(.active) .checkbox-label > * { color: #ccc; font-weight: 500; }
+.modal-content .radio-content small,
+.modal-content .checkbox-content small,
+.modal-content .checkbox-group .input-checkbox .checkbox-label small { color: #999; font-size: 0.85rem; line-height: 1.4; }
+
+/* Modal section spacing utilities */
+.modal-content .modal-section { margin-bottom: 1rem; }
+.modal-content .modal-section--compact { margin-bottom: 0.75rem; }
+.modal-content .modal-section--loose { margin-bottom: 2rem; }
+
+.modal-actions,
+.modal-footer {
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  padding: 1.5rem 2rem;
+  border-top: 1px solid #444;
+}
+
+/* Modal action buttons (consistent with global .btn rules) */
+/* Unified button sizing + alignment for modal footers */
+.modal-actions .btn,
+.modal-footer .btn,
+.modal-actions .cancel-button,
+.modal-footer .cancel-button,
+.modal-actions .delete-button,
+.modal-footer .delete-button {
+  padding: 0.65rem 1.25rem;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center; /* center text horizontally */
+  gap: 0.5rem;
+  /* Use normal weight in modal footers (no bold) */
+  font-weight: 400;
+  font-size: 0.95rem;
+  min-width: 110px;
+  min-height: var(--control-height);
+  box-sizing: border-box;
+  transition: all 0.18s ease;
+  text-align: center; /* ensure multi-line text centers */
+}
+
+/* Icon sizing and alignment inside buttons - hidden for modal footer buttons (text-only) */
+.modal-actions .btn svg,
+.modal-footer .btn svg {
+  display: none;
+}
+
+/* Global button utilities (use semantic classes: cancel-button, btn-info, btn-primary, delete-button) */
+.btn {
+  padding: 0.65rem 1.25rem;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 500;
+  font-size: 0.95rem;
+  border: none;
+  cursor: pointer;
+  min-width: 110px;
+  box-sizing: border-box;
+  transition: all 0.18s ease;
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Primary (blue) */
+.btn-primary {
+  background-color: var(--brand-focus);
+  color: white;
+}
+.btn-primary:hover:not(:disabled) {
+  background-color: var(--brand-700);
+}
+
+/* Info (also blue, lighter) */
+.btn-info {
+  background-color: var(--brand-500);
+  color: white;
+}
+.btn-info:hover:not(:disabled) {
+  background-color: var(--brand-600);
+}
+
+/* Success (green) - use a flat success color */
+.btn-success {
+  background-color: #27ae60;
+  color: white;
+}
+.btn-success:hover:not(:disabled) {
+  filter: brightness(0.95);
+}
+
+/* Secondary (muted) */
+.btn-secondary {
+  background-color: #444;
+  color: #fff;
+  border: 1px solid #333;
+}
+.btn-secondary:hover:not(:disabled) {
+  background-color: #555;
+}
+
+/* Focus & disabled states (consistent and accessible) */
+.modal-actions .btn:focus-visible,
+.modal-footer .btn:focus-visible {
+  outline: 2px solid rgba(var(--brand-rgb), 0.9);
+  outline-offset: 2px;
+}
+
+.modal-actions .btn:disabled,
+.modal-footer .btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  filter: none;
+}
+
+.modal-actions .cancel-button,
+.modal-footer .cancel-button {
+  background-color: #555;
+  color: white;
+  border: 1px solid #444;
+}
+
+.modal-actions .cancel-button:hover:not(:disabled),
+.modal-footer .cancel-button:hover:not(:disabled) {
+  background-color: #666;
+}
+
+.modal-actions .btn-info,
+.modal-footer .btn-info,
+.modal-actions .info-button,
+.modal-footer .info-button {
+  background-color: var(--brand-500);
+  color: white;
+}
+
+.modal-actions .btn-info:hover:not(:disabled),
+.modal-footer .btn-info:hover:not(:disabled) {
+  background-color: var(--brand-600);
+}
+
+.modal-actions .delete-button,
+.modal-footer .delete-button,
+.modal-actions .modal-delete-button,
+.modal-footer .modal-delete-button {
+  padding: 0.65rem 1.25rem;
+  background-color: rgba(231, 76, 60, 0.12);
+  color: #ff6b6b;
+  border: 1px solid rgba(231, 76, 60, 0.3);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  font-weight: 500;
+  font-size: 1rem;
+  min-width: 110px;
+  min-height: var(--control-height);
+  box-shadow: 0 6px 16px rgba(231, 76, 60, 0.08);
+}
+
+.modal-actions .delete-button:hover:not(:disabled),
+.modal-footer .delete-button:hover:not(:disabled),
+.modal-actions .modal-delete-button:hover:not(:disabled),
+.modal-footer .modal-delete-button:hover:not(:disabled) {
+  background-color: #e74c3c;
+  color: #fff;
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgba(231, 76, 60, 0.18);
+}
+
+/* Custom checkbox & radio styles scoped to modals */
+/* Uses markup pattern: .checkbox-wrapper > input + .checkbox-content, .radio-label > input + .radio-content */
+.modal-content .checkbox-wrapper { position: relative; display: flex; align-items: flex-start; gap: 0.75rem; }
+.modal-content .checkbox-wrapper input[type="checkbox"] {
+  position: absolute; left: 0; top: 50%; transform: translateY(-50%); width: 18px; height: 18px; opacity: 0; margin: 0; cursor: pointer; z-index: 3;
+}
+.modal-content .checkbox-content { position: relative; padding-left: 26px; display: flex; flex-direction: column; gap: 0.25rem; }
+/* Match the app's standard .checkbox-box visuals: 16px box, subtle border, small radius */
+.modal-content .checkbox-content::before {
+  content: '';
+  position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  width: 16px; height: 16px; border-radius: 3px;
+  background: transparent; border: 1px solid rgba(255,255,255,0.12); box-sizing: border-box;
+  transition: all 0.12s ease; z-index: 1;
+}
+/* Checked state uses brand color like the app */
+.modal-content .checkbox-wrapper input[type="checkbox"]:checked + .checkbox-content::before {
+  background: var(--brand-500); border-color: var(--brand-500); box-shadow: none;
+}
+/* Checkmark - subtle, centered */
+.modal-content .checkbox-wrapper input[type="checkbox"]:checked + .checkbox-content::after {
+  content: '';
+  position: absolute; left: 5px; top: 50%; transform: translateY(-50%) rotate(45deg);
+  width: 5px; height: 8px; border: solid white; border-width: 0 2px 2px 0; z-index: 4;
+}
+
+
+/* Radios */
+.modal-content .radio-label { position: relative; }
+.modal-content .radio-label input[type="radio"] {
+  position: absolute; left: 0; top: 50%; transform: translateY(-50%); width: 18px; height: 18px; opacity: 0; margin: 0; cursor: pointer; z-index: 3;
+}
+.modal-content .radio-label .radio-content { position: relative; padding-left: 28px; }
+.modal-content .radio-label .radio-content::before {
+  content: '';
+  position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  width: 18px; height: 18px; border-radius: 50%; background: #1e1e1e; border: 1px solid #444; transition: all 0.12s ease; z-index: 1;
+}
+.modal-content .radio-label input[type="radio"]:checked + .radio-content::before {
+  background: var(--brand-focus); border-color: var(--brand-focus); box-shadow: 0 0 0 4px rgba(var(--brand-rgb), 0.08);
+}
+.modal-content .radio-label input[type="radio"]:checked + .radio-content::after {
+  content: '';
+  position: absolute; left: 5px; top: 50%; transform: translateY(-50%);
+  width: 8px; height: 8px; border-radius: 50%; background: white; z-index: 4;
+}
+
+/* Focus styling */
+.modal-content .checkbox-wrapper input[type="checkbox"]:focus-visible + .checkbox-content::before,
+.modal-content .radio-label input[type="radio"]:focus-visible + .radio-content::before {
+  outline: 3px solid rgba(var(--brand-rgb), 0.12); outline-offset: 2px;
+}
+
+/* Small modal size variations */
+.modal-sm { max-width: 420px }
+.modal-md { max-width: 700px }
+.modal-lg { max-width: 1000px }
+
+/* Backwards-compatible dialog classes (legacy components) — standardized to the modal look & sizes */
+.dialog-overlay,
+.confirm-overlay,
+.match-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(4px);
+}
+
+.dialog,
+.confirm-dialog,
+.match-dialog {
+  background: #2a2a2a;
+  border: 1px solid #444;
+  border-radius: 6px;
+  width: 100%;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Default sizes for legacy dialog variants so they match the centralized modal sizes */
+.dialog,
+.match-dialog { max-width: 700px /* modal-md */; }
+.confirm-dialog { max-width: 520px /* smaller confirm dialogs */; }
+
+/* Align inner spacing with centralized modal body/footer/header */
+.dialog .dialog-header,
+.confirm-dialog .confirm-header,
+.match-dialog .match-header {
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid #444;
+}
+
+.dialog .dialog-body,
+.confirm-dialog .confirm-body,
+.match-dialog .match-body {
+  padding: 1.5rem 1.75rem;
+  overflow-y: auto;
+}
+
+.dialog .dialog-actions,
+.confirm-dialog .confirm-actions,
+.match-dialog .match-actions {
+  padding: 1rem 1.5rem;
+  border-top: 1px solid #444;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+}
+
+/* Responsive modal footer behavior: stack buttons on smaller screens */
+@media (max-width: 768px) {
+  .modal-actions,
+  .modal-footer,
+  .dialog .dialog-actions,
+  .confirm-dialog .confirm-actions,
+  .match-dialog .match-actions {
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+
+  .modal-actions .btn,
+  .modal-footer .btn,
+  .dialog .dialog-actions .btn,
+  .confirm-dialog .confirm-actions .btn,
+  .match-dialog .match-actions .btn {
+    flex: 1 1 auto;
+    min-width: 0;
+    justify-content: center;
+  }
+} 
+
+/* Shared modal form control styles */
+.modal-content .form-group {
+  margin-bottom: 1.5rem;
+}
+.modal-content .form-group:last-of-type {
+  margin-bottom: 0;
+}
+/* Prevent nested form-groups from compounding vertical spacing. Use utility modifiers for fine control. */
+.modal-content .form-group > .form-group,
+.modal-content .form-group .radio-group,
+.modal-content .form-group .checkbox-group {
+  margin-bottom: 0;
+}
+/* Utility modifiers */
+.modal-content .form-group--compact { margin-bottom: 0.5rem; }
+.modal-content .form-group--no-margin { margin-bottom: 0; }
+
+.modal-content .form-group label {
+  font-weight: 500;
+  color: #fff;
+  font-size: 0.95rem;
+}
+
+/* Preferred label class for modals: allows icon + text and spacing control */
+.modal-content .form-label {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+  color: #fff;
+  font-size: 0.95rem;
+}
+
+/* Ensure Phosphor SVG icons used in labels inherit size and color (previously targeted <i> tags) */
+.modal-content .form-label svg,
+.modal-content .form-label svg * {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  display: inline-block; /* ensure svg renders inline like an icon */
+  vertical-align: middle;
+  /* ensure the svg uses the currentColor for its fill/stroke */
+  fill: currentColor !important;
+}
+
+/* Info section icons (larger, inherit info color) */
+.modal-content .info-section svg,
+.modal-content .info-section svg * {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  margin-top: 0.125rem;
+  color: inherit;
+  display: inline-block;
+  vertical-align: middle;
+  fill: currentColor !important;
+}
+
+/* Small inline button icons (e.g., edit destination) */
+.modal-content .btn-edit-destination svg,
+.modal-content .icon-btn svg {
+  width: 16px;
+  height: 16px;
+  display: inline-block;
+  vertical-align: middle;
+  fill: currentColor !important;
+}
+
+/* Spinner class used on PhSpinner: target by class rather than legacy <i> selector */
+.ph-spin {
+  animation: spin 1s linear infinite;
+}
+
+/* Ensure any Ph icons that might be hidden are visible */
+.modal-content .form-label i { display: none !important; }
+.modal-content .form-label svg { display: inline-block !important; }
+.modal-content .info-section svg { display: inline-block !important; }
+
+/* Card wrapper for controls following the label */
+.modal-content .form-control-card {
+  background-color: #232323;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 1rem;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.25);
+}
+/* Small vertical spacing between children inside the control-card */
+.modal-content .form-control-card > * + * {
+  margin-top: 0.6rem; /* small gap between nested elements */
+}
+
+/* When destination or tags lists are placed inside the card, avoid a nested card look */
+.modal-content .form-control-card .destination-readonly,
+.modal-content .form-control-card .tags-list {
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+  min-height: 0 !important;
+}
+
+.modal-content .form-group label.required::after {
+  content: ' *';
+  color: #dc3545;
+}
+
+.modal-content .input-with-icon {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.modal-content .input-with-icon i,
+.modal-content .input-with-icon svg {
+  position: absolute;
+  left: 0.75rem;
+  color: #999;
+  font-size: 1.1rem;
+  width: 18px;
+  height: 18px;
+  pointer-events: none;
+  display: inline-block;
+}
+
+.modal-content input.form-control,
+.modal-content select.form-control,
+.modal-content textarea.form-control {
+  width: 100%;
+  padding: 0.75rem;
+  font-size: 0.95rem;
+  border: 1px solid #444;
+  border-radius: 6px;
+  background-color: #1a1a1a;
+  color: #fff;
+  transition: all 0.2s;
+} 
+
+.modal-content input.form-control:focus,
+.modal-content select.form-control:focus,
+.modal-content textarea.form-control:focus {
+  outline: none;
+  border-color: var(--brand-focus);
+  box-shadow: 0 0 0 3px rgba(var(--brand-rgb), 0.1);
+}
+
+.modal-content .form-control::placeholder {
+  color: #666;
+}
+
+.modal-content .help-text {
+  display: block;
+  font-size: 0.85rem;
+  color: #999;
+  line-height: 1.4;
+}
+/* Compact help text variant for tight layouts */
+.modal-content .help-text--compact {
+  margin: 0.25rem 0 0.5rem 0;
+  font-size: 0.82rem;
+}
+
+/* Compact inline browse button sizing for modals (matches RootFolder modal styling) */
+.modal-content .btn-inline-browse {
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  align-self: center;
+}
+.modal-content .btn-inline-browse svg {
+  width: 18px;
+  height: 18px;
+}
+.modal-content .btn-inline-browse:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(var(--brand-rgb), 0.12);
+}
+
+/* When the FolderBrowser is rendered with `useInnerCard=false` (e.g., embedded in a modal),
+   remove the inner browser card so the content visually matches the surrounding modal body */
+.modal-content .folder-browser.no-inner-card .browser-content,
+.folder-browser.no-inner-card .browser-content {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  margin: 0;
+}
+.modal-content .folder-browser.no-inner-card .browser-body,
+.folder-browser.no-inner-card .browser-body {
+  padding: 0;
+  overflow-y: auto;
+}
+
+/* Modal-specific validation appearance (match modal's alerts) */
+.modal-content .folder-browser .validation-message {
+  display:block;
+  width:100%;
+  padding:0.85rem 1rem;
+  border-radius:6px;
+  margin-bottom:1rem;
+  font-weight: 500;
+}
+.modal-content .folder-browser .validation-message.success {
+  background: rgba(46, 204, 113, 0.08);
+  color: #22a35a;
+  border: 1px solid rgba(46, 204, 113, 0.12);
+}
+.modal-content .folder-browser .validation-message.error {
+  background: rgba(231, 76, 60, 0.06);
+  color: #e74c3c;
+  border: 1px solid rgba(231, 76, 60, 0.08);
+}
+
+/* Make browser path chips match form labels / inputs */
+.modal-content .folder-browser .breadcrumbs {
+  margin-bottom: 0.75rem;
+}
+.modal-content .folder-browser .breadcrumb-item.current {
+  background: rgba(var(--brand-rgb), 0.08);
+  color: var(--brand-600);
+  border-color: rgba(var(--brand-rgb), 0.12);
+}
+
+/* Slightly reduce directory list visual weight inside modal */
+.modal-content .folder-browser .directory-list {
+  margin-top: 0.5rem;
+}
+
+/* Make the inline browser input visually match modal inputs */
+.modal-content .folder-browser .browser-input {
+  background-color: #1a1a1a;
+  border: 1px solid #444;
+  color: #fff;
+  padding: 0.75rem;
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.modal-content .folder-browser .browser-input:focus {
+  outline: none;
+  border-color: var(--brand-focus);
+  box-shadow: 0 0 0 3px rgba(var(--brand-rgb), 0.1);
+}
+
+.modal-content .folder-browser .browser-input::placeholder {
+  color: #666;
+}
+
+.modal-content .folder-browser .current-path .path-text {
+  background: transparent;
+  padding: 0;
+}
+
+/* Modal-specific modal body sections (non-card fields) */
+.modal-content .modal-section-title {
+  margin: 0 0 0.75rem 0;
+  color: #fff;
+  font-size: 1.1rem;
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  font-weight: 500;
+}
+.modal-content .modal-section-body {
+  background: transparent; /* no inner card */
+  border: none;
+  padding: 0 0 1rem 0;
+  margin-bottom: 1rem;
+}
+
+/* Reusable section-card inside modals (matches FormSection .section-card visuals) */
+.modal-content .section-card {
+  background-color: #232323;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 0.75rem;
+  margin-top: 0.5rem;
+  box-shadow: 0 6px 14px rgba(0,0,0,0.20);
+}
+.modal-content .section-card.section-card--no-top { margin-top: 0 }
+.modal-content .section-card > *:first-child { margin-top: 0; }
+.modal-content .section-card > *:last-child { margin-bottom: 0; }

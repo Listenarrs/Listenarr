@@ -224,7 +224,7 @@ This produces a single deployment artifact containing both backend and frontend.
 5. Images cached in `listenarr.api/wwwroot/cache/` (gitignored)
 
 ### Production Deployment
-- Docker images available at `therobbiedavis/listenarr` (latest, stable, nightly tags)
+- Docker images available at `listenarrs/listenarr` (latest, stable, nightly tags)
 - Self-contained executables for Windows, Linux, macOS
 - Single-container deployment includes both API and frontend
 - Persistent volume at `/app/config` for database and configuration

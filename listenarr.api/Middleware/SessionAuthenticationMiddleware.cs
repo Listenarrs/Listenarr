@@ -34,31 +34,41 @@ namespace Listenarr.Api.Middleware
 
         public async Task InvokeAsync(HttpContext context, ISessionService sessionService)
         {
-
             // Only process session authentication if no user is already authenticated
-            if (!context.User.Identity?.IsAuthenticated ?? true)
+            var isAlreadyAuthenticated = context.User.Identity?.IsAuthenticated ?? false;
+            var path = context.Request.Path.Value ?? string.Empty;
+            if (!isAlreadyAuthenticated)
             {
                 var sessionToken = ExtractSessionToken(context);
                 if (!string.IsNullOrEmpty(sessionToken))
                 {
+                    var tokenHash = SecurityRequestUtils.HashSecretForLog(sessionToken);
+                    _logger.LogDebug("[SessionAuth] Incoming session token for {Path} ({TokenHash})", path, tokenHash);
                     try
                     {
                         var principal = await sessionService.GetSessionUserAsync(sessionToken);
                         if (principal != null)
                         {
                             context.User = principal;
-                            _logger.LogDebug("Session authentication successful for token: {TokenPrefix}...", sessionToken[..8]);
+                            _logger.LogDebug("[SessionAuth] Session authentication successful for {Path} ({TokenHash})", path, tokenHash);
                         }
                         else
                         {
-                            _logger.LogDebug("Session token invalid or expired: {TokenPrefix}...", sessionToken[..8]);
+                            _logger.LogDebug("[SessionAuth] Session token invalid or expired for {Path} ({TokenHash})", path, tokenHash);
                         }
                     }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Error during session authentication");
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+                        _logger.LogError(ex, "[SessionAuth] Error during session authentication for {Path}", path);
                     }
                 }
+                else if (path.Contains("startupconfig"))
+                {
+                    _logger.LogDebug("[SessionAuth] No session token found for {Path}. HeaderCount={HeaderCount}", path, context.Request.Headers.Count);
+                }
+            }
+            else if (path.Contains("startupconfig"))
+            {
+                _logger.LogDebug("[SessionAuth] User already authenticated for {Path}. Identity: {Identity}, Name: {Name}", path, context.User.Identity?.AuthenticationType, context.User.Identity?.Name);
             }
 
             await _next(context);
@@ -81,24 +91,27 @@ namespace Listenarr.Api.Middleware
             }
 
             // For WebSocket (SignalR) connections browsers can't send custom headers on the
-            // initial upgrade request. The client will send the token as a query string
-            // parameter named "access_token" when using the accessTokenFactory approach.
-            // Accept that here for hub endpoints so SignalR connections can authenticate.
+            // initial upgrade request. Accept query token only for hub endpoints.
             try
             {
-                var qs = context.Request.Query;
-                if (qs.ContainsKey("access_token"))
+                var path = context.Request.Path.Value ?? string.Empty;
+                if (path.StartsWith("/hubs/", StringComparison.OrdinalIgnoreCase))
                 {
-                    var provided = qs["access_token"].FirstOrDefault();
-                    if (!string.IsNullOrEmpty(provided)) return provided;
+                    var qs = context.Request.Query;
+                    if (qs.TryGetValue("access_token", out var accessTokenValues))
+                    {
+                        var provided = accessTokenValues.FirstOrDefault();
+                        if (!string.IsNullOrEmpty(provided)) return provided;
+                    }
                 }
             }
-            catch
-            {
+            catch (Exception caughtEx_1) when (caughtEx_1 is not OperationCanceledException && caughtEx_1 is not OutOfMemoryException && caughtEx_1 is not StackOverflowException) {
                 // ignore any query-parsing issues and fall through to null
+                            System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
             }
 
             return null;
         }
     }
 }
+

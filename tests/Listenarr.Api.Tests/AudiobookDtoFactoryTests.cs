@@ -44,6 +44,7 @@ namespace Listenarr.Api.Tests
             Assert.Equal(book.BasePath, dto.BasePath);
             Assert.NotNull(dto.Files);
             Assert.Single(dto.Files);
+            // With a file record present in DB, wanted should be false (has content)
             Assert.False(dto.Wanted == true, "With a file present, wanted should be false");
         }
 

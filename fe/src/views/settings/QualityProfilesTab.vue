@@ -2,11 +2,16 @@
   <div class="tab-content">
     <div class="quality-profiles-tab">
       <div class="section-header">
-        <h3>Quality Profiles</h3>
+        <h3>
+          Quality Profiles
+          <PhSpinner v-if="loading" class="ph-spin small-inline-spinner" />
+        </h3>
       </div>
 
+      <LoadingState v-if="loading && qualityProfiles.length === 0" message="Loading quality profiles..." />
+
       <!-- Empty State -->
-      <div v-if="qualityProfiles.length === 0" class="empty-state">
+      <div v-else-if="qualityProfiles.length === 0" class="empty-state">
         <PhStar class="empty-icon" />
         <p>No quality profiles configured yet.</p>
         <p class="empty-help">
@@ -26,30 +31,27 @@
             <div class="profile-title-section">
               <div class="profile-name-row">
                 <h4>{{ profile.name }}</h4>
-                <span v-if="profile.isDefault" class="status-badge default">
-                  <PhCheckCircle />
-                  Default
-                </span>
+
               </div>
               <p v-if="profile.description" class="profile-description">
                 {{ profile.description }}
               </p>
             </div>
             <div class="profile-actions">
-              <button @click="editProfile(profile)" class="icon-button" title="Edit Profile">
+              <button @click="editProfile(profile)" class="icon-button action-edit" title="Edit Profile">
                 <PhPencil />
               </button>
               <button
                 v-if="!profile.isDefault"
                 @click="setDefaultProfile(profile)"
-                class="icon-button"
+                class="icon-button action-secondary"
                 title="Set as Default"
               >
                 <PhStar />
               </button>
               <button
                 @click="confirmDeleteProfile(profile)"
-                class="icon-button danger"
+                class="icon-button danger action-delete"
                 :disabled="profile.isDefault"
                 :title="profile.isDefault ? 'Cannot delete default profile' : 'Delete Profile'"
               >
@@ -65,20 +67,29 @@
               class="profile-section"
             >
               <h5><PhCheckSquare /> Allowed Qualities</h5>
-              <div class="quality-badges">
-                <span
-                  v-for="quality in profile.qualities
-                    .filter((q) => q.allowed)
-                    .sort((a, b) => b.priority - a.priority)"
-                  :key="quality.quality"
-                  class="quality-badge"
-                  :class="{ 'is-cutoff': quality.quality === profile.cutoffQuality }"
-                >
-                  {{ quality.quality }}
-                  <template v-if="quality.quality === profile.cutoffQuality">
-                    <PhScissors title="Cutoff Quality" />
-                  </template>
-                </span>
+              <div v-if="profile.cutoffQuality" class="quality-subtitle">
+                <PhScissors />
+                Upgrade until {{ profile.cutoffQuality }}
+              </div>
+              <div class="quality-groups">
+                <div v-for="group in getQualityGroups(profile)" :key="group.key" class="quality-group">
+                  <div class="quality-group-header">
+                    <span class="quality-group-title">{{ group.label }}</span>
+                  </div>
+                  <div class="quality-badges">
+                    <span
+                      v-for="quality in group.qualities"
+                      :key="quality.id"
+                      class="quality-badge"
+                      :class="{ 'is-cutoff': quality.id === profile.cutoffQuality }"
+                    >
+                      {{ quality.label }}
+                      <template v-if="quality.id === profile.cutoffQuality">
+                        <PhScissors title="Cutoff Quality" />
+                      </template>
+                    </span>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -219,44 +230,17 @@
         @save="saveQualityProfile"
       />
 
-      <!-- Delete Confirmation Modal -->
-      <div v-if="profileToDelete" class="modal-overlay" @click="profileToDelete = null">
-        <div class="modal-content" @click.stop>
-          <div class="modal-header">
-            <h3>
-              <PhWarningCircle />
-              Delete Quality Profile
-            </h3>
-            <button @click="profileToDelete = null" class="modal-close">
-              <PhX />
-            </button>
-          </div>
-          <div class="modal-body">
-            <p>
-              Are you sure you want to delete the quality profile
-              <strong>{{ profileToDelete.name }}</strong
-              >?
-            </p>
-            <p v-if="profileToDelete.isDefault" class="warning-text">
-              <PhWarning />
-              This is the default profile and cannot be deleted. Please set another profile as
-              default first.
-            </p>
-            <p>This action cannot be undone.</p>
-          </div>
-          <div class="modal-actions">
-            <button @click="profileToDelete = null" class="cancel-button">Cancel</button>
-            <button
-              @click="executeDeleteProfile"
-              class="delete-button"
-              :disabled="profileToDelete.isDefault"
-            >
-              <PhTrash />
-              Delete
-            </button>
-          </div>
-        </div>
-      </div>
+      <!-- Delete Confirmation Modal (shared) -->
+      <DeleteConfirmationModal :visible="!!profileToDelete" title="Delete Quality Profile" @close="profileToDelete = null" @confirm="executeDeleteProfile">
+        <template v-slot>
+          <p>Are you sure you want to delete the quality profile <strong>{{ profileToDelete?.name }}</strong>?</p>
+          <p v-if="profileToDelete?.isDefault" class="warning-text">
+            <PhWarning />
+            This is the default profile and cannot be deleted. Please set another profile as default first.
+          </p>
+          <p>This action cannot be undone.</p>
+        </template>
+      </DeleteConfirmationModal>
     </div>
   </div>
 </template>
@@ -272,10 +256,10 @@ import {
   updateQualityProfile,
 } from '@/services/api'
 import type { QualityProfile } from '@/types'
-import QualityProfileFormModal from '@/components/QualityProfileFormModal.vue'
+import QualityProfileFormModal from '@/components/settings/QualityProfileFormModal.vue'
+import DeleteConfirmationModal from '@/components/feedback/DeleteConfirmationModal.vue'
 import {
   PhStar,
-  PhCheckCircle,
   PhPencil,
   PhTrash,
   PhCheckSquare,
@@ -289,15 +273,140 @@ import {
   PhSparkle,
   PhCheck,
   PhX,
-  PhWarningCircle,
   PhWarning,
 } from '@phosphor-icons/vue'
 
 const toast = useToast()
+const loading = ref(false)
 const qualityProfiles = ref<QualityProfile[]>([])
 const showQualityProfileForm = ref(false)
 const editingQualityProfile = ref<QualityProfile | null>(null)
 const profileToDelete = ref<QualityProfile | null>(null)
+
+type DisplayQuality = {
+  id: string
+  label: string
+  codec: string
+  isLossless: boolean
+  priority: number
+}
+
+type QualityGroupDisplay = {
+  key: string
+  label: string
+  qualities: DisplayQuality[]
+}
+
+const parseQualityString = (qualityStr: string): Omit<DisplayQuality, 'priority'> | null => {
+  if (qualityStr === 'FLAC') {
+    return { id: 'FLAC', codec: 'FLAC', label: 'FLAC', isLossless: true }
+  }
+
+  const mp3Match = qualityStr.match(/MP3 (\d+)kbps/)
+  if (mp3Match) {
+    const bitrate = parseInt(mp3Match[1]!)
+    return { id: qualityStr, codec: 'MP3', label: `MP3 ${bitrate} kbps`, isLossless: false }
+  }
+
+  if (qualityStr === 'MP3 VBR') {
+    return { id: 'MP3 VBR', codec: 'MP3', label: 'MP3 Variable Bitrate', isLossless: false }
+  }
+
+  const aacMatch = qualityStr.match(/AAC (\d+)kbps/)
+  if (aacMatch) {
+    const bitrate = parseInt(aacMatch[1]!)
+    return { id: qualityStr, codec: 'AAC', label: `AAC ${bitrate} kbps`, isLossless: false }
+  }
+
+  if (qualityStr === 'AAC') {
+    return { id: 'AAC', codec: 'AAC', label: 'AAC', isLossless: false }
+  }
+
+  const m4bMatch = qualityStr.match(/M4B (\d+)kbps/)
+  if (m4bMatch) {
+    const bitrate = parseInt(m4bMatch[1]!)
+    return { id: qualityStr, codec: 'M4B', label: `M4B ${bitrate} kbps`, isLossless: false }
+  }
+
+  if (qualityStr === 'M4B') {
+    return { id: 'M4B', codec: 'M4B', label: 'M4B (AAC)', isLossless: false }
+  }
+
+  const opusMatch = qualityStr.match(/OPUS (\d+)kbps/)
+  if (opusMatch) {
+    const bitrate = parseInt(opusMatch[1]!)
+    return { id: qualityStr, codec: 'OPUS', label: `OPUS ${bitrate} kbps`, isLossless: false }
+  }
+
+  if (qualityStr === 'OPUS') {
+    return { id: 'OPUS', codec: 'OPUS', label: 'OPUS', isLossless: false }
+  }
+
+  const oggMatch = qualityStr.match(/OGG Vorbis (\d+)kbps/)
+  if (oggMatch) {
+    const bitrate = parseInt(oggMatch[1]!)
+    return { id: qualityStr, codec: 'OGG Vorbis', label: `OGG Vorbis ${bitrate} kbps`, isLossless: false }
+  }
+
+  if (qualityStr === 'OGG Vorbis') {
+    return { id: 'OGG Vorbis', codec: 'OGG Vorbis', label: 'OGG Vorbis', isLossless: false }
+  }
+
+  return null
+}
+
+const toDisplayQuality = (quality: QualityProfile['qualities'][number]): DisplayQuality => {
+  const parsed = parseQualityString(quality.quality)
+  const codec =
+    parsed?.codec ||
+    (quality as QualityProfile['qualities'][number] & { codec?: string }).codec ||
+    'Other'
+  const isLossless =
+    parsed?.isLossless ||
+    (quality as QualityProfile['qualities'][number] & { isLossless?: boolean }).isLossless ||
+    false
+  const label =
+    parsed?.label ||
+    (() => {
+      const bitrate = (quality as QualityProfile['qualities'][number] & { bitrate?: number }).bitrate
+      if (bitrate) return `${codec} ${bitrate} kbps`
+      return quality.quality || codec
+    })()
+
+  return {
+    id: quality.quality,
+    label,
+    codec,
+    isLossless,
+    priority: quality.priority,
+  }
+}
+
+const getQualityGroups = (profile: QualityProfile): QualityGroupDisplay[] => {
+  const allowed = (profile.qualities || [])
+    .filter((q) => q.allowed)
+    .map(toDisplayQuality)
+    .sort((a, b) => a.priority - b.priority)
+
+  const groups = new Map<string, QualityGroupDisplay>()
+
+  allowed.forEach((quality) => {
+    const groupKey = quality.isLossless ? 'lossless' : `codec:${quality.codec}`
+    if (!groups.has(groupKey)) {
+      const label = quality.isLossless
+        ? profile.customGroupNames?.[quality.codec] || profile.customGroupNames?.FLAC || 'Lossless'
+        : profile.customGroupNames?.[quality.codec] || quality.codec
+      groups.set(groupKey, {
+        key: groupKey,
+        label,
+        qualities: [],
+      })
+    }
+    groups.get(groupKey)?.qualities.push(quality)
+  })
+
+  return Array.from(groups.values())
+}
 
 const formatApiError = (error: unknown): string => {
   if (typeof error === 'object' && error !== null) {
@@ -313,6 +422,7 @@ const formatApiError = (error: unknown): string => {
 }
 
 const loadQualityProfiles = async () => {
+  loading.value = true
   try {
     qualityProfiles.value = await getQualityProfiles()
   } catch (error) {
@@ -322,6 +432,8 @@ const loadQualityProfiles = async () => {
     })
     const errorMessage = formatApiError(error)
     toast.error('Load failed', errorMessage)
+  } finally {
+    loading.value = false
   }
 }
 
@@ -424,28 +536,27 @@ defineExpose({
   animation: fadeIn 0.2s ease;
 }
 
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
+/* @keyframes fadeIn is centralized in src/assets/animations.css */
 
 .section-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 1.5rem;
+  padding-bottom: 1rem; /* match other tabs with a horizontal rule */
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .section-header h3 {
   font-size: 1.5rem;
-  font-weight: 600;
+  font-weight: 500;
   margin: 0;
+}
+
+.section-header .small-inline-spinner {
+  margin-left: 0.5rem;
+  width: 18px;
+  height: 18px;
 }
 
 .empty-state {
@@ -518,7 +629,7 @@ defineExpose({
   padding: 0.3rem 0.7rem;
   border-radius: 6px;
   font-size: 0.75rem;
-  font-weight: 600;
+  font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -559,7 +670,7 @@ defineExpose({
   margin: 0;
   color: #4dabf7;
   font-size: 0.9rem;
-  font-weight: 600;
+  font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   display: flex;
@@ -582,7 +693,7 @@ defineExpose({
 .profile-name-row h4 {
   margin: 0;
   font-size: 1.25rem;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .status-badge {
@@ -592,7 +703,7 @@ defineExpose({
   padding: 0.25rem 0.75rem;
   border-radius: 12px;
   font-size: 0.75rem;
-  font-weight: 600;
+  font-weight: 500;
   text-transform: uppercase;
 }
 
@@ -613,34 +724,7 @@ defineExpose({
   flex-shrink: 0;
 }
 
-.icon-button {
-  background: transparent;
-  border: 1px solid var(--border-color);
-  padding: 0.5rem;
-  border-radius: 6px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s;
-  font-size: 1.1rem;
-}
-
-.icon-button:hover:not(:disabled) {
-  background: var(--bg-hover);
-  border-color: var(--primary-color);
-  color: var(--primary-color);
-}
-
-.icon-button.danger:hover:not(:disabled) {
-  border-color: #f44336;
-  color: #f44336;
-}
-
-.icon-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
+/* Use centralized .icon-button in src/assets/buttons.css for consistent icon buttons */
 
 .profile-content {
   display: flex;
@@ -657,12 +741,47 @@ defineExpose({
 .profile-section h5 {
   margin: 0 0 0.75rem 0;
   font-size: 0.9rem;
-  font-weight: 600;
+  font-weight: 500;
   text-transform: uppercase;
   color: var(--text-secondary);
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+
+.quality-subtitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin-bottom: 0.75rem;
+}
+
+.quality-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.quality-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.quality-group-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.quality-group-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
 }
 
 .quality-badges {
@@ -688,7 +807,7 @@ defineExpose({
   background: rgba(76, 175, 80, 0.15);
   color: #4caf50;
   border-color: rgba(76, 175, 80, 0.3);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 /* Icon sizing & color consistency inside profile cards */
@@ -769,7 +888,7 @@ defineExpose({
 
 .filter-type {
   font-size: 0.85rem;
-  font-weight: 600;
+  font-weight: 500;
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -807,116 +926,4 @@ defineExpose({
   border: 1px solid rgba(244, 67, 54, 0.3);
 }
 
-/* Modal Styles */
-/* Modal Styles (canonical) */
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.85);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  backdrop-filter: blur(4px);
-}
-
-.modal-content {
-  background: #2a2a2a;
-  border: 1px solid #444;
-  border-radius: 6px;
-  max-width: 700px;
-  width: 100%;
-  max-height: 90vh;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
-}
-
-.modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1.5rem;
-  border-bottom: 1px solid #444;
-}
-
-.modal-header h3 {
-  margin: 0;
-  color: #fff;
-  font-size: 1.25rem;
-}
-
-.modal-close {
-  background: none;
-  border: none;
-  color: #b3b3b3;
-  cursor: pointer;
-  padding: 0.5rem;
-  border-radius: 6px;
-  transition: all 0.2s;
-}
-
-.modal-close:hover {
-  background: #333;
-  color: #fff;
-}
-
-.modal-body {
-  padding: 2rem;
-  overflow-y: auto;
-  flex: 1;
-}
-
-.modal-actions {
-  display: flex;
-  gap: 1rem;
-  justify-content: flex-end;
-  padding: 1.5rem;
-  border-top: 1px solid #444;
-}
-
-/* Ensure modal context delete buttons are full-size */
-.modal-overlay .modal-content .modal-actions .delete-button,
-.modal-content .modal-actions .delete-button,
-.modal-overlay .modal-content .modal-actions .modal-delete-button,
-.modal-content .modal-actions .modal-delete-button {
-  padding: 0.75rem 1.25rem;
-  background-color: rgba(231, 76, 60, 0.15);
-  color: #ff6b6b;
-  border: 1px solid rgba(231, 76, 60, 0.3);
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.18s ease;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.6rem;
-  font-weight: 700;
-  font-size: 1rem;
-  min-width: 120px;
-  height: auto;
-  box-shadow: 0 6px 16px rgba(231, 76, 60, 0.12);
-}
-
-.cancel-button {
-  padding: 0.75rem 1.5rem;
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.2s;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-weight: 500;
-  font-size: 0.95rem;
-}
-
-.cancel-button:hover {
-  background: var(--bg-hover);
-}
 </style>

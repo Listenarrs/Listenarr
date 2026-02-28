@@ -27,7 +27,8 @@ namespace Listenarr.Domain.Models
         Failed,
         Processing,
         Ready,
-        Moved // Added to track completed moves
+        Moved,           // Added to track completed moves
+        ImportBlocked    // Added: Block re-processing of bad imports
     }
 
     public class Download
@@ -59,6 +60,36 @@ namespace Listenarr.Domain.Models
         public string? ErrorMessage { get; set; }
         public string DownloadClientId { get; set; } = string.Empty;
         public Dictionary<string, object> Metadata { get; set; } = new();
+
+        /// <summary>
+        /// Tracks why a download is ImportBlocked (error code for categorization)
+        /// Examples: "InvalidFormat", "MissingMetadata", "FileMoveError", "AlreadyImported"
+        /// </summary>
+        public string? ImportBlockReason { get; set; }
+
+        /// <summary>
+        /// List of user-facing error messages explaining why import failed
+        /// Multiple messages can be added as validation discovers multiple issues
+        /// </summary>
+        public List<string>? ImportBlockMessages { get; set; }
+
+        /// <summary>
+        /// Number of import attempts made for this download
+        /// Helps identify chronically failing imports
+        /// </summary>
+        public int ImportAttempts { get; set; } = 0;
+
+        /// <summary>
+        /// When the download was last imported successfully (for idempotency tracking)
+        /// If null and Status=Moved, import happened but wasn't recorded
+        /// </summary>
+        public DateTime? LastImportedAt { get; set; }
+
+        /// <summary>
+        /// Unique identifier from download history to track import event
+        /// Links to DownloadHistory.Id for audit trail
+        /// </summary>
+        public int? HistoryId { get; set; }
     }
 
     /// <summary>
@@ -108,9 +139,15 @@ namespace Listenarr.Domain.Models
         public string? ContentPath { get; set; }
 
         /// <summary>
+        /// The time when the download was detected as complete.
+        /// Used for stability window validation before import.
+        /// </summary>
+        public DateTime? CompletionTime { get; set; }
+
+        /// <summary>
         /// Creates a shallow copy of this QueueItem.
         /// Used by GetImportItem to avoid modifying the original item.
-        /// Matches Sonarr's DownloadClientItem.Clone() pattern.
+        /// Matches DownloadClientItem.Clone() pattern.
         /// </summary>
         public QueueItem Clone()
         {

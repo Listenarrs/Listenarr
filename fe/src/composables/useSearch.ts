@@ -112,29 +112,67 @@ export function useSearch() {
     if (detectedType === 'asin') {
       results = await searchByAsin(query)
     } else if (detectedType === 'isbn') {
-      results = await searchByISBN(query)
+      // If query starts with 'isbn:' (case-insensitive), use advanced search
+      const isbnMatch = query.match(/^isbn:(.+)/i)
+      if (isbnMatch && isbnMatch[1]) {
+        const params: Record<string, unknown> = {
+          isbn: isbnMatch[1].trim(),
+          language: searchLanguage.value,
+          pagination: { page: 1, limit: 50 }
+        }
+        try {
+          isSearching.value = true
+          searchError.value = ''
+          searchStatus.value = 'Searching for audiobooks and fetching metadata...'
+          const resp = await apiService.advancedSearch({ ...params })
+          results = resp || []
+        } catch (err) {
+          searchError.value = err instanceof Error ? err.message : 'Failed to search for audiobooks'
+          throw err
+        } finally {
+          isSearching.value = false
+          setTimeout(() => {
+            searchStatus.value = ''
+          }, 1000)
+        }
+      } else {
+        results = await searchByISBN(query)
+      }
     } else {
       // For title-like queries, prefer the backend's advanced/title search which
       // returns enriched SearchResult objects (Audimeta where available).
-      // Parse simple prefixes if present, otherwise treat the full query as a title.
-      const params: Record<string, unknown> = {}
 
-      const parts = query.split(/\s+/)
-      for (const part of parts) {
-        if (part.toUpperCase().startsWith('TITLE:')) {
-          params.title = part.substring(6).trim()
-        } else if (part.toUpperCase().startsWith('AUTHOR:')) {
-          params.author = part.substring(7).trim()
-        } else if (part.toUpperCase().startsWith('ISBN:')) {
-          params.isbn = part.substring(5).trim()
-        } else if (part.toUpperCase().startsWith('ASIN:')) {
-          params.asin = part.substring(5).trim()
+      // Improved: parse advanced tokens (TITLE:, AUTHOR:, ISBN:, ASIN:, SERIES:) with multi-word support
+
+      const params: Record<string, unknown> = {}
+      // Add SERIES: to the regex
+      const regex = /(TITLE:|AUTHOR:|ISBN:|ASIN:|SERIES:)/gi
+      const matches = []
+      let match: RegExpExecArray | null
+      while ((match = regex.exec(query)) !== null) {
+        if (match && match[1]) {
+          matches.push({ key: match[1].toUpperCase().replace(':', ''), index: match.index ?? 0, len: match[1].length })
         }
       }
-
-      // No explicit prefixes -> use whole query as title
-      const hasExplicit = Boolean(params.title || params.author || params.isbn || params.asin)
-      if (!hasExplicit) params.title = query
+      let foundAny = false
+      for (let i = 0; i < matches.length; i++) {
+        const mi = matches[i]
+        if (!mi) continue
+        const { key, index, len } = mi
+        const start = index + len
+        const nextMatch = matches[i + 1]
+        const end = nextMatch ? nextMatch.index : query.length
+        const value = query.substring(start, end).trim()
+        if (value) {
+          foundAny = true
+          if (key === 'TITLE') params.title = value
+          else if (key === 'AUTHOR') params.author = value
+          else if (key === 'ISBN') params.isbn = value
+          else if (key === 'ASIN') params.asin = value
+          else if (key === 'SERIES') params.series = value
+        }
+      }
+      if (!foundAny) params.title = query
 
       // Include language and a reasonable default pagination
       params.language = searchLanguage.value
@@ -145,7 +183,8 @@ export function useSearch() {
         isSearching.value = true
         searchError.value = ''
         searchStatus.value = 'Searching for audiobooks and fetching metadata...'
-        const resp = await apiService.advancedSearch(params)
+        // Use canonical /search endpoint (POST) for advanced search
+        const resp = await apiService.advancedSearch({ ...params })
         results = resp || []
       } catch (err) {
         searchError.value = err instanceof Error ? err.message : 'Failed to search for audiobooks'
@@ -171,8 +210,9 @@ export function useSearch() {
     const cleanAsin = asin.replace(/^ASIN:/i, '').trim()
 
     // Validate ASIN using the same strict pattern as detection.
-    if (!/^(B[0-9A-Z]{9})$/.test(cleanAsin.toUpperCase())) {
-      searchError.value = 'Invalid ASIN format. Expected an Amazon ASIN like B08G9PRS1K'
+    // Matches: 'B' + 9 alphanumerics OR 10-digit numeric ASIN (ISBN-10 format)
+    if (!/^(B[0-9A-Z]{9}|\d{9}(?:X|\d))$/.test(cleanAsin.toUpperCase())) {
+      searchError.value = 'Invalid ASIN format. Expected an Amazon ASIN like B08G9PRS1K or 1980006520'
       return
     }
 
@@ -187,15 +227,27 @@ export function useSearch() {
       } catch {}
       searchAbortController.value = new AbortController()
 
-      const results = await apiService.searchByTitle(`ASIN:${cleanAsin}`, {
-        signal: searchAbortController.value.signal,
-        language: searchLanguage.value,
-      })
+      // Use metadata endpoint to fetch canonical metadata for the ASIN and
+      // convert into a SearchResult-like envelope the UI expects.
+      const metaResp = await apiService.getAudibleMetadata<any>(cleanAsin /* region defaults to 'us' */)
 
-      logger.debug('ASIN search results:', results)
+      logger.debug('ASIN audible metadata response:', metaResp)
 
-      // Process results - this will be handled by the component
-      return results
+      const meta = (metaResp as any)?.metadata ?? (metaResp as any)
+      const mapped: any = {
+        asin: cleanAsin,
+        title: meta?.title || meta?.productTitle || '',
+        imageUrl: meta?.image || meta?.imageUrl || meta?.coverImage,
+        metadataSource: (metaResp as any)?.source || 'audimeta',
+        publisher: meta?.publisher || meta?.publisherName || undefined,
+        publishedDate: meta?.releaseDate || meta?.publishedDate || undefined,
+        runtimeLengthMin: meta?.runtimeMinutes ?? meta?.runtimeLengthMin ?? meta?.runtime ?? undefined,
+        narrators: meta?.narrators ?? meta?.Narrators ?? undefined,
+        authors: meta?.authors ?? meta?.Authors ?? undefined,
+        searchResult: meta,
+      }
+
+      return [mapped] as unknown as SearchResult[]
     } catch (error) {
       logger.error('ASIN search failed:', error)
       searchError.value = error instanceof Error ? error.message : 'Failed to search for audiobook'
@@ -223,6 +275,7 @@ export function useSearch() {
       } catch {}
       searchAbortController.value = new AbortController()
 
+      // Use canonical /search/title endpoint
       const results = await apiService.searchByTitle(query, {
         signal: searchAbortController.value.signal,
         language: searchLanguage.value,

@@ -1,0 +1,64 @@
+.form-group.checkbox-group {
+  margin-bottom: 1rem;
+}
+
+/* Ensure consistent spacing between form groups inside any .form-body across the app */
+.form-body > .form-group { margin-bottom: 1rem; }
+
+.checkbox-group label {
+  display: flex;
+  align-items: flex-start; /* align checkbox to the top of stacked text */
+  gap: 0.75rem;
+  padding: 0.9rem 1rem; /* slightly reduce vertical padding for tighter spacing */
+  background-color: #1a1a1a;
+  border: 1px solid #444;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+/* Stack title and descriptive text vertically inside the label for better readability */
+.checkbox-group label span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.checkbox-group label span small {
+  color: #999;
+  font-size: 0.85rem;
+  font-weight: normal;
+}
+
+.checkbox-group label:hover {
+  border-color: var(--brand-focus);
+  background-color: #222;
+}
+
+.checkbox-group input[type='checkbox'] {
+  margin-top: 0.25rem;
+  width: auto;
+  cursor: pointer;
+}
+
+.checkbox-group input[type='checkbox']:focus-visible {
+  outline: 2px solid rgba(var(--brand-rgb), 0.9);
+  outline-offset: 2px;
+}
+
+.checkbox-group label strong {
+  color: #fff;
+  font-size: 0.95rem;
+}
+
+.checkbox-group label small {
+  color: #999;
+  font-size: 0.85rem;
+  font-weight: normal;
+}
+
+.checkbox-group small {
+  color: #adb5bd;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}

@@ -6,7 +6,7 @@ We're always looking for people to help make Listenarr even better! There are a 
 
 Setup guides, FAQ, troubleshooting tips - the more information we have in the documentation, the better. Help us improve:
 
-- [Wiki](https://github.com/therobbiedavis/Listenarr/wiki) (coming soon)
+- [Wiki](https://github.com/Listenarrs/Listenarr//wiki) (coming soon)
 - Code comments and inline documentation
 - README improvements
 - Tutorial videos or blog posts
@@ -90,10 +90,10 @@ Note: there is also a `watch` task available in the workspace tasks that runs `d
 ### Contributing Code
 
 **Before you start:**
-- If you're adding a new feature, please check [GitHub Issues](https://github.com/therobbiedavis/Listenarr/issues) to see if it's already requested
+- If you're adding a new feature, please check [GitHub Issues](https://github.com/Listenarrs/Listenarr/issues) to see if it's already requested
 - Comment on the issue so work isn't duplicated
 - If adding something not already requested, please create an issue first to discuss it
-- Reach out on [Discussions](https://github.com/therobbiedavis/Listenarr/discussions) if you have questions
+- Reach out on [Discussions](https://github.com/Listenarrs/Listenarr/discussions) if you have questions
 
  - Run frontend tests: `cd fe && npm test` (the frontend uses Vitest/Vite; check `fe/package.json` for exact scripts)
 - Rebase from Listenarr's `develop` branch, don't merge
@@ -239,13 +239,13 @@ Listenarr/
 
 ## Localization
 
-We plan to support multiple languages in the future. If you'd like to help translate Listenarr into your language, please let us know on [Discussions](https://github.com/therobbiedavis/Listenarr/discussions).
+We plan to support multiple languages in the future. If you'd like to help translate Listenarr into your language, please let us know on [Discussions](https://github.com/Listenarrs/Listenarr/discussions).
 
 ## Feature Requests
 
 Got an idea for a new feature? Here's how to suggest it:
 
-1. Check [GitHub Discussions](https://github.com/therobbiedavis/Listenarr/discussions) to see if it's already been suggested
+1. Check [GitHub Discussions](https://github.com/Listenarrs/Listenarr/discussions) to see if it's already been suggested
 2. If not, create a new discussion in the "Ideas" category
 3. Clearly describe the feature and why it would be useful
 4. Include mockups or examples if applicable
@@ -254,7 +254,7 @@ Got an idea for a new feature? Here's how to suggest it:
 
 Found a bug? Please report it!
 
-1. Check [GitHub Issues](https://github.com/therobbiedavis/Listenarr/issues) to see if it's already reported
+1. Check [GitHub Issues](https://github.com/Listenarrs/Listenarr/issues) to see if it's already reported
 2. If not, create a new issue with:
    - Clear title describing the bug
    - Steps to reproduce
@@ -289,8 +289,8 @@ We are committed to providing a welcoming and inspiring community for all. Pleas
 
 If you have any questions about contributing, please:
 
-1. Check the [Wiki](https://github.com/therobbiedavis/Listenarr/wiki) (coming soon)
-2. Ask in [GitHub Discussions](https://github.com/therobbiedavis/Listenarr/discussions)
+1. Check the [Wiki](https://github.com/Listenarrs/Listenarr/wiki) (coming soon)
+2. Ask in [GitHub Discussions](https://github.com/Listenarrs/Listenarr/discussions)
 3. Open an issue if you think something is unclear in this guide
 
 ---

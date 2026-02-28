@@ -62,8 +62,7 @@ public class MetadataStrategyCoordinator
                     return (metadata, source.Name);
                 }
             }
-            catch (Exception sourceEx)
-            {
+            catch (Exception sourceEx) when (sourceEx is not OperationCanceledException && sourceEx is not OutOfMemoryException && sourceEx is not StackOverflowException) {
                 _logger.LogWarning(sourceEx, "Failed to fetch metadata from {SourceName} for ASIN {Asin}, trying next source", 
                     source.Name, asin);
                 continue; // Try next metadata source
@@ -73,3 +72,4 @@ public class MetadataStrategyCoordinator
         return (null, null);
     }
 }
+

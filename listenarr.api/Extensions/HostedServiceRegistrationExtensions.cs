@@ -37,6 +37,10 @@ namespace Listenarr.Api.Extensions
             // Register background service for download monitoring and real-time updates
             services.AddHostedService<DownloadMonitorService>();
 
+            // Register background service for completed download handling (import pipeline)
+            // Implements CompletedDownloadService pattern for stability window validation
+            services.AddHostedService<CompletedDownloadHandlingService>();
+
             // Register background service for queue monitoring (external clients) and real-time updates
             services.AddHostedService<QueueMonitorService>();
 

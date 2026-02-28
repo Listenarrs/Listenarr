@@ -124,8 +124,8 @@ namespace Listenarr.Api.Services
                 embed["thumbnail"] = new JsonObject { ["url"] = Truncate(absoluteImageUrl, 2000) };
             }
 
-            var embeds = new JsonArray();
-            var fields = new JsonArray();
+                        var embeds = new JsonArray();
+                        var fields = new JsonArray();
 
             if (!string.IsNullOrWhiteSpace(author))
             {
@@ -244,7 +244,7 @@ namespace Listenarr.Api.Services
             var shortContent = BuildDiscordContent(trigger, title ?? string.Empty, author ?? string.Empty);
             payload["content"] = shortContent;
             payload["username"] = "Listenarr";
-            payload["avatar_url"] = "https://raw.githubusercontent.com/therobbiedavis/Listenarr/main/.github/logo-icon.png";
+            payload["avatar_url"] = "https://raw.githubusercontent.com/Listenarrs/Listenarr/main/.github/logo-icon.png";
             if (embeds.Count > 0) payload["embeds"] = embeds;
 
             return payload;
@@ -349,11 +349,14 @@ namespace Listenarr.Api.Services
             {
                 try
                 {
+                    Console.WriteLine($"DEBUG: Attempting to download image for attachment: {absoluteImageUrl}");
                     logInfo?.Invoke($"Attempting to download image for attachment: {absoluteImageUrl}");
                     var imageResponse = await httpClient.GetAsync(absoluteImageUrl);
+                    Console.WriteLine($"DEBUG: image GET status: {imageResponse.StatusCode}");
                     if (imageResponse.IsSuccessStatusCode)
                     {
                         var imageData = await imageResponse.Content.ReadAsByteArrayAsync();
+                        Console.WriteLine($"DEBUG: downloaded image data length: {imageData?.Length}");
                         if (imageData != null && imageData.Length > 0)
                         {
                             var contentType = imageResponse.Content.Headers.ContentType?.MediaType ?? "image/jpeg";
@@ -383,8 +386,7 @@ namespace Listenarr.Api.Services
                         logInfo?.Invoke($"Failed to download image for notification: {absoluteImageUrl} - HTTP {imageResponse.StatusCode}");
                     }
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     logDebug?.Invoke(ex, $"Error downloading image for notification from {absoluteImageUrl}: {ex.Message}");
                 }
             }
@@ -483,7 +485,7 @@ namespace Listenarr.Api.Services
             var shortContent = BuildDiscordContent(trigger, title ?? string.Empty, author ?? string.Empty);
             payload["content"] = shortContent;
             payload["username"] = "Listenarr";
-            payload["avatar_url"] = "https://raw.githubusercontent.com/therobbiedavis/Listenarr/main/.github/logo-icon.png";
+            payload["avatar_url"] = "https://raw.githubusercontent.com/Listenarrs/Listenarr/main/.github/logo-icon.png";
             if (embeds.Count > 0)
             {
                 payload["embeds"] = embeds;
@@ -575,3 +577,4 @@ namespace Listenarr.Api.Services
         }
     }
 }
+

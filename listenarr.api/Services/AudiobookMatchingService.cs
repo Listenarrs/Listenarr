@@ -93,9 +93,9 @@ namespace Listenarr.Api.Services
             }
 
             // ISBN match (very high confidence - 35% weight)
-            if (!string.IsNullOrEmpty(download.Isbn) && !string.IsNullOrEmpty(audiobook.Isbn))
+            if (!string.IsNullOrWhiteSpace(download.Isbn) && audiobook.Isbn != null && audiobook.Isbn.Any())
             {
-                if (string.Equals(download.Isbn, audiobook.Isbn, StringComparison.OrdinalIgnoreCase))
+                if (audiobook.Isbn.Any(i => string.Equals(download.Isbn, i, StringComparison.OrdinalIgnoreCase)))
                 {
                     confidence += 0.35;
                 }

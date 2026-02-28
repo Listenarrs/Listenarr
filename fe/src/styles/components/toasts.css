@@ -1,0 +1,52 @@
+/* Reusable toast styles for Listenarr
+   Placed in a dedicated CSS file so multiple components can reuse the same
+   presentation and it can be overridden globally if needed. */
+
+:root {
+  --toast-top-offset: 72px; /* default: top-nav height (60px) + 12px */
+  --toast-z: 3100;
+}
+
+.global-toast {
+  position: fixed;
+  top: var(--toast-top-offset);
+  right: 1rem;
+  z-index: var(--toast-z);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  pointer-events: none; /* allow clicks through when toasts are not hovered */
+}
+
+.global-toast .toast-item {
+  pointer-events: auto; /* enable interactions on the toast itself */
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  min-width: 260px;
+  max-width: 420px;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  color: #fff;
+}
+
+.global-toast .toast-content { flex: 1; overflow: hidden }
+.global-toast .toast-title { font-weight: 500; font-size: 0.95rem; margin-bottom: 0.25rem }
+.global-toast .toast-message { font-size: 0.9rem; color: rgba(255,255,255,0.9); word-break: break-word }
+.global-toast .toast-close { background: transparent; border: none; color: rgba(255,255,255,0.85); font-size: 1.1rem; line-height: 1; cursor: pointer }
+
+/* Strong, visible variants using semantic variables (falls back to hard-coded colors) */
+.global-toast .toast-info { background-color: var(--toast-info-bg, #1976d2) !important; border-left: 4px solid var(--toast-info-accent, #125ea8) !important; color: var(--toast-info-color, #ffffff) !important; box-shadow: 0 10px 30px rgba(25,118,210,0.12); }
+.global-toast .toast-success { background-color: var(--toast-success-bg, #28a745) !important; border-left: 4px solid var(--toast-success-accent, #1e7e34) !important; color: var(--toast-success-color, #ffffff) !important; box-shadow: 0 10px 30px rgba(40,167,69,0.15); }
+.global-toast .toast-warning { background-color: var(--toast-warning-bg, #856404) !important; border-left: 4px solid var(--toast-warning-accent, #6d5103) !important; color: var(--toast-warning-color, #ffffff) !important; box-shadow: 0 10px 30px rgba(133,100,4,0.28); }
+.global-toast .toast-warning .toast-message { color: rgba(255,255,255,0.95); }
+.global-toast .toast-warning .toast-close { color: rgba(255,255,255,0.85); }
+.global-toast .toast-error { background-color: var(--toast-error-bg, #e74c3c) !important; border-left: 4px solid var(--toast-error-accent, #c0392b) !important; color: var(--toast-error-color, #fff1f0) !important; }
+
+/* simple transition */
+.global-toast .toast-enter-active, .global-toast .toast-leave-active { transition: all 220ms cubic-bezier(.2,.8,.2,1); }
+.global-toast .toast-enter-from { opacity: 0; transform: translateY(8px); }
+.global-toast .toast-enter-to { opacity: 1; transform: translateY(0); }
+.global-toast .toast-leave-from { opacity: 1; transform: translateY(0); }
+.global-toast .toast-leave-to { opacity: 0; transform: translateY(8px); }

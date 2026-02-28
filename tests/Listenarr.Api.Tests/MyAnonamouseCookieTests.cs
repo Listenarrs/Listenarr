@@ -699,8 +699,20 @@ namespace Listenarr.Api.Tests
             public Task<List<Audiobook>> GetAllAsync() => Task.FromResult(_store.ToList());
             public Task<Audiobook?> GetByAsinAsync(string asin) => Task.FromResult(_store.FirstOrDefault(a => a.Asin == asin));
             public Task<Audiobook?> GetByIdAsync(int id) => Task.FromResult(_store.FirstOrDefault(a => a.Id == id));
-            public Task<Audiobook?> GetByIsbnAsync(string isbn) => Task.FromResult(_store.FirstOrDefault(a => a.Isbn == isbn));
+            public Task<Audiobook?> GetByIsbnAsync(string isbn) => Task.FromResult(_store.FirstOrDefault(a => a.Isbn != null && a.Isbn.Contains(isbn)));
             public Task<bool> UpdateAsync(Audiobook audiobook) { var idx = _store.FindIndex(a => a.Id == audiobook.Id); if (idx<0) return Task.FromResult(false); _store[idx]=audiobook; return Task.FromResult(true); }
+            public Task<string?> GetAuthorAsinByNameAsync(string name)
+            {
+                if (string.IsNullOrWhiteSpace(name)) return Task.FromResult<string?>(null);
+                var normalized = name.Trim();
+                var match = _store.SelectMany(b => (b.Authors ?? new List<string>()).Select(a => new { book = b, author = a }))
+                                  .FirstOrDefault(x => string.Equals(x.author?.Trim(), normalized, StringComparison.OrdinalIgnoreCase) && ((x.book.AuthorAsins?.Count ?? 0) > 0));
+                if (match != null)
+                {
+                    return Task.FromResult(match.book.AuthorAsins?.FirstOrDefault());
+                }
+                return Task.FromResult<string?>(null);
+            }
         }
 
         // Minimal test stubs for other services used by DownloadService

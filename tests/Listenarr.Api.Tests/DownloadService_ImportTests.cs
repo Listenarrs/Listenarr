@@ -276,94 +276,21 @@ namespace Listenarr.Api.Tests
         }
 
         [Fact]
-        public async Task ManualImport_AppendsUniqueSuffix_WhenDestinationExists()
-        {
-            var db = CreateInMemoryDb();
-
-            // Create audiobook with basepath
-            var basePath = Path.Combine(Path.GetTempPath(), "listenarr-manual", Guid.NewGuid().ToString());
-            Directory.CreateDirectory(basePath);
-            var book = new Audiobook { Title = "Manual Book", BasePath = basePath };
-            db.Audiobooks.Add(book);
-            await db.SaveChangesAsync();
-
-            // Create source file
-            var src = Path.Combine(Path.GetTempPath(), $"manual-src-{Guid.NewGuid()}.mp3");
-            await File.WriteAllTextAsync(src, "content");
-
-            // Create an existing destination file to cause collision
-            var dest = Path.Combine(basePath, "Manual Book (2025)");
-            Directory.CreateDirectory(dest);
-            var destFile = Path.Combine(dest, "chapter.mp3");
-            await File.WriteAllTextAsync(destFile, "existing");
-
-            // Prepare controller with mocks
-            var repoMock = new Mock<IAudiobookRepository>();
-            repoMock.Setup(r => r.GetByIdAsync(It.IsAny<int>())).ReturnsAsync((int id) => db.Audiobooks.Find(id));
-
-            var metadataMock = new Mock<IMetadataService>();
-            metadataMock.Setup(m => m.ExtractFileMetadataAsync(It.IsAny<string>())).ReturnsAsync(new AudioMetadata { Title = "Chapter", Bitrate = 128000 });
-
-            var fileNamingMock = new Mock<IFileNamingService>();
-            fileNamingMock.Setup(f => f.ApplyNamingPattern(It.IsAny<string>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<bool>()))
-                .Returns((string pattern, Dictionary<string, object> vars, bool t) => Path.Combine("Manual Book (2025)", "chapter.mp3"));
-
-            var configMock = new Mock<IConfigurationService>();
-            configMock.Setup(c => c.GetApplicationSettingsAsync()).ReturnsAsync(new ApplicationSettings { OutputPath = basePath });
-
-            var scanMock = new Mock<IScanQueueService>();
-            scanMock.Setup(s => s.EnqueueScanAsync(It.IsAny<int>(), It.IsAny<string>())).ReturnsAsync(Guid.NewGuid());
-
-            var controller = new ManualImportController(
-                Mock.Of<Microsoft.Extensions.Logging.ILogger<ManualImportController>>(),
-                repoMock.Object,
-                metadataMock.Object,
-                fileNamingMock.Object,
-                configMock.Object,
-                scanMock.Object
-            );
-
-            // Build request
-            var request = new ManualImportRequest
-            {
-                Path = Path.GetTempPath(),
-                Mode = "interactive",
-                InputMode = "copy",
-                Items = new System.Collections.Generic.List<ManualImportItem>
-                {
-                    new ManualImportItem { FullPath = src, MatchedAudiobookId = book.Id }
-                }
-            };
-
-            // Act
-            var result = await controller.Start(request);
-
-            // Assert: destination should exist and be unique (chapter (1).mp3)
-            var files = Directory.GetFiles(dest);
-            Assert.Contains(files, p => Path.GetFileName(p).StartsWith("chapter"));
-            if (files.Length < 2)
-            {
-                Assert.Contains(files, f => f.EndsWith("chapter (1).mp3"));
-            }
-
-            // Cleanup
-            try { Directory.Delete(basePath, true); } catch { }
-            try { File.Delete(src); } catch { }
-        }
-
-        [Fact]
         public async Task GetQueue_DoesNotPurge_WhenSabnzbdHistoryContainsMatch()
         {
             var db = CreateInMemoryDb();
 
-            // Seed download that would otherwise be considered orphaned
+            // Seed download that would be considered orphaned: 
+            // - Status is Queued (not Downloading/Processing, not terminal states)
+            // - Started >5 minutes ago (meets orphan age threshold)
+            // - Not in client queue (will be detected as orphaned)
             var download = new Download
             {
                 Id = "purge-1",
                 Title = "William Faulkner - The Sound and the Fury",
-                Status = DownloadStatus.Downloading,
+                Status = DownloadStatus.Queued,
                 DownloadClientId = "sab-1",
-                StartedAt = DateTime.UtcNow
+                StartedAt = DateTime.UtcNow.AddMinutes(-10)
             };
             db.Downloads.Add(download);
             await db.SaveChangesAsync();

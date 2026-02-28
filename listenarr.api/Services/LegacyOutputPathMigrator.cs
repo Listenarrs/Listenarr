@@ -47,8 +47,7 @@ namespace Listenarr.Api.Services
                 await _rootFolderService.CreateAsync(root);
                 _logger.LogInformation("Migrated legacy ApplicationSettings.outputPath '{Path}' to RootFolder 'Default'", appSettings.OutputPath);
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogWarning(ex, "Failed to migrate legacy ApplicationSettings.outputPath to RootFolder");
             }
         }

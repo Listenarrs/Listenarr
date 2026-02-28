@@ -36,15 +36,14 @@ namespace Listenarr.Api.Services
                         await clientProxy.SendCoreAsync("QueueUpdate", new object[] { queue }, CancellationToken.None);
                     }
                 }
-                catch (Exception inner)
-                {
+                catch (Exception inner) when (inner is not OperationCanceledException && inner is not OutOfMemoryException && inner is not StackOverflowException) {
                     _logger.LogDebug(inner, "Direct SendCoreAsync for QueueUpdate failed (non-fatal)");
                 }
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogWarning(ex, "Failed to broadcast QueueUpdate");
             }
         }
     }
 }
+

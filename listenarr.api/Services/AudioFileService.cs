@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
 using Listenarr.Domain.Models;
 using Listenarr.Infrastructure.Models;
@@ -43,6 +43,7 @@ namespace Listenarr.Api.Services
                 // single-file representation) prefer to only associate files that live in the
                 // same containing directory. This prevents accidental associations when a
                 // completed download move erroneously places a file in a sibling folder.
+                // However, allow files in the audiobook's BasePath (multi-file import scenario).
                 try
                 {
                     var audiobook = await db.Audiobooks.FindAsync(audiobookId);
@@ -50,25 +51,33 @@ namespace Listenarr.Api.Services
                     {
                         var existingDir = Path.GetFullPath(Path.GetDirectoryName(audiobook.FilePath) ?? string.Empty);
                         var candidateDir = Path.GetFullPath(Path.GetDirectoryName(filePath) ?? string.Empty);
+                        var candidateFull = Path.GetFullPath(filePath);
 
                         if (!string.IsNullOrEmpty(existingDir) && !string.IsNullOrEmpty(candidateDir))
                         {
                             // Ensure candidate is the same directory or a subdirectory of the existing dir
-                            if (!candidateDir.Equals(existingDir, StringComparison.OrdinalIgnoreCase) &&
-                                !candidateDir.StartsWith(existingDir + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                            var isInExistingDir = candidateDir.Equals(existingDir, StringComparison.OrdinalIgnoreCase) ||
+                                                   candidateDir.StartsWith(existingDir + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+                            
+                            // Also allow if file is within the audiobook's BasePath (multi-file migration)
+                            var isInBasePath = !string.IsNullOrWhiteSpace(audiobook.BasePath) &&
+                                               candidateFull.StartsWith(Path.GetFullPath(audiobook.BasePath) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+
+                            if (!isInExistingDir && !isInBasePath)
                             {
-                                _logger.LogWarning("Refusing to associate file outside audiobook folder. AudiobookId={AudiobookId}, AudiobookDir={AudiobookDir}, File={File}", audiobookId, existingDir, filePath);
+                                var audiobookTitle = audiobook.Title ?? "Unknown";
+                                _logger.LogWarning("Refusing to associate file outside audiobook folder. AudiobookId={AudiobookId}, AudiobookDir={AudiobookDir}, BasePath={BasePath}, File={File}", audiobookId, existingDir, audiobook.BasePath, filePath);
                                 // Create a history entry so the UI can show that an attempted association was refused
                                 try
                                 {
                                     var historyEntry = new History
                                     {
                                         AudiobookId = audiobookId,
-                                        AudiobookTitle = audiobook?.Title ?? "Unknown",
+                                        AudiobookTitle = audiobookTitle,
                                         EventType = "File Association Refused",
                                         Message = $"Refused to associate file outside audiobook folder: {Path.GetFileName(filePath)}",
                                         Source = source ?? "Scan",
-                                        Data = JsonSerializer.Serialize(new { FilePath = filePath, AudiobookDir = existingDir }),
+                                        Data = JsonSerializer.Serialize(new { FilePath = filePath, AudiobookDir = existingDir, BasePath = audiobook.BasePath }),
                                         Timestamp = DateTime.UtcNow
                                     };
 
@@ -81,16 +90,14 @@ namespace Listenarr.Api.Services
                                         var toastSvc = scope.ServiceProvider.GetService<IToastService>();
                                         if (toastSvc != null)
                                         {
-                                            await toastSvc.PublishToastAsync("warning", "File not associated", $"Refused to associate {Path.GetFileName(filePath)} to {audiobook?.Title ?? "Unknown"}");
+                                            await toastSvc.PublishToastAsync("warning", "File not associated", $"Refused to associate {Path.GetFileName(filePath)} to {audiobookTitle}");
                                         }
                                     }
-                                    catch (Exception thx)
-                                    {
+                                    catch (Exception thx) when (thx is not OperationCanceledException && thx is not OutOfMemoryException && thx is not StackOverflowException) {
                                         _logger.LogDebug(thx, "Failed to publish toast for refused file association");
                                     }
                                 }
-                                catch (Exception hx)
-                                {
+                                catch (Exception hx) when (hx is not OperationCanceledException && hx is not OutOfMemoryException && hx is not StackOverflowException) {
                                     _logger.LogDebug(hx, "Failed to persist history for refused file association (AudiobookId={AudiobookId}, File={File})", audiobookId, filePath);
                                 }
 
@@ -99,8 +106,7 @@ namespace Listenarr.Api.Services
                         }
                     }
                 }
-                catch (Exception exDir)
-                {
+                catch (Exception exDir) when (exDir is not OperationCanceledException && exDir is not OutOfMemoryException && exDir is not StackOverflowException) {
                     _logger.LogDebug(exDir, "Failed to verify audiobook folder containment for AudiobookId={AudiobookId} File={File}", audiobookId, filePath);
                 }
 
@@ -130,8 +136,7 @@ namespace Listenarr.Api.Services
                         meta = cachedMeta;
                     }
                 }
-                catch (Exception mEx)
-                {
+                catch (Exception mEx) when (mEx is not OperationCanceledException && mEx is not OutOfMemoryException && mEx is not StackOverflowException) {
                     _logger.LogInformation(mEx, "Metadata extraction failed for {Path}", filePath);
                 }
                 // If metadata extraction produced minimal results, attempt to ensure ffprobe is installed
@@ -170,16 +175,14 @@ namespace Listenarr.Api.Services
                                         finally { _limiter.Sem.Release(); }
                                     }
                                 }
-                                catch (Exception rex)
-                                {
+                                catch (Exception rex) when (rex is not OperationCanceledException && rex is not OutOfMemoryException && rex is not StackOverflowException) {
                                     _logger.LogInformation(rex, "Retry metadata extraction failed for {Path}", filePath);
                                 }
                             }
                         }
                     }
                 }
-                catch (Exception exRetry)
-                {
+                catch (Exception exRetry) when (exRetry is not OperationCanceledException && exRetry is not OutOfMemoryException && exRetry is not StackOverflowException) {
                     _logger.LogDebug(exRetry, "Non-fatal error while attempting ffprobe install/retry for {Path}", filePath);
                 }
                 var fi = new FileInfo(filePath);
@@ -212,8 +215,7 @@ namespace Listenarr.Api.Services
                             var conn = db.Database.GetDbConnection();
                             _logger.LogInformation("Created AudiobookFile for audiobook {AudiobookId}: {Path} (Db: {Db}) Id={Id}", audiobookId, filePath, conn?.ConnectionString, fileRecord.Id);
                         }
-                        catch (Exception logEx)
-                        {
+                        catch (Exception logEx) when (logEx is not OperationCanceledException && logEx is not OutOfMemoryException && logEx is not StackOverflowException) {
                             _logger.LogInformation("Created AudiobookFile for audiobook {AudiobookId}: {Path} (Db: unknown) Id={Id}", audiobookId, filePath, fileRecord.Id);
                             _logger.LogDebug(logEx, "Failed to log DB connection string for AudiobookFile creation");
                         }
@@ -266,13 +268,11 @@ namespace Listenarr.Api.Services
                                     await db.SaveChangesAsync();
                                 }
                             }
-                            catch (Exception aubEx)
-                            {
+                            catch (Exception aubEx) when (aubEx is not OperationCanceledException && aubEx is not OutOfMemoryException && aubEx is not StackOverflowException) {
                                 _logger.LogDebug(aubEx, "Failed to update Audiobook file summary fields for AudiobookId {AudiobookId}", audiobookId);
                             }
                         }
-                        catch (Exception hx)
-                        {
+                        catch (Exception hx) when (hx is not OperationCanceledException && hx is not OutOfMemoryException && hx is not StackOverflowException) {
                             _logger.LogDebug(hx, "Failed to create history entry for added audiobook file {Path}", filePath);
                         }
 
@@ -298,12 +298,12 @@ namespace Listenarr.Api.Services
                     }
                 }
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogWarning(ex, "Failed to create AudiobookFile record for audiobook {AudiobookId} at {Path}", audiobookId, filePath);
                 return false;
             }
         }
     }
 }
+
 

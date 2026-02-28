@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createRouter, createMemoryHistory } from 'vue-router'
-import CollectionView from '@/views/CollectionView.vue'
+import CollectionView from '@/views/library/CollectionView.vue'
 import { useLibraryStore } from '@/stores/library'
 
 vi.mock('@/services/api', () => ({

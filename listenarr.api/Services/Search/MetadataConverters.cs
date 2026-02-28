@@ -19,42 +19,6 @@ public class MetadataConverters
     }
 
     /// <summary>
-    /// Converts Amazon search result to SearchResult.
-    /// </summary>
-    public SearchResult ConvertAmazonSearchToResult(AmazonSearchResult amazonResult)
-    {
-        return new SearchResult
-        {
-            Title = amazonResult.Title ?? "Unknown Title",
-            Artist = amazonResult.Author ?? "Unknown Author",
-            Source = "Amazon",
-            Asin = amazonResult.Asin ?? "",
-            ImageUrl = amazonResult.ImageUrl ?? ""
-        };
-    }
-
-    /// <summary>
-    /// Converts Amazon search result to MetadataSearchResult.
-    /// </summary>
-    public MetadataSearchResult ConvertAmazonSearchToMetadataResult(AmazonSearchResult amazonResult)
-    {
-        return new MetadataSearchResult
-        {
-            Id = Guid.NewGuid().ToString(),
-            Title = amazonResult.Title ?? "Unknown Title",
-            Artist = amazonResult.Author ?? "Unknown Author",
-            Album = amazonResult.Title ?? "Unknown Title",
-            Category = "Audiobook",
-            Source = "Amazon",
-            Asin = amazonResult.Asin ?? "",
-            ImageUrl = amazonResult.ImageUrl ?? "",
-            ProductUrl = amazonResult.Asin != null ? $"https://www.amazon.com/dp/{amazonResult.Asin}" : null,
-            IsEnriched = false,
-            MetadataSource = "Amazon"
-        };
-    }
-
-    /// <summary>
     /// Converts Audimeta API response to AudibleBookMetadata.
     /// </summary>
     public AudibleBookMetadata ConvertAudimetaToMetadata(AudimetaBookResponse audimetaData, string asin, string source = "Audible")
@@ -71,7 +35,7 @@ public class MetadataConverters
             Description = audimetaData.Description,
             Genres = audimetaData.Genres?.Select(g => g.Name).Where(n => !string.IsNullOrEmpty(n)).Select(n => n!).ToList(),
             Language = audimetaData.Language,
-            Isbn = audimetaData.Isbn,
+            Isbn = !string.IsNullOrWhiteSpace(audimetaData.Isbn) ? new List<string> { audimetaData.Isbn! } : new List<string>(),
             ImageUrl = audimetaData.ImageUrl,
             Abridged = audimetaData.BookFormat?.Contains("abridged", StringComparison.OrdinalIgnoreCase) ?? false,
             Explicit = audimetaData.Explicit ?? false
@@ -100,6 +64,21 @@ public class MetadataConverters
             {
                 metadata.PublishYear = yearMatch.Value;
             }
+            // Also store the full date for calendar/timeline features
+            // Try to parse as ISO 8601 datetime
+            if (DateTime.TryParse(dateStr, out var parsedDate))
+            {
+                metadata.PublishedDate = parsedDate.ToString("yyyy-MM-dd");
+            }
+            else
+            {
+                // If parsing fails, try just the year
+                var datePart = Regex.Match(dateStr, @"^(\d{4})-\d{2}-\d{2}");
+                if (datePart.Success)
+                {
+                    metadata.PublishedDate = datePart.Value;
+                }
+            }
         }
 
         _logger.LogInformation("Converted audimeta data for {Asin}: Title={Title}, Runtime={Runtime}min, Year={Year}, Series={Series}, ImageUrl={ImageUrl}",
@@ -122,10 +101,10 @@ public class MetadataConverters
             Authors = audnexusData.Authors?.Select(a => a.Name).Where(n => !string.IsNullOrEmpty(n)).Select(n => n!).ToList(),
             Narrators = audnexusData.Narrators?.Select(n => n.Name).Where(n => !string.IsNullOrEmpty(n)).Select(n => n!).ToList(),
             Publisher = audnexusData.PublisherName,
-            Description = audnexusData.Description ?? audnexusData.Summary,
+            Description = !string.IsNullOrWhiteSpace(audnexusData.Summary) ? audnexusData.Summary : audnexusData.Description,
             Genres = audnexusData.Genres?.Select(g => g.Name).Where(n => !string.IsNullOrEmpty(n)).Select(n => n!).ToList(),
             Language = audnexusData.Language,
-            Isbn = audnexusData.Isbn,
+            Isbn = !string.IsNullOrWhiteSpace(audnexusData.Isbn) ? new List<string> { audnexusData.Isbn! } : new List<string>(),
             ImageUrl = audnexusData.Image,
             Abridged = audnexusData.FormatType?.Contains("abridged", StringComparison.OrdinalIgnoreCase) ?? false,
             Explicit = audnexusData.IsAdult ?? false
@@ -136,11 +115,19 @@ public class MetadataConverters
         {
             metadata.Series = audnexusData.SeriesPrimary.Name;
             metadata.SeriesNumber = audnexusData.SeriesPrimary.Position;
+            _logger.LogInformation("Extracted primary series from Audnexus: {Series}, Position={Position}", 
+                metadata.Series, metadata.SeriesNumber);
         }
         else if (audnexusData.SeriesSecondary != null)
         {
             metadata.Series = audnexusData.SeriesSecondary.Name;
             metadata.SeriesNumber = audnexusData.SeriesSecondary.Position;
+            _logger.LogInformation("Extracted secondary series from Audnexus: {Series}, Position={Position}", 
+                metadata.Series, metadata.SeriesNumber);
+        }
+        else
+        {
+            _logger.LogDebug("No series information from Audnexus for ASIN {Asin}", asin);
         }
 
         // Convert runtime from minutes
@@ -239,8 +226,7 @@ public class MetadataConverters
                     _logger.LogDebug("Started background image cache for ASIN {Asin}", asin);
                 }
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogWarning(ex, "Failed to check/initiate image caching for ASIN {Asin}", asin);
             }
         }
@@ -261,13 +247,30 @@ public class MetadataConverters
             // no-op; placeholder to keep behavior explicit in future
         }
 
+        var categoryText = string.Join(", ", metadata.Genres ?? new List<string> { "Audiobook" });
+        var genreList = metadata.Genres;
+        if (genreList == null || !genreList.Any())
+        {
+            genreList = categoryText
+                .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(g => g.Trim())
+                .Where(g => !string.IsNullOrWhiteSpace(g))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (genreList.Count == 1 && string.Equals(genreList[0], "Audiobook", StringComparison.OrdinalIgnoreCase))
+            {
+                genreList = new List<string>();
+            }
+        }
+
         var result = new SearchResult
         {
             Id = Guid.NewGuid().ToString(),
             Title = title,
             Artist = author ?? "Unknown Author",
             Album = metadata.Series ?? metadata.Title ?? "Unknown Album",
-            Category = string.Join(", ", metadata.Genres ?? new List<string> { "Audiobook" }),
+            Category = categoryText,
             Size = 0, // We don't have file size from metadata
             Seeders = 0, // Not applicable for direct Amazon results
             Leechers = 0, // Not applicable for direct Amazon results
@@ -275,7 +278,7 @@ public class MetadataConverters
             Source = metadata.Source ?? "Amazon/Audible", // Use the metadata source (Audible or Amazon) if available
             MetadataSource = metadata.Source, // Set the metadata source for display
             SourceLink = productUrl, // Link to the product page
-            PublishedDate = !string.IsNullOrEmpty(metadata.PublishYear) && int.TryParse(metadata.PublishYear, out var year) ? $"{year}-01-01" : "1970-01-01",
+            PublishedDate = !string.IsNullOrEmpty(metadata.PublishedDate) ? metadata.PublishedDate : (!string.IsNullOrEmpty(metadata.PublishYear) && int.TryParse(metadata.PublishYear, out var year) ? $"{year}-01-01" : "1970-01-01"),
             PublishYear = metadata.PublishYear,
             Subtitle = metadata.Subtitle,
             Quality = metadata.Version ?? "Unknown",
@@ -289,6 +292,8 @@ public class MetadataConverters
             SeriesNumber = metadata.SeriesNumber,
             ImageUrl = imageUrl,
             Asin = asin,
+            Isbn = metadata.Isbn ?? new List<string>(),
+            Genres = genreList,
             ProductUrl = productUrl
         };
         
@@ -367,8 +372,7 @@ public class MetadataConverters
                     _logger.LogDebug("Started background image cache for ASIN {Asin}", asin);
                 }
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogWarning(ex, "Failed to check/initiate image caching for ASIN {Asin}", asin);
             }
         }
@@ -382,16 +386,33 @@ public class MetadataConverters
                 : $"https://www.audible.com/pd/{asin}";
         }
 
+        var categoryText = string.Join(", ", metadata.Genres ?? new List<string> { "Audiobook" });
+        var genreList = metadata.Genres;
+        if (genreList == null || !genreList.Any())
+        {
+            genreList = categoryText
+                .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(g => g.Trim())
+                .Where(g => !string.IsNullOrWhiteSpace(g))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (genreList.Count == 1 && string.Equals(genreList[0], "Audiobook", StringComparison.OrdinalIgnoreCase))
+            {
+                genreList = new List<string>();
+            }
+        }
+
         var result = new MetadataSearchResult
         {
             Id = Guid.NewGuid().ToString(),
             Title = title,
             Artist = author ?? "Unknown Author",
             Album = metadata.Series ?? metadata.Title ?? "Unknown Album",
-            Category = string.Join(", ", metadata.Genres ?? new List<string> { "Audiobook" }),
+            Category = categoryText,
             Source = metadata.Source ?? "Amazon/Audible",
             SourceLink = productUrl,
-            PublishedDate = !string.IsNullOrEmpty(metadata.PublishYear) && int.TryParse(metadata.PublishYear, out var year) ? $"{year}-01-01" : "1970-01-01",
+            PublishedDate = !string.IsNullOrEmpty(metadata.PublishedDate) ? metadata.PublishedDate : (!string.IsNullOrEmpty(metadata.PublishYear) && int.TryParse(metadata.PublishYear, out var year) ? $"{year}-01-01" : "1970-01-01"),
             Format = "Audiobook",
             Score = 0,
             Description = metadata.Description,
@@ -404,6 +425,8 @@ public class MetadataConverters
             SeriesNumber = metadata.SeriesNumber,
             ImageUrl = imageUrl,
             Asin = asin,
+            Isbn = metadata.Isbn ?? new List<string>(),
+            Genres = genreList,
             ProductUrl = productUrl,
             IsEnriched = true,
             MetadataSource = metadata.Source
@@ -415,3 +438,4 @@ public class MetadataConverters
         return result;
     }
 }
+

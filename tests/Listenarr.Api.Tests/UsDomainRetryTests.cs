@@ -14,33 +14,6 @@ namespace Listenarr.Api.Tests
     public class UsDomainRetryTests
     {
         [Fact]
-        public async Task Audible_TryFetchProductTitle_RetriesToCom_WhenLocaleRedirectDetected()
-        {
-            // Arrange: handler returns localized redirect HTML for audible.de and valid og:title for audible.com
-            var handler = new DelegatingHandlerStub(req =>
-            {
-                var host = req.RequestUri?.Host ?? string.Empty;
-                if (host.Contains("audible.de", StringComparison.OrdinalIgnoreCase) || host.Contains("audible.eu", StringComparison.OrdinalIgnoreCase))
-                {
-                    var html = "<html><body><h1>Aufgrund deines Standorts haben wir dich zu audible.de weitergeleitet.</h1></body></html>";
-                    return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(html) });
-                }
-                // Default: return a US product page with og:title
-                var usHtml = "<html><head><meta property=\"og:title\" content=\"US Product Title\" /></head><body></body></html>";
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(usHtml) });
-            });
-
-            var httpClient = new HttpClient(handler) { BaseAddress = new Uri("https://www.audible.de") };
-            var svc = new AudibleSearchService(httpClient, new NullLogger<AudibleSearchService>(), new TestConfigurationService());
-
-            // Call internal TryFetchProductTitle directly (InternalsVisibleTo applied)
-            var title = await svc.TryFetchProductTitle("https://www.audible.de/pd/test-product", "B0TESTASIN");
-
-            // Assert that the service retried and returned the US og:title
-            Assert.Equal("US Product Title", title);
-        }
-
-        [Fact]
         public async Task Amazon_GetHtmlAsync_RetriesToCom_WhenNonUsHostRequested()
         {
             // Arrange: handler returns locale redirect for amazon.de and valid content for amazon.com

@@ -47,7 +47,7 @@ jobs:
           echo "VERSION=${NEWVERSION}" >> $GITHUB_OUTPUT
 
       - name: Restore .NET
-        run: dotnet restore listenarr.sln
+        run: dotnet restore listenarr.slnx
 
       - name: Persist bumped version to csproj (for build)
         if: steps.resolve-version.outputs.VERSION != ''
@@ -271,7 +271,7 @@ jobs:
           PR_NUMBER: ${{ steps.find_triggering_pr.outputs.PR_NUMBER }}
 
       - name: Build solution
-        run: dotnet build listenarr.sln -c Release --no-restore
+        run: dotnet build listenarr.slnx -c Release --no-restore
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -314,8 +314,8 @@ jobs:
       - name: Set image name
         id: set-tags
         run: |
-          echo "DOCKER_IMAGE=docker.io/${{ github.repository_owner }}/listenarr" >> $GITHUB_OUTPUT
-          echo "GHCR_IMAGE=ghcr.io/${{ github.repository_owner }}/listenarr" >> $GITHUB_OUTPUT
+          echo "DOCKER_IMAGE=docker.io/therobbiedavis/listenarr" >> $GITHUB_OUTPUT
+          echo "GHCR_IMAGE=ghcr.io/listenarrs/listenarr" >> $GITHUB_OUTPUT
           TAG=${GITHUB_REF/refs/tags/}
           echo "TAG=$TAG" >> $GITHUB_OUTPUT
 
@@ -388,7 +388,7 @@ jobs:
 
       - name: Notify Discord
         uses: rjstone/discord-webhook-notify@v2.2.1
-        if: ${{ github.repository_owner == 'therobbiedavis' }}
+        if: ${{ github.repository_owner == 'listenarrs' }}
         with:
             severity: info
             description: v${{steps.resolve-version.outputs.VERSION}} - ${{ steps.find_triggering_pr.outputs.PR_TITLE }}

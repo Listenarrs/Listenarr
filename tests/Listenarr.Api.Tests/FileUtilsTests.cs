@@ -178,5 +178,36 @@ namespace Listenarr.Api.Tests
                 try { Directory.Delete(dir, true); } catch { }
             }
         }
+
+        [Fact]
+        public void GetUniqueDestinationPath_BatchImport_HandleMultipleCollisions_WithUsedSet()
+        {
+            // Simulate batch import scenario: importing multiple files where multiple target the same destination
+            var dir = Path.Combine(Path.GetTempPath(), "fu-batch-" + Guid.NewGuid());
+            Directory.CreateDirectory(dir);
+            var usedDestinations = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            // First file imports to chapter.mp3
+            var file1 = Path.Combine(dir, "chapter.mp3");
+            var result1 = FileUtils.GetUniqueDestinationPath(file1, File.Exists, usedDestinations);
+            Assert.Equal(file1, result1); // Does not exist, no used, returns original
+            usedDestinations.Add(result1);
+
+            // Second file also wants chapter.mp3 - should get chapter (1).mp3 because first one is in usedDestinations
+            var file2 = Path.Combine(dir, "chapter.mp3");
+            var result2 = FileUtils.GetUniqueDestinationPath(file2, File.Exists, usedDestinations);
+            Assert.NotEqual(result1, result2);
+            Assert.Contains(" (1)", result2);
+            usedDestinations.Add(result2);
+
+            // Third file also wants chapter.mp3 - should get chapter (2).mp3
+            var file3 = Path.Combine(dir, "chapter.mp3");
+            var result3 = FileUtils.GetUniqueDestinationPath(file3, File.Exists, usedDestinations);
+            Assert.NotEqual(result1, result3);
+            Assert.NotEqual(result2, result3);
+            Assert.Contains(" (2)", result3);
+
+            try { Directory.Delete(dir, true); } catch { }
+        }
     }
 }

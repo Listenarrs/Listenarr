@@ -1,0 +1,10 @@
+/* View-level helpers and consistent section sizing */
+
+.section { padding: 1.25rem; background: var(--card-bg); border-radius: 8px; border: 1px solid var(--border-color) }
+.section-title { color: var(--brand-500) }
+
+/* Brand helper: use flat brand color (no gradient) */
+.brand-gradient {
+  background-color: var(--brand-600);
+  color: #fff;
+}

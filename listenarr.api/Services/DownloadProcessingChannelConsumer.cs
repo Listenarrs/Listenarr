@@ -33,11 +33,11 @@ namespace Listenarr.Api.Services
                     // Optionally we could signal a processing mechanism here; keep lightweight for now.
                     _logger.LogDebug("Channel consumer observed job {JobId}", jobId);
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogWarning(ex, "Failed to handle channel job {JobId}", jobId);
                 }
             }
         }
     }
 }
+

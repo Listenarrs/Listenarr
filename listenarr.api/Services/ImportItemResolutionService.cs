@@ -8,7 +8,7 @@ namespace Listenarr.Api.Services
 {
     /// <summary>
     /// Resolves import items with accurate paths and metadata.
-    /// EXACTLY matches Sonarr's ProvideImportItemService pattern.
+    /// Matches ProvideImportItemService pattern.
     /// </summary>
     public interface IImportItemResolutionService
     {

@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from 'vitest'
+import { nextTick } from 'vue'
 import { mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
-import DownloadClientFormModal from '@/components/DownloadClientFormModal.vue'
+import DownloadClientFormModal from '@/components/domain/download/DownloadClientFormModal.vue'
 
 describe('DownloadClientFormModal', () => {
   it('renders password input for qbittorrent', async () => {
@@ -21,16 +22,15 @@ describe('DownloadClientFormModal', () => {
         isEnabled: true,
         useSSL: false,
         downloadPath: '',
+        username: '',
+        password: '',
         settings: {},
       },
     })
     await wrapper.vm.$nextTick()
 
-    const passwordInput = wrapper.find('input[id="password"]')
-    // debug
-     
-    console.log('HTML:', wrapper.html())
-    expect(passwordInput.exists()).toBe(true)
+    const passwordComponent = wrapper.findComponent({ name: 'PasswordInput' })
+    expect(passwordComponent.exists()).toBe(true)
   })
 
   it('renders api key input for sabnzbd', async () => {
@@ -49,13 +49,15 @@ describe('DownloadClientFormModal', () => {
         isEnabled: true,
         useSSL: false,
         downloadPath: '',
+        username: '',
+        password: '',
         settings: {},
       },
     })
     await wrapper.vm.$nextTick()
 
-    const apiKeyInput = wrapper.find('input[id="apiKey"]')
-    expect(apiKeyInput.exists()).toBe(true)
+    const apiKeyComponent = wrapper.findComponent({ name: 'PasswordInput' })
+    expect(apiKeyComponent.exists()).toBe(true)
   })
 
   it('test button on modal uses current input values (no ID sent)', async () => {
@@ -77,6 +79,7 @@ describe('DownloadClientFormModal', () => {
         isEnabled: true,
         useSSL: false,
         downloadPath: '',
+        username: '',
         settings: {},
         password: 'dbpass',
       },
@@ -118,19 +121,21 @@ describe('DownloadClientFormModal', () => {
         isEnabled: true,
         useSSL: false,
         downloadPath: '',
+        username: '',
         settings: {},
         password: 'dbpass',
       },
     })
     await wrapper.vm.$nextTick()
 
-    const passwordInput = wrapper.find('input[id="password"]')
-    expect(passwordInput.exists()).toBe(true)
-    // prepopulated value should match DB
-    expect((passwordInput.element as HTMLInputElement).value).toBe('dbpass')
+    const passwordComponent = wrapper.findComponent({ name: 'PasswordInput' })
+    expect(passwordComponent.exists()).toBe(true)
+    // prepopulated value should match DB via v-model prop
+    expect(passwordComponent.props('modelValue')).toBe('dbpass')
 
-    // clear the password input to explicitly test empty-password behavior
-    await passwordInput.setValue('')
+    // clear the password input by emitting v-model update
+    await (passwordComponent.vm as any).$emit('update:modelValue', '')
+    await nextTick()
 
     // click Test
     const testButton = wrapper.find('button.btn-info')

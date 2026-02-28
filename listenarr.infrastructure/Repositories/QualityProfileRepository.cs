@@ -63,25 +63,39 @@ namespace Listenarr.Infrastructure.Repositories
             existing.MaximumAge = profile.MaximumAge;
 
             // Replace list/scalar-serialized properties safely
-            existing.Qualities.Clear();
+            // Create a new list to force EF Core to detect the change
+            var newQualities = new List<QualityDefinition>();
             if (profile.Qualities != null && profile.Qualities.Count > 0)
             {
                 foreach (var q in profile.Qualities)
                 {
-                    existing.Qualities.Add(new QualityDefinition
+                    newQualities.Add(new QualityDefinition
                     {
                         Quality = q.Quality,
                         Allowed = q.Allowed,
-                        Priority = q.Priority
+                        Priority = q.Priority,
+                        Codec = q.Codec,
+                        Bitrate = q.Bitrate,
+                        IsLossless = q.IsLossless
                     });
                 }
             }
+            existing.Qualities = newQualities;
+            // Mark Qualities as modified so EF Core detects the change
+            _db.Entry(existing).Property(p => p.Qualities).IsModified = true;
 
             existing.PreferredFormats = profile.PreferredFormats ?? new System.Collections.Generic.List<string>();
             existing.PreferredWords = profile.PreferredWords ?? new System.Collections.Generic.List<string>();
             existing.MustNotContain = profile.MustNotContain ?? new System.Collections.Generic.List<string>();
             existing.MustContain = profile.MustContain ?? new System.Collections.Generic.List<string>();
             existing.PreferredLanguages = profile.PreferredLanguages ?? new System.Collections.Generic.List<string>();
+
+            // Update CustomGroupNames
+            existing.CustomGroupNames = profile.CustomGroupNames;
+            if (profile.CustomGroupNames != null)
+            {
+                _db.Entry(existing).Property(p => p.CustomGroupNames).IsModified = true;
+            }
 
             existing.UpdatedAt = DateTime.UtcNow;
 

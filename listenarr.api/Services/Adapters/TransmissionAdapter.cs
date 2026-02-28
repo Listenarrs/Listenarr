@@ -19,6 +19,7 @@ namespace Listenarr.Api.Services.Adapters
     {
         public string ClientId => "transmission";
         public string ClientType => "transmission";
+        public DownloadProtocol Protocol => DownloadProtocol.Torrent;
 
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly IRemotePathMappingService _pathMappingService;
@@ -43,12 +44,26 @@ namespace Listenarr.Api.Services.Adapters
                     tag = 1
                 };
                 await InvokeRpcAsync(client, payload, ct);
-                return (true, "Transmission: session established");
+                return (true, "Transmission: connected");
             }
-            catch (Exception ex)
+            catch (HttpRequestException httpEx) when (httpEx.StatusCode == HttpStatusCode.Unauthorized || httpEx.StatusCode == HttpStatusCode.Forbidden)
             {
+                _logger.LogDebug(httpEx, "Transmission authentication failed for client {ClientId}", LogRedaction.SanitizeText(client?.Id ?? client?.Name ?? client?.Type));
+                return (false, "Transmission: authentication failed (check username/password)");
+            }
+            catch (HttpRequestException httpEx)
+            {
+                _logger.LogDebug(httpEx, "Transmission test failed for client {ClientId}", LogRedaction.SanitizeText(client?.Id ?? client?.Name ?? client?.Type));
+                return (false, $"Transmission: network error ({httpEx.StatusCode?.ToString() ?? "unavailable"})");
+            }
+            catch (TaskCanceledException tce)
+            {
+                _logger.LogDebug(tce, "Transmission test timed out for client {ClientId}", LogRedaction.SanitizeText(client?.Id ?? client?.Name ?? client?.Type));
+                return (false, "Transmission: connection timed out");
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogDebug(ex, "Transmission test failed for client {ClientId}", LogRedaction.SanitizeText(client?.Id ?? client?.Name ?? client?.Type));
-                return (false, ex.Message);
+                return (false, "Transmission: connection failed");
             }
         }
 
@@ -132,8 +147,7 @@ namespace Listenarr.Api.Services.Adapters
                 _logger.LogWarning("Transmission AddAsync returning null - torrent may not have been added");
                 return null;
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Failed to add torrent to Transmission for client {ClientName}", LogRedaction.SanitizeText(client.Name ?? client.Id));
                 throw;
             }
@@ -172,8 +186,7 @@ namespace Listenarr.Api.Services.Adapters
                 _logger.LogWarning("Transmission failed to remove torrent {Id}: {Message}", LogRedaction.SanitizeText(id), LogRedaction.SanitizeText(errorMsg));
                 return false;
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error removing torrent {Id} from Transmission", LogRedaction.SanitizeText(id));
                 return false;
             }
@@ -214,14 +227,12 @@ namespace Listenarr.Api.Services.Adapters
                         var queueItem = await MapTorrentAsync(client, torrent, ct);
                         items.Add(queueItem);
                     }
-                    catch (Exception ex)
-                    {
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                         _logger.LogDebug(ex, "Failed to map Transmission torrent entry (non-fatal)");
                     }
                 }
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogWarning(ex, "Failed to retrieve Transmission queue for client {ClientName}", LogRedaction.SanitizeText(client.Name ?? client.Id));
             }
 
@@ -235,9 +246,140 @@ namespace Listenarr.Api.Services.Adapters
         }
 
         /// <summary>
-        /// Resolves the actual import item for a completed download.
+        /// Get all downloads as standardized DownloadClientItem objects
+        /// </summary>
+        public async Task<List<DownloadClientItem>> GetItemsAsync(DownloadClientConfiguration client, CancellationToken ct = default)
+        {
+            var items = new List<DownloadClientItem>();
+            if (client == null) return items;
+
+            var payload = new
+            {
+                method = "torrent-get",
+                arguments = new
+                {
+                    fields = new[]
+                    {
+                        "id", "hashString", "name", "percentDone", "status", "totalSize", "rateDownload", "rateUpload",
+                        "leftUntilDone", "eta", "downloadDir", "addedDate", "uploadedEver", "uploadRatio", "labels"
+                    }
+                },
+                tag = 3
+            };
+
+            try
+            {
+                var response = await InvokeRpcAsync(client, payload, ct);
+                if (!response.TryGetProperty("arguments", out var args) || !args.TryGetProperty("torrents", out var torrents) || torrents.ValueKind != JsonValueKind.Array)
+                {
+                    return items;
+                }
+
+                foreach (var torrent in torrents.EnumerateArray())
+                {
+                    try
+                    {
+                        var downloadClientItem = await MapToDownloadClientItemAsync(client, torrent, ct);
+                        items.Add(downloadClientItem);
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+                        _logger.LogDebug(ex, "Failed to map Transmission torrent entry (non-fatal)");
+                    }
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+                _logger.LogWarning(ex, "Failed to retrieve Transmission items for client {ClientName}", LogRedaction.SanitizeText(client.Name ?? client.Id));
+            }
+
+            return items;
+        }
+
+        /// <summary>
+        /// Get import item from DownloadClientItem
+        /// </summary>
+        public async Task<DownloadClientItem> GetImportItemAsync(
+            DownloadClientConfiguration client,
+            DownloadClientItem item,
+            DownloadClientItem? previousAttempt = null,
+            CancellationToken ct = default)
+        {
+            // Clone to avoid mutating the original
+            var result = item.Clone();
+
+            // If OutputPath is already set and exists, use it
+            if (!string.IsNullOrEmpty(result.OutputPath))
+            {
+                var localPath = await _pathMappingService.TranslatePathAsync(client.Id, result.OutputPath);
+                if (!string.IsNullOrEmpty(localPath) && (File.Exists(localPath) || Directory.Exists(localPath)))
+                {
+                    result.OutputPath = localPath;
+                    return result;
+                }
+            }
+
+            // Query Transmission for the torrent details
+            var payload = new
+            {
+                method = "torrent-get",
+                arguments = new
+                {
+                    ids = ParseTransmissionIds(item.DownloadId),
+                    fields = new[] { "id", "name", "downloadDir" }
+                },
+                tag = 5
+            };
+
+            try
+            {
+                var response = await InvokeRpcAsync(client, payload, ct);
+                if (!response.TryGetProperty("arguments", out var args) || 
+                    !args.TryGetProperty("torrents", out var torrents) || 
+                    torrents.ValueKind != JsonValueKind.Array)
+                {
+                    _logger.LogWarning("Failed to query Transmission for torrent {TorrentId}", item.DownloadId);
+                    return result;
+                }
+
+                var torrent = torrents.EnumerateArray().FirstOrDefault();
+                if (torrent.ValueKind == JsonValueKind.Undefined)
+                {
+                    _logger.LogWarning("Torrent {TorrentId} not found in Transmission", item.DownloadId);
+                    return result;
+                }
+
+                var downloadDir = torrent.TryGetProperty("downloadDir", out var dirProp) ? dirProp.GetString() : null;
+                var name = torrent.TryGetProperty("name", out var nameProp) ? nameProp.GetString() : null;
+
+                if (string.IsNullOrEmpty(downloadDir) || string.IsNullOrEmpty(name))
+                {
+                    _logger.LogWarning("Missing downloadDir or name for torrent {TorrentId}", item.DownloadId);
+                    return result;
+                }
+
+                // Transmission stores files as: downloadDir/name
+                var contentPath = CombineWithOptionalBase(downloadDir, name);
+                
+                // Apply path mapping
+                var localContentPath = await _pathMappingService.TranslatePathAsync(client.Id, contentPath);
+                result.OutputPath = localContentPath;
+
+                _logger.LogDebug(
+                    "Resolved Transmission content path for {TorrentId}: {ContentPath}",
+                    item.DownloadId,
+                    localContentPath);
+
+                return result;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+                _logger.LogWarning(ex, "Error resolving import item for Transmission torrent {TorrentId}", item.DownloadId);
+                return result;
+            }
+        }
+
+        /// <summary>
+        /// LEGACY: Resolves the actual import item for a completed download.
         /// Queries Transmission API for downloadDir and builds the content path.
-        /// EXACTLY matches Sonarr's Transmission.GetImportItem pattern.
+        /// Matches Transmission.GetImportItem pattern.
         /// </summary>
         public async Task<QueueItem> GetImportItemAsync(
             DownloadClientConfiguration client,
@@ -300,7 +442,7 @@ namespace Listenarr.Api.Services.Adapters
                 }
 
                 // Transmission stores files as: downloadDir/name
-                var contentPath = Path.Combine(downloadDir, name);
+                var contentPath = CombineWithOptionalBase(downloadDir, name);
                 
                 // Apply path mapping
                 var localContentPath = await _pathMappingService.TranslatePathAsync(client.Id, contentPath);
@@ -313,8 +455,7 @@ namespace Listenarr.Api.Services.Adapters
 
                 return result;
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogWarning(ex, "Error resolving import item for Transmission torrent {TorrentId}", queueItem.Id);
                 return result;
             }
@@ -380,8 +521,7 @@ namespace Listenarr.Api.Services.Adapters
                 {
                     localPath = await _pathMappingService.TranslatePathAsync(client.Id, downloadDir);
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogDebug(ex, "Failed to translate Transmission path '{Path}' for client {ClientName}", LogRedaction.SanitizeFilePath(downloadDir), LogRedaction.SanitizeText(client.Name ?? client.Id));
                 }
             }
@@ -390,7 +530,7 @@ namespace Listenarr.Api.Services.Adapters
 
             // For Transmission, construct ContentPath from downloadDir + name
             var contentPath = !string.IsNullOrEmpty(downloadDir) && !string.IsNullOrEmpty(name)
-                ? Path.Combine(downloadDir, name)
+                ? CombineWithOptionalBase(downloadDir, name)
                 : downloadDir;
             var localContentPath = !string.IsNullOrEmpty(contentPath)
                 ? await _pathMappingService.TranslatePathAsync(client.Id, contentPath)
@@ -420,6 +560,86 @@ namespace Listenarr.Api.Services.Adapters
             };
 
             return queueItem;
+        }
+
+        private async Task<DownloadClientItem> MapToDownloadClientItemAsync(DownloadClientConfiguration client, JsonElement torrent, CancellationToken ct)
+        {
+            // Try snake_case (JSON-RPC 2.0 / Transmission 4.1+) first, fall back to camelCase for backwards compatibility
+            var hash = torrent.TryGetProperty("hash_string", out var hashProp) || torrent.TryGetProperty("hashString", out hashProp) 
+                ? hashProp.GetString() ?? string.Empty : string.Empty;
+            var numericId = torrent.TryGetProperty("id", out var numericIdProp) ? numericIdProp.GetInt32() : 0;
+            var name = torrent.TryGetProperty("name", out var nameProp) ? nameProp.GetString() ?? string.Empty : string.Empty;
+            var percentDone = (torrent.TryGetProperty("percent_done", out var percentProp) || torrent.TryGetProperty("percentDone", out percentProp))
+                ? percentProp.GetDouble() * 100 : 0d;
+            var totalSize = (torrent.TryGetProperty("total_size", out var sizeProp) || torrent.TryGetProperty("totalSize", out sizeProp))
+                ? sizeProp.GetInt64() : 0L;
+            var leftUntilDone = (torrent.TryGetProperty("left_until_done", out var leftProp) || torrent.TryGetProperty("leftUntilDone", out leftProp))
+                ? leftProp.GetInt64() : 0L;
+            var rateDownload = (torrent.TryGetProperty("rate_download", out var rateProp) || torrent.TryGetProperty("rateDownload", out rateProp))
+                ? rateProp.GetDouble() : 0d;
+            var eta = torrent.TryGetProperty("eta", out var etaProp) ? etaProp.GetInt32() : -1;
+            var downloadDir = (torrent.TryGetProperty("download_dir", out var dirProp) || torrent.TryGetProperty("downloadDir", out dirProp))
+                ? dirProp.GetString() ?? string.Empty : string.Empty;
+            var statusCode = torrent.TryGetProperty("status", out var statusProp) ? statusProp.GetInt32() : 0;
+            var uploadRatio = (torrent.TryGetProperty("upload_ratio", out var ratioProp) || torrent.TryGetProperty("uploadRatio", out ratioProp))
+                ? ratioProp.GetDouble() : 0d;
+
+            // Map Transmission status codes to DownloadItemStatus
+            var status = statusCode switch
+            {
+                0 => DownloadItemStatus.Paused,  // Stopped
+                1 => DownloadItemStatus.Queued,  // Check waiting
+                2 => DownloadItemStatus.Downloading, // Checking
+                3 => DownloadItemStatus.Queued,  // Download waiting
+                4 => DownloadItemStatus.Downloading, // Downloading
+                5 => DownloadItemStatus.Queued,  // Seed waiting
+                6 => DownloadItemStatus.Downloading, // Seeding
+                _ => DownloadItemStatus.Warning
+            };
+
+            if (percentDone >= 100.0 && (statusCode is 0 or 3 or 5 or 6))
+            {
+                status = DownloadItemStatus.Completed;
+            }
+
+            // For Transmission, construct OutputPath from downloadDir + name
+            var contentPath = !string.IsNullOrEmpty(downloadDir) && !string.IsNullOrEmpty(name)
+                ? CombineWithOptionalBase(downloadDir, name)
+                : downloadDir;
+            var localContentPath = !string.IsNullOrEmpty(contentPath)
+                ? await _pathMappingService.TranslatePathAsync(client.Id, contentPath)
+                : contentPath;
+
+            TimeSpan? remainingTime = eta >= 0 ? TimeSpan.FromSeconds(eta) : null;
+
+            // ✅ Use hash as DownloadId if available, otherwise fall back to numeric ID
+            var downloadId = !string.IsNullOrEmpty(hash) ? hash.ToUpperInvariant() : numericId.ToString(CultureInfo.InvariantCulture);
+
+            return new DownloadClientItem
+            {
+                DownloadId = downloadId,
+                Title = name,
+                Status = status,
+                TotalSize = totalSize,
+                RemainingSize = leftUntilDone,
+                RemainingTime = remainingTime,
+                SeedRatio = uploadRatio,
+                OutputPath = localContentPath,
+                Message = $"Status code: {statusCode}",
+                Progress = percentDone,
+                DownloadSpeed = rateDownload,
+                CanBeRemoved = true,
+                CanMoveFiles = status == DownloadItemStatus.Completed,
+                DownloadClientInfo = DownloadClientItemClientInfo.FromClient(
+                    clientId: client.Id,
+                    clientName: client.Name,
+                    clientType: "transmission",
+                    protocol: DownloadProtocol.Torrent,
+                    removeCompletedDownloads: client.Settings?.TryGetValue("removeCompletedDownloads", out var removeVal) == true && 
+                                             (removeVal is bool boolVal && boolVal),
+                    hasPostImportCategory: false // Transmission doesn't support post-import categories
+                )
+            };
         }
 
         private List<string> CollectLabels(DownloadClientConfiguration client)
@@ -528,6 +748,32 @@ namespace Listenarr.Api.Services.Adapters
             return $"{scheme}://{client.Host}:{client.Port}/transmission/rpc";
         }
 
+        private static string CombineWithOptionalBase(string? basePath, string candidatePath)
+        {
+            var normalizedPath = candidatePath.Trim();
+
+            if (string.IsNullOrEmpty(normalizedPath))
+            {
+                return normalizedPath;
+            }
+
+            if (Path.IsPathRooted(normalizedPath) || string.IsNullOrWhiteSpace(basePath))
+            {
+                return normalizedPath;
+            }
+
+            var relativePath = normalizedPath.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (Path.IsPathRooted(relativePath))
+            {
+                return relativePath;
+            }
+
+            var normalizedBasePath = basePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            return string.IsNullOrEmpty(normalizedBasePath)
+                ? relativePath
+                : normalizedBasePath + Path.DirectorySeparatorChar + relativePath;
+        }
+
         private static AuthenticationHeaderValue? BuildAuthHeader(DownloadClientConfiguration client)
         {
             if (string.IsNullOrWhiteSpace(client.Username))
@@ -565,3 +811,4 @@ namespace Listenarr.Api.Services.Adapters
         }
     }
 }
+

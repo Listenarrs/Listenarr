@@ -39,7 +39,14 @@ export const useSearchStore = defineStore('search', () => {
     abortController = new AbortController()
 
     try {
-      // Default to intelligent (Amazon + Audible enrichment) search for unified searches
+      // Ensure antiforgery token exists for the current auth before making unsafe request.
+      // Non-fatal: if this fails, we'll continue and the ApiService.request logic will
+      // attempt its own CSRF retry as a fallback.
+      try {
+        await apiService.ensureAntiforgeryForCurrentAuth()
+      } catch {}
+
+      // Use canonical intelligentSearch endpoint for quick search
       const response: SearchResult[] = await apiService.intelligentSearch(
         query,
         category,

@@ -1,0 +1,195 @@
+/* ===================================
+   CENTRALIZED ANIMATIONS
+   ===================================
+   
+   This file contains all shared keyframe animations
+   used throughout the application. Instead of duplicating
+   these in individual component files, they are defined
+   once here and imported globally.
+   
+   Usage:
+   - Use animation: keyword directly: animation: spin 1s linear infinite;
+   - Or use utility classes: class="animate-spin"
+*/
+
+/* ===================================
+   CORE KEYFRAME ANIMATIONS
+   =================================== */
+
+/* Spinner/rotation animation - used for loading states */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Pulse animation - used for active/loading indicators */
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* Fade in animation - used for content appearing */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Bounce animation - used for attention/emphasis */
+@keyframes bounce {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+/* Slide down animation - used for dropdowns and reveal effects */
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Highlight pulse animation - used for emphasis on new items */
+@keyframes highlightPulse {
+  0%, 100% {
+    background-color: transparent;
+  }
+  50% {
+    background-color: rgba(33, 150, 243, 0.2);
+  }
+}
+
+/* ===================================
+   ANIMATION UTILITY CLASSES
+   =================================== */
+
+/* Direct animation utilities - use when inline style: animation is needed */
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+.animate-pulse {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.2s ease;
+}
+
+.animate-bounce {
+  animation: bounce 2s ease-in-out infinite;
+}
+
+.animate-slideDown {
+  animation: slideDown 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.animate-highlightPulse {
+  animation: highlightPulse 1.2s ease-in-out 2;
+}
+
+/* ===================================
+   ANIMATION MODIFIERS
+   =================================== */
+
+/* Animation duration modifiers */
+.animate-duration-fast {
+  animation-duration: 150ms !important;
+}
+
+.animate-duration-normal {
+  animation-duration: 300ms !important;
+}
+
+.animate-duration-slow {
+  animation-duration: 500ms !important;
+}
+
+/* Animation delay modifiers */
+.animate-delay-100 {
+  animation-delay: 100ms;
+}
+
+.animate-delay-200 {
+  animation-delay: 200ms;
+}
+
+.animate-delay-300 {
+  animation-delay: 300ms;
+}
+
+/* Animation iteration modifiers */
+.animate-once {
+  animation-iteration-count: 1 !important;
+}
+
+.animate-infinite {
+  animation-iteration-count: infinite !important;
+}
+
+/* ===================================
+   HOVER EFFECTS WITH TRANSITIONS
+   =================================== */
+
+/* Lift effect - element rises on hover with shadow */
+.hover-lift {
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* Scale effect - element grows on hover */
+.hover-scale {
+  transition: transform 0.2s;
+}
+
+.hover-scale:hover {
+  transform: scale(1.05);
+}
+
+/* Opacity effect - element fades on hover */
+.hover-opacity {
+  transition: opacity 0.2s;
+}
+
+.hover-opacity:hover {
+  opacity: 0.8;
+}
+
+/* ===================================
+   TRANSITION UTILITIES
+   =================================== */
+
+.transition-fast {
+  transition: all 150ms ease;
+}
+
+.transition-normal {
+  transition: all 300ms ease;
+}
+
+.transition-slow {
+  transition: all 500ms ease;
+}

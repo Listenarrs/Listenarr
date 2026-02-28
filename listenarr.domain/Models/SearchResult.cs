@@ -90,9 +90,11 @@ namespace Listenarr.Domain.Models
         public string? Narrator { get; set; }
         public string? ImageUrl { get; set; }
         public string? Asin { get; set; }
+        public List<string> Isbn { get; set; } = new();
         public string? Series { get; set; }
         public string? SeriesNumber { get; set; }
         public string? ProductUrl { get; set; } // Direct link to Amazon/Audible product page
+        public List<string>? Genres { get; set; } // Genres from metadata sources (e.g., Audimeta)
         // Indicates this result had a successful full metadata enrichment pass
         public bool IsEnriched { get; set; }
         // Tracks which metadata API was used to enrich this result
@@ -145,9 +147,11 @@ namespace Listenarr.Domain.Models
         public string? Narrator { get; set; }
         public string? ImageUrl { get; set; }
         public string? Asin { get; set; }
+        public List<string> Isbn { get; set; } = new();
         public string? Series { get; set; }
         public string? SeriesNumber { get; set; }
         public string? ProductUrl { get; set; } // Direct link to Amazon/Audible product page
+        public List<string>? Genres { get; set; } // Genres from metadata sources (e.g., Audimeta)
         // Indicates this result had a successful full metadata enrichment pass (Audible product scrape)
         public bool IsEnriched { get; set; }
         // Tracks which metadata API was used to enrich this result (e.g., "Audimeta", "Audnexus", "Audible (Scraped)")
@@ -270,6 +274,7 @@ namespace Listenarr.Domain.Models
                 Narrator = result.Narrator,
                 ImageUrl = result.ImageUrl,
                 Asin = result.Asin,
+                Isbn = result.Isbn,
                 Series = result.Series,
                 SeriesNumber = result.SeriesNumber,
                 ProductUrl = result.ProductUrl,
@@ -413,6 +418,7 @@ namespace Listenarr.Domain.Models
                 Narrator = result.Narrator,
                 ImageUrl = result.ImageUrl,
                 Asin = result.Asin,
+                Isbn = result.Isbn,
                 Series = result.Series,
                 SeriesNumber = result.SeriesNumber,
                 ProductUrl = result.ProductUrl,
@@ -424,6 +430,48 @@ namespace Listenarr.Domain.Models
         public static List<MetadataSearchResult> ToMetadataList(IEnumerable<SearchResult> results)
         {
             return results.Select(ToMetadata).ToList();
+        }
+
+        /// <summary>
+        /// Convert SearchResult to simplified DTO (removes torrent/NZB fields)
+        /// Useful for advanced search responses which focus on metadata
+        /// </summary>
+        public static object ToSimplified(SearchResult result)
+        {
+            return new
+            {
+                result.Id,
+                result.Title,
+                Artist = result.Artist,
+                result.Subtitle,
+                result.Description,
+                result.Publisher,
+                result.Language,
+                result.Runtime,
+                result.Narrator,
+                result.ImageUrl,
+                result.Asin,
+                result.Isbn,
+                result.Series,
+                result.SeriesNumber,
+                result.ProductUrl,
+                result.PublishedDate,
+                result.PublishYear,
+                result.Genres,
+                result.IsEnriched,
+                result.MetadataSource,
+                result.Source,
+                result.SourceLink,
+                result.Score
+            };
+        }
+
+        /// <summary>
+        /// Convert list of SearchResults to simplified DTOs
+        /// </summary>
+        public static List<object> ToSimplifiedList(IEnumerable<SearchResult> results)
+        {
+            return results.Select(ToSimplified).ToList();
         }
     }
 }

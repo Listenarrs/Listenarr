@@ -13,8 +13,6 @@ public class AsinSearchHandler
     private readonly IConfigurationService _configurationService;
     private readonly AudimetaService _audimetaService;
     private readonly IAudnexusService _audnexusService;
-    private readonly IAudibleMetadataService _audibleMetadataService;
-    private readonly IAmazonMetadataService _amazonMetadataService;
     private readonly MetadataConverters _metadataConverters;
     private readonly SearchProgressReporter _searchProgressReporter;
 
@@ -23,8 +21,6 @@ public class AsinSearchHandler
         IConfigurationService configurationService,
         AudimetaService audimetaService,
         IAudnexusService audnexusService,
-        IAudibleMetadataService audibleMetadataService,
-        IAmazonMetadataService amazonMetadataService,
         MetadataConverters metadataConverters,
         SearchProgressReporter searchProgressReporter)
     {
@@ -32,8 +28,6 @@ public class AsinSearchHandler
         _configurationService = configurationService;
         _audimetaService = audimetaService;
         _audnexusService = audnexusService;
-        _audibleMetadataService = audibleMetadataService;
-        _amazonMetadataService = amazonMetadataService;
         _metadataConverters = metadataConverters;
         _searchProgressReporter = searchProgressReporter;
     }
@@ -42,8 +36,6 @@ public class AsinSearchHandler
     /// Searches for a specific ASIN using the following workflow:
     /// 1. Audimeta.de /book/{asin} endpoint (primary)
     /// 2. Audnexus fallback (if configured)
-    /// 3. Amazon product page scraping (final fallback)
-    /// Note: Audible scraping has been removed per new workflow requirements.
     /// </summary>
     public async Task<List<SearchResult>> SearchByAsinAsync(
         string asin,
@@ -53,23 +45,6 @@ public class AsinSearchHandler
         _logger.LogInformation("Processing direct ASIN query: {Asin}", asin);
         await _searchProgressReporter.BroadcastAsync($"Extracting ASIN: {asin}", null);
 
-        // Load application settings for provider flags
-        bool skipAmazon = false;
-        bool skipAudible = false;
-
-        try
-        {
-            var appSettings = await _configurationService.GetApplicationSettingsAsync();
-            if (appSettings != null)
-            {
-                skipAmazon = !appSettings.EnableAmazonSearch;
-                skipAudible = !appSettings.EnableAudibleSearch;
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Failed to load application settings for ASIN search");
-        }
 
         // Initialize metadata variables
         AudibleBookMetadata? metadata = null;
@@ -93,8 +68,7 @@ public class AsinSearchHandler
                 _logger.LogInformation("Audimeta.de returned no data for ASIN {Asin}", asin);
             }
         }
-        catch (Exception ex)
-        {
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
             _logger.LogDebug(ex, "Failed to get metadata from Audimeta.de for ASIN {Asin}", asin);
         }
 
@@ -122,45 +96,20 @@ public class AsinSearchHandler
                         }
                     }
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogDebug(ex, "Failed to get metadata from {Source} for ASIN {Asin}", source.Name, asin);
                 }
             }
         }
 
-        // Step 3: If metadata sources failed, scrape Amazon product page as fallback (Audible scraping removed)
-        if (metadata == null)
-        {
-            _logger.LogInformation("No metadata found from APIs for ASIN {Asin}, falling back to Amazon scraping", asin);
-            await _searchProgressReporter.BroadcastAsync($"Metadata sources unavailable, scraping Amazon", null);
-
-            // Try Amazon scraping only (Audible no longer used as fallback)
-            if (!skipAmazon)
-            {
-                try
-                {
-                    await _searchProgressReporter.BroadcastAsync($"Scraping Amazon for {asin}", null);
-                    var amazonMeta = await _amazonMetadataService.ScrapeAmazonMetadataAsync(asin);
-                    if (amazonMeta != null)
-                    {
-                        metadata = amazonMeta;
-                        metadataSourceName = amazonMeta.Source ?? "Amazon";
-                        _logger.LogInformation("Successfully scraped metadata for ASIN {Asin} from {Source}", asin, metadataSourceName);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogDebug(ex, "Failed to scrape Amazon for ASIN {Asin}", asin);
-                }
-            }
-        }
 
         // Step 3: Convert metadata to SearchResult
         if (metadata != null)
         {
             await _searchProgressReporter.BroadcastAsync($"Found audiobook: {metadata.Title}", null);
             var result = await _metadataConverters.ConvertMetadataToSearchResultAsync(metadata, asin, null, null, null);
+            _logger.LogInformation("Converted metadata to SearchResult: Title={Title}, Series={Series}, SeriesNumber={SeriesNumber}", 
+                result.Title, result.Series, result.SeriesNumber);
             result.IsEnriched = true;
             result.MetadataSource = metadataSourceName;
 
@@ -204,3 +153,4 @@ public class AsinSearchHandler
         return new List<SearchResult>();
     }
 }
+

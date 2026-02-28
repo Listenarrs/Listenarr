@@ -7,11 +7,14 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/therobbiedavis/Listenarr/releases"><img alt="Release" src="https://img.shields.io/github/v/release/therobbiedavis/Listenarr?style=flat-square"></a>
+  <a href="https://github.com/Listenarrs/Listenarr/releases"><img alt="Release" src="https://img.shields.io/github/v/release/Listenarrs/Listenarr?style=flat-square"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square"></a>
-  <a href="https://github.com/therobbiedavis/Listenarr/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/therobbiedavis/Listenarr/total?style=flat-square"></a>
-  <a href="https://github.com/therobbiedavis/Listenarr/pkgs/container/listenarr"><img alt="GHCR" src="https://img.shields.io/badge/ghcr.io-listenarr-181717?style=flat-square&logo=github"></a>
+  <a href="https://github.com/Listenarrs/Listenarr/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/Listenarrs/Listenarr/total?style=flat-square"></a>
+  <a href="https://hub.docker.com/r/jvmilazz0/kavita"><img alt="Docker Hub Pulls" src="https://img.shields.io/docker/pulls/therobbiedavis/listenarr.svg"></a>
+  <a href="https://github.com/Listenarrs/Listenarr/pkgs/container/listenarr"><img alt="GHCR" src="https://img.shields.io/badge/ghcr.io-listenarr-181717?style=flat-square&logo=github"></a>
   <a href="https://hub.docker.com/r/therobbiedavis/listenarr"><img alt="Docker Hub Mirror" src="https://img.shields.io/badge/docker%20hub-mirror-0db7ed?style=flat-square&logo=docker"></a>
+  <a href="#backers"><img alt="Open Collective Backers" src="https://opencollective.com/listenarr/backers/badge.svg"></a>
+  <a href="#sponsors"><img alt="Open Collective Sponsors" src="https://opencollective.com/listenarr/sponsors/badge.svg"></a>
 </p>
 
 ---
@@ -19,7 +22,7 @@
 Listenarr is a fast, feature-rich, cross-platform audiobook management server. Built with a focus on being a complete solution for all your audiobook downloading needs. Set up your own server and get ready to streamline your audiobook listening!
 
 <p align="center">
-  <a href="https://github.com/therobbiedavis/Listenarr/tree/canary/preview-images">
+  <a href="https://github.com/Listenarrs/Listenarr/tree/canary/preview-images">
     <img src="preview-images/audiobooks.png" alt="Homepage">
   </a>
 </p>
@@ -35,11 +38,23 @@ Listenarr is a fast, feature-rich, cross-platform audiobook management server. B
 - [x] **Intelligent file organization** with customizable naming patterns
 - [ ] **Full localization support** Soon™️
 
-To see what's coming up, check out our [Roadmap](#roadmap)! If you have a suggestion or feature request, please submit them in [Discussions](https://github.com/therobbiedavis/Listenarr/discussions)
+To see what's coming up, check out our [Roadmap](#roadmap)! If you have a suggestion or feature request, please submit them in [Discussions](https://github.com/Listenarrs/Listenarr/discussions)
+
+## Notice
+
+> [!WARNING]
+> Listenarr is being actively developed and should be considered **beta software**. There may be security exploits despite best efforts. Expose this software to the internet at your own risk. The platform may be subject to changes as it is being built out. You may experience data loss and need to restart. The Listenarr team strives to avoid any data loss, but please maintain backups of important data.
+
+## Disclaimer
+
+This app is coded with AI assistance. I started this because my wife (an avid audiobook listener) was reading through multiple series quickly and I wanted an automated way for her to request, download, and listen to new audiobooks. I am a front-end developer and I don't know C#, so I took this as an opportunity to learn and started this project.
+
+> [!NOTE]  
+> This is just a fun a side project that solved a need for me; it is not my main priority. I will choose my work, family, and mental health before this project.
 
 ## Support
 
-[![Discord](https://img.shields.io/badge/Discord-Join-7289DA?style=flat-square&logo=discord)](https://discord.gg/CwZ2Sqp9NF) [![GitHub Issues](https://img.shields.io/badge/GitHub-Issues-red?style=flat-square&logo=github)](https://github.com/therobbiedavis/Listenarr/issues)
+[![Discord](https://img.shields.io/badge/Discord-Join-7289DA?style=flat-square&logo=discord)](https://discord.gg/CwZ2Sqp9NF) [![GitHub Issues](https://img.shields.io/badge/GitHub-Issues-red?style=flat-square&logo=github)](https://github.com/Listenarrs/Listenarr/issues)
 
 Join our community on Discord for help, announcements, and discussion: https://discord.gg/CwZ2Sqp9NF
 
@@ -49,7 +64,7 @@ The easiest way to get started is to use Docker (recommended for production), pr
 
 ### Docker (Recommended for Production)
 
-> **Container images:** GHCR is the preferred registry for Listenarr. Use `ghcr.io/therobbiedavis/listenarr:<tag>` for the latest builds. A Docker Hub mirror (`docker.io/therobbiedavis/listenarr:<tag>`) is still published for backwards compatibility.
+> **Container images:** GHCR is the preferred registry for Listenarr. Use `ghcr.io/listenarrs/listenarr:<tag>` for the latest builds. A Docker Hub mirror (`docker.io/therobbiedavis/listenarr:<tag>`) is still published for backwards compatibility.
 
 ```bash
 docker run -d \
@@ -60,7 +75,9 @@ docker run -d \
   ## OPTIONAL: Used by Discord Bot
   -e LISTENARR_PUBLIC_URL=https://your-domain.com \
   -v listenarr_data:/app/config \
-  ghcr.io/therobbiedavis/listenarr:canary
+  -v /path/to/audiobooks:/audiobooks #optional \
+  -v /path/to/downloadclient-downloads:/downloads #optional \
+  ghcr.io/listenarrs/listenarr:canary
 ```
 
 **Service will be available at:**
@@ -78,7 +95,7 @@ docker run -d \
 version: '3.8'
 services:
   listenarr:
-    image: ghcr.io/therobbiedavis/listenarr:canary
+    image: ghcr.io/listenarrs/listenarr:canary
     user: "1001:1001"  ## Replace with your desired UID and GID
     ports:
       - "4545:4545"
@@ -86,6 +103,8 @@ services:
       - LISTENARR_PUBLIC_URL=https://your-domain.com ## OPTIONAL: Used by Discord Bot
     volumes:
       - listenarr_data:/app/config
+      - /path/to/audiobooks:/audiobooks #optional
+      - /path/to/downloadclient-downloads:/downloads #optional
     restart: unless-stopped
 
 # For Docker Hub, replace the image with docker.io/therobbiedavis/listenarr:canary
@@ -96,7 +115,7 @@ volumes:
 
 ### Pre-built Executables
 
-**Download the latest release** from [GitHub Releases](https://github.com/therobbiedavis/Listenarr/releases) and extract the archive for your platform.
+**Download the latest release** from [GitHub Releases](https://github.com/Listenarrs/Listenarr/releases) and extract the archive for your platform.
 
 #### Windows
 ```cmd
@@ -269,7 +288,7 @@ Listenarr uses GitHub Actions for automated building and deployment:
 - **Nightly Builds** (on `develop` pushes): Builds self-contained executables (Linux x64, Windows x64) and publishes container images tagged `nightly` / `nightly-X.Y.Z` to GHCR & Docker Hub.
 - **Release Builds** (on version tags): Builds executables for Linux x64, Windows x64, and macOS x64. Creates GitHub releases and publishes container images tagged `stable`, `latest`, and `X.Y.Z` to GHCR & Docker Hub.
 
-All workflows push to `ghcr.io/therobbiedavis/listenarr` and `docker.io/therobbiedavis/listenarr`.
+All workflows push to `ghcr.io/listenarrs/listenarr` and `docker.io/therobbiedavis/listenarr`.
 
 Version numbers are automatically incremented:
 - Canary: Patch version +1
@@ -280,11 +299,7 @@ All builds are CI-first: `dotnet publish` automatically builds the frontend and 
 
 ## Feature Requests
 
-Got a great idea? Throw it up on [Discussions](https://github.com/therobbiedavis/Listenarr/discussions) or vote on another idea. Many great features in Listenarr are driven by our community.
-
-## Notice
-
-⚠️ Listenarr is being actively developed and should be considered **beta software**. The platform may be subject to changes as it is being built out. You may experience data loss and need to restart. The Listenarr team strives to avoid any data loss, but please maintain backups of important data.
+Got a great idea? Throw it up on [Discussions](https://github.com/Listenarrs/Listenarr/discussions) or vote on another idea. Many great features in Listenarr are driven by our community.
 
 ## Technology Stack
 
@@ -383,7 +398,7 @@ Supported download clients:
 - `GET /api/configuration` - Get all settings
 - `POST /api/configuration` - Save settings
 
-For complete API documentation, see our [API Reference](https://github.com/therobbiedavis/Listenarr/wiki/API) (coming soon).
+For complete API documentation, see our [API Reference](https://github.com/Listenarrs/Listenarr/wiki/API) (coming soon).
 
 ## Development
 
@@ -467,7 +482,19 @@ Bumped versions are persisted via PR to maintain branch protection.
 
 This project exists thanks to all the people who contribute. [Contribute](CONTRIBUTING.md).
 
-<a href="https://github.com/therobbiedavis/Listenarr/graphs/contributors"><img src="https://opencollective.com/Listenarr/contributors.svg?width=890&button=false" /></a>
+<a href="https://github.com/Listenarrs/Listenarr/graphs/contributors"><img src="https://opencollective.com/Listenarr/contributors.svg?width=890&button=false" /></a>
+
+## Backers
+
+Thank you to all our backers! 🙏 [Become a backer](https://opencollective.com/Listenarr#backer)
+
+<a href="https://opencollective.com/Listenarr#backer"><img src="https://opencollective.com/listenarr/backers.svg?width=890"></a>
+
+## Sponsors
+
+Support this project by becoming a sponsor. Your logo will show up here with a link to your website. [Become a sponsor](https://opencollective.com/Listenarr#sponsor)
+
+<a href="https://opencollective.com/Listenarr#sponsor"><img src="https://opencollective.com/listenarr/sponsors.svg?width=890"></a>
 
 ## License
 
@@ -480,7 +507,8 @@ The AGPL-3.0 license ensures that any modifications made to Listenarr, including
 
 ## Acknowledgments
 
-- [Audnexus](https://audnex.us/) - Audiobook metadata API
+- [Audnexus](https://audnex.us/) - Audible metadata API
+- [Audimeta](https://audimeta.de) - Audible metadata API
 - [Sonarr](https://sonarr.tv/) / [Radarr](https://radarr.video/) - Inspiration for the *arr naming and architecture
 - Vue.js and .NET communities
 - All the open-source libraries that make this project possible

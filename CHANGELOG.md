@@ -4,10 +4,152 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-## [0.2.48] - 2026-01-14
+
+## [0.2.53] - 2026-02-27
+
 ### Fixed
-- **qBittorrent Test**: `qBittorrent` client test now attempts authentication when the unauthenticated `/api/v2/app/version` returns `403` and retries the request; valid credentials will now cause the test to succeed (e.g., when behind authentication or proxy).
-- **Download client test behavior**: The Test button on the **Download Client** modal now tests the client using the current form input values (unsaved edits), while the Test button on the download client card in the settings tab tests using the saved DB configuration values.
+- **Security banner state when auth is enabled:** Fixed a frontend state bug where unauthenticated `401` responses from `GET /api/configuration/startupconfig` were interpreted as `auth disabled`, causing the no-auth security banner to remain visible even when authentication was enabled.
+- **`GET /api/library` wanted-flag path evaluation:** Hardened wanted-flag file checks to safely handle invalid/problematic file paths without throwing, preventing endpoint-level `500` responses in production data edge cases.
+- **`GET /api/library` legacy ISBN materialization crash:** Fixed a production-only crash path where legacy non-array/invalid JSON values in `Audiobooks.Isbn` could fail EF materialization (`Invalid token type`) and return `500`.
+
+### Changed
+- **Audiobook EF mapping resiliency:** Updated `Audiobook.Isbn` persistence mapping to use the resilient JSON value converter/comparer pattern already used by other JSON-backed list fields (`Authors`, `Genres`, `Tags`, `Narrators`, `AuthorAsins`).
+
+### Added
+- **Regression coverage for library resilience:** Added API integration coverage that simulates legacy ISBN text data and verifies `GET /api/library` remains successful.
+
+## [0.2.52] - 2026-02-26
+
+### Changed
+- **Authentication-disabled UX & deployment guidance:** Listenarr now emits a clear startup warning in the backend logs and shows a persistent in-app banner when authentication is disabled, reinforcing that no-auth mode is intended for trusted LAN/VPN use and not direct internet exposure.
+- **Secret handling in API responses:** Centralized API response redaction for sensitive configuration/indexer payloads (startup config, application settings, API configs, download clients, and indexers) so remote unauthenticated callers receive masked values instead of raw secrets.
+- **Audiobook identifier model:** Introduced a canonical typed external identifier system for audiobooks (`ASIN`, `ISBN`, `OLID`) with legacy field compatibility (dual-read/dual-write behavior for existing `Asin`, `Isbn`, and `OpenLibraryId` fields during migration).
+- **Image loading pipeline (frontend):** Unified AudiobooksView image loading onto the protected image/blob pipeline so authenticated deployments no longer rely on direct `<img src="/api/images/...">` requests that cannot send auth headers.
+- **Audiobook detail & library view architecture:** Streamlined AudiobooksView/AudiobookDetailView behavior with safer shared image handling, consolidated selection logic, memoized status calculation, improved tab/hash/query sync, canonical detail-endpoint loading, and shared desktop/mobile action configuration.
+- **Metadata refresh behavior:** Metadata refresh is now an explicit identifier-driven “rescan metadata” workflow that performs patch-style updates (non-empty provider values overwrite existing values, blanks do not erase data).
+- **Description normalization:** Metadata descriptions are stripped/normalized from HTML while preserving readable text content for display and storage.
+- **Edit audiobook UX:** The Edit Audiobook modal now opens in the large size layout to better accommodate metadata and identifier editing.
+
+### Fixed
+- **Reported security issues:** Verified/fixed the previously reported issues where anonymous callers could retrieve startup API key material and create arbitrary admin users via `POST /api/account/register` (`isAdmin=true` abuse path).
+- **Startup config secret exposure:** Startup config responses now redact secrets (including SSL certificate password) for remote unauthenticated callers, and startup config save responses no longer echo raw secrets to untrusted callers.
+- **Identifier provenance spoofing:** `PUT /api/library/{id}/identifiers` now forces user-submitted identifiers to `Manual` source unless the row is an unchanged existing server-owned identifier (`Imported`/`Provider`), preventing provenance spoofing.
+- **Duplicate identifiers in UI:** Fixed duplicate identifier rows in the edit modal caused by legacy imported identifiers overlapping with canonical manual/provider identifiers (same normalized value now deduped in effective responses and cleanup-on-save flow).
+- **Metadata rescan leakage:** `rescan-metadata` failure responses now return a generic error body to callers instead of exposing attempted ASIN/ISBN lists (attempted IDs are retained only in debug logs).
+- **Metadata rescan abuse controls:** Added cooldown/rate limiting per audiobook + actor (IP/user) and caps on provider attempts per rescan to reduce abuse potential in no-auth deployments.
+- **Logging leaks:** Removed raw header dumps from session-auth logging, and replaced token/API key prefix logging with hashed fingerprints in auth middleware and logout logging.
+- **SSRF hardening gaps (outbound tests/webhooks):** Added DNS/private-IP/final-URI validation across notification sends and high-risk indexer outbound test/import paths; public callers can no longer use these routes to target localhost/private-network hosts.
+- **Debug/process endpoint exposure:** Restricted debug/diagnostic/process-control endpoints (library debug, FFmpeg, Discord bot control/diagnostics, diagnostics notification test, Prowlarr debug routes) to localhost/private-network callers or authenticated admin/API-key users.
+- **Image cache SSRF protections:** Hardened image downloading with DNS/private-IP checks and redirect validation to reduce SSRF risk in image caching/fetch flows.
+- **Audiobook cover recovery on cache miss:** Fixed `/api/images/{identifier}` fallback cases that returned empty/placeholder responses when cache files were missing but metadata providers could still supply a valid image.
+- **Audimeta fallback bug:** Fixed a fallback chain bug where Audimeta `Description` values were incorrectly treated as image URLs, blocking Audnexus/OpenLibrary image fallback.
+- **ASIN/author/ISBN fallback routing:** Tightened ISBN detection so author names/ASIN-like values are no longer misrouted into OpenLibrary ISBN lookups.
+- **Cache alias reuse for changed primary ASINs:** When a primary ASIN changes, `/api/images/{newAsin}` can now reuse a cached image stored under an alternate identifier instead of falling back to placeholder.
+- **Author image behavior:** Author cards no longer fall back to audiobook cover art; they now correctly show the placeholder when no author-specific image exists.
+- **Auth-required image loading in AudiobooksView:** Fixed 401 image failures caused by direct `<img>` requests in authenticated mode; images now load via authenticated fetch + blob URLs.
+- **Missing cover recovery (provider fallback):** When no local image exists and no cached file is present, Listenarr now properly reaches out to providers (Audimeta/Audnexus/OpenLibrary), caches the image, and returns it instead of a zero-size/placeholder response when recoverable.
+- **Genres after metadata refresh:** Fixed audiobook detail responses so refreshed metadata fields (including genres and other rescanned fields) are returned by the detail endpoint and visible after metadata rescan.
+- **Runtime formatting in AudiobookDetailView:** Fixed audiobook runtime display to treat stored runtime values as minutes (e.g., `1472` now renders as `24h 32m` instead of `0h 24m`).
+- **AudiobookDetail/AudiobooksView navigation mismatch:** Fixed status-click navigation and tab resolution issues between AudiobooksView and AudiobookDetailView (`downloads` mismatch vs supported detail tabs).
+- **Frontend test stability and warnings:** Fixed failing frontend tests (`AddNewView.spec.ts`, `AudiobooksView`, `AudiobookDetailView`, related suites) and cleaned up Vue test warnings introduced during refactors.
+- **API test determinism:** Stabilized test auth defaults in the API test factory so endpoint tests don’t inherit local auth-enabled config unexpectedly.
+
+### Added
+- **Typed audiobook external identifiers:** Added `AudiobookExternalIdentifier` entity/model/table and migration-backed persistence for multiple identifiers per audiobook (ASIN/ISBN/OLID) with normalization, primary marker support, source tracking (`manual/provider/imported`), and optional region support for ASINs.
+- **Identifier migration & backfill:** Added an EF Core migration to create the external identifiers table and backfill legacy ASIN/ISBN/OpenLibrary values into the new structure at startup migration time.
+- **Identifier management API:** Added `GET /api/library/{id}/identifiers` and `PUT /api/library/{id}/identifiers` to view/edit associated identifiers with validation, dedupe, and legacy-field synchronization.
+- **Identifier editing UI:** Added identifier editing in the Edit Audiobook modal (add/remove ASIN/ISBN/OLID, mark primary identifier, show source badges) and a full associated identifier list with primary indicator on the audiobook detail page.
+- **Metadata rescan endpoint and UI action:** Added `POST /api/library/{id}/rescan-metadata` plus a new “Rescan Metadata” action in AudiobookDetailView so users can repair metadata after adding/correcting identifiers.
+- **Metadata rescan image repair:** Metadata rescans now also attempt to cache/update the audiobook image when providers return a cover image URL.
+- **Cover recovery fallback expansion:** Added additional image fallback paths for cache-miss covers using local library identifiers (ISBN/OLID), alternate stored identifiers, and OpenLibrary title+author ISBN discovery when provider ASIN lookups fail.
+- **Security utility infrastructure:** Added shared security helpers for request trust evaluation, secret hashing, endpoint access gating, outbound request validation (URL/DNS/redirect/final URI checks), and reusable API response redaction.
+- **Regression coverage:** Added/updated tests covering image fallback chains, identifier deduplication/provenance handling, metadata rescan behavior/rate limits, and security redaction/hardening paths.
+
+### Removed
+- **Verbose sensitive logging:** Removed raw request-header dumps from session authentication logging on missing-token startupconfig requests.
+- **Public error detail leakage:** Removed detailed attempted identifier lists and attempt metadata from public `rescan-metadata` failure payloads (kept only in debug logs).
+- **Author image fallback to book covers:** Removed audiobook-cover fallback behavior for author cards so missing author images consistently use the placeholder image.
+- **Legacy duplicate identifier presentation:** Removed duplicate imported/manual identifier rows from effective identifier responses when a canonical identifier already exists for the same normalized value.
+- **api/account/register:** Removed because the app currently creates/updates admin credentials through SaveApplicationSettingsAsync() via Settings, but a user could start with "AuthenticationRequired": "true" in the config.json and no users exist and be locked out, but this is not a valid usecase.
+
+## [0.2.51] - 2026-02-23
+
+### Fixed
+- **UI (Remote Path Mapping):** Fixed Remote Path Mapping modal Save action by ensuring the shared `ModalForm` includes `id="modal-form"` so footer Save buttons using `form="modal-form"` correctly submit the form.
+
+
+## [0.2.50] - 2026-02-22
+
+### Changed
+- **Persistence & EF Core:** Pinned EF Core to 9.0.0 in central package management and refactored persistence registration to avoid resolving scoped EF option-configurators from the root provider. Registered a singleton `DbContextOptions<ListenArrDbContext>` and an `IDbContextFactory<ListenArrDbContext>` (Simple factory) so contexts are created safely at scoped time.
+- **Startup migrations:** Startup now applies EF migrations via the `IDbContextFactory` (migration errors are logged and do not prevent startup in development). Added a development-friendly fallback for safe startup when migrations cannot be applied.
+- **Migrations:** Added an AutoSync migration `20260222154541_SyncModelToCurrent` (no-op `Up` with a preserved `.Designer.cs` model snapshot) to keep tooling/model metadata in sync; `dotnet ef database update` reported the database as already up to date.
+- **Design-time tooling:** Added `ListenArrDesignTimeDbContextFactory` to improve EF tooling support.
+- **Bugfix (DI):** Fixed runtime failures caused by resolving scoped EF configurators from the root provider (controllers and startup no longer throw when activating DbContexts).
+- **Frontend polish:** `fe/src/App.vue` — brand/logo now links to `/`, hover background bleed fixed, headphone animation triggers on brand hover, and a mobile sidebar backdrop was added. `fe/src/views/settings/IndexersTab.vue` — Prowlarr modal inputs updated to use shared `.form-input` styles for consistent visuals.
+- **Build/dev:** Verified solution build succeeded locally and frontend dev server (Vite) ran for visual validation of the UI changes.
+ - **Notifications UI:** Redesigned the Notifications modal to accept service-specific credentials (Telegram Bot Token + Chat ID, Pushover API Token + User Key, Pushbullet Access Token), hide the generic webhook URL for token-only services, and ensure trigger badges render in a consistent order.
+
+### Added
+- **Notifications / NTFY:** Implemented NTFY publish compatibility (plain text POST body plus `Title`, `Tags`, and `Priority` headers) and added a diagnostics endpoint `POST /api/diagnostics/test-notification` to send test notifications. Frontend Test buttons now call the diagnostics endpoint for live testing.
+
+### Fixed
+- **Notifications UI & Webhooks:** Fixed the notification card Test button so it triggers a real test call; added webhook trigger selection in the Notifications settings and aligned `CheckboxCard` layout for consistent visuals.
+ - **Notifications implementations:** Standardized and fixed all notification integrations and payloads (NTFY, Telegram, Pushover, Pushbullet, Slack, and generic/Zapier). Highlights:
+   - NTFY: sends plain-text body with `Title`, `Priority`, and `Tags` headers.
+   - Telegram: sends JSON to `sendMessage` with `chat_id`, `text`, `disable_notification`, and `parse_mode`.
+   - Pushover: posts `application/x-www-form-urlencoded` to `/1/messages.json` with `token`, `user`, `message`, and `title`.
+   - Pushbullet: posts JSON to `/v2/pushes` using `Authorization: Bearer <access_token>` and `type=note` payloads.
+   - Slack: posts `{"text":"..."}` to Incoming Webhooks URLs.
+   - Zapier/Generic: posts the full rich JSON payload produced by the payload builder to the exact configured webhook URL.
+   Temporary redacted request/response logging was added to aid diagnostics during verification.
+
+### Security
+- **DevDependency removal:** Removed `source-map-explorer` from devDependencies to address a transitive `ejs` vulnerability and updated lockfile(s).
+
+## [0.2.49] - 2026-02-21
+
+### Fixed
+- **Settings save CSRF failure**: ensured antiforgery token is refreshed and bound to authenticated user. Added `tokenReadyPromise` in `ApiService` and blocked unsafe requests until token is available. Removed manual CSRFFetch from `saveApplicationSettings`.
+- **Startup config persistence**: previously, `AuthenticationRequired` was preserved from `config.json` and ignored when the frontend saved.  Toggle in General Settings now updates the flag and writes it to the file; authentication behaves the same as the other startup options.
+- **Token export**: properly export `ensureImageCached` and cleaned stray code from `api.ts` that caused build errors.
+- **Startup cache logging**: added missing `logger` import and removed unsafe `console` usage.
+
+### Changed
+- **Logging cleanup**: converted remaining `console.log` calls in `ApiService` to `logger.debug` and tidied comments.
+
+
+## [0.2.48] - 2026-01-14
+
+### Added
+- **Prowlarr compatibility improvements**: `POST /api/v1/indexers`, `POST /api/v1/indexer` and `PUT /api/v1/indexer/{id}` now accept varied payload shapes (nested `settings`, `fields` arrays and multiple property name variants) and return standard DTOs with non-null `fields` and `tags` for better interoperability.
+- **Toast suppression**: Global message-level and per-indexer toast suppression to reduce notification noise during rapid indexer imports (default suppression window: 5 seconds).
+- **Settings — loading UI**: Added visible loading indicators and a `LoadingState` placeholder to Settings tab components (`QualityProfilesTab`, `NotificationsTab`, `RootFoldersSettings`, `IndexersTab`, `DownloadClientsTab`). Inline header spinners and unit tests were added to improve perceived responsiveness during async loads.
+
+
+### Changed
+- **`ProwlarrCompatController` behavior**:
+  - `PUT /api/v1/indexer/{id}` implements upsert semantics (creates when missing) and **deduplicates** by normalized URL + API key. Deduplication runs client-side (pulls results with `AsNoTracking().ToList()` then normalizes) to avoid EF translation issues.
+  - Removed early create-time broadcast in `PUT` and compute `created` after dedupe so `IndexersUpdated` is broadcast once (prevents duplicate broadcasts/toasts).
+  - `DELETE /api/v1/indexer/{id}` tolerates `id == 0` from external clients and returns an empty JSON object with a warning log to avoid noisy caller errors.
+- **General Settings — API Key control**: Improved the API key input in the General Settings tab—input is full width with an inline visibility toggle and the regenerate/copy buttons placed inside the input (order: visibility, regenerate, copy). The regenerate button uses a red hue to indicate the key will be invalidated, and the copy button uses a blue hue. Functionality is unchanged and unit tests pass locally.
+- **PasswordInput component**: Added a named `append` slot to `PasswordInput.vue` so callers can inject inline controls (e.g., copy/regenerate buttons) without relying on deep CSS overrides. `ApiKeyControl` now uses the slot, improving layout robustness and accessibility. Unit tests updated and pass locally.
+- **Frontend — route prefetch**: Added route prefetch in `main.ts` to improve perceived navigation performance.
+- **Images / Author ASIN**: Prefer stored author ASIN for author image lookup and probe the DB when a cached image lookup returns NotFound; this reduces unnecessary Audnexus calls and improves cache hit rates.
+- **qBittorrent adapter**: Prefer `IHttpClientFactory` with a cookie-client fallback, use injected `HttpClient` for auth requests, and clarified auth failure messages; added `QBittorrentHelpers` and robustness improvements in the adapter.
+- **Dependencies**: Bumped frontend/backend dependencies and regenerated lockfiles.
+
+### Fixed
+- **qBittorrent Test**: `qBittorrent` client test now attempts authentication when the unauthenticated `/api/v2/app/version` values.
+- **Duplicate notifications & race**: Added `NotificationSuppressionSeconds`, `_lastToastTimes`, `_lastToastMessages`, and helper methods `ShouldSendToastForIndexer`/`ShouldSendToastForMessage`. Fixed an edge-case race where the per-indexer check previously updated the global message timestamp causing unintended self-suppression.
+- **EF translation error**: Moved normalization/dedupe to in-memory evaluation to avoid EF Core InvalidOperationException when calling `NormalizeIndexerUrl` inside an EF expression.
+- **Download client test behavior**: The Test button on the **Download Client** modal uses the current (unsaved) form input values; the Test button on the download client card in the Settings tab tests the saved DB configuration values.
+- **Images / Author ASIN tests**: Mocked `IAudiobookRepository.GetAuthorAsinByNameAsync` in ImagesController tests so the stored‑ASIN path is exercised; tests updated accordingly.
+- **Frontend — Loading UI & tests**: Added VTU test stubs for `LoadingState` and `PhSpinner` and unit tests covering loading indicators in settings tabs to prevent component-resolution warnings in tests.
+- **Tests**: Added and updated unit tests in `tests/Listenarr.Api.Tests` (e.g., `ProwlarrCompatControllerTests`, `ProwlarrEndpointsTests`) to validate broadcasting, idempotent PUT upsert, delete `id==0` tolerance, and toast/message-level dedupe. All API tests pass locally (253 tests).
+
+### Removed
+- Removed duplicate/early Broadcast/toast on the create path in the `PUT` flow to avoid double notifications.
 
 
 ## [0.2.47] - 2026-01-13
@@ -33,8 +175,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Root folder management**: Complete root folder system with named folders, selection when adding/editing audiobooks, move/rename confirmation dialogs, and comprehensive E2E and unit tests.
 - **Bulk update endpoint**: Batch update API endpoint for audiobooks with frontend integration for efficient mass updates.
 - **Notification system**: Toast messages now also appear as persistent notifications via SignalR, with support for import and deletion broadcasts.
-- **Quality profile minimum score threshold**: Added MinimumScore property to quality profiles (similar to Sonarr's MinFormatScore) to reject releases below specified threshold (migration: `20260103235802_AddMinimumScoreToQualityProfile`).
-- **Import item resolution service**: Implemented GetImportItemAsync pattern across all download client adapters following Sonarr's approach for accurate post-download path resolution.
+- **Quality profile minimum score threshold**: Added MinimumScore property to quality profiles to reject releases below specified threshold (migration: `20260103235802_AddMinimumScoreToQualityProfile`).
+- **Import item resolution service**: Implemented GetImportItemAsync pattern across all download client adapters for accurate post-download path resolution.
 - **Lazy image loading**: Native browser loading="lazy" for all images with placeholder support, replacing custom lazy loading logic.
 - **Advanced search and collection features**: New AdvancedSearchModal with ASIN, author, title, and series search prefixes for precise queries
 - **Collection view**: Comprehensive CollectionView for managing audiobook collections with author and series grouping

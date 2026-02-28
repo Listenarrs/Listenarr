@@ -12,55 +12,61 @@ const routes = [
   {
     path: '/',
     name: 'home',
-    component: () => import('../views/AudiobooksView.vue'),
+    component: () => import('../views/library/AudiobooksView.vue'),
     meta: { requiresAuth: true },
   },
   {
     path: '/audiobooks',
     name: 'audiobooks',
-    component: () => import('../views/AudiobooksView.vue'),
+    component: () => import('../views/library/AudiobooksView.vue'),
     meta: { requiresAuth: true },
   },
   {
     path: '/audiobooks/:id',
     name: 'audiobook-detail',
-    component: () => import('../views/AudiobookDetailView.vue'),
+    component: () => import('../views/library/AudiobookDetailView.vue'),
     meta: { requiresAuth: true },
   },
   {
     path: '/collection/:type/:name',
     name: 'collection',
-    component: () => import('../views/CollectionView.vue'),
+    component: () => import('../views/library/CollectionView.vue'),
     meta: { requiresAuth: true },
   },
   {
     path: '/add-new',
     name: 'add-new',
-    component: () => import('../views/AddNewView.vue'),
+    component: () => import('../views/content/AddNewView.vue'),
     meta: { requiresAuth: true },
   },
   {
     path: '/library-import',
     name: 'library-import',
-    component: () => import('../views/LibraryImportView.vue'),
+    component: () => import('../views/library/LibraryImportView.vue'),
     meta: { requiresAuth: true },
   },
   {
     path: '/activity',
     name: 'activity',
-    component: () => import('../views/ActivityView.vue'),
+    component: () => import('../views/activity/ActivityView.vue'),
     meta: { requiresAuth: true },
   },
   {
     path: '/wanted',
     name: 'wanted',
-    component: () => import('../views/WantedView.vue'),
+    component: () => import('../views/content/WantedView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/calendar',
+    name: 'calendar',
+    component: () => import('../views/content/CalendarView.vue'),
     meta: { requiresAuth: true },
   },
   {
     path: '/downloads',
     name: 'downloads',
-    component: () => import('../views/DownloadsView.vue'),
+    component: () => import('../views/activity/DownloadsView.vue'),
     meta: { requiresAuth: true },
   },
   {
@@ -72,19 +78,19 @@ const routes = [
   {
     path: '/system',
     name: 'system',
-    component: () => import('../views/SystemView.vue'),
+    component: () => import('../views/system/SystemView.vue'),
     meta: { requiresAuth: true },
   },
   {
     path: '/logs',
     name: 'logs',
-    component: () => import('../views/LogsView.vue'),
+    component: () => import('../views/activity/LogsView.vue'),
     meta: { requiresAuth: true },
   },
   {
     path: '/login',
     name: 'login',
-    component: () => import('../views/LoginView.vue'),
+    component: () => import('../views/auth/LoginView.vue'),
     meta: { hideLayout: true },
   },
 ]
@@ -123,12 +129,17 @@ export function preloadRoute(nameOrPath: string) {
 }
 
 // Navigation guard: protect routes requiring auth and preserve redirectTo
+
+
+
 router.beforeEach(async (to, from, next) => {
-  // Skip auth guard in Cypress tests
   if (import.meta.env.CYPRESS) return next()
   const auth = useAuthStore()
+  const forceLogin =
+    to.name === 'login' &&
+    ((to.query.force as string | undefined) === '1' ||
+      (to.query.force as string | undefined) === 'true')
 
-  // Debug: Log every navigation attempt
   logger.log('router', 'Navigation:', {
     from: from.fullPath,
     to: to.fullPath,
@@ -136,48 +147,62 @@ router.beforeEach(async (to, from, next) => {
     loaded: auth.loaded,
   })
 
-  // Load current user only once per app lifetime (avoid repeated calls on every navigation)
+  // Load current user only once per app lifetime
   if (!auth.loaded) {
     try {
       await auth.loadCurrentUser()
-    } catch {
-      // ignore - loadCurrentUser handles errors and sets loaded flag
-    }
+    } catch {}
   }
 
-  logger.debug('[router] beforeEach', {
-    to: to.fullPath,
-    authenticated: auth.user.authenticated,
-    loaded: auth.loaded,
-  })
-
-  // Obtain startup config using a shared module-level promise/cache so multiple navigations
-  // during app boot don't trigger many GETs to /api/startupconfig.
-  // use shared startup config cache (deduplicates inflight requests)
-  const startupConfig = await getStartupConfigCached()
-  // Fail-safe: if we couldn't load startup config, assume authentication is required
+  // Always fetch the latest startup config (no cache)
+  const startupConfig = await getStartupConfigCached(0)
   const startupConfigMissing = !startupConfig
   logger.debug('[router] startupConfigMissing', startupConfigMissing)
   logger.debug('[router] startupConfig', startupConfig)
   const authRequiredConfig = (() => {
-    if (startupConfigMissing) return true
-    // Accept both camelCase and PascalCase variants from backend
+    if (startupConfigMissing) {
+        logger.debug('[router] startupConfig missing, defaulting authRequiredConfig to false')
+        // If the backend is temporarily unreachable or the config fetch fails,
+        // do not force the login screen. Treat missing config as "no auth"
+        // to avoid blocking the SPA from loading.
+        return false
+      }
     const raw =
       startupConfig?.authenticationRequired ??
       (startupConfig as StartupConfig & { AuthenticationRequired?: string | boolean })
         ?.AuthenticationRequired
-    const v = raw
-    if (v === undefined || v === null) return false
-    if (typeof v === 'boolean') return v
-    if (typeof v === 'string') return v.toLowerCase() === 'enabled' || v.toLowerCase() === 'true'
+    logger.debug('[router] startupConfig raw authRequired:', raw)
+    let v = raw
+    if (v === undefined || v === null) {
+      logger.debug('[router] authRequiredConfig: value undefined/null, returning false')
+      return false
+    }
+    if (typeof v === 'boolean') {
+      logger.debug('[router] authRequiredConfig: boolean value', v)
+      return v
+    }
+    if (typeof v === 'string') {
+      const parsed = v.toLowerCase() === 'enabled' || v.toLowerCase() === 'true'
+      logger.debug('[router] authRequiredConfig: string value', v, 'parsed as', parsed)
+      return parsed
+    }
+    logger.debug('[router] authRequiredConfig: unknown type, returning false')
     return false
   })()
+  logger.debug('[router] FINAL authRequiredConfig:', authRequiredConfig)
 
   // If authentication is disabled in startup config, prevent access to login page
   if (!authRequiredConfig) {
     // Authentication globally disabled: don't enforce requiresAuth.
     // Still prevent navigating to the login page when auth is disabled.
     if (to.name === 'login') {
+      // Allow explicitly forced login navigation (used right after enabling auth)
+      // to avoid race conditions where startup config propagation briefly reports
+      // authentication as disabled.
+      if (forceLogin && !auth.user.authenticated) {
+        logger.debug('[router] force login requested; allowing login route despite auth config')
+        return next()
+      }
       // Check if there's a redirect parameter - if so, honor it instead of going to home
       // Also check auth.redirectTo store as fallback (set during initial navigation attempts)
       const redirectPath = (to.query.redirect as string | undefined) || auth.redirectTo

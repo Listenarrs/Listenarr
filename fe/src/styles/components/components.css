@@ -1,0 +1,113 @@
+/* Component-level shared styles and tokens */
+
+/* Button visuals are centralized in `src/assets/buttons.css` — avoid duplicating `.btn` base styles here.
+   Use `.btn`, `.btn-primary`, `.btn-info`, and size modifiers from the centralized system. */
+
+/* Form Group Container */
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.form-group:last-child {
+  margin-bottom: 0;
+}
+
+/* Form Labels */
+.form-label {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-weight: 500;
+  color: var(--text-primary, #ffffff);
+  font-size: 0.95rem;
+}
+
+.form-label.required::after {
+  content: ' *';
+  color: var(--danger-500, #ff6b6b);
+  font-weight: 500;
+}
+
+/* Form controls */
+.form-input, .form-select {
+  height: var(--control-height);
+  padding: var(--control-padding);
+  border-radius: var(--btn-radius);
+  background-color: var(--input-bg);
+  box-sizing: border-box;
+  border: 1px solid #3a3a3a; /* modal-like default border */
+  color: var(--text-color);
+  font-size: 0.95rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.12s ease;
+}
+
+.form-input:focus, .form-select:focus {
+  outline: none;
+  border-color: var(--brand-focus);
+  box-shadow: var(--focus-ring);
+  transform: translateY(-1px);
+}
+
+.form-input:disabled, .form-select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  background-color: var(--bg-primary, #0d0d0d);
+}
+
+.form-input::placeholder, .form-select option::placeholder {
+  color: #888;
+}
+
+/* Ensure selects use the same appearance as modal selects by default when using .form-select */
+.form-select {
+  background-color: #1a1a1a;
+  border: 1px solid #444;
+}
+
+.form-select:focus {
+  box-shadow: 0 0 0 3px rgba(var(--brand-rgb), 0.1);
+}
+
+/* Make entered input text more noticeable when present (not placeholder-shown) */
+.form-input:not(:placeholder-shown),
+textarea.form-input:not(:placeholder-shown) {
+  color: #ffffff;
+  font-weight: 500;
+  opacity: 0.98;
+}
+
+/* Helper text styles - make these subtle, descriptive, and lower-contrast */
+.form-help,
+.help-text,
+.form-hint {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--text-muted); /* use semantic muted text color */
+  font-size: 0.8rem;
+  line-height: 1.25;
+  font-weight: 400;
+}
+
+/* Inline hint variant for short, inline helper text */
+.form-hint-inline {
+  display: inline-block;
+  margin-left: 0.5rem;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  vertical-align: middle;
+}
+
+/* Small-note variant for less prominent helpers */
+.small-note {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  opacity: 0.9;
+}
+
+/* Icon buttons - centralized in src/assets/buttons.css to avoid duplication */
+
+/* Utility */
+.flex-1 { flex: 1; min-width: 0 }

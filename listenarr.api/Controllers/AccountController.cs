@@ -1,4 +1,4 @@
-﻿using Listenarr.Domain.Models;
+using Listenarr.Domain.Models;
 using Listenarr.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -77,27 +77,6 @@ namespace Listenarr.Api.Controllers
             }
         }
 
-        [HttpPost("register")]
-        [AllowAnonymous]
-        public async Task<IActionResult> Register([FromBody] RegisterRequest req)
-        {
-            if (string.IsNullOrWhiteSpace(req.Username) || string.IsNullOrWhiteSpace(req.Password))
-            {
-                return BadRequest(new { message = "Username and password required" });
-            }
-
-            try
-            {
-                var user = await _userService.CreateUserAsync(req.Username, req.Password, req.Email, req.IsAdmin);
-                return Ok(new { id = user.Id, username = user.Username });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to register user");
-                return BadRequest(new { message = ex.Message });
-            }
-        }
-
         [HttpPost("logout")]
         [AllowAnonymous]
         public async Task<IActionResult> Logout()
@@ -116,7 +95,7 @@ namespace Listenarr.Api.Controllers
                 if (!string.IsNullOrEmpty(sessionToken))
                 {
                     await _sessionService.InvalidateSessionAsync(sessionToken);
-                    _logger.LogInformation("Session invalidated for token: {TokenPrefix}...", sessionToken[..8]);
+                    _logger.LogInformation("Session invalidated for token {TokenHash}", SecurityRequestUtils.HashSecretForLog(sessionToken));
                 }
                 else if (User?.Identity?.AuthenticationType == "ApiKey" || username == "ApiKey")
                 {
@@ -135,8 +114,7 @@ namespace Listenarr.Api.Controllers
                 var responseAuthType = authEnabled ? "session" : "none";
                 return Ok(new { message = "Logged out successfully", authType = responseAuthType });
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error during logout for user: {Username} (AuthType: {AuthType})", username, authType);
                 return StatusCode(500, new { message = "Error during logout", error = ex.Message });
             }
@@ -195,12 +173,6 @@ namespace Listenarr.Api.Controllers
         public bool RememberMe { get; set; }
     }
 
-    public class RegisterRequest
-    {
-        public string Username { get; set; } = string.Empty;
-        public string Password { get; set; } = string.Empty;
-        public string? Email { get; set; }
-        public bool IsAdmin { get; set; }
-    }
 }
+
 

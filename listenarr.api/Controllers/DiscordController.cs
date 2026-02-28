@@ -1,4 +1,4 @@
-﻿using Listenarr.Api.Services;
+using Listenarr.Api.Services;
 using Listenarr.Domain.Models;
 using Microsoft.AspNetCore.Mvc;
 using System.Text.Json;
@@ -30,6 +30,9 @@ namespace Listenarr.Api.Controllers
         [HttpGet("status")]
         public async Task<IActionResult> GetStatus()
         {
+            var gate = SensitiveEndpointAccessGuard.RequireLocalOrAdmin(HttpContext, _logger, "discord/status");
+            if (gate != null) return gate;
+
             try
             {
                 var settings = await _configurationService.GetApplicationSettingsAsync();
@@ -58,8 +61,7 @@ namespace Listenarr.Api.Controllers
                         return BadRequest(new { success = false, message = "Invalid bot token (unauthorized)" });
                     }
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogWarning(ex, "Failed to call /users/@me for diagnostics");
                 }
 
@@ -107,8 +109,7 @@ namespace Listenarr.Api.Controllers
                 _logger.LogWarning("Discord token validation returned {Status}: {Body}", meRespCheck.StatusCode, LogRedaction.RedactText(meCheckBody, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { token })));
                 return StatusCode(500, new { success = false, message = "Failed to validate bot token", status = (int)meRespCheck.StatusCode, body = meCheckBody });
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error checking Discord status");
                 return StatusCode(500, new { success = false, message = ex.Message });
             }
@@ -120,6 +121,9 @@ namespace Listenarr.Api.Controllers
         [HttpPost("register-commands")]
         public async Task<IActionResult> RegisterCommands()
         {
+            var gate = SensitiveEndpointAccessGuard.RequireLocalOrAdmin(HttpContext, _logger, "discord/register-commands");
+            if (gate != null) return gate;
+
             try
             {
                 var settings = await _configurationService.GetApplicationSettingsAsync();
@@ -156,11 +160,11 @@ namespace Listenarr.Api.Controllers
                         catch (System.Text.Json.JsonException)
                         {
                             // ignore parse errors
+                                                    System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
                         }
                     }
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogWarning(ex, "Discord register-commands: failed to call /users/@me");
                 }
 
@@ -240,8 +244,7 @@ namespace Listenarr.Api.Controllers
                 _logger.LogWarning("Register commands returned {Status}: {Body}", resp.StatusCode, LogRedaction.RedactText(body, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { token })));
                 return StatusCode((int)resp.StatusCode, new { success = false, message = "Failed to register commands", body });
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error registering Discord commands");
                 return StatusCode(500, new { success = false, message = ex.Message });
             }
@@ -253,6 +256,9 @@ namespace Listenarr.Api.Controllers
         [HttpPost("start-bot")]
         public async Task<IActionResult> StartBot()
         {
+            var gate = SensitiveEndpointAccessGuard.RequireLocalOrAdmin(HttpContext, _logger, "discord/start-bot");
+            if (gate != null) return gate;
+
             try
             {
                 var isRunning = await _botService.IsBotRunningAsync();
@@ -291,8 +297,7 @@ namespace Listenarr.Api.Controllers
                         }
                     }
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogDebug(ex, "Failed to run diagnostics before starting bot");
                 }
 
@@ -307,8 +312,7 @@ namespace Listenarr.Api.Controllers
                     return StatusCode(500, new { success = false, message = "Failed to start bot" });
                 }
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error starting Discord bot");
                 return StatusCode(500, new { success = false, message = ex.Message });
             }
@@ -320,6 +324,9 @@ namespace Listenarr.Api.Controllers
         [HttpPost("stop-bot")]
         public async Task<IActionResult> StopBot()
         {
+            var gate = SensitiveEndpointAccessGuard.RequireLocalOrAdmin(HttpContext, _logger, "discord/stop-bot");
+            if (gate != null) return gate;
+
             try
             {
                 var isRunning = await _botService.IsBotRunningAsync();
@@ -338,8 +345,7 @@ namespace Listenarr.Api.Controllers
                     return StatusCode(500, new { success = false, message = "Failed to stop bot" });
                 }
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error stopping Discord bot");
                 return StatusCode(500, new { success = false, message = ex.Message });
             }
@@ -351,14 +357,16 @@ namespace Listenarr.Api.Controllers
         [HttpGet("bot-status")]
         public async Task<IActionResult> GetBotStatus()
         {
+            var gate = SensitiveEndpointAccessGuard.RequireLocalOrAdmin(HttpContext, _logger, "discord/bot-status");
+            if (gate != null) return gate;
+
             try
             {
                 var status = await _botService.GetBotStatusAsync();
                 var isRunning = await _botService.IsBotRunningAsync();
                 return Ok(new { success = true, status, isRunning });
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error getting Discord bot status");
                 return StatusCode(500, new { success = false, message = ex.Message });
             }
@@ -371,6 +379,9 @@ namespace Listenarr.Api.Controllers
         [HttpGet("diagnostics")]
         public async Task<IActionResult> Diagnostics()
         {
+            var gate = SensitiveEndpointAccessGuard.RequireLocalOrAdmin(HttpContext, _logger, "discord/diagnostics");
+            if (gate != null) return gate;
+
             try
             {
                 var contentRoot = System.IO.Path.Combine(AppContext.BaseDirectory);
@@ -405,8 +416,7 @@ namespace Listenarr.Api.Controllers
                         nodeError = (nodeError ?? string.Empty) + " (timed out)";
                     }
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     nodeError = ex.Message;
                 }
 
@@ -422,12 +432,12 @@ namespace Listenarr.Api.Controllers
                     nodeError
                 });
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error running Discord diagnostics");
                 return StatusCode(500, new { success = false, message = ex.Message });
             }
         }
     }
 }
+
 

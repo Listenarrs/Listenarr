@@ -1,28 +1,25 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-  <TargetFramework>net8.0</TargetFramework>
-    <IsPackable>false</IsPackable>
-    <!-- Enable nullable annotations for test code to avoid CS8632 warnings -->
-    <Nullable>enable</Nullable>
-    <!-- Suppress specific test-only warning about FormatterServices obsoletion and some nullable warnings in tests -->
-    <NoWarn>$(NoWarn);SYSLIB0050;CS8602;CS8600;CS8625;CS8604;CS8605</NoWarn>
-  </PropertyGroup>
+	<PropertyGroup>
+		<IsPackable>false</IsPackable>
+		<!-- Suppress specific test-only warning about FormatterServices obsoletion and some nullable warnings in tests -->
+		<NoWarn>$(NoWarn);SYSLIB0050;CS8602;CS8600;CS8625;CS8604;CS8605</NoWarn>
+	</PropertyGroup>
 
-  <ItemGroup>
-  <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="8.0.23" />
-  <PackageReference Include="Microsoft.EntityFrameworkCore" Version="8.0.23" />
-  <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.23" />
-  <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.10.0" />
-    <PackageReference Include="xunit" Version="2.5.3" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.0" />
-    <PackageReference Include="coverlet.collector" Version="3.2.0" />
-  <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="8.0.10" />
-  <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.10" />
-    <PackageReference Include="Moq" Version="4.20.69" />
-  </ItemGroup>
+	<ItemGroup>
+		<PackageReference Include="Microsoft.Data.Sqlite.Core" />
+		<PackageReference Include="Microsoft.EntityFrameworkCore" />
+		<PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+		<PackageReference Include="Microsoft.NET.Test.Sdk" />
+		<PackageReference Include="xunit" />
+		<PackageReference Include="xunit.runner.visualstudio" />
+		<PackageReference Include="coverlet.collector" />
+		<PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" />
+		<PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+		<PackageReference Include="Moq" />
+	</ItemGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="..\..\listenarr.api\Listenarr.Api.csproj" />
-    <ProjectReference Include="..\..\listenarr.infrastructure\Listenarr.Infrastructure.csproj" />
-  </ItemGroup>
+	<ItemGroup>
+		<ProjectReference Include="..\..\listenarr.api\Listenarr.Api.csproj" />
+		<ProjectReference Include="..\..\listenarr.infrastructure\Listenarr.Infrastructure.csproj" />
+	</ItemGroup>
 </Project>

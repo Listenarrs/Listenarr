@@ -91,8 +91,7 @@ namespace Listenarr.Api.Services
                                 result = converted;
                             }
                         }
-                        catch (Exception ex)
-                        {
+                        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                             _logger.LogWarning(ex, "Audnexus lookup failed, trying next source");
                         }
                     }
@@ -113,8 +112,7 @@ namespace Listenarr.Api.Services
                         };
                     }
                 }
-                catch (Exception sourceEx)
-                {
+                catch (Exception sourceEx) when (sourceEx is not OperationCanceledException && sourceEx is not OutOfMemoryException && sourceEx is not StackOverflowException) {
                     _logger.LogWarning(sourceEx, "Failed to fetch metadata from {SourceName}, trying next source", source.Name);
                     continue;
                 }
@@ -136,3 +134,4 @@ namespace Listenarr.Api.Services
         }
     }
 }
+

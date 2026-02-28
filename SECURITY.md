@@ -18,7 +18,7 @@ We take the security of Listenarr seriously. If you believe you have found a sec
 - **Do NOT** disclose the vulnerability publicly until it has been addressed
 
 ### Please DO:
-1. **Email us** at [robbie@therobbiedavis] with details of the vulnerability
+1. **Email us** at [robbie@therobbiedavis.com] with details of the vulnerability
 2. **Include** as much information as possible:
    - Type of vulnerability
    - Step-by-step instructions to reproduce

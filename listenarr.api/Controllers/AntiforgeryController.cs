@@ -37,11 +37,13 @@ namespace Listenarr.Api.Controllers
                         nameMask = name.Length <= 8 ? name : name.Substring(0, 8);
                     }
                 }
-
-                _logger.LogInformation("Issuing antiforgery token. Authenticated={Authenticated}, NameMask={NameMask}, ClaimsCount={ClaimsCount}", isAuthenticated, nameMask, user?.Claims?.Count() ?? 0);
+                var hasAuthorizationHeader = !string.IsNullOrWhiteSpace(HttpContext.Request.Headers["Authorization"].FirstOrDefault());
+                var cookieNames = string.Join(',', HttpContext.Request.Cookies.Keys);
+                var afCookie = HttpContext.Request.Cookies.FirstOrDefault(kv => kv.Key?.StartsWith(".AspNetCore.Antiforgery") == true);
+                var cookiePrefix = afCookie.Value != null && afCookie.Value.Length > 8 ? afCookie.Value.Substring(0, 8) : afCookie.Value;
+                _logger.LogInformation("Issuing antiforgery token. Authenticated={Authenticated}, NameMask={NameMask}, ClaimsCount={ClaimsCount}, HasAuthorizationHeader={HasAuthorizationHeader}, CookieNames={CookieNames}, AntiforgeryCookiePrefix={CookiePrefix}", isAuthenticated, nameMask, user?.Claims?.Count() ?? 0, hasAuthorizationHeader, cookieNames, cookiePrefix);
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 // Non-fatal diagnostic logging
                 _logger.LogDebug(ex, "Failed to log antiforgery principal details");
             }
@@ -51,3 +53,4 @@ namespace Listenarr.Api.Controllers
         }
     }
 }
+

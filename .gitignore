@@ -278,3 +278,4 @@ listenarr.api/wwwroot/index.html
 listenarr.api/wwwroot/*.map
 listenarr.api/wwwroot/assets/**
 listenarr.api/config/appsettings/appsettings.json
+/listenarr.api/config

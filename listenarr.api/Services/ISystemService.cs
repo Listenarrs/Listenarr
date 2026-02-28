@@ -46,6 +46,11 @@ namespace Listenarr.Api.Services
         /// Get the path to the current log file
         /// </summary>
         string GetLogFilePath();
+
+        /// <summary>
+        /// Get the startup configuration (for dynamic auth checks)
+        /// </summary>
+        StartupConfig GetStartupConfig();
     }
 }
 

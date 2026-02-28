@@ -37,9 +37,9 @@ namespace Listenarr.Api.Tests
             mockMetadata.Setup(m => m.GetMetadataAsync(identifier, It.IsAny<string>(), It.IsAny<bool>())).ReturnsAsync((object)meta);
 
             // Create temporary content root and the cached image file
-            var tempRoot = Path.Combine(Path.GetTempPath(), "listenarr_test_contentroot_fallback");
-            Directory.CreateDirectory(Path.Combine(tempRoot, "config", "cache", "images", "temp"));
-            var fullPath = Path.Combine(tempRoot, relativePath);
+            var tempRoot = Path.Join(Path.GetTempPath(), "listenarr_test_contentroot_fallback");
+            Directory.CreateDirectory(Path.Join(tempRoot, "config", "cache", "images", "temp"));
+            var fullPath = Path.Join(tempRoot, relativePath);
             File.WriteAllText(fullPath, "fake image data");
 
             var mockEnv = new Mock<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>();
@@ -67,8 +67,23 @@ namespace Listenarr.Api.Tests
             }
 
             // Cleanup
-            try { File.Delete(fullPath); } catch { }
-            try { Directory.Delete(Path.Combine(tempRoot, "config", "cache", "images", "temp"), true); } catch { }
+            try
+            {
+                File.Delete(fullPath);
+            }
+            catch (System.Exception)
+            {
+                // Best-effort test cleanup; ignore cleanup failures.
+            }
+
+            try
+            {
+                Directory.Delete(Path.Join(tempRoot, "config", "cache", "images", "temp"), true);
+            }
+            catch (System.Exception)
+            {
+                // Best-effort test cleanup; ignore cleanup failures.
+            }
         }
     }
 }

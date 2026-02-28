@@ -2,10 +2,15 @@
   <div class="tab-content">
     <div class="indexers-tab">
       <div class="section-header">
-        <h3>Indexers</h3>
+        <h3>
+          Indexers
+          <PhSpinner v-if="loading" class="ph-spin small-inline-spinner" />
+        </h3>
       </div>
 
-      <div v-if="indexers.length === 0" class="empty-state">
+      <LoadingState v-if="loading && indexers.length === 0" message="Loading indexers..." />
+
+      <div v-else-if="indexers.length === 0" class="empty-state">
         <PhListMagnifyingGlass />
         <p>No indexers configured. Add Newznab or Torznab indexers to search for audiobooks.</p>
       </div>
@@ -20,14 +25,29 @@
           <div class="indexer-header">
             <div class="indexer-info">
               <h4>{{ indexer.name }}</h4>
-              <span class="indexer-type" :class="indexer.type.toLowerCase()">
+              <img
+                v-if="indexer.type === 'Torrent'"
+                src="@/assets/icons/indexers/torrent.svg"
+                alt="Torrent"
+                class="indexer-type-icon"
+                title="Torrent"
+              />
+              <img
+                v-else-if="indexer.type === 'Usenet'"
+                src="@/assets/icons/indexers/usenet.svg"
+                alt="Usenet"
+                class="indexer-type-icon"
+                title="Usenet"
+              />
+              <span v-else class="indexer-type" :class="indexer.type.toLowerCase()">
                 {{ indexer.implementation === 'InternetArchive' ? 'DDL' : indexer.type }}
               </span>
             </div>
             <div class="indexer-actions">
               <button
                 @click="toggleIndexerFunc(indexer.id)"
-                class="icon-button"
+                class="icon-button action-secondary action-toggle"
+                :class="{ active: indexer.isEnabled }"
                 :title="indexer.isEnabled ? 'Disable' : 'Enable'"
               >
                 <template v-if="indexer.isEnabled">
@@ -39,23 +59,40 @@
               </button>
               <button
                 @click="testIndexerFunc(indexer.id)"
-                class="icon-button"
+                class="icon-button action-secondary"
+                :class="{
+                  'test-success': lastTestResults[indexer.id] === 'success',
+                  'test-fail': lastTestResults[indexer.id] === 'fail'
+                }"
                 title="Test"
                 :disabled="testingIndexer === indexer.id"
               >
                 <template v-if="testingIndexer === indexer.id">
                   <PhSpinner class="ph-spin" />
                 </template>
+                <template v-else-if="lastTestResults[indexer.id] === 'success'">
+                  <PhCheckCircle />
+                </template>
+                <template v-else-if="lastTestResults[indexer.id] === 'fail'">
+                  <PhXCircle />
+                </template>
+                <!-- Fall back to persisted indexer.lastTestSuccessful if available -->
+                <template v-else-if="indexer.lastTestSuccessful === true">
+                  <PhCheckCircle />
+                </template>
+                <template v-else-if="indexer.lastTestSuccessful === false">
+                  <PhXCircle />
+                </template>
                 <template v-else>
                   <PhCheckCircle />
                 </template>
               </button>
-              <button @click="editIndexer(indexer)" class="icon-button" title="Edit">
+              <button @click="editIndexer(indexer)" class="icon-button action-edit" title="Edit">
                 <PhPencil />
               </button>
               <button
                 @click="confirmDeleteIndexer(indexer)"
-                class="icon-button danger"
+                class="icon-button danger action-delete"
                 title="Delete"
               >
                 <PhTrash />
@@ -73,9 +110,9 @@
               <PhListChecks />
               <span class="detail-label">Features:</span>
               <div class="feature-badges">
-                <span v-if="indexer.enableRss" class="badge">RSS</span>
-                <span v-if="indexer.enableAutomaticSearch" class="badge">Automatic Search</span>
-                <span v-if="indexer.enableInteractiveSearch" class="badge">Interactive Search</span>
+                <Pill variant="success" v-if="indexer.enableRss">RSS</Pill>
+                <Pill variant="primary" v-if="indexer.enableAutomaticSearch">Automatic Search</Pill>
+                <Pill variant="info" v-if="indexer.enableInteractiveSearch">Interactive Search</Pill>
               </div>
             </div>
             <div class="detail-row" v-if="indexer.lastTestedAt">
@@ -113,50 +150,90 @@
         @saved="loadIndexers()"
       />
 
-      <!-- Delete Indexer Confirmation Modal -->
-      <div v-if="indexerToDelete" class="modal-overlay" @click="indexerToDelete = null">
-        <div class="modal-content" @click.stop>
-          <div class="modal-header">
-            <h3>
-              <PhWarningCircle />
-              Delete Indexer
-            </h3>
-            <button @click="indexerToDelete = null" class="modal-close">
-              <PhX />
-            </button>
-          </div>
-          <div class="modal-body">
-            <p>
-              Are you sure you want to delete the indexer <strong>{{ indexerToDelete.name }}</strong
-              >?
-            </p>
-            <p>This action cannot be undone.</p>
-          </div>
-          <div class="modal-actions">
-            <button type="button" @click="indexerToDelete = null" class="cancel-button">
-              Cancel
-            </button>
-            <button
-              type="button"
-              @click="executeDeleteIndexer()"
-              class="delete-button modal-delete-button"
-            >
-              <PhTrash />
-              Delete
-            </button>
-          </div>
-        </div>
-      </div>
+      <Modal :visible="showProwlarrModal" size="md" @close="closeProwlarrModal">
+        <template #header>
+          <ModalHeader title="Import from Prowlarr" :icon="PhDownloadSimple" @close="closeProwlarrModal" />
+        </template>
+        <template #default>
+          <ModalForm :submitting="importingProwlarr" @submit="importFromProwlarr">
+            <ModalBody>
+              <FormSection title="Connection" :icon="PhGlobe">
+                <FormRow
+                  label="Prowlarr URL / IP"
+                  labelFor="prowlarr-url"
+                  help="Include scheme (http/https). Example: http://localhost"
+                >
+                  <input
+                    id="prowlarr-url"
+                    v-model="prowlarrUrl"
+                    type="text"
+                    class="form-input"
+                    placeholder="http://localhost"
+                    autocomplete="off"
+                  />
+                </FormRow>
+
+                <FormRow label="Port (optional)" labelFor="prowlarr-port">
+                  <input
+                    id="prowlarr-port"
+                    v-model="prowlarrPort"
+                    type="number"
+                    class="form-input"
+                    min="1"
+                    max="65535"
+                    placeholder="9696"
+                  />
+                </FormRow>
+
+                <FormRow label="API Key" labelFor="prowlarr-key" help="Find this in Prowlarr Settings → General">
+                  <PasswordInput
+                    id="prowlarr-key"
+                    v-model="prowlarrApiKey"
+                    class="form-input"
+                    placeholder="Prowlarr API Key"
+                  />
+                </FormRow>
+              </FormSection>
+
+              <div v-if="prowlarrSummary" class="prowlarr-summary">
+                Imported {{ prowlarrSummary.addedCount }} indexer(s), skipped {{
+                  prowlarrSummary.skippedCount
+                }}.
+              </div>
+            </ModalBody>
+          </ModalForm>
+        </template>
+        <template #footer>
+          <ModalFooter
+            :showCancel="true"
+            :showSave="true"
+            :saving="importingProwlarr"
+            saveLabel="Import"
+            saveLabelLoading="Importing..."
+            @cancel="closeProwlarrModal"
+            @save="importFromProwlarr"
+          />
+        </template>
+      </Modal>
+
+      <!-- Delete Indexer Confirmation Modal (shared) -->
+      <DeleteConfirmationModal :visible="!!indexerToDelete" title="Delete Indexer" @close="indexerToDelete = null" @confirm="executeDeleteIndexer">
+        <template v-slot>
+          <p>Are you sure you want to delete the indexer <strong>{{ indexerToDelete?.name }}</strong>?</p>
+          <p>This action cannot be undone.</p>
+        </template>
+      </DeleteConfirmationModal>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, nextTick } from 'vue'
 import {
   PhListMagnifyingGlass,
   PhToggleRight,
   PhToggleLeft,
+  PhGlobe,
   PhCheckCircle,
   PhXCircle,
   PhPencil,
@@ -166,28 +243,48 @@ import {
   PhClock,
   PhWarning,
   PhWarningCircle,
+  PhPlus,
   PhX,
   PhSpinner,
+  PhDownloadSimple,
 } from '@phosphor-icons/vue'
-import IndexerFormModal from '@/components/IndexerFormModal.vue'
+import DeleteConfirmationModal from '@/components/feedback/DeleteConfirmationModal.vue'
+import IndexerFormModal from '@/components/settings/IndexerFormModal.vue'
+import FormSection from '@/components/settings/FormSection.vue'
+import FormRow from '@/components/settings/FormRow.vue'
+import PasswordInput from '@/components/form/PasswordInput.vue'
 import { useToast } from '@/services/toastService'
 import { errorTracking } from '@/services/errorTracking'
+import { Pill, LoadingState } from '@/components/base'
+import { Modal, ModalHeader, ModalFooter, ModalBody, ModalForm } from '@/components/feedback'
 import type { Indexer } from '@/types'
 import {
   getIndexers,
   toggleIndexer as apiToggleIndexer,
   testIndexer as apiTestIndexer,
   deleteIndexer,
+  importProwlarrIndexers,
 } from '@/services/api'
 import { signalRService } from '@/services/signalr'
 
 // State
 const toast = useToast()
 const indexers = ref<Indexer[]>([])
+const loading = ref(false)
 const showIndexerForm = ref(false)
 const editingIndexer = ref<Indexer | null>(null)
 const indexerToDelete = ref<Indexer | null>(null)
 const testingIndexer = ref<number | null>(null)
+// Per-indexer ephemeral test results: 'success' | 'fail' | undefined
+const lastTestResults = reactive<Record<number, 'success' | 'fail' | undefined>>({})
+
+// Prowlarr import state
+const prowlarrUrl = ref('')
+const prowlarrPort = ref('')
+const prowlarrApiKey = ref('')
+const importingProwlarr = ref(false)
+const prowlarrSummary = ref<{ addedCount: number; skippedCount: number } | null>(null)
+const showProwlarrModal = ref(false)
 
 // Functions
 const formatApiError = (error: unknown): string => {
@@ -211,6 +308,7 @@ const formatDate = (dateString: string | undefined): string => {
 }
 
 const loadIndexers = async () => {
+  loading.value = true
   try {
     indexers.value = await getIndexers()
   } catch (error) {
@@ -220,6 +318,8 @@ const loadIndexers = async () => {
     })
     const errorMessage = formatApiError(error)
     toast.error('Load failed', errorMessage)
+  } finally {
+    loading.value = false
   }
 }
 
@@ -254,6 +354,10 @@ const testIndexerFunc = async (id: number) => {
       if (index !== -1) {
         indexers.value[index] = result.indexer
       }
+      // mark success (persist until next test)
+      lastTestResults[id] = 'success'
+      console.debug('IndexersTab: lastTestResults set', id, lastTestResults[id])
+      await nextTick()
     } else {
       const errorMessage = formatApiError({ response: { data: result.error || result.message } })
       toast.error('Indexer test failed', errorMessage)
@@ -261,6 +365,10 @@ const testIndexerFunc = async (id: number) => {
       if (index !== -1) {
         indexers.value[index] = result.indexer
       }
+      // mark failure (persist until next test)
+      lastTestResults[id] = 'fail'
+      console.debug('IndexersTab: lastTestResults set', id, lastTestResults[id])
+      await nextTick()
     }
   } catch (error) {
     errorTracking.captureException(error as Error, {
@@ -269,6 +377,9 @@ const testIndexerFunc = async (id: number) => {
     })
     const errorMessage = formatApiError(error)
     toast.error('Indexer test failed', errorMessage)
+    lastTestResults[id] = 'fail'
+    console.debug('IndexersTab: lastTestResults set', id, lastTestResults[id])
+    await nextTick()
   } finally {
     testingIndexer.value = null
   }
@@ -299,6 +410,69 @@ const executeDeleteIndexer = async () => {
     toast.error('Delete failed', errorMessage)
   } finally {
     indexerToDelete.value = null
+  }
+}
+
+const openProwlarrModal = () => {
+  showProwlarrModal.value = true
+}
+
+const closeProwlarrModal = () => {
+  showProwlarrModal.value = false
+  prowlarrSummary.value = null
+}
+
+const importFromProwlarr = async () => {
+  const url = prowlarrUrl.value.trim()
+  const apiKey = prowlarrApiKey.value.trim()
+  const portRaw = prowlarrPort.value.trim()
+
+  if (!url) {
+    toast.warning('Prowlarr', 'Please enter a Prowlarr URL or IP')
+    return
+  }
+
+  if (!apiKey) {
+    toast.warning('Prowlarr', 'Please enter your Prowlarr API key')
+    return
+  }
+
+  let portValue: number | undefined
+  if (portRaw.length > 0) {
+    const parsed = Number(portRaw)
+    if (Number.isNaN(parsed) || parsed <= 0) {
+      toast.warning('Prowlarr', 'Please enter a valid port number')
+      return
+    }
+    portValue = parsed
+  }
+
+  importingProwlarr.value = true
+  prowlarrSummary.value = null
+
+  try {
+    const result = await importProwlarrIndexers({
+      url,
+      port: portValue,
+      apiKey,
+    })
+
+    prowlarrSummary.value = {
+      addedCount: result.addedCount,
+      skippedCount: result.skippedCount,
+    }
+
+    await loadIndexers()
+    toast.success('Prowlarr', `Imported ${result.addedCount} indexer(s)`)
+  } catch (error) {
+    errorTracking.captureException(error as Error, {
+      component: 'IndexersTab',
+      operation: 'importProwlarrIndexers',
+    })
+    const errorMessage = formatApiError(error)
+    toast.error('Prowlarr import failed', errorMessage)
+  } finally {
+    importingProwlarr.value = false
   }
 }
 
@@ -348,7 +522,7 @@ const openAddIndexer = () => {
   showIndexerForm.value = true
 }
 
-defineExpose({ openAddIndexer })
+defineExpose({ openAddIndexer, openProwlarrImport: openProwlarrModal })
 </script>
 
 <style scoped>
@@ -356,16 +530,7 @@ defineExpose({ openAddIndexer })
   animation: fadeIn 0.2s ease;
 }
 
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
+/* @keyframes fadeIn is centralized in src/assets/animations.css */
 
 .indexers-tab {
   width: 100%;
@@ -384,7 +549,12 @@ defineExpose({ openAddIndexer })
   margin: 0;
   color: #fff;
   font-size: 1.5rem;
-  font-weight: 600;
+  font-weight: 500;
+}
+
+.prowlarr-summary {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
 }
 
 .add-button {
@@ -490,8 +660,14 @@ defineExpose({ openAddIndexer })
   padding: 0.25rem 0.5rem;
   border-radius: 4px;
   font-size: 0.75rem;
-  font-weight: 600;
+  font-weight: 500;
   text-transform: uppercase;
+}
+
+.indexer-type-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
 }
 
 .indexer-type.torrent {
@@ -514,34 +690,7 @@ defineExpose({ openAddIndexer })
   gap: 0.5rem;
 }
 
-.icon-button {
-  padding: 0.5rem;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s;
-  color: var(--text-secondary);
-}
-
-.icon-button:hover {
-  background: var(--background-hover);
-  border-color: var(--primary);
-  color: var(--primary);
-}
-
-.icon-button.danger:hover {
-  border-color: var(--error);
-  color: var(--error);
-}
-
-.icon-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
+/* Use centralized .icon-button in src/assets/buttons.css for consistent icon buttons */
 
 .indexer-details {
   display: flex;
@@ -566,8 +715,7 @@ defineExpose({ openAddIndexer })
 }
 
 .indexer-header svg,
-.indexer-header .ph-icon,
-.icon-button svg {
+.indexer-header .ph-icon {
   width: 18px;
   height: 18px;
   flex-shrink: 0;
@@ -575,7 +723,7 @@ defineExpose({ openAddIndexer })
 }
 
 .detail-label {
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-secondary);
   min-width: 90px;
 }
@@ -610,13 +758,12 @@ defineExpose({ openAddIndexer })
   gap: 0.5rem;
 }
 
-.badge {
-  padding: 0.25rem 0.5rem;
-  background: var(--primary);
-  color: white;
-  border-radius: 4px;
-  font-size: 0.75rem;
-  font-weight: 500;
+/* Badge styles - Now using Pill component from @/components/base */
+
+.section-header .small-inline-spinner {
+  margin-left: 0.5rem;
+  width: 18px;
+  height: 18px;
 }
 
 .error-row {
@@ -626,135 +773,7 @@ defineExpose({ openAddIndexer })
   border: 1px solid var(--error);
 }
 
-/* Modal Styles (canonical) */
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.85);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  backdrop-filter: blur(4px);
-}
 
-.modal-content {
-  background: #2a2a2a;
-  border: 1px solid #444;
-  border-radius: 6px;
-  max-width: 700px;
-  width: 100%;
-  max-height: 90vh;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
-}
-
-.modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1.5rem;
-  border-bottom: 1px solid #444;
-}
-
-.modal-header h3 {
-  margin: 0;
-  color: #fff;
-  font-size: 1.25rem;
-}
-
-.modal-close {
-  background: none;
-  border: none;
-  color: #b3b3b3;
-  cursor: pointer;
-  padding: 0.5rem;
-  border-radius: 6px;
-  transition: all 0.2s;
-}
-
-.modal-close:hover {
-  background: #333;
-  color: #fff;
-}
-
-.modal-body {
-  padding: 2rem;
-  overflow-y: auto;
-  flex: 1;
-}
-
-.modal-actions {
-  display: flex;
-  gap: 1rem;
-  justify-content: flex-end;
-  padding: 1.5rem;
-  border-top: 1px solid #444;
-}
-
-/* Ensure modal context delete buttons are full-size */
-.modal-overlay .modal-content .modal-actions .delete-button,
-.modal-content .modal-actions .delete-button,
-.modal-overlay .modal-content .modal-actions .modal-delete-button,
-.modal-content .modal-actions .modal-delete-button {
-  padding: 0.75rem 1.25rem;
-  background-color: rgba(231, 76, 60, 0.15);
-  color: #ff6b6b;
-  border: 1px solid rgba(231, 76, 60, 0.3);
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.18s ease;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.6rem;
-  font-weight: 700;
-  font-size: 1rem;
-  min-width: 120px;
-  height: auto;
-  box-shadow: 0 6px 16px rgba(231, 76, 60, 0.12);
-}
-
-.modal-overlay .modal-content .modal-actions .delete-button:hover,
-.modal-content .modal-actions .delete-button:hover {
-  background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
-  color: #fff;
-}
-
-.cancel-button,
-.delete-button {
-  padding: 0.5rem 1rem;
-  border: none;
-  border-radius: var(--border-radius);
-  cursor: pointer;
-  font-size: 0.9rem;
-  transition: all 0.2s;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.cancel-button {
-  background: var(--background-secondary);
-  color: var(--text-primary);
-}
-
-.cancel-button:hover {
-  background: var(--background-hover);
-}
-
-.delete-button {
-  background: var(--error);
-  color: white;
-}
-
-.delete-button:hover {
-  background: #dc2626;
-}
 
 /* Section Header */
 .section-header {
@@ -770,13 +789,13 @@ defineExpose({ openAddIndexer })
   margin: 0;
   color: #fff;
   font-size: 1.5rem;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 /* Add Button */
 .add-button {
   padding: 0.75rem 1.5rem;
-  background: linear-gradient(135deg, #1e88e5 0%, #1565c0 100%);
+  background: #1e88e5;
   color: white;
   border: none;
   border-radius: 6px;
@@ -791,7 +810,7 @@ defineExpose({ openAddIndexer })
 }
 
 .add-button:hover {
-  background: linear-gradient(135deg, #1976d2 0%, #0d47a1 100%);
+  background: #1976d2;
   transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(30, 136, 229, 0.4);
 }
@@ -805,7 +824,7 @@ defineExpose({ openAddIndexer })
 
 .empty-state .empty-icon {
   font-size: 4rem;
-  color: #495057;
+  color: #868e96;
   margin-bottom: 1rem;
   width: 4rem;
   height: 4rem;
@@ -815,7 +834,7 @@ defineExpose({ openAddIndexer })
   margin: 1rem 0 0.5rem 0;
   color: #fff;
   font-size: 1.5rem;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .empty-state p {
@@ -828,7 +847,7 @@ defineExpose({ openAddIndexer })
 .add-button-large {
   margin-top: 1.5rem;
   padding: 1rem 2rem;
-  background: linear-gradient(135deg, #1e88e5 0%, #1565c0 100%);
+  background: #1e88e5;
   color: white;
   border: none;
   border-radius: 6px;
@@ -837,13 +856,13 @@ defineExpose({ openAddIndexer })
   display: inline-flex;
   align-items: center;
   gap: 0.75rem;
-  font-weight: 600;
+  font-weight: 500;
   font-size: 1rem;
   box-shadow: 0 4px 12px rgba(30, 136, 229, 0.3);
 }
 
 .add-button-large:hover {
-  background: linear-gradient(135deg, #1976d2 0%, #0d47a1 100%);
+  background: #1976d2;
   transform: translateY(-2px);
   box-shadow: 0 6px 16px rgba(30, 136, 229, 0.4);
 }
@@ -888,7 +907,7 @@ defineExpose({ openAddIndexer })
   margin: 0 0 0.5rem 0;
   color: #fff;
   font-size: 1.1rem;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .indexer-type {
@@ -896,7 +915,7 @@ defineExpose({ openAddIndexer })
   padding: 0.3rem 0.75rem;
   border-radius: 6px;
   font-size: 0.75rem;
-  font-weight: 600;
+  font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -925,46 +944,7 @@ defineExpose({ openAddIndexer })
   margin-left: 1rem;
 }
 
-.icon-button {
-  padding: 0.5rem;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 6px;
-  cursor: pointer;
-  color: #adb5bd;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
-  font-size: 1.1rem;
-  width: 36px;
-  height: 36px;
-}
-
-.icon-button:hover:not(:disabled) {
-  background: rgba(77, 171, 247, 0.15);
-  border-color: #4dabf7;
-  color: #4dabf7;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(77, 171, 247, 0.3);
-}
-
-.icon-button.danger {
-  color: #ff6b6b;
-}
-
-.icon-button.danger:hover:not(:disabled) {
-  background: rgba(255, 107, 107, 0.15);
-  border-color: #ff6b6b;
-  color: #ff6b6b;
-  box-shadow: 0 2px 8px rgba(255, 107, 107, 0.3);
-}
-
-.icon-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-  transform: none;
-}
+/* Use centralized .icon-button in src/assets/buttons.css for consistent icon buttons */
 
 .indexer-details {
   display: flex;
@@ -1010,18 +990,7 @@ defineExpose({ openAddIndexer })
   gap: 0.5rem;
 }
 
-.badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.3rem 0.6rem;
-  background-color: rgba(77, 171, 247, 0.15);
-  color: #4dabf7;
-  border: 1px solid rgba(77, 171, 247, 0.3);
-  border-radius: 6px;
-  font-size: 0.75rem;
-  font-weight: 600;
-}
+/* Badge styles - Now using Pill component from @/components/base */
 
 /* Mobile Responsive */
 @media (max-width: 768px) {

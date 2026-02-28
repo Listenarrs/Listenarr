@@ -21,6 +21,7 @@ namespace Listenarr.Api.Services.Adapters
     {
         public string ClientId => "nzbget";
         public string ClientType => "nzbget";
+        public DownloadProtocol Protocol => DownloadProtocol.Usenet;
 
         private static readonly HashSet<char> InvalidFileNameChars = new(Path.GetInvalidFileNameChars());
 
@@ -64,17 +65,31 @@ namespace Listenarr.Api.Services.Adapters
                     return (false, "NZBGet: Unable to retrieve version");
                 }
 
-                return (true, $"NZBGet: Authentication succeeded (version {version}, using XML-RPC)");
+                return (true, "NZBGet: connected");
             }
             catch (HttpRequestException httpEx) when (httpEx.StatusCode == HttpStatusCode.Unauthorized || httpEx.StatusCode == HttpStatusCode.Forbidden)
             {
                 _logger.LogDebug(httpEx, "NZBGet authentication failed for client {ClientId}", LogRedaction.SanitizeText(client.Id ?? client.Name ?? client.Type));
                 return (false, "NZBGet: Authentication failed (check username/password)");
             }
-            catch (Exception ex)
+            catch (HttpRequestException httpEx) when (httpEx.StatusCode == HttpStatusCode.Unauthorized || httpEx.StatusCode == HttpStatusCode.Forbidden)
             {
+                _logger.LogDebug(httpEx, "NZBGet authentication failed for client {ClientId}", LogRedaction.SanitizeText(client.Id ?? client.Name ?? client.Type));
+                return (false, "NZBGet: Authentication failed (check username/password)");
+            }
+            catch (HttpRequestException httpEx)
+            {
+                _logger.LogDebug(httpEx, "NZBGet network error for client {ClientId}", LogRedaction.SanitizeText(client.Id ?? client.Name ?? client.Type));
+                return (false, $"NZBGet: network error ({httpEx.StatusCode?.ToString() ?? "unavailable"})");
+            }
+            catch (TaskCanceledException tce)
+            {
+                _logger.LogDebug(tce, "NZBGet test timed out for client {ClientId}", LogRedaction.SanitizeText(client.Id ?? client.Name ?? client.Type));
+                return (false, "NZBGet: connection timed out");
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogDebug(ex, "NZBGet test failed for client {ClientId}", LogRedaction.SanitizeText(client.Id ?? client.Name ?? client.Type));
-                return (false, ex.Message);
+                return (false, "NZBGet: connection failed");
             }
         }
 
@@ -237,8 +252,7 @@ namespace Listenarr.Api.Services.Adapters
                 // Return the NZBID so it can be stored and used for removal later
                 return queueId.ToString();
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Failed to add NZB via XML-RPC");
                 throw;
             }
@@ -333,8 +347,7 @@ namespace Listenarr.Api.Services.Adapters
                         }
                     }
                 }
-                catch (Exception histEx)
-                {
+                catch (Exception histEx) when (histEx is not OperationCanceledException && histEx is not OutOfMemoryException && histEx is not StackOverflowException) {
                     _logger.LogDebug(histEx, "Failed to search NZBGet history for download {Id}", LogRedaction.SanitizeText(id));
                 }
             }
@@ -357,8 +370,7 @@ namespace Listenarr.Api.Services.Adapters
                     return true;
                 }
             }
-            catch (Exception histEx)
-            {
+            catch (Exception histEx) when (histEx is not OperationCanceledException && histEx is not OutOfMemoryException && histEx is not StackOverflowException) {
                 _logger.LogDebug(histEx, "Could not remove {Id} from NZBGet history (may not be in history)", LogRedaction.SanitizeText(id));
             }
 
@@ -378,8 +390,7 @@ namespace Listenarr.Api.Services.Adapters
                 _logger.LogWarning("NZBGet reported failure when removing {Id} from both history and queue", LogRedaction.SanitizeText(id));
                 return false;
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error removing NZB {Id} from NZBGet", LogRedaction.SanitizeText(id));
                 return false;
             }
@@ -411,14 +422,12 @@ namespace Listenarr.Api.Services.Adapters
                             items.Add(queueItem);
                         }
                     }
-                    catch (Exception ex)
-                    {
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                         _logger.LogDebug(ex, "Failed to map NZBGet queue item (non-fatal)");
                     }
                 }
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogWarning(ex, "Failed to retrieve NZBGet queue for client {ClientName}", LogRedaction.SanitizeText(client.Name ?? client.Id));
             }
 
@@ -464,12 +473,212 @@ namespace Listenarr.Api.Services.Adapters
                     }
                 }
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogDebug(ex, "Failed to fetch NZBGet history for client {ClientName}", LogRedaction.SanitizeText(client.Name ?? client.Id));
             }
 
             return history;
+        }
+
+        /// <summary>
+        /// Get all downloads as standardized DownloadClientItem objects
+        /// </summary>
+        public async Task<List<DownloadClientItem>> GetItemsAsync(DownloadClientConfiguration client, CancellationToken ct = default)
+        {
+            var items = new List<DownloadClientItem>();
+            if (client == null) return items;
+
+            try
+            {
+                var listResult = await CallXmlRpcAsync(client, "listgroups");
+                var arrayData = listResult.Element("array")?.Element("data");
+                
+                if (arrayData == null)
+                {
+                    return items;
+                }
+
+                foreach (var valueElement in arrayData.Elements("value"))
+                {
+                    try
+                    {
+                        var structElement = valueElement.Element("struct");
+                        if (structElement != null)
+                        {
+                            var downloadClientItem = await MapGroupToDownloadClientItemAsync(client, structElement);
+                            items.Add(downloadClientItem);
+                        }
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+                        _logger.LogDebug(ex, "Failed to map NZBGet queue item (non-fatal)");
+                    }
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+                _logger.LogWarning(ex, "Failed to retrieve NZBGet items for client {ClientName}", LogRedaction.SanitizeText(client.Name ?? client.Id));
+            }
+
+            return items;
+        }
+
+        /// <summary>
+        /// Get import item from DownloadClientItem
+        /// </summary>
+        public async Task<DownloadClientItem> GetImportItemAsync(
+            DownloadClientConfiguration client,
+            DownloadClientItem item,
+            DownloadClientItem? previousAttempt = null,
+            CancellationToken ct = default)
+        {
+            // Clone to avoid mutating the original
+            var result = item.Clone();
+
+            // If OutputPath is already set and exists, use it
+            if (!string.IsNullOrEmpty(result.OutputPath))
+            {
+                var localPath = await _pathMappingService.TranslatePathAsync(client.Id, result.OutputPath);
+                if (!string.IsNullOrEmpty(localPath) && (File.Exists(localPath) || Directory.Exists(localPath)))
+                {
+                    result.OutputPath = localPath;
+                    return result;
+                }
+            }
+
+            try
+            {
+                // Query NZBGet history for the download
+                var historyResult = await CallXmlRpcAsync(client, "history", false);
+                var arrayData = historyResult.Element("array")?.Element("data");
+                
+                if (arrayData == null)
+                {
+                    _logger.LogWarning("Invalid NZBGet history response format");
+                    return result;
+                }
+
+                // Find matching history entry by ID
+                foreach (var valueElement in arrayData.Elements("value"))
+                {
+                    var structElement = valueElement.Element("struct");
+                    if (structElement == null) continue;
+
+                    var members = structElement.Elements("member").ToDictionary(
+                        m => m.Element("name")?.Value ?? string.Empty,
+                        m => m.Element("value")?.Elements().FirstOrDefault()?.Value ?? string.Empty
+                    );
+
+                    var entryId = members.GetValueOrDefault("ID", string.Empty);
+                    if (!string.Equals(entryId, item.DownloadId, StringComparison.OrdinalIgnoreCase)) continue;
+
+                    // Extract destination directory
+                    var destDir = members.GetValueOrDefault("DestDir", string.Empty);
+                    if (string.IsNullOrEmpty(destDir))
+                    {
+                        _logger.LogWarning("No DestDir found for NZBGet download {Id}", item.DownloadId);
+                        return result;
+                    }
+
+                    // Apply path mapping
+                    var localContentPath = await _pathMappingService.TranslatePathAsync(client.Id, destDir);
+                    result.OutputPath = localContentPath;
+
+                    _logger.LogDebug(
+                        "Resolved NZBGet content path for {Id}: {ContentPath}",
+                        item.DownloadId,
+                        localContentPath);
+
+                    return result;
+                }
+
+                _logger.LogWarning("Download {Id} not found in NZBGet history", item.DownloadId);
+                return result;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+                _logger.LogWarning(ex, "Error resolving import item for NZBGet download {Id}", item.DownloadId);
+                return result;
+            }
+        }
+
+        private async Task<DownloadClientItem> MapGroupToDownloadClientItemAsync(DownloadClientConfiguration client, XElement structElement)
+        {
+            var members = structElement.Elements("member").ToDictionary(
+                m => m.Element("name")?.Value ?? string.Empty,
+                m => m.Element("value")?.Elements().FirstOrDefault()?.Value ?? string.Empty
+            ) as IReadOnlyDictionary<string, string?>;
+            
+            var id = members.GetValueOrDefault("GroupID", null)
+                ?? members.GetValueOrDefault("LastID", null)
+                ?? Guid.NewGuid().ToString("N");
+
+            var title = members.GetValueOrDefault("NZBName", string.Empty);
+            var statusRaw = members.GetValueOrDefault("Status", string.Empty);
+            var category = members.GetValueOrDefault("Category", string.Empty);
+            var sizeMb = double.TryParse(members.GetValueOrDefault("FileSizeMB", "0"), NumberStyles.Any, CultureInfo.InvariantCulture, out var sm) ? sm : 0d;
+            var remainingMb = double.TryParse(members.GetValueOrDefault("RemainingSizeMB", "0"), NumberStyles.Any, CultureInfo.InvariantCulture, out var rm) ? rm : 0d;
+            var downloadRate = double.TryParse(members.GetValueOrDefault("DownloadRate", "0"), NumberStyles.Any, CultureInfo.InvariantCulture, out var dr) ? dr : 0d;
+            var destDir = members.GetValueOrDefault("DestDir", string.Empty);
+
+            var sizeBytes = Convert.ToInt64(Math.Max(0, sizeMb) * 1024 * 1024);
+            var remainingBytes = Convert.ToInt64(Math.Max(0, remainingMb) * 1024 * 1024);
+
+            TimeSpan? remainingTime = null;
+            if (downloadRate > 0 && remainingMb > 0)
+            {
+                var remainingBytesExact = remainingMb * 1024 * 1024;
+                var etaSeconds = (int)Math.Max(0, remainingBytesExact / downloadRate);
+                remainingTime = TimeSpan.FromSeconds(etaSeconds);
+            }
+
+            // Map NZBGet status to DownloadItemStatus
+            var status = (statusRaw ?? "QUEUED").ToUpperInvariant() switch
+            {
+                "QUEUED" => DownloadItemStatus.Queued,
+                "DOWNLOADING" => DownloadItemStatus.Downloading,
+                "PAUSED" => DownloadItemStatus.Paused,
+                "FETCHING" => DownloadItemStatus.Downloading,
+                "SCANNING" => DownloadItemStatus.Downloading,
+                "PP_QUEUED" => DownloadItemStatus.Downloading,
+                "PP_PROCESSING" => DownloadItemStatus.Downloading,
+                "SUCCESS" => DownloadItemStatus.Completed,
+                "FAILURE" => DownloadItemStatus.Failed,
+                _ => DownloadItemStatus.Queued
+            };
+
+            // For NZBGet, construct OutputPath from destDir + title
+            var contentPath = !string.IsNullOrEmpty(destDir) && !string.IsNullOrEmpty(title)
+                ? CombineWithOptionalBase(destDir, title)
+                : (destDir ?? string.Empty);
+            var localContentPath = !string.IsNullOrEmpty(contentPath)
+                ? await _pathMappingService.TranslatePathAsync(client.Id, contentPath)
+                : (contentPath ?? string.Empty);
+
+            var progress = sizeMb > 0 ? Math.Clamp((sizeMb - remainingMb) / sizeMb * 100, 0, 100) : 0;
+
+            return new DownloadClientItem
+            {
+                DownloadId = id.ToUpperInvariant(),
+                Title = title ?? string.Empty,
+                Category = category ?? string.Empty,
+                Status = status,
+                TotalSize = sizeBytes,
+                RemainingSize = remainingBytes,
+                RemainingTime = remainingTime,
+                OutputPath = localContentPath ?? string.Empty,
+                Message = statusRaw ?? "QUEUED",
+                Progress = progress,
+                DownloadSpeed = downloadRate,
+                CanBeRemoved = true,
+                CanMoveFiles = status == DownloadItemStatus.Completed,
+                DownloadClientInfo = DownloadClientItemClientInfo.FromClient(
+                    clientId: client.Id,
+                    clientName: client.Name,
+                    clientType: "nzbget",
+                    protocol: DownloadProtocol.Usenet,
+                    removeCompletedDownloads: client.Settings?.TryGetValue("removeCompletedDownloads", out var removeVal) == true && 
+                                             (removeVal is bool boolVal && boolVal),
+                    hasPostImportCategory: !string.IsNullOrEmpty(client.Settings?.GetValueOrDefault("postImportCategory")?.ToString())
+                )
+            };
         }
 
         private QueueItem MapGroup(DownloadClientConfiguration client, XElement structElement)
@@ -523,15 +732,14 @@ namespace Listenarr.Api.Services.Adapters
                 {
                     localPath = _pathMappingService.TranslatePathAsync(client.Id, destDir).GetAwaiter().GetResult();
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogDebug(ex, "Failed to translate NZBGet path '{Path}' for client {ClientName}", LogRedaction.SanitizeFilePath(destDir), LogRedaction.SanitizeText(client.Name ?? client.Id));
                 }
             }
 
             // For NZBGet, construct ContentPath from destDir + title
             var contentPath = !string.IsNullOrEmpty(destDir) && !string.IsNullOrEmpty(title)
-                ? Path.Combine(destDir, title)
+                ? CombineWithOptionalBase(destDir, title)
                 : destDir;
             var localContentPath = !string.IsNullOrEmpty(contentPath)
                 ? _pathMappingService.TranslatePathAsync(client.Id, contentPath).GetAwaiter().GetResult()
@@ -767,8 +975,7 @@ namespace Listenarr.Api.Services.Adapters
                 
                 return contentBytes;
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Failed to download NZB content from {Url}", LogRedaction.SanitizeUrl(nzbUrl));
                 throw new InvalidOperationException($"Unable to retrieve NZB content from {nzbUrl}");
             }
@@ -798,7 +1005,7 @@ namespace Listenarr.Api.Services.Adapters
         /// <summary>
         /// Resolves the actual import item for a completed download.
         /// Queries NZBGet history for FinalDir or DestDir.
-        /// EXACTLY matches Sonarr's NzbGet.GetImportItem pattern.
+        /// Matches NzbGet.GetImportItem pattern.
         /// </summary>
         public async Task<QueueItem> GetImportItemAsync(
             DownloadClientConfiguration client,
@@ -874,11 +1081,37 @@ namespace Listenarr.Api.Services.Adapters
                 _logger.LogWarning("Download {NzbId} not found in NZBGet history", queueItem.Id);
                 return result;
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogWarning(ex, "Error resolving import item for NZBGet download {NzbId}", queueItem.Id);
                 return result;
             }
         }
+
+        private static string CombineWithOptionalBase(string? basePath, string candidatePath)
+        {
+            var normalizedPath = candidatePath.Trim();
+
+            if (string.IsNullOrEmpty(normalizedPath))
+            {
+                return normalizedPath;
+            }
+
+            if (Path.IsPathRooted(normalizedPath) || string.IsNullOrWhiteSpace(basePath))
+            {
+                return normalizedPath;
+            }
+
+            var relativePath = normalizedPath.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (Path.IsPathRooted(relativePath))
+            {
+                return relativePath;
+            }
+
+            var normalizedBasePath = basePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            return string.IsNullOrEmpty(normalizedBasePath)
+                ? relativePath
+                : normalizedBasePath + Path.DirectorySeparatorChar + relativePath;
+        }
     }
 }
+

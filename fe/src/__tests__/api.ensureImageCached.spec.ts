@@ -39,7 +39,7 @@ describe('ApiService.ensureImageCached metadata flow', () => {
     // Assert
     expect(ok).toBe(true)
     expect(svc.getAudimetaMetadata).toHaveBeenCalledWith('ASIN000001', 'us', true)
-    expect((globalThis.fetch as unknown as vi.Mock).mock.calls.some((c) => String(c[0]).includes('audimeta.covers'))).toBe(true)
+    expect((globalThis.fetch as unknown as any).mock.calls.some((c) => String(c[0]).includes('audimeta.covers'))).toBe(true)
   })
 
   it('falls back to metadata (Audnexus) when Audimeta returns nothing', async () => {
@@ -64,7 +64,7 @@ describe('ApiService.ensureImageCached metadata flow', () => {
     expect(ok).toBe(true)
     expect(svc.getAudimetaMetadata).toHaveBeenCalled()
     expect(svc.getMetadata).toHaveBeenCalledWith('ASIN000002', 'us', true)
-    expect((globalThis.fetch as unknown as vi.Mock).mock.calls.some((c) => String(c[0]).includes('audnexus.covers'))).toBe(true)
+    expect((globalThis.fetch as unknown as any).mock.calls.some((c) => String(c[0]).includes('audnexus.covers'))).toBe(true)
   })
 
   it('uses cached candidate urls and avoids repeated metadata lookups', async () => {

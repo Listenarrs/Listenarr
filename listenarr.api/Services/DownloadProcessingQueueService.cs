@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2025 Robbie Davis
  * 
@@ -98,8 +98,7 @@ namespace Listenarr.Api.Services
                     _logger.LogDebug("Published job {JobId} to in-memory processing channel", job.Id);
                 }
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 // Do not fail the enqueue operation if the channel publish fails; log for diagnostics.
                 _logger.LogWarning(ex, "Failed to publish job {JobId} to processing channel", job.Id);
             }
@@ -219,3 +218,4 @@ namespace Listenarr.Api.Services
         }
     }
 }
+

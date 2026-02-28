@@ -9,7 +9,7 @@ class SessionTokenManager {
 
   constructor() {
     this.loadFromStorage()
-    // Listen for storage events from other tabs/windows
+    // Keep a listener for legacy localStorage migration scenarios.
     if (typeof window !== 'undefined' && window.addEventListener) {
       window.addEventListener('storage', this.handleStorageEvent)
     }
@@ -17,7 +17,22 @@ class SessionTokenManager {
 
   private loadFromStorage(): void {
     try {
-      this.token = localStorage.getItem(SessionTokenManager.STORAGE_KEY)
+      const sessionToken = sessionStorage.getItem(SessionTokenManager.STORAGE_KEY)
+      if (sessionToken) {
+        this.token = sessionToken
+        return
+      }
+
+      // One-time migration from older localStorage persistence.
+      const legacyToken = localStorage.getItem(SessionTokenManager.STORAGE_KEY)
+      if (legacyToken) {
+        this.token = legacyToken
+        sessionStorage.setItem(SessionTokenManager.STORAGE_KEY, legacyToken)
+        localStorage.removeItem(SessionTokenManager.STORAGE_KEY)
+        return
+      }
+
+      this.token = null
     } catch {
       this.token = null
     }
@@ -31,8 +46,10 @@ class SessionTokenManager {
     this.token = token
     try {
       if (token) {
-        localStorage.setItem(SessionTokenManager.STORAGE_KEY, token)
+        sessionStorage.setItem(SessionTokenManager.STORAGE_KEY, token)
+        localStorage.removeItem(SessionTokenManager.STORAGE_KEY)
       } else {
+        sessionStorage.removeItem(SessionTokenManager.STORAGE_KEY)
         localStorage.removeItem(SessionTokenManager.STORAGE_KEY)
       }
     } catch {
@@ -52,7 +69,7 @@ class SessionTokenManager {
     return !!this.token
   }
 
-  // Subscribe to token changes (including cross-tab storage events)
+  // Subscribe to token changes.
   onTokenChange(cb: (token: string | null) => void): () => void {
     this.subscribers.add(cb)
     // Call immediately with current value so subscribers have initial state

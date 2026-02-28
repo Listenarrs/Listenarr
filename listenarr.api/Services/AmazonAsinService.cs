@@ -85,8 +85,7 @@ namespace Listenarr.Api.Services
 
                 return (false, null, "ASIN not found for ISBN");
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Failed to resolve ASIN from ISBN {Isbn}", isbn);
                 return (false, null, "Lookup failed");
             }
@@ -116,47 +115,28 @@ namespace Listenarr.Api.Services
                         using var retryReq = new HttpRequestMessage(HttpMethod.Get, usUrl);
                         foreach (var h in req.Headers)
                             retryReq.Headers.TryAddWithoutValidation(h.Key, h.Value);
-                        HttpClient? usClient = null;
-                        try
-                        {
-                            var appSettings = await _configurationService.GetApplicationSettingsAsync();
-                            if (appSettings != null && appSettings.UseUsProxy && !string.IsNullOrWhiteSpace(appSettings.UsProxyHost) && appSettings.UsProxyPort > 0)
+                            HttpClient? usClient = null;
+                            try
                             {
-                                var handler = new HttpClientHandler
+                                // Always prefer a named "us" client if available, otherwise use the default client.
+                                usClient = _httpClientFactory != null ? _httpClientFactory.CreateClient("us") : _httpClient;
+                                var retryResp = await usClient.SendAsync(retryReq, ct);
+                                if (retryResp.IsSuccessStatusCode)
+                                    return await retryResp.Content.ReadAsStringAsync(ct);
+                            }
+                            finally
+                            {
+                                // Dispose only if we created a dedicated client here (unlikely when using factory)
+                                if (usClient != null && usClient != _httpClient && (_httpClientFactory == null || usClient != _httpClientFactory.CreateClient("us")))
                                 {
-                                    AutomaticDecompression = DecompressionMethods.All
-                                };
-                                var proxy = new WebProxy(appSettings.UsProxyHost, appSettings.UsProxyPort);
-                                if (!string.IsNullOrWhiteSpace(appSettings.UsProxyUsername))
-                                    proxy.Credentials = new NetworkCredential(appSettings.UsProxyUsername, appSettings.UsProxyPassword ?? string.Empty);
-                                handler.Proxy = proxy;
-                                handler.UseProxy = true;
-                                usClient = new HttpClient(handler, disposeHandler: true);
+                                    try { usClient.Dispose(); } catch (Exception caughtEx_1) when (caughtEx_1 is not OperationCanceledException && caughtEx_1 is not OutOfMemoryException && caughtEx_1 is not StackOverflowException) { 
+                                        System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                                    }
+                                }
                             }
-                            else if (_httpClientFactory != null)
-                            {
-                                usClient = _httpClientFactory.CreateClient("us");
-                            }
-                            else
-                            {
-                                usClient = _httpClient;
-                            }
-
-                            var retryResp = await usClient.SendAsync(retryReq, ct);
-                            if (retryResp.IsSuccessStatusCode)
-                                return await retryResp.Content.ReadAsStringAsync(ct);
-                        }
-                        finally
-                        {
-                            if (usClient != null && usClient != _httpClient && (_httpClientFactory == null || usClient != _httpClientFactory.CreateClient("us")))
-                            {
-                                try { usClient.Dispose(); } catch { }
-                            }
-                        }
                     }
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogDebug(ex, "Failed retrying Amazon URL as US domain");
                 }
             }
@@ -174,8 +154,7 @@ namespace Listenarr.Api.Services
                     return true;
                 return false;
             }
-            catch
-            {
+            catch (Exception caughtEx_2) when (caughtEx_2 is not OperationCanceledException && caughtEx_2 is not OutOfMemoryException && caughtEx_2 is not StackOverflowException) {
                 return false;
             }
         }
@@ -196,8 +175,7 @@ namespace Listenarr.Api.Services
                 }
                 return url;
             }
-            catch
-            {
+            catch (Exception caughtEx_3) when (caughtEx_3 is not OperationCanceledException && caughtEx_3 is not OutOfMemoryException && caughtEx_3 is not StackOverflowException) {
                 return url;
             }
         }
@@ -257,16 +235,15 @@ namespace Listenarr.Api.Services
                             return (true, true);
                     }
                 }
-                catch
-                {
+                catch (Exception caughtEx_4) when (caughtEx_4 is not OperationCanceledException && caughtEx_4 is not OutOfMemoryException && caughtEx_4 is not StackOverflowException) {
                     // ignore parsing errors and fall through to partial success
+                                    System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
                 }
 
                 // At least we loaded a product page, consider it a partial success (but not matching ISBN)
                 return (true, false);
             }
-            catch
-            {
+            catch (Exception caughtEx_5) when (caughtEx_5 is not OperationCanceledException && caughtEx_5 is not OutOfMemoryException && caughtEx_5 is not StackOverflowException) {
                 return (false, false);
             }
         }
@@ -305,11 +282,11 @@ namespace Listenarr.Api.Services
                 var verified = await TryVerifyAsinAsync(asin, isbn, ct);
                 return (verified.Success, verified.MatchesIsbn, null);
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogDebug(ex, "VerifyAsinContainsIsbnAsync failed for {Asin}", asin);
                 return (false, false, ex.Message);
             }
         }
     }
 }
+

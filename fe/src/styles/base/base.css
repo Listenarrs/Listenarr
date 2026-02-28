@@ -1,0 +1,281 @@
+/* color palette from <https://github.com/vuejs/theme> */
+:root {
+  --vt-c-white: #ffffff;
+  --vt-c-white-soft: #f8f8f8;
+  --vt-c-white-mute: #f2f2f2;
+
+  --vt-c-black: #181818;
+  --vt-c-black-soft: #222222;
+  --vt-c-black-mute: #282828;
+
+  --vt-c-indigo: #2c3e50;
+
+  --vt-c-divider-light-1: rgba(60, 60, 60, 0.29);
+  --vt-c-divider-light-2: rgba(60, 60, 60, 0.12);
+  --vt-c-divider-dark-1: rgba(84, 84, 84, 0.65);
+  --vt-c-divider-dark-2: rgba(84, 84, 84, 0.48);
+
+  --vt-c-text-light-1: var(--vt-c-indigo);
+  --vt-c-text-light-2: rgba(60, 60, 60, 0.66);
+  --vt-c-text-dark-1: var(--vt-c-white);
+  --vt-c-text-dark-2: rgba(235, 235, 235, 0.64);
+}
+
+/* semantic color variables for this project */
+:root {
+  --color-background: var(--vt-c-white);
+  --color-background-soft: var(--vt-c-white-soft);
+  --color-background-mute: var(--vt-c-white-mute);
+
+  --color-border: var(--vt-c-divider-light-2);
+  --color-border-hover: var(--vt-c-divider-light-1);
+
+  --color-heading: var(--vt-c-text-light-1);
+  --color-text: var(--vt-c-text-light-1);
+
+  --section-gap: 160px;
+
+  /* App-level aliases (keeps older/legacy view vars working) */
+  --primary-color: var(--brand-500); /* legacy alias */
+  --brand-50: #e3f2fd;
+  --brand-100: #bbdefb;
+  --brand-200: #90caf9;
+  --brand-300: #64b5f6;
+  --brand-400: #42a5f5;
+  --brand-500: #2196f3; /* Listenarr primary */
+  --brand-600: #1976d2;
+  --brand-700: #0d47a1;
+  --brand-focus: var(--brand-600);
+  --brand-rgb: 33,150,243; /* for rgba usages */
+
+  /* Status Colors */
+  --success-500: #51cf66;
+  --success-600: #40c057;
+  --danger-500: #ff6b6b;
+  --danger-600: #e74c3c;
+  --warning-500: #ffa500;
+  --warning-600: #ff8c00;
+  --info-500: #74c0fc;
+  --info-600: #4dabf7;
+
+  /* Neutral Colors */
+  --gray-50: #f9fafb;
+  --gray-100: #f3f4f6;
+  --gray-200: #e5e7eb;
+  --gray-300: #d1d5db;
+  --gray-400: #9ca3af;
+  --gray-500: #6b7280;
+  --gray-600: #4b5563;
+  --gray-700: #374151;
+  --gray-800: #1f2937;
+  --gray-900: #111827;
+
+  /* Semantic Backgrounds */
+  --bg-primary: #0f0f0f;
+  --bg-secondary: #1a1a1a;
+  --bg-tertiary: #2a2a2a;
+  --bg-surface: #3a3a3a;
+
+  /* Typography */
+  --text-primary: #ffffff;
+  --text-secondary: #cccccc;
+  --text-muted: #999999;
+  --text-disabled: #666666;
+
+  /* Spacing Scale */
+  --spacing-xs: 0.25rem;
+  --spacing-sm: 0.5rem;
+  --spacing-md: 1rem;
+  --spacing-lg: 1.5rem;
+  --spacing-xl: 2rem;
+  --spacing-2xl: 3rem;
+
+  /* Size Scale */
+  --size-xs: 32px;
+  --size-sm: 40px;
+  --size-md: 44px;
+  --size-lg: 48px;
+  --size-xl: 56px;
+
+  /* Radius Scale */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-full: 9999px;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
+  --shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.1);
+
+  /* Transitions */
+  --transition-fast: 0.12s ease;
+  --transition-normal: 0.2s ease;
+  --transition-slow: 0.3s ease;
+
+  /* Toast semantic color variables (can be overridden by theming) */
+  --toast-info-bg: var(--brand-600, #1976d2);
+  --toast-info-accent: var(--brand-700, #125ea8);
+
+  --toast-success-bg: #28a745;
+  --toast-success-accent: #1e7e34;
+
+  --toast-warning-bg: #856404;
+  --toast-warning-accent: #6d5103;
+
+  --toast-error-bg: #e74c3c;
+  --toast-error-accent: #c0392b;
+
+  --card-bg: var(--color-background-soft);
+  --border-color: var(--color-border);
+  --text-color: var(--color-text);
+  --text-muted: rgba(0, 0, 0, 0.6);
+  --button-bg: var(--card-bg);
+  --button-hover-bg: var(--color-background-mute);
+  --input-bg: var(--color-background);
+  --selected-bg: rgba(var(--brand-rgb), 0.06);
+  --muted-bg: var(--color-background-mute);
+
+  /* layout & control sizing */
+  --control-height: 40px;
+  --control-padding: 0.75rem 1rem;
+  --btn-radius: 8px;
+  --focus-ring: 0 0 0 3px rgba(var(--brand-rgb), 0.12);
+
+  /* Material 3 (M3) color system tokens (light theme) */
+  --md-sys-color-primary: #1976d2; /* uses brand-600 */
+  --md-sys-color-on-primary: #ffffff;
+  --md-sys-color-primary-container: #dbe9ff;
+  --md-sys-color-on-primary-container: #001b33;
+
+  --md-sys-color-secondary: #5b6f91; /* muted companion */
+  --md-sys-color-on-secondary: #ffffff;
+  --md-sys-color-secondary-container: #e9eefb;
+  --md-sys-color-on-secondary-container: #07122a;
+
+  --md-sys-color-tertiary: #6b5db2; /* accent/tertiary */
+  --md-sys-color-on-tertiary: #ffffff;
+  --md-sys-color-tertiary-container: #efe9ff;
+  --md-sys-color-on-tertiary-container: #24143f;
+
+  --md-sys-color-error: #b00020;
+  --md-sys-color-on-error: #ffffff;
+  --md-sys-color-error-container: #ffd8db;
+  --md-sys-color-on-error-container: #410002;
+
+  --md-sys-color-background: var(--color-background);
+  --md-sys-color-on-background: var(--color-text);
+  --md-sys-color-surface: var(--card-bg);
+  --md-sys-color-on-surface: var(--text-color);
+  --md-sys-color-surface-variant: #e7e0ec;
+  --md-sys-color-on-surface-variant: #191b1e;
+  --md-sys-color-outline: rgba(0,0,0,0.12);
+  --md-sys-color-shadow: rgba(0,0,0,0.4);
+  --md-sys-color-inverse-surface: #2f3033;
+  --md-sys-color-inverse-on-surface: #f6f7f8;
+  --md-sys-color-inverse-primary: #9ccaff;
+
+  /* NOTE: For an accurate M3 tonal palette (dynamic color roles) generate full tonal palettes
+     using Google's material-color-utilities and derive these tokens from the generated palettes.
+     Example script (node):
+
+     npm i @material/material-color-utilities
+
+     // generate-tonal-palettes.js
+     const { tonalPaletteFromHex } = require('@material/material-color-utilities').palettes;
+     const fs = require('fs');
+     const brand = '#2196f3';
+     const palette = tonalPaletteFromHex(brand).asList();
+     // palette[40] ... map to tokens (see M3 spec)
+     fs.writeFileSync('m3-palette.json', JSON.stringify(palette, null, 2));
+
+     Then map the tones to --md-sys-color-* tokens and add to CSS. This ensures WCAG-validated contrast.
+  */
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-background: var(--vt-c-black);
+    --color-background-soft: var(--vt-c-black-soft);
+    --color-background-mute: var(--vt-c-black-mute);
+
+    --color-border: var(--vt-c-divider-dark-2);
+    --color-border-hover: var(--vt-c-divider-dark-1);
+
+    --color-heading: var(--vt-c-text-dark-1);
+    --color-text: var(--vt-c-text-dark-2);
+
+    /* Dark mode overrides for aliases */
+    --text-muted: rgba(255, 255, 255, 0.64);
+    --selected-bg: rgba(33, 150, 243, 0.12);
+    --button-hover-bg: rgba(255, 255, 255, 0.03);
+
+    /* Material 3 (M3) color system tokens (dark theme) */
+    --md-sys-color-primary: #8cc2ff;
+    --md-sys-color-on-primary: #002e50;
+    --md-sys-color-primary-container: #004a88;
+    --md-sys-color-on-primary-container: #d8eeff;
+
+    --md-sys-color-secondary: #b1c2ea;
+    --md-sys-color-on-secondary: #07203a;
+    --md-sys-color-secondary-container: #1d2e44;
+    --md-sys-color-on-secondary-container: #dfe9ff;
+
+    --md-sys-color-tertiary: #c9b9ff;
+    --md-sys-color-on-tertiary: #22143f;
+    --md-sys-color-tertiary-container: #392a58;
+    --md-sys-color-on-tertiary-container: #efe6ff;
+
+    --md-sys-color-error: #ffb4ab;
+    --md-sys-color-on-error: #690005;
+    --md-sys-color-error-container: #93000a;
+    --md-sys-color-on-error-container: #ffd8d8;
+
+    --md-sys-color-background: var(--color-background);
+    --md-sys-color-on-background: var(--color-text);
+    --md-sys-color-surface: var(--card-bg);
+    --md-sys-color-on-surface: var(--text-color);
+    --md-sys-color-surface-variant: #2b2a31;
+    --md-sys-color-on-surface-variant: #d6d4db;
+    --md-sys-color-outline: rgba(255,255,255,0.08);
+    --md-sys-color-shadow: rgba(0,0,0,0.8);
+    --md-sys-color-inverse-surface: #f6f7f8;
+    --md-sys-color-inverse-on-surface: #141414;
+    --md-sys-color-inverse-primary: #175ecb;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  font-weight: normal;
+}
+
+body {
+  color: var(--color-text);
+  background: var(--color-background);
+  transition:
+    color 0.5s,
+    background-color 0.5s;
+  line-height: 1.6;
+  font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
+    Oxygen,
+    Ubuntu,
+    Cantarell,
+    'Fira Sans',
+    'Droid Sans',
+    'Helvetica Neue',
+    sans-serif;
+  font-size: 15px;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}

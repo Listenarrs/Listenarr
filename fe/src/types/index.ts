@@ -11,6 +11,27 @@ export interface BaseSearchResult {
   score?: number
 }
 
+export interface OpenLibraryBook {
+  key: string
+  title: string
+  // OpenLibrary sometimes returns `author_name` as an array, other times a single string
+  author_name?: string[] | string
+  author_key?: string[]
+  first_publish_year?: number
+  isbn?: string[]
+  edition_key?: string[]
+  cover_edition_key?: string
+  publisher?: string[]
+  cover_i?: number
+  edition_count?: number
+  language?: string[]
+  subject?: string[]
+  ebook_access?: 'public' | 'borrowable' | 'printdisabled' | 'no_ebook'
+  has_fulltext?: boolean
+  public_scan_b?: boolean
+  seriesList?: string[]
+}
+
 export interface IndexerSearchResult extends BaseSearchResult {
   size: number
   seeders?: number
@@ -32,9 +53,11 @@ export interface MetadataSearchResult extends BaseSearchResult {
   narrator?: string
   imageUrl?: string
   asin?: string
+  isbn?: string
   series?: string
   seriesNumber?: string
   seriesList?: string[]
+  genres?: string[] // Genres from metadata sources (e.g., Audimeta)
   productUrl?: string // Direct link to Amazon/Audible product page
   isEnriched?: boolean
   metadataSource?: string // Which metadata API enriched this result
@@ -78,6 +101,7 @@ export interface SearchResult extends BaseSearchResult {
   series?: string
   seriesNumber?: string
   seriesList?: string[]
+  genres?: string[] // Genres from metadata sources (e.g., Audimeta)
   productUrl?: string // Direct link to Amazon/Audible product page
   isEnriched?: boolean
   metadataSource?: string // Which metadata API enriched this result
@@ -168,6 +192,8 @@ export interface DownloadClientConfiguration {
   removeCompletedDownloads?: string // "none", "remove", "remove_and_delete"
   // Client-specific settings. Use `DownloadClientSettings` for typed access
   settings: DownloadClientSettings
+  // Optional persisted last test result (true = success, false = failure)
+  lastTestSuccessful?: boolean
 }
 
 export interface DownloadClientSettings {
@@ -220,7 +246,9 @@ export interface TranslatePathResponse {
 
 export interface ApplicationSettings {
   outputPath: string
+  folderNamingPattern: string
   fileNamingPattern: string
+  multiFileNamingPattern: string
   enableMetadataProcessing: boolean
   enableCoverArtDownload: boolean
   audnexusApiUrl: string
@@ -237,17 +265,12 @@ export interface ApplicationSettings {
   completedFileAction?: 'Move' | 'Copy'
   // Show completed external downloads (torrents/NZBs) in the Activity view
   showCompletedExternalDownloads?: boolean
+  // Failed download handling
+  failedDownloadHandlingEnabled?: boolean
+  failedDownloadAutoSearch?: boolean
   // Optional admin credentials used when saving settings to create/update an initial admin user
   adminUsername?: string
   adminPassword?: string
-
-  // External requests / proxy settings
-  preferUsDomain?: boolean
-  useUsProxy?: boolean
-  usProxyHost?: string
-  usProxyPort?: number
-  usProxyUsername?: string
-  usProxyPassword?: string
 
   // Notification settings
   webhookUrl?: string
@@ -278,18 +301,8 @@ export interface ApplicationSettings {
   discordBotAvatar?: string
 
   // Search behavior settings
-  // Toggle whether to include Amazon/Audible provider searches when performing intelligent search
-  enableAmazonSearch?: boolean
-  enableAudibleSearch?: boolean
   // Enable OpenLibrary augmentation/search
   enableOpenLibrarySearch?: boolean
-  // Limits and scoring thresholds used during search
-  // Maximum number of candidate ASINs to consider (candidateLimit)
-  searchCandidateCap?: number
-  // Maximum number of results to return to the UI (returnLimit)
-  searchResultCap?: number
-  // Fuzzy matching threshold used when comparing titles/authors (0.0 - 1.0)
-  searchFuzzyThreshold?: number
 }
 
 export interface StartupConfig {
@@ -308,6 +321,8 @@ export interface StartupConfig {
   syslogPort?: number
   analyticsEnabled?: boolean
   authenticationRequired?: string | boolean
+  // PascalCase variant is accepted for compatibility with some server responses
+  AuthenticationRequired?: string | boolean
   sslCertPath?: string
   sslCertPassword?: string
 }
@@ -316,8 +331,8 @@ export interface AudibleBookMetadata {
   title: string
   subtitle?: string
   authors: string[]
-  publishYear?: string
   publishedDate?: string
+  publishYear?: string
   series?: string
   seriesNumber?: string
   seriesList?: string[]
@@ -343,11 +358,35 @@ export interface AudibleBookMetadata {
   qualityProfileId?: number
 }
 
+export type AudiobookExternalIdentifierType = 'Asin' | 'Isbn' | 'OpenLibraryId'
+export type AudiobookExternalIdentifierSource = 'Provider' | 'Imported' | 'Manual'
+
+export interface AudiobookExternalIdentifier {
+  id: number
+  type: AudiobookExternalIdentifierType
+  value: string
+  valueNormalized: string
+  region?: string | null
+  isPrimary: boolean
+  source: AudiobookExternalIdentifierSource
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface AudiobookExternalIdentifierInput {
+  type: AudiobookExternalIdentifierType
+  value: string
+  region?: string | null
+  isPrimary?: boolean
+  source?: AudiobookExternalIdentifierSource
+}
+
 export interface Audiobook {
   id: number
   title: string
   subtitle?: string
   authors?: string[]
+  publishedDate?: string
   publishYear?: string
   series?: string
   seriesNumber?: string
@@ -387,6 +426,9 @@ export interface Audiobook {
   qualityProfileId?: number
   // Optional list of author ASINs (populated by backend when available)
   authorAsins?: string[]
+  identifiers?: AudiobookExternalIdentifier[]
+  // Server-computed flag indicating if this audiobook is wanted (monitored and missing files)
+  wanted?: boolean
 }
 
 export interface History {
@@ -522,10 +564,11 @@ export interface QualityProfile {
   mustContain?: string[] // Must be present
   preferredLanguages?: string[] // e.g., ["English", "Spanish"]
   minimumSeeders?: number
-  minimumScore?: number // Minimum score threshold for automatic downloads (Sonarr's MinFormatScore)
+  minimumScore?: number // Minimum score threshold for automatic downloads
   isDefault?: boolean
   preferNewerReleases?: boolean
   maximumAge?: number // days (0 = no limit)
+  customGroupNames?: Record<string, string> // Custom names for quality groups by codec
   createdAt?: string
   updatedAt?: string
 }
@@ -534,6 +577,55 @@ export interface QualityDefinition {
   quality: string // e.g., "320kbps", "192kbps", "lossless"
   allowed: boolean
   priority: number // Lower = higher priority
+  codec?: string
+  bitrate?: number
+  isLossless?: boolean
+}
+
+/**
+ * Extended quality information for better organization
+ * Maps the string identifiers to structured codec/bitrate data
+ */
+export interface QualityInfo {
+  id: string // Unique identifier matching QualityDefinition.quality
+  label: string // Display label (e.g., "MP3 320 kbps")
+  codec: string // Codec type (MP3, AAC, M4B, OPUS, OGG Vorbis, FLAC)
+  bitrate?: number // Bitrate in kbps (optional for lossless)
+  isLossless: boolean // Whether codec is lossless
+  category: 'lossy' | 'lossless' | 'unknown' // Category for grouping
+}
+
+/**
+ * Quality group for organizing qualities by category
+ */
+export interface QualityGroup {
+  category: 'lossy' | 'lossless' | 'unknown'
+  label: string
+  qualities: QualityInfo[]
+}
+
+/**
+ * Codec definition - represents a codec family (MP3, AAC, FLAC, etc.)
+ */
+export interface CodecDefinition {
+  codec: string // Codec identifier (MP3, AAC, FLAC, etc.)
+  label: string // Display label
+  isLossless: boolean
+  bitrates?: number[] // Available bitrates for lossy codecs
+  supportsVBR?: boolean // Whether codec supports variable bitrate
+}
+
+/**
+ * Quality item for the drag-and-drop UI
+ */
+export interface QualityItem {
+  id: string // Full quality ID (e.g., "MP3 320kbps")
+  codec: string // Codec name
+  bitrate?: number // Bitrate in kbps
+  label: string // Display label
+  isLossless: boolean
+  enabled: boolean // Whether quality is selected
+  priority: number // Position in list (lower = higher priority)
 }
 
 export interface QualityScore {
@@ -549,6 +641,7 @@ export interface QualityScore {
 
 export type SearchSortBy =
   | 'Seeders'
+  | 'Leechers'
   | 'Size'
   | 'PublishedDate'
   | 'Title'
@@ -556,6 +649,7 @@ export type SearchSortBy =
   | 'Language'
   | 'Quality'
   | 'Grabs'
+  | 'Score'
 
 export type SearchSortDirection = 'Ascending' | 'Descending'
 
@@ -589,7 +683,7 @@ export interface ManualImportRequestItem {
 export interface ManualImportRequest {
   path: string
   mode?: 'automatic' | 'interactive'
-  inputMode?: 'move' | 'copy'
+  inputMode?: 'move' | 'copy' | 'hardlink/copy'
   items?: ManualImportRequestItem[]
 }
 
@@ -614,6 +708,7 @@ export interface AudimetaBookResponse {
   description?: string
   imageUrl?: string
   lengthMinutes?: number
+  runtime?: number
   language?: string
   genres?: AudimetaGenre[]
   series?: AudimetaSeries[]
@@ -673,4 +768,3 @@ export interface SearchResponse {
   metadataResults: MetadataSearchResult[]
   totalCount: number
 }
-

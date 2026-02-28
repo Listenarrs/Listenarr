@@ -123,6 +123,53 @@ describe('App.vue activity badge', () => {
     expect(vm.activityCount).toBe(1)
   }, 20000)
 
+  it('counts DDL downloads regardless of downloadClientId casing', async () => {
+    // downloads list contains a DDL downloadClientId in lowercase
+    const active = ref([
+      {
+        id: 'dl-2',
+        status: 'Downloading',
+        downloadClientId: 'ddl',
+        startedAt: new Date().toISOString(),
+      },
+    ])
+
+    vi.doMock('@/stores/downloads', () => ({
+      useDownloadsStore: () => ({
+        activeDownloads: computed(() => active.value),
+        loadDownloads: vi.fn(async () => undefined),
+      }),
+    }))
+
+    vi.doMock('@/services/api', () => ({
+      apiService: {
+        getQueue: async () => [],
+        getServiceHealth: async () => ({ version: '0.0.0' }),
+        getStartupConfig: async () => ({ authenticationRequired: false }),
+        getLibrary: async () => [],
+      },
+    }))
+
+    const { default: AppComponent } = await import('@/App.vue')
+
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: '/', name: 'home', component: { template: '<div />' } }],
+    })
+    await router.push('/')
+    await router.isReady().catch(() => {})
+
+    const wrapper = mount(AppComponent, {
+      global: { stubs: ['RouterLink', 'RouterView'], plugins: [router] },
+    })
+
+    // Allow async onMounted tasks to settle
+    await new Promise((r) => setTimeout(r, 20))
+
+    const vm = wrapper.vm as unknown as { activityCount: number }
+    expect(vm.activityCount).toBe(1)
+  })
+
   it('prefers queue count when there are no downloads', async () => {
     // downloads empty
     const active = ref([])

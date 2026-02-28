@@ -24,6 +24,7 @@ using Listenarr.Api.Hubs;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
+using System.IO;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -58,6 +59,7 @@ namespace Listenarr.Api.Services
         private readonly IAppMetricsService _metrics;
         private readonly IDownloadQueueService _downloadQueueService;
         private readonly ICompletedDownloadProcessor _completedDownloadProcessor;
+        private readonly IDownloadHistoryService? _downloadHistoryService;
 
         // Track qBittorrent sync state for incremental updates (clientId -> last rid)
         private readonly Dictionary<string, int> _qbittorrentSyncState = new();
@@ -83,7 +85,8 @@ namespace Listenarr.Api.Services
             ICompletedDownloadProcessor completedDownloadProcessor,
             IAppMetricsService metrics,
             NotificationService notificationService,
-            Listenarr.Application.Services.IHubBroadcaster? hubBroadcaster = null)
+            Listenarr.Application.Services.IHubBroadcaster? hubBroadcaster = null,
+            IDownloadHistoryService? downloadHistoryService = null)
         {
             _hubContext = hubContext ?? throw new ArgumentNullException(nameof(hubContext));
             _hubBroadcaster = hubBroadcaster ?? new NoopHubBroadcaster();
@@ -104,6 +107,7 @@ namespace Listenarr.Api.Services
             _notificationService = notificationService ?? throw new ArgumentNullException(nameof(notificationService));
             _downloadQueueService = downloadQueueService ?? throw new ArgumentNullException(nameof(downloadQueueService));
             _completedDownloadProcessor = completedDownloadProcessor ?? throw new ArgumentNullException(nameof(completedDownloadProcessor));
+            _downloadHistoryService = downloadHistoryService;
         }
 
         /// <summary>
@@ -168,8 +172,7 @@ namespace Listenarr.Api.Services
 
                 return Task.FromResult<System.Collections.Generic.List<string>?>(null);
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogDebug(ex, "Failed to retrieve cached announces for download {DownloadId} (non-fatal)", downloadId);
                 return Task.FromResult<System.Collections.Generic.List<string>?>(null);
             }
@@ -248,8 +251,7 @@ namespace Listenarr.Api.Services
                             }
                         }
                     }
-                    catch (Exception syncEx)
-                    {
+                    catch (Exception syncEx) when (syncEx is not OperationCanceledException && syncEx is not OutOfMemoryException && syncEx is not StackOverflowException) {
                         _logger.LogDebug(syncEx, "Failed to synchronize status into scoped ListenArrDbContext (non-fatal)");
                     }
                 }
@@ -262,8 +264,7 @@ namespace Listenarr.Api.Services
                     await _completedDownloadProcessor.ProcessCompletedDownloadAsync(downloadId, finalPath);
                     _logger.LogInformation("CompletedDownloadProcessor finished for download {DownloadId}", downloadId);
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogError(ex, "Failed to process completed download removal for {DownloadId}", downloadId);
                 }
 
@@ -287,21 +288,18 @@ namespace Listenarr.Api.Services
                                 await clientProxy.SendCoreAsync("QueueUpdate", new object[] { currentQueue }, System.Threading.CancellationToken.None);
                             }
                         }
-                        catch (Exception exInner)
-                        {
+                        catch (Exception exInner) when (exInner is not OperationCanceledException && exInner is not OutOfMemoryException && exInner is not StackOverflowException) {
                             _logger.LogDebug(exInner, "Direct SendCoreAsync for QueueUpdate failed (non-fatal)");
                         }
 
                         _logger.LogInformation("Broadcasted QueueUpdate after processing download {DownloadId}", downloadId);
                     }
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogWarning(ex, "Failed to broadcast QueueUpdate after processing download {DownloadId}", downloadId);
                 }
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Unexpected error in ProcessCompletedDownloadAsync for {DownloadId}", downloadId);
             }
         }
@@ -324,8 +322,7 @@ namespace Listenarr.Api.Services
                 var (success, message) = await _clientGateway.TestConnectionAsync(client);
                 return (success, message, client);
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error during TestDownloadClientAsync for client {ClientId}", LogRedaction.SanitizeText(client.Id ?? client.Name ?? client.Type));
                 return (false, ex.Message, client);
             }
@@ -564,6 +561,24 @@ namespace Listenarr.Api.Services
             dbContext.Downloads.Add(download);
             await dbContext.SaveChangesAsync();
             _logger.LogInformation("Created download record in database: {DownloadId} for '{Title}'", downloadId, searchResult.Title);
+            
+            // Record in download history for idempotency tracking
+            if (_downloadHistoryService != null && !string.IsNullOrEmpty(downloadClientIdForModel))
+            {
+                try
+                {
+                    var protocol = IsTorrentResult(searchResult) ? Listenarr.Domain.Models.DownloadProtocol.Torrent : Listenarr.Domain.Models.DownloadProtocol.Usenet;
+                    await _downloadHistoryService.RecordGrabbedAsync(
+                        downloadId,
+                        downloadClientIdForModel,
+                        searchResult.Title ?? "Unknown",
+                        protocol);
+                    _logger.LogInformation("Recorded grabbed event in history for download {DownloadId}", downloadId);
+                }
+                catch (Exception histEx) when (histEx is not OperationCanceledException && histEx is not OutOfMemoryException && histEx is not StackOverflowException) {
+                    _logger.LogWarning(histEx, "Failed to record grabbed event in history for download {DownloadId} (non-critical)", downloadId);
+                }
+            }
 
             // Attempt to cache MyAnonamouse torrents ahead of handing off to qBittorrent
             await TryPrepareMyAnonamouseTorrentAsync(searchResult, downloadId);
@@ -586,10 +601,18 @@ namespace Listenarr.Api.Services
                     if (downloadToUpdate.Metadata == null)
                         downloadToUpdate.Metadata = new Dictionary<string, object>();
 
-                    downloadToUpdate.Metadata["TorrentHash"] = clientSpecificId;
+                    // Persist client-specific ID for all clients (NZBGet/SABnzbd/etc.)
+                    downloadToUpdate.Metadata["ClientDownloadId"] = clientSpecificId;
+
+                    // Maintain TorrentHash for qBittorrent compatibility
+                    if (downloadClient.Type.Equals("qbittorrent", StringComparison.OrdinalIgnoreCase))
+                    {
+                        downloadToUpdate.Metadata["TorrentHash"] = clientSpecificId;
+                    }
+
                     updateContext.Downloads.Update(downloadToUpdate);
                     await updateContext.SaveChangesAsync();
-                    _logger.LogInformation("Updated download {DownloadId} with qBittorrent hash: {Hash}", downloadId, clientSpecificId);
+                    _logger.LogInformation("Updated download {DownloadId} with client-specific ID: {ClientId}", downloadId, clientSpecificId);
                 }
             }
 
@@ -692,8 +715,7 @@ namespace Listenarr.Api.Services
                     }
                 }
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogWarning(ex, "Failed to trigger immediate queue update (non-fatal)");
             }
 
@@ -828,8 +850,7 @@ namespace Listenarr.Api.Services
                             mamId = newMam;
                         }
                     }
-                    catch (Exception exMam)
-                    {
+                    catch (Exception exMam) when (exMam is not OperationCanceledException && exMam is not OutOfMemoryException && exMam is not StackOverflowException) {
                         _logger.LogDebug(exMam, "Failed to persist updated mam_id from MyAnonamouse redirect response");
                     }
 
@@ -949,8 +970,7 @@ namespace Listenarr.Api.Services
                                 }
                             }
                         }
-                        catch (Exception rex2)
-                        {
+                        catch (Exception rex2) when (rex2 is not OperationCanceledException && rex2 is not OutOfMemoryException && rex2 is not StackOverflowException) {
                             _logger.LogDebug(rex2, "Failed to rewrite numeric IPs inside torrent (non-fatal)");
                         }
 
@@ -986,21 +1006,18 @@ namespace Listenarr.Api.Services
                                             }
                                         }
                                     }
-                                    catch (Exception subEx)
-                                    {
+                                    catch (Exception subEx) when (subEx is not OperationCanceledException && subEx is not OutOfMemoryException && subEx is not StackOverflowException) {
                                         _logger.LogDebug(subEx, "Non-fatal failure while attempting to rewrite announce URL {Ann} for '{Title}'", ann, searchResult.Title);
                                     }
                                 }
                             }
                         }
-                        catch (Exception rex3)
-                        {
+                        catch (Exception rex3) when (rex3 is not OperationCanceledException && rex3 is not OutOfMemoryException && rex3 is not StackOverflowException) {
                             _logger.LogDebug(rex3, "Failed to rewrite announce hosts inside torrent (non-fatal)");
                         }
                     }
                 }
-                catch (Exception rex)
-                {
+                catch (Exception rex) when (rex is not OperationCanceledException && rex is not OutOfMemoryException && rex is not StackOverflowException) {
                     _logger.LogDebug(rex, "Failed to rewrite torrent tracker hosts (non-fatal)");
                 }
 
@@ -1040,8 +1057,7 @@ namespace Listenarr.Api.Services
 
                                 updatedAnnounces.Add(newAnn);
                             }
-                            catch (Exception inner)
-                            {
+                            catch (Exception inner) when (inner is not OperationCanceledException && inner is not OutOfMemoryException && inner is not StackOverflowException) {
                                 _logger.LogDebug(inner, "Non-fatal failure while attempting to append mam_id to announce {Ann} for '{Title}'", ann, searchResult.Title);
                                 updatedAnnounces.Add(ann);
                             }
@@ -1051,8 +1067,7 @@ namespace Listenarr.Api.Services
                             _logger.LogInformation("Appended mam_id to MyAnonamouse announce URLs for '{Title}' - count={Count}", searchResult.Title, updatedAnnounces.Count);
                     }
                 }
-                catch (Exception exAppend)
-                {
+                catch (Exception exAppend) when (exAppend is not OperationCanceledException && exAppend is not OutOfMemoryException && exAppend is not StackOverflowException) {
                     _logger.LogDebug(exAppend, "Failed to append mam_id to MyAnonamouse announces (non-fatal)");
                 }
 
@@ -1070,8 +1085,7 @@ namespace Listenarr.Api.Services
                         _cache.Set(cacheKey + ":name", searchResult.TorrentFileName ?? "download.torrent", new MemoryCacheEntryOptions { SlidingExpiration = TimeSpan.FromMinutes(30) });
                         _logger.LogInformation("Cached MyAnonamouse torrent bytes and filename to memory for download {DownloadId}", downloadId);
                     }
-                    catch (Exception cex)
-                    {
+                    catch (Exception cex) when (cex is not OperationCanceledException && cex is not OutOfMemoryException && cex is not StackOverflowException) {
                         _logger.LogDebug(cex, "Failed to place cached MyAnonamouse torrent into memory cache (non-fatal)");
                     }
                 }
@@ -1091,20 +1105,17 @@ namespace Listenarr.Api.Services
                             _cache.Set(cacheKey + ":announces", announces, new MemoryCacheEntryOptions { SlidingExpiration = TimeSpan.FromMinutes(30) });
                             _logger.LogInformation("Cached MyAnonamouse torrent announces to memory for download {DownloadId}", downloadId);
                         }
-                        catch (Exception cexAnn)
-                        {
+                        catch (Exception cexAnn) when (cexAnn is not OperationCanceledException && cexAnn is not OutOfMemoryException && cexAnn is not StackOverflowException) {
                             _logger.LogDebug(cexAnn, "Failed to place cached MyAnonamouse announces into memory cache (non-fatal)");
                         }
                     }
                 }
-                catch (Exception exAnn)
-                {
+                catch (Exception exAnn) when (exAnn is not OperationCanceledException && exAnn is not OutOfMemoryException && exAnn is not StackOverflowException) {
                     _logger.LogDebug(exAnn, "Failed to extract announce URLs from cached torrent (non-fatal)");
                 }
                 response.Dispose();
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogWarning(ex, "Failed to cache MyAnonamouse torrent for '{Title}'", searchResult.Title);
             }
         }
@@ -1328,7 +1339,8 @@ namespace Listenarr.Api.Services
                 _logger.LogDebug("Torrent URL: {Url}", torrentUrl);
 
                 // Get existing torrents list before adding (only request hashes to minimize payload)
-                var torrentsBeforeResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/info?fields=hash");
+                var categoryFilter = QBittorrentHelpers.BuildCategoryParameter(client.Settings, "?");
+                var torrentsBeforeResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/info?fields=hash{categoryFilter}");
                 var existingHashes = new HashSet<string>();
                 if (torrentsBeforeResp.IsSuccessStatusCode)
                 {
@@ -1397,8 +1409,7 @@ namespace Listenarr.Api.Services
                             _logger.LogDebug("No announce/URL entries detected in cached torrent for '{Title}'", result.Title);
                         }
                     }
-                    catch (Exception exAnn)
-                    {
+                    catch (Exception exAnn) when (exAnn is not OperationCanceledException && exAnn is not OutOfMemoryException && exAnn is not StackOverflowException) {
                         _logger.LogDebug(exAnn, "Failed to extract announce URLs from torrent for diagnostics (non-fatal)");
                     }
 
@@ -1436,7 +1447,8 @@ namespace Listenarr.Api.Services
                 await Task.Delay(1000);
 
                 // Get updated torrents list to find the newly added torrent hash (request minimal fields)
-                var torrentsAfterResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/info?fields=hash,name");
+                var categoryFilter2 = QBittorrentHelpers.BuildCategoryParameter(client?.Settings ?? new Dictionary<string, object>(), "&");
+                var torrentsAfterResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/info?fields=hash,name{categoryFilter2}");
                 if (torrentsAfterResp.IsSuccessStatusCode)
                 {
                     var afterJson = await torrentsAfterResp.Content.ReadAsStringAsync();
@@ -1615,8 +1627,7 @@ namespace Listenarr.Api.Services
                     throw new Exception($"Transmission RPC error: {errorMsg}");
                 }
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Failed to send torrent to Transmission");
                 throw;
             }
@@ -1662,8 +1673,7 @@ namespace Listenarr.Api.Services
 
                 throw new Exception($"Failed to get Transmission session ID: {response.StatusCode}");
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Failed to get Transmission session ID");
                 throw;
             }
@@ -1793,8 +1803,7 @@ namespace Listenarr.Api.Services
 
                 _logger.LogInformation("Successfully added NZB to SABnzbd with ID: {DownloadId}", downloadId);
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Failed to send NZB to SABnzbd");
                 throw;
             }
@@ -1932,8 +1941,7 @@ namespace Listenarr.Api.Services
 
                 _logger.LogInformation("Successfully added NZB to NZBGet with ID: {NzbId}", nzbId);
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Failed to send NZB to NZBGet");
                 throw;
             }
@@ -1986,8 +1994,7 @@ namespace Listenarr.Api.Services
                     return (updatedUrl, indexer.ApiKey);
                 }
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogDebug(ex, "Failed to append indexer API key to NZB URL for {Title}", result.Title);
             }
 
@@ -2095,8 +2102,7 @@ namespace Listenarr.Api.Services
                 {
                     return await _configurationService.GetApplicationSettingsAsync();
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogDebug(ex, "Failed to load application settings while building queue (non-fatal)");
                     return null;
                 }
@@ -2115,8 +2121,7 @@ namespace Listenarr.Api.Services
                         {
                             clientQueue = await _clientGateway.GetQueueAsync(client);
                         }
-                        catch (Exception gwEx)
-                        {
+                        catch (Exception gwEx) when (gwEx is not OperationCanceledException && gwEx is not OutOfMemoryException && gwEx is not StackOverflowException) {
                             _logger.LogWarning(gwEx, "Client gateway failed to retrieve queue for {ClientName}, falling back to legacy implementation", client.Name ?? client.Id);
                             clientQueue = await GetQueueFallbackAsync(client);
                         }
@@ -2126,103 +2131,120 @@ namespace Listenarr.Api.Services
                         clientQueue = await GetQueueFallbackAsync(client);
                     }
 
-                    // Filter to only include items that Listenarr initiated
-                    _logger.LogInformation("Before filtering - Client {ClientName} has {TotalItems} queue items", client.Name ?? client.Id, clientQueue.Count);
-                    _logger.LogInformation("Database has {DatabaseItems} Listenarr downloads for filtering", listenarrDownloads.Count);
+                    // Show ALL client queue items, enrich with DB metadata if available
+                    // The download client is the source of truth for what's actually downloading
+                    _logger.LogInformation("Client {ClientName} has {TotalItems} queue items", client.Name ?? client.Id, clientQueue.Count);
+                    _logger.LogInformation("Database has {DatabaseItems} Listenarr downloads for metadata enrichment", listenarrDownloads.Count);
 
-                    foreach (var download in listenarrDownloads)
+                    // Process all queue items - client is the source of truth
+                    var mappedFiltered = new List<QueueItem>();
+                    foreach (var queueItem in clientQueue)
                     {
-                        var hashValue = download.Metadata?.TryGetValue("TorrentHash", out var h) == true ? h?.ToString() : "NO_HASH";
-                        _logger.LogInformation("DB Download: Id={Id}, Title='{Title}', ClientId='{ClientId}', Status={Status}, TorrentHash={Hash}",
-                            download.Id, download.Title, download.DownloadClientId, download.Status, hashValue);
-                    }
-
-                    foreach (var queueItem in clientQueue.Take(3)) // Just show first 3 to avoid spam
-                    {
-                        _logger.LogInformation("Queue Item: Id={Id}, Title='{Title}', ClientId='{ClientId}'",
-                            queueItem.Id, queueItem.Title, queueItem.DownloadClientId);
-                    }
-
-                    // Find queue items that correspond to Listenarr downloads
-                    // Include ONLY client queue items that ARE tracked by Listenarr
-                    var initialFiltered = clientQueue.Where(queueItem =>
-                        listenarrDownloads.Any(download =>
+                        try
                         {
-                            var idMatch = download.Id == queueItem.Id;
-
-                            // For qBittorrent, also check if queue item ID matches stored torrent hash
-                            var hashMatch = false;
-                            if (string.Equals(client.Type, "qbittorrent", StringComparison.OrdinalIgnoreCase))
+                            // Set CompletionTime for completed downloads (used by CompletedDownloadHandlingService)
+                            // This tracks when a download was detected as complete for stability window validation
+                            if (queueItem.Status == "completed" && queueItem.CompletionTime == null)
                             {
-                                try
+                                queueItem.CompletionTime = DateTime.UtcNow;
+                            }
+
+                            // Try to find matching database record for metadata enrichment
+                            var matchedDownload = listenarrDownloads.FirstOrDefault(download =>
+                            {
+                                // Must be same client
+                                if (download.DownloadClientId != client.Id)
+                                    return false;
+
+                                // Try direct ID match
+                                if (download.Id == queueItem.Id)
+                                    return true;
+
+                                // For qBittorrent, check torrent hash
+                                if (string.Equals(client.Type, "qbittorrent", StringComparison.OrdinalIgnoreCase))
                                 {
                                     if (download.Metadata != null && download.Metadata.TryGetValue("TorrentHash", out var hashObj))
                                     {
                                         var storedHash = hashObj?.ToString();
-                                        if (!string.IsNullOrEmpty(storedHash))
-                                        {
-                                            hashMatch = storedHash.Equals(queueItem.Id, StringComparison.OrdinalIgnoreCase);
-                                        }
+                                        if (!string.IsNullOrEmpty(storedHash) && 
+                                            storedHash.Equals(queueItem.Id, StringComparison.OrdinalIgnoreCase))
+                                            return true;
                                     }
                                 }
-                                catch
-                                {
-                                    hashMatch = false;
-                                }
-                            }
 
-                            // Enhanced title match using robust normalization
-                            var titleMatch = false;
-                            try
-                            {
+                                // Try title matching as fallback
                                 if (!string.IsNullOrEmpty(download.Title) && !string.IsNullOrEmpty(queueItem.Title))
                                 {
-                                    titleMatch = IsMatchingTitle(download.Title, queueItem.Title);
-                                    _logger.LogInformation("Title matching for download {DownloadId}: '{DownloadTitle}' vs '{QueueTitle}' = {Match}",
-                                        download.Id, download.Title, queueItem.Title, titleMatch);
+                                    if (IsMatchingTitle(download.Title, queueItem.Title))
+                                    {
+                                        _logger.LogDebug("Matched download {DownloadId} to queue item {QueueId} via title: '{DownloadTitle}' <-> '{QueueTitle}'",
+                                            download.Id, queueItem.Id, download.Title, queueItem.Title);
+                                        return true;
+                                    }
                                 }
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.LogWarning(ex, "Failed to match title for download {DownloadId}, defaulting to false", download.Id);
-                                titleMatch = false;
-                            }
 
-                            var clientMatch = download.DownloadClientId == client.Id;
-                            var overallMatch = clientMatch && (idMatch || hashMatch || titleMatch);
-
-                            _logger.LogInformation("Matching check for download {DownloadId} vs queue item {QueueId}: ClientMatch={ClientMatch}, IdMatch={IdMatch}, HashMatch={HashMatch}, TitleMatch={TitleMatch}, Overall={Overall}",
-                                download.Id, queueItem.Id, clientMatch, idMatch, hashMatch, titleMatch, overallMatch);
-
-                            return overallMatch;
-                        })
-                    ).ToList();
-
-                    // Map each filtered queue item to the Listenarr DB download id so the UI won't show duplicates
-                    var mappedFiltered = new List<QueueItem>();
-                    foreach (var queueItem in initialFiltered)
-                    {
-                        try
-                        {
-                            var matchedDownload = listenarrDownloads.FirstOrDefault(download =>
-                                download.DownloadClientId == client.Id && (
-                                    download.Id == queueItem.Id ||
-                    (download.Metadata != null && download.Metadata.TryGetValue("TorrentHash", out var h) && (h?.ToString() ?? string.Empty).Equals(queueItem.Id, StringComparison.OrdinalIgnoreCase)) ||
-                    (!string.IsNullOrEmpty(download.Title) && !string.IsNullOrEmpty(queueItem.Title) && IsMatchingTitle(download.Title, queueItem.Title))
-                                )
-                            );
+                                return false;
+                            });
 
                             if (matchedDownload != null)
                             {
-                                // Normalize the queue item id to the Listenarr DB id so the front-end treats them as the same
+                                // Store original torrent hash in metadata BEFORE changing ID
+                                var originalClientId = queueItem.Id;
+                                bool hashUpdated = false;
+                                
+                                if (string.Equals(client.Type, "qbittorrent", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    if (matchedDownload.Metadata == null)
+                                        matchedDownload.Metadata = new Dictionary<string, object>();
+                                    
+                                    if (!matchedDownload.Metadata.ContainsKey("TorrentHash"))
+                                    {
+                                        matchedDownload.Metadata["TorrentHash"] = originalClientId;
+                                        hashUpdated = true;
+                                        _logger.LogInformation("Stored torrent hash {Hash} for download {DownloadId}", originalClientId, matchedDownload.Id);
+                                    }
+                                }
+                                
+                                // Persist hash to database if we just discovered it
+                                if (hashUpdated)
+                                {
+                                    try
+                                    {
+                                        var dbContext = await _dbContextFactory.CreateDbContextAsync();
+                                        var dbDownload = await dbContext.Downloads.FindAsync(matchedDownload.Id);
+                                        if (dbDownload != null)
+                                        {
+                                            if (dbDownload.Metadata == null)
+                                                dbDownload.Metadata = new Dictionary<string, object>();
+                                            dbDownload.Metadata["TorrentHash"] = originalClientId;
+                                            await dbContext.SaveChangesAsync();
+                                            _logger.LogInformation("Persisted torrent hash {Hash} to database for download {DownloadId}", originalClientId, matchedDownload.Id);
+                                        }
+                                    }
+                                    catch (Exception dbEx) when (dbEx is not OperationCanceledException && dbEx is not OutOfMemoryException && dbEx is not StackOverflowException) {
+                                        _logger.LogWarning(dbEx, "Failed to persist torrent hash for download {DownloadId}", matchedDownload.Id);
+                                    }
+                                }
+                                
+                                // Enrich queue item with database metadata
+                                // Use DB ID so UI doesn't show duplicates
                                 queueItem.Id = matchedDownload.Id;
+                                
+                                _logger.LogDebug("Enriched queue item (original: {OriginalId}) with DB metadata from download {DownloadId}", 
+                                    originalClientId, matchedDownload.Id);
+                            }
+                            else
+                            {
+                                // No DB record found - this is an untracked download
+                                // Still show it (client is source of truth)
+                                _logger.LogDebug("Queue item {QueueId} '{Title}' not tracked in database - showing as untracked", 
+                                    queueItem.Id, queueItem.Title);
                             }
 
                             mappedFiltered.Add(queueItem);
                         }
-                        catch (Exception ex)
-                        {
-                            _logger.LogDebug(ex, "Error mapping filtered queue item to Listenarr download");
+                        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+                            _logger.LogWarning(ex, "Error processing queue item {QueueId}, including anyway", queueItem.Id);
                             mappedFiltered.Add(queueItem);
                         }
                     }
@@ -2280,41 +2302,80 @@ namespace Listenarr.Api.Services
                         }
                     }
 
-                    _logger.LogDebug("Client {ClientName}: {TotalItems} total items, {FilteredItems} Listenarr items",
-                        client.Name, clientQueue.Count, mappedFiltered.Count);
+                    _logger.LogDebug("Client {ClientName}: showing {TotalItems} queue items", 
+                        client.Name, mappedFiltered.Count);
 
-                    // Purge orphaned download records that are no longer in the client's queue
+                    // CONSERVATIVE CLEANUP: Only purge downloads that are clearly abandoned
+                    // Client is the source of truth for active downloads
                     try
                     {
                         var clientDownloads = listenarrDownloads.Where(d => d.DownloadClientId == client.Id).ToList();
-                        var mappedDownloadIds = mappedFiltered.Select(q => q.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                        
+                        // Build set of all client item IDs (both original client IDs and normalized DB IDs)
+                        var allClientItemIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        
+                        // Add all normalized (mapped) IDs from the processed queue
+                        foreach (var mapped in mappedFiltered)
+                        {
+                            allClientItemIds.Add(mapped.Id);
+                        }
+                        
+                        // Also add original client queue IDs (torrent hashes, etc)
+                        foreach (var item in clientQueue)
+                        {
+                            allClientItemIds.Add(item.Id);
+                        }
 
+                        // Only purge downloads that meet ALL these criteria:
+                        // 1. Not in client queue
+                        // 2. Not Completed status (needs processing first)
+                        // 3. Not very recent (allow 5 minutes for hash resolution)
+                        // 4. Not in Downloading/Processing state (might be actively monitored)
                         var orphanedDownloads = clientDownloads.Where(d =>
                         {
-                            // Check if download ID matches
-                            if (mappedDownloadIds.Contains(d.Id))
+                            // Check if in client queue by ID
+                            if (allClientItemIds.Contains(d.Id))
                                 return false;
 
-                            // For qBittorrent, also check if the TorrentHash matches
+                            // Check if in client queue by torrent hash
                             if (string.Equals(client.Type, "qbittorrent", StringComparison.OrdinalIgnoreCase) &&
                                 d.Metadata != null && d.Metadata.TryGetValue("TorrentHash", out var hashObj))
                             {
                                 var torrentHash = hashObj?.ToString();
-                                if (!string.IsNullOrEmpty(torrentHash) && mappedDownloadIds.Contains(torrentHash))
+                                if (!string.IsNullOrEmpty(torrentHash) && allClientItemIds.Contains(torrentHash))
                                     return false;
                             }
 
-                            // Don't purge Completed status downloads - they need cleanup first
-                            if (d.Status == DownloadStatus.Completed)
+                            // Don't purge terminal states - they need proper cleanup
+                            if (d.Status == DownloadStatus.Completed || 
+                                d.Status == DownloadStatus.Moved ||
+                                d.Status == DownloadStatus.Failed)
                                 return false;
 
+                            // Don't purge active states
+                            if (d.Status == DownloadStatus.Downloading || 
+                                d.Status == DownloadStatus.Processing)
+                                return false;
+
+                            // Give NEW downloads 5 minutes to appear in client queue
+                            // This handles race conditions during download addition
+                            if ((DateTime.UtcNow - d.StartedAt).TotalMinutes < 5)
+                            {
+                                _logger.LogDebug("Skipping purge for recent download {DownloadId} '{Title}' (age: {Age:F1} min)",
+                                    d.Id, d.Title, (DateTime.UtcNow - d.StartedAt).TotalMinutes);
+                                return false;
+                            }
+
+                            _logger.LogDebug("Download {DownloadId} '{Title}' is orphaned (not in client queue, age: {Age:F1} min, status: {Status})",
+                                d.Id, d.Title, (DateTime.UtcNow - d.StartedAt).TotalMinutes, d.Status);
                             return true;
                         }).ToList();
 
                         if (orphanedDownloads.Any())
                         {
-                            // If this is a SABnzbd or NZBGet client, consult the client's history first
-                            // SAFETY: If history fetch fails, skip purging to avoid accidental deletion
+                            _logger.LogInformation("Found {Count} potentially orphaned downloads for client {ClientName}, will purge after validation",
+                                orphanedDownloads.Count, client.Name);
+                                
                             var toPurge = orphanedDownloads;
                             try
                             {
@@ -2336,7 +2397,9 @@ namespace Listenarr.Api.Services
                                                     if (!string.IsNullOrEmpty(d.DownloadClientId) && 
                                                         historyItems.Any(h => h.Id.Equals(d.DownloadClientId, StringComparison.OrdinalIgnoreCase)))
                                                     {
-                                                        try { _metrics.Increment("download.purge.skipped.history.nzbid_match"); } catch { }
+                                                        try { _metrics.Increment("download.purge.skipped.history.nzbid_match"); } catch (Exception caughtEx_1) when (caughtEx_1 is not OperationCanceledException && caughtEx_1 is not OutOfMemoryException && caughtEx_1 is not StackOverflowException) { 
+                                                            System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                                                        }
                                                         return false;
                                                     }
 
@@ -2344,31 +2407,35 @@ namespace Listenarr.Api.Services
                                                     if (!string.IsNullOrEmpty(d.Title) && 
                                                         historyItems.Any(h => !string.IsNullOrEmpty(h.Name) && IsMatchingTitle(d.Title, h.Name)))
                                                     {
-                                                        try { _metrics.Increment("download.purge.skipped.history.title_match"); } catch { }
+                                                        try { _metrics.Increment("download.purge.skipped.history.title_match"); } catch (Exception caughtEx_2) when (caughtEx_2 is not OperationCanceledException && caughtEx_2 is not OutOfMemoryException && caughtEx_2 is not StackOverflowException) { 
+                                                            System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                                                        }
                                                         return false;
                                                     }
 
                                                     // No match in history -> eligible to purge
                                                     return true;
                                                 }
-                                                catch
-                                                {
+                                                catch (Exception caughtEx_3) when (caughtEx_3 is not OperationCanceledException && caughtEx_3 is not OutOfMemoryException && caughtEx_3 is not StackOverflowException) {
                                                     // If anything goes wrong, be conservative and avoid purging this download
                                                     return false;
                                                 }
                                             }).ToList();
                                         }
-                                        catch (Exception hx)
-                                        {
+                                        catch (Exception hx) when (hx is not OperationCanceledException && hx is not OutOfMemoryException && hx is not StackOverflowException) {
                                             _logger.LogWarning(hx, "Error while fetching NZBGet history for client {ClientName}, skipping purge for safety", client.Name);
-                                            try { _metrics.Increment("download.purge.skipped.history.fetch_error"); } catch { }
+                                            try { _metrics.Increment("download.purge.skipped.history.fetch_error"); } catch (Exception caughtEx_4) when (caughtEx_4 is not OperationCanceledException && caughtEx_4 is not OutOfMemoryException && caughtEx_4 is not StackOverflowException) { 
+                                                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                                            }
                                             toPurge = new List<Download>();
                                         }
                                     }
                                     else
                                     {
                                         _logger.LogWarning("DownloadClientGateway not available for client {ClientName}, skipping purge for safety", client.Name);
-                                        try { _metrics.Increment("download.purge.skipped.history.gateway_unavailable"); } catch { }
+                                        try { _metrics.Increment("download.purge.skipped.history.gateway_unavailable"); } catch (Exception caughtEx_5) when (caughtEx_5 is not OperationCanceledException && caughtEx_5 is not OutOfMemoryException && caughtEx_5 is not StackOverflowException) { 
+                                            System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                                        }
                                         toPurge = new List<Download>();
                                     }
                                 }
@@ -2415,29 +2482,31 @@ namespace Listenarr.Api.Services
                                                                 // If the DB record stores the nzo id directly as the DownloadClientId, skip purging
                                                                 if (!string.IsNullOrEmpty(d.DownloadClientId) && historySlots.Any(h => h.nzo.Equals(d.DownloadClientId, StringComparison.OrdinalIgnoreCase)))
                                                                 {
-                                                                    try { _metrics.Increment("download.purge.skipped.history.nzo_match"); } catch { }
+                                                                    try { _metrics.Increment("download.purge.skipped.history.nzo_match"); } catch (Exception caughtEx_6) when (caughtEx_6 is not OperationCanceledException && caughtEx_6 is not OutOfMemoryException && caughtEx_6 is not StackOverflowException) { 
+                                                                        System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                                                                    }
                                                                     return false;
                                                                 }
 
                                                                 // Match by title similarity against history name entries -> skip purging
                                                                 if (!string.IsNullOrEmpty(d.Title) && historySlots.Any(h => !string.IsNullOrEmpty(h.name) && IsMatchingTitle(d.Title, h.name)))
                                                                 {
-                                                                    try { _metrics.Increment("download.purge.skipped.history.title_match"); } catch { }
+                                                                    try { _metrics.Increment("download.purge.skipped.history.title_match"); } catch (Exception caughtEx_7) when (caughtEx_7 is not OperationCanceledException && caughtEx_7 is not OutOfMemoryException && caughtEx_7 is not StackOverflowException) { 
+                                                                        System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                                                                    }
                                                                     return false;
                                                                 }
 
                                                                 // No match in history -> eligible to purge
                                                                 return true;
                                                             }
-                                                            catch
-                                                            {
+                                                            catch (Exception caughtEx_8) when (caughtEx_8 is not OperationCanceledException && caughtEx_8 is not OutOfMemoryException && caughtEx_8 is not StackOverflowException) {
                                                                 // If anything goes wrong, be conservative and avoid purging this download
                                                                 return false;
                                                             }
                                                         }).ToList();
                                                     }
-                                                    catch (Exception hx)
-                                                    {
+                                                    catch (Exception hx) when (hx is not OperationCanceledException && hx is not OutOfMemoryException && hx is not StackOverflowException) {
                                                         _logger.LogWarning(hx, "Failed to parse SABnzbd history for client {ClientName}, skipping purge for safety", client.Name);
                                                         // Keep toPurge as orphanedDownloads but bail out of purging below
                                                     }
@@ -2446,28 +2515,32 @@ namespace Listenarr.Api.Services
                                             else
                                             {
                                                 _logger.LogWarning("Failed to fetch SABnzbd history for client {ClientName}: {StatusCode}", client.Name, historyResp.StatusCode);
-                                                try { _metrics.Increment("download.purge.skipped.history.fetch_failed"); } catch { }
+                                                try { _metrics.Increment("download.purge.skipped.history.fetch_failed"); } catch (Exception caughtEx_9) when (caughtEx_9 is not OperationCanceledException && caughtEx_9 is not OutOfMemoryException && caughtEx_9 is not StackOverflowException) { 
+                                                    System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                                                }
                                                 // skip purging when we couldn't confirm history to avoid accidental deletions
                                                 toPurge = new List<Download>();
                                             }
                                         }
-                                        catch (Exception hx)
-                                        {
+                                        catch (Exception hx) when (hx is not OperationCanceledException && hx is not OutOfMemoryException && hx is not StackOverflowException) {
                                             _logger.LogWarning(hx, "Error while fetching SABnzbd history for client {ClientName}, skipping purge for safety", client.Name);
-                                            try { _metrics.Increment("download.purge.skipped.history.fetch_error"); } catch { }
+                                            try { _metrics.Increment("download.purge.skipped.history.fetch_error"); } catch (Exception caughtEx_10) when (caughtEx_10 is not OperationCanceledException && caughtEx_10 is not OutOfMemoryException && caughtEx_10 is not StackOverflowException) { 
+                                                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                                            }
                                             toPurge = new List<Download>();
                                         }
                                     }
                                     else
                                     {
                                         _logger.LogWarning("SABnzbd client {ClientName} missing apiKey in settings, skipping orphan purge for safety", client.Name);
-                                        try { _metrics.Increment("download.purge.skipped.history.missing_api_key"); } catch { }
+                                        try { _metrics.Increment("download.purge.skipped.history.missing_api_key"); } catch (Exception caughtEx_11) when (caughtEx_11 is not OperationCanceledException && caughtEx_11 is not OutOfMemoryException && caughtEx_11 is not StackOverflowException) { 
+                                            System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                                        }
                                         toPurge = new List<Download>();
                                     }
                                 }
                             }
-                            catch (Exception hx)
-                            {
+                            catch (Exception hx) when (hx is not OperationCanceledException && hx is not OutOfMemoryException && hx is not StackOverflowException) {
                                 _logger.LogWarning(hx, "Unexpected error while checking history before purge for client {ClientName}, skipping purge for safety", client.Name);
                                 toPurge = new List<Download>();
                             }
@@ -2484,7 +2557,9 @@ namespace Listenarr.Api.Services
                                     purgeScopedDbContext.Downloads.Remove(trackedDownload);
                                     _logger.LogInformation("Purged orphaned download record: {DownloadId} '{Title}' (no longer exists in {ClientName} queue)",
                                         orphanedDownload.Id, orphanedDownload.Title, client.Name);
-                                    try { _metrics.Increment("download.purged.count"); } catch { }
+                                    try { _metrics.Increment("download.purged.count"); } catch (Exception caughtEx_12) when (caughtEx_12 is not OperationCanceledException && caughtEx_12 is not OutOfMemoryException && caughtEx_12 is not StackOverflowException) { 
+                                        System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                                    }
                                 }
                             }
 
@@ -2493,13 +2568,11 @@ namespace Listenarr.Api.Services
                                 toPurge.Count, client.Name);
                         }
                     }
-                    catch (Exception purgeEx)
-                    {
+                    catch (Exception purgeEx) when (purgeEx is not OperationCanceledException && purgeEx is not OutOfMemoryException && purgeEx is not StackOverflowException) {
                         _logger.LogError(purgeEx, "Error purging orphaned downloads for client {ClientName}", client.Name);
                     }
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogError(ex, "Error getting queue from download client {ClientName}", client.Name);
                 }
             }
@@ -2549,8 +2622,7 @@ namespace Listenarr.Api.Services
                         existingIds.Add(d.Id);
                     }
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogWarning(ex, "Error while appending completed external downloads to queue (non-fatal)");
                 }
             }
@@ -2720,8 +2792,7 @@ namespace Listenarr.Api.Services
 
                 return removedFromClient;
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error removing from queue: {DownloadId}", downloadId);
                 return false;
             }
@@ -2780,7 +2851,8 @@ namespace Listenarr.Api.Services
                     }
 
                     // Get torrents (with or without authentication)
-                    var torrentsResponse = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/info");
+                    var categoryFilter3 = QBittorrentHelpers.BuildCategoryParameter(client.Settings, "?");
+                    var torrentsResponse = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/info{categoryFilter3}");
                     if (!torrentsResponse.IsSuccessStatusCode) return items;
 
                     torrentsJson = await torrentsResponse.Content.ReadAsStringAsync();
@@ -2822,6 +2894,33 @@ namespace Listenarr.Api.Services
                         var localContentPath = !string.IsNullOrEmpty(contentPath)
                             ? await _pathMappingService.TranslatePathAsync(client.Id, contentPath)
                             : contentPath;
+
+                        // If qBittorrent doesn't return content_path, fall back to save path + torrent name
+                        // to avoid scanning the entire download root.
+                        if (string.IsNullOrWhiteSpace(localContentPath))
+                        {
+                            if (!string.IsNullOrWhiteSpace(localPath) && !string.IsNullOrWhiteSpace(name))
+                            {
+                                var normalizedName = name.Trim();
+                                if (Path.IsPathRooted(normalizedName))
+                                {
+                                    localContentPath = normalizedName;
+                                }
+                                else
+                                {
+                                    var relativeName = normalizedName.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                                    localContentPath = Path.IsPathRooted(relativeName)
+                                        ? relativeName
+                                        : localPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                                            + Path.DirectorySeparatorChar
+                                            + relativeName;
+                                }
+                            }
+                            else if (!string.IsNullOrWhiteSpace(localPath))
+                            {
+                                localContentPath = localPath;
+                            }
+                        }
 
                         // Map qBittorrent states to unified status
                         // Note: qBittorrent doesn't have explicit "completed" states
@@ -2895,8 +2994,7 @@ namespace Listenarr.Api.Services
                     }
                 }
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogWarning(ex, "Error getting qBittorrent queue - client may be unreachable");
             }
 
@@ -2919,15 +3017,13 @@ namespace Listenarr.Api.Services
                 // or replaced with a more maintainable version in a subsequent change.
                 return await GetQBittorrentQueueAsync(client);
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogWarning(ex, "Incremental qBittorrent sync failed, falling back to full fetch");
                 try
                 {
                     return await GetQBittorrentQueueAsync(client);
                 }
-                catch (Exception inner)
-                {
+                catch (Exception inner) when (inner is not OperationCanceledException && inner is not OutOfMemoryException && inner is not StackOverflowException) {
                     _logger.LogWarning(inner, "Fallback full fetch also failed for qBittorrent client {ClientName}", client.Name);
                     return new List<QueueItem>();
                 }
@@ -2967,8 +3063,7 @@ namespace Listenarr.Api.Services
                 await ctx.SaveChangesAsync();
                 return id;
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogWarning(ex, "DownloadDirectlyAsync: failed to create DDL download record");
                 return Guid.NewGuid().ToString();
             }
@@ -2981,7 +3076,9 @@ namespace Listenarr.Api.Services
             {
                 _logger.LogInformation("LogDownloadHistory: audiobook={Title}, source={Source}, result={ResultTitle}", audiobook?.Title, source, result?.Title);
             }
-            catch { }
+            catch (Exception caughtEx_13) when (caughtEx_13 is not OperationCanceledException && caughtEx_13 is not OutOfMemoryException && caughtEx_13 is not StackOverflowException) { 
+                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+            }
             await Task.CompletedTask;
         }
 
@@ -2991,8 +3088,7 @@ namespace Listenarr.Api.Services
             {
                 return AreTitlesSimilar(titleA ?? string.Empty, titleB ?? string.Empty);
             }
-            catch
-            {
+            catch (Exception caughtEx_14) when (caughtEx_14 is not OperationCanceledException && caughtEx_14 is not OutOfMemoryException && caughtEx_14 is not StackOverflowException) {
                 return false;
             }
         }
@@ -3003,12 +3099,56 @@ namespace Listenarr.Api.Services
             {
                 var An = NormalizeTitle(a);
                 var Bn = NormalizeTitle(b);
-                if (An.Contains(Bn) || Bn.Contains(An) || An == Bn) return true;
+                
+                // Exact match
+                if (An == Bn) return true;
+                
+                // One contains the other (substring match)
+                if (An.Contains(Bn) || Bn.Contains(An)) return true;
+                
+                // Check if the shorter title contains all major words from the shorter title
+                // This handles cases where the torrent filename has extra metadata
+                var shorterTokens = (An.Length <= Bn.Length ? An : Bn).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                var longerTitle = An.Length <= Bn.Length ? Bn : An;
+                
+                // If shorter is at least 3 words and all words appear in longer (in order or scattered)
+                if (shorterTokens.Length >= 3)
+                {
+                    // Check if all tokens from shorter appear in longer (as substrings or words)
+                    var allTokensFound = shorterTokens.All(token => longerTitle.Contains(token));
+                    if (allTokensFound)
+                    {
+                        // Additional validation: check that tokens appear in roughly the same order
+                        var lastPos = 0;
+                        var inOrder = true;
+                        foreach (var token in shorterTokens)
+                        {
+                            var pos = longerTitle.IndexOf(token, lastPos);
+                            if (pos < 0)
+                            {
+                                inOrder = false;
+                                break;
+                            }
+                            lastPos = pos + token.Length;
+                        }
+                        if (inOrder) return true;
+                    }
+                }
+                
+                // Levenshtein distance with more generous threshold for longer titles
                 var dist = LevenshteinDistance(An, Bn);
-                var threshold = Math.Max(3, (int)(Math.Min(An.Length, Bn.Length) * 0.15));
+                var minLen = Math.Min(An.Length, Bn.Length);
+                var maxLen = Math.Max(An.Length, Bn.Length);
+                
+                // For longer titles, use a percentage-based threshold; for shorter, use absolute
+                // This handles cases like the torrent having extra metadata appended
+                var threshold = minLen < 20 
+                    ? Math.Max(3, (int)(minLen * 0.20))  // 20% for short titles
+                    : Math.Max(5, (int)(minLen * 0.25)); // 25% for longer titles
+                
                 return dist <= threshold;
             }
-            catch { return false; }
+            catch (Exception caughtEx_15) when (caughtEx_15 is not OperationCanceledException && caughtEx_15 is not OutOfMemoryException && caughtEx_15 is not StackOverflowException) { return false; }
         }
 
         private string NormalizeTitle(string s)
@@ -3080,14 +3220,12 @@ namespace Listenarr.Api.Services
                             _logger.LogWarning("Item {DownloadId} still exists in {ClientName} queue after removal attempt", downloadId, client.Name ?? client.Id);
                             return false;
                         }
-                        catch (Exception queueEx)
-                        {
+                        catch (Exception queueEx) when (queueEx is not OperationCanceledException && queueEx is not OutOfMemoryException && queueEx is not StackOverflowException) {
                             _logger.LogWarning(queueEx, "Failed to verify queue status for {DownloadId} on {ClientName}, assuming removal failed", downloadId, client.Name ?? client.Id);
                             return false;
                         }
                     }
-                    catch (Exception ex)
-                    {
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                         _logger.LogWarning(ex, "RemoveFromClientAsync: Exception removing {DownloadId} from {Client}: {Message}", 
                             LogRedaction.SanitizeText(downloadId), LogRedaction.SanitizeText(client.Name ?? client.Id), ex.Message);
                         
@@ -3104,8 +3242,7 @@ namespace Listenarr.Api.Services
                                 return true;
                             }
                         }
-                        catch (Exception queueEx)
-                        {
+                        catch (Exception queueEx) when (queueEx is not OperationCanceledException && queueEx is not OutOfMemoryException && queueEx is not StackOverflowException) {
                             _logger.LogDebug(queueEx, "Failed to verify queue after exception for {DownloadId}", downloadId);
                         }
                         
@@ -3116,8 +3253,7 @@ namespace Listenarr.Api.Services
                 // Fallback conservative behavior when no gateway is available
                 return false;
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogWarning(ex, "RemoveFromClientAsync fallback failed for client {Client}", client?.Name ?? client?.Id);
                 return false;
             }
@@ -3181,7 +3317,9 @@ namespace Listenarr.Api.Services
             {
                 _logger.LogDebug("CleanupOldTempFiles called (noop)");
             }
-            catch { }
+            catch (Exception caughtEx_16) when (caughtEx_16 is not OperationCanceledException && caughtEx_16 is not OutOfMemoryException && caughtEx_16 is not StackOverflowException) { 
+                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+            }
         }
 
         // Overload used by TempFileCleanupService to specify retention window in hours
@@ -3193,7 +3331,10 @@ namespace Listenarr.Api.Services
             {
                 _logger.LogDebug("CleanupOldTempFiles called with hours={Hours} (noop)", hours);
             }
-            catch { }
+            catch (Exception caughtEx_17) when (caughtEx_17 is not OperationCanceledException && caughtEx_17 is not OutOfMemoryException && caughtEx_17 is not StackOverflowException) { 
+                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+            }
         }
     }
 }
+

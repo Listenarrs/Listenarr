@@ -1,0 +1,35 @@
+<Project>
+	<PropertyGroup>
+		<ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+		<CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+		<EFVersion>9.0.13</EFVersion>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<PackageVersion Include="AsyncKeyedLock" Version="8.0.2" />
+		<PackageVersion Include="coverlet.collector" Version="3.2.0" />
+		<PackageVersion Include="HtmlAgilityPack" Version="1.12.4" />
+		<PackageVersion Include="Microsoft.AspNetCore.Authorization" Version="8.0.24" />
+		<PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.24" />
+		<PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="8.0.24" />
+		<PackageVersion Include="Microsoft.Data.Sqlite.Core" Version="$(EFVersion)" />
+		<PackageVersion Include="Microsoft.Data.Sqlite" Version="8.0.0" />
+		<PackageVersion Include="Microsoft.EntityFrameworkCore" Version="$(EFVersion)" />
+		<PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="$(EFVersion)" />
+		<PackageVersion Include="Microsoft.EntityFrameworkCore.InMemory" Version="$(EFVersion)" />
+		<PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="$(EFVersion)" />
+		<PackageVersion Include="Microsoft.Extensions.Http.Polly" Version="8.0.24" />
+		<PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+		<PackageVersion Include="Microsoft.Playwright" Version="1.58.0" />
+		<PackageVersion Include="Moq" Version="4.20.72" />
+		<PackageVersion Include="Polly" Version="8.6.5" />
+		<PackageVersion Include="Serilog.AspNetCore" Version="8.0.3" />
+		<PackageVersion Include="Serilog.Sinks.File" Version="5.0.0" />
+		<PackageVersion Include="SharpCompress" Version="0.36.0" />
+		<PackageVersion Include="SixLabors.ImageSharp" Version="3.1.12" />
+		<PackageVersion Include="Swashbuckle.AspNetCore" Version="6.9.0" />
+		<PackageVersion Include="xunit" Version="2.9.3" />
+		<PackageVersion Include="xunit.runner.visualstudio" Version="2.8.2" />
+		<PackageVersion Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.0" />
+	</ItemGroup>
+</Project>

@@ -18,9 +18,13 @@
 
 using System;
 using System.IO;
+using System.Linq;
+using System.Net;
 using System.Net.Http;
+using System.Net.Sockets;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using SixLabors.ImageSharp;
 
 namespace Listenarr.Api.Services
 {
@@ -33,10 +37,12 @@ namespace Listenarr.Api.Services
         Task ClearTempCacheAsync();
     }
 
-    public class ImageCacheService : IImageCacheService
+    public class ImageCacheService : IImageCacheService, IDisposable
     {
+        private const int MaxImageRedirects = 5;
         private readonly ILogger<ImageCacheService> _logger;
         private readonly HttpClient _httpClient;
+        private readonly HttpClient _httpClientNoRedirect;
         private readonly string _tempCachePath;
         private readonly string _libraryImagePath;
         private readonly string _authorImagePath;
@@ -46,6 +52,13 @@ namespace Listenarr.Api.Services
     {
         _logger = logger;
         _httpClient = httpClientFactory.CreateClient();
+        _httpClientNoRedirect = new HttpClient(new HttpClientHandler
+        {
+            AllowAutoRedirect = false
+        })
+        {
+            Timeout = _httpClient.Timeout
+        };
         _contentRootPath = contentRootPath;
 
         // Set up cache directories relative to content root
@@ -70,6 +83,11 @@ namespace Listenarr.Api.Services
                 _logger.LogWarning("Cannot cache image: URL or identifier is empty");
                 return null;
             }
+            if (!TryValidateExternalImageUrl(imageUrl, out var validationReason))
+            {
+                _logger.LogWarning("Blocked image download URL for {Identifier}: {Reason}", identifier, validationReason);
+                return null;
+            }
 
             try
             {
@@ -77,16 +95,22 @@ namespace Listenarr.Api.Services
                 var libraryPath = GetImagePath(identifier, _libraryImagePath);
                 if (File.Exists(libraryPath))
                 {
-                    _logger.LogInformation("Image already in library storage: {Identifier}", identifier);
-                    return GetRelativePath(libraryPath);
+                    if (IsValidCachedCoverFile(libraryPath, identifier, "library"))
+                    {
+                        _logger.LogInformation("Image already in library storage: {Identifier}", identifier);
+                        return GetRelativePath(libraryPath);
+                    }
                 }
 
                 // Also check authors storage (author images may be stored separately)
                 var authorPath = GetImagePath(identifier, _authorImagePath);
                 if (File.Exists(authorPath))
                 {
-                    _logger.LogInformation("Image already in author storage: {Identifier}", identifier);
-                    return GetRelativePath(authorPath);
+                    if (IsValidCachedCoverFile(authorPath, identifier, "author"))
+                    {
+                        _logger.LogInformation("Image already in author storage: {Identifier}", identifier);
+                        return GetRelativePath(authorPath);
+                    }
                 }
 
                 // Check temp cache for a valid (non-placeholder) image
@@ -115,16 +139,22 @@ namespace Listenarr.Api.Services
                     libraryPath = GetImagePath(identifier, _libraryImagePath);
                     if (File.Exists(libraryPath))
                     {
-                        _logger.LogInformation("Image already in library storage (after wait): {Identifier}", identifier);
-                        return GetRelativePath(libraryPath);
+                        if (IsValidCachedCoverFile(libraryPath, identifier, "library"))
+                        {
+                            _logger.LogInformation("Image already in library storage (after wait): {Identifier}", identifier);
+                            return GetRelativePath(libraryPath);
+                        }
                     }
 
                     // Also check author storage after lock
                     authorPath = GetImagePath(identifier, _authorImagePath);
                     if (File.Exists(authorPath))
                     {
-                        _logger.LogInformation("Image already in author storage (after wait): {Identifier}", identifier);
-                        return GetRelativePath(authorPath);
+                        if (IsValidCachedCoverFile(authorPath, identifier, "author"))
+                        {
+                            _logger.LogInformation("Image already in author storage (after wait): {Identifier}", identifier);
+                            return GetRelativePath(authorPath);
+                        }
                     }
 
                     tempExisting = GetBestTempImagePathIfValid(identifier);
@@ -134,18 +164,28 @@ namespace Listenarr.Api.Services
                         return GetRelativePath(tempExisting);
                     }
 
-                    // Download image
-                    var response = await _httpClient.GetAsync(imageUrl);
+                    // Download image with manual redirect handling so every redirect target is revalidated.
+                    var download = await DownloadWithValidatedRedirectsAsync(imageUrl);
+                    using var response = download.Response;
+                    var finalUri = download.FinalUri;
                     response.EnsureSuccessStatusCode();
 
+                    // Read bytes first so we can reject tiny placeholder images (for example 1x1)
+                    var imageBytes = await response.Content.ReadAsByteArrayAsync();
+                    var mediaType = response.Content.Headers.ContentType?.MediaType;
+                    if (IsPlaceholderImage(imageBytes, mediaType))
+                    {
+                        _logger.LogInformation("Skipping placeholder/tiny image for {Identifier} from {Url}", identifier, imageUrl);
+                        return null;
+                    }
+
                     // Determine file extension from content type or URL
-                    var extension = GetImageExtension(imageUrl, response.Content.Headers.ContentType?.MediaType);
+                    var extension = GetImageExtension(finalUri.ToString(), response.Content.Headers.ContentType?.MediaType);
                     var fileName = $"{SanitizeFileName(identifier)}{extension}";
                     var filePath = Path.Combine(_tempCachePath, fileName);
 
                     // Save to temp cache
-                    await using var fileStream = File.Create(filePath);
-                    await response.Content.CopyToAsync(fileStream);
+                    await File.WriteAllBytesAsync(filePath, imageBytes);
 
                     _logger.LogInformation("Image cached successfully: {FilePath}", filePath);
                     return GetRelativePath(filePath);
@@ -155,8 +195,7 @@ namespace Listenarr.Api.Services
                     sem.Release();
                 }
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Failed to download and cache image from {Url}", imageUrl);
                 return null;
             }
@@ -220,8 +259,7 @@ namespace Listenarr.Api.Services
                 _logger.LogInformation("Image moved to library storage: {Identifier}", identifier);
                 return GetRelativePath(libraryPath);
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Failed to move image to library storage for {Identifier}", identifier);
                 return null;
             }
@@ -285,8 +323,7 @@ namespace Listenarr.Api.Services
                 _logger.LogInformation("Author image moved to author storage: {Identifier}", identifier);
                 return GetRelativePath(authorPath);
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Failed to move author image to author storage for {Identifier}", identifier);
                 return null;
             }
@@ -311,13 +348,19 @@ namespace Listenarr.Api.Services
 
             // Check library storage first
             var libraryPath = GetImagePath(identifier, _libraryImagePath);
-            if (File.Exists(libraryPath))
-                return Task.FromResult<string?>(GetRelativePath(libraryPath));
+                if (File.Exists(libraryPath))
+                {
+                    if (IsValidCachedCoverFile(libraryPath, identifier, "library"))
+                        return Task.FromResult<string?>(GetRelativePath(libraryPath));
+                }
 
             // Check authors storage next
             var authorPath = GetImagePath(identifier, _authorImagePath);
-            if (File.Exists(authorPath))
-                return Task.FromResult<string?>(GetRelativePath(authorPath));
+                if (File.Exists(authorPath))
+                {
+                    if (IsValidCachedCoverFile(authorPath, identifier, "author"))
+                        return Task.FromResult<string?>(GetRelativePath(authorPath));
+                }
 
             // Check temp cache and prefer non-placeholder images
             var tempBest = GetBestTempImagePathIfValid(identifier);
@@ -337,22 +380,10 @@ namespace Listenarr.Api.Services
                 var path = Path.Combine(_tempCachePath, sanitized + ext);
                 if (!File.Exists(path)) continue;
 
-                // If it's a GIF that is very small, treat it as a placeholder and ignore it
-                if (ext.Equals(".gif", StringComparison.OrdinalIgnoreCase))
+                // Remove placeholder images (e.g. 1x1) from temp cache so fallback can continue.
+                if (!IsValidCachedCoverFile(path, identifier, "temp"))
                 {
-                    try
-                    {
-                        var fi = new FileInfo(path);
-                        if (fi.Length < 2048)
-                        {
-                            _logger.LogInformation("Ignoring small GIF placeholder in cache for {Identifier}: {Path} ({Length} bytes)", identifier, path, fi.Length);
-                            continue;
-                        }
-                    }
-                    catch
-                    {
-                        // If anything goes wrong inspecting the file, fall back to using it
-                    }
+                    continue;
                 }
 
                 return path;
@@ -379,16 +410,14 @@ namespace Listenarr.Api.Services
                         {
                             File.Delete(file);
                         }
-                        catch (Exception ex)
-                        {
+                        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                             _logger.LogWarning(ex, "Failed to delete cached file: {File}", file);
                         }
                     }
                     _logger.LogInformation("Temp cache cleared: {Count} files deleted", files.Length);
                 }
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Failed to clear temp cache");
             }
 
@@ -444,5 +473,287 @@ namespace Listenarr.Api.Services
             // Default to .jpg
             return ".jpg";
         }
+
+        private async Task<(HttpResponseMessage Response, Uri FinalUri)> DownloadWithValidatedRedirectsAsync(string imageUrl)
+        {
+            if (!Uri.TryCreate(imageUrl, UriKind.Absolute, out var currentUri))
+            {
+                throw new InvalidOperationException("Invalid image URL format");
+            }
+
+            HttpResponseMessage? response = null;
+
+            for (var redirectCount = 0; redirectCount <= MaxImageRedirects; redirectCount++)
+            {
+                if (!TryValidateExternalImageUri(currentUri, out var uriValidationReason))
+                {
+                    throw new InvalidOperationException($"Blocked image URL: {uriValidationReason}");
+                }
+
+                if (!await TryValidateResolvedExternalImageUriAsync(currentUri))
+                {
+                    throw new InvalidOperationException("Blocked image URL: DNS resolved to private or loopback address");
+                }
+
+                response?.Dispose();
+                using var request = new HttpRequestMessage(HttpMethod.Get, currentUri);
+                response = await _httpClientNoRedirect.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+
+                if (IsRedirectStatusCode(response.StatusCode))
+                {
+                    var location = response.Headers.Location;
+                    if (location == null)
+                    {
+                        throw new HttpRequestException($"Redirect response from {currentUri} did not include a Location header.");
+                    }
+
+                    var nextUri = location.IsAbsoluteUri ? location : new Uri(currentUri, location);
+                    if (!TryValidateExternalImageUri(nextUri, out var redirectValidationReason))
+                    {
+                        throw new InvalidOperationException($"Blocked redirect target: {redirectValidationReason}");
+                    }
+
+                    currentUri = nextUri;
+                    continue;
+                }
+
+                var finalUri = response.RequestMessage?.RequestUri ?? currentUri;
+                if (!TryValidateExternalImageUri(finalUri, out var finalValidationReason))
+                {
+                    throw new InvalidOperationException($"Blocked final image URL: {finalValidationReason}");
+                }
+
+                if (!await TryValidateResolvedExternalImageUriAsync(finalUri))
+                {
+                    throw new InvalidOperationException("Blocked final image URL: DNS resolved to private or loopback address");
+                }
+
+                return (response, finalUri);
+            }
+
+            response?.Dispose();
+            throw new HttpRequestException($"Too many redirects while downloading image (>{MaxImageRedirects}).");
+        }
+
+        private static bool TryValidateExternalImageUrl(string imageUrl, out string reason)
+        {
+            reason = string.Empty;
+            if (!Uri.TryCreate(imageUrl, UriKind.Absolute, out var uri))
+            {
+                reason = "Invalid URL format";
+                return false;
+            }
+
+            return TryValidateExternalImageUri(uri, out reason);
+        }
+
+        private static bool TryValidateExternalImageUri(Uri uri, out string reason)
+        {
+            reason = string.Empty;
+
+            if (!uri.IsAbsoluteUri)
+            {
+                reason = "URL must be absolute";
+                return false;
+            }
+
+            if (!string.Equals(uri.Scheme, "http", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(uri.Scheme, "https", StringComparison.OrdinalIgnoreCase))
+            {
+                reason = $"Unsupported URL scheme '{uri.Scheme}'";
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(uri.UserInfo))
+            {
+                reason = "URLs with embedded credentials are not allowed";
+                return false;
+            }
+
+            var host = uri.Host ?? string.Empty;
+            if (string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)
+                || host.EndsWith(".local", StringComparison.OrdinalIgnoreCase)
+                || host.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase))
+            {
+                reason = "Localhost or local-network hostnames are not allowed";
+                return false;
+            }
+
+            if (IPAddress.TryParse(host, out var ip) && IsPrivateOrLoopback(ip))
+            {
+                reason = "Private or loopback IP targets are not allowed";
+                return false;
+            }
+
+            return true;
+        }
+
+        private async Task<bool> TryValidateResolvedExternalImageUriAsync(Uri uri)
+        {
+            try
+            {
+                var host = uri.Host;
+                if (string.IsNullOrWhiteSpace(host))
+                {
+                    return false;
+                }
+
+                if (IPAddress.TryParse(host, out var ip))
+                {
+                    return !IsPrivateOrLoopback(ip);
+                }
+
+                var addresses = await Dns.GetHostAddressesAsync(host);
+                if (addresses == null || addresses.Length == 0)
+                {
+                    _logger.LogWarning("Blocked image URL because DNS resolution returned no addresses: {Host}", host);
+                    return false;
+                }
+
+                var privateOrLoopback = addresses.FirstOrDefault(IsPrivateOrLoopback);
+                if (privateOrLoopback != null)
+                {
+                    _logger.LogWarning(
+                        "Blocked image URL because DNS resolved to private/loopback address. Host={Host}, Address={Address}",
+                        host,
+                        privateOrLoopback);
+                    return false;
+                }
+
+                return true;
+            }
+            catch (SocketException ex)
+            {
+                _logger.LogWarning(ex, "Blocked image URL because DNS resolution failed for host {Host}", uri.Host);
+                return false;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+                _logger.LogWarning(ex, "Blocked image URL due to unexpected DNS validation error for host {Host}", uri.Host);
+                return false;
+            }
+        }
+
+        private static bool IsRedirectStatusCode(HttpStatusCode statusCode)
+        {
+            return statusCode == HttpStatusCode.Moved
+                || statusCode == HttpStatusCode.Redirect
+                || statusCode == HttpStatusCode.RedirectMethod
+                || statusCode == HttpStatusCode.TemporaryRedirect
+                || (int)statusCode == 308; // Permanent Redirect
+        }
+
+        private static bool IsPrivateOrLoopback(System.Net.IPAddress ip)
+        {
+            if (ip.IsIPv4MappedToIPv6)
+            {
+                ip = ip.MapToIPv4();
+            }
+
+            if (System.Net.IPAddress.IsLoopback(ip)) return true;
+
+            if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+            {
+                var b = ip.GetAddressBytes();
+                if (b[0] == 10) return true;
+                if (b[0] == 127) return true;
+                if (b[0] == 169 && b[1] == 254) return true;
+                if (b[0] == 172 && b[1] >= 16 && b[1] <= 31) return true;
+                if (b[0] == 192 && b[1] == 168) return true;
+                return false;
+            }
+
+            if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6)
+            {
+                if (ip.IsIPv6LinkLocal || ip.IsIPv6SiteLocal) return true;
+                var b = ip.GetAddressBytes();
+                if (b.Length > 0 && (b[0] & 0xFE) == 0xFC) return true; // fc00::/7
+                return false;
+            }
+
+            return false;
+        }
+
+        private bool IsValidCachedCoverFile(string filePath, string identifier, string bucket)
+        {
+            try
+            {
+                if (!File.Exists(filePath)) return false;
+                var bytes = File.ReadAllBytes(filePath);
+                var mediaType = GetMediaTypeFromExtension(Path.GetExtension(filePath));
+                if (IsPlaceholderImage(bytes, mediaType))
+                {
+                    _logger.LogInformation("Deleting placeholder/tiny cached image for {Identifier} in {Bucket}: {Path}", identifier, bucket, filePath);
+                    try
+                    {
+                        File.Delete(filePath);
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+                        _logger.LogDebug(ex, "Failed deleting invalid cached image for {Identifier} in {Bucket}: {Path}", identifier, bucket, filePath);
+                    }
+                    return false;
+                }
+                return true;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+                _logger.LogWarning(ex, "Failed validating cached image file for {Identifier}: {Path}", identifier, filePath);
+                return false;
+            }
+        }
+
+        private static string? GetMediaTypeFromExtension(string ext)
+        {
+            return ext.ToLowerInvariant() switch
+            {
+                ".jpg" or ".jpeg" => "image/jpeg",
+                ".png" => "image/png",
+                ".gif" => "image/gif",
+                ".webp" => "image/webp",
+                ".svg" => "image/svg+xml",
+                _ => null
+            };
+        }
+
+        private bool IsPlaceholderImage(byte[] data, string? mediaType)
+        {
+            if (data == null || data.Length == 0) return true;
+            if (!string.IsNullOrWhiteSpace(mediaType) && mediaType.Contains("gif", StringComparison.OrdinalIgnoreCase) && data.Length < 2048)
+                return true;
+
+            try
+            {
+                var info = Image.Identify(data);
+                if (info != null && (info.Width <= 1 || info.Height <= 1))
+                    return true;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
+                // If dimensions can't be detected, keep existing behavior and allow caching.
+                // We do not treat undecodable images as placeholders because some valid images
+                // may not be recognized by Identify for edge codecs/content.
+                _logger.LogDebug(ex, "Failed to inspect image dimensions for placeholder detection");
+            }
+
+            return false;
+        }
+
+        public void Dispose()
+        {
+            try
+            {
+                _httpClientNoRedirect.Dispose();
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+                _logger.LogWarning(ex, "Failed disposing no-redirect HttpClient in ImageCacheService");
+            }
+
+            try
+            {
+                _httpClient.Dispose();
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+                _logger.LogWarning(ex, "Failed disposing HttpClient in ImageCacheService");
+            }
+        }
     }
 }
+

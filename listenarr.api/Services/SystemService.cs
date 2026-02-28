@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2025 Robbie Davis
  * 
@@ -37,6 +37,18 @@ namespace Listenarr.Api.Services
             _startTime = DateTime.UtcNow;
         }
 
+        public StartupConfig GetStartupConfig()
+        {
+            try
+            {
+                return _configurationService.GetStartupConfigAsync().GetAwaiter().GetResult();
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+                _logger.LogError(ex, "Error retrieving startup configuration");
+                return new StartupConfig();
+            }
+        }
+
         public SystemInfo GetSystemInfo()
         {
             try
@@ -61,8 +73,7 @@ namespace Listenarr.Api.Services
                     StartTime = _startTime
                 };
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error getting system info");
                 throw;
             }
@@ -102,8 +113,7 @@ namespace Listenarr.Api.Services
                     DriveName = driveInfo.Name
                 };
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error getting storage info");
                 throw;
             }
@@ -144,8 +154,7 @@ namespace Listenarr.Api.Services
                     ExternalApis = externalApiHealth
                 };
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error getting service health");
                 throw;
             }
@@ -199,8 +208,7 @@ namespace Listenarr.Api.Services
                     Clients = clientStatuses
                 };
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error getting download client health");
                 return new DownloadClientHealth
                 {
@@ -260,8 +268,7 @@ namespace Listenarr.Api.Services
                     Apis = apiStatuses
                 };
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error getting external API health");
                 return new ExternalApiHealth
                 {
@@ -296,8 +303,7 @@ namespace Listenarr.Api.Services
                     FreeFormatted = FormatBytes(freeBytes)
                 };
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error getting memory info");
                 return new MemoryInfo();
             }
@@ -317,8 +323,7 @@ namespace Listenarr.Api.Services
                     ProcessorCount = Environment.ProcessorCount
                 };
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error getting CPU info");
                 return new CpuInfo
                 {
@@ -470,8 +475,7 @@ namespace Listenarr.Api.Services
                     });
                 }
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Error reading log file");
                 logs.Add(new LogEntry
                 {
@@ -573,11 +577,11 @@ namespace Listenarr.Api.Services
                     Source = "Application"
                 };
             }
-            catch
-            {
+            catch (Exception caughtEx_1) when (caughtEx_1 is not OperationCanceledException && caughtEx_1 is not OutOfMemoryException && caughtEx_1 is not StackOverflowException) {
                 return null;
             }
         }
     }
 }
+
 
