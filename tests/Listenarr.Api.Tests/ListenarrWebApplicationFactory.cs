@@ -1,24 +1,19 @@
-using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.IO;
-using System.Threading.Tasks;
 using Listenarr.Api.Services;
-using Listenarr.Domain.Models;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Moq;
+using System.Collections.Concurrent;
+using System.Diagnostics;
 
 namespace Listenarr.Api.Tests
 {
     public class ListenarrWebApplicationFactory : WebApplicationFactory<Program>
     {
         private static readonly ConcurrentDictionary<string, byte> DbFilesToCleanup = new(StringComparer.OrdinalIgnoreCase);
-        private static readonly object CleanupSync = new();
+        private static readonly Lock CleanupSync = new();
         private static bool _isProcessExitCleanupHooked;
 
         private string? _sqliteDbPath;

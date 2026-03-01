@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Api.Services
 {
@@ -21,7 +20,7 @@ namespace Listenarr.Api.Services
         private readonly IProcessRunner? _processRunner;
         private string? _botApiKey;
         private Process? _botProcess;
-        private readonly object _processLock = new object();
+        private readonly Lock _processLock = new();
 
         public DiscordBotService(
             ILogger<DiscordBotService> logger,

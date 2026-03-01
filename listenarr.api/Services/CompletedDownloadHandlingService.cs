@@ -16,12 +16,8 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.DependencyInjection;
-using Listenarr.Domain.Models;
 using Listenarr.Infrastructure.Models;
+using Microsoft.EntityFrameworkCore;
 
 namespace Listenarr.Api.Services
 {
@@ -44,7 +40,7 @@ namespace Listenarr.Api.Services
         
         // Track downloads that are in the completion pipeline to avoid duplicate processing
         private readonly Dictionary<string, DateTime> _processingDownloads = new();
-        private readonly object _processingLock = new();
+        private readonly Lock _processingLock = new();
 
         public CompletedDownloadHandlingService(
             IServiceScopeFactory serviceScopeFactory,
