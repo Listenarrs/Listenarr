@@ -195,13 +195,13 @@ namespace Listenarr.Api.Services
             {
                 var e = embeds[0]!.AsObject();
 
-                string titleText = e.ContainsKey("title") ? e["title"]?.ToString() ?? string.Empty : string.Empty;
-                string descriptionText = e.ContainsKey("description") ? e["description"]?.ToString() ?? string.Empty : string.Empty;
+                string titleText = e.TryGetPropertyValue("title", out var tt) && tt != null ? tt.ToString() ?? string.Empty : string.Empty;
+                string descriptionText = e.TryGetPropertyValue("description", out var dt) && dt != null ? dt.ToString() ?? string.Empty : string.Empty;
 
                 int total = titleText.Length + descriptionText.Length;
-                if (e.ContainsKey("fields") && e["fields"] != null)
+                if (e.TryGetPropertyValue("fields", out var fieldsObj) && fieldsObj != null)
                 {
-                    foreach (var f in e["fields"]!.AsArray())
+                    foreach (var f in fieldsObj!.AsArray())
                     {
                         var fo = f!.AsObject();
                         var n = fo["name"]?.ToString() ?? string.Empty;
@@ -221,9 +221,9 @@ namespace Listenarr.Api.Services
                         excess = excess - reduce;
                     }
 
-                    if (excess > 0 && e.ContainsKey("fields") && e["fields"] != null)
+                    if (excess > 0 && fieldsObj != null)
                     {
-                        var arr = e["fields"]!.AsArray();
+                        var arr = fieldsObj!.AsArray();
                         for (int i = 0; i < arr.Count && excess > 0; i++)
                         {
                             var fo = arr[i]!.AsObject();

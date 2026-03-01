@@ -996,8 +996,8 @@ namespace Listenarr.Api.Controllers
                 }
 
                 _logger.LogInformation("IntelligentSearch called for query: {Query}", LogRedaction.SanitizeText(query));
-                var region = Request.Query.ContainsKey("region") ? Request.Query["region"].ToString() ?? "us" : "us";
-                var language = Request.Query.ContainsKey("language") ? Request.Query["language"].ToString() : null;
+                var region = Request.Query.TryGetValue("region", out var regionValue) ? regionValue.ToString() ?? "us" : "us";
+                var language = Request.Query.TryGetValue("language", out var languageValue) ? languageValue.ToString() : null;
                 var results = await _searchService.IntelligentSearchAsync(query, candidateLimit, returnLimit, containmentMode, requireAuthorAndPublisher, fuzzyThreshold, region, language, HttpContext.RequestAborted);
                 // Normalize images for metadata results so the SPA receives local /api/v{version}/images/{asin} when possible
                 if (_imageCacheService != null && results != null)

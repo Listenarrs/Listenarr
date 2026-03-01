@@ -2650,8 +2650,8 @@ namespace Listenarr.Api.Services
                     var allDownloads = await dbContext.Downloads.ToListAsync();
                     downloadRecord = allDownloads.FirstOrDefault(d => 
                         d.Metadata != null &&
-                        d.Metadata.ContainsKey("TorrentHash") &&
-                        d.Metadata["TorrentHash"]?.ToString() == downloadId);
+                        d.Metadata.TryGetValue("TorrentHash", out var hashObj) &&
+                        hashObj?.ToString() == downloadId);
                 }
 
                 // If still not found, try enhanced title/name matching for legacy downloads

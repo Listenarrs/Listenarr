@@ -229,8 +229,12 @@ namespace Listenarr.Api.Services
         public bool IsTerminalState(DownloadItemStatus state)
         {
             // Terminal states: no valid transitions out (except to themselves)
-            return !ValidTransitions.ContainsKey(state) ||
-                   (ValidTransitions[state].Count == 1 && ValidTransitions[state].Contains(state));
+            if (!ValidTransitions.TryGetValue(state, out var transitions))
+            {
+                return true;
+            }
+
+            return (transitions.Count == 1 && transitions.Contains(state));
         }
 
         /// <summary>

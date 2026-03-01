@@ -852,16 +852,16 @@ namespace Listenarr.Api.Services
                     var torrentLookup = new List<(string Hash, string Name, string SavePath, string ContentPath, double Progress, long AmountLeft, string State, long Size, string Category, long? SeedingTime)>();
                     foreach (var t in allTorrents)
                     {
-                        var hash = t.ContainsKey("hash") ? t["hash"].GetString() ?? "" : "";
-                        var name = t.ContainsKey("name") ? t["name"].GetString() ?? "" : "";
-                        var savePath = t.ContainsKey("save_path") ? t["save_path"].GetString() ?? "" : "";
-                        var contentPath = t.ContainsKey("content_path") ? t["content_path"].GetString() ?? "" : "";
-                        var progress = t.ContainsKey("progress") ? t["progress"].GetDouble() : 0.0;
-                        var amountLeft = t.ContainsKey("amount_left") ? t["amount_left"].GetInt64() : 0L;
-                        var state = t.ContainsKey("state") ? t["state"].GetString() ?? "" : "";
-                        var size = t.ContainsKey("size") ? t["size"].GetInt64() : 0L;
-                        var category = t.ContainsKey("category") ? t["category"].GetString() ?? "" : "";
-                        var seedingTime = t.ContainsKey("seeding_time") ? t["seeding_time"].GetInt64() : (long?)null;
+                        var hash = t.TryGetValue("hash", out JsonElement hashValue) ? hashValue.GetString() ?? "" : "";
+                        var name = t.TryGetValue("name", out JsonElement nameValue) ? nameValue.GetString() ?? "" : "";
+                        var savePath = t.TryGetValue("save_path", out JsonElement savePathValue) ? savePathValue.GetString() ?? "" : "";
+                        var contentPath = t.TryGetValue("content_path", out JsonElement contentPathValue) ? contentPathValue.GetString() ?? "" : "";
+                        var progress = t.TryGetValue("progress", out JsonElement progressValue) ? progressValue.GetDouble() : 0.0;
+                        var amountLeft = t.TryGetValue("amount_left", out JsonElement amountLeftValue) ? amountLeftValue.GetInt64() : 0L;
+                        var state = t.TryGetValue("state", out JsonElement stateValue) ? stateValue.GetString() ?? "" : "";
+                        var size = t.TryGetValue("size", out JsonElement sizeValue) ? sizeValue.GetInt64() : 0L;
+                        var category = t.TryGetValue("category", out JsonElement categoryValue) ? categoryValue.GetString() ?? "" : "";
+                        var seedingTime = t.TryGetValue("seeding_time", out JsonElement seedingTimeValue) ? seedingTimeValue.GetInt64() : (long?)null;
                         torrentLookup.Add((hash, name, savePath, contentPath, progress, amountLeft, state, size, category, seedingTime));
                     }
 
@@ -1089,9 +1089,8 @@ namespace Listenarr.Api.Services
                             else
                             {
                                 // Not complete anymore - remove candidate if present
-                                if (_completionCandidates.ContainsKey(dl.Id))
+                                if (_completionCandidates.Remove(dl.Id))
                                 {
-                                    _completionCandidates.Remove(dl.Id);
                                     _logger.LogDebug("Download {DownloadId} no longer appears complete in qBittorrent, removed from candidates", dl.Id);
                                     _ = BroadcastCandidateUpdateAsync(dl, false, cancellationToken);
                                 }
@@ -1333,9 +1332,8 @@ namespace Listenarr.Api.Services
                                 }
                                 else
                                 {
-                                    if (_completionCandidates.ContainsKey(dl.Id))
+                                    if (_completionCandidates.Remove(dl.Id))
                                     {
-                                        _completionCandidates.Remove(dl.Id);
                                         _ = BroadcastCandidateUpdateAsync(dl, false, cancellationToken);
                                     }
                                 }
@@ -1995,9 +1993,8 @@ namespace Listenarr.Api.Services
                                     failedMatch.Error,
                                     cancellationToken);
 
-                                if (_completionCandidates.ContainsKey(dl.Id))
+                                if (_completionCandidates.Remove(dl.Id))
                                 {
-                                    _completionCandidates.Remove(dl.Id);
                                     _ = BroadcastCandidateUpdateAsync(dl, false, cancellationToken);
                                 }
                                 continue;
@@ -2092,9 +2089,8 @@ namespace Listenarr.Api.Services
                                 // Not found in completed items - check if it's still in queue for progress updates
                                 // SABnzbd doesn't provide queue data in history API, so we can't update progress here
                                 // Progress updates for SABnzbd would need to be done via the queue API
-                                if (_completionCandidates.ContainsKey(dl.Id))
+                                if (_completionCandidates.Remove(dl.Id))
                                 {
-                                    _completionCandidates.Remove(dl.Id);
                                     _logger.LogDebug("Download {DownloadId} no longer appears complete in SABnzbd, removed from candidates", dl.Id);
                                     _ = BroadcastCandidateUpdateAsync(dl, false, cancellationToken);
                                 }
@@ -2358,9 +2354,8 @@ namespace Listenarr.Api.Services
                                     failedMatch.Error,
                                     cancellationToken);
 
-                                if (_completionCandidates.ContainsKey(dl.Id))
+                                if (_completionCandidates.Remove(dl.Id))
                                 {
-                                    _completionCandidates.Remove(dl.Id);
                                     _ = BroadcastCandidateUpdateAsync(dl, false, cancellationToken);
                                 }
                                 continue;
@@ -2415,9 +2410,8 @@ namespace Listenarr.Api.Services
                             else
                             {
                                 // Not found in completed items - remove from candidates if present
-                                if (_completionCandidates.ContainsKey(dl.Id))
+                                if (_completionCandidates.Remove(dl.Id))
                                 {
-                                    _completionCandidates.Remove(dl.Id);
                                     _logger.LogDebug("Download {DownloadId} no longer appears complete in NZBGet, removed from candidates", dl.Id);
                                     _ = BroadcastCandidateUpdateAsync(dl, false, cancellationToken);
                                 }
