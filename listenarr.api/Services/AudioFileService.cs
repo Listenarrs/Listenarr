@@ -58,7 +58,7 @@ namespace Listenarr.Api.Services
                             // Ensure candidate is the same directory or a subdirectory of the existing dir
                             var isInExistingDir = candidateDir.Equals(existingDir, StringComparison.OrdinalIgnoreCase) ||
                                                    candidateDir.StartsWith(existingDir + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
-                            
+
                             // Also allow if file is within the audiobook's BasePath (multi-file migration)
                             var isInBasePath = !string.IsNullOrWhiteSpace(audiobook.BasePath) &&
                                                candidateFull.StartsWith(Path.GetFullPath(audiobook.BasePath) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
@@ -93,11 +93,13 @@ namespace Listenarr.Api.Services
                                             await toastSvc.PublishToastAsync("warning", "File not associated", $"Refused to associate {Path.GetFileName(filePath)} to {audiobookTitle}");
                                         }
                                     }
-                                    catch (Exception thx) when (thx is not OperationCanceledException && thx is not OutOfMemoryException && thx is not StackOverflowException) {
+                                    catch (Exception thx) when (thx is not OperationCanceledException && thx is not OutOfMemoryException && thx is not StackOverflowException)
+                                    {
                                         _logger.LogDebug(thx, "Failed to publish toast for refused file association");
                                     }
                                 }
-                                catch (Exception hx) when (hx is not OperationCanceledException && hx is not OutOfMemoryException && hx is not StackOverflowException) {
+                                catch (Exception hx) when (hx is not OperationCanceledException && hx is not OutOfMemoryException && hx is not StackOverflowException)
+                                {
                                     _logger.LogDebug(hx, "Failed to persist history for refused file association (AudiobookId={AudiobookId}, File={File})", audiobookId, filePath);
                                 }
 
@@ -106,7 +108,8 @@ namespace Listenarr.Api.Services
                         }
                     }
                 }
-                catch (Exception exDir) when (exDir is not OperationCanceledException && exDir is not OutOfMemoryException && exDir is not StackOverflowException) {
+                catch (Exception exDir) when (exDir is not OperationCanceledException && exDir is not OutOfMemoryException && exDir is not StackOverflowException)
+                {
                     _logger.LogDebug(exDir, "Failed to verify audiobook folder containment for AudiobookId={AudiobookId} File={File}", audiobookId, filePath);
                 }
 
@@ -119,24 +122,18 @@ namespace Listenarr.Api.Services
                     var cacheKey = $"meta::{filePath}::{ticks}";
                     if (!_memoryCache.TryGetValue(cacheKey, out var cachedObj) || !(cachedObj is AudioMetadata cachedMeta))
                     {
-                        await _limiter.Sem.WaitAsync();
-                        try
-                        {
-                            meta = await metadataService.ExtractFileMetadataAsync(filePath);
-                            // Cache for 5 minutes
-                            _memoryCache.Set(cacheKey, meta, TimeSpan.FromMinutes(5));
-                        }
-                        finally
-                        {
-                            _limiter.Sem.Release();
-                        }
+                        using var _ = await _limiter.Sem.LockAsync();
+                        meta = await metadataService.ExtractFileMetadataAsync(filePath);
+                        // Cache for 5 minutes
+                        _memoryCache.Set(cacheKey, meta, TimeSpan.FromMinutes(5));
                     }
                     else
                     {
                         meta = cachedMeta;
                     }
                 }
-                catch (Exception mEx) when (mEx is not OperationCanceledException && mEx is not OutOfMemoryException && mEx is not StackOverflowException) {
+                catch (Exception mEx) when (mEx is not OperationCanceledException && mEx is not OutOfMemoryException && mEx is not StackOverflowException)
+                {
                     _logger.LogInformation(mEx, "Metadata extraction failed for {Path}", filePath);
                 }
                 // If metadata extraction produced minimal results, attempt to ensure ffprobe is installed
@@ -162,27 +159,25 @@ namespace Listenarr.Api.Services
                                     if (!string.IsNullOrEmpty(ffpath))
                                     {
                                         // Retry metadata extraction once under limiter
-                                        await _limiter.Sem.WaitAsync();
-                                        try
-                                        {
-                                            meta = await metadataService.ExtractFileMetadataAsync(filePath);
-                                            // Update cache
-                                            var fileInfoForCache2 = new FileInfo(filePath);
-                                            var ticks2 = fileInfoForCache2.Exists ? fileInfoForCache2.LastWriteTimeUtc.Ticks : 0L;
-                                            var cacheKey2 = $"meta::{filePath}::{ticks2}";
-                                            _memoryCache.Set(cacheKey2, meta, TimeSpan.FromMinutes(5));
-                                        }
-                                        finally { _limiter.Sem.Release(); }
+                                        using var _ = await _limiter.Sem.LockAsync();
+                                        meta = await metadataService.ExtractFileMetadataAsync(filePath);
+                                        // Update cache
+                                        var fileInfoForCache2 = new FileInfo(filePath);
+                                        var ticks2 = fileInfoForCache2.Exists ? fileInfoForCache2.LastWriteTimeUtc.Ticks : 0L;
+                                        var cacheKey2 = $"meta::{filePath}::{ticks2}";
+                                        _memoryCache.Set(cacheKey2, meta, TimeSpan.FromMinutes(5));
                                     }
                                 }
-                                catch (Exception rex) when (rex is not OperationCanceledException && rex is not OutOfMemoryException && rex is not StackOverflowException) {
+                                catch (Exception rex) when (rex is not OperationCanceledException && rex is not OutOfMemoryException && rex is not StackOverflowException)
+                                {
                                     _logger.LogInformation(rex, "Retry metadata extraction failed for {Path}", filePath);
                                 }
                             }
                         }
                     }
                 }
-                catch (Exception exRetry) when (exRetry is not OperationCanceledException && exRetry is not OutOfMemoryException && exRetry is not StackOverflowException) {
+                catch (Exception exRetry) when (exRetry is not OperationCanceledException && exRetry is not OutOfMemoryException && exRetry is not StackOverflowException)
+                {
                     _logger.LogDebug(exRetry, "Non-fatal error while attempting ffprobe install/retry for {Path}", filePath);
                 }
                 var fi = new FileInfo(filePath);
@@ -215,7 +210,8 @@ namespace Listenarr.Api.Services
                             var conn = db.Database.GetDbConnection();
                             _logger.LogInformation("Created AudiobookFile for audiobook {AudiobookId}: {Path} (Db: {Db}) Id={Id}", audiobookId, filePath, conn?.ConnectionString, fileRecord.Id);
                         }
-                        catch (Exception logEx) when (logEx is not OperationCanceledException && logEx is not OutOfMemoryException && logEx is not StackOverflowException) {
+                        catch (Exception logEx) when (logEx is not OperationCanceledException && logEx is not OutOfMemoryException && logEx is not StackOverflowException)
+                        {
                             _logger.LogInformation("Created AudiobookFile for audiobook {AudiobookId}: {Path} (Db: unknown) Id={Id}", audiobookId, filePath, fileRecord.Id);
                             _logger.LogDebug(logEx, "Failed to log DB connection string for AudiobookFile creation");
                         }
@@ -268,11 +264,13 @@ namespace Listenarr.Api.Services
                                     await db.SaveChangesAsync();
                                 }
                             }
-                            catch (Exception aubEx) when (aubEx is not OperationCanceledException && aubEx is not OutOfMemoryException && aubEx is not StackOverflowException) {
+                            catch (Exception aubEx) when (aubEx is not OperationCanceledException && aubEx is not OutOfMemoryException && aubEx is not StackOverflowException)
+                            {
                                 _logger.LogDebug(aubEx, "Failed to update Audiobook file summary fields for AudiobookId {AudiobookId}", audiobookId);
                             }
                         }
-                        catch (Exception hx) when (hx is not OperationCanceledException && hx is not OutOfMemoryException && hx is not StackOverflowException) {
+                        catch (Exception hx) when (hx is not OperationCanceledException && hx is not OutOfMemoryException && hx is not StackOverflowException)
+                        {
                             _logger.LogDebug(hx, "Failed to create history entry for added audiobook file {Path}", filePath);
                         }
 
@@ -298,7 +296,8 @@ namespace Listenarr.Api.Services
                     }
                 }
             }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
                 _logger.LogWarning(ex, "Failed to create AudiobookFile record for audiobook {AudiobookId} at {Path}", audiobookId, filePath);
                 return false;
             }

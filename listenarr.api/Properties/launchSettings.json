@@ -1,27 +1,26 @@
-﻿{
-  "$schema": "https://json.schemastore.org/launchsettings.json",
+{
   "profiles": {
     "http": {
       "commandName": "Project",
-      "dotnetRunMessages": true,
       "launchBrowser": true,
       "launchUrl": "swagger",
-      "applicationUrl": "http://localhost:4545",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development",
         "LISTENARR_CONTENT_ROOT": "../../listenarr.api"
-      }
+      },
+      "dotnetRunMessages": true,
+      "applicationUrl": "http://localhost:4545"
     },
     "https": {
       "commandName": "Project",
-      "dotnetRunMessages": true,
       "launchBrowser": true,
       "launchUrl": "swagger",
-      "applicationUrl": "https://localhost:7172;http://localhost:4545",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development",
         "LISTENARR_CONTENT_ROOT": "../../listenarr.api"
-      }
+      },
+      "dotnetRunMessages": true,
+      "applicationUrl": "https://localhost:7172;http://localhost:4545"
     },
     "IIS Express": {
       "commandName": "IISExpress",
@@ -30,6 +29,15 @@
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development"
       }
+    }
+  },
+  "$schema": "https://json.schemastore.org/launchsettings.json",
+  "iisSettings": {
+    "windowsAuthentication": false,
+    "anonymousAuthentication": true,
+    "iisExpress": {
+      "applicationUrl": "http://localhost:36264/",
+      "sslPort": 44320
     }
   }
 }

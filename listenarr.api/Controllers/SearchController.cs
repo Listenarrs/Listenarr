@@ -1090,13 +1090,13 @@ namespace Listenarr.Api.Controllers
 
                 // Support MyAnonamouse query string toggles (mamFilter, mamSearchInDescription, mamSearchInSeries, mamSearchInFilenames, mamLanguage, mamFreeleechWedge)
                 var mamOptions = new Listenarr.Api.Models.MyAnonamouseOptions();
-                if (Request.Query.ContainsKey("mamFilter") && Enum.TryParse<Listenarr.Api.Models.MamTorrentFilter>(Request.Query["mamFilter"].ToString() ?? string.Empty, true, out var mamFilter))
+                if (Request.Query.TryGetValue("mamFilter", out var queryMamFilter) && Enum.TryParse<Listenarr.Api.Models.MamTorrentFilter>(queryMamFilter.ToString() ?? string.Empty, true, out var mamFilter))
                     mamOptions.Filter = mamFilter;
-                if (Request.Query.ContainsKey("mamSearchInDescription") && bool.TryParse(Request.Query["mamSearchInDescription"], out var sd)) mamOptions.SearchInDescription = sd;
-                if (Request.Query.ContainsKey("mamSearchInSeries") && bool.TryParse(Request.Query["mamSearchInSeries"], out var ss)) mamOptions.SearchInSeries = ss;
-                if (Request.Query.ContainsKey("mamSearchInFilenames") && bool.TryParse(Request.Query["mamSearchInFilenames"], out var sf)) mamOptions.SearchInFilenames = sf;
-                if (Request.Query.ContainsKey("mamLanguage")) mamOptions.SearchLanguage = Request.Query["mamLanguage"].ToString();
-                if (Request.Query.ContainsKey("mamFreeleechWedge") && Enum.TryParse<Listenarr.Api.Models.MamFreeleechWedge>(Request.Query["mamFreeleechWedge"].ToString() ?? string.Empty, true, out var mw)) mamOptions.FreeleechWedge = mw;
+                if (Request.Query.TryGetValue("mamSearchInDescription", out var queryMamSearchInDescription) && bool.TryParse(queryMamSearchInDescription, out var sd)) mamOptions.SearchInDescription = sd;
+                if (Request.Query.TryGetValue("mamSearchInSeries", out var queryMamSearchInSeries) && bool.TryParse(queryMamSearchInSeries, out var ss)) mamOptions.SearchInSeries = ss;
+                if (Request.Query.TryGetValue("mamSearchInFilenames", out var queryMamSearchInFilenames) && bool.TryParse(queryMamSearchInFilenames, out var sf)) mamOptions.SearchInFilenames = sf;
+                if (Request.Query.TryGetValue("mamLanguage", out var queryMamLanguage)) mamOptions.SearchLanguage = queryMamLanguage.ToString();
+                if (Request.Query.TryGetValue("mamFreeleechWedge", out var queryMamFreeleechWedge) && Enum.TryParse<Listenarr.Api.Models.MamFreeleechWedge>(queryMamFreeleechWedge.ToString() ?? string.Empty, true, out var mw)) mamOptions.FreeleechWedge = mw;
 
                 var req = new Listenarr.Api.Models.SearchRequest { MyAnonamouse = mamOptions };
                 var results = await _searchService.SearchIndexersAsync(query, category, sortBy, sortDirection, isAutomaticSearch, req);

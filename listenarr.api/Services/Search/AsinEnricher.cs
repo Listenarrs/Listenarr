@@ -1,9 +1,7 @@
-using System.Collections.Concurrent;
-using System.Threading;
+using AsyncKeyedLock;
 using Listenarr.Api.Services.Search.Filters;
 using Listenarr.Api.Services.Search.Strategies;
-using Listenarr.Infrastructure.Models;
-using Microsoft.Extensions.Logging;
+using System.Collections.Concurrent;
 
 namespace Listenarr.Api.Services.Search;
 
@@ -44,7 +42,7 @@ public class AsinEnricher
         string? query,
         CancellationToken ct = default)
     {
-        var semaphore = new SemaphoreSlim(5); // Increased from 3 to 5 for better throughput
+        var semaphore = new AsyncNonKeyedLocker(5); // Increased from 3 to 5 for better throughput
         var enrichmentTasks = new List<Task>();
         var enriched = new ConcurrentBag<SearchResult>();
         var asinsNeedingFallback = new ConcurrentBag<string>();
@@ -54,7 +52,7 @@ public class AsinEnricher
         {
             enrichmentTasks.Add(Task.Run(async () =>
             {
-                await semaphore.WaitAsync(ct);
+                using var _ = await semaphore.LockAsync(ct);
                 try
                 {
                     ct.ThrowIfCancellationRequested();
@@ -202,10 +200,6 @@ public class AsinEnricher
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogWarning(ex, "Metadata enrichment failed for ASIN {Asin}", asin);
-                }
-                finally
-                {
-                    semaphore.Release();
                 }
             }));
         }

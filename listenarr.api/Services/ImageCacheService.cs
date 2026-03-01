@@ -16,15 +16,10 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using System;
-using System.IO;
-using System.Linq;
-using System.Net;
-using System.Net.Http;
-using System.Net.Sockets;
-using System.Threading.Tasks;
-using Microsoft.Extensions.Logging;
+using AsyncKeyedLock;
 using SixLabors.ImageSharp;
+using System.Net;
+using System.Net.Sockets;
 
 namespace Listenarr.Api.Services
 {
@@ -46,32 +41,33 @@ namespace Listenarr.Api.Services
         private readonly string _tempCachePath;
         private readonly string _libraryImagePath;
         private readonly string _authorImagePath;
-    private readonly string _contentRootPath;
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, System.Threading.SemaphoreSlim> _downloadLocks = new();
-    public ImageCacheService(ILogger<ImageCacheService> logger, IHttpClientFactory httpClientFactory, string contentRootPath)
-    {
-        _logger = logger;
-        _httpClient = httpClientFactory.CreateClient();
-        _httpClientNoRedirect = new HttpClient(new HttpClientHandler
-        {
-            AllowAutoRedirect = false
-        })
-        {
-            Timeout = _httpClient.Timeout
-        };
-        _contentRootPath = contentRootPath;
+        private readonly string _contentRootPath;
+        private readonly AsyncKeyedLocker<string> _downloadLocks = new();
 
-        // Set up cache directories relative to content root
-        var baseDir = Path.Combine(contentRootPath, "config");
-        _tempCachePath = Path.Combine(baseDir, "cache", "images", "temp");
-        _libraryImagePath = Path.Combine(baseDir, "cache", "images", "library");
-        _authorImagePath = Path.Combine(baseDir, "cache", "images", "authors");
+        public ImageCacheService(ILogger<ImageCacheService> logger, IHttpClientFactory httpClientFactory, string contentRootPath)
+        {
+            _logger = logger;
+            _httpClient = httpClientFactory.CreateClient();
+            _httpClientNoRedirect = new HttpClient(new HttpClientHandler
+            {
+                AllowAutoRedirect = false
+            })
+            {
+                Timeout = _httpClient.Timeout
+            };
+            _contentRootPath = contentRootPath;
 
-        // Ensure directories exist
-        Directory.CreateDirectory(_tempCachePath);
-        Directory.CreateDirectory(_libraryImagePath);
-        Directory.CreateDirectory(_authorImagePath);
-    }
+            // Set up cache directories relative to content root
+            var baseDir = Path.Combine(contentRootPath, "config");
+            _tempCachePath = Path.Combine(baseDir, "cache", "images", "temp");
+            _libraryImagePath = Path.Combine(baseDir, "cache", "images", "library");
+            _authorImagePath = Path.Combine(baseDir, "cache", "images", "authors");
+
+            // Ensure directories exist
+            Directory.CreateDirectory(_tempCachePath);
+            Directory.CreateDirectory(_libraryImagePath);
+            Directory.CreateDirectory(_authorImagePath);
+        }
 
         /// <summary>
         /// Downloads an image from a URL and caches it temporarily
@@ -131,71 +127,65 @@ namespace Listenarr.Api.Services
                 }
 
                 // Use per-identifier lock to prevent concurrent downloads for same identifier
-                var sem = _downloadLocks.GetOrAdd(identifier, _ => new System.Threading.SemaphoreSlim(1, 1));
-                await sem.WaitAsync();
-                try
+                using var _ = await _downloadLocks.LockAsync(identifier);
+
+                // Re-check after acquiring lock
+                libraryPath = GetImagePath(identifier, _libraryImagePath);
+                if (File.Exists(libraryPath))
                 {
-                    // Re-check after acquiring lock
-                    libraryPath = GetImagePath(identifier, _libraryImagePath);
-                    if (File.Exists(libraryPath))
+                    if (IsValidCachedCoverFile(libraryPath, identifier, "library"))
                     {
-                        if (IsValidCachedCoverFile(libraryPath, identifier, "library"))
-                        {
-                            _logger.LogInformation("Image already in library storage (after wait): {Identifier}", identifier);
-                            return GetRelativePath(libraryPath);
-                        }
+                        _logger.LogInformation("Image already in library storage (after wait): {Identifier}", identifier);
+                        return GetRelativePath(libraryPath);
                     }
-
-                    // Also check author storage after lock
-                    authorPath = GetImagePath(identifier, _authorImagePath);
-                    if (File.Exists(authorPath))
-                    {
-                        if (IsValidCachedCoverFile(authorPath, identifier, "author"))
-                        {
-                            _logger.LogInformation("Image already in author storage (after wait): {Identifier}", identifier);
-                            return GetRelativePath(authorPath);
-                        }
-                    }
-
-                    tempExisting = GetBestTempImagePathIfValid(identifier);
-                    if (!string.IsNullOrEmpty(tempExisting))
-                    {
-                        _logger.LogInformation("Image already cached (after wait): {Identifier}", identifier);
-                        return GetRelativePath(tempExisting);
-                    }
-
-                    // Download image with manual redirect handling so every redirect target is revalidated.
-                    var download = await DownloadWithValidatedRedirectsAsync(imageUrl);
-                    using var response = download.Response;
-                    var finalUri = download.FinalUri;
-                    response.EnsureSuccessStatusCode();
-
-                    // Read bytes first so we can reject tiny placeholder images (for example 1x1)
-                    var imageBytes = await response.Content.ReadAsByteArrayAsync();
-                    var mediaType = response.Content.Headers.ContentType?.MediaType;
-                    if (IsPlaceholderImage(imageBytes, mediaType))
-                    {
-                        _logger.LogInformation("Skipping placeholder/tiny image for {Identifier} from {Url}", identifier, imageUrl);
-                        return null;
-                    }
-
-                    // Determine file extension from content type or URL
-                    var extension = GetImageExtension(finalUri.ToString(), response.Content.Headers.ContentType?.MediaType);
-                    var fileName = $"{SanitizeFileName(identifier)}{extension}";
-                    var filePath = Path.Combine(_tempCachePath, fileName);
-
-                    // Save to temp cache
-                    await File.WriteAllBytesAsync(filePath, imageBytes);
-
-                    _logger.LogInformation("Image cached successfully: {FilePath}", filePath);
-                    return GetRelativePath(filePath);
                 }
-                finally
+
+                // Also check author storage after lock
+                authorPath = GetImagePath(identifier, _authorImagePath);
+                if (File.Exists(authorPath))
                 {
-                    sem.Release();
+                    if (IsValidCachedCoverFile(authorPath, identifier, "author"))
+                    {
+                        _logger.LogInformation("Image already in author storage (after wait): {Identifier}", identifier);
+                        return GetRelativePath(authorPath);
+                    }
                 }
+
+                tempExisting = GetBestTempImagePathIfValid(identifier);
+                if (!string.IsNullOrEmpty(tempExisting))
+                {
+                    _logger.LogInformation("Image already cached (after wait): {Identifier}", identifier);
+                    return GetRelativePath(tempExisting);
+                }
+
+                // Download image with manual redirect handling so every redirect target is revalidated.
+                var download = await DownloadWithValidatedRedirectsAsync(imageUrl);
+                using var response = download.Response;
+                var finalUri = download.FinalUri;
+                response.EnsureSuccessStatusCode();
+
+                // Read bytes first so we can reject tiny placeholder images (for example 1x1)
+                var imageBytes = await response.Content.ReadAsByteArrayAsync();
+                var mediaType = response.Content.Headers.ContentType?.MediaType;
+                if (IsPlaceholderImage(imageBytes, mediaType))
+                {
+                    _logger.LogInformation("Skipping placeholder/tiny image for {Identifier} from {Url}", identifier, imageUrl);
+                    return null;
+                }
+
+                // Determine file extension from content type or URL
+                var extension = GetImageExtension(finalUri.ToString(), response.Content.Headers.ContentType?.MediaType);
+                var fileName = $"{SanitizeFileName(identifier)}{extension}";
+                var filePath = Path.Combine(_tempCachePath, fileName);
+
+                // Save to temp cache
+                await File.WriteAllBytesAsync(filePath, imageBytes);
+
+                _logger.LogInformation("Image cached successfully: {FilePath}", filePath);
+                return GetRelativePath(filePath);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
                 _logger.LogError(ex, "Failed to download and cache image from {Url}", imageUrl);
                 return null;
             }
@@ -259,7 +249,8 @@ namespace Listenarr.Api.Services
                 _logger.LogInformation("Image moved to library storage: {Identifier}", identifier);
                 return GetRelativePath(libraryPath);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
                 _logger.LogError(ex, "Failed to move image to library storage for {Identifier}", identifier);
                 return null;
             }
@@ -323,7 +314,8 @@ namespace Listenarr.Api.Services
                 _logger.LogInformation("Author image moved to author storage: {Identifier}", identifier);
                 return GetRelativePath(authorPath);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
                 _logger.LogError(ex, "Failed to move author image to author storage for {Identifier}", identifier);
                 return null;
             }
@@ -348,19 +340,19 @@ namespace Listenarr.Api.Services
 
             // Check library storage first
             var libraryPath = GetImagePath(identifier, _libraryImagePath);
-                if (File.Exists(libraryPath))
-                {
-                    if (IsValidCachedCoverFile(libraryPath, identifier, "library"))
-                        return Task.FromResult<string?>(GetRelativePath(libraryPath));
-                }
+            if (File.Exists(libraryPath))
+            {
+                if (IsValidCachedCoverFile(libraryPath, identifier, "library"))
+                    return Task.FromResult<string?>(GetRelativePath(libraryPath));
+            }
 
             // Check authors storage next
             var authorPath = GetImagePath(identifier, _authorImagePath);
-                if (File.Exists(authorPath))
-                {
-                    if (IsValidCachedCoverFile(authorPath, identifier, "author"))
-                        return Task.FromResult<string?>(GetRelativePath(authorPath));
-                }
+            if (File.Exists(authorPath))
+            {
+                if (IsValidCachedCoverFile(authorPath, identifier, "author"))
+                    return Task.FromResult<string?>(GetRelativePath(authorPath));
+            }
 
             // Check temp cache and prefer non-placeholder images
             var tempBest = GetBestTempImagePathIfValid(identifier);
@@ -410,14 +402,16 @@ namespace Listenarr.Api.Services
                         {
                             File.Delete(file);
                         }
-                        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+                        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                        {
                             _logger.LogWarning(ex, "Failed to delete cached file: {File}", file);
                         }
                     }
                     _logger.LogInformation("Temp cache cleared: {Count} files deleted", files.Length);
                 }
             }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
                 _logger.LogError(ex, "Failed to clear temp cache");
             }
 
@@ -627,7 +621,8 @@ namespace Listenarr.Api.Services
                 _logger.LogWarning(ex, "Blocked image URL because DNS resolution failed for host {Host}", uri.Host);
                 return false;
             }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
                 _logger.LogWarning(ex, "Blocked image URL due to unexpected DNS validation error for host {Host}", uri.Host);
                 return false;
             }
@@ -687,14 +682,16 @@ namespace Listenarr.Api.Services
                     {
                         File.Delete(filePath);
                     }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                    {
                         _logger.LogDebug(ex, "Failed deleting invalid cached image for {Identifier} in {Bucket}: {Path}", identifier, bucket, filePath);
                     }
                     return false;
                 }
                 return true;
             }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
                 _logger.LogWarning(ex, "Failed validating cached image file for {Identifier}: {Path}", identifier, filePath);
                 return false;
             }
@@ -742,7 +739,8 @@ namespace Listenarr.Api.Services
             {
                 _httpClientNoRedirect.Dispose();
             }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
                 _logger.LogWarning(ex, "Failed disposing no-redirect HttpClient in ImageCacheService");
             }
 
@@ -750,7 +748,8 @@ namespace Listenarr.Api.Services
             {
                 _httpClient.Dispose();
             }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
                 _logger.LogWarning(ex, "Failed disposing HttpClient in ImageCacheService");
             }
         }

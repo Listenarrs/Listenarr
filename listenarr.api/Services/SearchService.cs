@@ -32,6 +32,7 @@ using Listenarr.Api.Services.Search.Filters;
 using Listenarr.Api.Services.Search.Strategies;
 using Microsoft.Extensions.Caching.Memory;
 using Listenarr.Api.Extensions;
+using AsyncKeyedLock;
 
 namespace Listenarr.Api.Services
 {
@@ -2978,10 +2979,10 @@ namespace Listenarr.Api.Services
 
             _logger.LogDebug("Enriching {Count} MyAnonamouse results (topN={TopN})", candidates.Count, topN);
 
-            var sem = new SemaphoreSlim(4);
+            var sem = new AsyncNonKeyedLocker(4);
             var tasks = candidates.Select(async r =>
             {
-                await sem.WaitAsync();
+                using var _ = await sem.LockAsync();
                 try
                 {
                     var cacheKey = $"mam:enrich:{r.ResultUrl}";
@@ -3080,10 +3081,6 @@ namespace Listenarr.Api.Services
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogDebug(ex, "Failed to enrich MyAnonamouse result {Id}", r.Id);
-                }
-                finally
-                {
-                    sem.Release();
                 }
             }).ToArray();
 

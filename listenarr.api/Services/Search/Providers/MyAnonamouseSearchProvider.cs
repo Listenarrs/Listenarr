@@ -5,6 +5,7 @@ using System.Net.Http;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using AsyncKeyedLock;
 using Listenarr.Api.Models;
 using Listenarr.Domain.Models;
 using Listenarr.Infrastructure.Models;
@@ -798,10 +799,10 @@ namespace Listenarr.Api.Services.Search.Providers
 
             _logger.LogDebug("Enriching {Count} MyAnonamouse results (topN={TopN})", candidates.Count, topN);
 
-            var sem = new SemaphoreSlim(4);
+            var sem = new AsyncNonKeyedLocker(4);
             var tasks = candidates.Select(async r =>
             {
-                await sem.WaitAsync();
+                using var _ = await sem.LockAsync();
                 try
                 {
                     if (string.IsNullOrEmpty(r.ResultUrl)) return;
@@ -887,10 +888,6 @@ namespace Listenarr.Api.Services.Search.Providers
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogDebug(ex, "Failed to enrich MyAnonamouse result {Id}", r.Id);
-                }
-                finally
-                {
-                    sem.Release();
                 }
             }).ToArray();
 

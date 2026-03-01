@@ -143,9 +143,8 @@ namespace Listenarr.Api.Services
                         // Skip if already being processed
                         lock (_processingLock)
                         {
-                            if (_processingDownloads.ContainsKey(download.Id))
+                            if (_processingDownloads.TryGetValue(download.Id, out var firstSeen))
                             {
-                                var firstSeen = _processingDownloads[download.Id];
                                 if (DateTime.UtcNow - firstSeen > TimeSpan.FromMinutes(5))
                                 {
                                     // Been processing for too long, reset and retry

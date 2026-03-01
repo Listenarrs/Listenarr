@@ -1,14 +1,6 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
-using Listenarr.Domain.Models;
+using AsyncKeyedLock;
 using Listenarr.Infrastructure.Models;
+using Microsoft.EntityFrameworkCore;
 
 namespace Listenarr.Api.Services
 {
@@ -18,7 +10,7 @@ namespace Listenarr.Api.Services
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly ILogger<MetadataRescanService> _logger;
         private readonly TimeSpan _interval = TimeSpan.FromMinutes(5);
-        private readonly SemaphoreSlim _sem = new SemaphoreSlim(2); // bound concurrent extractions
+        private readonly AsyncNonKeyedLocker _sem = new(2); // bound concurrent extractions
 
         public MetadataRescanService(IServiceScopeFactory scopeFactory, ILogger<MetadataRescanService> logger)
         {
@@ -52,7 +44,7 @@ namespace Listenarr.Api.Services
                     var tasks = new List<Task>();
                     foreach (var f in candidates)
                     {
-                        await _sem.WaitAsync(stoppingToken);
+                        using var releaser = await _sem.LockAsync(stoppingToken);
 
                         // Capture loop variable
                         var file = f;
@@ -98,7 +90,7 @@ namespace Listenarr.Api.Services
                             }
                             finally
                             {
-                                _sem.Release();
+                                releaser.Dispose();
                             }
                         }));
                     }
