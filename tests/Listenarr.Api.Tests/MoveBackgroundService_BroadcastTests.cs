@@ -132,7 +132,11 @@ namespace Listenarr.Api.Tests
                         Console.WriteLine($"DIAG: DB MoveJob {j.Id} status={j.Status} error={j.Error} attempts={j.AttemptCount}");
                     }
                 }
-                catch (Exception ex)
+                catch (ObjectDisposedException ex)
+                {
+                    Console.WriteLine($"DIAG: Failed to read DB move jobs: {ex.Message}");
+                }
+                catch (InvalidOperationException ex)
                 {
                     Console.WriteLine($"DIAG: Failed to read DB move jobs: {ex.Message}");
                 }

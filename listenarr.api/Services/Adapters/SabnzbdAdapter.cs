@@ -294,6 +294,8 @@ namespace Listenarr.Api.Services.Adapters
             var items = new List<QueueItem>();
             if (client == null) return items;
 
+            var configuredCategory = DownloadClientCategoryFilter.GetConfiguredCategory(client);
+
             try
             {
                 var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/api";
@@ -360,6 +362,11 @@ namespace Listenarr.Api.Services.Adapters
                         var timeLeft = slot.TryGetProperty("timeleft", out var time) ? time.GetString() ?? "0:00:00" : "0:00:00";
                         var category = slot.TryGetProperty("cat", out var cat) ? cat.GetString() ?? "" : "";
                         var priority = slot.TryGetProperty("priority", out var pri) ? pri.GetString() ?? "" : "";
+
+                        if (!DownloadClientCategoryFilter.Matches(configuredCategory, category))
+                        {
+                            continue;
+                        }
 
                         int etaSeconds = 0;
                         if (!string.IsNullOrEmpty(timeLeft) && timeLeft != "0:00:00")
@@ -488,6 +495,8 @@ namespace Listenarr.Api.Services.Adapters
             var items = new List<DownloadClientItem>();
             if (client == null) return items;
 
+            var configuredCategory = DownloadClientCategoryFilter.GetConfiguredCategory(client);
+
             try
             {
                 var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/api";
@@ -558,6 +567,11 @@ namespace Listenarr.Api.Services.Adapters
                         var timeLeft = slot.TryGetProperty("timeleft", out var time) ? time.GetString() ?? "0:00:00" : "0:00:00";
                         var category = slot.TryGetProperty("cat", out var cat) ? cat.GetString() ?? "" : "";
 
+                        if (!DownloadClientCategoryFilter.Matches(configuredCategory, category))
+                        {
+                            continue;
+                        }
+
                         int etaSeconds = 0;
                         if (!string.IsNullOrEmpty(timeLeft) && timeLeft != "0:00:00")
                         {
@@ -611,7 +625,7 @@ namespace Listenarr.Api.Services.Adapters
                                 clientName: client.Name,
                                 clientType: "sabnzbd",
                                 protocol: DownloadProtocol.Usenet,
-                                removeCompletedDownloads: client.Settings?.TryGetValue("removeCompletedDownloads", out var removeVal) == true && 
+                                removeCompletedDownloads: client.Settings?.TryGetValue("removeCompletedDownloads", out var removeVal) is true &&
                                                          (removeVal is bool boolVal && boolVal),
                                 hasPostImportCategory: !string.IsNullOrEmpty(client.Settings?.GetValueOrDefault("postImportCategory")?.ToString())
                             )

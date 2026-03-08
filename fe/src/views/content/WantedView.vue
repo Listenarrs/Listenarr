@@ -85,9 +85,7 @@
                   }}<span v-if="item.seriesNumber"> #{{ item.seriesNumber }}</span></span
                 >
                 <span v-if="item.publishYear">Released: {{ formatDate(item.publishYear) }}</span>
-                <span v-if="item.runtime"
-                  >{{ Math.floor(item.runtime / 60) }}h {{ item.runtime % 60 }}m</span
-                >
+                <span v-if="item.runtime">{{ formatRuntime(item.runtime) }}</span>
               </div>
               <div class="wanted-quality">
                 <template v-if="getQualityProfileForAudiobook(item)">
@@ -355,7 +353,7 @@ const topPadding = computed(() => {
 // Map audiobook IDs to active downloads (exclude terminal/completed states)
 const activeDownloadsByAudiobook = computed(() => {
   const map = new Map<number, Download>()
-  const terminalStates = ['Completed', 'Failed', 'Ready', 'Moved']
+  const terminalStates = ['Completed', 'Failed', 'Ready', 'Moved', 'ImportBlocked']
   
   downloadsStore.downloads.forEach((download) => {
     if (download.audiobookId && !terminalStates.includes(download.status)) {
@@ -448,6 +446,20 @@ const formatDate = (date: string | undefined): string => {
   } catch {
     return date
   }
+}
+
+const normalizeRuntimeMinutes = (runtime: number): number => {
+  // Wanted data can contain legacy second-based runtime values from older metadata flows.
+  // Treat very large values as seconds and normalize to minutes for display.
+  return runtime >= 20000 ? Math.round(runtime / 60) : Math.round(runtime)
+}
+
+const formatRuntime = (runtime: number | undefined): string => {
+  if (!runtime || runtime <= 0) return 'Unknown'
+  const totalMinutes = normalizeRuntimeMinutes(runtime)
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+  return `${hours}h ${minutes}m`
 }
 
 const searchMissing = async () => {

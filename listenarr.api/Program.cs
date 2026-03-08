@@ -265,6 +265,23 @@ builder.Services
 // Required for [Authorize] / role policies used by controllers.
 builder.Services.AddAuthorization();
 
+// *Arr standard proxy trust model:
+// trust forwarded headers from RFC1918/RFC4193/link-local proxy networks that are
+// common in Docker/Synology/reverse-proxy deployments.
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders =
+        ForwardedHeaders.XForwardedFor |
+        ForwardedHeaders.XForwardedProto |
+        ForwardedHeaders.XForwardedHost;
+
+    options.KnownNetworks.Add(new Microsoft.AspNetCore.HttpOverrides.IPNetwork(IPAddress.Parse("10.0.0.0"), 8));
+    options.KnownNetworks.Add(new Microsoft.AspNetCore.HttpOverrides.IPNetwork(IPAddress.Parse("172.16.0.0"), 12));
+    options.KnownNetworks.Add(new Microsoft.AspNetCore.HttpOverrides.IPNetwork(IPAddress.Parse("192.168.0.0"), 16));
+    options.KnownNetworks.Add(new Microsoft.AspNetCore.HttpOverrides.IPNetwork(IPAddress.Parse("fc00::"), 7));
+    options.KnownNetworks.Add(new Microsoft.AspNetCore.HttpOverrides.IPNetwork(IPAddress.Parse("fe80::"), 10));
+});
+
 // Add SignalR for real-time updates
 builder.Services.AddSignalR()
     .AddJsonProtocol(options =>
@@ -532,7 +549,7 @@ if (builder.Environment.IsEnvironment("Test") || isLikelyTestHost)
     var resolvedSqlitePath = Path.GetFullPath(sqliteDbPath);
     if (string.Equals(resolvedSqlitePath, repoDbPath, StringComparison.OrdinalIgnoreCase))
     {
-        sqliteDbPath = Path.Combine(Path.GetTempPath(), "listenarr-tests", "program-main", $"listenarr-{Guid.NewGuid():N}.db");
+        sqliteDbPath = Path.Join(Path.GetTempPath(), "listenarr-tests", "program-main", $"listenarr-{Guid.NewGuid():N}.db");
         Log.Logger.Warning("[Startup] Test environment attempted to use repo sqlite path; forcing isolated test DB path: {SqliteDbPath}", sqliteDbPath);
     }
 }
@@ -651,16 +668,21 @@ builder.Services.AddListenarrInfrastructure();
 // Register application-level services (moved from Program.cs to keep startup focused)
 builder.Services.AddListenarrAppServices(builder.Configuration);
 // Register hosted/background services (moved from Program.cs). Allow tests to disable these.
-// In local development, disable hosted/background services to avoid activating
-// long-running background workers (and to avoid EF resolution at host start).
-    if (isDev)
-    {
-        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
-        {
-            { "Listenarr:DisableHostedServices", "true" }
-        });
-    }
-var disableHostedServices = builder.Configuration.GetValue<bool>("Listenarr:DisableHostedServices");
+// Hosted services are ENABLED by default in local development because download monitoring
+// and import processing rely on these background workers.
+// Use explicit config/env override only when intentionally disabling them.
+var disableHostedServices =
+    builder.Configuration.GetValue<bool>("Listenarr:DisableHostedServices") ||
+    string.Equals(Environment.GetEnvironmentVariable("LISTENARR_DISABLE_HOSTED_SERVICES"), "true", StringComparison.OrdinalIgnoreCase);
+
+if (disableHostedServices)
+{
+    Log.Logger.Warning("[Startup] Hosted/background services are disabled by configuration override");
+}
+else
+{
+    Log.Logger.Information("[Startup] Hosted/background services are enabled");
+}
 if (!disableHostedServices)
 {
     builder.Services.AddListenarrHostedServices(builder.Configuration);
@@ -718,14 +740,14 @@ builder.Services.AddSwaggerGen(options =>
         "Authentication quick start:",
         "1. Click `Authorize` and enter one credential (you do not need all schemes).",
         "2. Session token flow:",
-        "   - Call `POST /api/v{version}/Account/login` with `{ \"username\": \"...\", \"password\": \"...\", \"rememberMe\": false }`.",
+        "   - Call `POST /api/v{version}/account/login` with `{ \"username\": \"...\", \"password\": \"...\", \"rememberMe\": false }`.",
         "   - Copy `sessionToken` from the 200 response when `authType` is `session`.",
         "   - Use `SessionBearer` (`Bearer <sessionToken>`) or `SessionTokenHeader` (`<sessionToken>`).",
         "3. API key flow:",
         "   - Listenarr auto-generates an API key on first run.",
-        "   - Read the current key from `GET /api/v{version}/Configuration/startupconfig` (localhost/auth redaction rules apply).",
-        "   - Rotate the key with `POST /api/v{version}/Configuration/apikey/regenerate` (Administrator required).",
-        "   - `POST /api/v{version}/Configuration/apikey/generate-initial` is localhost bootstrap only and typically returns 409 after setup.",
+        "   - Read the current key from `GET /api/v{version}/configuration/startupconfig` (trusted-network/auth redaction rules apply).",
+        "   - Rotate the key with `POST /api/v{version}/configuration/apikey/regenerate` (Administrator required).",
+        "   - `POST /api/v{version}/configuration/apikey/generate-initial` is localhost bootstrap only and typically returns 409 after setup.",
         "   - Use `ApiKeyHeader` (`<apiKey>`) or `ApiKeyAuthorization` (`ApiKey <apiKey>`)."
     });
 
@@ -744,7 +766,7 @@ builder.Services.AddSwaggerGen(options =>
         Description = string.Join(Environment.NewLine, new[]
         {
             "Use `Authorization: Bearer <sessionToken>`.",
-            "Get `sessionToken` from `POST /api/v{version}/Account/login` using username/password credentials."
+            "Get `sessionToken` from `POST /api/v{version}/account/login` using username/password credentials."
         })
     });
 
@@ -756,7 +778,7 @@ builder.Services.AddSwaggerGen(options =>
         Description = string.Join(Environment.NewLine, new[]
         {
             "Use `X-Session-Token: <sessionToken>`.",
-            "Get `sessionToken` from `POST /api/v{version}/Account/login` using username/password credentials."
+            "Get `sessionToken` from `POST /api/v{version}/account/login` using username/password credentials."
         })
     });
 
@@ -769,8 +791,8 @@ builder.Services.AddSwaggerGen(options =>
         {
             "Use `X-Api-Key: <apiKey>`.",
             "API keys are auto-generated on first run.",
-            "Read the current key from `GET /api/v{version}/Configuration/startupconfig` (localhost/auth redaction rules apply).",
-            "Regenerate with `POST /api/v{version}/Configuration/apikey/regenerate` (Administrator required)."
+            "Read the current key from `GET /api/v{version}/configuration/startupconfig` (trusted-network/auth redaction rules apply).",
+            "Regenerate with `POST /api/v{version}/configuration/apikey/regenerate` (Administrator required)."
         })
     });
 
@@ -783,8 +805,8 @@ builder.Services.AddSwaggerGen(options =>
         {
             "Use `Authorization: ApiKey <apiKey>`.",
             "API keys are auto-generated on first run.",
-            "Read the current key from `GET /api/v{version}/Configuration/startupconfig` (localhost/auth redaction rules apply).",
-            "Regenerate with `POST /api/v{version}/Configuration/apikey/regenerate` (Administrator required)."
+            "Read the current key from `GET /api/v{version}/configuration/startupconfig` (trusted-network/auth redaction rules apply).",
+            "Regenerate with `POST /api/v{version}/configuration/apikey/regenerate` (Administrator required)."
         })
     });
 
@@ -812,6 +834,7 @@ builder.Services.AddSwaggerGen(options =>
     // the same simple type name (e.g. TranslatePathRequest).
     options.CustomSchemaIds(type => (type.FullName ?? type.Name).Replace('+', '.'));
     options.OperationFilter<GlobalApiDocumentationOperationFilter>();
+    options.DocumentFilter<SwaggerTagOrderDocumentFilter>();
 
     // Resolve conflicting actions (ambiguous HTTP method actions) by selecting the first
     // description. This prevents Swagger generation failures when multiple action descriptors
@@ -956,16 +979,9 @@ if (app.Environment.IsDevelopment())
     });
 }
 
-// Use forwarded headers middleware (must be early in pipeline)
-// This processes X-Forwarded-For and X-Forwarded-Proto headers from the reverse proxy.
-// By default, ASP.NET Core will only trust forwarded headers from loopback addresses (127.0.0.1, ::1).
-// This is safe for most self-hosted and direct scenarios, and will work behind a reverse proxy if the proxy runs locally or you set ASPNETCORE_FORWARDEDHEADERS_ENABLED=true.
-// For advanced scenarios, set trusted proxies via KnownProxies/KnownNetworks if needed.
-app.UseForwardedHeaders(new ForwardedHeadersOptions
-{
-    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
-    // Do not set KnownProxies/KnownNetworks here for maximum compatibility
-});
+// Use forwarded headers middleware (must be early in pipeline).
+// Options are configured in DI to trust common private proxy networks.
+app.UseForwardedHeaders();
 
 // Note: HTTPS redirection is handled by the reverse proxy, not by this application
 

@@ -8,7 +8,8 @@ using System.ComponentModel.DataAnnotations;
 namespace Listenarr.Api.Controllers
 {
     [ApiController]
-    [Route("api/v{version:apiVersion}/[controller]")]
+    [Route("api/v{version:apiVersion}/account")]
+    [Tags("Account")]
     public class AccountController : ControllerBase
     {
         private readonly IStartupConfigService _startupConfigService;
@@ -26,6 +27,15 @@ namespace Listenarr.Api.Controllers
             _sessionService = sessionService;
         }
 
+        /// <summary>
+        /// Authenticate a user and return a session token.
+        /// </summary>
+        /// <param name="req">Login credentials and optional remember-me flag.</param>
+        /// <returns>Session token on success, or an error message.</returns>
+        /// <response code="200">Login succeeded. Returns session token and auth type.</response>
+        /// <response code="400">Username or password missing.</response>
+        /// <response code="401">Invalid credentials.</response>
+        /// <response code="429">Too many failed attempts. Retry after the indicated number of seconds.</response>
         [HttpPost("login")]
         [AllowAnonymous]
         public async Task<IActionResult> Login([FromBody] LoginRequest req)
@@ -78,6 +88,11 @@ namespace Listenarr.Api.Controllers
             }
         }
 
+        /// <summary>
+        /// End the current session and invalidate the session token.
+        /// </summary>
+        /// <returns>Confirmation message and the configured auth type.</returns>
+        /// <response code="200">Logout succeeded.</response>
         [HttpPost("logout")]
         [AllowAnonymous]
         public async Task<IActionResult> Logout()
@@ -140,6 +155,10 @@ namespace Listenarr.Api.Controllers
             return null;
         }
 
+        /// <summary>
+        /// Get the current user's authentication status and identity.
+        /// </summary>
+        /// <returns>An object with <c>authenticated</c> flag and the user's display name.</returns>
         [HttpGet("me")]
         [AllowAnonymous]
         public ActionResult<object> Me()
@@ -150,6 +169,10 @@ namespace Listenarr.Api.Controllers
             return Ok(new { authenticated = true, name = User?.Identity?.Name ?? string.Empty });
         }
 
+        /// <summary>
+        /// List all administrator accounts.
+        /// </summary>
+        /// <returns>A collection of admin user summaries (id, username, email, creation date).</returns>
         [HttpGet("admins")]
         public async Task<IActionResult> GetAdminUsers()
         {

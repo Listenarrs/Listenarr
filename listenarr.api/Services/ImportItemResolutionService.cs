@@ -56,6 +56,17 @@ namespace Listenarr.Api.Services
                 return queueItem; // Return original if client not found
             }
 
+            // Skip resolution for disabled clients — don't contact the download client at all
+            if (!client.IsEnabled)
+            {
+                _logger.LogDebug(
+                    "Skipping import item resolution for download {DownloadId}: download client {ClientName} ({ClientId}) is disabled",
+                    download.Id,
+                    client.Name,
+                    client.Id);
+                return queueItem;
+            }
+
             // Get the appropriate adapter for this client type
             var adapter = _adapterFactory.GetByIdOrType(client.Type);
 

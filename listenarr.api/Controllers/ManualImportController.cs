@@ -9,6 +9,7 @@ namespace Listenarr.Api.Controllers;
 
 [ApiController]
 [Route("api/v{version:apiVersion}/library/manual-import")]
+[Tags("Library")]
 public class ManualImportController : ControllerBase
 {
     private readonly ILogger<ManualImportController> _logger;
@@ -34,6 +35,11 @@ public class ManualImportController : ControllerBase
         _scanQueueService = scanQueueService;
     }
 
+    /// <summary>
+    /// Preview the files available for manual import from a directory.
+    /// </summary>
+    /// <param name="path">Absolute path to the directory to scan.</param>
+    /// <returns>List of files with relative paths, sizes, and tentative metadata.</returns>
     [HttpGet("preview")]
     public ActionResult<object> Preview([FromQuery] string path)
     {
@@ -82,6 +88,11 @@ public class ManualImportController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Start a manual import operation, copying or moving selected files into the library.
+    /// </summary>
+    /// <param name="request">Import configuration including source path, mode, input mode (copy/move), and selected file items.</param>
+    /// <returns>Summary of imported files with success/failure details per item.</returns>
     [HttpPost]
     public async Task<ActionResult<object>> Start([FromBody] ManualImportRequest request)
     {

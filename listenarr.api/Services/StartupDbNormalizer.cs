@@ -55,6 +55,10 @@ namespace Listenarr.Api.Services
                 // shutdown requested - ignore
                             System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
             }
+            catch (OperationCanceledException ex)
+            {
+                _logger.LogWarning(ex, "StartupDbNormalizer: operation canceled/timed out; skipping normalization pass");
+            }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "StartupDbNormalizer: unexpected error while running normalization");
             }

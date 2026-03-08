@@ -27,6 +27,17 @@ namespace Listenarr.Api.Services
         {
             _logger = logger;
             _httpClient = new HttpClient();
+            // Use a longer timeout than HttpClient's 100s default because static ffprobe archives
+            // can be large and hosts may have slow links. Allow override via environment variable.
+            var timeoutSeconds = 300;
+            var timeoutEnv = Environment.GetEnvironmentVariable("LISTENARR_FFPROBE_DOWNLOAD_TIMEOUT_SECONDS");
+            if (!string.IsNullOrWhiteSpace(timeoutEnv)
+                && int.TryParse(timeoutEnv, out var parsedSeconds)
+                && parsedSeconds > 0)
+            {
+                timeoutSeconds = parsedSeconds;
+            }
+            _httpClient.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
             _autoInstall = Environment.GetEnvironmentVariable("LISTENARR_AUTO_INSTALL_FFPROBE")?.ToLower() != "false"; // default true
             _startupConfigService = startupConfigService;
             _processRunner = processRunner;
@@ -476,6 +487,16 @@ namespace Listenarr.Api.Services
 
                 _logger.LogInformation("ffprobe installed to {Path}", ffprobePath);
                 return ffprobePath;
+            }
+            catch (TaskCanceledException ex)
+            {
+                _logger.LogWarning(ex, "ffprobe download/install timed out or was canceled");
+                return null;
+            }
+            catch (OperationCanceledException ex)
+            {
+                _logger.LogWarning(ex, "ffprobe download/install was canceled");
+                return null;
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogWarning(ex, "Failed to download or install ffprobe");

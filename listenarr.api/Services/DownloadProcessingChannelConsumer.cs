@@ -19,23 +19,46 @@ namespace Listenarr.Api.Services
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            await foreach (var jobId in _channel.ReadAllAsync(stoppingToken))
+            try
             {
-                try
+                await foreach (var jobId in _channel.ReadAllAsync(stoppingToken))
                 {
-                    using var scope = _scopeFactory.CreateScope();
-                    var queueService = scope.ServiceProvider.GetRequiredService<IDownloadProcessingQueueService>();
-                    var job = await queueService.GetJobAsync(jobId);
-                    if (job == null) continue;
+                    try
+                    {
+                        using var scope = _scopeFactory.CreateScope();
+                        var queueService = scope.ServiceProvider.GetRequiredService<IDownloadProcessingQueueService>();
+                        var job = await queueService.GetJobAsync(jobId);
+                        if (job == null) continue;
 
-                    // If job is pending, trigger immediate processing via DownloadProcessingBackgroundService by
-                    // leaving it in Pending state. The background service will pick it up during its next loop.
-                    // Optionally we could signal a processing mechanism here; keep lightweight for now.
-                    _logger.LogDebug("Channel consumer observed job {JobId}", jobId);
+                        // If job is pending, trigger immediate processing via DownloadProcessingBackgroundService by
+                        // leaving it in Pending state. The background service will pick it up during its next loop.
+                        // Optionally we could signal a processing mechanism here; keep lightweight for now.
+                        _logger.LogDebug("Channel consumer observed job {JobId}", jobId);
+                    }
+                    catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                    {
+                        break;
+                    }
+                    catch (OperationCanceledException ex)
+                    {
+                        _logger.LogWarning(ex, "Channel consumer canceled/timed out while handling job {JobId}", jobId);
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+                        _logger.LogWarning(ex, "Failed to handle channel job {JobId}", jobId);
+                    }
                 }
-                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
-                    _logger.LogWarning(ex, "Failed to handle channel job {JobId}", jobId);
-                }
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                _logger.LogInformation("Download processing channel consumer stopping due to host shutdown");
+            }
+            catch (OperationCanceledException ex)
+            {
+                _logger.LogWarning(ex, "Download processing channel stream canceled/timed out");
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
+                _logger.LogError(ex, "Unhandled error in DownloadProcessingChannelConsumer stream");
             }
         }
     }

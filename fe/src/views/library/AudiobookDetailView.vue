@@ -1271,7 +1271,9 @@ async function handleEditSaved() {
 
 
 function formatRuntime(minutes: number): string {
-  const totalMinutes = Math.floor(minutes)
+  // Guard against legacy data stored in seconds (> 333 hours is unrealistic for minutes)
+  const normalized = minutes >= 20000 ? Math.round(minutes / 60) : minutes
+  const totalMinutes = Math.floor(normalized)
   const hours = Math.floor(totalMinutes / 60)
   const mins = totalMinutes % 60
   return `${hours}h ${mins}m`

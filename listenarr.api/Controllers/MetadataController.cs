@@ -7,6 +7,7 @@ namespace Listenarr.Api.Controllers
 {
     [ApiController]
     [Route("api/v{version:apiVersion}/metadata")]
+    [Tags("Metadata")]
     public class MetadataController : ControllerBase
     {
         private readonly IAudiobookMetadataService _metadataService;

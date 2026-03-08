@@ -25,11 +25,13 @@ namespace Listenarr.Api.Services.Adapters
         private readonly IHttpClientFactory _httpFactory;
         private readonly ILogger<QbittorrentAdapter> _logger;
         private readonly IRemotePathMappingService _pathMappingService;
+        private readonly ITorrentFileDownloader _torrentFileDownloader;
 
-        public QbittorrentAdapter(IHttpClientFactory httpFactory, IRemotePathMappingService pathMappingService, ILogger<QbittorrentAdapter> logger)
+        public QbittorrentAdapter(IHttpClientFactory httpFactory, IRemotePathMappingService pathMappingService, ITorrentFileDownloader torrentFileDownloader, ILogger<QbittorrentAdapter> logger)
         {
             _httpFactory = httpFactory ?? throw new ArgumentNullException(nameof(httpFactory));
             _pathMappingService = pathMappingService ?? throw new ArgumentNullException(nameof(pathMappingService));
+            _torrentFileDownloader = torrentFileDownloader ?? throw new ArgumentNullException(nameof(torrentFileDownloader));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
@@ -252,13 +254,13 @@ namespace Listenarr.Api.Services.Adapters
                     new KeyValuePair<string, string>("password", client.Password ?? string.Empty)
                 });
 
-                var loginResp = await httpClient.PostAsync($"{baseUrl}/api/v2/auth/login", loginData, ct);
-                if (!loginResp.IsSuccessStatusCode)
+                using var loginResponse = await httpClient.PostAsync($"{baseUrl}/api/v2/auth/login", loginData, ct);
+                if (!loginResponse.IsSuccessStatusCode)
                 {
-                    var body = await loginResp.Content.ReadAsStringAsync(ct);
+                    var body = await loginResponse.Content.ReadAsStringAsync(ct);
                     var redacted = LogRedaction.RedactText(body, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { client.Password ?? string.Empty }));
 
-                    if (loginResp.StatusCode == HttpStatusCode.Forbidden)
+                    if (loginResponse.StatusCode == HttpStatusCode.Forbidden)
                     {
                         var testResp = await httpClient.GetAsync($"{baseUrl}/api/v2/app/version", ct);
                         if (!testResp.IsSuccessStatusCode)
@@ -273,7 +275,7 @@ namespace Listenarr.Api.Services.Adapters
                     }
                     else
                     {
-                        _logger.LogWarning("qBittorrent login failed: {Status} - {Body}", loginResp.StatusCode, redacted);
+                        _logger.LogWarning("qBittorrent login failed: {Status} - {Body}", loginResponse.StatusCode, redacted);
                     }
                 }
                 else
@@ -319,7 +321,39 @@ namespace Listenarr.Api.Services.Adapters
                 }
 
                 HttpResponseMessage addResponse;
-                if (result.TorrentFileContent != null && result.TorrentFileContent.Length > 0)
+                // Pre-download torrent file if not cached and URL is HTTP(S) (not magnet).
+                // This avoids the download client needing to fetch from the source URL,
+                // which can fail if the source requires authentication the client lacks.
+                byte[]? torrentFileData = result.TorrentFileContent;
+                if ((torrentFileData == null || torrentFileData.Length == 0) &&
+                    !torrentUrl.StartsWith("magnet:", StringComparison.OrdinalIgnoreCase) &&
+                    Uri.TryCreate(torrentUrl, UriKind.Absolute, out var torrentUri) &&
+                    (torrentUri.Scheme.Equals("http", StringComparison.OrdinalIgnoreCase) ||
+                     torrentUri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase)))
+                {
+                    try
+                    {
+                        var downloadResult = await _torrentFileDownloader.DownloadAsync(torrentUrl, ct);
+                        if (downloadResult.HasBytes)
+                        {
+                            torrentFileData = downloadResult.TorrentBytes;
+                            _logger.LogInformation("Pre-downloaded torrent file ({Bytes} bytes) for '{Title}'",
+                                torrentFileData!.Length, LogRedaction.SanitizeText(result.Title));
+                        }
+                        else if (downloadResult.HasMagnet)
+                        {
+                            // Indexer redirected to a magnet link — use it as the torrent URL instead
+                            torrentUrl = downloadResult.MagnetUri!;
+                            _logger.LogInformation("Indexer redirected to magnet link for '{Title}'", LogRedaction.SanitizeText(result.Title));
+                        }
+                    }
+                    catch (Exception ex) when (ex is not OutOfMemoryException && ex is not StackOverflowException)
+                    {
+                        _logger.LogWarning(ex, "Failed to pre-download torrent file for '{Title}', falling back to URL", LogRedaction.SanitizeText(result.Title));
+                    }
+                }
+
+                if (torrentFileData != null && torrentFileData.Length > 0)
                 {
                     using var multipart = new MultipartFormDataContent();
                     multipart.Add(new StringContent(savePath), "savepath");
@@ -329,7 +363,7 @@ namespace Listenarr.Api.Services.Adapters
                         multipart.Add(new StringContent(tags), "tags");
 
                     var torrentFileName = string.IsNullOrEmpty(result.TorrentFileName) ? "download.torrent" : result.TorrentFileName;
-                    var torrentContent = new ByteArrayContent(result.TorrentFileContent!);
+                    var torrentContent = new ByteArrayContent(torrentFileData);
                     torrentContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/x-bittorrent");
                     multipart.Add(torrentContent, "torrents", torrentFileName);
 
@@ -409,6 +443,62 @@ namespace Listenarr.Api.Services.Adapters
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "qBittorrent AddAsync failed for client {ClientId}", LogRedaction.SanitizeText(client?.Id));
                 throw;
+            }
+        }
+
+        /// <summary>
+        /// Marks a torrent as imported by changing its category to the configured post-import category.
+        /// This allows users to differentiate imported vs active torrents in qBittorrent.
+        /// Mirrors Sonarr's MarkItemAsImported behavior.
+        /// </summary>
+        public async Task<bool> MarkItemAsImportedAsync(DownloadClientConfiguration client, string downloadId, CancellationToken ct = default)
+        {
+            if (client == null) return false;
+            if (string.IsNullOrEmpty(downloadId)) return false;
+
+            var postImportCategory = client.Settings?.GetValueOrDefault("postImportCategory")?.ToString();
+            if (string.IsNullOrEmpty(postImportCategory))
+            {
+                _logger.LogDebug("No postImportCategory configured for qBittorrent client {ClientId}, skipping MarkItemAsImported", client.Id);
+                return true; // No-op is success
+            }
+
+            var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}";
+            try
+            {
+                var cookieJar = new CookieContainer();
+                var handler = new HttpClientHandler { CookieContainer = cookieJar, UseCookies = true, AutomaticDecompression = DecompressionMethods.All };
+                using var httpClient = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
+
+                // Authenticate
+                using var loginData = new FormUrlEncodedContent(new[]
+                {
+                    new KeyValuePair<string, string>("username", client.Username ?? string.Empty),
+                    new KeyValuePair<string, string>("password", client.Password ?? string.Empty)
+                });
+                var loginResp = await httpClient.PostAsync($"{baseUrl}/api/v2/auth/login", loginData, ct);
+
+                // Set category
+                using var setCategoryData = new FormUrlEncodedContent(new[]
+                {
+                    new KeyValuePair<string, string>("hashes", downloadId.ToLowerInvariant()),
+                    new KeyValuePair<string, string>("category", postImportCategory)
+                });
+
+                using var resp = await httpClient.PostAsync($"{baseUrl}/api/v2/torrents/setCategory", setCategoryData, ct);
+                if (resp.IsSuccessStatusCode)
+                {
+                    _logger.LogInformation("Marked torrent {Hash} as imported (category: {Category}) in qBittorrent", downloadId, postImportCategory);
+                    return true;
+                }
+
+                _logger.LogWarning("Failed to mark torrent {Hash} as imported in qBittorrent: {StatusCode}", downloadId, resp.StatusCode);
+                return false;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
+                _logger.LogWarning(ex, "Error marking torrent {Hash} as imported in qBittorrent", downloadId);
+                return false;
             }
         }
 
@@ -517,7 +607,7 @@ namespace Listenarr.Api.Services.Adapters
                 var categoryFilter = QBittorrentHelpers.BuildCategoryParameter(client.Settings, "&");
                 
                 // Extract category for logging
-                var category = client.Settings?.TryGetValue("category", out var categoryObj) == true 
+                var category = client.Settings?.TryGetValue("category", out var categoryObj) is true
                     ? categoryObj?.ToString() 
                     : null;
                 QBittorrentHelpers.LogCategoryFiltering(_logger, category);
@@ -625,6 +715,7 @@ namespace Listenarr.Api.Services.Adapters
             if (client == null) return items;
 
             var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}";
+            var categoryFilter = QBittorrentHelpers.BuildCategoryParameter(client.Settings, "&");
 
             try
             {
@@ -660,9 +751,42 @@ namespace Listenarr.Api.Services.Adapters
                     return items;
                 }
 
+                // Fetch qBittorrent global preferences for seed limit evaluation (Sonarr parity)
+                bool globalMaxRatioEnabled = false;
+                float globalMaxRatio = -1f;
+                bool globalMaxSeedingTimeEnabled = false;
+                long globalMaxSeedingTime = -1;
+                try
+                {
+                    var prefsResp = await httpClient.GetAsync($"{baseUrl}/api/v2/app/preferences", ct);
+                    if (prefsResp.IsSuccessStatusCode)
+                    {
+                        var prefsJson = await prefsResp.Content.ReadAsStringAsync(ct);
+                        if (!string.IsNullOrWhiteSpace(prefsJson))
+                        {
+                            var prefs = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(prefsJson);
+                            if (prefs != null)
+                            {
+                                globalMaxRatioEnabled = prefs.TryGetValue("max_ratio_enabled", out var mre) && mre.GetBoolean();
+                                globalMaxRatio = prefs.TryGetValue("max_ratio", out var mr) ? (float)mr.GetDouble() : -1f;
+                                globalMaxSeedingTimeEnabled = prefs.TryGetValue("max_seeding_time_enabled", out var mste) && mste.GetBoolean();
+                                globalMaxSeedingTime = prefs.TryGetValue("max_seeding_time", out var mst) ? mst.GetInt64() : -1;
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                {
+                    _logger.LogDebug(ex, "Failed to fetch qBittorrent preferences for seed limit evaluation, will use conservative defaults");
+                }
+
+                // Resolve removeCompletedDownloads setting once for all torrents
+                var removeCompletedDownloads = !string.IsNullOrEmpty(client.RemoveCompletedDownloads) &&
+                    client.RemoveCompletedDownloads != "none";
+
                 // Limit fields returned to reduce memory usage
-                var fields = "name,progress,size,downloaded,dlspeed,eta,state,hash,added_on,num_seeds,num_leechs,ratio,save_path,category,content_path";
-                var torrentsResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/info?fields={Uri.EscapeDataString(fields)}", ct);
+                var fields = "name,progress,size,downloaded,dlspeed,eta,state,hash,added_on,num_seeds,num_leechs,ratio,save_path,category,content_path,ratio_limit,seeding_time_limit,seeding_time";
+                var torrentsResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/info?fields={Uri.EscapeDataString(fields)}{categoryFilter}", ct);
                 if (!torrentsResp.IsSuccessStatusCode) return items;
 
                 var json = await torrentsResp.Content.ReadAsStringAsync(ct);
@@ -685,6 +809,10 @@ namespace Listenarr.Api.Services.Adapters
                     var numSeeds = torrent.TryGetValue("num_seeds", out var numSeedsEl) ? (int?)numSeedsEl.GetInt32() : null;
                     var numLeechs = torrent.TryGetValue("num_leechs", out var numLeechsEl) ? (int?)numLeechsEl.GetInt32() : null;
                     var ratio = torrent.TryGetValue("ratio", out var ratioEl) ? (double?)ratioEl.GetDouble() : null;
+                    // Per-torrent seed limit overrides (-1 = use global, -2 = use global, >=0 = per-torrent limit)
+                    var ratioLimit = torrent.TryGetValue("ratio_limit", out var ratioLimitEl) ? (float)ratioLimitEl.GetDouble() : -2f;
+                    var seedingTimeLimit = torrent.TryGetValue("seeding_time_limit", out var stlEl) ? stlEl.GetInt64() : -2L;
+                    var seedingTime = torrent.TryGetValue("seeding_time", out var seedTimeEl) ? (long?)seedTimeEl.GetInt64() : null;
                     var savePath = torrent.TryGetValue("save_path", out var savePathEl) ? savePathEl.GetString() ?? string.Empty : string.Empty;
                     var category = torrent.TryGetValue("category", out var categoryEl) ? categoryEl.GetString() ?? string.Empty : string.Empty;
                     var contentPath = torrent.TryGetValue("content_path", out var contentPathEl) ? contentPathEl.GetString() ?? string.Empty : string.Empty;
@@ -729,6 +857,16 @@ namespace Listenarr.Api.Services.Adapters
 
                     TimeSpan? remainingTime = eta.HasValue && eta.Value < 8640000 ? TimeSpan.FromSeconds(eta.Value) : null;
 
+                    // qBittorrent can remove completed torrents while still seeding; file moves
+                    // still require the torrent to be stopped so we don't break the payload.
+                    var isStopped = state is "pausedUP" or "stoppedUP";
+                    var seedLimitReached = HasReachedSeedLimit(
+                        ratio ?? 0, ratioLimit, seedingTime, seedingTimeLimit,
+                        globalMaxRatioEnabled, globalMaxRatio,
+                        globalMaxSeedingTimeEnabled, globalMaxSeedingTime);
+                    var canBeRemoved = removeCompletedDownloads && seedLimitReached;
+                    var canMoveFiles = canBeRemoved && isStopped;
+
                     items.Add(new DownloadClientItem
                     {
                         DownloadId = hash.ToUpperInvariant(), // ✅ Uppercase SHA1 hash (standard format)
@@ -745,15 +883,14 @@ namespace Listenarr.Api.Services.Adapters
                         DownloadSpeed = dlspeed,
                         Seeders = numSeeds ?? 0,
                         Leechers = numLeechs ?? 0,
-                        CanBeRemoved = true,
-                        CanMoveFiles = status == DownloadItemStatus.Completed,
+                        CanBeRemoved = canBeRemoved,
+                        CanMoveFiles = canMoveFiles,
                         DownloadClientInfo = DownloadClientItemClientInfo.FromClient(
                             clientId: client.Id,
                             clientName: client.Name,
                             clientType: "qbittorrent",
                             protocol: DownloadProtocol.Torrent,
-                            removeCompletedDownloads: client.Settings?.TryGetValue("removeCompletedDownloads", out var removeVal) == true && 
-                                                     (removeVal is bool boolVal && boolVal),
+                            removeCompletedDownloads: removeCompletedDownloads,
                             hasPostImportCategory: !string.IsNullOrEmpty(client.Settings?.GetValueOrDefault("postImportCategory")?.ToString())
                         )
                     });
@@ -764,6 +901,74 @@ namespace Listenarr.Api.Services.Adapters
             }
 
             return items;
+        }
+
+        /// <summary>
+        /// Determines whether a qBittorrent torrent has reached its seed limit (ratio or time).
+        /// Mirrors Sonarr's HasReachedSeedLimit logic for qBittorrent.
+        /// </summary>
+        /// <param name="ratio">Current torrent ratio</param>
+        /// <param name="ratioLimit">Per-torrent ratio limit (-2 = use global, -1 = no limit, >=0 = per-torrent)</param>
+        /// <param name="seedingTime">Torrent seeding time in seconds (null if unknown)</param>
+        /// <param name="seedingTimeLimit">Per-torrent seeding time limit in minutes (-2 = use global, -1 = no limit, >=0 = per-torrent)</param>
+        /// <param name="globalMaxRatioEnabled">Whether global max ratio is enabled in qBit preferences</param>
+        /// <param name="globalMaxRatio">Global max ratio from qBit preferences</param>
+        /// <param name="globalMaxSeedingTimeEnabled">Whether global max seeding time is enabled in qBit preferences</param>
+        /// <param name="globalMaxSeedingTime">Global max seeding time from qBit preferences (in minutes)</param>
+        private static bool HasReachedSeedLimit(
+            double ratio,
+            float ratioLimit,
+            long? seedingTime,
+            long seedingTimeLimit,
+            bool globalMaxRatioEnabled,
+            float globalMaxRatio,
+            bool globalMaxSeedingTimeEnabled,
+            long globalMaxSeedingTime)
+        {
+            var hasEffectiveRatioLimit =
+                ratioLimit >= 0 ||
+                (ratioLimit <= -2 && globalMaxRatioEnabled && globalMaxRatio > 0);
+            var hasEffectiveSeedingTimeLimit =
+                seedingTimeLimit >= 0 ||
+                (seedingTimeLimit <= -2 && globalMaxSeedingTimeEnabled && globalMaxSeedingTime > 0);
+
+            if (!hasEffectiveRatioLimit && !hasEffectiveSeedingTimeLimit)
+            {
+                return true;
+            }
+
+            // Check ratio limit (per-torrent override takes precedence)
+            if (ratioLimit >= 0 && ratioLimit - ratio <= 0.001)
+            {
+                // Per-torrent ratio limit set
+                return true;
+            }
+
+            if (ratioLimit <= -2 && globalMaxRatioEnabled && globalMaxRatio - ratio <= 0.001)
+            {
+                // Use global ratio limit (-2 means inherit global)
+                return true;
+            }
+
+            // Check seeding time limit (per-torrent override takes precedence)
+            if (seedingTimeLimit >= 0 &&
+                seedingTime is long currentSeedingTime &&
+                currentSeedingTime >= seedingTimeLimit * 60)
+            {
+                // Per-torrent seeding time limit set (in minutes, convert to seconds for comparison)
+                return true;
+            }
+
+            if (seedingTimeLimit <= -2 &&
+                globalMaxSeedingTimeEnabled &&
+                seedingTime is long inheritedSeedingTime &&
+                inheritedSeedingTime >= globalMaxSeedingTime * 60)
+            {
+                // Use global seeding time limit (in minutes, convert to seconds)
+                return true;
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -842,7 +1047,7 @@ namespace Listenarr.Api.Services.Adapters
 
                 var propsJson = await propsResp.Content.ReadAsStringAsync(ct);
                 var props = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(propsJson);
-                var savePath = props?.TryGetValue("save_path", out var savePathEl) == true 
+                var savePath = props?.TryGetValue("save_path", out var savePathEl) is true
                     ? savePathEl.GetString() ?? string.Empty 
                     : string.Empty;
 
@@ -852,24 +1057,12 @@ namespace Listenarr.Api.Services.Adapters
                     return result;
                 }
 
-                // Get first file's path and extract subdirectory
-                var firstFile = files[0];
-                var fileName = firstFile.TryGetValue("name", out var nameEl) ? nameEl.GetString() ?? string.Empty : string.Empty;
-                
-                if (string.IsNullOrEmpty(fileName))
+                var outputPath = ResolveTorrentContentPath(savePath, files);
+                if (string.IsNullOrEmpty(outputPath))
                 {
-                    _logger.LogWarning("No file name found in torrent {Hash}", hash);
+                    _logger.LogWarning("Unable to resolve content path from torrent files for hash {Hash}", hash);
                     return result;
                 }
-
-                // Extract the first subdirectory from file path (qBittorrent uses / separator even on Windows)
-                var pathParts = fileName.Split('/');
-                var subfolder = pathParts.Length > 1 ? pathParts[0] : string.Empty;
-
-                // Construct output path
-                var outputPath = !string.IsNullOrEmpty(subfolder) 
-                    ? CombineWithOptionalBase(savePath, subfolder)
-                    : savePath;
 
                 // Apply remote path mapping
                 result.OutputPath = await _pathMappingService.TranslatePathAsync(client.Id, outputPath);
@@ -966,7 +1159,7 @@ namespace Listenarr.Api.Services.Adapters
 
                 var propsJson = await propsResp.Content.ReadAsStringAsync(ct);
                 var props = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(propsJson);
-                var savePath = props?.TryGetValue("save_path", out var savePathEl) == true 
+                var savePath = props?.TryGetValue("save_path", out var savePathEl) is true
                     ? savePathEl.GetString() ?? string.Empty 
                     : string.Empty;
 
@@ -976,24 +1169,12 @@ namespace Listenarr.Api.Services.Adapters
                     return result;
                 }
 
-                // Get first file's path and extract subdirectory
-                var firstFile = files[0];
-                var fileName = firstFile.TryGetValue("name", out var nameEl) ? nameEl.GetString() ?? string.Empty : string.Empty;
-                
-                if (string.IsNullOrEmpty(fileName))
+                var outputPath = ResolveTorrentContentPath(savePath, files);
+                if (string.IsNullOrEmpty(outputPath))
                 {
-                    _logger.LogWarning("No file name found in torrent {Hash}", hash);
+                    _logger.LogWarning("Unable to resolve content path from torrent files for hash {Hash}", hash);
                     return result;
                 }
-
-                // Extract the first subdirectory from file path (qBittorrent uses / separator even on Windows)
-                var pathParts = fileName.Split('/');
-                var subfolder = pathParts.Length > 1 ? pathParts[0] : string.Empty;
-
-                // Construct output path
-                var outputPath = !string.IsNullOrEmpty(subfolder) 
-                    ? CombineWithOptionalBase(savePath, subfolder)
-                    : savePath;
 
                 // ✅ Apply remote path mapping
                 result.ContentPath = await _pathMappingService.TranslatePathAsync(client.Id, outputPath);
@@ -1032,6 +1213,54 @@ namespace Listenarr.Api.Services.Adapters
                 ? relativePath
                 : normalizedBasePath + Path.DirectorySeparatorChar + relativePath;
         }
+
+        internal static string ResolveTorrentContentPath(
+            string savePath,
+            List<Dictionary<string, JsonElement>> files)
+        {
+            if (string.IsNullOrWhiteSpace(savePath) || files == null || files.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            var fileNames = files
+                .Select(f => f.TryGetValue("name", out var nameEl) ? nameEl.GetString() ?? string.Empty : string.Empty)
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .ToList();
+
+            if (fileNames.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            var firstFile = fileNames[0];
+            var firstParts = firstFile.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            var hasNestedPath = firstParts.Length > 1;
+
+            if (fileNames.Count == 1)
+            {
+                return hasNestedPath
+                    ? CombineWithOptionalBase(savePath, firstParts[0])
+                    : CombineWithOptionalBase(savePath, firstFile);
+            }
+
+            if (!hasNestedPath)
+            {
+                return savePath;
+            }
+
+            var topLevel = firstParts[0];
+            var allShareTopLevel = fileNames.All(name =>
+            {
+                var parts = name.Split('/', StringSplitOptions.RemoveEmptyEntries);
+                return parts.Length > 1 && string.Equals(parts[0], topLevel, StringComparison.Ordinal);
+            });
+
+            return allShareTopLevel
+                ? CombineWithOptionalBase(savePath, topLevel)
+                : savePath;
+        }
+
     }
 }
 

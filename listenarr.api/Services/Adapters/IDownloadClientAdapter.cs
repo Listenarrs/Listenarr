@@ -59,5 +59,17 @@ namespace Listenarr.Api.Services.Adapters
             QueueItem queueItem,
             QueueItem? previousAttempt = null,
             CancellationToken ct = default);
+
+        /// <summary>
+        /// Marks a download as imported in the client (e.g., changes torrent category to post-import category).
+        /// Called after a successful import to allow the client to differentiate imported vs active downloads.
+        /// Default implementation is a no-op for clients that don't support this feature.
+        /// </summary>
+        /// <param name="client">Download client configuration</param>
+        /// <param name="downloadId">The client-specific download ID (torrent hash, NZB ID, etc.)</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>True if the operation succeeded or was a no-op</returns>
+        Task<bool> MarkItemAsImportedAsync(DownloadClientConfiguration client, string downloadId, CancellationToken ct = default)
+            => Task.FromResult(true); // Default no-op
     }
 }

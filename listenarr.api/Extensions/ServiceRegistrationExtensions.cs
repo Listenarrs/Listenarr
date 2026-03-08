@@ -222,6 +222,7 @@ namespace Listenarr.Api.Extensions
 
             // Shared helpers
             services.AddScoped<INzbUrlResolver, NzbUrlResolver>();
+            services.AddScoped<ITorrentFileDownloader, Listenarr.Api.Services.Adapters.TorrentFileDownloader>();
 
             // Register available adapter implementations. Keep adapters scoped because they may depend on scoped services.
             services.AddScoped<IDownloadClientAdapter, Listenarr.Api.Services.Adapters.QbittorrentAdapter>();

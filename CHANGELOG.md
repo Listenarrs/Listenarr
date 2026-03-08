@@ -5,6 +5,76 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.56] - 2026-03-05
+
+### Added
+- **Swagger endpoint documentation:** Added comprehensive XML doc comments (`<summary>`, `<param>`, `<remarks>`, `<response>`) to all ~133 API endpoints across 22 controllers for improved Swagger UI discoverability and developer experience.
+- **Swagger tag grouping and ordering:** Added `[Tags("...")]` attributes to all controllers with a custom `SwaggerTagOrderDocumentFilter` providing logical tag ordering and descriptions in the Swagger UI.
+- **Custom Transmission RPC path support:** Added frontend and backend support for configuring a non-default Transmission RPC endpoint path (`urlBase`), allowing connections to installations that use custom paths instead of `/transmission/rpc`.
+- **Frontend regression coverage (Prowlarr import):** Added a unit test for the Settings → Indexers "Import from Prowlarr" modal validating that entering host in URL/IP and port in the dedicated Port field submits the expected API payload.
+- **Import lifecycle regression coverage:** Added focused `CompletedDownloadProcessor` unit tests covering:
+  - non-blocking retry behavior on first import failure (`ImportPending`, attempts incremented, no manual-interaction toast),
+  - threshold blocking behavior on third failure attempt (`ImportBlocked`, reason/messages persisted, manual-interaction toast + history event),
+  - blocked/manual-interaction flow for no-importable-files post-import guard.
+- **Reconciliation and adapter conformance coverage:** Added focused regression tests for queue rebind precedence, missing-queue retention, import-candidate eligibility, and adapter filtering behavior (Transmission, qBittorrent, SABnzbd, NZBGet).
+- **Import-path resolution coverage:** Added regression tests for single-file and multi-file import path resolution across Transmission, qBittorrent, SABnzbd, and NZBGet.
+- **Manual-interaction workflow coverage:** Added regression tests and API support for blocked-import signaling, block-reason visibility on single-download responses, and retry/unblock transition (`ImportBlocked -> ImportPending`) via `POST /api/v{version}/downloads/{id}/retry-import`.
+- **Recovery coverage:** Added regression tests for startup stuck-job reset behavior, duplicate requeue prevention during restart windows, and import-attempt counter persistence across processor restarts.
+- **API/UI status mapping coverage:** Added regression tests to lock status-surface consistency (`ImportPending` included in active/downloading mappings, `ImportBlocked` treated as failed/terminal) across backend downloads endpoints and frontend Activity/Wanted status buckets.
+- **Shared `TorrentFileDownloader` service:** Extracted reusable service for pre-downloading torrent files and resolving magnet URI redirects, used by Transmission and qBittorrent adapters.
+- **Windows path length enforcement:** Added backend `EnsurePathWithinLimits()` method in `FileNamingService` and frontend `usePathLengthCheck` composable providing real-time path length warnings in FileManagementSection, AddLibraryModal, EditAudiobookModal, and MoveAudiobookModal.
+
+### Changed
+- **API route casing normalization:** Replaced implicit `[controller]` route tokens with explicit lowercase route strings across all controllers for consistent URL casing.
+- **Prowlarr compatibility endpoints hidden from Swagger:** Added `[ApiExplorerSettings(IgnoreApi = true)]` to `ProwlarrCompatController` to hide internal compatibility endpoints from the public API documentation while keeping them functional.
+- **Explicit import lifecycle state handling:** Strengthened Sonarr-parity lifecycle behavior around `Completed -> ImportPending -> Moved/ImportBlocked` by formalizing retry-vs-block transition semantics and ensuring failure metadata (`ImportAttempts`, block reason/messages) is consistently persisted.
+- **Active/in-progress parity semantics:** Treated `ImportPending` as an in-progress state across queue/monitoring and status-derived views while preserving `ImportBlocked` as terminal/manual-interaction-required.
+- **qBittorrent item-surface parity:** Applied configured qBittorrent category filtering parameter to `GetItemsAsync` so queue and item surfaces use the same category constraint.
+- **Download-client category filtering parity:** Normalized qBittorrent category filtering to trim configured category values and aligned monitor fallback queries with the shared category filter behavior used by Transmission, SABnzbd, and NZBGet.
+- **Expanded audio file format support:** Added `.wv` (WavPack), `.wma`, `.ape` (Monkey's Audio), `.alac`, `.aif`, and `.aiff` to the recognized audio extensions in `FileUtils.AudioExtensions`, enabling import of audiobooks in lossless/less-common formats.
+
+### Fixed
+- **Debug test/build contamination from stale output trees:** Excluded `bin/**` and `artifacts/**` from default SDK compile items in the API and API test projects so Debug builds no longer compile stale generated sources from prior runs.
+- **Disabled download clients still contacted by background services:** Fixed multiple code paths where disabled download clients were still being contacted for import resolution, post-import cleanup, and deferred removals — causing persistent log spam and unnecessary network calls. Added `IsEnabled` guards in:
+  - `ImportItemResolutionService.ResolveImportItemAsync` — skips adapter calls for disabled clients
+  - `DownloadProcessingBackgroundService.EnqueueCompletedDownloadsAsync` — filters completed downloads by enabled client IDs before processing
+  - `DownloadMonitorService.FinalizeDownloadAsync` — re-checks client enabled status before finalization (handles mid-cycle disabling and scheduled retries)
+  - `CompletedDownloadProcessor.ProcessCompletedDownloadAsync` — skips `MarkItemAsImportedAsync` and `RemoveAsync` cleanup for disabled clients
+  - `CompletedDownloadHandlingService.ProcessDeferredRemovalsAsync` — skips deferred removal calls for disabled clients
+  - `DownloadService.RemoveFromQueueAsync` — skips client removal calls when target client is disabled (both explicit and record-fallback paths)
+  - `DownloadHashRetrievalService.TryRetrieveHashAsync` — defensive guard against future callers
+- **Webhook notifications silently stopped dispatching:** Restored notification delivery by registering `INotificationService` in DI and having `NotificationService` implement the interface used by completed-download and move flows.
+- **Completed-download actions not persisting in settings UI:** Fixed `RemoveCompletedDownloads` save/reload flow by returning the top-level property from API responses, hydrating the Vue form from the top-level field, and fetching antiforgery tokens using the current authenticated principal.
+- **Deferred client cleanup skipped when nothing was import-ready:** Fixed `CompletedDownloadHandlingService` so deferred removals still run even when there are no `Completed` or `ImportPending` items in the same cycle.
+- **Transmission/qBittorrent completed-item cleanup deferred forever without seed limits:** Fixed both torrent clients so "remove from client" does not wait forever when no effective seed ratio or idle seeding limits are configured; qBittorrent also now separates `CanBeRemoved` from stricter file-move gating.
+- **Prowlarr import URL/port handling:** Prowlarr import now reliably supports both input styles: `hostOrIp:port` directly in URL/IP field, or host/IP in URL/IP field with port in the dedicated Port field.
+- **Port input normalization and validation:** Hardened frontend/backend handling for port values by enforcing valid integer TCP port range checks (1–65535).
+- **Manual interaction signaling reliability:** Ensured blocked-import paths consistently emit manual-interaction UX signals (warning toast + `ImportBlocked` history entry) and record import-failure history details for auditability.
+- **Transmission 301 redirect handling:** Pre-download torrent files before sending to Transmission to handle 301 redirects and magnet URI resolution that Transmission cannot follow natively.
+- **Duplicate Activity entries:** Fixed matching logic in `DownloadService` and `DownloadQueueService` to check `ClientDownloadId` metadata first, preventing duplicate download records when queue items were re-matched by title alone.
+- **FileMover hardlink cross-drive warning:** Improved logging when hardlink creation fails due to cross-drive source/destination, clearly indicating the fallback to copy.
+- **Runtime display showing incorrect hours:** Fixed `formatRuntime` displaying values like "2175h" instead of correct hours/minutes. Root cause was a `* 60` conversion in AddLibraryModal sending seconds to backend expecting minutes; added `>= 20000` legacy seconds guard across shared formatting utilities.
+- **NZBGet test connection and queue auth errors:** Fixed `CallXmlRpcAsync` not passing HTTP status code to `HttpRequestException`, removed duplicate catch block in `TestConnectionAsync`, and improved auth-specific error logging in `GetQueueAsync`.
+- **NZBGet downloads falsely reported as failed:** Downloads containing unrecognized audio formats (e.g., `.wv` WavPack files) were marked as `ImportFailed` because `FileUtils.IsAudioFile()` did not recognize the extension, causing the completed download processor to find zero importable files.
+- **Post-import scan scanning download directory instead of library:** After importing files, the scan job was enqueued with the download/destination path, causing `ScanBackgroundService` to scan the download directory and trigger spurious "Refusing to associate file outside audiobook folder" warnings. Fixed by passing `null` to the scan enqueue so the scanner uses the audiobook's `BasePath` or global `OutputPath`. Also added `BasePath` population in `CompletedDownloadProcessor` after directory imports so the audiobook's library path is always known.
+- **Transmission magnet links not starting (e.g. AudioBookBay):** When both a magnet link and an HTTP torrent URL were available (common with Prowlarr indexers), the Transmission adapter sent only the bare magnet link via `filename`. Transmission's weaker DHT/tracker metadata resolution often stalled at "Downloading metadata..." while qBittorrent handled the same magnet fine. Fixed by pre-downloading the .torrent file from the HTTP `TorrentUrl` when a magnet link is the primary URL — sending full torrent data via `metainfo` gives Transmission complete tracker lists and piece hashes so it starts immediately. Also added explicit `"paused": false` to the `torrent-add` RPC call to guard against Transmission instances with `start-added-torrents` disabled. Additionally, fixed JSON serialization to use `UnsafeRelaxedJsonEscaping` preventing `&`/`+` in magnet links from being escaped to `\u00XX`, and added `Uri.UnescapeDataString` normalization for magnet links — Transmission's magnet parser does not URL-decode percent-encoded tracker URLs (e.g. `tr=http%3a%2f%2f...`), causing silent tracker resolution failure and permanent metadata stall.
+- **Removed dead legacy download client code:** Removed ~750 lines of unused `SendToQBittorrent`, `SendToTransmission`, `GetTransmissionSessionId`, `SendToSABnzbd`, `SendToNZBGet`, and `EnsureIndexerApiKeyOnNzbUrlAsync` methods from `DownloadService.cs` and the unused `IDownloadClientService` interface from `IServices.cs`. All download traffic uses the adapter gateway (`_clientGateway.AddAsync`).
+
+
+## [0.2.55] - 2026-03-01
+
+### Added
+- **Regression coverage for trust/proxy behavior:** Added API tests validating `*Arr standard` forwarded-header trust configuration and caller redaction behavior differences between public-network and private-network callers.
+
+### Changed
+- **`*arr standard` reverse-proxy trust model:** Updated forwarded-header handling to trust common private proxy networks (`10/8`, `172.16/12`, `192.168/16`, `fc00::/7`, `fe80::/10`) and process `X-Forwarded-Host` in addition to `X-Forwarded-For`/`X-Forwarded-Proto` for Docker/Synology/reverse-proxy deployments.
+- **Secret redaction trust policy:** Adjusted secret redaction decisions to match `*Arr standard` behavior by treating local/private-network callers as trusted perimeter callers, while still requiring admin/API-key authentication for public-network callers.
+- **Security/auth guidance text:** Updated API/Swagger guidance text to reflect trusted-network redaction behavior (`trusted-network/auth`) instead of localhost-only wording.
+
+### Fixed
+- **Indexer test + download client test in containerized LAN setups:** Removed over-restrictive private/loopback target blocking for these connectivity test flows, preventing false failures like successful test followed by save errors in common Synology Docker bridge-network deployments.
+- **Download client modal test credential fallback:** When testing an existing download client from the edit modal, the request now includes the client `id` so backend test logic can reuse saved credentials (for example password/API key) when the input field is left blank.
+
 ## [0.2.54] - 2026-02-28
 
 ### Added

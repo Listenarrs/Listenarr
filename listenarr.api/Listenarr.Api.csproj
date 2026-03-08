@@ -2,8 +2,9 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
-    <Version>0.2.54</Version>
-    <AssemblyVersion>0.2.54</AssemblyVersion>
+    <Version>0.2.56</Version>
+    <AssemblyVersion>0.2.56</AssemblyVersion>
+    <DefaultItemExcludes>$(DefaultItemExcludes);bin\**;bin/**;artifacts\**;artifacts/**</DefaultItemExcludes>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
     <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>  

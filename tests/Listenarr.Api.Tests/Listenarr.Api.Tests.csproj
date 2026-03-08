@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
+		<DefaultItemExcludes>$(DefaultItemExcludes);bin\**;bin/**;artifacts\**;artifacts/**</DefaultItemExcludes>
 		<IsPackable>false</IsPackable>
 		<!-- Suppress specific test-only warning about FormatterServices obsoletion and some nullable warnings in tests -->
 		<NoWarn>$(NoWarn);SYSLIB0050;CS8602;CS8600;CS8625;CS8604;CS8605</NoWarn>

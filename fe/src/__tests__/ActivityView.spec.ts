@@ -844,4 +844,92 @@ describe('ActivityView Completed tab shows completed downloads from downloads st
     await vm.confirmRemove()
     expect(removeFromQueueMock).toHaveBeenCalledWith('q2', 'qbittorrent')
   }, 20000)
+
+  it('maps ImportPending to downloading and ImportBlocked to failed buckets', async () => {
+    vi.resetModules()
+
+    vi.doMock('@/services/signalr', () => ({
+      signalRService: {
+        connect: vi.fn(async () => undefined),
+        onQueueUpdate: vi.fn(() => () => undefined),
+        onFilesRemoved: vi.fn(() => () => undefined),
+        onToast: vi.fn(() => () => undefined),
+        onAudiobookUpdate: vi.fn(() => () => undefined),
+        onDownloadUpdate: vi.fn(() => () => undefined),
+        onDownloadsList: vi.fn(() => () => undefined),
+      },
+    }))
+
+    vi.doMock('@/services/api', () => ({
+      apiService: {
+        getQueue: async () => [],
+        getServiceHealth: async () => ({ version: '0.0.0' }),
+        getStartupConfig: async () => ({ authenticationRequired: false }),
+        getLibrary: async () => [],
+      },
+    }))
+
+    vi.doMock('@/stores/configuration', () => ({
+      useConfigurationStore: () => ({
+        applicationSettings: { showCompletedExternalDownloads: false },
+        loadApplicationSettings: vi.fn(async () => undefined),
+      }),
+    }))
+
+    vi.doMock('@/stores/downloads', () => ({
+      useDownloadsStore: () => ({
+        activeDownloads: [
+          {
+            id: 'd-importpending',
+            title: 'Import Pending',
+            status: 'ImportPending',
+            progress: 99,
+            totalSize: 1000,
+            downloadedSize: 990,
+            downloadClientId: 'qbittorrent',
+            startedAt: new Date().toISOString(),
+          },
+        ],
+        failedDownloads: [
+          {
+            id: 'd-importblocked',
+            title: 'Import Blocked',
+            status: 'ImportBlocked',
+            progress: 100,
+            totalSize: 1000,
+            downloadedSize: 1000,
+            downloadClientId: 'qbittorrent',
+            startedAt: new Date().toISOString(),
+          },
+        ],
+        completedDownloads: [],
+        loadDownloads: vi.fn(async () => undefined),
+      }),
+    }))
+
+    const { default: ActivityViewComponent } = await import('@/views/activity/ActivityView.vue')
+    const wrapper = mount(ActivityViewComponent, { global: { stubs: ['CustomSelect'] } })
+
+    await new Promise((r) => setTimeout(r, 10))
+
+    const vm = wrapper.vm as unknown as {
+      filterTabs: FilterTab[]
+      selectedTab: string
+      filteredQueue: ActivityItem[]
+    }
+
+    const downloadingTab = vm.filterTabs.find((t) => t.value === 'downloading')
+    const failedTab = vm.filterTabs.find((t) => t.value === 'failed')
+
+    expect(downloadingTab?.count).toBe(1)
+    expect(failedTab?.count).toBe(1)
+
+    vm.selectedTab = 'downloading'
+    await new Promise((r) => setTimeout(r, 10))
+    expect(vm.filteredQueue.some((item) => item.id === 'd-importpending')).toBe(true)
+
+    vm.selectedTab = 'failed'
+    await new Promise((r) => setTimeout(r, 10))
+    expect(vm.filteredQueue.some((item) => item.id === 'd-importblocked')).toBe(true)
+  }, 20000)
 })

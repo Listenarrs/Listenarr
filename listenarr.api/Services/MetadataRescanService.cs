@@ -97,11 +97,26 @@ namespace Listenarr.Api.Services
 
                     await Task.WhenAll(tasks);
                 }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (OperationCanceledException ex)
+                {
+                    _logger.LogWarning(ex, "Metadata rescan cycle canceled/timed out; continuing");
+                }
                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogError(ex, "Error while running metadata rescan");
                 }
 
-                await Task.Delay(_interval, stoppingToken);
+                try
+                {
+                    await Task.Delay(_interval, stoppingToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
             }
             _logger.LogInformation("MetadataRescanService stopping");
         }

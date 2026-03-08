@@ -161,14 +161,14 @@
                 <FormRow
                   label="Prowlarr URL / IP"
                   labelFor="prowlarr-url"
-                  help="Include scheme (http/https). Example: http://localhost"
+                  help="Enter hostname/IP with optional scheme and optional :port (for example: 192.168.1.10:4545 or http://localhost)."
                 >
                   <input
                     id="prowlarr-url"
                     v-model="prowlarrUrl"
                     type="text"
                     class="form-input"
-                    placeholder="http://localhost"
+                    placeholder="192.168.1.10:4545"
                     autocomplete="off"
                   />
                 </FormRow>
@@ -435,10 +435,10 @@ const importFromProwlarr = async () => {
   }
 
   let portValue: number | undefined
+  const parsed = Number(portRaw)
   if (portRaw.length > 0) {
-    const parsed = Number(portRaw)
-    if (Number.isNaN(parsed) || parsed <= 0) {
-      toast.warning('Prowlarr', 'Please enter a valid port number')
+    if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 65535) {
+      toast.warning('Prowlarr', 'Please enter a valid port number (1-65535)')
       return
     }
     portValue = parsed

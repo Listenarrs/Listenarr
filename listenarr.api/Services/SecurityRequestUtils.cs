@@ -60,10 +60,10 @@ public static class SecurityRequestUtils
     }
 
     public static bool ShouldRedactSecretsForCaller(HttpContext? context)
-        // Do not trust private-network source IPs as "local" for secret redaction decisions.
-        // In reverse-proxy/container setups the app may only see the proxy's private IP if
-        // forwarded headers are not explicitly trusted, which would otherwise bypass redaction.
-        => !IsLoopbackRequest(context) && !IsAuthenticatedAdminOrApiKey(context);
+        // *Arr standard trust model:
+        // - trusted local/private-network callers may receive non-redacted config payloads
+        // - public-network callers must authenticate as admin/API-key to receive secrets
+        => !IsLocalOrPrivateRequest(context) && !IsAuthenticatedAdminOrApiKey(context);
 
     public static string HashSecretForLog(string? secret, string prefix = "sha256")
     {

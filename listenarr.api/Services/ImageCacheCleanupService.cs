@@ -38,6 +38,15 @@ namespace Listenarr.Api.Services
                         _logger.LogInformation("Daily image cache cleanup completed successfully");
                     }
                 }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    _logger.LogInformation("Image Cache Cleanup Service cancellation requested");
+                    break;
+                }
+                catch (OperationCanceledException ex)
+                {
+                    _logger.LogWarning(ex, "Image cache cleanup operation canceled/timed out; continuing");
+                }
                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogError(ex, "Error occurred during image cache cleanup");
                 }
@@ -47,7 +56,7 @@ namespace Listenarr.Api.Services
                 {
                     await Task.Delay(_cleanupInterval, stoppingToken);
                 }
-                catch (TaskCanceledException)
+                catch (OperationCanceledException)
                 {
                     _logger.LogInformation("Image Cache Cleanup Service is stopping");
                     break;
@@ -70,9 +79,13 @@ namespace Listenarr.Api.Services
                 {
                     await Task.Delay(timeUntilMidnight, stoppingToken);
                 }
-                catch (TaskCanceledException)
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
                     _logger.LogInformation("Image Cache Cleanup Service is stopping before first cleanup");
+                }
+                catch (OperationCanceledException ex)
+                {
+                    _logger.LogWarning(ex, "Image Cache Cleanup Service startup delay canceled/timed out");
                 }
             }
         }

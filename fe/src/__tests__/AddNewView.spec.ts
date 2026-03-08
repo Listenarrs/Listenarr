@@ -242,7 +242,7 @@ describe('AddNewView pagination', () => {
     scrollSpy.mockRestore()
   })
 
-  it('maps runtime from runtimeLengthMin (minutes) to seconds', async () => {
+  it('maps runtime from runtimeLengthMin (minutes) and keeps as minutes', async () => {
     const apiModule = await import('@/services/api')
     const apiService = apiModule.apiService as unknown as { searchAudimetaByTitleAndAuthor?: Mock }
     apiService.searchAudimetaByTitleAndAuthor?.mockResolvedValue({
@@ -275,10 +275,10 @@ describe('AddNewView pagination', () => {
     await vm.performAdvancedSearch()
     expect(vm.titleResults.length).toBe(1)
     const tr = vm.titleResults[0] as unknown
-    expect(tr.searchResult.runtime).toBe(10 * 60)
+    expect(tr.searchResult.runtime).toBe(10)
   })
 
-  it('maps runtime from lengthMinutes (metadata field) to seconds', async () => {
+  it('maps runtime from lengthMinutes (metadata field) and keeps as minutes', async () => {
     const apiModule = await import('@/services/api')
     const apiService = apiModule.apiService as unknown as { searchAudimetaByTitleAndAuthor?: Mock }
     apiService.searchAudimetaByTitleAndAuthor?.mockResolvedValue({
@@ -310,7 +310,7 @@ describe('AddNewView pagination', () => {
     await vm.performAdvancedSearch()
     expect(vm.titleResults.length).toBe(1)
     const tr = vm.titleResults[0] as unknown
-    expect(tr.searchResult.runtime).toBe(12 * 60)
+    expect(tr.searchResult.runtime).toBe(12)
   })
 
   it('renders formatted runtime string for advanced search results', async () => {

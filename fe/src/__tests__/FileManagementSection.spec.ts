@@ -51,4 +51,45 @@ describe('FileManagementSection', () => {
     expect(preview.text()).toContain('Ch02')
     expect(preview.text()).toContain('Ch03')
   })
+
+  it('shows path length warning when combined pattern exceeds 259 characters', async () => {
+    const { default: FileManagementSection } = await import('@/components/settings/FileManagementSection.vue')
+    // Use highly nested folder pattern that definitely exceeds 259 chars with sample values
+    // Each {Author}/{Series}/{Title} expands to ~48 chars; six repetitions + output path + file will exceed 259
+    const longPattern = '{Author}/{Series}/{Title}/{Author}/{Series}/{Title}/{Author}/{Series}/{Title}/{Author}/{Series}/{Title}/{Author}/{Series}/{Title}/{Author}/{Series}/{Title}'
+    const wrapper = mount(FileManagementSection, {
+      props: {
+        settings: {
+          outputPath: 'D:\\VeryLongAudiobookLibraryBasePath\\Collection',
+          folderNamingPattern: longPattern,
+          fileNamingPattern: '{Title}',
+        },
+      },
+    })
+
+    const warning = wrapper.find('.path-length-warning')
+    expect(warning.exists()).toBe(true)
+    expect(warning.text()).toContain('260 characters')
+  })
+
+  it('does not show path length warning when combined pattern is short', async () => {
+    const { default: FileManagementSection } = await import('@/components/settings/FileManagementSection.vue')
+    const wrapper = mount(FileManagementSection, {
+      props: {
+        settings: {
+          outputPath: 'D:\\Books',
+          folderNamingPattern: '{Author}/{Title}',
+          fileNamingPattern: '{Title}',
+        },
+      },
+    })
+
+    const warning = wrapper.find('.path-length-warning')
+    expect(warning.exists()).toBe(false)
+
+    // Should show the "ok" indicator instead
+    const ok = wrapper.find('.path-length-ok')
+    expect(ok.exists()).toBe(true)
+    expect(ok.text()).toContain('/ 259 characters')
+  })
 })

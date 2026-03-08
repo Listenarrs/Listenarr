@@ -15,10 +15,11 @@ namespace Listenarr.Api.Tests
     /// queue/history requests so tests that register a DelegatingHandlerMock will work.
     /// For other operations it returns conservative defaults.
     /// </summary>
-    public class TestDownloadClientGateway : Listenarr.Api.Services.IDownloadClientGateway
+    public class TestDownloadClientGateway : Listenarr.Api.Services.IDownloadClientGateway, IDisposable
     {
         private readonly IHttpClientFactory? _httpFactory;
         private readonly HttpClient? _httpClient;
+        private HttpClient? _ownedHttpClient;
 
         public TestDownloadClientGateway(IHttpClientFactory? httpFactory = null, HttpClient? httpClient = null)
         {
@@ -30,7 +31,12 @@ namespace Listenarr.Api.Tests
         {
             if (_httpClient != null) return _httpClient;
             if (_httpFactory != null) return _httpFactory.CreateClient();
-            return new HttpClient();
+            return _ownedHttpClient ??= new HttpClient();
+        }
+
+        public void Dispose()
+        {
+            _ownedHttpClient?.Dispose();
         }
 
         public Task<(bool Success, string Message)> TestConnectionAsync(DownloadClientConfiguration client, CancellationToken ct = default)
@@ -56,7 +62,7 @@ namespace Listenarr.Api.Tests
                 {
                     var http = GetHttpClient();
                     var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/api";
-                    var url = $"{baseUrl}?mode=queue&output=json&apikey={Uri.EscapeDataString(client.Settings?.TryGetValue("apiKey", out var v) == true ? v?.ToString() ?? string.Empty : string.Empty)}";
+                    var url = $"{baseUrl}?mode=queue&output=json&apikey={Uri.EscapeDataString(client.Settings?.TryGetValue("apiKey", out var v) is true ? v?.ToString() ?? string.Empty : string.Empty)}";
                     var resp = await http.GetAsync(url, ct);
                     if (!resp.IsSuccessStatusCode) return new List<QueueItem>();
                     var txt = await resp.Content.ReadAsStringAsync(ct);
@@ -92,7 +98,7 @@ namespace Listenarr.Api.Tests
                 {
                     var http = GetHttpClient();
                     var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/api";
-                    var apiKey = client.Settings?.TryGetValue("apiKey", out var v) == true ? v?.ToString() ?? string.Empty : string.Empty;
+                    var apiKey = client.Settings?.TryGetValue("apiKey", out var v) is true ? v?.ToString() ?? string.Empty : string.Empty;
                     var url = $"{baseUrl}?mode=history&output=json&limit={limit}&apikey={Uri.EscapeDataString(apiKey)}";
                     var resp = await http.GetAsync(url, ct);
                     if (!resp.IsSuccessStatusCode) return outList;
@@ -116,6 +122,11 @@ namespace Listenarr.Api.Tests
             }
 
             return outList;
+        }
+
+        public Task<bool> MarkItemAsImportedAsync(DownloadClientConfiguration client, string downloadId, CancellationToken ct = default)
+        {
+            return Task.FromResult(true);
         }
     }
 }

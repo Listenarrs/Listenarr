@@ -25,6 +25,8 @@ export const useDownloadsStore = defineStore('downloads', () => {
     if (normalized === 'processing') return 'Processing'
     if (normalized === 'ready') return 'Ready'
     if (normalized === 'moved') return 'Moved'
+    if (normalized === 'importpending') return 'ImportPending'
+    if (normalized === 'importblocked') return 'ImportBlocked'
     return 'Queued'
   }
 
@@ -51,7 +53,7 @@ export const useDownloadsStore = defineStore('downloads', () => {
       for (const updated of updatedDownloads) {
         const status = (updated.status || '').toString().toLowerCase()
         if (
-          (status === 'completed' || status === 'ready') &&
+          (status === 'completed' || status === 'ready' || status === 'importpending') &&
           typeof updated.audiobookId === 'number'
         ) {
           const aid = updated.audiobookId as number
@@ -96,12 +98,9 @@ export const useDownloadsStore = defineStore('downloads', () => {
     // Subscribe to queue updates (replacement list from backend)
     unsubscribeQueue = signalRService.onQueueUpdate((queueItems) => {
       // QueueUpdate provides the current queue state
-      // When a download is completed and removed, it won't be in this list
-      // We need to update our downloads to match the queue
-      const queueIds = new Set(queueItems.map(q => q.id))
-      
-      // Remove downloads that are no longer in the queue
-      downloads.value = downloads.value.filter(d => queueIds.has(d.id))
+      // Do not remove existing tracked downloads solely because they are missing
+      // from a single queue snapshot. External clients can briefly report empty
+      // queues, and terminal/queue-less states are persisted in DB.
       
       // Update existing and add new items from queue
       queueItems.forEach((queueItem) => {
@@ -161,7 +160,7 @@ export const useDownloadsStore = defineStore('downloads', () => {
   const activeDownloads = computed(() => {
     const active = downloads.value.filter((d) => {
       const status = (d.status || '').toString().toLowerCase()
-      const isActive = ['queued', 'downloading', 'paused', 'processing'].includes(status)
+      const isActive = ['queued', 'downloading', 'paused', 'processing', 'importpending'].includes(status)
       return isActive
     })
     return active
@@ -175,7 +174,10 @@ export const useDownloadsStore = defineStore('downloads', () => {
   )
 
   const failedDownloads = computed(() =>
-    downloads.value.filter((d) => (d.status || '').toString().toLowerCase() === 'failed'),
+    downloads.value.filter((d) => {
+      const status = (d.status || '').toString().toLowerCase()
+      return status === 'failed' || status === 'importblocked'
+    }),
   )
 
   const loadDownloads = async () => {

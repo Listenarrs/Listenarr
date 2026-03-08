@@ -66,10 +66,10 @@ export const formatDate = (dateString: string): string => {
 export const formatRuntime = (raw: number): string => {
   if (!raw || raw <= 0) return 'Unknown'
 
-  // Input is expected to be minutes. Callers should normalize seconds -> minutes
-  // when necessary (use normalizeRuntime for that). Treat the incoming value as
-  // minutes and floor to an integer before formatting.
-  const totalMinutes = Math.floor(raw)
+  // Guard against legacy data stored in seconds (> 333 hours is unrealistic for minutes).
+  // Values >= 20000 are treated as seconds and converted to minutes.
+  const normalized = raw >= 20000 ? Math.round(raw / 60) : raw
+  const totalMinutes = Math.floor(normalized)
   const hours = Math.floor(totalMinutes / 60)
   const mins = totalMinutes % 60
 

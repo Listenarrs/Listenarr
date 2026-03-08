@@ -110,6 +110,7 @@ public static class ApiResponseRedactor
             config.Username,
             config.UseSSL,
             config.IsEnabled,
+            config.RemoveCompletedDownloads,
             Settings = config.Settings,
             config.CreatedAt
         };
@@ -127,6 +128,7 @@ public static class ApiResponseRedactor
             config.Username,
             config.UseSSL,
             config.IsEnabled,
+            config.RemoveCompletedDownloads,
             Settings = config.Settings,
             config.CreatedAt
         };

@@ -28,6 +28,7 @@ namespace Listenarr.Api.Controllers
 {
     [ApiController]
     [Route("api/v{version:apiVersion}/history")]
+    [Tags("History")]
     public class HistoryController : ControllerBase
     {
         private readonly ListenArrDbContext _dbContext;
@@ -40,8 +41,10 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Get all history entries, ordered by most recent first
+        /// Get all history entries, ordered by most recent first.
         /// </summary>
+        /// <param name="limit">Maximum number of entries to return.</param>
+        /// <param name="offset">Number of entries to skip for pagination.</param>
         [HttpGet]
         public async Task<IActionResult> GetAll([FromQuery] int? limit = null, [FromQuery] int? offset = null)
         {
@@ -72,8 +75,9 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Get history entries for a specific audiobook
+        /// Get history entries for a specific audiobook.
         /// </summary>
+        /// <param name="audiobookId">Audiobook ID to filter by.</param>
         [HttpGet("audiobook/{audiobookId}")]
         public async Task<IActionResult> GetByAudiobookId(int audiobookId)
         {
@@ -89,8 +93,10 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Get history entries by event type
+        /// Get history entries filtered by event type (e.g., "Downloaded", "Imported", "Deleted").
         /// </summary>
+        /// <param name="eventType">Event type string to filter by.</param>
+        /// <param name="limit">Maximum number of entries to return.</param>
         [HttpGet("type/{eventType}")]
         public async Task<IActionResult> GetByEventType(string eventType, [FromQuery] int? limit = null)
         {
@@ -110,8 +116,10 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Get history entries by source
+        /// Get history entries filtered by source (e.g., indexer name).
         /// </summary>
+        /// <param name="source">Source string to filter by.</param>
+        /// <param name="limit">Maximum number of entries to return.</param>
         [HttpGet("source/{source}")]
         public async Task<IActionResult> GetBySource(string source, [FromQuery] int? limit = null)
         {
@@ -131,8 +139,9 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Get recent history entries (last 50 by default)
+        /// Get the most recent history entries.
         /// </summary>
+        /// <param name="limit">Number of recent entries to return (default 50).</param>
         [HttpGet("recent")]
         public async Task<IActionResult> GetRecent([FromQuery] int limit = 50)
         {
@@ -145,8 +154,9 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Delete a history entry
+        /// Delete a single history entry.
         /// </summary>
+        /// <param name="id">History entry ID.</param>
         [HttpDelete("{id}")]
         public async Task<IActionResult> Delete(int id)
         {
@@ -165,7 +175,7 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Delete all history entries (clear history)
+        /// Delete all history entries.
         /// </summary>
         [HttpDelete("clear")]
         public async Task<IActionResult> ClearAll()
@@ -180,8 +190,9 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Delete history entries older than specified days
+        /// Delete history entries older than a specified number of days.
         /// </summary>
+        /// <param name="days">Age threshold in days (default 90). Entries older than this are deleted.</param>
         [HttpDelete("cleanup")]
         public async Task<IActionResult> CleanupOld([FromQuery] int days = 90)
         {

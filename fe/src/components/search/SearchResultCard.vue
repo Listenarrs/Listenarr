@@ -48,7 +48,7 @@
         <div class="result-stats">
           <span v-if="book.searchResult?.runtime" class="stat-item">
             <PhClock />
-            {{ formatRuntime((book.searchResult?.lengthMinutes ?? (book.searchResult?.runtime && (book.searchResult.runtime as number) > 1000 ? Math.round((book.searchResult.runtime as number) / 60) : book.searchResult?.runtime)) ?? 0) }}
+            {{ formatRuntime((book.searchResult?.lengthMinutes ?? book.searchResult?.runtime ?? 0)) }}
           </span>
           <span v-if="book.searchResult?.language" class="stat-item">
             <PhGlobe />

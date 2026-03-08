@@ -3,6 +3,7 @@ import { setActivePinia, createPinia } from 'pinia'
 import { describe, it, beforeEach, expect, vi } from 'vitest'
 import WantedView from '@/views/content/WantedView.vue'
 import { useLibraryStore } from '@/stores/library'
+import { useDownloadsStore } from '@/stores/downloads'
 import { API_BASE_PATH } from '@/services/apiBase'
 
 // Mock api service ensureImageCached and getImageUrl (and other helpers used by stores)
@@ -47,5 +48,57 @@ describe('WantedView image recache behavior', () => {
     expect(img.exists()).toBe(true)
     const src = img.attributes('src') || ''
     expect(src).toContain(`${imageBasePath}/ASIN1`)
+  })
+
+  it('treats ImportPending as active and ImportBlocked as terminal for wanted items', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    const libraryStore = useLibraryStore()
+    libraryStore.audiobooks = [
+      { id: 101, title: 'Pending Book', monitored: true, files: [] },
+      { id: 202, title: 'Blocked Book', monitored: true, files: [] },
+    ] as unknown as ReturnType<typeof useLibraryStore>['audiobooks']
+    libraryStore.fetchLibrary = vi.fn(async () => undefined)
+
+    const downloadsStore = useDownloadsStore()
+    downloadsStore.downloads = [
+      {
+        id: 'd-pending',
+        title: 'Pending Book',
+        status: 'ImportPending',
+        progress: 100,
+        totalSize: 1000,
+        downloadedSize: 1000,
+        audiobookId: 101,
+        startedAt: new Date().toISOString(),
+        metadata: {},
+      },
+      {
+        id: 'd-blocked',
+        title: 'Blocked Book',
+        status: 'ImportBlocked',
+        progress: 100,
+        totalSize: 1000,
+        downloadedSize: 1000,
+        audiobookId: 202,
+        startedAt: new Date().toISOString(),
+        metadata: {},
+      },
+    ] as any
+
+    const wrapper = mount(WantedView, { global: { plugins: [pinia] } })
+    await new Promise((r) => setTimeout(r, 10))
+
+    const vm = wrapper.vm as unknown as {
+      hasActiveDownload: (audiobook: { id: number }) => boolean
+      getStatusText: (audiobook: { id: number }) => string
+    }
+
+    expect(vm.hasActiveDownload({ id: 101 })).toBe(true)
+    expect(vm.getStatusText({ id: 101 })).toContain('ImportPending')
+
+    expect(vm.hasActiveDownload({ id: 202 })).toBe(false)
+    expect(vm.getStatusText({ id: 202 })).toBe('Missing')
   })
 })

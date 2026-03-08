@@ -42,6 +42,8 @@ namespace Listenarr.Api.Extensions
             // services like `DownloadService`.
             services.AddScoped<NotificationService>(sp =>
                 ActivatorUtilities.CreateInstance<NotificationService>(sp));
+            // Also register by interface so GetService<INotificationService>() resolves
+            services.AddScoped<INotificationService>(sp => sp.GetRequiredService<NotificationService>());
 
             // Minimal application metrics service for telemetry/metrics counters used by tests and instrumentation
             services.AddSingleton<IAppMetricsService, NoopAppMetricsService>();

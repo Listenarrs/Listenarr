@@ -11,6 +11,7 @@ using Xunit;
 
 namespace Listenarr.Api.Tests
 {
+    [Trait("Area", "DownloadMonitoring")]
     public class DownloadMonitorServiceTests
     {
         private static ListenArrDbContext CreateInMemoryDb()
@@ -80,6 +81,78 @@ namespace Listenarr.Api.Tests
 
             configMock.Verify(c => c.GetDownloadClientConfigurationsAsync(), Times.Once);
             configMock.Verify(c => c.GetDownloadClientConfigurationAsync(It.IsAny<string>()), Times.Never);
+        }
+
+        [Theory]
+        [InlineData(DownloadStatus.Completed)]
+        [InlineData(DownloadStatus.ImportPending)]
+        [Trait("Scenario", "UnfinalizedCompletedStatesRemainImportCandidates")]
+        public async Task MonitorDownloadsAsync_UnfinalizedCompletedStates_RemainActiveImportCandidates(DownloadStatus status)
+        {
+            using var db = CreateInMemoryDb();
+
+            db.Downloads.Add(new Download
+            {
+                Id = $"dl-{status.ToString().ToLowerInvariant()}",
+                Title = "Candidate Item",
+                Status = status,
+                DownloadClientId = "client-1",
+                FinalPath = string.Empty,
+                StartedAt = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+
+            var clientConfig = new DownloadClientConfiguration
+            {
+                Id = "client-1",
+                Name = "Enabled Client",
+                Type = "unknown",
+                IsEnabled = true
+            };
+
+            var configMock = new Mock<IConfigurationService>();
+            configMock.Setup(c => c.GetApplicationSettingsAsync()).ReturnsAsync(new ApplicationSettings());
+            configMock.Setup(c => c.GetDownloadClientConfigurationsAsync())
+                .ReturnsAsync(new List<DownloadClientConfiguration> { clientConfig });
+            configMock.Setup(c => c.GetDownloadClientConfigurationAsync("client-1"))
+                .ReturnsAsync(clientConfig);
+
+            var services = new ServiceCollection();
+            services.AddSingleton(db);
+            services.AddSingleton<IConfigurationService>(configMock.Object);
+            var serviceProvider = services.BuildServiceProvider();
+            var scopeFactory = serviceProvider.GetRequiredService<IServiceScopeFactory>();
+
+            var clientProxyMock = new Mock<IClientProxy>();
+            clientProxyMock
+                .Setup(p => p.SendCoreAsync(It.IsAny<string>(), It.IsAny<object?[]>(), It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+
+            var hubClientsMock = new Mock<IHubClients>();
+            hubClientsMock.SetupGet(h => h.All).Returns(clientProxyMock.Object);
+
+            var hubContextMock = new Mock<IHubContext<DownloadHub>>();
+            hubContextMock.SetupGet(h => h.Clients).Returns(hubClientsMock.Object);
+
+            var loggerMock = new Mock<ILogger<DownloadMonitorService>>();
+            var httpFactoryMock = new Mock<IHttpClientFactory>();
+            using var httpClient = new HttpClient(new HttpClientHandler());
+            httpFactoryMock.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(httpClient);
+
+            var monitor = new DownloadMonitorService(
+                scopeFactory,
+                hubContextMock.Object,
+                loggerMock.Object,
+                httpFactoryMock.Object);
+
+            var method = typeof(DownloadMonitorService).GetMethod("MonitorDownloadsAsync", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+
+            var task = (Task?)method!.Invoke(monitor, new object[] { CancellationToken.None });
+            Assert.NotNull(task);
+            await task!;
+
+            configMock.Verify(c => c.GetDownloadClientConfigurationAsync("client-1"), Times.Once);
         }
     }
 }

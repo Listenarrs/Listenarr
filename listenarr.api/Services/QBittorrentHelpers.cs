@@ -25,7 +25,7 @@ namespace Listenarr.Api.Services
             if (!settings.TryGetValue("category", out var categoryObj) || categoryObj == null)
                 return string.Empty;
 
-            var category = categoryObj.ToString();
+            var category = categoryObj.ToString()?.Trim();
             if (string.IsNullOrWhiteSpace(category))
                 return string.Empty;
 

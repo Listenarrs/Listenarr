@@ -15,7 +15,7 @@ namespace Listenarr.Api.Services
     /// Refactored to delegate payload construction and attachment handling to NotificationPayloadBuilder.
     /// Provides static compatibility shims used by tests.
     /// </summary>
-    public class NotificationService
+    public class NotificationService : INotificationService
     {
         private readonly HttpClient _httpClient;
         private readonly HttpClient _httpClientNoRedirect;
@@ -32,6 +32,50 @@ namespace Listenarr.Api.Services
             _configurationService = configurationService;
             _payloadBuilder = payloadBuilder ?? throw new ArgumentNullException(nameof(payloadBuilder));
             _httpContextAccessor = httpContextAccessor;
+        }
+
+        // INotificationService interface stubs — webhook dispatch goes through SendNotificationAsync;
+        // these typed convenience methods delegate to the main webhook loop or no-op.
+        public async Task SendDownloadCompletedNotificationAsync(Listenarr.Domain.Models.Download download)
+        {
+            try
+            {
+                var webhooks = await _configurationService.GetWebhookConfigurationsAsync();
+                foreach (var wh in webhooks.Where(w => w.IsEnabled && w.Triggers.Contains("Imported")))
+                    await SendNotificationAsync("Imported", new { AudiobookTitle = download.Title, Timestamp = DateTime.UtcNow }, wh.Url, wh.Triggers);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
+                _logger.LogDebug(ex, "SendDownloadCompletedNotificationAsync failed for {Id}", download.Id);
+            }
+        }
+
+        public async Task SendDownloadFailedNotificationAsync(Listenarr.Domain.Models.Download download, string error)
+        {
+            try
+            {
+                var webhooks = await _configurationService.GetWebhookConfigurationsAsync();
+                foreach (var wh in webhooks.Where(w => w.IsEnabled && w.Triggers.Contains("Failed")))
+                    await SendNotificationAsync("Failed", new { AudiobookTitle = download.Title, Error = error, Timestamp = DateTime.UtcNow }, wh.Url, wh.Triggers);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
+                _logger.LogDebug(ex, "SendDownloadFailedNotificationAsync failed for {Id}", download.Id);
+            }
+        }
+
+        public async Task SendSystemNotificationAsync(string title, string message)
+        {
+            try
+            {
+                var webhooks = await _configurationService.GetWebhookConfigurationsAsync();
+                foreach (var wh in webhooks.Where(w => w.IsEnabled && w.Triggers.Contains("System")))
+                    await SendNotificationAsync("System", new { Title = title, Message = message, Timestamp = DateTime.UtcNow }, wh.Url, wh.Triggers);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
+                _logger.LogDebug(ex, "SendSystemNotificationAsync failed");
+            }
         }
 
         // Compatibility shims removed — callers/tests should use NotificationPayloadBuilder directly.

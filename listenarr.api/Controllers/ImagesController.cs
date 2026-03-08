@@ -25,6 +25,7 @@ namespace Listenarr.Api.Controllers
 {
     [ApiController]
     [Route("api/v{version:apiVersion}/images")]
+    [Tags("Images")]
     public class ImagesController : ControllerBase
     {
         private readonly IImageCacheService _imageCacheService;
@@ -77,6 +78,11 @@ namespace Listenarr.Api.Controllers
             _environment = environment;
         }
 
+        /// <summary>
+        /// Get a cached cover image by identifier (ASIN, numeric ID, or author name). Optionally download on demand via a URL query parameter.
+        /// </summary>
+        /// <param name="identifier">Image identifier (typically an ASIN or database ID).</param>
+        /// <returns>The image file with appropriate content type and caching headers.</returns>
         [HttpGet("{identifier}")]
         public async Task<IActionResult> GetImage(string identifier)
         {
@@ -1097,6 +1103,10 @@ namespace Listenarr.Api.Controllers
                 : normalizedBasePath + Path.DirectorySeparatorChar + relativePath;
         }
 
+        /// <summary>
+        /// Delete a cached cover image by identifier.
+        /// </summary>
+        /// <param name="identifier">Image identifier to delete.</param>
         [HttpDelete("{identifier}")]
         public async Task<IActionResult> DeleteImage(string identifier)
         {

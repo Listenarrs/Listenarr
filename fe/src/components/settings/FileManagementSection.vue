@@ -43,6 +43,18 @@
         </div>
       </FormRow>
 
+      <!-- Path length warning -->
+      <div v-if="pathLengthWarning" class="path-length-warning">
+        <PhWarning :size="18" />
+        <div class="warning-content">
+          <strong>Path may exceed Windows limit (260 characters)</strong>
+          <p>{{ pathLengthWarning }}</p>
+        </div>
+      </div>
+      <div v-else-if="estimatedPathLength > 0" class="path-length-ok">
+        <span>Estimated sample path length: {{ estimatedPathLength }} / 259 characters</span>
+      </div>
+
       <FormRow label="Completed File Action" help="Choose whether completed downloads should be moved into the library output path or copied and left in the client's folder.">
         <select :value="settings.completedFileAction" @change="e => updateField('completedFileAction', (e.target as HTMLSelectElement).value)">
           <option value="Move">Move</option>
@@ -97,7 +109,7 @@
 <script setup lang="ts">
 import type { ApplicationSettings } from '@/types'
 import { ref, computed } from 'vue'
-import { PhFolder, PhQuestion, PhX } from '@phosphor-icons/vue'
+import { PhFolder, PhQuestion, PhX, PhWarning } from '@phosphor-icons/vue'
 import FormRow from '@/components/settings/FormRow.vue'
 
 const props = defineProps<{ settings: Partial<ApplicationSettings> }>()
@@ -190,6 +202,31 @@ function updateField(field: keyof ApplicationSettings, value: unknown) {
   const payload = { ...(props.settings || {}), [field]: value } as Partial<ApplicationSettings>
   emit('update:settings', payload)
 }
+
+// --- Path length estimation ---
+const WINDOWS_MAX_PATH = 259
+
+/** Build a sample full path from the current patterns and output path to estimate length. */
+const estimatedPathLength = computed(() => {
+  const outputPath = (props.settings.outputPath || 'D:\\Audiobooks').replace(/[\/\\]+$/, '')
+  const folder = folderPattern.value ? applyPattern(folderPattern.value) : ''
+  const file = filePatternSingleFile.value
+    ? applyPattern(filePatternSingleFile.value, 'file') + '.m4b'
+    : 'Unknown Title.m4b'
+
+  const parts = [outputPath, folder, file].filter(Boolean)
+  const fullPath = parts.join('\\')
+  return fullPath.length
+})
+
+const pathLengthWarning = computed<string | null>(() => {
+  const len = estimatedPathLength.value
+  if (len <= WINDOWS_MAX_PATH) return null
+
+  const excess = len - WINDOWS_MAX_PATH
+  return `With the sample values, the generated path is ${len} characters — ${excess} over the Windows MAX_PATH limit. ` +
+    'Long author names, series, or titles will be automatically truncated by the server, but shorter patterns are recommended to avoid surprises.'
+})
 
 function openModal(type: 'folder' | 'file') {
   activePatternType.value = type
@@ -436,5 +473,46 @@ h3 svg {
   font-family: 'Courier New', monospace;
   flex: 1;
   word-break: break-all;
+}
+
+/* Path length feedback */
+.path-length-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.625rem;
+  margin-top: 1rem;
+  padding: 0.875rem 1rem;
+  background-color: rgba(255, 152, 0, 0.08);
+  border: 1px solid rgba(255, 152, 0, 0.35);
+  border-radius: 6px;
+  color: #ffb74d;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.path-length-warning svg {
+  flex-shrink: 0;
+  margin-top: 0.125rem;
+}
+
+.path-length-warning .warning-content {
+  flex: 1;
+}
+
+.path-length-warning .warning-content strong {
+  display: block;
+  margin-bottom: 0.25rem;
+  color: #ffa726;
+}
+
+.path-length-warning .warning-content p {
+  margin: 0;
+  color: #ffcc80;
+}
+
+.path-length-ok {
+  margin-top: 0.75rem;
+  font-size: 0.8rem;
+  color: #6c757d;
 }
 </style>

@@ -1786,7 +1786,7 @@ class ApiService {
   // to ensure subsequent unsafe requests have a token bound to the current user.
   async ensureAntiforgeryForCurrentAuth(): Promise<void> {
     try {
-      await this.fetchAntiforgeryToken()
+      await this.fetchAntiforgeryToken(this.buildAuthHeaders())
     } catch {
       // Swallow here; callers will handle request failures.
     }

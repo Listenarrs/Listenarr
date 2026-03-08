@@ -29,14 +29,16 @@ namespace Listenarr.Api.Services
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            await foreach (var job in _moveQueue.Reader.ReadAllAsync(stoppingToken))
+            try
             {
-                if (stoppingToken.IsCancellationRequested) break;
-
-                try
+                await foreach (var job in _moveQueue.Reader.ReadAllAsync(stoppingToken))
                 {
-                    _logger.LogInformation("Processing move job {JobId} for audiobook {AudiobookId} to {Path}", job.Id, job.AudiobookId, job.RequestedPath);
-                    _moveQueue.UpdateJobStatus(job.Id, "Processing");
+                    if (stoppingToken.IsCancellationRequested) break;
+
+                    try
+                    {
+                        _logger.LogInformation("Processing move job {JobId} for audiobook {AudiobookId} to {Path}", job.Id, job.AudiobookId, job.RequestedPath);
+                        _moveQueue.UpdateJobStatus(job.Id, "Processing");
 
                     using var scope = _scopeFactory.CreateScope();
                     var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
@@ -477,17 +479,34 @@ namespace Listenarr.Api.Services
                         _logger.LogError(ex, "Move job {JobId} failed", job.Id);
                         // Failure during move job — attempt counts updated and history recorded where configured
                     }
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
-                    _logger.LogError(ex, "Unexpected error processing move job {JobId}", job.Id);
-                    try { _moveQueue.UpdateJobStatus(job.Id, "Failed", ex.Message); } catch (Exception caughtEx_2) when (caughtEx_2 is not OperationCanceledException && caughtEx_2 is not OutOfMemoryException && caughtEx_2 is not StackOverflowException) { 
-                        System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                    }
+                    catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                    {
+                        break;
+                    }
+                    catch (OperationCanceledException ex)
+                    {
+                        _logger.LogWarning(ex, "Move job {JobId} canceled/timed out", job.Id);
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+                        _logger.LogError(ex, "Unexpected error processing move job {JobId}", job.Id);
+                        try { _moveQueue.UpdateJobStatus(job.Id, "Failed", ex.Message); } catch (Exception caughtEx_2) when (caughtEx_2 is not OperationCanceledException && caughtEx_2 is not OutOfMemoryException && caughtEx_2 is not StackOverflowException) { 
+                            System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                        }
                     }
                 }
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                _logger.LogInformation("MoveBackgroundService stopping due to host shutdown");
+            }
+            catch (OperationCanceledException ex)
+            {
+                _logger.LogWarning(ex, "MoveBackgroundService channel stream canceled/timed out");
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
+                _logger.LogError(ex, "Unhandled error in MoveBackgroundService channel loop");
             }
         }
 

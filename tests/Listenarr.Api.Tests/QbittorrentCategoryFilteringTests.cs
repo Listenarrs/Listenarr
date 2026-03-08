@@ -96,6 +96,19 @@ namespace Listenarr.Api.Tests
         }
 
         [Fact]
+        public void QBittorrentHelpers_BuildCategoryParameter_Trims_Configured_Category()
+        {
+            // Arrange
+            var settings = new Dictionary<string, object> { { "category", "  audiobooks  " } };
+
+            // Act
+            var result = QBittorrentHelpers.BuildCategoryParameter(settings, "&");
+
+            // Assert
+            Assert.Equal("&category=audiobooks", result);
+        }
+
+        [Fact]
         public void QBittorrentHelpers_BuildCategoryParameter_With_Empty_Category_String_Returns_Empty()
         {
             // Arrange

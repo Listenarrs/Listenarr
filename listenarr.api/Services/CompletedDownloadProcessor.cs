@@ -70,9 +70,12 @@ namespace Listenarr.Api.Services
                 }
                 else
                 {
-                    download.Status = DownloadStatus.Completed;
+                    if (!TryTransitionStatus(download, DownloadStatus.ImportPending, "PreImport"))
+                    {
+                        return;
+                    }
                     await _downloadRepository.UpdateAsync(download);
-                    _logger.LogInformation("Marked download {DownloadId} as Completed (pre-import)", downloadId);
+                    _logger.LogInformation("Marked download {DownloadId} as ImportPending (pre-import)", downloadId);
 
                     // Broadcast queue update immediately after marking as Completed so UI updates
                     try
@@ -99,8 +102,8 @@ namespace Listenarr.Api.Services
                             var local = await scopedDb.Downloads.FindAsync(downloadId);
                             if (local != null)
                             {
-                                local.Status = DownloadStatus.Completed;
-                                _logger.LogDebug("Synchronized Completed status into scoped ListenArrDbContext for {DownloadId}", downloadId);
+                                local.Status = DownloadStatus.ImportPending;
+                                _logger.LogDebug("Synchronized ImportPending status into scoped ListenArrDbContext for {DownloadId}", downloadId);
                             }
                         }
                     }
@@ -130,7 +133,9 @@ namespace Listenarr.Api.Services
                     {
                         try
                         {
-                            var files = System.IO.Directory.GetFiles(finalPath, "*", System.IO.SearchOption.AllDirectories);
+                            var files = System.IO.Directory.GetFiles(finalPath, "*", System.IO.SearchOption.AllDirectories)
+                                .Where(f => FileUtils.IsAudioFile(f))
+                                .ToArray();
                             if (files != null && files.Length > 0)
                             {
                                 var importResults = await _fileFinalizer.ImportFilesFromDirectoryAsync(downloadId, download?.AudiobookId, files, settings);
@@ -192,6 +197,65 @@ namespace Listenarr.Api.Services
                                 _logger.LogDebug(ex, "Failed to update FinalPath from directory import results (non-fatal)");
                             }
 
+                            // Update audiobook BasePath so future scans target the correct library
+                            // directory instead of falling back to the global OutputPath.
+                            try
+                            {
+                                if (download?.AudiobookId != null && importResults != null)
+                                {
+                                    var successPaths = importResults
+                                        .Where(r => r != null && r.Success && !string.IsNullOrWhiteSpace(r.FinalPath))
+                                        .Select(r => r.FinalPath!)
+                                        .ToList();
+
+                                    if (successPaths.Count > 0)
+                                    {
+                                        var dirs = successPaths
+                                            .Select(p => System.IO.Path.GetDirectoryName(p) ?? p)
+                                            .Distinct(StringComparer.OrdinalIgnoreCase)
+                                            .ToList();
+
+                                        string? commonDir;
+                                        if (dirs.Count == 1)
+                                        {
+                                            commonDir = dirs[0];
+                                        }
+                                        else
+                                        {
+                                            // Find common ancestor directory of all imported files
+                                            var first = dirs[0];
+                                            var minLen = dirs.Min(d => d.Length);
+                                            int ci = 0;
+                                            while (ci < minLen && dirs.All(d => char.ToUpperInvariant(d[ci]) == char.ToUpperInvariant(first[ci])))
+                                                ci++;
+                                            var prefix = first.Substring(0, ci);
+                                            var lastSep = prefix.LastIndexOfAny(new[] { System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar });
+                                            commonDir = lastSep >= 0 ? prefix.Substring(0, lastSep) : prefix;
+                                        }
+
+                                        if (!string.IsNullOrWhiteSpace(commonDir))
+                                        {
+                                            var scopeFactoryToUse = (_importService as ImportService)?.ScopeFactory ?? _serviceScopeFactory;
+                                            using var bpScope = scopeFactoryToUse.CreateScope();
+                                            var bpDb = bpScope.ServiceProvider.GetService<ListenArrDbContext>();
+                                            if (bpDb != null)
+                                            {
+                                                var audiobook = await bpDb.Audiobooks.FindAsync(download.AudiobookId.Value);
+                                                if (audiobook != null && !commonDir.Equals(audiobook.BasePath, StringComparison.OrdinalIgnoreCase))
+                                                {
+                                                    audiobook.BasePath = commonDir;
+                                                    await bpDb.SaveChangesAsync();
+                                                    _logger.LogInformation("Updated audiobook {AudiobookId} BasePath after directory import: {BasePath}", download.AudiobookId, commonDir);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            catch (Exception bpEx) when (bpEx is not OperationCanceledException && bpEx is not OutOfMemoryException && bpEx is not StackOverflowException) {
+                                _logger.LogDebug(bpEx, "Failed to update audiobook BasePath after directory import (non-fatal)");
+                            }
+
                             // Process archives inside the directory (extract and import)
                             if (settings.ExtractArchives)
                             {
@@ -204,7 +268,9 @@ namespace Listenarr.Api.Services
                                         tempDirExtracted = await _archiveExtractor.ExtractArchiveToTempDirAsync(archivePath);
                                         if (!string.IsNullOrWhiteSpace(tempDirExtracted) && System.IO.Directory.Exists(tempDirExtracted))
                                         {
-                                            var extractedFiles = System.IO.Directory.GetFiles(tempDirExtracted, "*", System.IO.SearchOption.AllDirectories);
+                                            var extractedFiles = System.IO.Directory.GetFiles(tempDirExtracted, "*", System.IO.SearchOption.AllDirectories)
+                                                .Where(f => FileUtils.IsAudioFile(f))
+                                                .ToArray();
                                             if (extractedFiles != null && extractedFiles.Length > 0)
                                             {
                                                 var extractedResults = await _fileFinalizer.ImportFilesFromDirectoryAsync(downloadId, download?.AudiobookId, extractedFiles, settings);
@@ -298,7 +364,9 @@ namespace Listenarr.Api.Services
                                     tempExtractDir = await _archiveExtractor.ExtractArchiveToTempDirAsync(finalPath);
                                     if (!string.IsNullOrWhiteSpace(tempExtractDir) && System.IO.Directory.Exists(tempExtractDir))
                                     {
-                                        var extractedFiles = System.IO.Directory.GetFiles(tempExtractDir, "*", System.IO.SearchOption.AllDirectories);
+                                        var extractedFiles = System.IO.Directory.GetFiles(tempExtractDir, "*", System.IO.SearchOption.AllDirectories)
+                                            .Where(f => FileUtils.IsAudioFile(f))
+                                            .ToArray();
                                         if (extractedFiles != null && extractedFiles.Length > 0)
                                         {
                                             var extractedResults = await _fileFinalizer.ImportFilesFromDirectoryAsync(downloadId, download?.AudiobookId, extractedFiles, settings);
@@ -503,6 +571,33 @@ namespace Listenarr.Api.Services
                     }
                 }
 
+                try
+                {
+                    var postImport = await _downloadRepository.FindAsync(downloadId);
+                    if (postImport != null &&
+                        postImport.Status == DownloadStatus.ImportPending)
+                    {
+                        // Download is still ImportPending after all import attempts.
+                        // This can happen when:
+                        //  - No importable files were found at all (FinalPath empty)
+                        //  - Import was rejected by quality check (FinalPath may be pre-set from prior import)
+                        // Mark as ImportBlocked to prevent infinite re-enqueue loops.
+                        var reason = string.IsNullOrWhiteSpace(postImport.FinalPath)
+                            ? "No importable files were found after download completion. Manual interaction is required."
+                            : "Import was not successful (possible quality rejection or duplicate). Manual interaction is required.";
+
+                        await MarkImportFailureAsync(
+                            downloadId,
+                            "NoImportableFiles",
+                            reason,
+                            forceBlock: true);
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                {
+                    _logger.LogWarning(ex, "Failed to evaluate post-import state for download {DownloadId}", downloadId);
+                }
+
                 // Add history entry and send notifications after successful import
                 try
                 {
@@ -655,10 +750,51 @@ namespace Listenarr.Api.Services
                             _logger.LogInformation("Cleanup: clientConfig={IsNull}, RemoveCompletedDownloads={Setting}", 
                                 clientConfig == null ? "NULL" : "Found", 
                                 clientConfig?.RemoveCompletedDownloads ?? "NULL");
-                                
-                            if (clientConfig != null && !string.IsNullOrEmpty(clientConfig.RemoveCompletedDownloads) && 
+
+                            // Skip cleanup if the download client is disabled
+                            if (clientConfig != null && !clientConfig.IsEnabled)
+                            {
+                                _logger.LogDebug("Skipping post-import cleanup for download {DownloadId}: client {ClientName} is disabled",
+                                    downloadForCleanup.Id, clientConfig.Name);
+                            }
+                            else if (clientConfig != null && !string.IsNullOrEmpty(clientConfig.RemoveCompletedDownloads) && 
                                 clientConfig.RemoveCompletedDownloads != "none")
                             {
+                                // Sonarr parity: Mark item as imported (e.g., change torrent category) before removal.
+                                // This ensures the torrent is properly categorized even if removal is deferred.
+                                string clientIdForMark = downloadForCleanup.Id;
+                                if (downloadForCleanup.Metadata != null && downloadForCleanup.Metadata.TryGetValue("TorrentHash", out var markHashObj))
+                                {
+                                    var markHash = markHashObj?.ToString();
+                                    if (!string.IsNullOrEmpty(markHash))
+                                        clientIdForMark = markHash;
+                                }
+                                try
+                                {
+                                    await downloadClientGateway.MarkItemAsImportedAsync(clientConfig, clientIdForMark);
+                                }
+                                catch (Exception markEx) when (markEx is not OperationCanceledException && markEx is not OutOfMemoryException && markEx is not StackOverflowException)
+                                {
+                                    _logger.LogDebug(markEx, "Failed to mark download {DownloadId} as imported in client (non-fatal)", downloadForCleanup.Id);
+                                }
+
+                                // Sonarr parity: Check CanBeRemoved flag before attempting removal.
+                                // If the torrent hasn't reached its seed limit, defer removal to the next cycle.
+                                bool canBeRemoved = true; // Default true for usenet clients
+                                if (downloadForCleanup.Metadata != null && downloadForCleanup.Metadata.TryGetValue("CanBeRemoved", out var canRemoveObj))
+                                {
+                                    canBeRemoved = canRemoveObj is bool b ? b : (canRemoveObj is System.Text.Json.JsonElement je ? je.GetBoolean() : bool.TryParse(canRemoveObj?.ToString(), out var parsed) && parsed);
+                                }
+
+                                if (!canBeRemoved)
+                                {
+                                    _logger.LogInformation("Download {DownloadId} cannot be removed yet (CanBeRemoved=false, torrent still seeding). Deferring removal to next cycle.",
+                                        downloadForCleanup.Id);
+                                    // Don't remove - let the monitor service update CanBeRemoved on the next poll
+                                    // when the torrent eventually reaches its seed limit
+                                }
+                                else
+                                {
                                 bool deleteFiles = clientConfig.RemoveCompletedDownloads == "remove_and_delete";
                                 
                                 // Get the actual client-specific ID (torrent hash for qBittorrent/Transmission, droneId for NZBGet, etc.)
@@ -841,6 +977,7 @@ namespace Listenarr.Api.Services
                                     _logger.LogWarning("Failed to remove download {DownloadId} from client {ClientName}", 
                                         download!.Id, clientConfig.Name);
                                 }
+                                } // end else (canBeRemoved)
                             }
                         }
                     }
@@ -881,49 +1018,180 @@ namespace Listenarr.Api.Services
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Unexpected error in ProcessCompletedDownloadAsync for {DownloadId}", downloadId);
-                
-                // Record import failure in history and check if we should block further attempts
-                try
+
+                await MarkImportFailureAsync(
+                    downloadId,
+                    "UnhandledImportError",
+                    ex.Message ?? "Unexpected import processing error",
+                    ex,
+                    forceBlock: false);
+            }
+        }
+
+        private async Task MarkImportFailureAsync(
+            string downloadId,
+            string reason,
+            string message,
+            Exception? exception = null,
+            bool forceBlock = false)
+        {
+            try
+            {
+                var download = await _downloadRepository.FindAsync(downloadId);
+                if (download == null)
                 {
-                    var download = await _downloadRepository.FindAsync(downloadId);
-                    if (download != null)
+                    return;
+                }
+
+                download.ImportAttempts = download.ImportAttempts + 1;
+                const int MaxImportAttempts = 3;
+
+                var shouldBlock = forceBlock || download.ImportAttempts >= MaxImportAttempts;
+                download.ErrorMessage = message;
+
+                var targetStatus = shouldBlock ? DownloadStatus.ImportBlocked : DownloadStatus.ImportPending;
+                if (!TryTransitionStatus(download, targetStatus, "MarkImportFailure"))
+                {
+                    return;
+                }
+
+                if (shouldBlock)
+                {
+                    download.ImportBlockReason = reason;
+                    download.ImportBlockMessages ??= new List<string>();
+                    if (!download.ImportBlockMessages.Contains(message))
                     {
-                        // Increment import attempts
-                        download.ImportAttempts = download.ImportAttempts + 1;
-                        const int MaxImportAttempts = 3;  // Block after 3 consecutive failures during testing
-                        
-                        if (download.ImportAttempts >= MaxImportAttempts)
-                        {
-                            // Block this download from further import attempts
-                            download.Status = DownloadStatus.ImportBlocked;
-                            download.ImportBlockReason = "MaxAttemptsExceeded";
-                            _logger.LogWarning("Download {DownloadId} blocked after {Attempts} failed import attempts", downloadId, download.ImportAttempts);
-                        }
-                        
-                        await _downloadRepository.UpdateAsync(download);
-                        
-                        // Record in history
-                        if (_downloadHistoryService != null && !string.IsNullOrEmpty(download.DownloadClientId))
-                        {
-                            var errorMessage = ex.Message ?? "Unknown error";
-                            var errorDetails = new List<string> { errorMessage };
-                            if (ex.InnerException != null)
-                            {
-                                errorDetails.Add($"Inner: {ex.InnerException.Message}");
-                            }
-                            
-                            await _downloadHistoryService.RecordImportFailedAsync(
-                                download.Id,
-                                download.DownloadClientId,
-                                string.Join(" | ", errorDetails));
-                            _logger.LogInformation("Recorded import failure in history for download {DownloadId}: {Error}", downloadId, errorMessage);
-                        }
+                        download.ImportBlockMessages.Add(message);
                     }
                 }
-                catch (Exception histEx) when (histEx is not OperationCanceledException && histEx is not OutOfMemoryException && histEx is not StackOverflowException) {
-                    _logger.LogWarning(histEx, "Failed to record import failure in history for download {DownloadId} (non-critical)", downloadId);
+
+                await _downloadRepository.UpdateAsync(download);
+
+                if (_downloadHistoryService != null && !string.IsNullOrEmpty(download.DownloadClientId))
+                {
+                    var detail = message;
+                    if (exception != null && exception.InnerException != null)
+                    {
+                        detail += $" | Inner: {exception.InnerException.Message}";
+                    }
+
+                    await _downloadHistoryService.RecordImportFailedAsync(
+                        download.Id,
+                        download.DownloadClientId,
+                        download.Title ?? "Unknown",
+                        detail);
+                }
+
+                if (shouldBlock)
+                {
+                    _logger.LogWarning(
+                        "Download {DownloadId} import blocked (Reason: {Reason}, Attempts: {Attempts})",
+                        downloadId,
+                        reason,
+                        download.ImportAttempts);
+
+                    var scopeFactoryToUse = (_importService as ImportService)?.ScopeFactory ?? _serviceScopeFactory;
+                    using var scope = scopeFactoryToUse.CreateScope();
+
+                    var toastService = scope.ServiceProvider.GetService<IToastService>();
+                    if (toastService != null)
+                    {
+                        var title = string.IsNullOrWhiteSpace(download.Title) ? "Download" : download.Title;
+                        await toastService.PublishToastAsync(
+                            "warning",
+                            "Manual Interaction Required",
+                            $"{title} could not be imported automatically and has been blocked.",
+                            timeoutMs: 8000);
+                    }
+
+                    var historyRepo = scope.ServiceProvider.GetService<IHistoryRepository>();
+                    if (historyRepo != null)
+                    {
+                        await historyRepo.AddAsync(new Listenarr.Domain.Models.History
+                        {
+                            AudiobookId = download.AudiobookId,
+                            AudiobookTitle = download.Title,
+                            EventType = "ImportBlocked",
+                            Message = message,
+                            Source = "AutoImport",
+                            Timestamp = DateTime.UtcNow,
+                            NotificationSent = false,
+                            Data = JsonSerializer.Serialize(new
+                            {
+                                DownloadId = download.Id,
+                                Reason = reason,
+                                Attempts = download.ImportAttempts
+                            })
+                        });
+                    }
                 }
             }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
+                _logger.LogWarning(ex, "Failed to persist import failure details for download {DownloadId}", downloadId);
+            }
+        }
+
+        private bool TryTransitionStatus(Download download, DownloadStatus targetStatus, string transitionSource)
+        {
+            if (download == null)
+            {
+                return false;
+            }
+
+            var currentStatus = download.Status;
+            if (IsValidStatusTransition(currentStatus, targetStatus))
+            {
+                download.Status = targetStatus;
+                return true;
+            }
+
+            _logger.LogWarning(
+                "Rejected invalid download status transition for {DownloadId}: {FromStatus} -> {ToStatus} (Source: {Source})",
+                download.Id,
+                currentStatus,
+                targetStatus,
+                transitionSource);
+
+            try
+            {
+                _metrics.Increment("download.transition.rejected.invalid");
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
+                _logger.LogDebug(ex, "Failed to emit invalid transition metric for download {DownloadId}", download.Id);
+            }
+
+            return false;
+        }
+
+        private static bool IsValidStatusTransition(DownloadStatus fromStatus, DownloadStatus toStatus)
+        {
+            if (fromStatus == toStatus)
+            {
+                return true;
+            }
+
+            return toStatus switch
+            {
+                DownloadStatus.ImportPending => fromStatus is DownloadStatus.Queued
+                    or DownloadStatus.Downloading
+                    or DownloadStatus.Paused
+                    or DownloadStatus.Processing
+                    or DownloadStatus.Completed,
+
+                DownloadStatus.ImportBlocked => fromStatus is DownloadStatus.ImportPending
+                    or DownloadStatus.Processing
+                    or DownloadStatus.Completed
+                    or DownloadStatus.Downloading,
+
+                DownloadStatus.Moved => fromStatus is DownloadStatus.ImportPending
+                    or DownloadStatus.Completed
+                    or DownloadStatus.Processing
+                    or DownloadStatus.Downloading,
+
+                _ => true,
+            };
         }
     }
 }

@@ -32,6 +32,7 @@ namespace Listenarr.Api.Controllers
 {
     [ApiController]
     [Route("api/v{version:apiVersion}/indexers")]
+    [Tags("Indexers")]
     public class IndexersController : ControllerBase
     {
         private readonly ListenArrDbContext _dbContext;
@@ -50,9 +51,6 @@ namespace Listenarr.Api.Controllers
         private bool ShouldRedactIndexerSecretsForCaller()
             => SecurityRequestUtils.ShouldRedactSecretsForCaller(HttpContext);
 
-        private bool AllowPrivateOutboundTargetsForCaller()
-            => SecurityRequestUtils.IsLoopbackRequest(HttpContext) || SecurityRequestUtils.IsAuthenticatedAdminOrApiKey(HttpContext);
-
         private Indexer RedactIndexerForCaller(Indexer indexer)
             => ShouldRedactIndexerSecretsForCaller() ? ApiResponseRedactor.RedactIndexer(indexer) : indexer;
 
@@ -66,24 +64,16 @@ namespace Listenarr.Api.Controllers
                 ? ApiResponseRedactor.RedactedValue
                 : mamId;
 
-        private async Task<string?> ValidateOutboundUrlForCallerAsync(string url)
+        private Task<string?> ValidateOutboundUrlForCallerAsync(string url)
         {
-            var allowPrivateTargets = AllowPrivateOutboundTargetsForCaller();
-            if (!OutboundRequestSecurity.TryValidateExternalHttpUrl(url, out var reason, allowPrivateTargets))
+            // *Arr standard behavior: allow private/loopback destinations for indexer connectivity
+            // tests/imports, but still enforce absolute HTTP(S) URLs and block embedded credentials.
+            if (!OutboundRequestSecurity.TryValidateExternalHttpUrl(url, out var reason, allowPrivateTargets: true))
             {
-                return reason;
+                return Task.FromResult<string?>(reason);
             }
 
-            if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
-            {
-                var dnsOk = await OutboundRequestSecurity.TryValidateResolvedExternalHttpUriAsync(uri, _logger, allowPrivateTargets);
-                if (!dnsOk)
-                {
-                    return "DNS resolved to private or loopback address";
-                }
-            }
-
-            return null;
+            return Task.FromResult<string?>(null);
         }
 
         private async Task<HttpResponseMessage> SendValidatedAsync(
@@ -98,7 +88,8 @@ namespace Listenarr.Api.Controllers
                 uri,
                 _httpClientNoRedirect,
                 _logger,
-                allowPrivateTargets: AllowPrivateOutboundTargetsForCaller(),
+                // *Arr standard behavior for indexers: allow private/loopback destinations.
+                allowPrivateTargets: true,
                 completionOption: completionOption,
                 cancellationToken: cancellationToken);
             return response;
@@ -353,7 +344,7 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Get all indexers
+        /// Get all configured indexers.
         /// </summary>
         [HttpGet]
         public async Task<IActionResult> GetAll()
@@ -367,8 +358,9 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Get indexer by ID
+        /// Get an indexer by its database ID.
         /// </summary>
+        /// <param name="id">Indexer ID.</param>
         [HttpGet("{id}")]
         public async Task<IActionResult> GetById(int id)
         {
@@ -382,8 +374,9 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Create a new indexer
+        /// Create a new indexer.
         /// </summary>
+        /// <param name="indexer">Indexer configuration to create.</param>
         [HttpPost]
         public async Task<IActionResult> Create([FromBody] Indexer indexer)
         {
@@ -400,8 +393,9 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Import indexers from Prowlarr that include category 3000 or 3030
+        /// Import audiobook-related indexers (category 3000/3030) from a Prowlarr instance.
         /// </summary>
+        /// <param name="request">Prowlarr server URL and API key.</param>
         [HttpPost("prowlarr/import")]
         public async Task<IActionResult> ImportFromProwlarr([FromBody] ProwlarrImportRequest request)
         {
@@ -560,8 +554,10 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Update an existing indexer
+        /// Update an existing indexer.
         /// </summary>
+        /// <param name="id">Indexer ID.</param>
+        /// <param name="indexer">Updated indexer configuration.</param>
         [HttpPut("{id}")]
         public async Task<IActionResult> Update(int id, [FromBody] Indexer indexer)
         {
@@ -600,8 +596,9 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Delete an indexer
+        /// Delete an indexer.
         /// </summary>
+        /// <param name="id">Indexer ID.</param>
         [HttpDelete("{id}")]
         public async Task<IActionResult> Delete(int id)
         {
@@ -620,8 +617,9 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Test an indexer connection
+        /// Test an indexer's connection to verify it is reachable and properly configured.
         /// </summary>
+        /// <param name="id">Indexer ID.</param>
         [HttpPost("{id}/test")]
         public async Task<IActionResult> Test(int id)
         {
@@ -634,6 +632,10 @@ namespace Listenarr.Api.Controllers
             return await ExecuteIndexerTestAsync(indexer, persist: true);
         }
 
+        /// <summary>
+        /// Test an indexer configuration without saving it. Useful for validating settings before creating an indexer.
+        /// </summary>
+        /// <param name="indexer">Indexer configuration to test (not persisted).</param>
         [HttpPost("test")]
         public async Task<IActionResult> TestDraft([FromBody] Indexer indexer)
         {
@@ -1083,8 +1085,9 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Toggle indexer enabled state
+        /// Toggle an indexer's enabled/disabled state.
         /// </summary>
+        /// <param name="id">Indexer ID.</param>
         [HttpPut("{id}/toggle")]
         public async Task<IActionResult> Toggle(int id)
         {
@@ -1105,7 +1108,7 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Get enabled indexers only
+        /// Get only enabled indexers.
         /// </summary>
         [HttpGet("enabled")]
         public async Task<IActionResult> GetEnabled()

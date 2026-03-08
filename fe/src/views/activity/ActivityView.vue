@@ -243,7 +243,7 @@ const mobileTabOptions = computed(() => [
   { value: 'all', label: `All (${allActivityItems.value.length})`, icon: PhList },
   {
     value: 'downloading',
-    label: `Downloading (${allActivityItems.value.filter((q) => q.status === 'downloading').length})`,
+    label: `Downloading (${allActivityItems.value.filter((q) => q.status === 'downloading' || q.status === 'importpending').length})`,
     icon: PhDownloadSimple,
   },
   {
@@ -318,6 +318,8 @@ const convertDownloadToQueueItem = (download: Download): QueueItem => {
   if (download.status === 'Queued') status = 'queued'
   else if (download.status === 'Paused') status = 'paused'
   else if (download.status === 'Completed' || download.status === 'Ready') status = 'completed'
+  else if (download.status === 'ImportPending') status = 'downloading'
+  else if (download.status === 'ImportBlocked') status = 'failed'
   else if (download.status === 'Failed') status = 'failed'
   else if (download.status === 'Downloading' || download.status === 'Processing')
     status = 'downloading'
@@ -470,7 +472,7 @@ const filterTabs = computed(() => [
   {
     label: 'Downloading',
     value: 'downloading',
-    count: allActivityItems.value.filter((q) => q.status === 'downloading').length,
+    count: allActivityItems.value.filter((q) => q.status === 'downloading' || q.status === 'importpending').length,
   },
   {
     label: 'Paused',
@@ -512,7 +514,11 @@ const filteredQueue = computed(() => {
 const refreshQueue = async () => {
   loading.value = true
   try {
-    queue.value = await apiService.getQueue()
+    const [queueItems] = await Promise.all([
+      apiService.getQueue(),
+      downloadsStore.loadDownloads(),
+    ])
+    queue.value = queueItems
   } catch (err) {
     errorTracking.captureException(err as Error, {
       component: 'ActivityView',

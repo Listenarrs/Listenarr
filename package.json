@@ -1,9 +1,13 @@
 {
   "name": "listenarr",
-  "version": "1.0.0",
+  "version": "0.2.55",
   "private": true,
   "description": "Listenarr - Automated audiobook downloading and management",
   "scripts": {
+    "version:sync": "node scripts/sync-fe-version-from-csproj.mjs",
+    "predev": "npm run version:sync",
+    "prebuild": "npm run version:sync",
+    "pretest": "npm run version:sync",
     "dev": "concurrently \"npm run dev:api\" \"npm run dev:web\" --names \"API,WEB\" --prefix-colors \"blue,green\"",
     "dev:api": "cd listenarr.api && dotnet run",
     "dev:web": "cd fe && npm run dev",

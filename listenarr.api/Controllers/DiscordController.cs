@@ -6,7 +6,8 @@ using System.Text.Json;
 namespace Listenarr.Api.Controllers
 {
     [ApiController]
-    [Route("api/v{version:apiVersion}/[controller]")]
+    [Route("api/v{version:apiVersion}/discord")]
+    [Tags("Discord")]
     public class DiscordController : ControllerBase
     {
         private readonly IConfigurationService _configurationService;
@@ -251,7 +252,7 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Start the Discord bot process
+        /// Start the Discord bot process.
         /// </summary>
         [HttpPost("start-bot")]
         public async Task<IActionResult> StartBot()
@@ -319,7 +320,7 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Stop the Discord bot process
+        /// Stop the Discord bot process.
         /// </summary>
         [HttpPost("stop-bot")]
         public async Task<IActionResult> StopBot()
@@ -352,7 +353,7 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Get the current status of the Discord bot process
+        /// Get the current status of the Discord bot process.
         /// </summary>
         [HttpGet("bot-status")]
         public async Task<IActionResult> GetBotStatus()

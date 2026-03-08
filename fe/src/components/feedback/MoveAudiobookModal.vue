@@ -28,6 +28,12 @@
               <div class="path-display"><code>{{ pendingMove?.combined || pendingRootPath || 'No destination path' }}</code></div>
             </div>
 
+            <!-- Path length warning -->
+            <div v-if="movePathWarning" class="path-length-warning">
+              <PhWarning :size="16" />
+              <span>{{ movePathWarning }}</span>
+            </div>
+
             <!-- Hardlink warning -->
             <div class="hardlink-warning" v-if="showHardlinkWarning && volumeCheckResult?.willBreakHardlinks">
               <PhWarning :size="20" />
@@ -96,6 +102,7 @@ import { PhX, PhArrowRight, PhArrowDown, PhWarning } from '@phosphor-icons/vue'
 import type { Component } from 'vue'
 import { computed, watch, ref } from 'vue'
 import { apiService } from '@/services/api'
+import { usePathLengthCheck } from '@/composables/usePathLengthCheck'
 
 const props = withDefaults(
   defineProps<{
@@ -120,6 +127,10 @@ const volumeCheckResult = ref<{
   message?: string
 } | null>(null)
 const showHardlinkWarning = ref(false)
+
+// Path-length warning for the destination
+const moveDestinationPath = computed(() => props.pendingMove?.combined || props.pendingRootPath || '')
+const { pathLengthWarning: movePathWarning } = usePathLengthCheck(moveDestinationPath)
 
 // Check volumes when paths change
 watch(
@@ -178,6 +189,20 @@ function onSubmit() {
 .checkbox-content small { color:#bfc8cc; margin-top:4px }
 .checkbox-content .checkbox-title { font-weight: 500; color:#e6eef8 }
 .confirm-note { color:#bfc8cc; font-size:0.9rem; margin-top:0.75rem }
+
+/* Path length warning */
+.path-length-warning {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 0.5rem;
+  padding: 6px 10px;
+  background: rgba(255, 152, 0, 0.12);
+  border: 1px solid rgba(255, 152, 0, 0.3);
+  border-radius: 6px;
+  color: #ffb74d;
+  font-size: 0.82rem;
+}
 
 /* Hardlink warning */
 .hardlink-warning { 

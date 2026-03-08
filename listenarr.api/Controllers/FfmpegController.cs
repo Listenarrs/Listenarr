@@ -14,6 +14,7 @@ namespace Listenarr.Api.Controllers
 {
     [ApiController]
     [Route("api/v{version:apiVersion}/ffmpeg")]
+    [Tags("System")]
     public class FfmpegController : ControllerBase
     {
         private readonly IFfmpegService _ffmpegService;
@@ -27,6 +28,10 @@ namespace Listenarr.Api.Controllers
             _processRunner = processRunner;
         }
 
+        /// <summary>
+        /// Get the path to the bundled ffprobe binary and the associated license notice.
+        /// </summary>
+        /// <remarks>Restricted to local or admin callers.</remarks>
         [HttpGet("info")]
         public async Task<IActionResult> GetInfo()
         {
@@ -45,6 +50,14 @@ namespace Listenarr.Api.Controllers
             return Ok(new { ffprobePath = path, licenseNotice = license });
         }
 
+        /// <summary>
+        /// Run ffprobe against a local audio file and return the raw JSON output.
+        /// </summary>
+        /// <param name="req">Request body containing the absolute path to the file to scan.</param>
+        /// <remarks>Restricted to local or admin callers. Only absolute, local file paths are accepted.</remarks>
+        /// <response code="200">ffprobe output including parsed JSON, exit code, stdout, and stderr.</response>
+        /// <response code="400">File path missing, relative, or non-local.</response>
+        /// <response code="404">File not found at the specified path.</response>
         [HttpPost("scan")]
         public async Task<IActionResult> RunFfprobe([FromBody] FfprobeScanRequest req)
         {

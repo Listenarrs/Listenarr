@@ -24,7 +24,8 @@ using Microsoft.AspNetCore.Authorization;
 namespace Listenarr.Api.Controllers
 {
     [ApiController]
-    [Route("api/v{version:apiVersion}/[controller]")]
+    [Route("api/v{version:apiVersion}/system")]
+    [Tags("System")]
     public class SystemController : ControllerBase
     {
         private readonly ISystemService _systemService;
@@ -37,7 +38,7 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Get current system information including OS, runtime, memory, and CPU usage
+        /// Get current system information including OS, runtime, memory, and CPU usage.
         /// </summary>
         [HttpGet("info")]
         public ActionResult<SystemInfo> GetSystemInfo()
@@ -61,7 +62,7 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Get storage information for the application's data directory
+        /// Get storage information for the application's data directory.
         /// </summary>
         [HttpGet("storage")]
         public ActionResult<StorageInfo> GetStorageInfo()
@@ -84,7 +85,7 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Get health status of all services including download clients and external APIs
+        /// Get health status of all services including download clients and external APIs.
         /// </summary>
         [HttpGet("health")]
         public async Task<ActionResult<ServiceHealth>> GetServiceHealth()
@@ -107,8 +108,9 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Get recent log entries
+        /// Get recent log entries.
         /// </summary>
+        /// <param name="limit">Maximum number of log entries to return (default 100).</param>
         [HttpGet("logs")]
         public ActionResult<List<LogEntry>> GetLogs([FromQuery] int limit = 100)
         {
@@ -131,7 +133,7 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Test log broadcasting (generates test log messages)
+        /// Generate test log messages at Info, Warning, and Error levels for debugging log broadcasting.
         /// </summary>
         [HttpPost("logs/test")]
         public ActionResult TestLogs()
@@ -156,7 +158,7 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Download log file
+        /// Download the current log file as a text file attachment.
         /// </summary>
         [HttpGet("logs/download")]
         public ActionResult DownloadLogs()

@@ -155,7 +155,7 @@ export const extractNarrators = (result: NormalizedResult): string => {
  * @param raw - Runtime value (may be in seconds or minutes)
  * @returns Runtime in minutes, or undefined if invalid
  * @example
- * normalizeRuntime(3600) // 60 (1 hour)
+ * normalizeRuntime(130500) // 2175 (was stored in seconds)
  * normalizeRuntime(60) // 60 (already in minutes)
  * normalizeRuntime('invalid') // undefined
  */
@@ -165,9 +165,9 @@ export const normalizeRuntime = (raw: unknown): number | undefined => {
   const num = Number(raw)
   if (isNaN(num) || num <= 0) return undefined
 
-  // Convert from seconds to minutes when the value looks like seconds (heuristic > 1000).
-  // Treat values <= 1000 as minutes already. Round to the nearest minute for safety.
-  return num > 1000 ? Math.round(num / 60) : Math.round(num)
+  // Values >= 20000 are likely stored in seconds (> 333 hours is unrealistic for minutes).
+  // Convert to minutes. Values below the threshold are treated as minutes already.
+  return num >= 20000 ? Math.round(num / 60) : Math.round(num)
 }
 
 /**

@@ -298,7 +298,14 @@ namespace Listenarr.Api.Services
                 }
                 catch (Exception linkEx) when (linkEx is not OperationCanceledException && linkEx is not OutOfMemoryException && linkEx is not StackOverflowException) {
                     // Hardlink failed (likely cross-volume or unsupported filesystem)
-                    _logger.LogWarning(linkEx, "Hardlink failed, falling back to copy: {Source} -> {Dest}", sourceFile, destFile);
+                    var isCrossDevice = linkEx is IOException ioEx && ioEx.Message.Contains("error code 17");
+                    if (!isCrossDevice)
+                        isCrossDevice = linkEx is IOException ioEx2 && ioEx2.Message.Contains("error code 18"); // Unix EXDEV
+                    
+                    if (isCrossDevice)
+                        _logger.LogInformation("Hardlink not possible (source and destination are on different drives), falling back to copy: {Source} -> {Dest}", sourceFile, destFile);
+                    else
+                        _logger.LogWarning(linkEx, "Hardlink failed, falling back to copy: {Source} -> {Dest}", sourceFile, destFile);
                     
                     // Fallback to copy
                     File.Copy(sourceFile, destFile, true);

@@ -7,7 +7,8 @@ using System.Linq;
 namespace Listenarr.Api.Controllers
 {
     [ApiController]
-    [Route("api/v{version:apiVersion}/[controller]")]
+    [Route("api/v{version:apiVersion}/antiforgery")]
+    [Tags("Account")]
     public class AntiforgeryController : ControllerBase
     {
         private readonly IAntiforgery _antiforgery;
@@ -19,6 +20,11 @@ namespace Listenarr.Api.Controllers
             _logger = logger;
         }
 
+        /// <summary>
+        /// Issue a new CSRF antiforgery token for the current session.
+        /// </summary>
+        /// <remarks>The token must be sent as a request header on subsequent state-changing requests.</remarks>
+        /// <returns>An object containing the antiforgery request token.</returns>
         [HttpGet("token")]
         [AllowAnonymous]
         public IActionResult GetToken()

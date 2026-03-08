@@ -33,7 +33,7 @@ namespace Listenarr.Api.Services
 
             try
             {
-                if (context?.Request?.RouteValues?.TryGetValue("version", out var routeVersionObj) == true)
+                if (context?.Request?.RouteValues?.TryGetValue("version", out var routeVersionObj) is true)
                 {
                     var routeVersion = routeVersionObj?.ToString();
                     if (!string.IsNullOrWhiteSpace(routeVersion))

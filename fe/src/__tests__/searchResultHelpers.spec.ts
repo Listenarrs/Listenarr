@@ -136,18 +136,19 @@ describe('searchResultHelpers', () => {
   })
 
   describe('normalizeRuntime', () => {
-    it('assumes values > 1000 are seconds', () => {
-      expect(normalizeRuntime(3600)).toBe(60) // 3600 seconds = 60 minutes
+    it('assumes values >= 20000 are seconds', () => {
+      expect(normalizeRuntime(130500)).toBe(2175) // 130500 / 60 = 2175 minutes
       expect(normalizeRuntime(45900)).toBe(765) // 45900 / 60 = 765
     })
 
-    it('assumes values <= 1000 are minutes', () => {
+    it('keeps values < 20000 as minutes', () => {
       expect(normalizeRuntime(60)).toBe(60)
       expect(normalizeRuntime(120)).toBe(120)
+      expect(normalizeRuntime(3600)).toBe(3600) // 60 hours — valid for a very long audiobook
     })
 
     it('handles string input', () => {
-      expect(normalizeRuntime('3600')).toBe(60)
+      expect(normalizeRuntime('45900')).toBe(765)
       expect(normalizeRuntime('120')).toBe(120)
     })
 
@@ -160,7 +161,7 @@ describe('searchResultHelpers', () => {
     })
 
     it('rounds seconds-to-minutes conversion', () => {
-      expect(normalizeRuntime(3659)).toBe(61) // 3659 / 60 = 60.98... -> 61
+      expect(normalizeRuntime(130559)).toBe(2176) // 130559 / 60 = 2175.98... -> 2176
     })
   })
 

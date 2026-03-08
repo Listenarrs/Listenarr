@@ -197,6 +197,11 @@
                   Select a named root (or custom path) and edit the path relative to it on the
                   right.
                 </small>
+                <!-- Path length warning -->
+                <div v-if="destinationPathWarning" class="path-length-warning">
+                  <PhWarning :size="16" />
+                  <span>{{ destinationPathWarning }}</span>
+                </div>
               </div>
             </div>
           </div>
@@ -245,10 +250,11 @@ import RootFolderSelect from '@/components/form/RootFolderSelect.vue'
 import Checkbox from '@/components/form/Checkbox.vue'
 import FormRow from '@/components/settings/FormRow.vue'
 import { useRootFoldersStore } from '@/stores/rootFolders'
-import { PhX, PhSpinner, PhPlus, PhImage } from '@phosphor-icons/vue' 
+import { PhX, PhSpinner, PhPlus, PhImage, PhWarning } from '@phosphor-icons/vue' 
 import { toForward, normalizeForCompare } from '@/utils/path' 
 import { formatDate } from '@/utils/searchResultFormatting'
 import { stripHtmlAndNormalize } from '@/utils/textUtils'
+import { usePathLengthCheck } from '@/composables/usePathLengthCheck'
 
 interface Props {
   visible: boolean
@@ -342,6 +348,27 @@ const rootPath = ref<string>('')
 const previewFull = ref<string>('')
 const previewRelative = ref<string>('')
 
+// Path length check — reactively compute the full destination path
+const estimatedFullPath = computed(() => {
+  let root = ''
+  if (selectedRootId.value === 0) {
+    root = (customRootPath.value || '').trim()
+  } else if (selectedRootId.value && selectedRootId.value > 0) {
+    const found = rootStore.folders.find((f) => f.id === selectedRootId.value)
+    root = found?.path || ''
+  } else {
+    const defaultRoot = rootStore.folders.find((f) => f.isDefault)
+    root = defaultRoot?.path || configStore.applicationSettings?.outputPath || ''
+  }
+  if (selectedRootId.value === 0) return root
+  const rel = (options.value.relativePath || '').trim()
+  if (!root) return rel
+  if (!rel) return root
+  const sep = root.includes('\\') ? '\\' : '/'
+  return root.endsWith(sep) ? root + rel : root + sep + rel
+})
+const { pathLengthWarning: destinationPathWarning } = usePathLengthCheck(estimatedFullPath)
+
 // Hold an enriched metadata object (populate if metadata sources available)
 const enriched = ref<AudibleBookMetadata | null>(null)
 // Image and metadata UI state
@@ -432,7 +459,7 @@ const mapAudimetaToAudible = (
     imageUrl: audimeta?.imageUrl || props.book?.imageUrl,
     runtime:
       typeof audimeta?.lengthMinutes === 'number'
-        ? audimeta.lengthMinutes * 60
+        ? audimeta.lengthMinutes
         : props.book?.runtime,
     language: audimeta?.language || props.book?.language,
     genres: genres.length ? genres : props.book?.genres || [],
@@ -716,8 +743,10 @@ const addToLibrary = async () => {
 
 const formatRuntime = (minutes: number): string => {
   if (!minutes) return 'Unknown'
-  const hours = Math.floor(minutes / 60)
-  const mins = minutes % 60
+  // Guard against legacy data stored in seconds
+  const normalized = minutes >= 20000 ? Math.round(minutes / 60) : minutes
+  const hours = Math.floor(normalized / 60)
+  const mins = normalized % 60
   return `${hours}h ${mins}m`
 }
 
@@ -1001,5 +1030,24 @@ const capitalizeFirst = (str: string): string => {
   .btn {
     justify-content: center;
   }
+}
+
+.path-length-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  padding: 0.625rem 0.75rem;
+  background-color: rgba(255, 152, 0, 0.08);
+  border: 1px solid rgba(255, 152, 0, 0.35);
+  border-radius: 6px;
+  color: #ffb74d;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.path-length-warning svg {
+  flex-shrink: 0;
+  margin-top: 0.125rem;
 }
 </style>

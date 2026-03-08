@@ -9,6 +9,7 @@ namespace Listenarr.Api.Controllers
 {
     [ApiController]
     [Route("api/v{version:apiVersion}/admin")]
+    [Tags("System")]
     public class AdminMetadataController : ControllerBase
     {
         private readonly ListenArrDbContext _db;
@@ -29,7 +30,14 @@ namespace Listenarr.Api.Controllers
             _metadataService = metadataService;
         }
 
-        // POST /api/admin/reextract-file/123
+        /// <summary>
+        /// Re-extract audio metadata (duration, format, bitrate, etc.) for a single audiobook file.
+        /// </summary>
+        /// <param name="audiobookFileId">The database ID of the AudiobookFile to re-extract.</param>
+        /// <returns>Confirmation of the re-extraction result.</returns>
+        /// <response code="200">Re-extraction completed successfully.</response>
+        /// <response code="400">Invalid CSRF token or the file has no path.</response>
+        /// <response code="404">AudiobookFile not found.</response>
         [HttpPost("reextract-file/{audiobookFileId}")]
         public async Task<IActionResult> ReextractFile(int audiobookFileId)
         {
@@ -77,7 +85,11 @@ namespace Listenarr.Api.Controllers
             return Ok(new { message = "Re-extraction completed", audiobookFileId = audiobookFileId });
         }
 
-        // POST /api/admin/trigger-rescan
+        /// <summary>
+        /// Trigger a batch metadata rescan for audiobook files that are missing duration, format, or sample rate.
+        /// </summary>
+        /// <param name="max">Maximum number of files to process in this batch (default 50).</param>
+        /// <returns>Summary with the number of files examined and updated.</returns>
         [HttpPost("trigger-rescan")]
         public async Task<IActionResult> TriggerRescan([FromQuery] int max = 50)
         {

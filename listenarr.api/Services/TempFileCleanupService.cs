@@ -41,6 +41,15 @@ namespace Listenarr.Api.Services
                         _logger.LogInformation("Temp file cleanup completed successfully");
                     }
                 }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    _logger.LogInformation("Temp File Cleanup Service cancellation requested");
+                    break;
+                }
+                catch (OperationCanceledException ex)
+                {
+                    _logger.LogWarning(ex, "Temp file cleanup operation canceled/timed out; continuing");
+                }
                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogError(ex, "Error occurred during temp file cleanup");
                 }
@@ -50,7 +59,7 @@ namespace Listenarr.Api.Services
                 {
                     await Task.Delay(_cleanupInterval, stoppingToken);
                 }
-                catch (TaskCanceledException)
+                catch (OperationCanceledException)
                 {
                     _logger.LogInformation("Temp File Cleanup Service is stopping");
                     break;

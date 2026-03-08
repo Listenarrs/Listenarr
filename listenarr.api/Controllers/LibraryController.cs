@@ -40,6 +40,7 @@ namespace Listenarr.Api.Controllers
 {
     [ApiController]
     [Route("api/v{version:apiVersion}/library")]
+    [Tags("Library")]
     public class LibraryController : ControllerBase
     {
         private const int MetadataRescanCooldownSeconds = 15;
@@ -174,6 +175,11 @@ namespace Listenarr.Api.Controllers
             public string? Path { get; set; }
         }
 
+        /// <summary>
+        /// Add a new audiobook to the library from search metadata.
+        /// </summary>
+        /// <param name="request">Audiobook metadata, monitoring preference, quality profile, and optional auto-search flag.</param>
+        /// <returns>The newly created audiobook record.</returns>
         [HttpPost("add")]
         public async Task<IActionResult> AddToLibrary([FromBody] AddToLibraryRequest request)
         {
@@ -550,6 +556,11 @@ namespace Listenarr.Api.Controllers
             return Ok(new { message = "Audiobook added to library successfully", audiobook });
         }
 
+        /// <summary>
+        /// Preview the destination path that would be computed for an audiobook based on current naming settings.
+        /// </summary>
+        /// <param name="request">Audiobook metadata and optional destination root override.</param>
+        /// <returns>Full path, relative path, and root directory.</returns>
         [HttpPost("preview-path")]
         public async Task<IActionResult> PreviewPath([FromBody] PreviewPathRequest request)
         {
@@ -590,6 +601,9 @@ namespace Listenarr.Api.Controllers
             }
         }
 
+        /// <summary>
+        /// Get all audiobooks in the library, including file info and wanted status.
+        /// </summary>
         [HttpGet]
         public async Task<IActionResult> GetAll()
         {
@@ -665,6 +679,10 @@ namespace Listenarr.Api.Controllers
             return Ok(dto);
         }
 
+        /// <summary>
+        /// Look up an audiobook by its ASIN.
+        /// </summary>
+        /// <param name="asin">Amazon Standard Identification Number.</param>
         [HttpGet("by-asin/{asin}")]
         public async Task<IActionResult> GetByAsin(string asin)
         {
@@ -673,6 +691,10 @@ namespace Listenarr.Api.Controllers
             return Ok(book);
         }
 
+        /// <summary>
+        /// Look up an audiobook by its ISBN.
+        /// </summary>
+        /// <param name="isbn">International Standard Book Number.</param>
         [HttpGet("by-isbn/{isbn}")]
         public async Task<IActionResult> GetByIsbn(string isbn)
         {
@@ -681,6 +703,10 @@ namespace Listenarr.Api.Controllers
             return Ok(book);
         }
 
+        /// <summary>
+        /// Get a single audiobook by its database ID, including files, quality profile, external identifiers, and wanted status.
+        /// </summary>
+        /// <param name="id">Audiobook ID.</param>
         [HttpGet("{id}")]
         public async Task<ActionResult<Audiobook>> GetAudiobook(int id)
         {
@@ -753,6 +779,10 @@ namespace Listenarr.Api.Controllers
             return Ok(audiobookDto);
         }
 
+        /// <summary>
+        /// Get all external identifiers (ASIN, ISBN, Goodreads ID, etc.) for an audiobook.
+        /// </summary>
+        /// <param name="id">Audiobook ID.</param>
         [HttpGet("{id}/identifiers")]
         public async Task<IActionResult> GetAudiobookIdentifiers(int id)
         {
@@ -776,6 +806,11 @@ namespace Listenarr.Api.Controllers
             });
         }
 
+        /// <summary>
+        /// Replace all external identifiers for an audiobook in a single operation.
+        /// </summary>
+        /// <param name="id">Audiobook ID.</param>
+        /// <param name="request">New set of identifiers. Existing identifiers will be removed and replaced.</param>
         [HttpPut("{id}/identifiers")]
         public async Task<IActionResult> ReplaceAudiobookIdentifiers(int id, [FromBody] ReplaceAudiobookIdentifiersRequest? request)
         {
@@ -927,6 +962,10 @@ namespace Listenarr.Api.Controllers
             });
         }
 
+        /// <summary>
+        /// Re-fetch metadata for an audiobook from upstream sources (Audimeta / Audnexus) and update the local record.
+        /// </summary>
+        /// <param name="id">Audiobook ID.</param>
         [HttpPost("{id}/rescan-metadata")]
         public async Task<IActionResult> RescanAudiobookMetadata(int id)
         {
@@ -1199,7 +1238,10 @@ namespace Listenarr.Api.Controllers
 
         // NOTE: Do not perform ad-hoc schema changes at runtime. Use EF Core migrations to modify the database schema.
 
-        // DEBUG: Return raw AudiobookFile rows for an audiobook. Not intended for production use.
+        /// <summary>
+        /// [Debug] Return raw AudiobookFile database rows for an audiobook. Restricted to local/admin callers.
+        /// </summary>
+        /// <param name="id">Audiobook ID.</param>
         [HttpGet("{id}/files-debug")]
         public async Task<IActionResult> GetAudiobookFilesDebug(int id)
         {
@@ -1210,8 +1252,10 @@ namespace Listenarr.Api.Controllers
             return Ok(files);
         }
 
-        // DEBUG: Scan JSON-backed TEXT columns for stored values that are clearly not JSON
-        // Returns a list of offending rows per configured entity so we can diagnose deserialization errors.
+        /// <summary>
+        /// [Debug] Scan JSON-backed columns for invalid JSON values. Restricted to local/admin callers.
+        /// </summary>
+        /// <returns>A map of column names to offending row data, useful for diagnosing deserialization errors.</returns>
         [HttpGet("debug/json-invalid")]
         public async Task<IActionResult> GetInvalidJsonColumns()
         {
@@ -1429,6 +1473,11 @@ namespace Listenarr.Api.Controllers
 
         // Diagnostics endpoints removed - cleanup completed
 
+        /// <summary>
+        /// Update an existing audiobook's metadata and settings. Supports partial updates — only non-null fields are applied.
+        /// </summary>
+        /// <param name="id">Audiobook ID.</param>
+        /// <param name="updatedAudiobook">Fields to update (null fields are left unchanged).</param>
         [HttpPut("{id}")]
         public async Task<IActionResult> UpdateAudiobook(int id, [FromBody] Audiobook updatedAudiobook)
         {
@@ -1531,6 +1580,10 @@ namespace Listenarr.Api.Controllers
             return Ok(new { message = "Audiobook updated successfully", audiobook = existingAudiobook });
         }
 
+        /// <summary>
+        /// Delete an audiobook from the library, including its cached cover image.
+        /// </summary>
+        /// <param name="id">Audiobook ID.</param>
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteAudiobook(int id)
         {
@@ -1612,6 +1665,11 @@ namespace Listenarr.Api.Controllers
             return StatusCode(500, new { message = "Failed to delete audiobook" });
         }
 
+        /// <summary>
+        /// Delete multiple audiobooks in a single transaction.
+        /// </summary>
+        /// <param name="request">List of audiobook IDs to delete.</param>
+        /// <returns>Summary with deleted count, image cleanup count, and any per-item errors.</returns>
         [HttpPost("delete-bulk")]
         public async Task<IActionResult> BulkDeleteAudiobooks([FromBody] BulkDeleteRequest request)
         {
@@ -1777,6 +1835,10 @@ namespace Listenarr.Api.Controllers
             return Ok(result);
         }
 
+        /// <summary>
+        /// Bulk-update fields (monitored status, quality profile, root folder) for multiple audiobooks at once.
+        /// </summary>
+        /// <param name="request">Audiobook IDs and the fields to update.</param>
         [HttpPost("bulk-update")]
         public async Task<IActionResult> BulkUpdateAudiobooks([FromBody] BulkUpdateRequest request)
         {
@@ -2127,7 +2189,7 @@ namespace Listenarr.Api.Controllers
             try
             {
                 // Search recursively but limit to common audio file extensions
-                var exts = new[] { ".m4b", ".mp3", ".flac", ".ogg", ".opus", ".m4a", ".aac", ".wav" };
+                var exts = FileUtils.AudioExtensions;
 
                 // Iterative safe directory traversal to avoid unhandled IO/Access exceptions and handle special characters
                 var dirs = new Stack<string>();
@@ -2292,7 +2354,7 @@ namespace Listenarr.Api.Controllers
 
                     var foundSet = new HashSet<string>(foundFiles.Select(f => Path.GetRelativePath(basePath, f)), StringComparer.OrdinalIgnoreCase);
                     var toRemove = existingFiles
-                        .Where(f => f.Path != null && !foundSet.Contains(f.Path))
+                        .Where(f => f.Path != null && FileUtils.IsAudioFile(f.Path) && !foundSet.Contains(f.Path))
                         .ToList();
 
                     List<object> removedFilesDto = new();
@@ -2456,6 +2518,12 @@ namespace Listenarr.Api.Controllers
             return NotFound(new { message = "Job not found" });
         }
 
+        /// <summary>
+        /// Enqueue a background job to move an audiobook's files to a new destination path.
+        /// </summary>
+        /// <param name="id">Audiobook ID.</param>
+        /// <param name="request">Move request with destination path and optional source override.</param>
+        /// <returns>Accepted with a job ID that can be polled for progress.</returns>
         [HttpPost("{id}/move")]
         public async Task<IActionResult> EnqueueMove(int id, [FromBody] MoveRequest request)
         {
@@ -2574,6 +2642,10 @@ namespace Listenarr.Api.Controllers
             }
         }
 
+        /// <summary>
+        /// Get the current status of a file-move background job.
+        /// </summary>
+        /// <param name="jobId">The GUID returned when the move was enqueued.</param>
         [HttpGet("move/{jobId}")]
         public IActionResult GetMoveJobStatus(string jobId)
         {
@@ -2587,6 +2659,11 @@ namespace Listenarr.Api.Controllers
             return NotFound(new { message = "Job not found" });
         }
 
+        /// <summary>
+        /// Re-enqueue a previously failed or completed move job for retry.
+        /// </summary>
+        /// <param name="jobId">Original move job GUID.</param>
+        /// <returns>Accepted with the new job ID.</returns>
         [HttpPost("move/requeue/{jobId}")]
         public async Task<IActionResult> RequeueMoveJob(string jobId)
         {
@@ -2613,6 +2690,11 @@ namespace Listenarr.Api.Controllers
             return Accepted(new { message = "Requeued move job", jobId = newJobId });
         }
 
+        /// <summary>
+        /// Re-enqueue a previously failed or completed scan job for retry.
+        /// </summary>
+        /// <param name="jobId">Original scan job GUID.</param>
+        /// <returns>Accepted with the new job ID.</returns>
         [HttpPost("scan/requeue/{jobId}")]
         public async Task<IActionResult> RequeueScanJob(string jobId)
         {
@@ -2764,7 +2846,9 @@ namespace Listenarr.Api.Controllers
             // Get existing downloads for this audiobook
             var existingDownloads = await dbContext.Downloads
                 .Where(d => d.AudiobookId == audiobook.Id &&
-                           (d.Status == DownloadStatus.Completed || d.Status == DownloadStatus.Downloading))
+                           (d.Status == DownloadStatus.Completed ||
+                            d.Status == DownloadStatus.Downloading ||
+                            d.Status == DownloadStatus.ImportPending))
                 .ToListAsync();
 
             // Get existing files for this audiobook
@@ -2800,9 +2884,10 @@ namespace Listenarr.Api.Controllers
                     }
                 }
                 // For active downloads, assume they will meet quality requirements
-                else if (download.Status == DownloadStatus.Downloading)
+                else if (download.Status == DownloadStatus.Downloading ||
+                         download.Status == DownloadStatus.ImportPending)
                 {
-                    _logger.LogDebug("Quality cutoff assumed met for audiobook '{Title}' due to active download", audiobook.Title);
+                    _logger.LogDebug("Quality cutoff assumed met for audiobook '{Title}' due to active download/import", audiobook.Title);
                     return true;
                 }
             }

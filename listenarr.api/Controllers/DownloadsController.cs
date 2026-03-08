@@ -9,7 +9,8 @@ using Microsoft.Extensions.Caching.Memory;
 namespace Listenarr.Api.Controllers;
 
 [ApiController]
-[Route("api/v{version:apiVersion}/[controller]")]
+[Route("api/v{version:apiVersion}/downloads")]
+[Tags("Downloads")]
 public class DownloadsController : ControllerBase
 {
     private readonly ListenArrDbContext _dbContext;
@@ -61,12 +62,26 @@ public class DownloadsController : ControllerBase
         return NotFound(new { error = "Cached announces not found", downloadId });
     }
 
+    /// <summary>
+    /// List all download records, optionally filtered by status.
+    /// </summary>
+    /// <param name="status">Optional status filter (e.g., Queued, Downloading, Completed, Failed).</param>
     [HttpGet]
     public async Task<ActionResult<IEnumerable<Download>>> GetDownloads([FromQuery] string? status = null)
     {
         try
         {
             IQueryable<Download> query = _dbContext.Downloads;
+
+            var downloadClients = await _configurationService.GetDownloadClientConfigurationsAsync();
+            var enabledClientIds = downloadClients
+                .Where(c => c.IsEnabled && !string.IsNullOrWhiteSpace(c.Id))
+                .Select(c => c.Id)
+                .ToList();
+
+            query = query.Where(d =>
+                d.DownloadClientId == "DDL" ||
+                (!string.IsNullOrEmpty(d.DownloadClientId) && enabledClientIds.Contains(d.DownloadClientId)));
 
             if (!string.IsNullOrEmpty(status))
             {
@@ -92,8 +107,9 @@ public class DownloadsController : ControllerBase
     }
 
     /// <summary>
-    /// Get a specific download by ID
+    /// Get a specific download record by ID.
     /// </summary>
+    /// <param name="id">Download record ID.</param>
     [HttpGet("{id}")]
     public async Task<ActionResult<Download>> GetDownload(string id)
     {
@@ -124,7 +140,10 @@ public class DownloadsController : ControllerBase
                 completedAt = download.CompletedAt,
                 errorMessage = download.ErrorMessage,
                 downloadClientId = download.DownloadClientId,
-                metadata = download.Metadata
+                metadata = download.Metadata,
+                importBlockReason = download.ImportBlockReason,
+                importBlockMessages = download.ImportBlockMessages,
+                importAttempts = download.ImportAttempts
             };
 
             return Ok(downloadObj);
@@ -136,17 +155,74 @@ public class DownloadsController : ControllerBase
       }
 
     /// <summary>
-    /// Get active downloads (Queued or Downloading status)
+    /// Retry importing a download that was blocked due to import issues. Resets status to ImportPending.
+    /// </summary>
+    /// <param name="id">Download record ID.</param>
+    [HttpPost("{id}/retry-import")]
+    public async Task<ActionResult> RetryBlockedImport(string id)
+    {
+        try
+        {
+            var download = await _dbContext.Downloads.FindAsync(id);
+            if (download == null)
+            {
+                return NotFound(new { error = "Download not found", id });
+            }
+
+            if (download.Status != DownloadStatus.ImportBlocked)
+            {
+                return BadRequest(new
+                {
+                    error = "Download is not import blocked",
+                    id,
+                    status = download.Status.ToString()
+                });
+            }
+
+            download.Status = DownloadStatus.ImportPending;
+            download.ImportBlockReason = null;
+            download.ImportBlockMessages = null;
+            download.ImportAttempts = 0;
+
+            await _dbContext.SaveChangesAsync();
+
+            _logger.LogInformation("Reset blocked import {DownloadId} back to ImportPending", id);
+            return Ok(new
+            {
+                message = "Import retry queued",
+                id,
+                status = download.Status.ToString()
+            });
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+        {
+            _logger.LogError(ex, "Error retrying blocked import {DownloadId}", id);
+            return StatusCode(500, new { error = "Failed to retry blocked import", message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Get all active downloads (Queued, Downloading, Processing, or ImportPending status).
     /// </summary>
     [HttpGet("active")]
     public async Task<ActionResult<IEnumerable<Download>>> GetActiveDownloads()
     {
         try
         {
+            var downloadClients = await _configurationService.GetDownloadClientConfigurationsAsync();
+            var enabledClientIds = downloadClients
+                .Where(c => c.IsEnabled && !string.IsNullOrWhiteSpace(c.Id))
+                .Select(c => c.Id)
+                .ToList();
+
             var activeDownloads = await _dbContext.Downloads
                 .Where(d => d.Status == DownloadStatus.Queued ||
                            d.Status == DownloadStatus.Downloading ||
-                           d.Status == DownloadStatus.Processing)
+                           d.Status == DownloadStatus.Processing ||
+                           d.Status == DownloadStatus.ImportPending)
+                .Where(d =>
+                    d.DownloadClientId == "DDL" ||
+                    (!string.IsNullOrEmpty(d.DownloadClientId) && enabledClientIds.Contains(d.DownloadClientId)))
                 .OrderByDescending(d => d.StartedAt)
                 .ToListAsync();
 
@@ -162,8 +238,10 @@ public class DownloadsController : ControllerBase
     }
 
 
-    /// <summary>    /// Delete a download record (does not cancel active download)
+    /// <summary>
+    /// Delete a download record from the database. This does not cancel an active download in the client.
     /// </summary>
+    /// <param name="id">Download record ID.</param>
     [HttpDelete("{id}")]
     public async Task<ActionResult> DeleteDownload(string id)
     {
@@ -189,7 +267,7 @@ public class DownloadsController : ControllerBase
     }
 
     /// <summary>
-    /// Clear completed downloads
+    /// Delete all download records with Completed status.
     /// </summary>
     [HttpDelete("completed")]
     public async Task<ActionResult> ClearCompletedDownloads()
@@ -213,7 +291,7 @@ public class DownloadsController : ControllerBase
     }
 
     /// <summary>
-    /// Clear failed downloads
+    /// Delete all download records with Failed or ImportBlocked status.
     /// </summary>
     [HttpDelete("failed")]
     public async Task<ActionResult> ClearFailedDownloads()
@@ -221,7 +299,7 @@ public class DownloadsController : ControllerBase
         try
         {
             var failedDownloads = await _dbContext.Downloads
-                .Where(d => d.Status == DownloadStatus.Failed)
+                .Where(d => d.Status == DownloadStatus.Failed || d.Status == DownloadStatus.ImportBlocked)
                 .ToListAsync();
 
             _dbContext.Downloads.RemoveRange(failedDownloads);

@@ -60,7 +60,7 @@ describe('DownloadClientFormModal', () => {
     expect(apiKeyComponent.exists()).toBe(true)
   })
 
-  it('test button on modal uses current input values (no ID sent)', async () => {
+  it('test button on modal uses current input values and includes ID for existing client fallback', async () => {
     const api = await import('@/services/api')
     ;(api.testDownloadClient as unknown) = vi.fn(async (config: unknown) => ({ success: true, message: 'ok', client: config }))
 
@@ -98,11 +98,11 @@ describe('DownloadClientFormModal', () => {
     expect((api.testDownloadClient as unknown)).toHaveBeenCalled()
     const calledWith = (api.testDownloadClient as unknown).mock.calls[0][0]
     expect(calledWith.host).toBe('edited.local')
-    // ID should NOT be sent when testing modal inputs to avoid DB fallback
-    expect(calledWith.id).toBeUndefined()
+    // Existing client id should be sent so backend can reuse saved credentials when needed.
+    expect(calledWith.id).toBe('3')
   })
 
-  it('modal prepopulates password from DB and uses empty password when cleared', async () => {
+  it('modal sends existing client ID when password is cleared so backend can pull saved password', async () => {
     const api = await import('@/services/api')
     ;(api.testDownloadClient as unknown) = vi.fn(async (config: unknown) => ({ success: true, message: 'ok', client: config }))
 
@@ -143,7 +143,8 @@ describe('DownloadClientFormModal', () => {
 
     expect((api.testDownloadClient as unknown)).toHaveBeenCalled()
     const calledWith = (api.testDownloadClient as unknown).mock.calls[0][0]
-    // Because we omit the id, server will NOT pull DB password; we should send empty password
+    // We still send an empty password input, but include id so backend can reuse saved credentials.
     expect(calledWith.password).toBe('')
+    expect(calledWith.id).toBe('4')
   })
 })

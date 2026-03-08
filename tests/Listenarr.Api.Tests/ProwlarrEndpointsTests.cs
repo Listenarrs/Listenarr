@@ -169,6 +169,36 @@ namespace Listenarr.Api.Tests
         }
 
         [Fact]
+        public async Task IndexersList_Post_AcceptsSingleObject()
+        {
+            var client = _factory.CreateClient();
+
+            var payload = JsonSerializer.Serialize(new
+            {
+                name = "Single Object via Indexers",
+                implementation = "Newznab",
+                baseUrl = "http://localhost:18090",
+                apiPath = "api",
+                apiKey = "OBJECTKEY",
+                categories = new[] { 3030 }
+            });
+
+            using var content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json");
+            var resp = await client.PostAsync(
+                "/api/v1/indexers",
+                content);
+
+            Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+
+            using var stream = await resp.Content.ReadAsStreamAsync();
+            var doc = await JsonDocument.ParseAsync(stream);
+            Assert.True(doc.RootElement.TryGetProperty("accepted", out var accepted));
+            Assert.True(accepted.GetBoolean());
+            Assert.True(doc.RootElement.TryGetProperty("created", out var created));
+            Assert.True(created.GetInt32() >= 1);
+        }
+
+        [Fact]
         public async Task Indexers_Post_PersistsToDatabaseAndVisibleViaApi()
         {
             var client = _factory.CreateClient();

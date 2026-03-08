@@ -23,7 +23,8 @@ using Microsoft.AspNetCore.Mvc;
 namespace Listenarr.Api.Controllers
 {
     [ApiController]
-    [Route("api/v{version:apiVersion}/[controller]")]
+    [Route("api/v{version:apiVersion}/download")]
+    [Tags("Downloads")]
     public class DownloadController : ControllerBase
     {
         private readonly IDownloadService _downloadService;
@@ -41,9 +42,9 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Search for an audiobook across all indexers sequentially until a match is found,
-        /// then automatically send to the appropriate download client
+        /// Search all enabled indexers for an audiobook and automatically send the best match to a download client.
         /// </summary>
+        /// <param name="request">Request containing the audiobook ID to search for.</param>
         [HttpPost("search-and-download")]
         public async Task<ActionResult<SearchAndDownloadResult>> SearchAndDownload([FromBody] SearchAndDownloadRequest request)
         {
@@ -59,8 +60,9 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Manually send a search result to a download client
+        /// Send a specific search result to a download client (torrent or NZB).
         /// </summary>
+        /// <param name="request">The search result to download, optional download client ID, and optional audiobook ID to associate.</param>
         [HttpPost("send")]
         public async Task<ActionResult<string>> SendToDownloadClient([FromBody] SendDownloadRequest request)
         {
@@ -94,7 +96,7 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Get the current download queue from all enabled download clients
+        /// Get the current download queue from all enabled download clients.
         /// </summary>
         [HttpGet("queue")]
         public async Task<ActionResult<List<QueueItem>>> GetQueue()
@@ -111,8 +113,10 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Retrieve cached torrent bytes (if cached) for a given download id
+        /// Retrieve cached torrent file bytes for a download, if available.
         /// </summary>
+        /// <param name="downloadId">Download ID.</param>
+        /// <returns>The torrent file as a binary download.</returns>
         [HttpGet("cached/{downloadId}/torrent")]
         public async Task<IActionResult> GetCachedTorrent(string downloadId)
         {
@@ -136,8 +140,9 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Retrieve cached announce URLs for a given download id
+        /// Retrieve cached tracker announce URLs for a download.
         /// </summary>
+        /// <param name="downloadId">Download ID.</param>
         [HttpGet("cached/{downloadId}/announces")]
         public async Task<IActionResult> GetCachedAnnounces(string downloadId)
         {
@@ -158,8 +163,11 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Remove an item from the download queue
+        /// Remove a download from the queue and optionally from the download client.
         /// </summary>
+        /// <param name="downloadId">Download ID to remove.</param>
+        /// <param name="downloadClientId">Optional download client ID to target.</param>
+        /// <param name="force">When true, remove the database record even if the download client removal fails.</param>
         [HttpDelete("queue/{downloadId}")]
         public async Task<ActionResult> RemoveFromQueue(string downloadId, [FromQuery] string? downloadClientId = null, [FromQuery] bool force = false)
         {
@@ -179,9 +187,9 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Reprocess a specific completed download by adding it to the processing queue
-        /// Requires API key authentication via X-Api-Key header or Authorization: ApiKey header
+        /// Re-queue a completed download for reprocessing (file import).
         /// </summary>
+        /// <param name="downloadId">Download ID to reprocess.</param>
         [HttpPost("reprocess/{downloadId}")]
         public async Task<ActionResult> ReprocessDownload(string downloadId)
         {
@@ -201,9 +209,9 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Bulk reprocess multiple completed downloads
-        /// Requires API key authentication via X-Api-Key header or Authorization: ApiKey header
+        /// Bulk re-queue multiple completed downloads for reprocessing.
         /// </summary>
+        /// <param name="request">List of download IDs to reprocess.</param>
         [HttpPost("reprocess/bulk")]
         public async Task<ActionResult> ReprocessDownloads([FromBody] ReprocessRequest request)
         {
@@ -225,9 +233,9 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Reprocess all completed downloads that meet certain criteria
-        /// Requires API key authentication via X-Api-Key header or Authorization: ApiKey header
+        /// Re-queue all completed downloads matching the specified criteria for reprocessing.
         /// </summary>
+        /// <param name="request">Optional filters: include already-processed downloads and maximum age.</param>
         [HttpPost("reprocess/all")]
         public async Task<ActionResult> ReprocessAllDownloads([FromBody] ReprocessAllRequest? request = null)
         {
@@ -253,8 +261,7 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Get processing queue statistics
-        /// Requires API key authentication via X-Api-Key header or Authorization: ApiKey header
+        /// Get download processing queue statistics (pending, in-progress, completed counts).
         /// </summary>
         [HttpGet("processing/stats")]
         public async Task<ActionResult> GetProcessingStats()
@@ -271,9 +278,9 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Get recent processing activity
-        /// Requires API key authentication via X-Api-Key header or Authorization: ApiKey header
+        /// Get recent download processing activity.
         /// </summary>
+        /// <param name="count">Maximum number of activity entries to return (default 50).</param>
         [HttpGet("processing/activity")]
         public async Task<ActionResult> GetProcessingActivity([FromQuery] int count = 50)
         {

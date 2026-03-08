@@ -28,7 +28,8 @@ namespace Listenarr.Domain.Models
         Processing,
         Ready,
         Moved,           // Added to track completed moves
-        ImportBlocked    // Added: Block re-processing of bad imports
+        ImportBlocked,   // Added: Block re-processing of bad imports
+        ImportPending    // Added: Explicitly waiting on import completion/manual interaction
     }
 
     public class Download

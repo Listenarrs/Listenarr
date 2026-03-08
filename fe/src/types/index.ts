@@ -120,7 +120,17 @@ export interface Download {
   artist: string
   album: string
   originalUrl: string
-  status: 'Queued' | 'Downloading' | 'Paused' | 'Completed' | 'Failed' | 'Processing' | 'Ready' | 'Moved'
+  status:
+    | 'Queued'
+    | 'Downloading'
+    | 'Paused'
+    | 'Completed'
+    | 'Failed'
+    | 'Processing'
+    | 'Ready'
+    | 'Moved'
+    | 'ImportPending'
+    | 'ImportBlocked'
   progress: number
   totalSize: number
   downloadedSize: number
@@ -198,6 +208,7 @@ export interface DownloadClientConfiguration {
 
 export interface DownloadClientSettings {
   apiKey?: string
+  urlBase?: string
   category?: string
   tags?: string
   recentPriority?: string

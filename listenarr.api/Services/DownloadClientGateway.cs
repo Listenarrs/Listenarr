@@ -83,5 +83,11 @@ namespace Listenarr.Api.Services
             var adapter = ResolveAdapter(client);
             return adapter.GetRecentHistoryAsync(client, limit, ct);
         }
+
+        public Task<bool> MarkItemAsImportedAsync(DownloadClientConfiguration client, string downloadId, CancellationToken ct = default)
+        {
+            var adapter = ResolveAdapter(client);
+            return adapter.MarkItemAsImportedAsync(client, downloadId, ct);
+        }
     }
 }

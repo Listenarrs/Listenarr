@@ -23,7 +23,8 @@ using Listenarr.Api.Services;
 namespace Listenarr.Api.Controllers
 {
     [ApiController]
-    [Route("api/v{version:apiVersion}/[controller]")]
+    [Route("api/v{version:apiVersion}/qualityprofile")]
+    [Tags("Quality Profiles")]
     public class QualityProfileController : ControllerBase
     {
         private readonly IQualityProfileService _qualityProfileService;
@@ -38,7 +39,7 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Get all quality profiles
+        /// Get all quality profiles.
         /// </summary>
         [HttpGet]
         public async Task<ActionResult<List<QualityProfile>>> GetAll()
@@ -55,8 +56,9 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Get quality profile by ID
+        /// Get a quality profile by ID.
         /// </summary>
+        /// <param name="id">Quality profile ID.</param>
         [HttpGet("{id}")]
         public async Task<ActionResult<QualityProfile>> GetById(int id)
         {
@@ -76,7 +78,7 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Get the default quality profile
+        /// Get the default quality profile.
         /// </summary>
         [HttpGet("default")]
         public async Task<ActionResult<QualityProfile>> GetDefault()
@@ -97,8 +99,9 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Create a new quality profile
+        /// Create a new quality profile.
         /// </summary>
+        /// <param name="profile">Quality profile to create.</param>
         [HttpPost]
         public async Task<ActionResult<QualityProfile>> Create([FromBody] QualityProfile profile)
         {
@@ -119,8 +122,10 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Update an existing quality profile
+        /// Update an existing quality profile.
         /// </summary>
+        /// <param name="id">Quality profile ID.</param>
+        /// <param name="profile">Updated quality profile data.</param>
         [HttpPut("{id}")]
         public async Task<ActionResult<QualityProfile>> Update(int id, [FromBody] QualityProfile profile)
         {
@@ -151,8 +156,9 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Delete a quality profile
+        /// Delete a quality profile.
         /// </summary>
+        /// <param name="id">Quality profile ID.</param>
         [HttpDelete("{id}")]
         public async Task<ActionResult> Delete(int id)
         {
@@ -177,8 +183,10 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Score search results against a quality profile
+        /// Score a list of search results against a quality profile's preferred criteria.
         /// </summary>
+        /// <param name="id">Quality profile ID.</param>
+        /// <param name="searchResults">Search results to score.</param>
         [HttpPost("{id}/score")]
         public async Task<ActionResult<List<QualityScore>>> ScoreResults(
             int id,

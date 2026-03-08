@@ -6,6 +6,7 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -23,12 +24,14 @@ namespace Listenarr.Api.Services.Adapters
 
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly IRemotePathMappingService _pathMappingService;
+        private readonly ITorrentFileDownloader _torrentFileDownloader;
         private readonly ILogger<TransmissionAdapter> _logger;
 
-        public TransmissionAdapter(IHttpClientFactory httpClientFactory, IRemotePathMappingService pathMappingService, ILogger<TransmissionAdapter> logger)
+        public TransmissionAdapter(IHttpClientFactory httpClientFactory, IRemotePathMappingService pathMappingService, ITorrentFileDownloader torrentFileDownloader, ILogger<TransmissionAdapter> logger)
         {
             _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
             _pathMappingService = pathMappingService ?? throw new ArgumentNullException(nameof(pathMappingService));
+            _torrentFileDownloader = torrentFileDownloader ?? throw new ArgumentNullException(nameof(torrentFileDownloader));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
@@ -43,7 +46,18 @@ namespace Listenarr.Api.Services.Adapters
                     arguments = new { },
                     tag = 1
                 };
-                await InvokeRpcAsync(client, payload, ct);
+                var response = await InvokeRpcAsync(client, payload, ct);
+
+                // Validate that the RPC endpoint actually responded with a successful session-get.
+                // Without this check, a non-Transmission service on the same port (or Transmission's
+                // web UI returning HTML) would falsely pass the test.
+                if (!response.TryGetProperty("result", out var resultProp) ||
+                    !string.Equals(resultProp.GetString(), "success", StringComparison.OrdinalIgnoreCase))
+                {
+                    var hint = resultProp.ValueKind == JsonValueKind.String ? resultProp.GetString() : "unexpected response";
+                    return (false, $"Transmission: RPC endpoint did not return a valid session response ({hint})");
+                }
+
                 return (true, "Transmission: connected");
             }
             catch (HttpRequestException httpEx) when (httpEx.StatusCode == HttpStatusCode.Unauthorized || httpEx.StatusCode == HttpStatusCode.Forbidden)
@@ -75,20 +89,125 @@ namespace Listenarr.Api.Services.Adapters
             var arguments = new Dictionary<string, object>();
 
             // Prefer cached torrent file data over URL (required for private trackers with authentication)
-            if (result.TorrentFileContent != null && result.TorrentFileContent.Length > 0)
+            byte[]? torrentFileData = result.TorrentFileContent;
+            var torrentUrl = !string.IsNullOrEmpty(result.MagnetLink) ? result.MagnetLink : result.TorrentUrl;
+
+            _logger.LogDebug("AddAsync entry for '{Title}': TorrentFileContent={HasContent}, MagnetLink={HasMagnet}, TorrentUrl={Url}",
+                LogRedaction.SanitizeText(result.Title),
+                result.TorrentFileContent != null && result.TorrentFileContent.Length > 0 ? $"{result.TorrentFileContent.Length} bytes" : "null",
+                !string.IsNullOrEmpty(result.MagnetLink) ? "yes" : "no",
+                LogRedaction.SanitizeUrl(torrentUrl ?? "(null)"));
+
+            // Transmission's magnet link handling is less reliable than qBittorrent's — it
+            // often stalls at "Downloading metadata..." because its DHT/tracker resolution is
+            // weaker. When a separate TorrentUrl (HTTP) is available alongside a magnet link,
+            // prefer fetching the .torrent file from TorrentUrl. The .torrent file contains
+            // full tracker lists and piece hashes, giving Transmission everything it needs to
+            // start immediately without metadata resolution.
+            if ((torrentFileData == null || torrentFileData.Length == 0) &&
+                !string.IsNullOrEmpty(torrentUrl) &&
+                torrentUrl.StartsWith("magnet:", StringComparison.OrdinalIgnoreCase) &&
+                !string.IsNullOrEmpty(result.TorrentUrl) &&
+                !result.TorrentUrl.StartsWith("magnet:", StringComparison.OrdinalIgnoreCase) &&
+                Uri.TryCreate(result.TorrentUrl, UriKind.Absolute, out var altUri) &&
+                (altUri.Scheme.Equals("http", StringComparison.OrdinalIgnoreCase) ||
+                 altUri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase)))
+            {
+                _logger.LogDebug("Magnet link available but TorrentUrl also present — attempting .torrent pre-download from {Url} for better Transmission compatibility",
+                    LogRedaction.SanitizeUrl(result.TorrentUrl));
+                try
+                {
+                    var altResult = await _torrentFileDownloader.DownloadAsync(result.TorrentUrl, ct);
+                    if (altResult.HasBytes)
+                    {
+                        torrentFileData = altResult.TorrentBytes;
+                        _logger.LogInformation("Pre-downloaded .torrent file ({Bytes} bytes) from TorrentUrl for '{Title}' — using instead of magnet link",
+                            torrentFileData!.Length, LogRedaction.SanitizeText(result.Title));
+                    }
+                    else
+                    {
+                        _logger.LogDebug("TorrentUrl pre-download did not return file data for '{Title}', will use magnet link", LogRedaction.SanitizeText(result.Title));
+                    }
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException && ex is not StackOverflowException)
+                {
+                    _logger.LogDebug(ex, "TorrentUrl pre-download failed for '{Title}', will use magnet link", LogRedaction.SanitizeText(result.Title));
+                }
+            }
+
+            // Pre-download torrent file if not cached and URL is HTTP(S) (not magnet).
+            // Transmission's built-in HTTP client cannot always follow redirects from indexers
+            // (e.g. Prowlarr returning 301), so we fetch the .torrent file ourselves and send
+            // the raw bytes via the metainfo field instead.
+            if ((torrentFileData == null || torrentFileData.Length == 0) &&
+                !string.IsNullOrEmpty(torrentUrl) &&
+                !torrentUrl.StartsWith("magnet:", StringComparison.OrdinalIgnoreCase) &&
+                Uri.TryCreate(torrentUrl, UriKind.Absolute, out var torrentUri) &&
+                (torrentUri.Scheme.Equals("http", StringComparison.OrdinalIgnoreCase) ||
+                 torrentUri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase)))
+            {
+                _logger.LogDebug("Attempting pre-download of torrent file from {Url}", LogRedaction.SanitizeUrl(torrentUrl));
+                try
+                {
+                    var downloadResult = await _torrentFileDownloader.DownloadAsync(torrentUrl, ct);
+                    if (downloadResult.HasBytes)
+                    {
+                        torrentFileData = downloadResult.TorrentBytes;
+                        _logger.LogInformation("Pre-downloaded torrent file ({Bytes} bytes) for '{Title}'",
+                            torrentFileData!.Length, LogRedaction.SanitizeText(result.Title));
+                    }
+                    else if (downloadResult.HasMagnet)
+                    {
+                        // Indexer redirected to a magnet link — use it directly
+                        torrentUrl = downloadResult.MagnetUri!;
+                        _logger.LogInformation("Indexer redirected to magnet link for '{Title}'", LogRedaction.SanitizeText(result.Title));
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Pre-download returned no data for '{Title}', falling back to URL", LogRedaction.SanitizeText(result.Title));
+                    }
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException && ex is not StackOverflowException)
+                {
+                    _logger.LogWarning(ex, "Failed to pre-download torrent file for '{Title}', falling back to URL", LogRedaction.SanitizeText(result.Title));
+                }
+            }
+            else if (torrentFileData == null || torrentFileData.Length == 0)
+            {
+                _logger.LogDebug("Skipping pre-download: torrentFileData={HasData}, torrentUrl={Url}, isMagnet={IsMagnet}",
+                    torrentFileData != null && torrentFileData.Length > 0 ? "has data" : "null/empty",
+                    string.IsNullOrEmpty(torrentUrl) ? "(empty)" : LogRedaction.SanitizeUrl(torrentUrl),
+                    torrentUrl?.StartsWith("magnet:", StringComparison.OrdinalIgnoreCase) == true ? "yes" : "no");
+            }
+
+            if (torrentFileData != null && torrentFileData.Length > 0)
             {
                 // Use metainfo field for torrent file data (base64 encoded)
-                arguments["metainfo"] = Convert.ToBase64String(result.TorrentFileContent);
-                _logger.LogDebug("Using cached torrent file data ({Bytes} bytes) for '{Title}'", result.TorrentFileContent.Length, LogRedaction.SanitizeText(result.Title));
+                arguments["metainfo"] = Convert.ToBase64String(torrentFileData);
+                _logger.LogDebug("Using cached torrent file data ({Bytes} bytes) for '{Title}'", torrentFileData.Length, LogRedaction.SanitizeText(result.Title));
             }
             else
             {
                 // Fall back to filename field for URLs/magnet links
-                var torrentUrl = !string.IsNullOrEmpty(result.MagnetLink) ? result.MagnetLink : result.TorrentUrl;
                 if (string.IsNullOrEmpty(torrentUrl))
                 {
                     throw new ArgumentException("No magnet link, torrent URL, or cached torrent file provided", nameof(result));
                 }
+
+                // Transmission does not reliably decode percent-encoded magnet parameter
+                // values, so decode safe values ahead of time. Leave values encoded when
+                // decoding would introduce top-level separators like '&' or '#' and corrupt
+                // the magnet payload.
+                if (torrentUrl.StartsWith("magnet:", StringComparison.OrdinalIgnoreCase))
+                {
+                    var normalizedMagnetUrl = NormalizeMagnetUriForTransmission(torrentUrl);
+                    if (!string.Equals(normalizedMagnetUrl, torrentUrl, StringComparison.Ordinal))
+                    {
+                        _logger.LogDebug("Normalized percent-encoded magnet link for Transmission compatibility");
+                    }
+                    torrentUrl = normalizedMagnetUrl;
+                }
+
                 arguments["filename"] = torrentUrl;
                 _logger.LogDebug("Using torrent URL for '{Title}': {Url}", LogRedaction.SanitizeText(result.Title), LogRedaction.SanitizeUrl(torrentUrl));
             }
@@ -98,6 +217,11 @@ namespace Listenarr.Api.Services.Adapters
             {
                 arguments["download-dir"] = client.DownloadPath;
             }
+
+            // Explicitly request that the torrent starts immediately. Without this,
+            // Transmission uses its session setting `start-added-torrents` which
+            // defaults to true but may be set to false by the user.
+            arguments["paused"] = false;
 
             var labels = CollectLabels(client);
             if (labels.Count > 0)
@@ -197,6 +321,8 @@ namespace Listenarr.Api.Services.Adapters
             var items = new List<QueueItem>();
             if (client == null) return items;
 
+            var configuredCategory = DownloadClientCategoryFilter.GetConfiguredCategory(client);
+
             // Use old format for compatibility with Transmission < 4.1.0
             var payload = new
             {
@@ -206,7 +332,7 @@ namespace Listenarr.Api.Services.Adapters
                     fields = new[]
                     {
                         "id", "hashString", "name", "percentDone", "status", "totalSize", "rateDownload", "rateUpload",
-                        "leftUntilDone", "eta", "downloadDir", "addedDate", "uploadedEver", "uploadRatio"
+                        "leftUntilDone", "eta", "downloadDir", "addedDate", "uploadedEver", "uploadRatio", "labels"
                     }
                 },
                 tag = 3
@@ -224,6 +350,12 @@ namespace Listenarr.Api.Services.Adapters
                 {
                     try
                     {
+                        var labels = ExtractLabels(torrent);
+                        if (!DownloadClientCategoryFilter.MatchesAny(configuredCategory, labels))
+                        {
+                            continue;
+                        }
+
                         var queueItem = await MapTorrentAsync(client, torrent, ct);
                         items.Add(queueItem);
                     }
@@ -253,6 +385,32 @@ namespace Listenarr.Api.Services.Adapters
             var items = new List<DownloadClientItem>();
             if (client == null) return items;
 
+            var configuredCategory = DownloadClientCategoryFilter.GetConfiguredCategory(client);
+
+            // Fetch session-level seed config for Sonarr-parity seed limit evaluation
+            bool sessionSeedRatioLimited = false;
+            double sessionSeedRatioLimit = 0;
+            bool sessionIdleSeedingLimitEnabled = false;
+            int sessionIdleSeedingLimit = 0;
+            try
+            {
+                var sessionPayload = new { method = "session-get", arguments = new { }, tag = 99 };
+                var sessionResp = await InvokeRpcAsync(client, sessionPayload, ct);
+                if (sessionResp.TryGetProperty("arguments", out var sessionArgs))
+                {
+                    sessionSeedRatioLimited = (sessionArgs.TryGetProperty("seedRatioLimited", out var srl) || sessionArgs.TryGetProperty("seed_ratio_limited", out srl)) && srl.GetBoolean();
+                    sessionSeedRatioLimit = (sessionArgs.TryGetProperty("seedRatioLimit", out var srlv) || sessionArgs.TryGetProperty("seed_ratio_limit", out srlv)) ? srlv.GetDouble() : 0;
+                    sessionIdleSeedingLimitEnabled = (sessionArgs.TryGetProperty("idle-seeding-limit-enabled", out var isle) || sessionArgs.TryGetProperty("idle_seeding_limit_enabled", out isle)) && isle.GetBoolean();
+                    sessionIdleSeedingLimit = (sessionArgs.TryGetProperty("idle-seeding-limit", out var isl) || sessionArgs.TryGetProperty("idle_seeding_limit", out isl)) ? isl.GetInt32() : 0;
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
+                _logger.LogDebug(ex, "Failed to fetch Transmission session config for seed limit evaluation, will use conservative defaults");
+            }
+
+            var sessionConfig = (sessionSeedRatioLimited, sessionSeedRatioLimit, sessionIdleSeedingLimitEnabled, sessionIdleSeedingLimit);
+
             var payload = new
             {
                 method = "torrent-get",
@@ -261,7 +419,8 @@ namespace Listenarr.Api.Services.Adapters
                     fields = new[]
                     {
                         "id", "hashString", "name", "percentDone", "status", "totalSize", "rateDownload", "rateUpload",
-                        "leftUntilDone", "eta", "downloadDir", "addedDate", "uploadedEver", "uploadRatio", "labels"
+                        "leftUntilDone", "eta", "downloadDir", "addedDate", "uploadedEver", "uploadRatio", "labels",
+                        "seedRatioMode", "seedRatioLimit", "seedIdleMode", "seedIdleLimit", "secondsSeeding"
                     }
                 },
                 tag = 3
@@ -279,7 +438,13 @@ namespace Listenarr.Api.Services.Adapters
                 {
                     try
                     {
-                        var downloadClientItem = await MapToDownloadClientItemAsync(client, torrent, ct);
+                        var labels = ExtractLabels(torrent);
+                        if (!DownloadClientCategoryFilter.MatchesAny(configuredCategory, labels))
+                        {
+                            continue;
+                        }
+
+                        var downloadClientItem = await MapToDownloadClientItemAsync(client, torrent, sessionConfig, ct);
                         items.Add(downloadClientItem);
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
@@ -535,12 +700,13 @@ namespace Listenarr.Api.Services.Adapters
             var localContentPath = !string.IsNullOrEmpty(contentPath)
                 ? await _pathMappingService.TranslatePathAsync(client.Id, contentPath)
                 : contentPath;
+            var primaryLabel = ExtractLabels(torrent).FirstOrDefault() ?? string.Empty;
 
             var queueItem = new QueueItem
             {
                 Id = id,
                 Title = name,
-                Quality = "Unknown",
+                Quality = string.IsNullOrWhiteSpace(primaryLabel) ? "Unknown" : primaryLabel,
                 Status = status,
                 Progress = percentDone,
                 Size = totalSize,
@@ -562,7 +728,11 @@ namespace Listenarr.Api.Services.Adapters
             return queueItem;
         }
 
-        private async Task<DownloadClientItem> MapToDownloadClientItemAsync(DownloadClientConfiguration client, JsonElement torrent, CancellationToken ct)
+        private async Task<DownloadClientItem> MapToDownloadClientItemAsync(
+            DownloadClientConfiguration client,
+            JsonElement torrent,
+            (bool SeedRatioLimited, double SeedRatioLimit, bool IdleSeedingLimitEnabled, int IdleSeedingLimit) sessionConfig,
+            CancellationToken ct)
         {
             // Try snake_case (JSON-RPC 2.0 / Transmission 4.1+) first, fall back to camelCase for backwards compatibility
             var hash = torrent.TryGetProperty("hash_string", out var hashProp) || torrent.TryGetProperty("hashString", out hashProp) 
@@ -583,6 +753,18 @@ namespace Listenarr.Api.Services.Adapters
             var statusCode = torrent.TryGetProperty("status", out var statusProp) ? statusProp.GetInt32() : 0;
             var uploadRatio = (torrent.TryGetProperty("upload_ratio", out var ratioProp) || torrent.TryGetProperty("uploadRatio", out ratioProp))
                 ? ratioProp.GetDouble() : 0d;
+
+            // Seed limit fields for Sonarr-parity seed limit evaluation
+            var seedRatioMode = (torrent.TryGetProperty("seed_ratio_mode", out var srmProp) || torrent.TryGetProperty("seedRatioMode", out srmProp))
+                ? srmProp.GetInt32() : 0;
+            var seedRatioLimit = (torrent.TryGetProperty("seed_ratio_limit", out var srlProp) || torrent.TryGetProperty("seedRatioLimit", out srlProp))
+                ? srlProp.GetDouble() : 0d;
+            var seedIdleMode = (torrent.TryGetProperty("seed_idle_mode", out var simProp) || torrent.TryGetProperty("seedIdleMode", out simProp))
+                ? simProp.GetInt32() : 0;
+            var seedIdleLimit = (torrent.TryGetProperty("seed_idle_limit", out var silProp) || torrent.TryGetProperty("seedIdleLimit", out silProp))
+                ? silProp.GetInt32() : 0;
+            var secondsSeeding = (torrent.TryGetProperty("seconds_seeding", out var ssProp) || torrent.TryGetProperty("secondsSeeding", out ssProp))
+                ? ssProp.GetInt64() : 0L;
 
             // Map Transmission status codes to DownloadItemStatus
             var status = statusCode switch
@@ -609,16 +791,34 @@ namespace Listenarr.Api.Services.Adapters
             var localContentPath = !string.IsNullOrEmpty(contentPath)
                 ? await _pathMappingService.TranslatePathAsync(client.Id, contentPath)
                 : contentPath;
+            var primaryLabel = ExtractLabels(torrent).FirstOrDefault() ?? string.Empty;
 
             TimeSpan? remainingTime = eta >= 0 ? TimeSpan.FromSeconds(eta) : null;
 
             // ✅ Use hash as DownloadId if available, otherwise fall back to numeric ID
             var downloadId = !string.IsNullOrEmpty(hash) ? hash.ToUpperInvariant() : numericId.ToString(CultureInfo.InvariantCulture);
 
+            // Sonarr parity: CanBeRemoved = removeCompletedDownloads && HasReachedSeedLimit
+            //                 CanMoveFiles = CanBeRemoved && status == Stopped (statusCode 0)
+            // This prevents removing torrents before seed goals are met and prevents
+            // moving files from active seeders (which breaks the torrent).
+            var removeCompletedDownloads = client.Settings?.TryGetValue("removeCompletedDownloads", out var removeVal) is true &&
+                (removeVal is bool boolVal && boolVal);
+            var isStopped = statusCode == 0; // TR_STATUS_STOPPED
+            var isSeeding = statusCode == 6; // TR_STATUS_SEED
+            var seedLimitReached = HasReachedSeedLimit(
+                isStopped, isSeeding, uploadRatio,
+                seedRatioMode, seedRatioLimit,
+                seedIdleMode, seedIdleLimit, secondsSeeding,
+                sessionConfig);
+            var canBeRemoved = removeCompletedDownloads && seedLimitReached;
+            var canMoveFiles = canBeRemoved && isStopped;
+
             return new DownloadClientItem
             {
                 DownloadId = downloadId,
                 Title = name,
+                Category = primaryLabel,
                 Status = status,
                 TotalSize = totalSize,
                 RemainingSize = leftUntilDone,
@@ -628,18 +828,101 @@ namespace Listenarr.Api.Services.Adapters
                 Message = $"Status code: {statusCode}",
                 Progress = percentDone,
                 DownloadSpeed = rateDownload,
-                CanBeRemoved = true,
-                CanMoveFiles = status == DownloadItemStatus.Completed,
+                CanBeRemoved = canBeRemoved,
+                CanMoveFiles = canMoveFiles,
                 DownloadClientInfo = DownloadClientItemClientInfo.FromClient(
                     clientId: client.Id,
                     clientName: client.Name,
                     clientType: "transmission",
                     protocol: DownloadProtocol.Torrent,
-                    removeCompletedDownloads: client.Settings?.TryGetValue("removeCompletedDownloads", out var removeVal) == true && 
-                                             (removeVal is bool boolVal && boolVal),
+                    removeCompletedDownloads: removeCompletedDownloads,
                     hasPostImportCategory: false // Transmission doesn't support post-import categories
                 )
             };
+        }
+
+        /// <summary>
+        /// Determines whether a Transmission torrent has reached its seed limit (ratio or idle time).
+        /// Mirrors Sonarr's HasReachedSeedLimit logic for Transmission.
+        /// </summary>
+        private static bool HasReachedSeedLimit(
+            bool isStopped,
+            bool isSeeding,
+            double ratio,
+            int seedRatioMode,
+            double seedRatioLimit,
+            int seedIdleMode,
+            int seedIdleLimit,
+            long secondsSeeding,
+            (bool SeedRatioLimited, double SeedRatioLimit, bool IdleSeedingLimitEnabled, int IdleSeedingLimit) sessionConfig)
+        {
+            var hasEffectiveRatioLimit =
+                (seedRatioMode == 1 && seedRatioLimit > 0) ||
+                (seedRatioMode == 0 && sessionConfig.SeedRatioLimited && sessionConfig.SeedRatioLimit > 0);
+            var hasEffectiveIdleLimit =
+                (seedIdleMode == 1 && seedIdleLimit > 0) ||
+                (seedIdleMode == 0 && sessionConfig.IdleSeedingLimitEnabled && sessionConfig.IdleSeedingLimit > 0);
+
+            // With no effective seed constraints configured, honor the cleanup policy
+            // immediately instead of reporting the torrent as non-removable forever.
+            if (!hasEffectiveRatioLimit && !hasEffectiveIdleLimit)
+            {
+                return true;
+            }
+
+            // seedRatioMode: 0 = global, 1 = per-torrent, 2 = unlimited
+            if (seedRatioMode == 1 && isStopped && ratio >= seedRatioLimit)
+            {
+                // Per-torrent ratio limit
+                return true;
+            }
+
+            if (seedRatioMode == 0 && isStopped && sessionConfig.SeedRatioLimited && ratio >= sessionConfig.SeedRatioLimit)
+            {
+                // Use global ratio limit
+                return true;
+            }
+
+            // seedIdleMode: 0 = global, 1 = per-torrent, 2 = unlimited
+            // Transmission uses idle limit as a seeding time limit when set per-torrent
+            if (seedIdleMode == 1 && (isStopped || isSeeding) && secondsSeeding > seedIdleLimit * 60)
+            {
+                // Per-torrent idle/seed time limit (in minutes)
+                return true;
+            }
+
+            if (seedIdleMode == 0 && isStopped && sessionConfig.IdleSeedingLimitEnabled)
+            {
+                // The global idle limit is a real idle limit, if configured then 'Stopped' is enough
+                return true;
+            }
+
+            return false;
+        }
+
+        private static List<string> ExtractLabels(JsonElement torrent)
+        {
+            var labels = new List<string>();
+            if (!torrent.TryGetProperty("labels", out var labelsProp) || labelsProp.ValueKind != JsonValueKind.Array)
+            {
+                return labels;
+            }
+
+            foreach (var label in labelsProp.EnumerateArray())
+            {
+                if (label.ValueKind != JsonValueKind.String)
+                {
+                    continue;
+                }
+
+                var value = label.GetString();
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    labels.Add(value.Trim());
+                }
+            }
+
+            return labels;
         }
 
         private List<string> CollectLabels(DownloadClientConfiguration client)
@@ -680,11 +963,22 @@ namespace Listenarr.Api.Services.Adapters
             return new object[] { id };
         }
 
+        /// <summary>
+        /// JsonSerializerOptions that use UnsafeRelaxedJsonEscaping so that characters like
+        /// &amp;, +, and = inside magnet-link query strings are NOT escaped to \u00XX sequences.
+        /// Transmission's built-in JSON parser does not always decode unicode escape sequences
+        /// correctly, which causes tracker URLs in magnet links (&amp;tr=...) to be silently lost.
+        /// </summary>
+        private static readonly JsonSerializerOptions s_rpcJsonOptions = new()
+        {
+            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+        };
+
         private async Task<JsonElement> InvokeRpcAsync(DownloadClientConfiguration client, object payload, CancellationToken ct)
         {
             var httpClient = _httpClientFactory.CreateClient("transmission");
             var baseUrl = BuildBaseUrl(client);
-            var serializedPayload = JsonSerializer.Serialize(payload);
+            var serializedPayload = JsonSerializer.Serialize(payload, s_rpcJsonOptions);
             string? sessionId = null;
             
             _logger.LogDebug("Transmission RPC request to {Url}: {Payload}", LogRedaction.SanitizeUrl(baseUrl), LogRedaction.SanitizeText(serializedPayload, 500));
@@ -723,7 +1017,7 @@ namespace Listenarr.Api.Services.Adapters
                     var sensitiveValues = LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { client.Password ?? string.Empty });
                     var redacted = LogRedaction.RedactText(body, sensitiveValues);
                     _logger.LogWarning("Transmission returned {StatusCode}: {Body}", response.StatusCode, redacted);
-                    throw new HttpRequestException($"Transmission returned {response.StatusCode}: {redacted}");
+                    throw new HttpRequestException($"Transmission returned {response.StatusCode}: {redacted}", null, response.StatusCode);
                 }
 
                 _logger.LogDebug("Transmission RPC response ({StatusCode}): {Body}", response.StatusCode, body);
@@ -733,6 +1027,17 @@ namespace Listenarr.Api.Services.Adapters
                     _logger.LogWarning("Transmission returned empty response body");
                     using var emptyDoc = JsonDocument.Parse("{}");
                     return emptyDoc.RootElement.Clone();
+                }
+
+                // Validate the response is actually JSON before parsing. A non-Transmission service
+                // (or the web UI on the wrong port) may return HTML which would fail JSON parsing
+                // with an unhelpful error message.
+                var trimmedBody = body.TrimStart();
+                if (trimmedBody.Length > 0 && trimmedBody[0] != '{' && trimmedBody[0] != '[')
+                {
+                    var preview = trimmedBody.Length > 100 ? trimmedBody[..100] + "..." : trimmedBody;
+                    _logger.LogWarning("Transmission RPC returned non-JSON response: {Preview}", LogRedaction.SanitizeText(preview));
+                    throw new HttpRequestException("Transmission RPC endpoint returned a non-JSON response. Verify the host and port point to the Transmission RPC endpoint (default port 9091).");
                 }
 
                 using var doc = JsonDocument.Parse(body);
@@ -745,7 +1050,68 @@ namespace Listenarr.Api.Services.Adapters
         private static string BuildBaseUrl(DownloadClientConfiguration client)
         {
             var scheme = client.UseSSL ? "https" : "http";
-            return $"{scheme}://{client.Host}:{client.Port}/transmission/rpc";
+            var rpcPath = "/transmission/rpc";
+            if (client.Settings?.TryGetValue("urlBase", out var urlBaseObj) is true)
+            {
+                var custom = urlBaseObj?.ToString()?.Trim();
+                if (!string.IsNullOrEmpty(custom))
+                {
+                    rpcPath = custom.StartsWith('/') ? custom : "/" + custom;
+                }
+            }
+            return $"{scheme}://{client.Host}:{client.Port}{rpcPath}";
+        }
+
+        private static string NormalizeMagnetUriForTransmission(string magnetUri)
+        {
+            var queryStart = magnetUri.IndexOf('?');
+            if (queryStart < 0 || queryStart >= magnetUri.Length - 1)
+            {
+                return magnetUri;
+            }
+
+            var segments = magnetUri[(queryStart + 1)..].Split('&');
+            var changed = false;
+
+            for (var i = 0; i < segments.Length; i++)
+            {
+                var segment = segments[i];
+                if (string.IsNullOrEmpty(segment))
+                {
+                    continue;
+                }
+
+                var equalsIndex = segment.IndexOf('=');
+                if (equalsIndex <= 0 || equalsIndex >= segment.Length - 1)
+                {
+                    continue;
+                }
+
+                var value = segment[(equalsIndex + 1)..];
+                if (!value.Contains('%'))
+                {
+                    continue;
+                }
+
+                var decodedValue = Uri.UnescapeDataString(value);
+                if (decodedValue.Contains('&') || decodedValue.Contains('#'))
+                {
+                    continue;
+                }
+
+                if (!string.Equals(decodedValue, value, StringComparison.Ordinal))
+                {
+                    segments[i] = $"{segment[..(equalsIndex + 1)]}{decodedValue}";
+                    changed = true;
+                }
+            }
+
+            if (!changed)
+            {
+                return magnetUri;
+            }
+
+            return $"{magnetUri[..(queryStart + 1)]}{string.Join("&", segments)}";
         }
 
         private static string CombineWithOptionalBase(string? basePath, string candidatePath)
@@ -783,6 +1149,68 @@ namespace Listenarr.Api.Services.Adapters
 
             var credentials = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{client.Username}:{client.Password}"));
             return new AuthenticationHeaderValue("Basic", credentials);
+        }
+
+        private async Task<byte[]?> PreDownloadTorrentFileAsync(string torrentUrl, CancellationToken ct)
+        {
+            using var downloadCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            downloadCts.CancelAfter(TimeSpan.FromSeconds(60));
+
+            // Use a dedicated handler with redirects disabled so we can follow them manually
+            using var handler = new HttpClientHandler
+            {
+                AutomaticDecompression = DecompressionMethods.All,
+                AllowAutoRedirect = false
+            };
+            using var httpClient = new HttpClient(handler)
+            {
+                Timeout = TimeSpan.FromSeconds(60)
+            };
+
+            var currentUrl = torrentUrl;
+            for (var hop = 0; hop < 10; hop++)
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Get, currentUrl);
+                request.Headers.Accept.ParseAdd("application/x-bittorrent, application/octet-stream, */*");
+                request.Headers.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
+
+                var response = await httpClient.SendAsync(request, downloadCts.Token);
+
+                if (response.StatusCode is HttpStatusCode.MovedPermanently or HttpStatusCode.Found
+                    or HttpStatusCode.TemporaryRedirect or HttpStatusCode.PermanentRedirect
+                    or HttpStatusCode.SeeOther)
+                {
+                    var location = response.Headers.Location;
+                    if (location == null)
+                    {
+                        _logger.LogWarning("Pre-download got {StatusCode} with no Location header from {Url}",
+                            response.StatusCode, LogRedaction.SanitizeUrl(currentUrl));
+                        return null;
+                    }
+
+                    // Resolve relative redirects
+                    var nextUri = location.IsAbsoluteUri ? location : new Uri(new Uri(currentUrl), location);
+                    _logger.LogDebug("Pre-download following {StatusCode} redirect: {From} → {To}",
+                        response.StatusCode, LogRedaction.SanitizeUrl(currentUrl), LogRedaction.SanitizeUrl(nextUri.ToString()));
+                    currentUrl = nextUri.ToString();
+                    continue;
+                }
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("Pre-download failed ({StatusCode}) from {Url}",
+                        response.StatusCode, LogRedaction.SanitizeUrl(currentUrl));
+                    return null;
+                }
+
+                var bytes = await response.Content.ReadAsByteArrayAsync(downloadCts.Token);
+                _logger.LogDebug("Pre-download fetched {Bytes} bytes from {Url} (hops: {Hops})",
+                    bytes.Length, LogRedaction.SanitizeUrl(currentUrl), hop);
+                return bytes;
+            }
+
+            _logger.LogWarning("Pre-download exceeded maximum redirects (10) starting from {Url}", LogRedaction.SanitizeUrl(torrentUrl));
+            return null;
         }
 
         private static string? ExtractTorrentIdentifier(JsonElement element)

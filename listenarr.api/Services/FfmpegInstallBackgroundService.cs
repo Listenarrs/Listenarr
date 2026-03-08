@@ -60,7 +60,13 @@ namespace Listenarr.Api.Services
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
                 // Shutdown requested
-                            System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                _logger.LogDebug("FFmpeg installer background service canceled due to host shutdown.");
+            }
+            catch (OperationCanceledException ex)
+            {
+                // Treat timeout/cancellation from installer HTTP calls as non-fatal so this hosted
+                // service cannot stop the entire application host.
+                _logger.LogWarning(ex, "FFmpeg installer background service canceled/timed out; continuing without bundled ffprobe.");
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogWarning(ex, "Error while attempting background ffprobe installation");

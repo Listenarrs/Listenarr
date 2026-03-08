@@ -64,6 +64,13 @@ describe('searchResultFormatting', () => {
       expect(formatRuntime(2160)).toBe('36h') // 2160 minutes = 36 hours
       expect(formatRuntime(2222)).toBe('37h 2m') // 2222 minutes = 37h 2m
     })
+
+    it('normalizes legacy seconds values (>= 20000) to minutes', () => {
+      // 130500 seconds -> 2175 minutes -> 36h 15m
+      expect(formatRuntime(130500)).toBe('36h 15m')
+      // 36000 seconds -> 600 minutes -> 10h
+      expect(formatRuntime(36000)).toBe('10h')
+    })
   })
 
   describe('capitalizeLanguage', () => {

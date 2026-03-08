@@ -107,8 +107,9 @@ namespace Listenarr.Api.Services
             try
             {
                 var uri = new Uri(url);
-                // Remove userinfo (username:password@) and query parameters
-                return $"{uri.Scheme}://{uri.Host}{uri.AbsolutePath}";
+                // Remove userinfo (username:password@) and query parameters, but preserve port
+                var portSuffix = uri.IsDefaultPort ? string.Empty : $":{uri.Port}";
+                return $"{uri.Scheme}://{uri.Host}{portSuffix}{uri.AbsolutePath}";
             }
             catch (Exception caughtEx_3) when (caughtEx_3 is not OperationCanceledException && caughtEx_3 is not OutOfMemoryException && caughtEx_3 is not StackOverflowException) {
                 // If URL parsing fails, return sanitized placeholder

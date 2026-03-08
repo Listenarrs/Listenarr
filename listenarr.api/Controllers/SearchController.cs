@@ -30,7 +30,8 @@ using Microsoft.AspNetCore.Mvc;
 namespace Listenarr.Api.Controllers
 {
     [ApiController]
-    [Route("api/v{version:apiVersion}/[controller]")]
+    [Route("api/v{version:apiVersion}/search")]
+    [Tags("Search")]
     public class SearchController : ControllerBase
     {
         private readonly ISearchService _searchService;
@@ -136,6 +137,12 @@ namespace Listenarr.Api.Controllers
             }).Cast<object>().ToList() ?? new List<object>();
         }
 
+        /// <summary>
+        /// Perform a combined metadata and indexer search using a structured request body.
+        /// Supports simple (metadata-only) and advanced (indexer) search modes.
+        /// </summary>
+        /// <param name="reqJson">Search request JSON with query, mode, region, and optional filters.</param>
+        /// <param name="simplified">When true (default), return simplified metadata for the "Add New" workflow.</param>
         [HttpPost]
         public async Task<ActionResult<object>> Search([FromBody] JsonElement reqJson, [FromQuery] bool? simplified = null)
         {
@@ -855,6 +862,16 @@ namespace Listenarr.Api.Controllers
             }
         }
 
+        /// <summary>
+        /// Search configured indexers for audiobook torrents/NZBs using query parameters.
+        /// </summary>
+        /// <param name="query">Search term.</param>
+        /// <param name="category">Optional category filter.</param>
+        /// <param name="apiIds">Optional list of specific API IDs to query.</param>
+        /// <param name="enrichedOnly">When true, return only metadata results that have enriched data.</param>
+        /// <param name="sortBy">Sort field (default: Seeders).</param>
+        /// <param name="sortDirection">Sort direction (default: Descending).</param>
+        /// <returns>Separated indexer and metadata results.</returns>
         [HttpGet]
         public async Task<ActionResult<List<SearchResult>>> Search(
             [FromQuery] string query,
@@ -963,6 +980,16 @@ namespace Listenarr.Api.Controllers
             }
         }
 
+        /// <summary>
+        /// Perform an intelligent metadata search that automatically scores and ranks results using fuzzy matching.
+        /// </summary>
+        /// <param name="query">Search term (title, author, or combination).</param>
+        /// <param name="category">Optional category filter.</param>
+        /// <param name="candidateLimit">Maximum candidates to consider before ranking (default 50).</param>
+        /// <param name="returnLimit">Maximum results to return (default 50).</param>
+        /// <param name="containmentMode">Matching strictness: Relaxed or Strict (default Relaxed).</param>
+        /// <param name="requireAuthorAndPublisher">When true, only return results with both author and publisher.</param>
+        /// <param name="fuzzyThreshold">Minimum fuzzy-match score (0.0–1.0, default 0.7).</param>
         [HttpGet("intelligent")]
         [ProducesResponseType(typeof(List<MetadataSearchResult>), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -1036,6 +1063,11 @@ namespace Listenarr.Api.Controllers
             }
         }
 
+        /// <summary>
+        /// Search for audiobook series by name using the Audimeta API.
+        /// </summary>
+        /// <param name="name">Series name to search for.</param>
+        /// <param name="region">Audible marketplace region (default: us).</param>
         [HttpGet("audimeta/series")]
         public async Task<ActionResult<object>> SearchAudimetaSeries([FromQuery] string name, [FromQuery] string region = "us")
         {
@@ -1052,6 +1084,11 @@ namespace Listenarr.Api.Controllers
             }
         }
 
+        /// <summary>
+        /// Get all books in a series by the series ASIN.
+        /// </summary>
+        /// <param name="asin">Audible series ASIN.</param>
+        /// <param name="region">Audible marketplace region (default: us).</param>
         [HttpGet("audimeta/series/books/{asin}")]
         public async Task<ActionResult<object>> GetAudimetaSeriesBooks(string asin, [FromQuery] string region = "us")
         {
@@ -1068,6 +1105,14 @@ namespace Listenarr.Api.Controllers
             }
         }
 
+        /// <summary>
+        /// Search configured indexers only (no metadata enrichment). Supports MyAnonamouse-specific query parameters.
+        /// </summary>
+        /// <param name="query">Search term.</param>
+        /// <param name="category">Optional category filter.</param>
+        /// <param name="sortBy">Sort field (default: Seeders).</param>
+        /// <param name="sortDirection">Sort direction (default: Descending).</param>
+        /// <param name="isAutomaticSearch">Set to true when this search is triggered automatically rather than by user action.</param>
         [HttpGet("indexers")]
         [ProducesResponseType(typeof(List<SearchResult>), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -1109,6 +1154,11 @@ namespace Listenarr.Api.Controllers
             }
         }
 
+        /// <summary>
+        /// Test connectivity to a configured API source.
+        /// </summary>
+        /// <param name="apiId">API configuration ID to test.</param>
+        /// <returns>True if the connection succeeds, false otherwise.</returns>
         [HttpPost("test/{apiId}")]
         public async Task<ActionResult<bool>> TestApiConnection(string apiId)
         {

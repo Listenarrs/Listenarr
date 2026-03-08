@@ -8,9 +8,11 @@ using Listenarr.Domain.Models;
 
 namespace Listenarr.Api.Tests
 {
+    [Trait("Area", "ProcessingQueueRecovery")]
     public class DownloadProcessingQueueServiceTests
     {
         [Fact]
+        [Trait("Scenario", "DuplicateActiveJobReturnsExisting")]
         public async Task QueuePreventsDuplicateActiveJob_ReturnsExisting()
         {
             var options = new DbContextOptionsBuilder<ListenArrDbContext>()
@@ -42,6 +44,7 @@ namespace Listenarr.Api.Tests
         }
 
         [Fact]
+        [Trait("Scenario", "RecentlyCompletedCooldownPreventsDuplicate")]
         public async Task QueueRespectsRecentlyCompletedCooldown_ReturnsCompletedJob()
         {
             var options = new DbContextOptionsBuilder<ListenArrDbContext>()

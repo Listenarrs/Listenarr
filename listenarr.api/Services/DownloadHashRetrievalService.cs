@@ -132,6 +132,13 @@ namespace Listenarr.Api.Services
                 return null;
             }
 
+            // Skip hash retrieval for disabled clients
+            if (!client.IsEnabled)
+            {
+                _logger.LogDebug("Skipping hash retrieval for disabled client {ClientName}", client.Name);
+                return null;
+            }
+
             try
             {
                 _logger.LogInformation(

@@ -65,6 +65,10 @@ namespace Listenarr.Api.Services
 
             // Build listenarrDownloads list using repository
             List<Download> listenarrDownloads;
+            // Track all known client-specific IDs (TorrentHash, ClientDownloadId) across ALL downloads
+            // (including Moved/Failed) so that "unmatched completed" external items can be correctly
+            // identified as tracked — even when the DB record points to a different client.
+            var allKnownClientItemIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             {
                 var allDownloads = await _downloadRepository.GetAllAsync();
                 _logger.LogInformation("Found {TotalDownloads} downloads (including failed)", allDownloads.Count);
@@ -94,12 +98,22 @@ namespace Listenarr.Api.Services
                 }
 
                 var externalDownloads = allDownloads
-                    .Where(d => d.DownloadClientId != "DDL" && d.Status != DownloadStatus.Completed && d.Status != DownloadStatus.Moved)
+                    .Where(d => d.DownloadClientId != "DDL" &&
+                                d.Status != DownloadStatus.Moved &&
+                                d.Status != DownloadStatus.Failed &&
+                                (d.Status != DownloadStatus.Completed || string.IsNullOrEmpty(d.FinalPath)))
                     .ToList();
 
                 listenarrDownloads = ddlToShow.Concat(externalDownloads).ToList();
                 _logger.LogDebug("Final filtering result: {FinalCount} downloads to include in queue filtering ({DdlCount} DDL, {ExternalCount} external)",
                     listenarrDownloads.Count, ddlToShow.Count, externalDownloads.Count);
+
+                // Collect all known client item IDs from ALL downloads (including Moved/Failed)
+                // so we can suppress "unmatched external" items that are actually tracked.
+                foreach (var clientItemId in allDownloads.SelectMany(dl => GetKnownClientItemIds(dl.Metadata)))
+                {
+                    allKnownClientItemIds.Add(clientItemId);
+                }
             }
 
             // Application settings cache
@@ -129,40 +143,7 @@ namespace Listenarr.Api.Services
 
                     // Filter queue to Listenarr downloads
                     var initialFiltered = clientQueue.Where(queueItem =>
-                        listenarrDownloads.Any(download =>
-                        {
-                            var idMatch = download.Id == queueItem.Id;
-                            var hashMatch = false;
-                            if (string.Equals(client.Type, "qbittorrent", StringComparison.OrdinalIgnoreCase))
-                            {
-                                try
-                                {
-                                    if (download.Metadata != null && download.Metadata.TryGetValue("TorrentHash", out var hashObj))
-                                    {
-                                        var storedHash = hashObj?.ToString();
-                                        if (!string.IsNullOrEmpty(storedHash))
-                                        {
-                                            hashMatch = storedHash.Equals(queueItem.Id, StringComparison.OrdinalIgnoreCase);
-                                        }
-                                    }
-                                }
-                                catch (Exception caughtEx_1) when (caughtEx_1 is not OperationCanceledException && caughtEx_1 is not OutOfMemoryException && caughtEx_1 is not StackOverflowException) { hashMatch = false; }
-                            }
-
-                            var titleMatch = false;
-                            try
-                            {
-                                if (!string.IsNullOrEmpty(download.Title) && !string.IsNullOrEmpty(queueItem.Title))
-                                {
-                                    titleMatch = AreTitlesSimilar(download.Title, queueItem.Title);
-                                }
-                            }
-                            catch (Exception caughtEx_2) when (caughtEx_2 is not OperationCanceledException && caughtEx_2 is not OutOfMemoryException && caughtEx_2 is not StackOverflowException) { titleMatch = false; }
-
-                            var clientMatch = download.DownloadClientId == client.Id;
-                            var overallMatch = clientMatch && (idMatch || hashMatch || titleMatch);
-                            return overallMatch;
-                        })
+                        FindBestMatchingDownload(queueItem, client, listenarrDownloads) != null
                     ).ToList();
 
                     var mappedFiltered = new List<QueueItem>();
@@ -170,13 +151,7 @@ namespace Listenarr.Api.Services
                     {
                         try
                         {
-                            var matchedDownload = listenarrDownloads.FirstOrDefault(download =>
-                                download.DownloadClientId == client.Id && (
-                                    download.Id == queueItem.Id ||
-                                    (download.Metadata != null && download.Metadata.TryGetValue("TorrentHash", out var h) && (h?.ToString() ?? string.Empty).Equals(queueItem.Id, StringComparison.OrdinalIgnoreCase)) ||
-                                    (!string.IsNullOrEmpty(download.Title) && !string.IsNullOrEmpty(queueItem.Title) && AreTitlesSimilar(download.Title, queueItem.Title))
-                                )
-                            );
+                            var matchedDownload = FindBestMatchingDownload(queueItem, client, listenarrDownloads);
 
                             if (matchedDownload != null)
                             {
@@ -200,6 +175,11 @@ namespace Listenarr.Api.Services
                         var unmatchedCompleted = clientQueue
                             .Where(q => (q.Status ?? string.Empty).Equals("completed", StringComparison.OrdinalIgnoreCase))
                             .Where(q => !existingIds.Contains(q.Id))
+                            // Skip items whose client ID (hash) is already tracked by ANY download
+                            // record, even one tied to a different client or in a terminal state.
+                            // This prevents showing torrents as "unmatched" when they were grabbed
+                            // by Listenarr but recorded under a different download client.
+                            .Where(q => string.IsNullOrEmpty(q.Id) || !allKnownClientItemIds.Contains(q.Id))
                             .ToList();
 
                         foreach (var uc in unmatchedCompleted)
@@ -240,7 +220,8 @@ namespace Listenarr.Api.Services
 
                     _logger.LogDebug("Client {ClientName}: {TotalItems} total items, {FilteredItems} Listenarr items", client.Name, clientQueue.Count, mappedFiltered.Count);
 
-                    // Purge orphaned downloads
+                    // Keep tracked downloads when queue snapshots temporarily
+                    // miss them instead of deleting records via orphan heuristics.
                     try
                     {
                         var clientDownloads = listenarrDownloads.Where(d => d.DownloadClientId == client.Id).ToList();
@@ -249,32 +230,11 @@ namespace Listenarr.Api.Services
 
                         if (orphanedDownloads.Any())
                         {
-                            // Don't purge NZBGet downloads - they move to history immediately and need CompletedDownloadProcessor
-                            var toPurge = orphanedDownloads.Where(d => client.Type?.ToLowerInvariant() != "nzbget").ToList();
-                            
-                            if (toPurge.Count < orphanedDownloads.Count)
-                            {
-                                _logger.LogDebug("Skipped purge of {SkippedCount} NZBGet downloads (may be in history)", 
-                                    orphanedDownloads.Count - toPurge.Count);
+                            _logger.LogInformation("Detected {Count} tracked downloads missing from {ClientName} queue snapshot; keeping records for resilient monitoring/import handling",
+                                orphanedDownloads.Count, client.Name);
+                            try { _metrics.Increment("download.purge.skipped.tracked_orphan_retained", orphanedDownloads.Count); } catch (Exception caughtEx_3) when (caughtEx_3 is not OperationCanceledException && caughtEx_3 is not OutOfMemoryException && caughtEx_3 is not StackOverflowException) {
+                                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
                             }
-
-                            foreach (var orphanedDownload in toPurge)
-                            {
-                                try
-                                {
-                                    await _downloadRepository.RemoveAsync(orphanedDownload.Id);
-                                    _logger.LogInformation("Purged orphaned download record: {DownloadId} '{Title}' (no longer exists in {ClientName} queue)",
-                                        orphanedDownload.Id, orphanedDownload.Title, client.Name);
-                                    try { _metrics.Increment("download.purged.count"); } catch (Exception caughtEx_3) when (caughtEx_3 is not OperationCanceledException && caughtEx_3 is not OutOfMemoryException && caughtEx_3 is not StackOverflowException) { 
-                                        System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
-                                    }
-                                }
-                                catch (Exception exRemove) when (exRemove is not OperationCanceledException && exRemove is not OutOfMemoryException && exRemove is not StackOverflowException) {
-                                    _logger.LogWarning(exRemove, "Failed to purge orphaned download {DownloadId} from repository, continuing", orphanedDownload.Id);
-                                }
-                            }
-
-                            _logger.LogInformation("Attempted purge of {Count} orphaned download records from {ClientName}", toPurge.Count, client.Name);
                         }
                     }
                     catch (Exception purgeEx) when (purgeEx is not OperationCanceledException && purgeEx is not OutOfMemoryException && purgeEx is not StackOverflowException) {
@@ -355,6 +315,117 @@ namespace Listenarr.Api.Services
             var lower = s.ToLowerInvariant();
             var cleaned = new string(lower.Where(ch => char.IsLetterOrDigit(ch) || char.IsWhiteSpace(ch)).ToArray());
             return string.Join(' ', cleaned.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries));
+        }
+
+        private Download? FindBestMatchingDownload(QueueItem queueItem, DownloadClientConfiguration client, List<Download> listenarrDownloads)
+        {
+            if (queueItem == null || client == null || listenarrDownloads == null || listenarrDownloads.Count == 0)
+            {
+                return null;
+            }
+
+            var bestMatch = listenarrDownloads
+                .Where(download => download.DownloadClientId == client.Id)
+                .Select(download => new
+                {
+                    Download = download,
+                    Score = GetMatchScore(download, queueItem)
+                })
+                .Where(x => x.Score > 0)
+                .OrderByDescending(x => x.Score)
+                .ThenByDescending(x => x.Download.StartedAt)
+                .FirstOrDefault();
+
+            return bestMatch?.Download;
+        }
+
+        private int GetMatchScore(Download download, QueueItem queueItem)
+        {
+            if (download == null || queueItem == null)
+            {
+                return 0;
+            }
+
+            if (!string.IsNullOrWhiteSpace(download.Id) &&
+                !string.IsNullOrWhiteSpace(queueItem.Id) &&
+                string.Equals(download.Id, queueItem.Id, StringComparison.OrdinalIgnoreCase))
+            {
+                return 3;
+            }
+
+            try
+            {
+                if (download.Metadata != null && !string.IsNullOrWhiteSpace(queueItem.Id))
+                {
+                    // Check ClientDownloadId (stored for all client types on add)
+                    var storedId = GetMetadataString(download.Metadata, "ClientDownloadId");
+                    if (!string.IsNullOrWhiteSpace(storedId) &&
+                        string.Equals(storedId, queueItem.Id, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return 2;
+                    }
+
+                    // Legacy fallback: TorrentHash (older qBittorrent records)
+                    var storedHash = GetMetadataString(download.Metadata, "TorrentHash");
+                    if (!string.IsNullOrWhiteSpace(storedHash) &&
+                        string.Equals(storedHash, queueItem.Id, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return 2;
+                    }
+                }
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
+                _logger.LogDebug(
+                    ex,
+                    "Failed to inspect download metadata while scoring queue match for download {DownloadId} and queue item {QueueItemId}",
+                    LogRedaction.SanitizeText(download.Id),
+                    LogRedaction.SanitizeText(queueItem.Id));
+            }
+
+            if (!string.IsNullOrWhiteSpace(download.Title) &&
+                !string.IsNullOrWhiteSpace(queueItem.Title) &&
+                AreTitlesSimilar(download.Title, queueItem.Title))
+            {
+                return 1;
+            }
+
+            return 0;
+        }
+
+        private static IEnumerable<string> GetKnownClientItemIds(Dictionary<string, object>? metadata)
+        {
+            var clientDownloadId = GetMetadataString(metadata, "ClientDownloadId");
+            if (!string.IsNullOrWhiteSpace(clientDownloadId))
+            {
+                yield return clientDownloadId;
+            }
+
+            var torrentHash = GetMetadataString(metadata, "TorrentHash");
+            if (!string.IsNullOrWhiteSpace(torrentHash))
+            {
+                yield return torrentHash;
+            }
+        }
+
+        private static string? GetMetadataString(Dictionary<string, object>? metadata, string key)
+        {
+            if (metadata == null || !metadata.TryGetValue(key, out var value) || value == null)
+            {
+                return null;
+            }
+
+            if (value is JsonElement element)
+            {
+                return element.ValueKind switch
+                {
+                    JsonValueKind.Null => null,
+                    JsonValueKind.Undefined => null,
+                    _ => element.ToString()
+                };
+            }
+
+            return value.ToString();
         }
     }
 }

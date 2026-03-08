@@ -13,7 +13,8 @@ namespace Listenarr.Api.Controllers
 {
     [ApiController]
     [Route("api/v1")]
-
+    [Tags("Prowlarr Compatibility")]
+    [ApiExplorerSettings(IgnoreApi = true)]
     public class ProwlarrCompatController : ControllerBase
     {
         private StartupConfig GetStartupConfig()
@@ -375,7 +376,21 @@ namespace Listenarr.Api.Controllers
             var authGuard = RequireAuthenticatedIfEnabled();
             if (authGuard != null) return authGuard;
             Response.ContentType = "application/json";
-            return Ok(System.Array.Empty<object>());
+            // Frontend and compatibility clients both call this endpoint. Return persisted
+            // indexers in the standard shape used by the UI so versioned routing does not
+            // accidentally break first-party indexer listing.
+            var indexers = _dbContext.Indexers
+                .OrderBy(i => i.Priority)
+                .ThenBy(i => i.Name)
+                .AsNoTracking()
+                .ToList();
+
+            if (SecurityRequestUtils.ShouldRedactSecretsForCaller(HttpContext))
+            {
+                indexers = indexers.Select(ApiResponseRedactor.RedactIndexer).ToList();
+            }
+
+            return Ok(indexers);
         }
 
         /// <summary>
@@ -823,6 +838,13 @@ namespace Listenarr.Api.Controllers
                 }
 
                 if (HttpContext?.Response != null) HttpContext.Response.ContentType = "application/json";
+
+            // Accept a single object payload as well as arrays. This keeps the endpoint
+            // tolerant when callers post one indexer at a time.
+            if (payload.ValueKind == System.Text.Json.JsonValueKind.Object)
+            {
+                return await PostIndexer(payload);
+            }
 
             if (payload.ValueKind != System.Text.Json.JsonValueKind.Array)
             {

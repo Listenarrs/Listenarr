@@ -27,7 +27,8 @@ namespace Listenarr.Api.Controllers;
 /// Used to translate file paths when download clients are in different containers/systems.
 /// </summary>
 [ApiController]
-[Route("api/v{version:apiVersion}/[controller]")]
+[Route("api/v{version:apiVersion}/remotepathmappings")]
+[Tags("Remote Path Mappings")]
 public class RemotePathMappingsController : ControllerBase
 {
     private readonly IRemotePathMappingService _mappingService;
@@ -42,7 +43,7 @@ public class RemotePathMappingsController : ControllerBase
     }
 
     /// <summary>
-    /// Get all remote path mappings
+    /// Get all remote path mappings.
     /// </summary>
     [HttpGet]
     public async Task<ActionResult<List<RemotePathMapping>>> GetAll()
@@ -59,8 +60,9 @@ public class RemotePathMappingsController : ControllerBase
     }
 
     /// <summary>
-    /// Get a specific remote path mapping by ID
+    /// Get a specific remote path mapping by ID.
     /// </summary>
+    /// <param name="id">Mapping ID.</param>
     [HttpGet("{id}")]
     public async Task<ActionResult<RemotePathMapping>> GetById(int id)
     {
@@ -81,8 +83,9 @@ public class RemotePathMappingsController : ControllerBase
     }
 
     /// <summary>
-    /// Get all remote path mappings for a specific download client
+    /// Get all remote path mappings for a specific download client.
     /// </summary>
+    /// <param name="downloadClientId">Download client ID.</param>
     [HttpGet("client/{downloadClientId}")]
     public async Task<ActionResult<List<RemotePathMapping>>> GetByClientId(string downloadClientId)
     {
@@ -98,8 +101,9 @@ public class RemotePathMappingsController : ControllerBase
     }
 
     /// <summary>
-    /// Create a new remote path mapping
+    /// Create a new remote path mapping.
     /// </summary>
+    /// <param name="mapping">Mapping to create with download client ID, remote path, and local path.</param>
     [HttpPost]
     public async Task<ActionResult<RemotePathMapping>> Create([FromBody] RemotePathMapping mapping)
     {
@@ -131,8 +135,10 @@ public class RemotePathMappingsController : ControllerBase
     }
 
     /// <summary>
-    /// Update an existing remote path mapping
+    /// Update an existing remote path mapping.
     /// </summary>
+    /// <param name="id">Mapping ID.</param>
+    /// <param name="mapping">Updated mapping data.</param>
     [HttpPut("{id}")]
     public async Task<ActionResult<RemotePathMapping>> Update(int id, [FromBody] RemotePathMapping mapping)
     {
@@ -173,8 +179,9 @@ public class RemotePathMappingsController : ControllerBase
     }
 
     /// <summary>
-    /// Delete a remote path mapping
+    /// Delete a remote path mapping.
     /// </summary>
+    /// <param name="id">Mapping ID.</param>
     [HttpDelete("{id}")]
     public async Task<ActionResult> Delete(int id)
     {
@@ -195,7 +202,7 @@ public class RemotePathMappingsController : ControllerBase
     }
 
     /// <summary>
-    /// Translate a remote path to a local path for a specific download client
+    /// Translate a remote path to a local path for a specific download client using configured mappings.
     /// </summary>
     [HttpPost("translate")]
     public async Task<ActionResult<object>> TranslatePath([FromBody] TranslatePathRequest request)

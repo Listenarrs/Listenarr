@@ -184,7 +184,7 @@ namespace Listenarr.Api.Services
                             var titleToken = (audiobook.Title ?? string.Empty).Replace("\"", string.Empty).Trim();
                             var authorToken = audiobook.Authors?.FirstOrDefault() ?? string.Empty;
 
-                            var exts = new[] { ".m4b", ".mp3", ".flac", ".ogg", ".opus", ".m4a", ".aac", ".wav" };
+                            var exts = FileUtils.AudioExtensions;
 
                             // Collect candidate audio files first
                             var candidates = new List<string>();
@@ -328,6 +328,11 @@ namespace Listenarr.Api.Services
                                 foreach (var existingFile in existingFiles)
                                 {
                                     if (string.IsNullOrEmpty(existingFile.Path)) continue;
+
+                                    // Skip files with non-audio extensions — they may have been
+                                    // registered by a different pipeline (e.g. cover images from
+                                    // a legacy import) and shouldn't be governed by the audio scan.
+                                    if (!FileUtils.IsAudioFile(existingFile.Path)) continue;
                                     
                                     // Normalize path: if relative, make it absolute using basePath
                                     var fullPath = existingFile.Path;
@@ -527,6 +532,10 @@ namespace Listenarr.Api.Services
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
                     _logger.LogInformation("ScanBackgroundService cancellation requested");
+                }
+                catch (OperationCanceledException ex)
+                {
+                    _logger.LogWarning(ex, "ScanBackgroundService job stream canceled/timed out unexpectedly; continuing");
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogError(ex, "Unhandled error in ScanBackgroundService loop");

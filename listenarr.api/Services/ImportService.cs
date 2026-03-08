@@ -198,6 +198,7 @@ namespace Listenarr.Api.Services
 
                 string basePathForFile = settings.OutputPath; // default
                 string filenamePattern = filePattern;
+                var usingAudiobookBasePath = false;
 
                 if (audiobookId != null && namingMetadata != null)
                 {
@@ -208,6 +209,7 @@ namespace Listenarr.Api.Services
                         if (ab != null && !string.IsNullOrWhiteSpace(ab.BasePath))
                         {
                             basePathForFile = ab.BasePath; // custom/base path
+                            usingAudiobookBasePath = true;
                             _logger.LogDebug("ImportSingleFile: using audiobook base path for download {DownloadId}: {BasePath}", downloadId, basePathForFile);
                             // For audiobook base path, default to filename-only unless the user explicitly configures a file pattern
                             filenamePattern = string.IsNullOrWhiteSpace(filePattern) ? "{Title}" : filePattern;
@@ -251,8 +253,9 @@ namespace Listenarr.Api.Services
                     || filenamePattern.IndexOf('/') >= 0
                     || filenamePattern.IndexOf('\\') >= 0;
 
-                // When basepath was explicitly from audiobook and pattern is for audiobook we treat as filename only
-                var treatAsFilename = filenamePattern == "{Title}" ? true : !patternAllowsSubfolders;
+                // When importing into an explicit audiobook base path, always treat the naming output as filename-only.
+                // This prevents re-appending author/title folder segments when base path already contains them.
+                var treatAsFilename = usingAudiobookBasePath || filenamePattern == "{Title}" || !patternAllowsSubfolders;
 
                 var filename = _fileNamingService.ApplyNamingPattern(filenamePattern, variables, treatAsFilename);
                 var ext = Path.GetExtension(sourcePath);
@@ -417,6 +420,18 @@ namespace Listenarr.Api.Services
                 foreach (var file in files)
                 {
                     var res = new ImportResult { SourcePath = file };
+
+                    // Skip non-audio files (cover images, NFOs, etc.) to prevent registering
+                    // them as AudiobookFile records that the scanner would later remove.
+                    if (!FileUtils.IsAudioFile(file))
+                    {
+                        res.Success = false;
+                        res.SkippedReason = "not an audio file";
+                        results.Add(res);
+                        _logger.LogDebug("ImportFilesFromDirectory: Skipping non-audio file {File}", file);
+                        continue;
+                    }
+
                     try
                     {
                         var candidateMetadata = (AudioMetadata?)null;
@@ -716,7 +731,7 @@ namespace Listenarr.Api.Services
                 : normalizedBasePath + Path.DirectorySeparatorChar + relativePath;
         }
 
-        // Local helpers - copy from DownloadService's helpers for parity
+        // Local helpers - aligned with DownloadService helper behavior
         private static string DetermineQualityFromMetadata(AudioMetadata? metadata, string path)
         {
             if (metadata != null)
@@ -725,39 +740,70 @@ namespace Listenarr.Api.Services
                 if (metadata.Bitrate.HasValue) return metadata.Bitrate.Value + "kbps";
             }
 
-            // Best-effort from filename
+            // Best-effort from filename (bitrate patterns)
             var name = Path.GetFileName(path) ?? string.Empty;
             if (name.IndexOf("320", StringComparison.OrdinalIgnoreCase) >= 0) return "MP3 320kbps";
             if (name.IndexOf("256", StringComparison.OrdinalIgnoreCase) >= 0) return "MP3 256kbps";
             if (name.IndexOf("192", StringComparison.OrdinalIgnoreCase) >= 0) return "MP3 192kbps";
             if (name.IndexOf("128", StringComparison.OrdinalIgnoreCase) >= 0) return "MP3 128kbps";
+
+            // Fallback: determine format from file extension
+            var ext = Path.GetExtension(path);
+            if (!string.IsNullOrEmpty(ext))
+            {
+                switch (ext.TrimStart('.').ToUpperInvariant())
+                {
+                    case "M4B": return "M4B";
+                    case "M4A": return "M4A";
+                    case "MP3": return "MP3";
+                    case "FLAC": return "FLAC";
+                    case "OGG": return "OGG";
+                    case "OPUS": return "OPUS";
+                    case "WMA": return "WMA";
+                    case "AAC": return "AAC";
+                    case "WV": return "WV";
+                    default: break;
+                }
+            }
+
             return string.Empty;
         }
 
+        /// <summary>
+        /// Returns true if the candidate quality is acceptable (not a confirmed downgrade).
+        /// Only blocks import when both qualities have numeric bitrates and the candidate is strictly lower.
+        /// Same quality, unknown quality, or non-comparable formats are all allowed.
+        /// </summary>
         private static bool IsQualityBetter(string? candidate, string? existing, QualityProfile? profile)
         {
-            // Default conservative: treat unknown as not better
-            if (string.IsNullOrWhiteSpace(candidate) || string.IsNullOrWhiteSpace(existing) || profile == null) return false;
-            // Very simple: prefer higher numeric bitrate if present
+            // When candidate or existing quality is unknown, allow the import rather than blocking
+            if (string.IsNullOrWhiteSpace(candidate) || string.IsNullOrWhiteSpace(existing) || profile == null) return true;
+
+            // Extract numeric bitrate if present.
+            // Look for groups of 2+ consecutive digits to avoid picking up single
+            // digits embedded in format names (e.g. "4" from M4B, "3" from MP3).
             bool TryParse(string q, out int kb)
             {
                 kb = 0;
-                var digits = new string(q.Where(char.IsDigit).ToArray());
-                if (int.TryParse(digits, out var d))
+                var match = System.Text.RegularExpressions.Regex.Match(q, @"\d{2,}");
+                if (match.Success && int.TryParse(match.Value, out var d))
                 {
-                    // normalize: 320 or 320kbps -> 320
                     kb = d;
                     return true;
                 }
                 return false;
             }
 
+            // When both have numeric bitrates, only block if candidate is strictly lower
             if (TryParse(candidate, out var candKb) && TryParse(existing, out var exKb))
             {
-                return candKb > exKb;
+                return candKb >= exKb;
             }
 
-            return !string.Equals(candidate, existing, StringComparison.OrdinalIgnoreCase);
+            // For non-numeric formats (M4B, FLAC, etc.): allow the import.
+            // Same format is a reimport (not a downgrade), and we can't reliably
+            // rank different format names against each other.
+            return true;
         }
     }
 }

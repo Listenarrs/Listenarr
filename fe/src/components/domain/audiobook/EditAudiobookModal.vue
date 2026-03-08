@@ -106,6 +106,11 @@
                   The right field is for organizing within the selected root.
                 </span>
               </p>
+              <!-- Path length warning -->
+              <div v-if="destinationPathWarning" class="path-length-warning">
+                <PhWarning :size="16" />
+                <span>{{ destinationPathWarning }}</span>
+              </div>
             </div>
             </div>
           </div>
@@ -329,6 +334,7 @@ import {
   PhStar,
   PhTag,
   PhLink,
+  PhWarning,
 } from '@phosphor-icons/vue'
 import { useConfigurationStore } from '@/stores/configuration'
 import RootFolderSelect from '@/components/form/RootFolderSelect.vue'
@@ -340,6 +346,7 @@ import { Modal, ModalHeader, ModalBody } from '@/components/feedback'
 import MoveAudiobookModal from '@/components/feedback/MoveAudiobookModal.vue'
 // FormRow and CheckboxCard not used in this component script; UI uses local markup
 import { useRootFoldersStore } from '@/stores/rootFolders'
+import { usePathLengthCheck } from '@/composables/usePathLengthCheck'
 
 // Diagnostic: surface undefined imports that can cause `Invalid vnode type` warnings
 if (typeof window !== 'undefined') {
@@ -741,6 +748,10 @@ function combinedBasePath(): string | null {
   return r + (needsSep ? sep : '') + rel
 }
 
+// Path-length warning for the destination path
+const editDestinationPath = computed(() => combinedBasePath() || '')
+const { pathLengthWarning: destinationPathWarning } = usePathLengthCheck(editDestinationPath)
+
 // Helper: derive relative path from full base and configured root (moved to module scope so it can be reused)
 function deriveRelativeFromBase(
   base: string | null | undefined,
@@ -1096,7 +1107,18 @@ function close() {
 <style scoped>
 /* Modal layout is provided by shared `modals.css` - keep component-specific scrollbars and spacing tweaks */
 
-
+.path-length-warning {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 6px 10px;
+  background: rgba(255, 152, 0, 0.12);
+  border: 1px solid rgba(255, 152, 0, 0.3);
+  border-radius: 6px;
+  color: #ffb74d;
+  font-size: 0.82rem;
+}
 
 /* Use global modal body padding variants instead of redefining .modal-body here */
 

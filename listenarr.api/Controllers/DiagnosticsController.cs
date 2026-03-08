@@ -5,7 +5,8 @@ using Microsoft.AspNetCore.Mvc;
 namespace Listenarr.Api.Controllers
 {
     [ApiController]
-    [Route("api/v{version:apiVersion}/[controller]")]
+    [Route("api/v{version:apiVersion}/diagnostics")]
+    [Tags("Notifications")]
     public class DiagnosticsController : ControllerBase
     {
         private readonly IConfigurationService _configurationService;
@@ -27,6 +28,11 @@ namespace Listenarr.Api.Controllers
             public string? WebhookUrl { get; set; }
         }
 
+        /// <summary>
+        /// Send a test webhook notification to verify the configured webhook URL works correctly.
+        /// </summary>
+        /// <param name="req">Optional trigger type, data payload, and target webhook ID or URL.</param>
+        /// <remarks>Restricted to local or admin callers. The webhook URL must match a configured target.</remarks>
         [HttpPost("test-notification")]
         [IgnoreAntiforgeryToken]
         public async Task<ActionResult<object>> TestNotification([FromBody] TestNotificationRequest req)

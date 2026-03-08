@@ -343,7 +343,7 @@
               <div class="result-stats">
                 <span v-if="audibleResult.runtime || audibleResult.searchResult?.runtime || audibleResult.searchResult?.lengthMinutes" class="stat-item">
                   <PhClock />
-                  {{ formatRuntime((audibleResult.runtime ?? audibleResult.searchResult?.lengthMinutes ?? (audibleResult.searchResult?.runtime && (audibleResult.searchResult.runtime as number) > 1000 ? Math.round((audibleResult.searchResult.runtime as number) / 60) : audibleResult.searchResult?.runtime ?? 0))!) }}
+                  {{ formatRuntime((audibleResult.runtime ?? audibleResult.searchResult?.lengthMinutes ?? audibleResult.searchResult?.runtime ?? 0)!) }}
                 </span>
                 <span v-if="audibleResult.language || audibleResult.searchResult?.language" class="stat-item">
                   <PhGlobe />
@@ -610,7 +610,7 @@
               <div class="result-stats">
                 <span v-if="book.searchResult?.runtime || book.searchResult?.lengthMinutes" class="stat-item">
                   <PhClock />
-                  {{ formatRuntime((book.searchResult?.lengthMinutes ?? (book.searchResult?.runtime && (book.searchResult.runtime as number) > 1000 ? Math.round((book.searchResult.runtime as number) / 60) : book.searchResult?.runtime) ) ?? 0) }}
+                  {{ formatRuntime((book.searchResult?.lengthMinutes ?? book.searchResult?.runtime ?? 0)) }}
                 </span>
                 <span v-if="book.searchResult?.language" class="stat-item">
                   <PhGlobe />
@@ -1442,14 +1442,15 @@ const handleAdvancedSearchResults = async (results: Array<Partial<SearchResult> 
           rrRes['RuntimeLengthMin']
         if (rawMinutes !== undefined && rawMinutes !== null) {
           const m = Number(rawMinutes)
-          if (!isNaN(m)) return Math.max(0, Math.round(m * 60))
+          if (!isNaN(m)) return Math.max(0, Math.round(m))
         }
 
         const raw = rrRes['runtime'] ?? rrRes['Runtime'] ?? rrRes['RuntimeMinutes'] ?? rrRes['RuntimeSeconds']
         if (raw === undefined || raw === null) return undefined
         const num = Number(raw)
         if (isNaN(num)) return undefined
-        return num > 1000 ? Math.round(num) : Math.round(num * 60)
+        // Values > 20000 are likely stored in seconds (legacy); convert to minutes
+        return num > 20000 ? Math.round(num / 60) : Math.round(num)
       })()
       // Also set runtime on searchResult for template display
       if (tr['runtime']) {
@@ -1805,7 +1806,8 @@ const changeAudimetaPage = async (newPage: number) => {
           if (raw === undefined || raw === null) return undefined
           const n = Number(raw)
           if (isNaN(n)) return undefined
-          return n > 1000 ? Math.round(n / 60) : n
+          // Values > 20000 are likely stored in seconds (legacy); convert to minutes
+          return n > 20000 ? Math.round(n / 60) : Math.round(n)
         })(),
         language: rr['language'] ?? rr['Language'],
         metadataSource: 'Audimeta',
@@ -2658,8 +2660,8 @@ const handleSimpleSearchResults = async (results: SearchResult[]) => {
         if (raw === undefined || raw === null) return undefined
         const num = Number(raw)
         if (isNaN(num)) return undefined
-        // Only convert from seconds if the number is suspiciously large (> 2 days in seconds)
-        return num > 172800 ? Math.round(num / 60) : num
+        // Values > 20000 are likely stored in seconds (legacy); convert to minutes
+        return num > 20000 ? Math.round(num / 60) : Math.round(num)
       })()
       // Also set runtime on searchResult for template display
       if (tr['runtime']) {

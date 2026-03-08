@@ -60,10 +60,14 @@ namespace Listenarr.Api.Services
             {
                 await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
                 _logger.LogInformation("Queue Monitor Service cancelled before start");
                 return;
+            }
+            catch (OperationCanceledException ex)
+            {
+                _logger.LogWarning(ex, "Queue Monitor startup delay canceled/timed out; continuing");
             }
 
             while (!stoppingToken.IsCancellationRequested)
@@ -72,10 +76,14 @@ namespace Listenarr.Api.Services
                 {
                     await MonitorQueueAsync(stoppingToken);
                 }
-                catch (OperationCanceledException)
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
                     // Cancellation requested - exit gracefully
                     break;
+                }
+                catch (OperationCanceledException ex)
+                {
+                    _logger.LogWarning(ex, "Queue monitor cycle canceled/timed out; continuing");
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                     _logger.LogError(ex, "Error in Queue Monitor Service");

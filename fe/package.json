@@ -1,12 +1,17 @@
 {
   "name": "listenarr-fe",
-  "version": "0.2.52",
+  "version": "0.2.55",
   "private": true,
   "type": "module",
   "engines": {
     "node": "^20.19.0 || >=22.12.0"
   },
   "scripts": {
+    "version:sync": "node ../scripts/sync-fe-version-from-csproj.mjs",
+    "predev": "npm run version:sync",
+    "prebuild": "npm run version:sync",
+    "pretest:unit": "npm run version:sync",
+    "prelint": "npm run version:sync",
     "dev": "vite",
     "dev:full": "concurrently \"npm run dev:api\" \"npm run dev\" --names \"API,WEB\" --prefix-colors \"blue,green\"",
     "dev:api": "cd ../listenarr.api && dotnet run",
@@ -14,7 +19,7 @@
     "preview": "vite preview",
     "test:unit": "vitest",
     "prepare": "cypress install",
-    "postinstall": "patch-package",
+    "postinstall": "patch-package && npm run version:sync",
     "test:e2e": "start-server-and-test preview http://localhost:4173 'cypress run --e2e'",
     "test:e2e:dev": "start-server-and-test 'vite dev --port 4173' http://localhost:4173 'cypress open --e2e'",
     "build-only": "vite build",
