@@ -88,6 +88,7 @@
             <input
               :type="showPassword ? 'text' : 'password'"
               v-model="settings.discordBotToken"
+              autocomplete="off"
               placeholder="Bot token (keep secret)"
               class="admin-input password-input"
             />

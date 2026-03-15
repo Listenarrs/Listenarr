@@ -107,6 +107,7 @@
               <PasswordInput
                 id="apiKey"
                 v-model="formData.apiKey"
+                autocomplete="off"
                 placeholder="********"
                 required
                 class="admin-input"

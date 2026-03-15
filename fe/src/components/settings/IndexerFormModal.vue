@@ -141,7 +141,7 @@
               label="API Key"
               labelFor="apiKey"
             >
-              <PasswordInput id="apiKey" v-model="formData.apiKey" placeholder="Your API key" class="admin-input" />
+              <PasswordInput id="apiKey" v-model="formData.apiKey" autocomplete="off" placeholder="Your API key" class="admin-input" />
             </FormRow>
 
             <FormRow v-if="formData.implementation !== 'InternetArchive'" label="Categories" labelFor="categories" help="Leave empty to search all categories">

@@ -189,6 +189,7 @@
                   <PasswordInput
                     id="prowlarr-key"
                     v-model="prowlarrApiKey"
+                    autocomplete="off"
                     class="form-input"
                     placeholder="Prowlarr API Key"
                   />
