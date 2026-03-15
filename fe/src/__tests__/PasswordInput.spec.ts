@@ -24,4 +24,22 @@ describe('PasswordInput', () => {
     expect(wrapper.emitted()['update:modelValue']).toBeTruthy()
     expect(wrapper.emitted()['update:modelValue']![0][0]).toBe('newsecret')
   })
+
+  it('passes autocomplete="off" through to the input when set by caller', () => {
+    const wrapper = mount(PasswordInput, {
+      props: { modelValue: '' },
+      attrs: { autocomplete: 'off' },
+    })
+    const input = wrapper.find('input')
+    expect((input.element as HTMLInputElement).getAttribute('autocomplete')).toBe('off')
+  })
+
+  it('passes autocomplete="current-password" through to the input when set by caller', () => {
+    const wrapper = mount(PasswordInput, {
+      props: { modelValue: '' },
+      attrs: { autocomplete: 'current-password' },
+    })
+    const input = wrapper.find('input')
+    expect((input.element as HTMLInputElement).getAttribute('autocomplete')).toBe('current-password')
+  })
 })

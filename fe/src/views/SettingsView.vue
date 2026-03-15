@@ -256,6 +256,7 @@
               <PasswordInput
                 id="api-key"
                 v-model="apiForm.apiKey"
+                autocomplete="off"
                 placeholder="Optional API key"
               />
               <small>Leave empty if not required</small>
