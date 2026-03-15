@@ -90,6 +90,7 @@
                 id="apiKey" 
                 v-model="formData.apiKey" 
                 type="password" 
+                autocomplete="off"
                 required 
                 placeholder="********"
               />
