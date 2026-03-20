@@ -7,6 +7,35 @@
     <template #default>
       <ModalBody compact>
         <form @submit.prevent="handleSave" class="edit-form form-body">
+          <!-- Metadata -->
+          <div class="form-group">
+            <label class="form-label" for="edit-title">
+              <PhPencil />
+              Metadata
+            </label>
+            <div class="form-control-card metadata-fields">
+              <div class="metadata-row">
+                <label class="metadata-label" for="edit-title">Title</label>
+                <input id="edit-title" v-model="formData.title" type="text" class="form-input" placeholder="Title" />
+              </div>
+              <div class="metadata-row">
+                <label class="metadata-label" for="edit-authors">Authors</label>
+                <input id="edit-authors" v-model="authorsString" type="text" class="form-input" placeholder="Author 1, Author 2" />
+              </div>
+              <div class="metadata-row-pair">
+                <div class="metadata-row">
+                  <label class="metadata-label" for="edit-series">Series</label>
+                  <input id="edit-series" v-model="formData.series" type="text" class="form-input" placeholder="Series name" />
+                </div>
+                <div class="metadata-row">
+                  <label class="metadata-label" for="edit-series-number">#</label>
+                  <input id="edit-series-number" v-model="formData.seriesNumber" type="text" class="form-input" placeholder="1" style="max-width: 80px" />
+                </div>
+              </div>
+              <p class="help-text">Edit the title, authors, and series. Use Organize Files after saving to rename on disk.</p>
+            </div>
+          </div>
+
           <!-- Monitored Status -->
             <div class="form-group">
               <label class="form-label">
@@ -274,6 +303,17 @@
       <button type="button" class="btn btn-secondary cancel-button" @click="close" title="Close" aria-label="Close">
         Close
       </button>
+      <button
+        v-if="props.audiobook?.files && props.audiobook.files.length > 0"
+        type="button"
+        class="btn btn-secondary"
+        @click="showOrganizeModal = true"
+        title="Organize files based on naming pattern"
+        aria-label="Organize Files"
+      >
+        <PhFolderOpen :size="16" />
+        Organize Files
+      </button>
       <div v-if="moveJob" class="move-status">
         <small>
           <strong>Move Job</strong>: {{ moveJob.jobId }} — <em>{{ moveJob.status }}</em>
@@ -306,6 +346,14 @@
     @cancel="cancelMoveConfirm"
     @confirm="handleMoveConfirm"
   />
+
+  <!-- Rename / Organize Modal -->
+  <RenamePreviewModal
+    :visible="showOrganizeModal"
+    :audiobook-ids="props.audiobook ? [props.audiobook.id] : []"
+    @close="showOrganizeModal = false"
+    @done="handleOrganizeDone"
+  />
 </template>
 
 <script setup lang="ts">
@@ -335,6 +383,7 @@ import {
   PhTag,
   PhLink,
   PhWarning,
+  PhFolderOpen,
 } from '@phosphor-icons/vue'
 import { useConfigurationStore } from '@/stores/configuration'
 import RootFolderSelect from '@/components/form/RootFolderSelect.vue'
@@ -344,6 +393,7 @@ import RadioCard from '@/components/settings/RadioCard.vue'
 import FolderBrowserModal from '@/components/feedback/FolderBrowserModal.vue'
 import { Modal, ModalHeader, ModalBody } from '@/components/feedback'
 import MoveAudiobookModal from '@/components/feedback/MoveAudiobookModal.vue'
+import RenamePreviewModal from '@/components/domain/organize/RenamePreviewModal.vue'
 // FormRow and CheckboxCard not used in this component script; UI uses local markup
 import { useRootFoldersStore } from '@/stores/rootFolders'
 import { usePathLengthCheck } from '@/composables/usePathLengthCheck'
@@ -370,6 +420,10 @@ interface Props {
 interface FormData {
   monitored: boolean
   qualityProfileId: number | null
+  title: string
+  authors: string[]
+  series: string
+  seriesNumber: string
   tags: string[]
   identifiers: EditableIdentifierRow[]
   abridged: boolean
@@ -415,6 +469,10 @@ const originalIdentifierRows = ref<EditableIdentifierRow[]>([])
 const formData = ref<FormData>({
   monitored: true,
   qualityProfileId: null,
+  title: '',
+  authors: [],
+  series: '',
+  seriesNumber: '',
   tags: [],
   identifiers: [],
   abridged: false,
@@ -429,6 +487,7 @@ const moveUnsub = ref<(() => void) | null>(null)
 
 // In-component move confirmation modal state
 const showMoveConfirm = ref(false)
+const showOrganizeModal = ref(false)
 const pendingMove = ref<{ original?: string; combined?: string } | null>(null)
 const modalMoveFiles = ref(true)
 const modalDeleteEmpty = ref(true)
@@ -448,6 +507,14 @@ function closeCustomBrowser() {
 
 // External custom input ref and helpers (used when we move the custom input outside the select)
 const externalCustomInput = ref<HTMLInputElement | null>(null)
+
+// Computed two-way binding for authors as comma-separated string
+const authorsString = computed({
+  get: () => formData.value.authors.join(', '),
+  set: (val: string) => {
+    formData.value.authors = val.split(',').map((s) => s.trim()).filter((s) => s.length > 0)
+  },
+})
 
 function onExternalCustomInput() {
   // Ensure parent selection state indicates custom path
@@ -565,6 +632,10 @@ const hasChanges = computed(() => {
   return (
     formData.value.monitored !== Boolean(props.audiobook.monitored) ||
     formData.value.qualityProfileId !== (props.audiobook.qualityProfileId ?? null) ||
+    formData.value.title !== (props.audiobook.title || '') ||
+    JSON.stringify(formData.value.authors) !== JSON.stringify(props.audiobook.authors || []) ||
+    formData.value.series !== (props.audiobook.series || '') ||
+    formData.value.seriesNumber !== (props.audiobook.seriesNumber || '') ||
     tagsChanged ||
     identifiersChanged ||
     formData.value.abridged !== Boolean(props.audiobook.abridged) ||
@@ -620,6 +691,10 @@ async function initializeForm() {
   formData.value = {
     monitored: Boolean(props.audiobook.monitored),
     qualityProfileId: props.audiobook.qualityProfileId ?? null,
+    title: props.audiobook.title || '',
+    authors: [...(props.audiobook.authors || [])],
+    series: props.audiobook.series || '',
+    seriesNumber: props.audiobook.seriesNumber || '',
     tags: [...(props.audiobook.tags || [])],
     identifiers: [],
     abridged: Boolean(props.audiobook.abridged),
@@ -873,6 +948,10 @@ async function handleSave() {
     // Build update payload with current form values
     const updates: Partial<Audiobook> = {
       monitored: formData.value.monitored,
+      title: formData.value.title.trim() || undefined,
+      authors: formData.value.authors.length > 0 ? formData.value.authors : undefined,
+      series: formData.value.series.trim() || undefined,
+      seriesNumber: formData.value.seriesNumber.trim() || undefined,
       tags: formData.value.tags,
       abridged: formData.value.abridged,
       explicit: formData.value.explicit,
@@ -894,6 +973,10 @@ async function handleSave() {
     const hasNonIdentifierChanges =
       formData.value.monitored !== Boolean(props.audiobook.monitored) ||
       formData.value.qualityProfileId !== (props.audiobook.qualityProfileId ?? null) ||
+      formData.value.title !== (props.audiobook.title || '') ||
+      JSON.stringify(formData.value.authors) !== JSON.stringify(props.audiobook.authors || []) ||
+      formData.value.series !== (props.audiobook.series || '') ||
+      formData.value.seriesNumber !== (props.audiobook.seriesNumber || '') ||
       JSON.stringify([...formData.value.tags].sort()) !==
         JSON.stringify([...(props.audiobook.tags || [])].sort()) ||
       formData.value.abridged !== Boolean(props.audiobook.abridged) ||
@@ -1087,6 +1170,11 @@ function addTag() {
 
 function removeTag(index: number) {
   formData.value.tags.splice(index, 1)
+}
+
+function handleOrganizeDone() {
+  showOrganizeModal.value = false
+  emit('saved')
 }
 
 function close() {
@@ -2071,4 +2159,32 @@ function close() {
 }
 
 .custom-input { min-width: 120px; flex: 1; width:100%; min-width:0 }
+
+.metadata-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.metadata-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.metadata-row-pair {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-end;
+}
+
+.metadata-row-pair .metadata-row:first-child {
+  flex: 1;
+}
+
+.metadata-label {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #adb5bd;
+}
 </style>

@@ -39,6 +39,9 @@ import type {
   AudiobookExternalIdentifierInput,
   UnmatchedFilesResponse,
   SavedUnmatchedResponse,
+  RenamePreview,
+  RenameOperation,
+  RenameResult,
 } from '@/types'
 import { getStartupConfigCached, getCachedStartupConfig, resetCache as resetStartupConfigCache } from './startupConfigCache'
 import { sessionTokenManager } from '@/utils/sessionToken'
@@ -1260,6 +1263,34 @@ class ApiService {
     }>('/library/bulk-update', {
       method: 'POST',
       body: JSON.stringify({ ids, updates }),
+    })
+  }
+
+  // Rename / Organize API
+  async previewRename(audiobookIds: number[]): Promise<RenamePreview[]> {
+    return this.request<RenamePreview[]>('/library/rename/preview', {
+      method: 'POST',
+      body: JSON.stringify({ audiobookIds }),
+    })
+  }
+
+  async executeRename(operations: RenameOperation[]): Promise<RenameResult[]> {
+    return this.request<RenameResult[]>('/library/rename', {
+      method: 'POST',
+      body: JSON.stringify({ operations }),
+    })
+  }
+
+  async previewRenameAudiobook(id: number): Promise<RenamePreview> {
+    return this.request<RenamePreview>(`/library/${id}/rename/preview`, {
+      method: 'POST',
+    })
+  }
+
+  async executeRenameAudiobook(id: number, operation: RenameOperation): Promise<RenameResult> {
+    return this.request<RenameResult>(`/library/${id}/rename`, {
+      method: 'POST',
+      body: JSON.stringify(operation),
     })
   }
 

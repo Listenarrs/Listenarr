@@ -87,6 +87,10 @@
           <PhPencil />
           Edit Selected
         </button>
+        <button v-if="selectedCount > 0" class="toolbar-btn" @click="showOrganize">
+          <PhFolderOpen />
+          Organize Selected
+        </button>
         <button v-if="selectedCount > 0" class="toolbar-btn delete-btn" @click="confirmBulkDelete">
           <PhTrash />
           Delete Selected ({{ selectedCount }})
@@ -627,6 +631,14 @@
       @saved="handleBulkEditSaved"
     />
 
+    <!-- Rename / Organize Modal -->
+    <RenamePreviewModal
+      :visible="showOrganizeModal"
+      :audiobook-ids="organizeAudiobookIds"
+      @close="closeOrganize"
+      @done="handleOrganizeDone"
+    />
+
     <!-- Edit Audiobook Modal -->
     <EditAudiobookModal
       :is-open="showEditModal"
@@ -724,6 +736,7 @@ import {
   PhX,
   PhUser,
   PhBooks,
+  PhFolderOpen,
 } from '@phosphor-icons/vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useLibraryStore } from '@/stores/library'
@@ -734,6 +747,7 @@ import { apiService } from '@/services/api'
 import { buildApiPath } from '@/services/apiBase'
 import { logger } from '@/utils/logger'
 import BulkEditModal from '@/components/domain/collection/BulkEditModal.vue'
+import RenamePreviewModal from '@/components/domain/organize/RenamePreviewModal.vue'
 import EditAudiobookModal from '@/components/domain/audiobook/EditAudiobookModal.vue'
 import DeleteConfirmationModal from '@/components/feedback/DeleteConfirmationModal.vue'
 import CustomSelect from '@/components/form/CustomSelect.vue'
@@ -1647,6 +1661,8 @@ const deleteFilesOnDisk = ref(false)
 const deleteFolderOnDisk = ref(false)
 const qualityProfiles = ref<QualityProfile[]>([])
 const showBulkEditModal = ref(false)
+const showOrganizeModal = ref(false)
+const organizeAudiobookIds = ref<number[]>([])
 const showEditModal = ref(false)
 const editAudiobook = ref<Audiobook | null>(null)
 const lastClickedIndex = ref<number | null>(null)
@@ -2150,6 +2166,21 @@ function showBulkEdit() {
 
 function closeBulkEdit() {
   showBulkEditModal.value = false
+}
+
+function showOrganize() {
+  organizeAudiobookIds.value = Array.from(libraryStore.selectedIds)
+  showOrganizeModal.value = true
+}
+
+function closeOrganize() {
+  showOrganizeModal.value = false
+}
+
+async function handleOrganizeDone() {
+  showOrganizeModal.value = false
+  await libraryStore.fetchLibrary()
+  libraryStore.clearSelection()
 }
 
 async function handleBulkEditSaved() {

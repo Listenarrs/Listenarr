@@ -972,3 +972,59 @@ export interface SavedUnmatchedResponse {
   lastScannedAt?: string
   items: UnmatchedFileItem[]
 }
+
+// ── Rename / Organize types ──
+
+export interface BulkRenameRequest {
+  audiobookIds: number[]
+}
+
+export interface FileRenamePreview {
+  fileId: number
+  currentPath?: string
+  newPath?: string
+  currentFilename?: string
+  newFilename?: string
+  changed: boolean
+}
+
+export interface RenamePreview {
+  audiobookId: number
+  audiobookTitle?: string
+  currentFolderPath?: string
+  newFolderPath?: string
+  folderChanged: boolean
+  fileRenames: FileRenamePreview[]
+  hasChanges: boolean
+}
+
+export interface FileRenameOperation {
+  fileId: number
+  currentPath: string
+  newPath: string
+}
+
+export interface RenameOperation {
+  audiobookId: number
+  newFolderPath?: string
+  fileRenames: FileRenameOperation[]
+}
+
+export interface ExecuteRenameRequest {
+  operations: RenameOperation[]
+}
+
+export interface FileRenameResultItem {
+  fileId: number
+  previousPath?: string
+  newPath?: string
+  success: boolean
+  error?: string
+}
+
+export interface RenameResult {
+  audiobookId: number
+  success: boolean
+  error?: string
+  renamedFiles: FileRenameResultItem[]
+}

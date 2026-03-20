@@ -303,7 +303,7 @@
           </div>
         </div>
         <div v-if="audiobook.files && audiobook.files.length" class="file-list">
-          <div v-for="f in audiobook.files" :key="f.id" class="file-item"
+          <div v-for="f in sortedFiles" :key="f.id" class="file-item"
             :class="{ expanded: isFileAccordionExpanded(f.id) }">
             <div class="file-header" @click="toggleFileAccordion(f.id)">
               <div class="file-info">
@@ -499,6 +499,14 @@
     @downloaded="handleDownloaded"
   />
 
+  <!-- Rename / Organize Modal -->
+  <RenamePreviewModal
+    :visible="showOrganizeModal"
+    :audiobook-ids="audiobook ? [audiobook.id] : []"
+    @close="showOrganizeModal = false"
+    @done="handleOrganizeDone"
+  />
+
 </template>
 
 <script setup lang="ts">
@@ -523,16 +531,19 @@ import { errorTracking } from '@/services/errorTracking'
 import { useProtectedImages } from '@/composables/useProtectedImages'
 import EditAudiobookModal from '@/components/domain/audiobook/EditAudiobookModal.vue'
 import ManualSearchModal from '@/components/domain/search/ManualSearchModal.vue'
+import RenamePreviewModal from '@/components/domain/organize/RenamePreviewModal.vue'
 import CustomSelect from '@/components/form/CustomSelect.vue'
 import DeleteConfirmationModal from '@/components/feedback/DeleteConfirmationModal.vue'
 import { Pill } from '@/components/base'
 import {
   PhArrowLeft,
   PhArrowClockwise,
+  PhArrowsClockwise,
   PhBookmark,
   PhSpinner,
   PhMagnifyingGlass,
   PhFolderOpen,
+  PhHardDrives,
   PhTrash,
   PhClock,
   PhFolder,
@@ -555,6 +566,8 @@ import {
   PhDownload,
   PhUpload,
   PhPencil,
+  PhTreeView,
+  PhSortAscending,
   PhHandGrabbing,
   PhFilePlus,
   PhFileMinus,
@@ -586,6 +599,7 @@ const rescanningMetadata = ref(false)
 const scanQueued = ref(false)
 const scanJobId = ref<string | null>(null)
 const showEditModal = ref(false)
+const showOrganizeModal = ref(false)
 const showMoreActions = ref(false)
 
 // History state
@@ -626,7 +640,7 @@ const topActions = computed<DetailTopAction[]>(() => [
     label: scanning.value ? 'Scanning...' : scanQueued.value ? 'Scan queued' : 'Scan Folder',
     title: scanning.value ? 'Scanning...' : scanQueued.value ? 'Scan queued' : 'Scan Folder',
     ariaLabel: 'Scan Folder',
-    icon: scanning.value ? PhSpinner : scanQueued.value ? PhClock : PhFolderOpen,
+    icon: scanning.value ? PhSpinner : scanQueued.value ? PhClock : PhHardDrives,
     iconClass: scanning.value ? 'ph-spin' : undefined,
     disabled: scanning.value || scanQueued.value,
     desktopGroup: 'primary',
@@ -658,11 +672,21 @@ const topActions = computed<DetailTopAction[]>(() => [
     label: rescanningMetadata.value ? 'Rescanning Metadata...' : 'Rescan Metadata',
     title: rescanningMetadata.value ? 'Rescanning Metadata...' : 'Rescan Metadata',
     ariaLabel: 'Rescan Metadata',
-    icon: rescanningMetadata.value ? PhSpinner : PhArrowClockwise,
+    icon: rescanningMetadata.value ? PhSpinner : PhArrowsClockwise,
     iconClass: rescanningMetadata.value ? 'ph-spin' : undefined,
     disabled: rescanningMetadata.value || !audiobook.value,
     desktopGroup: 'secondary',
     onClick: () => { void rescanMetadata() },
+  },
+  {
+    key: 'organize',
+    label: 'Organize Files',
+    title: 'Organize Files',
+    ariaLabel: 'Organize Files',
+    icon: PhTreeView,
+    disabled: !audiobook.value?.files?.length,
+    desktopGroup: 'secondary',
+    onClick: () => { showOrganizeModal.value = true },
   },
   {
     key: 'delete',
@@ -697,7 +721,7 @@ type DetailIdentifierItem = {
 }
 
 type DetailTopAction = {
-  key: 'refresh' | 'manual-search' | 'scan' | 'monitor' | 'edit' | 'rescan-metadata' | 'delete'
+  key: 'refresh' | 'manual-search' | 'scan' | 'monitor' | 'edit' | 'rescan-metadata' | 'organize' | 'delete'
   label: string
   title: string
   ariaLabel: string
@@ -808,6 +832,16 @@ const coverImageUrl = computed(() => {
     `audiobook-detail-${audiobook.value?.id ?? 'none'}`,
     getPlaceholderUrl(),
   )
+})
+
+// Files sorted by path for natural ordering (e.g., -01, -02, -03)
+const sortedFiles = computed(() => {
+  if (!audiobook.value?.files) return []
+  return [...audiobook.value.files].sort((a, b) => {
+    const pathA = (a.path || '').toLowerCase()
+    const pathB = (b.path || '').toLowerCase()
+    return pathA.localeCompare(pathB, undefined, { numeric: true })
+  })
 })
 
 // Show a base path even when no files exist yet by falling back to configured default root folder
@@ -1382,6 +1416,11 @@ async function handleEditSaved() {
   await loadAudiobook()
 }
 
+async function handleOrganizeDone() {
+  showOrganizeModal.value = false
+  await loadAudiobook()
+}
+
 
 
 function formatRuntime(minutes: number): string {
@@ -1443,6 +1482,8 @@ function getEventIconComponent(eventType: string): Component {
     Failed: PhWarningCircle,
     'File Added': PhFilePlus,
     'File Removed': PhFileMinus,
+    Organized: PhFolderOpen,
+    Moved: PhFolderOpen,
   }
   return icons[eventType] || PhCircle
 }
@@ -1460,6 +1501,8 @@ function getEventTypeClass(eventType: string): string {
     Failed: 'event-danger',
     'File Added': 'event-success',
     'File Removed': 'event-warning',
+    Organized: 'event-info',
+    Moved: 'event-info',
   }
   return classes[eventType] || 'event-default'
 }
@@ -1477,6 +1520,8 @@ function formatEventTitle(eventType: string): string {
     Failed: 'Failed',
     'File Added': 'File Added',
     'File Removed': 'File Removed',
+    Organized: 'Files Organized',
+    Moved: 'Files Moved',
   }
   return titles[eventType] || eventType
 }
