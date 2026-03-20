@@ -20,6 +20,7 @@ namespace Listenarr.Api.Models
         public int? Runtime { get; set; }
         public string? ImageUrl { get; set; }
         public bool Monitored { get; set; }
+        public string? BasePath { get; set; }
         // Transitional legacy primary file summary retained for filters and upgrade compatibility.
         public string? FilePath { get; set; }
         public long? FileSize { get; set; }

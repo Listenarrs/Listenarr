@@ -18,14 +18,29 @@
                 <label class="metadata-label" for="edit-title">Title</label>
                 <input id="edit-title" v-model="formData.title" type="text" class="form-input" placeholder="Title" />
               </div>
+
+              <!-- Authors: tag-style with autocomplete -->
               <div class="metadata-row">
-                <label class="metadata-label" for="edit-authors">Authors</label>
-                <input id="edit-authors" v-model="authorsString" type="text" class="form-input" placeholder="Author 1, Author 2" />
+                <label class="metadata-label">Authors</label>
+                <TagInput
+                  v-model="formData.authors"
+                  :suggestions="allKnownAuthors"
+                  placeholder="Add author..."
+                  label="author"
+                />
               </div>
+
+              <!-- Series: input with autocomplete -->
               <div class="metadata-row-pair">
                 <div class="metadata-row">
                   <label class="metadata-label" for="edit-series">Series</label>
-                  <input id="edit-series" v-model="formData.series" type="text" class="form-input" placeholder="Series name" />
+                  <AutocompleteInput
+                    id="edit-series"
+                    v-model="formData.series"
+                    :suggestions="allKnownSeries"
+                    class="form-input"
+                    placeholder="Series name"
+                  />
                 </div>
                 <div class="metadata-row">
                   <label class="metadata-label" for="edit-series-number">#</label>
@@ -151,26 +166,12 @@
               Tags
             </label>
             <div class="form-control-card">
-              <div class="tags-container">
-                <div class="tags-list">
-                  <span v-for="(tag, index) in formData.tags" :key="index" class="tag-item">
-                    {{ tag }}
-                    <button type="button" class="tag-remove" @click="removeTag(index)" title="Remove tag">
-                      <PhX :size="16" weight="bold"></PhX>
-                    </button>
-                  </span>
-                  <span v-if="formData.tags.length === 0" class="tags-empty">
-                    No tags added yet
-                  </span>
-                </div>
-                <div class="tag-input-group">
-                  <input type="text" v-model="newTag" @keypress.enter.prevent="addTag" placeholder="Add a tag..."
-                    class="tag-input" />
-                  <button type="button" @click="addTag" class="icon-btn btn-primary btn-add-tag" :disabled="!newTag.trim()" title="Add tag" aria-label="Add tag">
-                    <PhPlus :size="16"></PhPlus>
-                  </button>
-                </div>
-              </div>
+              <TagInput
+                v-model="formData.tags"
+                placeholder="Add a tag..."
+                empty-text="No tags added yet"
+                label="tag"
+              />
               <p class="help-text">Custom tags for organizing and filtering audiobooks</p>
             </div>
           </div>
@@ -396,6 +397,9 @@ import MoveAudiobookModal from '@/components/feedback/MoveAudiobookModal.vue'
 import RenamePreviewModal from '@/components/domain/organize/RenamePreviewModal.vue'
 // FormRow and CheckboxCard not used in this component script; UI uses local markup
 import { useRootFoldersStore } from '@/stores/rootFolders'
+import { useLibraryStore } from '@/stores/library'
+import TagInput from '@/components/form/TagInput.vue'
+import AutocompleteInput from '@/components/form/AutocompleteInput.vue'
 import { usePathLengthCheck } from '@/composables/usePathLengthCheck'
 
 // Diagnostic: surface undefined imports that can cause `Invalid vnode type` warnings
@@ -459,7 +463,6 @@ const isUsingCustomPath = computed(() => {
 })
 const rootPath = ref<string | null>(null)
 const saving = ref(false)
-const newTag = ref('')
 const editingDestination = ref(false)
 const toast = useToast()
 const originalIdentifierRows = ref<EditableIdentifierRow[]>([])
@@ -508,12 +511,27 @@ function closeCustomBrowser() {
 // External custom input ref and helpers (used when we move the custom input outside the select)
 const externalCustomInput = ref<HTMLInputElement | null>(null)
 
-// Computed two-way binding for authors as comma-separated string
-const authorsString = computed({
-  get: () => formData.value.authors.join(', '),
-  set: (val: string) => {
-    formData.value.authors = val.split(',').map((s) => s.trim()).filter((s) => s.length > 0)
-  },
+// Author and series autocomplete suggestions from library
+const libraryStore = useLibraryStore()
+
+const allKnownAuthors = computed(() => {
+  const authors = new Set<string>()
+  for (const book of libraryStore.audiobooks) {
+    if (book.authors) {
+      for (const a of book.authors) {
+        if (a && a.trim()) authors.add(a.trim())
+      }
+    }
+  }
+  return Array.from(authors).sort((a, b) => a.localeCompare(b))
+})
+
+const allKnownSeries = computed(() => {
+  const series = new Set<string>()
+  for (const book of libraryStore.audiobooks) {
+    if (book.series && book.series.trim()) series.add(book.series.trim())
+  }
+  return Array.from(series).sort((a, b) => a.localeCompare(b))
 })
 
 function onExternalCustomInput() {
@@ -710,7 +728,8 @@ async function initializeForm() {
       const normBase = toForward(props.audiobook!.basePath!)
       const normRoot = toForward(folder.path)
       const rootWithSlash = normRoot.endsWith('/') ? normRoot : normRoot + '/'
-      return normBase.toLowerCase().startsWith(rootWithSlash.toLowerCase())
+      return normBase.toLowerCase() === normRoot.toLowerCase() ||
+        normBase.toLowerCase().startsWith(rootWithSlash.toLowerCase())
     })
 
     if (matchingRoot) {
@@ -1158,18 +1177,6 @@ function toIdentifierWritePayload(row: EditableIdentifierRow): AudiobookExternal
     isPrimary: Boolean(row.isPrimary),
     source: row.source || 'Manual',
   }
-}
-
-function addTag() {
-  const tag = newTag.value.trim()
-  if (tag && !formData.value.tags.includes(tag)) {
-    formData.value.tags.push(tag)
-    newTag.value = ''
-  }
-}
-
-function removeTag(index: number) {
-  formData.value.tags.splice(index, 1)
 }
 
 function handleOrganizeDone() {
@@ -1660,146 +1667,6 @@ function close() {
 
 .ph-spin {
   animation: spin 1s linear infinite;
-}
-
-.tags-container {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.tags-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  padding: 0.75rem;
-  background-color: #1e1e1e;
-  border: 1px solid #3a3a3a;
-  border-radius: 6px;
-  min-height: 3rem;
-  align-items: flex-start;
-  align-content: flex-start;
-}
-
-.tag-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.35rem 0.6rem;
-  background-color: #2a2a2a;
-  color: #e0e0e0;
-  border-radius: 6px;
-  font-size: 0.85rem;
-  font-weight: 500;
-  border: 1px solid #3a3a3a;
-  transition: all 0.2s ease;
-}
-
-.tag-item:hover {
-  background-color: #333;
-  border-color: var(--brand-focus);
-  color: white;
-}
-
-.tag-item:hover::before {
-  opacity: 1;
-}
-
-.tags-empty {
-  color: #888;
-  font-size: 0.875rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  padding: 0.5rem;
-}
-
-.tag-remove {
-  background: rgba(0, 0, 0, 0.2);
-  border: none;
-  color: #ccc;
-  cursor: pointer;
-  padding: 0.25rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  transition: all 0.2s ease;
-  flex-shrink: 0;
-  margin-left: 0.25rem;
-}
-
-.tag-remove:hover {
-  background: var(--danger-600, #e74c3c);
-  color: #fff;
-}
-
-.tag-remove:active {
-  background: rgba(255, 255, 255, 0.25);
-}
-
-.tag-input-group {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.tag-input {
-  flex: 1;
-  padding: 0.75rem 1rem;
-  background-color: #1a1a1a;
-  border: 1px solid #3a3a3a;
-  border-radius: 6px;
-  color: white;
-  font-size: 0.95rem;
-  transition: all 0.2s ease;
-}
-
-.tag-input:hover {
-  border-color: #555;
-}
-
-.tag-input:focus {
-  outline: none;
-  border-color: var(--brand-focus);
-  background-color: #2d2d2d;
-  box-shadow: 0 0 0 3px rgba(var(--brand-rgb), 0.1);
-}
-
-.tag-input::placeholder {
-  color: #666;
-}
-
-.btn-add-tag {
-  /* icon-only variant: use compact square size */
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.5rem;
-  background-color: var(--brand-focus);
-  color: white;
-  border: none;
-  border-radius: var(--btn-radius);
-  font-size: 0.95rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  width: var(--control-height);
-  height: var(--control-height);
-}
-
-.btn-add-tag:hover:not(:disabled) {
-  background-color: #005fa3;
-  transform: translateY(-1px);
-}
-
-.btn-add-tag:active:not(:disabled) {
-  transform: translateY(0);
-}
-
-.btn-add-tag:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .checkbox-group {
