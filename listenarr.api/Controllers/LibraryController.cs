@@ -75,6 +75,7 @@ namespace Listenarr.Api.Controllers
         private readonly NotificationService? _notificationService;
         private readonly IRootFolderService? _rootFolderService;
         private readonly ILibraryAddService? _libraryAddService;
+        private readonly IRenameService? _renameService;
         /// <param name="repo">Repository for audiobook persistence and queries.</param>
         /// <param name="imageCacheService">Service for caching and moving cover images.</param>
         /// <param name="logger">Logger instance for diagnostic messages.</param>
@@ -97,7 +98,8 @@ namespace Listenarr.Api.Controllers
             IMoveQueueService? moveQueueService = null,
             NotificationService? notificationService = null,
             IRootFolderService? rootFolderService = null,
-            ILibraryAddService? libraryAddService = null)
+            ILibraryAddService? libraryAddService = null,
+            IRenameService? renameService = null)
         {
             _repo = repo;
             _imageCacheService = imageCacheService;
@@ -110,6 +112,7 @@ namespace Listenarr.Api.Controllers
             _notificationService = notificationService;
             _rootFolderService = rootFolderService;
             _libraryAddService = libraryAddService;
+            _renameService = renameService;
         }
 
         private static bool ComputeWantedFlag(Audiobook audiobook)
@@ -4608,6 +4611,81 @@ namespace Listenarr.Api.Controllers
             public bool? MoveFiles { get; set; }
             // When moving files, whether to delete the original folder if empty after the move
             public bool? DeleteEmptySource { get; set; }
+        }
+
+        // ── Rename / Organize endpoints ──
+
+        /// <summary>
+        /// Preview rename operations for a batch of audiobooks.
+        /// Returns the expected folder and file paths based on current naming patterns.
+        /// </summary>
+        [HttpPost("rename/preview")]
+        public async Task<IActionResult> PreviewRename([FromBody] Models.BulkRenameRequest request, CancellationToken ct)
+        {
+            if (_renameService == null)
+                return NotFound(new { message = "Rename service not available" });
+            if (request?.AudiobookIds == null || request.AudiobookIds.Length == 0)
+                return BadRequest(new { message = "At least one audiobook ID is required" });
+            if (request.AudiobookIds.Length > 500)
+                return BadRequest(new { message = "Cannot preview more than 500 audiobooks at once" });
+
+            var previews = await _renameService.PreviewRenameAsync(request.AudiobookIds, ct);
+            return Ok(previews);
+        }
+
+        /// <summary>
+        /// Execute confirmed rename operations for a batch of audiobooks.
+        /// Folder moves are enqueued to the background move service; file renames within
+        /// the same directory are performed synchronously.
+        /// </summary>
+        [HttpPost("rename")]
+        public async Task<IActionResult> ExecuteRename([FromBody] Models.ExecuteRenameRequest request, CancellationToken ct)
+        {
+            if (_renameService == null)
+                return NotFound(new { message = "Rename service not available" });
+            if (request?.Operations == null || request.Operations.Count == 0)
+                return BadRequest(new { message = "At least one rename operation is required" });
+
+            var results = await _renameService.ExecuteRenameAsync(request.Operations, ct);
+            return Ok(results);
+        }
+
+        /// <summary>
+        /// Preview rename for a single audiobook.
+        /// </summary>
+        [HttpPost("{id}/rename/preview")]
+        public async Task<IActionResult> PreviewRenameSingle(int id, CancellationToken ct)
+        {
+            if (_renameService == null)
+                return NotFound(new { message = "Rename service not available" });
+
+            var previews = await _renameService.PreviewRenameAsync(new[] { id }, ct);
+            var preview = previews.FirstOrDefault();
+            if (preview == null)
+                return NotFound(new { message = "Audiobook not found" });
+
+            return Ok(preview);
+        }
+
+        /// <summary>
+        /// Execute rename for a single audiobook.
+        /// </summary>
+        [HttpPost("{id}/rename")]
+        public async Task<IActionResult> ExecuteRenameSingle(int id, [FromBody] Models.RenameOperation operation, CancellationToken ct)
+        {
+            if (_renameService == null)
+                return NotFound(new { message = "Rename service not available" });
+            if (operation == null)
+                return BadRequest(new { message = "Rename operation is required" });
+            // Ensure the operation targets the correct audiobook
+            operation.AudiobookId = id;
+
+            var results = await _renameService.ExecuteRenameAsync(new List<Models.RenameOperation> { operation }, ct);
+            var result = results.FirstOrDefault();
+            if (result == null)
+                return NotFound(new { message = "Audiobook not found" });
+
+            return Ok(result);
         }
 
     }

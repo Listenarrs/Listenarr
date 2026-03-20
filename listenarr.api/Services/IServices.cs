@@ -547,4 +547,22 @@ namespace Listenarr.Api.Services
         /// </summary>
         Task<ImportResult> ReprocessExistingFileAsync(string downloadId, int? audiobookId, string sourcePath, ApplicationSettings settings, CancellationToken ct = default);
     }
+
+    /// <summary>
+    /// Previews and executes bulk rename/organize operations for audiobook
+    /// folders and files based on the configured naming patterns.
+    /// </summary>
+    public interface IRenameService
+    {
+        /// <summary>
+        /// Compute the expected folder and file paths for the given audiobooks
+        /// and return a diff against their current paths on disk.
+        /// </summary>
+        Task<List<Models.RenamePreview>> PreviewRenameAsync(int[] audiobookIds, CancellationToken ct = default);
+
+        /// <summary>
+        /// Execute the confirmed rename operations (move folders and rename files).
+        /// </summary>
+        Task<List<Models.RenameResult>> ExecuteRenameAsync(List<Models.RenameOperation> operations, CancellationToken ct = default);
+    }
 }
