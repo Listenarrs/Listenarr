@@ -4625,7 +4625,7 @@ namespace Listenarr.Api.Controllers
         public async Task<IActionResult> PreviewRename([FromBody] Models.BulkRenameRequest request, CancellationToken ct)
         {
             if (_renameService == null)
-                return NotFound(new { message = "Rename service not available" });
+                return StatusCode(503, new { message = "Rename service not available" });
             if (request?.AudiobookIds == null || request.AudiobookIds.Length == 0)
                 return BadRequest(new { message = "At least one audiobook ID is required" });
             if (request.AudiobookIds.Length > 500)
@@ -4644,9 +4644,11 @@ namespace Listenarr.Api.Controllers
         public async Task<IActionResult> ExecuteRename([FromBody] Models.ExecuteRenameRequest request, CancellationToken ct)
         {
             if (_renameService == null)
-                return NotFound(new { message = "Rename service not available" });
+                return StatusCode(503, new { message = "Rename service not available" });
             if (request?.Operations == null || request.Operations.Count == 0)
                 return BadRequest(new { message = "At least one rename operation is required" });
+            if (request.Operations.Count > 500)
+                return BadRequest(new { message = "Cannot execute more than 500 rename operations at once" });
 
             var results = await _renameService.ExecuteRenameAsync(request.Operations, ct);
             return Ok(results);
@@ -4659,7 +4661,7 @@ namespace Listenarr.Api.Controllers
         public async Task<IActionResult> PreviewRenameSingle(int id, CancellationToken ct)
         {
             if (_renameService == null)
-                return NotFound(new { message = "Rename service not available" });
+                return StatusCode(503, new { message = "Rename service not available" });
 
             var previews = await _renameService.PreviewRenameAsync(new[] { id }, ct);
             var preview = previews.FirstOrDefault();
@@ -4676,7 +4678,7 @@ namespace Listenarr.Api.Controllers
         public async Task<IActionResult> ExecuteRenameSingle(int id, [FromBody] Models.RenameOperation operation, CancellationToken ct)
         {
             if (_renameService == null)
-                return NotFound(new { message = "Rename service not available" });
+                return StatusCode(503, new { message = "Rename service not available" });
             if (operation == null)
                 return BadRequest(new { message = "Rename operation is required" });
             // Ensure the operation targets the correct audiobook

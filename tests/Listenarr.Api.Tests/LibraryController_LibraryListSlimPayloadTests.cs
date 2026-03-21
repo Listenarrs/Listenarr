@@ -98,7 +98,9 @@ namespace Listenarr.Api.Tests
             Assert.False(item.TryGetProperty("files", out _));
             Assert.False(item.TryGetProperty("description", out _));
             Assert.False(item.TryGetProperty("subtitle", out _));
-            Assert.False(item.TryGetProperty("basePath", out _));
+            // basePath is intentionally included in the slim payload so the EditAudiobookModal
+            // can show the correct destination folder when opened from the audiobooks list page.
+            Assert.True(item.TryGetProperty("basePath", out _));
         }
     }
 }

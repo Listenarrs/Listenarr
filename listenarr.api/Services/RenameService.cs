@@ -67,11 +67,18 @@ namespace Listenarr.Api.Services
             if (operations == null || operations.Count == 0)
                 return new List<RenameResult>();
 
+            if (operations.Count > MaxAudiobookIds)
+                throw new ArgumentException($"Cannot execute more than {MaxAudiobookIds} rename operations at once.");
+
+            // Fetch settings once for the entire batch instead of per-operation
+            var settings = await _configService.GetApplicationSettingsAsync();
+            var outputPath = settings?.OutputPath;
+
             var results = new List<RenameResult>();
 
             foreach (var op in operations)
             {
-                var result = await ExecuteSingleRename(op, ct);
+                var result = await ExecuteSingleRename(op, outputPath, ct);
                 results.Add(result);
             }
 
@@ -186,7 +193,7 @@ namespace Listenarr.Api.Services
             return preview;
         }
 
-        private async Task<RenameResult> ExecuteSingleRename(RenameOperation op, CancellationToken ct)
+        private async Task<RenameResult> ExecuteSingleRename(RenameOperation op, string? outputPath, CancellationToken ct)
         {
             var result = new RenameResult { AudiobookId = op.AudiobookId };
 
@@ -210,12 +217,16 @@ namespace Listenarr.Api.Services
                 if (!string.IsNullOrWhiteSpace(op.NewFolderPath) &&
                     !string.Equals(audiobook.BasePath, op.NewFolderPath, StringComparison.OrdinalIgnoreCase))
                 {
-                    // Validate: new folder path must not contain path traversal
+                    // Validate: new folder path must be under the configured output path
                     var normalizedNew = Path.GetFullPath(op.NewFolderPath);
-                    if (normalizedNew.Contains("..", StringComparison.Ordinal))
+                    if (!string.IsNullOrWhiteSpace(outputPath) &&
+                        !FileUtils.IsPathWithinRoot(normalizedNew, outputPath) &&
+                        !string.Equals(Path.GetFullPath(outputPath), normalizedNew, StringComparison.OrdinalIgnoreCase))
                     {
                         result.Success = false;
-                        result.Error = "Invalid destination path.";
+                        result.Error = "Destination path is outside the configured output folder.";
+                        _logger.LogWarning("Rejected folder move for audiobook {Id}: {Path} is outside output root {Root}",
+                            audiobook.Id, normalizedNew, outputPath);
                         return result;
                     }
 
@@ -273,6 +284,19 @@ namespace Listenarr.Api.Services
 
                         try
                         {
+                            // Validate file paths are within the allowed output root
+                            if (!string.IsNullOrWhiteSpace(outputPath))
+                            {
+                                if (!FileUtils.IsPathWithinRoot(fileOp.CurrentPath, outputPath) ||
+                                    !FileUtils.IsPathWithinRoot(fileOp.NewPath, outputPath))
+                                {
+                                    fileResult.Success = false;
+                                    fileResult.Error = "File path is outside the configured output folder.";
+                                    result.RenamedFiles.Add(fileResult);
+                                    continue;
+                                }
+                            }
+
                             // Validate source exists
                             if (!File.Exists(fileOp.CurrentPath))
                             {
@@ -418,6 +442,11 @@ namespace Listenarr.Api.Services
             };
         }
 
+        /// <summary>
+        /// Build the variable dictionary for naming pattern expansion.
+        /// Values are intentionally unsanitized here because <see cref="IFileNamingService.ApplyNamingPattern"/>
+        /// sanitizes each path component after variable substitution.
+        /// </summary>
         private static Dictionary<string, object> BuildNamingVariables(Audiobook audiobook, AudioMetadata metadata)
         {
             return new Dictionary<string, object>

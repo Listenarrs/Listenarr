@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
@@ -14,9 +15,22 @@ using Listenarr.Infrastructure.Models;
 
 namespace Listenarr.Api.Tests
 {
-    public class RenameServiceTests
+    public class RenameServiceTests : IDisposable
     {
-        private static (RenameService svc, ListenArrDbContext db) BuildService(
+        // Use a temp-based root so paths resolve correctly on any OS
+        private static readonly string LibraryRoot = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "RenameTests", "Library"));
+
+        private static string Lib(params string[] parts) => Path.Combine(new[] { LibraryRoot }.Concat(parts).ToArray());
+
+        private readonly List<ListenArrDbContext> _contexts = new();
+
+        public void Dispose()
+        {
+            foreach (var ctx in _contexts)
+                ctx.Dispose();
+        }
+
+        private (RenameService svc, ListenArrDbContext db) BuildService(
             ApplicationSettings? settings = null,
             Action<Mock<IFileMover>>? configureFileMover = null)
         {
@@ -24,6 +38,7 @@ namespace Listenarr.Api.Tests
                 .UseInMemoryDatabase(Guid.NewGuid().ToString())
                 .Options;
             var db = new ListenArrDbContext(options);
+            _contexts.Add(db);
 
             var dbFactoryMock = new Mock<IDbContextFactory<ListenArrDbContext>>();
             dbFactoryMock.Setup(f => f.CreateDbContextAsync(It.IsAny<CancellationToken>()))
@@ -31,7 +46,7 @@ namespace Listenarr.Api.Tests
 
             var effectiveSettings = settings ?? new ApplicationSettings
             {
-                OutputPath = @"C:\Library",
+                OutputPath = LibraryRoot,
                 FolderNamingPattern = "{Author}/{Series}/{Title}",
                 FileNamingPattern = "{Title}",
                 MultiFileNamingPattern = "{Title}-{DiskNumber:00}"
@@ -70,14 +85,14 @@ namespace Listenarr.Api.Tests
                 Id = 1,
                 Title = "The Stand",
                 Authors = new List<string> { "Stephen King" },
-                BasePath = @"C:\Library\Stephen King\The Stand",
+                BasePath = Lib("Stephen King", "The Stand"),
                 Files = new List<AudiobookFile>
                 {
                     new AudiobookFile
                     {
                         Id = 1,
                         AudiobookId = 1,
-                        Path = @"C:\Library\Stephen King\The Stand\The Stand.m4b"
+                        Path = Lib("Stephen King", "The Stand", "The Stand.m4b")
                     }
                 }
             });
@@ -100,14 +115,14 @@ namespace Listenarr.Api.Tests
                 Id = 2,
                 Title = "The Stand",
                 Authors = new List<string> { "Stephen King" },
-                BasePath = @"C:\Library\Wrong Folder\The Stand",
+                BasePath = Lib("Wrong Folder", "The Stand"),
                 Files = new List<AudiobookFile>
                 {
                     new AudiobookFile
                     {
                         Id = 2,
                         AudiobookId = 2,
-                        Path = @"C:\Library\Wrong Folder\The Stand\The Stand.m4b"
+                        Path = Lib("Wrong Folder", "The Stand", "The Stand.m4b")
                     }
                 }
             });
@@ -131,14 +146,14 @@ namespace Listenarr.Api.Tests
                 Id = 3,
                 Title = "The Stand",
                 Authors = new List<string> { "Stephen King" },
-                BasePath = @"C:\Library\Stephen King\The Stand",
+                BasePath = Lib("Stephen King", "The Stand"),
                 Files = new List<AudiobookFile>
                 {
                     new AudiobookFile
                     {
                         Id = 3,
                         AudiobookId = 3,
-                        Path = @"C:\Library\Stephen King\The Stand\wrong-name.m4b"
+                        Path = Lib("Stephen King", "The Stand", "wrong-name.m4b")
                     }
                 }
             });
@@ -164,14 +179,14 @@ namespace Listenarr.Api.Tests
                 Title = "Standalone Novel",
                 Authors = new List<string> { "Jane Author" },
                 Series = null, // No series
-                BasePath = @"C:\Library\Jane Author\Standalone Novel",
+                BasePath = Lib("Jane Author", "Standalone Novel"),
                 Files = new List<AudiobookFile>
                 {
                     new AudiobookFile
                     {
                         Id = 4,
                         AudiobookId = 4,
-                        Path = @"C:\Library\Jane Author\Standalone Novel\Standalone Novel.m4b"
+                        Path = Lib("Jane Author", "Standalone Novel", "Standalone Novel.m4b")
                     }
                 }
             });
@@ -198,7 +213,7 @@ namespace Listenarr.Api.Tests
                 Id = 5,
                 Title = "Empty Book",
                 Authors = new List<string> { "Nobody" },
-                BasePath = @"C:\Library\Nobody\Empty Book",
+                BasePath = Lib("Nobody", "Empty Book"),
                 Files = new List<AudiobookFile>()
             });
             await db.SaveChangesAsync();
@@ -219,12 +234,12 @@ namespace Listenarr.Api.Tests
                 Id = 6,
                 Title = "Long Book",
                 Authors = new List<string> { "Author" },
-                BasePath = @"C:\Library\Author\Long Book",
+                BasePath = Lib("Author", "Long Book"),
                 Files = new List<AudiobookFile>
                 {
-                    new AudiobookFile { Id = 10, AudiobookId = 6, Path = @"C:\Library\Author\Long Book\disc1.m4b" },
-                    new AudiobookFile { Id = 11, AudiobookId = 6, Path = @"C:\Library\Author\Long Book\disc2.m4b" },
-                    new AudiobookFile { Id = 12, AudiobookId = 6, Path = @"C:\Library\Author\Long Book\disc3.m4b" },
+                    new AudiobookFile { Id = 10, AudiobookId = 6, Path = Lib("Author", "Long Book", "disc1.m4b") },
+                    new AudiobookFile { Id = 11, AudiobookId = 6, Path = Lib("Author", "Long Book", "disc2.m4b") },
+                    new AudiobookFile { Id = 12, AudiobookId = 6, Path = Lib("Author", "Long Book", "disc3.m4b") },
                 }
             });
             await db.SaveChangesAsync();
@@ -283,6 +298,97 @@ namespace Listenarr.Api.Tests
 
             Assert.Single(result);
             Assert.False(result[0].HasChanges);
+        }
+
+        [Fact]
+        public async Task ExecuteRename_RejectsMoreThan500Operations()
+        {
+            var (svc, _) = BuildService();
+
+            var operations = Enumerable.Range(1, 501)
+                .Select(i => new RenameOperation { AudiobookId = i })
+                .ToList();
+            await Assert.ThrowsAsync<ArgumentException>(() => svc.ExecuteRenameAsync(operations));
+        }
+
+        [Fact]
+        public async Task ExecuteRename_RejectsFolderMoveOutsideOutputPath()
+        {
+            var (svc, db) = BuildService();
+
+            db.Audiobooks.Add(new Audiobook
+            {
+                Id = 8,
+                Title = "Escape Test",
+                Authors = new List<string> { "Author" },
+                BasePath = Lib("Author", "Escape Test"),
+                Files = new List<AudiobookFile>()
+            });
+            await db.SaveChangesAsync();
+
+            var outsidePath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "SomewhereElse", "Evil"));
+
+            var operations = new List<RenameOperation>
+            {
+                new RenameOperation
+                {
+                    AudiobookId = 8,
+                    NewFolderPath = outsidePath,
+                    FileRenames = new List<FileRenameOperation>()
+                }
+            };
+
+            var results = await svc.ExecuteRenameAsync(operations);
+
+            Assert.Single(results);
+            Assert.False(results[0].Success);
+            Assert.Contains("outside", results[0].Error, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public async Task ExecuteRename_RejectsFileRenameOutsideOutputPath()
+        {
+            var (svc, db) = BuildService();
+
+            var validSource = Lib("Author", "Book", "Book.m4b");
+            var outsideTarget = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "SomewhereElse", "stolen.m4b"));
+
+            db.Audiobooks.Add(new Audiobook
+            {
+                Id = 9,
+                Title = "Book",
+                Authors = new List<string> { "Author" },
+                BasePath = Lib("Author", "Book"),
+                Files = new List<AudiobookFile>
+                {
+                    new AudiobookFile { Id = 20, AudiobookId = 9, Path = validSource }
+                }
+            });
+            await db.SaveChangesAsync();
+
+            var operations = new List<RenameOperation>
+            {
+                new RenameOperation
+                {
+                    AudiobookId = 9,
+                    FileRenames = new List<FileRenameOperation>
+                    {
+                        new FileRenameOperation
+                        {
+                            FileId = 20,
+                            CurrentPath = validSource,
+                            NewPath = outsideTarget
+                        }
+                    }
+                }
+            };
+
+            var results = await svc.ExecuteRenameAsync(operations);
+
+            Assert.Single(results);
+            var fileResult = Assert.Single(results[0].RenamedFiles);
+            Assert.False(fileResult.Success);
+            Assert.Contains("outside", fileResult.Error, StringComparison.OrdinalIgnoreCase);
         }
     }
 }
