@@ -13,7 +13,7 @@ namespace Listenarr.Api.Services
 
     public sealed class AuthorCatalogFetchResult
     {
-        public AuthorLookupItem Author { get; set; } = new();
+        public AuthorLookupItem? Author { get; set; }
 
         public List<AudibleSearchResult> Books { get; set; } = new();
 
