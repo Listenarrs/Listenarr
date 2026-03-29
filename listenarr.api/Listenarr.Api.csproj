@@ -2,8 +2,8 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
-    <Version>0.2.61</Version>
-    <AssemblyVersion>0.2.61</AssemblyVersion>
+    <Version>0.2.62</Version>
+    <AssemblyVersion>0.2.62</AssemblyVersion>
     <DefaultItemExcludes>$(DefaultItemExcludes);bin\**;bin/**;artifacts\**;artifacts/**</DefaultItemExcludes>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
     <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
