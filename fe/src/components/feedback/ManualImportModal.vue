@@ -69,48 +69,22 @@
                 <div class="col col-check">
                   <Checkbox :modelValue="allSelected" @update:modelValue="setAllSelected" />
                 </div>
-                <div class="col col-path">Relative Path</div>
-                <div class="col col-audiobook">Audiobook</div>
-                <div class="col col-release-group">Release Group</div>
-                <div class="col col-quality">Quality</div>
-                <div class="col col-language">Language</div>
-                <div class="col col-size">Size</div>
+                <div v-for="(field, _) in importFields" :class="`col ${ field.class }`">{{ field.label }}</div>
                 <div class="col col-action"></div>
               </div>
 
               <div class="preview-body">
                 <div v-for="(it, idx) in previewItems" :key="idx" class="preview-row">
                   <div class="col col-check"><Checkbox v-model="it.selected" /></div>
-                  <div class="col col-path relative">{{ it.relativePath }}</div>
-                  <div class="col col-audiobook">
-                    <div class="clickable-cell" @click="openCellEditor(it, 'audiobook')">
-                      <span v-if="it.matchedAudiobookId">{{
-                        getLibraryTitle(it.matchedAudiobookId)
+                  <div v-for="(field, _) in importFields" :class="`col ${ field.class }`">
+                    <div v-if="field.editable" class="clickable-cell" @click="openCellEditor(it, field.key)">
+                      <span v-if="field.get(it)">{{
+                        field.display(it)
                       }}</span>
                       <span v-else class="placeholder">&nbsp;</span>
                     </div>
+                    <span v-else>{{ field.display(it) }}</span>
                   </div>
-                  <div class="col col-release-group">
-                    <div class="clickable-cell" @click="openCellEditor(it, 'releaseGroup')">
-                      <span v-if="it.releaseGroup">{{ it.releaseGroup }}</span>
-                      <span v-else class="placeholder">&nbsp;</span>
-                    </div>
-                  </div>
-                  <div class="col col-quality">
-                    <div class="clickable-cell" @click="openCellEditor(it, 'quality')">
-                      <span v-if="it.qualityProfileId">{{
-                        getQualityName(it.qualityProfileId)
-                      }}</span>
-                      <span v-else class="placeholder">&nbsp;</span>
-                    </div>
-                  </div>
-                  <div class="col col-language">
-                    <div class="clickable-cell" @click="openCellEditor(it, 'language')">
-                      <span v-if="it.language">{{ getLanguageName(it.language) }}</span>
-                      <span v-else class="placeholder">&nbsp;</span>
-                    </div>
-                  </div>
-                  <div class="col col-size">{{ it.size || '' }}</div>
                   <div class="col col-action">
                     <div
                       v-if="getItemIssues(it).length > 0"
@@ -140,18 +114,15 @@
         </template>
 
         <template #default>
-          <select 
-            v-if="showPreview" 
+          <select
+            v-if="showPreview"
             v-model="inputField"
             class="extra-select"
-            @change="openCellsEditor(inputField)"
+            @change="openCellsEditor()"
             :disabled="selectedCount === 0 || loading"
           >
             <option value="">Select...</option>
-            <option value="audiobook">Audiobook</option>
-            <option value="releaseGroup">Release Group</option>
-            <option value="quality">Quality</option>
-            <option value="language">Language</option>
+            <option v-for="(field, _) in importFields.filter((field: ImportField) => field.editable)" :value="field.key">{{ field.label }}</option>
           </select>
 
           <select v-if="showPreview" class="extra-select" v-model="inputMode">
@@ -327,8 +298,9 @@ const emit = defineEmits(['close', 'imported'] as const)
 const selectedPath = ref(props.initialPath || '')
 const loading = ref(false)
 const browserMode = ref(false)
-const inputField = ref<'audiobook' | 'releaseGroup' | 'quality' | 'language' | ''>('')
+const inputField = ref<string>('')
 const inputMode = ref<'move' | 'hardlink/copy' | ''>('')
+
 const showPreview = ref(false)
 interface PreviewItem {
   relativePath: string
@@ -345,6 +317,71 @@ interface PreviewItem {
   rejections?: string[]
 }
 const previewItems = ref<PreviewItem[]>([])
+
+interface ImportField {
+  key: string;
+  label: string;
+  class: string;
+  editable: boolean;
+  set: (item: PreviewItem, value: any) => void;
+  get: (item: PreviewItem) => any;
+  display: (item: PreviewItem) => string;
+}
+const importFields = [
+  {
+    key: 'path',
+    label: 'Relative Path',
+    class: 'col-path relative',
+    editable: false,
+    get: (item: PreviewItem) => item.relativePath,
+    display: (item: PreviewItem) => item.relativePath
+  },
+  {
+    key: 'audiobook',
+    label: 'Audiobook',
+    class: 'col-audiobook',
+    editable: true,
+    set: (item: PreviewItem, value: number) => item.matchedAudiobookId = value,
+    get: (item: PreviewItem) => item.matchedAudiobookId,
+    display: (item: PreviewItem) => getLibraryTitle(item.matchedAudiobookId)
+  },
+  {
+    key: 'releaseGroup',
+    label: 'Release Group',
+    class: 'col-release-group',
+    editable: true,
+    set: (item: PreviewItem, value: string) => item.releaseGroup = value,
+    get: (item: PreviewItem) => item.releaseGroup,
+    display: (item: PreviewItem) => item.releaseGroup
+  },
+  {
+    key: 'quality',
+    label: 'Quality',
+    class: 'col-quality',
+    editable: true,
+    set: (item: PreviewItem, value: number) => item.qualityProfileId = value,
+    get: (item: PreviewItem) => item.qualityProfileId,
+    display: (item: PreviewItem) => getQualityName(item.qualityProfileId)
+  },
+  {
+    key: 'language',
+    label: 'Language',
+    class: 'col-language',
+    editable: true,
+    set: (item: PreviewItem, value: string) => item.language = value,
+    get: (item: PreviewItem) => item.language,
+    display: (item: PreviewItem) => getLanguageName(item.language)
+  },
+  {
+    key: 'size',
+    label: 'Size',
+    class: 'col-size',
+    editable: false,
+    get: (item: PreviewItem) => item.size,
+    display: (item: PreviewItem) => item.size
+  }
+] as ImportField[]
+
 // Recent folders stored in sessionStorage
 const RECENT_KEY = 'manualImport.recentFolders'
 const recentFolders = ref<string[]>([])
@@ -469,14 +506,14 @@ const isPathValid = computed(() => {
   return typeof selectedPath.value === 'string' && selectedPath.value.trim().length > 0
 })
 
-const openCellEditor = (item: PreviewItem, field: string) => {
+const openCellEditor = (item: PreviewItem, selectedField: string) => {
   cellEditorItems.value = [item]
-  cellEditorField.value = field
-  // initialize editor value from item
-  if (field === 'audiobook') cellEditorValue.value = item.matchedAudiobookId ?? null
-  else if (field === 'quality') cellEditorValue.value = item.qualityProfileId ?? null
-  else if (field === 'language') cellEditorValue.value = item.language ?? null
-  else if (field === 'releaseGroup') cellEditorValue.value = item.releaseGroup ?? null
+  cellEditorField.value = selectedField
+  importFields.forEach((currentField) => {
+    if (currentField.key == selectedField) {
+      cellEditorValue.value = currentField.get(item) ?? null
+    }
+  })
   showCellEditor.value = true
 }
 
@@ -497,12 +534,12 @@ const closeCellEditor = () => {
 
 const saveCellEditor = () => {
   if (cellEditorItems.value.length <= 0 || !cellEditorField.value) return closeCellEditor()
-  const f = cellEditorField.value
   cellEditorItems.value.forEach((it) => {
-    if (f === 'audiobook') it.matchedAudiobookId = (cellEditorValue.value as number) ?? null
-    else if (f === 'quality') it.qualityProfileId = (cellEditorValue.value as number) ?? null
-    else if (f === 'language') it.language = (cellEditorValue.value as string) ?? null
-    else if (f === 'releaseGroup') it.releaseGroup = (cellEditorValue.value as string) ?? null
+    importFields.forEach((field) => {
+      if (cellEditorField.value === field.key) {
+        field.set(it, cellEditorValue.value ?? null)
+      }
+    })
     it.selected = true
   })
   closeCellEditor()
