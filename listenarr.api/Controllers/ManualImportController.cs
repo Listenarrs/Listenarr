@@ -1,7 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
-using System.Text.RegularExpressions;
 using Listenarr.Api.Services;
-using Listenarr.Domain.Models;
 using System.Text.Json.Serialization;
 using System.ComponentModel.DataAnnotations;
 using Listenarr.Domain.Utils;

@@ -140,6 +140,20 @@
         </template>
 
         <template #default>
+          <select 
+            v-if="showPreview" 
+            v-model="inputField"
+            class="extra-select"
+            @change="openCellsEditor(inputField)"
+            :disabled="selectedCount === 0 || loading"
+          >
+            <option value="">Select...</option>
+            <option value="audiobook">Audiobook</option>
+            <option value="releaseGroup">Release Group</option>
+            <option value="quality">Quality</option>
+            <option value="language">Language</option>
+          </select>
+
           <select v-if="showPreview" class="extra-select" v-model="inputMode">
             <option value="">Select Import Mode</option>
             <option value="move">Move</option>
@@ -313,6 +327,7 @@ const emit = defineEmits(['close', 'imported'] as const)
 const selectedPath = ref(props.initialPath || '')
 const loading = ref(false)
 const browserMode = ref(false)
+const inputField = ref<'audiobook' | 'releaseGroup' | 'quality' | 'language' | ''>('')
 const inputMode = ref<'move' | 'hardlink/copy' | ''>('')
 const showPreview = ref(false)
 interface PreviewItem {
@@ -369,7 +384,7 @@ const matchSelection = ref<number | null>(null)
 
 // Cell editor state: used when clicking table cells to edit audiobook/quality/lang/release-group
 const showCellEditor = ref(false)
-const cellEditorItem = ref<PreviewItem | null>(null)
+const cellEditorItems = ref<PreviewItem[]>([])
 const cellEditorField = ref<string | null>(null)
 const cellEditorValue = ref<number | string | null>(null)
 
@@ -455,7 +470,7 @@ const isPathValid = computed(() => {
 })
 
 const openCellEditor = (item: PreviewItem, field: string) => {
-  cellEditorItem.value = item
+  cellEditorItems.value = [item]
   cellEditorField.value = field
   // initialize editor value from item
   if (field === 'audiobook') cellEditorValue.value = item.matchedAudiobookId ?? null
@@ -465,22 +480,31 @@ const openCellEditor = (item: PreviewItem, field: string) => {
   showCellEditor.value = true
 }
 
+const openCellsEditor = () => {
+  cellEditorItems.value = previewItems.value.filter(item => item.selected === true)
+  cellEditorField.value = inputField.value
+  cellEditorValue.value = null
+  showCellEditor.value = true
+  inputField.value = ''
+}
+
 const closeCellEditor = () => {
   showCellEditor.value = false
-  cellEditorItem.value = null
+  cellEditorItems.value = []
   cellEditorField.value = null
   cellEditorValue.value = null
 }
 
 const saveCellEditor = () => {
-  if (!cellEditorItem.value || !cellEditorField.value) return closeCellEditor()
-  const it = cellEditorItem.value
+  if (cellEditorItems.value.length <= 0 || !cellEditorField.value) return closeCellEditor()
   const f = cellEditorField.value
-  if (f === 'audiobook') it.matchedAudiobookId = (cellEditorValue.value as number) ?? null
-  else if (f === 'quality') it.qualityProfileId = (cellEditorValue.value as number) ?? null
-  else if (f === 'language') it.language = (cellEditorValue.value as string) ?? null
-  else if (f === 'releaseGroup') it.releaseGroup = (cellEditorValue.value as string) ?? null
-  it.selected = true
+  cellEditorItems.value.forEach((it) => {
+    if (f === 'audiobook') it.matchedAudiobookId = (cellEditorValue.value as number) ?? null
+    else if (f === 'quality') it.qualityProfileId = (cellEditorValue.value as number) ?? null
+    else if (f === 'language') it.language = (cellEditorValue.value as string) ?? null
+    else if (f === 'releaseGroup') it.releaseGroup = (cellEditorValue.value as string) ?? null
+    it.selected = true
+  })
   closeCellEditor()
 }
 
