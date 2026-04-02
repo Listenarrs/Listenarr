@@ -110,6 +110,14 @@ namespace Listenarr.Api.Middleware
                             System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
             }
 
+            // Fall back to session cookie for browser-initiated resource requests
+            // (images, stylesheets, etc.) that cannot attach custom headers.
+            var cookieToken = context.Request.Cookies["listenarr_session"];
+            if (!string.IsNullOrEmpty(cookieToken))
+            {
+                return cookieToken;
+            }
+
             return null;
         }
     }

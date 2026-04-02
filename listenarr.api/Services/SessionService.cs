@@ -36,10 +36,13 @@ namespace Listenarr.Api.Services
 
     public class SessionService : ISessionService
     {
+        /// <summary>Default session duration (no "remember me").</summary>
+        public static readonly TimeSpan DefaultExpiration = TimeSpan.FromHours(8);
+        /// <summary>Extended session duration when "remember me" is checked.</summary>
+        public static readonly TimeSpan RememberMeExpiration = TimeSpan.FromDays(30);
+
         private readonly IDbContextFactory<ListenArrDbContext> _dbContextFactory;
         private readonly ILogger<SessionService> _logger;
-        private readonly TimeSpan _defaultExpiration = TimeSpan.FromHours(8);
-        private readonly TimeSpan _rememberMeExpiration = TimeSpan.FromDays(30);
 
         public SessionService(IDbContextFactory<ListenArrDbContext> dbContextFactory, ILogger<SessionService> logger)
         {
@@ -49,7 +52,7 @@ namespace Listenarr.Api.Services
 
         public async Task<string> CreateSessionAsync(string username, bool isAdmin, bool rememberMe = false)
         {
-            var expiration = rememberMe ? _rememberMeExpiration : _defaultExpiration;
+            var expiration = rememberMe ? RememberMeExpiration : DefaultExpiration;
             var now = DateTime.UtcNow;
 
             // Retry token generation on the unlikely chance of a hash collision.

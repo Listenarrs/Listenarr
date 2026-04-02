@@ -110,13 +110,4 @@ namespace Listenarr.Api.Tests
             return string.IsNullOrWhiteSpace(groupName) ? "/api/v1" : $"/api/{groupName}";
         }
     }
-
-    internal class TestStartupConfigService : Listenarr.Api.Services.IStartupConfigService
-    {
-        private readonly StartupConfig _cfg;
-        public TestStartupConfigService(StartupConfig cfg) { _cfg = cfg; }
-        public StartupConfig? GetConfig() => _cfg;
-        public Task ReloadAsync() => Task.CompletedTask;
-        public Task SaveAsync(StartupConfig config) => Task.CompletedTask;
-    }
 }
