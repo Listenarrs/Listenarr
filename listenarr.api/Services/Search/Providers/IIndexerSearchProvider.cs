@@ -16,7 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using Listenarr.Domain.Models;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Api.Services.Search.Providers
 {
@@ -26,10 +26,15 @@ namespace Listenarr.Api.Services.Search.Providers
     /// </summary>
     public interface IIndexerSearchProvider
     {
+        List<Implementation> Implements { get; }
+
         /// <summary>
-        /// Gets the indexer type that this provider handles.
+        /// Check if the given implementation is supported by this provider
         /// </summary>
-        string IndexerType { get; }
+        bool IsImplementing(Implementation type)
+        {
+            return Implements.Contains(type);
+        }
 
         /// <summary>
         /// Performs a search on the specific indexer.

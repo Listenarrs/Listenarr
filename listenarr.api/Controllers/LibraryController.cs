@@ -17,22 +17,14 @@
  */
 
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Http;
-using System.Threading.Tasks;
 using Microsoft.AspNetCore.SignalR;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Caching.Memory;
-using Listenarr.Domain.Models;
 using Listenarr.Infrastructure.Models;
 using Listenarr.Api.Models;
 using Listenarr.Api.Services;
 using Microsoft.EntityFrameworkCore;
-using System.Collections.Generic;
-using System.Linq;
-using System;
 using System.Text.Json;
 using System.Reflection;
-using System.IO;
 using System.Text.RegularExpressions;
 using System.Security.Cryptography;
 using System.Text;
@@ -3485,7 +3477,7 @@ namespace Listenarr.Api.Controllers
                     sizeMB = r.Size > 0 ? (r.Size / 1024 / 1024) : -1,
                     seeders = r.Seeders,
                     format = r.Format,
-                    downloadType = r.DownloadType
+                    protocol = r.Protocol
                 }).ToList();
 
                 using var scope = _scopeFactory.CreateScope();
@@ -3542,17 +3534,26 @@ namespace Listenarr.Api.Controllers
             var downloadsQueued = 0;
             try
             {
-                // Determine appropriate download client for this result
-                var isTorrent = IsTorrentResult(topResult.SearchResult);
-                var downloadClientId = await GetAppropriateDownloadClientAsync(topResult.SearchResult, isTorrent);
+                using var scope = _scopeFactory.CreateScope();
+                var configurationService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
 
-                if (string.IsNullOrEmpty(downloadClientId))
+                // Determine appropriate download client for this result
+                var downloadClients = await configurationService.GetDownloadClientConfigurationsAsync(topResult.SearchResult.Protocol, true);
+                if (downloadClients.Count() == 0)
                 {
-                    _logger.LogWarning("No suitable download client found for result type: {Type}", isTorrent ? "torrent" : "NZB");
+                    _logger.LogWarning("No suitable download client found for result protocol: {Protocol}", topResult.SearchResult.Protocol);
                     return 0;
                 }
 
-                await downloadService.StartDownloadAsync(topResult.SearchResult, downloadClientId, audiobook.Id);
+                // TODO: Prioritize the selected client ?
+                var downloadClient = downloadClients[0];
+
+                var downloadId = await downloadService.StartDownloadAsync(topResult.SearchResult, downloadClient.Id, audiobook.Id);
+                if (downloadId == null)
+                {
+                    throw new Exception("StartDownloadAsync returned null");
+                }
+                
                 downloadsQueued++;
 
                 _logger.LogInformation("Queued download for audiobook '{Title}': {ResultTitle} (Score: {Score})",
@@ -3734,103 +3735,7 @@ namespace Listenarr.Api.Controllers
 
             return string.Join(" ", parts);
         }
-
-        private bool IsTorrentResult(SearchResult result)
-        {
-            // Check DownloadType first if it's set
-            if (!string.IsNullOrEmpty(result.DownloadType))
-            {
-                if (result.DownloadType == "DDL")
-                {
-                    return false; // DDL is not a torrent
-                }
-                else if (result.DownloadType == "Torrent")
-                {
-                    return true;
-                }
-                else if (result.DownloadType == "Usenet")
-                {
-                    return false;
-                }
-            }
-
-            // Fallback to legacy detection logic
-            // Check for NZB first - if it has an NZB URL, it's a Usenet/NZB download
-            if (!string.IsNullOrEmpty(result.NzbUrl))
-            {
-                return false;
-            }
-
-            // Check for torrent indicators - magnet link or torrent file
-            if (!string.IsNullOrEmpty(result.MagnetLink) || !string.IsNullOrEmpty(result.TorrentUrl))
-            {
-                return true;
-            }
-
-            // If neither is set, we can't reliably determine the type
-            // Log a warning and default to false (NZB) as a safer choice
-            _logger.LogWarning("Unable to determine result type for '{Title}' from source '{Source}'. No MagnetLink, TorrentUrl, or NzbUrl found. Defaulting to NZB.",
-                result.Title, result.Source);
-            return false;
-        }
-
-        private async Task<string> GetAppropriateDownloadClientAsync(SearchResult searchResult, bool isTorrent)
-        {
-            using var scope = _scopeFactory.CreateScope();
-            var configurationService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
-
-            // Special handling for DDL downloads - they don't use external clients
-            if (searchResult.DownloadType?.Equals("DDL", StringComparison.OrdinalIgnoreCase) == true)
-            {
-                _logger.LogInformation("DDL download detected, using internal DDL client");
-                return "DDL";
-            }
-
-            // Get all configured download clients
-            var clients = await configurationService.GetDownloadClientConfigurationsAsync();
-            var enabledClients = clients.Where(c => c.IsEnabled).ToList();
-
-            _logger.LogInformation("Looking for {ClientType} client. Found {Count} enabled download clients: {Clients}",
-                isTorrent ? "torrent" : "NZB",
-                enabledClients.Count,
-                string.Join(", ", enabledClients.Select(c => $"{c.Name} ({c.Type})")));
-
-            if (isTorrent)
-            {
-                // Prefer qBittorrent, then Transmission
-                var client = enabledClients.FirstOrDefault(c => c.Type.Equals("qbittorrent", StringComparison.OrdinalIgnoreCase))
-                          ?? enabledClients.FirstOrDefault(c => c.Type.Equals("transmission", StringComparison.OrdinalIgnoreCase));
-
-                if (client != null)
-                {
-                    _logger.LogInformation("Selected torrent client: {ClientName} ({ClientType})", client.Name, client.Type);
-                }
-                else
-                {
-                    _logger.LogWarning("No torrent client (qBittorrent or Transmission) found among enabled clients");
-                }
-
-                return client?.Id ?? string.Empty;
-            }
-            else
-            {
-                // Prefer SABnzbd, then NZBGet
-                var client = enabledClients.FirstOrDefault(c => c.Type.Equals("sabnzbd", StringComparison.OrdinalIgnoreCase))
-                          ?? enabledClients.FirstOrDefault(c => c.Type.Equals("nzbget", StringComparison.OrdinalIgnoreCase));
-
-                if (client != null)
-                {
-                    _logger.LogInformation("Selected NZB client: {ClientName} ({ClientType})", client.Name, client.Type);
-                }
-                else
-                {
-                    _logger.LogWarning("No NZB client (SABnzbd or NZBGet) found among enabled clients");
-                }
-
-                return client?.Id ?? string.Empty;
-            }
-        }
-
+        
         // Helper to convert incoming update values (possibly JsonElement or boxed types) to the target property type
         private static object? ConvertUpdateValue(object? value, Type targetType)
         {

@@ -73,7 +73,7 @@ namespace Listenarr.Api.Controllers
             {
                 _logger.LogInformation("=== SendToDownloadClient RECEIVED REQUEST ===");
                 _logger.LogInformation("Title: {Title}", LogRedaction.SanitizeText(request.SearchResult?.Title));
-                _logger.LogInformation("DownloadType: '{DownloadType}'", LogRedaction.SanitizeText(request.SearchResult?.DownloadType));
+                _logger.LogInformation("DownloadType: '{DownloadType}'", LogRedaction.SanitizeText(request.SearchResult?.Protocol.ToString()));
                 _logger.LogInformation("TorrentUrl: {TorrentUrl}", LogRedaction.SanitizeUrl(request.SearchResult?.TorrentUrl));
                 _logger.LogInformation("NzbUrl: {NzbUrl}", LogRedaction.SanitizeUrl(request.SearchResult?.NzbUrl));
                 _logger.LogInformation("MagnetLink: {MagnetLink}", LogRedaction.SanitizeUrl(request.SearchResult?.MagnetLink));
@@ -93,7 +93,7 @@ namespace Listenarr.Api.Controllers
 
                 if (string.IsNullOrEmpty(downloadId))
                 {
-                    return Conflict(new { message = "A download for this audiobook is already active" });
+                    return Conflict(new { message = "Unable to download this audiobook: Maybe another download for this audiobook is already active ?" });
                 }
 
                 return Ok(new { downloadId, message = "Sent to download client successfully" });

@@ -21,12 +21,9 @@ using Listenarr.Api.Services;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
-using System.Linq;
-using System.Collections.Generic;
-using Listenarr.Domain.Models;
 using Listenarr.Api.Models;
 using Listenarr.Infrastructure.Models;
+using Listenarr.Infrastructure.Persistence.Converters;
 
 namespace Listenarr.Api.Controllers
 {
@@ -121,19 +118,13 @@ namespace Listenarr.Api.Controllers
 
         private async Task<IActionResult> ExecuteIndexerTestAsync(Indexer indexer, bool persist)
         {
-            // Normalize URL first
-            indexer.Url = NormalizeIndexerUrl(indexer.Url);
-
-            var impl = (indexer.Implementation ?? string.Empty).Trim().ToLowerInvariant();
-
             try
             {
-                _logger.LogInformation("[IndexerTest] Testing indexer {Name} (impl={Impl}, url={Url})", LogRedaction.SanitizeText(indexer.Name), LogRedaction.SanitizeText(indexer.Implementation), LogRedaction.SanitizeUrl(indexer.Url));
-                return impl switch
+                _logger.LogInformation("[IndexerTest] Testing indexer {Name} (impl={Impl}, url={Url})", LogRedaction.SanitizeText(indexer.Name), LogRedaction.SanitizeText(indexer.Implementation.ToString()), LogRedaction.SanitizeUrl(indexer.BaseUrl()));
+                return indexer.Implementation switch
                 {
-                    var s when s == "internetarchive" || s == "internet archive" => await TestInternetArchive(indexer, persist),
-                    var s when s == "myanonamouse" => await TestMyAnonamouse(indexer, persist),
-                    // For Newznab/Torznab/Custom fall back to a generic connectivity check
+                    var s when s == Implementation.InternetArchive => await TestInternetArchive(indexer, persist),
+                    var s when s == Implementation.MyAnonamouse => await TestMyAnonamouse(indexer, persist),
                     _ => await TestGenericIndexer(indexer, persist)
                 };
             }
@@ -186,15 +177,16 @@ namespace Listenarr.Api.Controllers
             // Minimal connectivity check: attempt to hit base URL or indexer 'api' endpoint
             try
             {
-                var target = indexer.Url?.TrimEnd('/') ?? string.Empty;
-                // Prefer /api endpoint if present, otherwise base URL
-                var testUrl = target.EndsWith("/api", StringComparison.OrdinalIgnoreCase) ? target : target + "/api";
+                var testUrl = indexer.BaseUrl();
+
+                if (Implementation.Slskd == indexer.Implementation)
+                {
+                    testUrl = testUrl + "/v0/application/version";
+                }
 
                 // If this is a Newznab/Torznab style indexer, append the apikey query parameter and add capabilities query to test auth
-                var implName = (indexer.Implementation ?? string.Empty).Trim().ToLowerInvariant();
-                var isNewznabStyle = implName == "newznab" || implName == "torznab";
-                
-                if (isNewznabStyle)
+                var isNewznabStyle = Implementation.Torznab == indexer.Implementation || Implementation.Newznab == indexer.Implementation;
+                if (Implementation.Torznab == indexer.Implementation || Implementation.Newznab == indexer.Implementation)
                 {
                     // Newznab/Torznab indexers REQUIRE an API key for authentication
                     if (string.IsNullOrWhiteSpace(indexer.ApiKey))
@@ -382,8 +374,8 @@ namespace Listenarr.Api.Controllers
             _dbContext.Indexers.Add(indexer);
             await _dbContext.SaveChangesAsync();
 
-            _logger.LogInformation("Created indexer '{Name}' (ID: {Id}, Type: {Type})",
-                indexer.Name, indexer.Id, indexer.Type);
+            _logger.LogInformation("Created indexer '{Name}' (ID: {Id}, Protocol: {Protocol})",
+                indexer.Name, indexer.Id, indexer.Protocol);
 
             return CreatedAtAction(nameof(GetById), new { id = indexer.Id }, RedactIndexerForCaller(indexer));
         }
@@ -526,14 +518,14 @@ namespace Listenarr.Api.Controllers
                     ? protocolProp.GetString() ?? string.Empty
                     : string.Empty;
 
-                var implementation = protocol.Equals("usenet", StringComparison.OrdinalIgnoreCase) ? "Newznab" : "Torznab";
+                var implementation = protocol.Equals("usenet", StringComparison.OrdinalIgnoreCase) ? Implementation.Newznab : Implementation.Torznab;
 
                 var proxyUrl = BuildProwlarrProxyUrl(baseUrl, indexerId);
                 var normalizedUrl = NormalizeProwlarrProxyUrl(proxyUrl);
 
                 var exists = existingIndexers.FirstOrDefault(i =>
                     NormalizeProwlarrProxyUrl(i.Url) == normalizedUrl &&
-                    string.Equals(i.Implementation, implementation, StringComparison.OrdinalIgnoreCase) &&
+                    i.Implementation == implementation &&
                     string.Equals(i.ApiKey ?? string.Empty, effectiveApiKey ?? string.Empty, StringComparison.Ordinal));
 
                 if (exists != null)
@@ -542,7 +534,6 @@ namespace Listenarr.Api.Controllers
                     continue;
                 }
 
-                var type = protocol.Equals("usenet", StringComparison.OrdinalIgnoreCase) ? "Usenet" : "Torrent";
                 var categories = string.Join(',', categoryIds.Where(c => c == 3000 || c == 3030).OrderBy(c => c));
 
                 var isEnabled = true;
@@ -558,7 +549,7 @@ namespace Listenarr.Api.Controllers
                 var indexer = new Indexer
                 {
                     Name = name,
-                    Type = type,
+                    Protocol = DownloadProtocolConverter.ConvertStringToDownloadProtocol(protocol),
                     Implementation = implementation,
                     Url = normalizedUrl,
                     ApiKey = string.IsNullOrWhiteSpace(effectiveApiKey) ? null : effectiveApiKey.Trim(),
@@ -605,7 +596,7 @@ namespace Listenarr.Api.Controllers
 
             // Update properties
             existing.Name = indexer.Name;
-            existing.Type = indexer.Type;
+            existing.Protocol = indexer.Protocol;
             existing.Implementation = indexer.Implementation;
             existing.Url = indexer.Url;
             existing.ApiKey = indexer.ApiKey == ApiResponseRedactor.RedactedValue ? existing.ApiKey : indexer.ApiKey;
@@ -1156,39 +1147,6 @@ namespace Listenarr.Api.Controllers
                 .ToListAsync();
 
             return Ok(RedactIndexersForCaller(indexers));
-        }
-
-        /// <summary>
-        /// Normalize indexer URL by removing duplicate or trailing '/api' segments and ensuring a scheme
-        /// </summary>
-        private string NormalizeIndexerUrl(string? rawUrl)
-        {
-            if (string.IsNullOrWhiteSpace(rawUrl)) return rawUrl ?? string.Empty;
-
-            var url = rawUrl.Trim();
-
-            // Add scheme if missing (assume https)
-            if (!url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-            {
-                url = "https://" + url;
-            }
-
-            // Remove repeated '/api/api' or trailing '/api'
-            // Normalize multiple slashes
-            while (url.Contains("/api/api", StringComparison.OrdinalIgnoreCase))
-            {
-                url = url.Replace("/api/api", "/api", StringComparison.OrdinalIgnoreCase);
-            }
-
-            // Preserve /api for Prowlarr proxy URLs (/{id}/api or /api/v{version}/indexer/{id}/api)
-            var prowlarrProxyPattern = @"/((api/v\d+(?:\.\d+)?/indexer/\d+)|\d+)/api$";
-            if (url.EndsWith("/api", StringComparison.OrdinalIgnoreCase) &&
-                !Regex.IsMatch(url, prowlarrProxyPattern, RegexOptions.IgnoreCase))
-            {
-                url = url.Substring(0, url.Length - 4);
-            }
-
-            return url.TrimEnd('/');
         }
 
         private string BuildProwlarrBaseUrl(string rawUrl, int? port)

@@ -5,6 +5,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="Converters\**\*.cs" />
     <Compile Include="Models\**\*.cs" />
     <Compile Include="Utils\**\*.cs" />
   </ItemGroup>

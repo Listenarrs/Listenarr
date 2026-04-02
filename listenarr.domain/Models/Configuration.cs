@@ -70,6 +70,21 @@ namespace Listenarr.Domain.Models
                 : JsonSerializer.Deserialize<Dictionary<string, object>>(SettingsJson) ?? new Dictionary<string, object>();
             set => SettingsJson = JsonSerializer.Serialize(value);
         }
+
+        public string? GetApiKey()
+        {
+            if (Settings != null && Settings.TryGetValue("apiKey", out var apiKeyObj))
+            {
+                return apiKeyObj?.ToString() ?? "";
+            }
+            
+            return null;
+        }
+
+        override public string ToString()
+        {
+            return $"{Name} ({Type})";
+        }
     }
 
     public class WebhookConfiguration

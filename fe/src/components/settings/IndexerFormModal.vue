@@ -24,7 +24,7 @@
                 <option value="Torznab">Torznab</option>
                 <option value="MyAnonamouse">MyAnonamouse</option>
                 <option value="InternetArchive">Internet Archive</option>
-                <option value="Custom">Custom</option>
+                <option value="Slskd">Slskd</option>
               </select>
             </FormRow>
 
@@ -144,7 +144,7 @@
               <PasswordInput id="apiKey" v-model="formData.apiKey" autocomplete="off" placeholder="Your API key" class="admin-input" />
             </FormRow>
 
-            <FormRow v-if="formData.implementation !== 'InternetArchive'" label="Categories" labelFor="categories" help="Leave empty to search all categories">
+            <FormRow v-if="formData.implementation !== 'InternetArchive' && formData.implementation !== 'Slskd'" label="Categories" labelFor="categories" help="Leave empty to search all categories">
               <input
                 id="categories"
                 v-model="formData.categories"
@@ -156,7 +156,7 @@
 
           <!-- Features -->
           <FormSection title="Features" :icon="PhGear">
-            <CheckboxCard v-if="formData.implementation !== 'InternetArchive'" v-model="formData.enableRss" title="Enable RSS" description="Use RSS feeds to monitor for new releases" />
+            <CheckboxCard v-if="formData.implementation !== 'InternetArchive' && formData.implementation !== 'Slskd'" v-model="formData.enableRss" title="Enable RSS" description="Use RSS feeds to monitor for new releases" />
 
             <CheckboxCard v-model="formData.enableAutomaticSearch" title="Enable Automatic Search" description="Use this indexer for automatic searches" />
 
@@ -215,6 +215,7 @@ import CheckboxCard from '@/components/settings/CheckboxCard.vue'
 import FormSection from '@/components/settings/FormSection.vue'
 import { PhGlobe, PhGear, PhToggleRight, PhInfo } from '@phosphor-icons/vue' 
 import type { Indexer } from '@/types' 
+import { DownloadProtocol } from "@/types/DownloadProtocolConfig"
 import {
   createIndexer,
   updateIndexer,
@@ -256,7 +257,7 @@ const iaCollection = ref('librivoxaudio')
 
 const defaultFormData = {
   name: '',
-  type: 'Torrent',
+  protocol: DownloadProtocol.Torrent,
   implementation: 'Torznab',
   url: '',
   apiKey: '',
@@ -304,6 +305,11 @@ const buildIndexerPayload = (): IndexerPayload => {
     payload.enableRss = false
     payload.minimumAge = 0
   }
+  
+  if (payload.protocol == DownloadProtocol.Soulseek) {
+    payload.categories = ''
+    payload.enableRss = false
+  }
 
   return payload
 }
@@ -315,7 +321,7 @@ watch(
     if (newIndexer) {
       formData.value = {
         name: newIndexer.name,
-        type: newIndexer.type,
+        protocol: newIndexer.protocol,
         implementation: newIndexer.implementation,
         url: newIndexer.url,
         apiKey: newIndexer.apiKey || '',
@@ -390,24 +396,22 @@ watch(
 // Watch for implementation changes to auto-set type
 watch(
   () => formData.value.implementation,
-  (newImplementation) => {
-    // Internet Archive is DDL only, set type to Usenet
-    if (newImplementation === 'InternetArchive') {
-      formData.value.type = 'Usenet'
-    }
-    // MyAnonamouse is torrent only
-    else if (newImplementation === 'MyAnonamouse') {
-      formData.value.type = 'Torrent'
-      // Set default URL for MyAnonamouse
-      formData.value.url = 'https://www.myanonamouse.net'
-    }
-    // Torznab defaults to Torrent
-    else if (newImplementation === 'Torznab') {
-      formData.value.type = 'Torrent'
-    }
-    // Newznab defaults to Usenet
-    else if (newImplementation === 'Newznab') {
-      formData.value.type = 'Usenet'
+  (implementation) => {
+    switch(implementation) {
+      case 'InternetArchive':
+      case 'Newznab':
+        formData.value.protocol = DownloadProtocol.Usenet
+        break;
+      case 'Slskd':
+        formData.value.protocol = DownloadProtocol.Soulseek
+        break;
+      case 'MyAnonamouse':
+        formData.value.url = 'https://www.myanonamouse.net'
+        // No break here so we fall through next case and protocol gets set too
+      case 'Torznab':
+      default:
+        formData.value.protocol = DownloadProtocol.Torrent
+        break;
     }
   },
 )

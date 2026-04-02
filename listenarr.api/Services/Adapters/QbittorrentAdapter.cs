@@ -9,30 +9,72 @@ using System.Threading;
 using System.Threading.Tasks;
 using Listenarr.Api.Services;
 using Listenarr.Domain.Models;
+using Listenarr.Infrastructure.Models;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Polly;
+using Polly.Extensions.Http;
+using Serilog;
 
 namespace Listenarr.Api.Services.Adapters
 {
     /// <summary>
     /// qBittorrent protocol implementation.
     /// </summary>
-    public class QbittorrentAdapter : IDownloadClientAdapter
+    public class QbittorrentAdapter : DownloadClientAdapter, IDownloadClientAdapter
     {
-        public string ClientId => "qbittorrent";
-        public string ClientType => "qbittorrent";
-        public DownloadProtocol Protocol => DownloadProtocol.Torrent;
+        private const string CLIENT_TYPE = "qbittorrent";
+        public string ClientType => CLIENT_TYPE;
+        public List<DownloadProtocol> Protocols => [DownloadProtocol.Torrent];
 
-        private readonly IHttpClientFactory _httpFactory;
-        private readonly ILogger<QbittorrentAdapter> _logger;
         private readonly IRemotePathMappingService _pathMappingService;
         private readonly ITorrentFileDownloader _torrentFileDownloader;
 
-        public QbittorrentAdapter(IHttpClientFactory httpFactory, IRemotePathMappingService pathMappingService, ITorrentFileDownloader torrentFileDownloader, ILogger<QbittorrentAdapter> logger)
+        public QbittorrentAdapter(
+            IDbContextFactory<ListenArrDbContext> dbFactory,
+            HttpClient httpClient,
+            IRemotePathMappingService pathMappingService, 
+            ITorrentFileDownloader torrentFileDownloader, 
+            ILogger<QbittorrentAdapter> logger) : base(dbFactory, httpClient, logger)
         {
-            _httpFactory = httpFactory ?? throw new ArgumentNullException(nameof(httpFactory));
             _pathMappingService = pathMappingService ?? throw new ArgumentNullException(nameof(pathMappingService));
             _torrentFileDownloader = torrentFileDownloader ?? throw new ArgumentNullException(nameof(torrentFileDownloader));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        }
+
+        public static void AddToServices(IServiceCollection services)
+        {
+            services.AddScoped<IDownloadClientAdapter, QbittorrentAdapter>();
+            services.AddHttpClient(CLIENT_TYPE)
+                .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler()
+                {
+                    AutomaticDecompression = System.Net.DecompressionMethods.All,
+                    UseCookies = false
+                })
+                .SetHandlerLifetime(TimeSpan.FromMinutes(5))
+                .AddPolicyHandler(HttpPolicyExtensions
+                    .HandleTransientHttpError()
+                    .CircuitBreakerAsync(
+                        handledEventsAllowedBeforeBreaking: 3,
+                        durationOfBreak: TimeSpan.FromSeconds(30),
+                        onBreak: (outcome, duration) =>
+                        {
+                            Log.Logger.Warning("[CIRCUIT BREAKER] qbittorrent client circuit opened due to {Reason}. Breaking for {Seconds}s", outcome.Exception?.Message ?? "policy trigger", duration.TotalSeconds);
+                        },
+                        onReset: () =>
+                        {
+                            Log.Logger.Information("[CIRCUIT BREAKER] qbittorrent client circuit reset - service recovered");
+                        }
+                    ))
+                .AddPolicyHandler(HttpPolicyExtensions
+                    .HandleTransientHttpError()
+                    .WaitAndRetryAsync(
+                        retryCount: 3,
+                        sleepDurationProvider: retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)),
+                        onRetry: (outcome, timespan, retryAttempt, context) =>
+                        {
+                            Log.Logger.Information("[RETRY] qbittorrent client retry attempt {Attempt} after {Delay}s delay", retryAttempt, timespan.TotalSeconds);
+                        }
+                    ));
         }
 
         public async Task<(bool Success, string Message)> TestConnectionAsync(DownloadClientConfiguration client, CancellationToken ct = default)
@@ -48,7 +90,7 @@ namespace Listenarr.Api.Services.Adapters
                     bool disposeHttp = false;
                     try
                     {
-                        http = _httpFactory?.CreateClient(client.Id ?? "qbittorrent");
+                        http = _httpClient;
                         if (http == null)
                         {
                             var cookieJar = new CookieContainer();
@@ -219,7 +261,7 @@ namespace Listenarr.Api.Services.Adapters
             }
         }
 
-        public async Task<string?> AddAsync(DownloadClientConfiguration client, SearchResult result, CancellationToken ct = default)
+        public async Task<Download?> AddAsync(DownloadClientConfiguration client, IndexerSearchResult result, CancellationToken ct = default)
         {
             ArgumentNullException.ThrowIfNull(client);
             ArgumentNullException.ThrowIfNull(result);
@@ -460,10 +502,16 @@ namespace Listenarr.Api.Services.Adapters
                     }
                 }
 
+                var download = new Download(result, client);
                 if (string.IsNullOrEmpty(detectedHash))
                     _logger.LogWarning("Unable to determine torrent hash after adding to qBittorrent for client {ClientId}", LogRedaction.SanitizeText(client.Id));
+                else
+                {
+                    download.SetClientDownloadId(detectedHash);
+                    download.Metadata["TorrentHash"] = detectedHash;
+                }
 
-                return detectedHash;
+                return download;
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "qBittorrent AddAsync failed for client {ClientId}", LogRedaction.SanitizeText(client.Id));
@@ -575,10 +623,9 @@ namespace Listenarr.Api.Services.Adapters
             }
         }
 
-        public async Task<bool> RemoveAsync(DownloadClientConfiguration client, string id, bool deleteFiles = false, CancellationToken ct = default)
+        public async Task<bool> RemoveAsync(DownloadClientConfiguration client, Download download, bool deleteFiles = false, CancellationToken ct = default)
         {
             ArgumentNullException.ThrowIfNull(client);
-            if (string.IsNullOrEmpty(id)) throw new ArgumentNullException(nameof(id));
 
             var baseUrl = DownloadClientUriBuilder.BuildAuthority(client);
 
@@ -618,7 +665,7 @@ namespace Listenarr.Api.Services.Adapters
 
                 using var deleteData = new FormUrlEncodedContent(new[]
                 {
-                    new KeyValuePair<string, string>("hashes", id),
+                    new KeyValuePair<string, string>("hashes", download.Id),
                     new KeyValuePair<string, string>("deleteFiles", deleteFiles ? "true" : "false")
                 });
 
@@ -630,11 +677,11 @@ namespace Listenarr.Api.Services.Adapters
                     return false;
                 }
 
-                _logger.LogInformation("Removed torrent {Id} from qBittorrent (deleteFiles={DeleteFiles})", LogRedaction.SanitizeText(id), deleteFiles);
+                _logger.LogInformation("Removed torrent {Id} from qBittorrent (deleteFiles={DeleteFiles})", LogRedaction.SanitizeText(download.Id), deleteFiles);
                 return true;
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
-                _logger.LogError(ex, "Error removing torrent from qBittorrent: {Id}", LogRedaction.SanitizeText(id));
+                _logger.LogError(ex, "Error removing torrent from qBittorrent: {Id}", LogRedaction.SanitizeText(download.Id));
                 return false;
             }
         }
@@ -1385,6 +1432,14 @@ namespace Listenarr.Api.Services.Adapters
             return allShareTopLevel
                 ? CombineWithOptionalBase(savePath, topLevel)
                 : savePath;
+        }
+
+        public async Task<List<Download>> PollAsync(DownloadMonitorService service, DownloadClientConfiguration client, List<Download> downloads, ApplicationSettings appSettings, CancellationToken ct = default)
+        {
+            using var db = _dbFactory.CreateDbContext();
+            await service.PollQBittorrentAsync(client, downloads, db, appSettings, ct);
+
+            return [];
         }
 
     }

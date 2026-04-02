@@ -225,10 +225,11 @@ namespace Listenarr.Api.Extensions
             services.AddScoped<ITorrentFileDownloader, Listenarr.Api.Services.Adapters.TorrentFileDownloader>();
 
             // Register available adapter implementations. Keep adapters scoped because they may depend on scoped services.
-            services.AddScoped<IDownloadClientAdapter, Listenarr.Api.Services.Adapters.QbittorrentAdapter>();
-            services.AddScoped<IDownloadClientAdapter, Listenarr.Api.Services.Adapters.TransmissionAdapter>();
-            services.AddScoped<IDownloadClientAdapter, Listenarr.Api.Services.Adapters.SabnzbdAdapter>();
-            services.AddScoped<IDownloadClientAdapter, Listenarr.Api.Services.Adapters.NzbgetAdapter>();
+            NzbgetAdapter.AddToServices(services);
+            QbittorrentAdapter.AddToServices(services);
+            SabnzbdAdapter.AddToServices(services);
+            SlskdAdapter.AddToServices(services);
+            TransmissionAdapter.AddToServices(services);
 
             // Register the concrete factory as scoped so it can safely resolve scoped adapters via DI.
             services.AddScoped<IDownloadClientAdapterFactory, Listenarr.Api.Services.Adapters.DownloadClientAdapterFactory>();

@@ -99,7 +99,8 @@ namespace Listenarr.Api.Tests
                 Grabs = 50,
                 Quality = null,
                 Size = 800 * 1024 * 1024,
-                PublishedDate = DateTime.UtcNow.AddDays(-2).ToString("o")
+                PublishedDate = DateTime.UtcNow.AddDays(-2).ToString("o"),
+                Protocol = DownloadProtocol.Usenet
             };
 
             var torrentLowSeed = new SearchResult
@@ -108,7 +109,8 @@ namespace Listenarr.Api.Tests
                 Seeders = 1,
                 Quality = null, // missing quality
                 Size = 20 * 1024 * 1024, // small suspicious size
-                PublishedDate = DateTime.UtcNow.AddYears(-2).ToString("o") // old
+                PublishedDate = DateTime.UtcNow.AddYears(-2).ToString("o"), // old
+                Protocol = DownloadProtocol.Torrent
             };
 
             var usenetScore = service.CalculateProwlarrStyleScore(usenet);

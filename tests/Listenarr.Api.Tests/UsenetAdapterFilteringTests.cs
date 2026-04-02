@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Listenarr.Api.Services;
 using Listenarr.Api.Services.Adapters;
 using Listenarr.Domain.Models;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -108,7 +109,8 @@ namespace Listenarr.Api.Tests
 
             using var httpClient = new HttpClient(handler);
             var adapter = new SabnzbdAdapter(
-                new TestHttpClientFactory(httpClient),
+                new Mock<IDbContextFactory<ListenArrDbContext>>().Object,
+                httpClient,
                 pathMapMock.Object,
                 Mock.Of<INzbUrlResolver>(),
                 NullLogger<SabnzbdAdapter>.Instance);
@@ -165,7 +167,8 @@ namespace Listenarr.Api.Tests
 
             using var httpClient = new HttpClient(handler);
             var adapter = new NzbgetAdapter(
-                new TestHttpClientFactory(httpClient),
+                new Mock<IDbContextFactory<ListenArrDbContext>>().Object,
+                httpClient,
                 Mock.Of<INzbUrlResolver>(),
                 pathMapMock.Object,
                 NullLogger<NzbgetAdapter>.Instance);

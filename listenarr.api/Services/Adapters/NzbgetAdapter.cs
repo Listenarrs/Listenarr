@@ -14,32 +14,54 @@ using Listenarr.Domain.Models;
 using Microsoft.Extensions.Logging;
 using System.IO;
 using System.Xml.Linq;
+using Polly.Extensions.Http;
+using Polly;
+using Microsoft.EntityFrameworkCore;
+using Listenarr.Infrastructure.Models;
 
 namespace Listenarr.Api.Services.Adapters
 {
-    public class NzbgetAdapter : IDownloadClientAdapter
+    public class NzbgetAdapter : DownloadClientAdapter, IDownloadClientAdapter
     {
-        public string ClientId => "nzbget";
-        public string ClientType => "nzbget";
-        public DownloadProtocol Protocol => DownloadProtocol.Usenet;
+        private const string CLIENT_TYPE = "nzbget";
+        public string ClientType => CLIENT_TYPE;
+        public List<DownloadProtocol> Protocols => [DownloadProtocol.Usenet];
 
         private static readonly HashSet<char> InvalidFileNameChars = new(Path.GetInvalidFileNameChars());
 
-        private readonly IHttpClientFactory _httpClientFactory;
         private readonly INzbUrlResolver _nzbUrlResolver;
         private readonly IRemotePathMappingService _pathMappingService;
-        private readonly ILogger<NzbgetAdapter> _logger;
 
         public NzbgetAdapter(
-            IHttpClientFactory httpClientFactory,
+            IDbContextFactory<ListenArrDbContext> dbFactory,
+            HttpClient httpClient,
             INzbUrlResolver nzbUrlResolver,
             IRemotePathMappingService pathMappingService,
-            ILogger<NzbgetAdapter> logger)
+            ILogger<NzbgetAdapter> logger) : base(dbFactory, httpClient, logger)
         {
-            _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
             _nzbUrlResolver = nzbUrlResolver ?? throw new ArgumentNullException(nameof(nzbUrlResolver));
             _pathMappingService = pathMappingService ?? throw new ArgumentNullException(nameof(pathMappingService));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        }
+
+        public static void AddToServices(IServiceCollection services)
+        {
+            services.AddScoped<IDownloadClientAdapter, NzbgetAdapter>();
+            services.AddHttpClient(CLIENT_TYPE)
+                .ConfigureHttpClient(client =>
+                {
+                    client.Timeout = TimeSpan.FromSeconds(30);
+                })
+                .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler()
+                {
+                    AutomaticDecompression = System.Net.DecompressionMethods.All,
+                    UseCookies = false
+                })
+                .SetHandlerLifetime(TimeSpan.FromMinutes(5))
+                .AddPolicyHandler(HttpPolicyExtensions
+                    .HandleTransientHttpError()
+                    .CircuitBreakerAsync(3, TimeSpan.FromSeconds(30)))
+                .AddPolicyHandler(HttpPolicyExtensions.HandleTransientHttpError()
+                    .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
         }
 
         public async Task<(bool Success, string Message)> TestConnectionAsync(DownloadClientConfiguration client, CancellationToken ct = default)
@@ -102,7 +124,7 @@ namespace Listenarr.Api.Services.Adapters
             return false;
         }
 
-        public async Task<string?> AddAsync(DownloadClientConfiguration client, SearchResult result, CancellationToken ct = default)
+        public async Task<Download?> AddAsync(DownloadClientConfiguration client, IndexerSearchResult result, CancellationToken ct = default)
         {
             if (client == null) throw new ArgumentNullException(nameof(client));
             if (result == null) throw new ArgumentNullException(nameof(result));
@@ -115,85 +137,20 @@ namespace Listenarr.Api.Services.Adapters
 
             // Use JSON-RPC for all versions (v25+ REST API has authentication issues)
             _logger.LogInformation("Using NZBGet JSON-RPC append method");
-            return await AddViaJsonRpcAsync(client, result, nzbUrl, indexerApiKey, ct);
-        }
+            Download? download = null;
+            var downloadId = await AddViaJsonRpcAsync(client, result, nzbUrl, indexerApiKey, ct);
+            if (downloadId != null)
+            {
+                download = new Download(result, client);
+                download.SetClientDownloadId(downloadId);
+            }
 
-        private async Task<string?> AddViaRestApiAsync(
-            DownloadClientConfiguration client, 
-            SearchResult result, 
-            string nzbUrl, 
-            string? indexerApiKey, 
-            CancellationToken ct)
-        {
-            var category = ResolveCategory(client);
-            var priority = ResolvePriority(client);
-            var droneId = Guid.NewGuid().ToString().Replace("-", string.Empty);
-            
-            // Download NZB content
-            var nzbBytes = await DownloadNzbAsync(nzbUrl, indexerApiKey, ct);
-            var nzbFileName = BuildNzbFileName(result);
-
-            var uploadUrl = DownloadClientUriBuilder.BuildUri(client, "/api/v2/nzb");
-            
-            using var httpClient = _httpClientFactory.CreateClient();
-            using var content = new MultipartFormDataContent();
-            
-            // Add NZB file
-            content.Add(new ByteArrayContent(nzbBytes), "file", nzbFileName);
-            
-            // Add metadata
-            if (!string.IsNullOrWhiteSpace(category))
-            {
-                content.Add(new StringContent(category), "Category");
-            }
-            
-            if (priority != 0)
-            {
-                content.Add(new StringContent(priority.ToString()), "Priority");
-            }
-            
-            // Add drone tracking parameter
-            content.Add(new StringContent($"drone={droneId}"), "PPParameters");
-            
-            using var request = new HttpRequestMessage(HttpMethod.Post, uploadUrl)
-            {
-                Content = content
-            };
-            
-            // Add Basic Auth (NZBGet v25 REST API accepts Basic Auth)
-            var authHeader = BuildAuthHeader(client);
-            if (authHeader != null)
-            {
-                request.Headers.Authorization = authHeader;
-            }
-            
-            _logger.LogDebug("NZBGet REST API POST to {Url} with file {FileName}", LogRedaction.SanitizeUrl(uploadUrl.ToString()), LogRedaction.SanitizeText(nzbFileName));
-            
-            using var response = await httpClient.SendAsync(request, ct);
-            var responseBody = await response.Content.ReadAsStringAsync(ct);
-            
-            if (!response.IsSuccessStatusCode)
-            {
-                _logger.LogError("NZBGet REST API upload failed: {StatusCode} - {Body}", response.StatusCode, responseBody);
-                throw new Exception($"NZBGet REST API upload error: {response.StatusCode} - {responseBody}");
-            }
-            
-            // Parse response JSON to get queue ID
-            var jsonResponse = JsonSerializer.Deserialize<JsonElement>(responseBody);
-            if (jsonResponse.TryGetProperty("nzbId", out var nzbIdProp))
-            {
-                var queueId = nzbIdProp.GetInt32();
-                _logger.LogInformation("NZBGet REST API added '{Title}' with queue ID {QueueId}", LogRedaction.SanitizeText(result.Title), queueId);
-                return queueId.ToString();
-            }
-            
-            _logger.LogWarning("NZBGet REST API response missing nzbId: {Body}", responseBody);
-            return null;
+            return download;
         }
 
         private async Task<string?> AddViaJsonRpcAsync(
             DownloadClientConfiguration client, 
-            SearchResult result, 
+            IndexerSearchResult result, 
             string nzbUrl, 
             string? indexerApiKey, 
             CancellationToken ct)
@@ -252,19 +209,18 @@ namespace Listenarr.Api.Services.Adapters
             }
         }
 
-        public async Task<bool> RemoveAsync(DownloadClientConfiguration client, string id, bool deleteFiles = false, CancellationToken ct = default)
+        public async Task<bool> RemoveAsync(DownloadClientConfiguration client, Download download, bool deleteFiles = false, CancellationToken ct = default)
         {
             if (client == null) throw new ArgumentNullException(nameof(client));
-            if (string.IsNullOrWhiteSpace(id)) throw new ArgumentNullException(nameof(id));
 
             // First try to parse as numeric NZBID (for queue removal)
-            var numericId = TryParseId(id);
+            var numericId = TryParseId(download.Id);
             
             // If it's not a numeric ID, it might be a droneId (GUID from Listenarr)
             // Try to find it in history first
             if (!numericId.HasValue)
             {
-                _logger.LogInformation("ID {Id} is not numeric, searching NZBGet history for matching download", LogRedaction.SanitizeText(id));
+                _logger.LogInformation("ID {Id} is not numeric, searching NZBGet history for matching download", LogRedaction.SanitizeText(download.Id));
                 
                 try
                 {
@@ -315,12 +271,12 @@ namespace Listenarr.Api.Services.Adapters
 
                                         if (paramMembers.TryGetValue("Name", out var paramName) &&
                                             paramMembers.TryGetValue("Value", out var paramValue) &&
-                                            paramName == "*drone" && paramValue == id &&
+                                            paramName == "*drone" && paramValue == download.Id &&
                                             members.TryGetValue("ID", out var idElement) &&
                                             int.TryParse(idElement?.Value, out var foundNumericId))
                                         {
                                             // Found matching droneId, get the NZBID
-                                            _logger.LogDebug("Found NZBID {NzbId} for droneId {DroneId} in history", foundNumericId, LogRedaction.SanitizeText(id));
+                                            _logger.LogDebug("Found NZBID {NzbId} for droneId {DroneId} in history", foundNumericId, LogRedaction.SanitizeText(download.Id));
                                             numericId = foundNumericId;
                                             break;
                                         }
@@ -333,13 +289,13 @@ namespace Listenarr.Api.Services.Adapters
                     }
                 }
                 catch (Exception histEx) when (histEx is not OperationCanceledException && histEx is not OutOfMemoryException && histEx is not StackOverflowException) {
-                    _logger.LogDebug(histEx, "Failed to search NZBGet history for download {Id}", LogRedaction.SanitizeText(id));
+                    _logger.LogDebug(histEx, "Failed to search NZBGet history for download {Id}", LogRedaction.SanitizeText(download.Id));
                 }
             }
 
             if (!numericId.HasValue)
             {
-                _logger.LogWarning("Cannot remove NZB {Id} - not found in queue or history", LogRedaction.SanitizeText(id));
+                _logger.LogWarning("Cannot remove NZB {Id} - not found in queue or history", LogRedaction.SanitizeText(download.Id));
                 return false;
             }
 
@@ -351,12 +307,12 @@ namespace Listenarr.Api.Services.Adapters
                 
                 if (historySuccess)
                 {
-                    _logger.LogInformation("Removed NZB {Id} from NZBGet history (deleteFiles={DeleteFiles})", LogRedaction.SanitizeText(id), deleteFiles);
+                    _logger.LogInformation("Removed NZB {Id} from NZBGet history (deleteFiles={DeleteFiles})", LogRedaction.SanitizeText(download.Id), deleteFiles);
                     return true;
                 }
             }
             catch (Exception histEx) when (histEx is not OperationCanceledException && histEx is not OutOfMemoryException && histEx is not StackOverflowException) {
-                _logger.LogDebug(histEx, "Could not remove {Id} from NZBGet history (may not be in history)", LogRedaction.SanitizeText(id));
+                _logger.LogDebug(histEx, "Could not remove {Id} from NZBGet history (may not be in history)", LogRedaction.SanitizeText(download.Id));
             }
 
             // Fall back to queue removal (for active downloads)
@@ -368,15 +324,15 @@ namespace Listenarr.Api.Services.Adapters
                 
                 if (success)
                 {
-                    _logger.LogInformation("Removed NZB {Id} from NZBGet queue (deleteFiles={DeleteFiles})", LogRedaction.SanitizeText(id), deleteFiles);
+                    _logger.LogInformation("Removed NZB {Id} from NZBGet queue (deleteFiles={DeleteFiles})", LogRedaction.SanitizeText(download.Id), deleteFiles);
                     return true;
                 }
 
-                _logger.LogWarning("NZBGet reported failure when removing {Id} from both history and queue", LogRedaction.SanitizeText(id));
+                _logger.LogWarning("NZBGet reported failure when removing {Id} from both history and queue", LogRedaction.SanitizeText(download.Id));
                 return false;
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
-                _logger.LogError(ex, "Error removing NZB {Id} from NZBGet", LogRedaction.SanitizeText(id));
+                _logger.LogError(ex, "Error removing NZB {Id} from NZBGet", LogRedaction.SanitizeText(download.Id));
                 return false;
             }
         }
@@ -816,7 +772,7 @@ namespace Listenarr.Api.Services.Adapters
             return 0;
         }
 
-        private static string BuildNzbFileName(SearchResult result)
+        private static string BuildNzbFileName(IndexerSearchResult result)
         {
             if (result == null)
             {
@@ -861,7 +817,6 @@ namespace Listenarr.Api.Services.Adapters
         private async Task<XElement> CallXmlRpcAsync(DownloadClientConfiguration client, string methodName, params object[] parameters)
         {
             var baseUrl = DownloadClientUriBuilder.BuildUri(client, "/xmlrpc").ToString();
-            var httpClient = _httpClientFactory.CreateClient();
 
             // Build XML-RPC request
             var methodCall = new XElement("methodCall",
@@ -879,7 +834,7 @@ namespace Listenarr.Api.Services.Adapters
             if (authHeader != null)
                 request.Headers.Authorization = authHeader;
 
-            using var response = await httpClient.SendAsync(request);
+            using var response = await _httpClient.SendAsync(request);
             var responseBody = await response.Content.ReadAsStringAsync();
 
             if (!response.IsSuccessStatusCode)
@@ -946,7 +901,6 @@ namespace Listenarr.Api.Services.Adapters
             {
                 _logger.LogDebug("Downloading NZB from {Url}", LogRedaction.SanitizeUrl(nzbUrl));
                 
-                var httpClient = _httpClientFactory.CreateClient();
                 using var request = new HttpRequestMessage(HttpMethod.Get, nzbUrl);
 
                 // Note: Newznab/Torznab APIs include the API key in the URL query string (e.g., &apikey=xxx)
@@ -956,7 +910,7 @@ namespace Listenarr.Api.Services.Adapters
                 // Set User-Agent header - many indexers require this and will reject requests without it
                 request.Headers.Add("User-Agent", "Listenarr/1.0.0.0");
 
-                using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+                using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
                 
                 _logger.LogDebug("NZB download response: StatusCode={StatusCode}, ContentType={ContentType}, ContentLength={ContentLength}",
                     response.StatusCode,
@@ -1118,6 +1072,14 @@ namespace Listenarr.Api.Services.Adapters
             return string.IsNullOrEmpty(normalizedBasePath)
                 ? relativePath
                 : normalizedBasePath + Path.DirectorySeparatorChar + relativePath;
+        }
+
+        public async Task<List<Download>> PollAsync(DownloadMonitorService service, DownloadClientConfiguration client, List<Download> downloads, ApplicationSettings appSettings, CancellationToken ct = default)
+        {
+            using var db = _dbFactory.CreateDbContext();
+            await service.PollNZBGetAsync(client, downloads, db, appSettings, ct);
+
+            return [];
         }
     }
 }

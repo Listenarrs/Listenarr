@@ -58,8 +58,8 @@ namespace Listenarr.Api.Tests
             var indexer = new Indexer
             {
                 Name = "althub",
-                Type = "Usenet",
-                Implementation = "Newznab",
+                Protocol = DownloadProtocol.Usenet,
+                Implementation = Implementation.Newznab,
                 Url = "https://api.althub.co.za",
                 ApiKey = "BAD_KEY",
             };
@@ -92,8 +92,8 @@ namespace Listenarr.Api.Tests
             var indexer = new Indexer
             {
                 Name = "althub",
-                Type = "Usenet",
-                Implementation = "Newznab",
+                Protocol = DownloadProtocol.Usenet,
+                Implementation = Implementation.Newznab,
                 Url = "https://api.althub.co.za",
                 ApiKey = "GOOD_KEY",
             };
@@ -128,8 +128,8 @@ namespace Listenarr.Api.Tests
             var indexer = new Indexer
             {
                 Name = "private-indexer",
-                Type = "Usenet",
-                Implementation = "Generic",
+                Protocol = DownloadProtocol.Usenet,
+                Implementation = Implementation.Custom,
                 Url = "http://192.168.1.25"
             };
 
@@ -166,8 +166,8 @@ namespace Listenarr.Api.Tests
             var indexer = new Indexer
             {
                 Name = "private-indexer",
-                Type = "Usenet",
-                Implementation = "Generic",
+                Protocol = DownloadProtocol.Usenet,
+                Implementation = Implementation.Custom,
                 Url = "http://192.168.1.25"
             };
 

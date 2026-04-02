@@ -84,8 +84,8 @@ namespace Listenarr.Api.Tests
             var indexer = new Indexer
             {
                 Name = "Test Newznab",
-                Type = "Usenet",
-                Implementation = "Newznab",
+                Protocol = DownloadProtocol.Usenet,
+                Implementation = Implementation.Newznab,
                 Url = "https://api.example.com/api",
                 ApiKey = "", // Empty API key
             };
@@ -113,8 +113,8 @@ namespace Listenarr.Api.Tests
             var indexer = new Indexer
             {
                 Name = "Test Newznab",
-                Type = "Usenet",
-                Implementation = "Newznab",
+                Protocol = DownloadProtocol.Usenet,
+                Implementation = Implementation.Newznab,
                 Url = "https://api.example.com/api",
                 ApiKey = null, // Null API key
             };
@@ -141,8 +141,8 @@ namespace Listenarr.Api.Tests
             var indexer = new Indexer
             {
                 Name = "Test Newznab",
-                Type = "Usenet",
-                Implementation = "Newznab",
+                Protocol = DownloadProtocol.Usenet,
+                Implementation = Implementation.Newznab,
                 Url = "https://api.example.com/api",
                 ApiKey = "   ", // Whitespace-only API key
             };
@@ -169,8 +169,8 @@ namespace Listenarr.Api.Tests
             var indexer = new Indexer
             {
                 Name = "Test Torznab",
-                Type = "Torrent",
-                Implementation = "Torznab",
+                Protocol = DownloadProtocol.Torrent,
+                Implementation = Implementation.Torznab,
                 Url = "https://api.example.com/api",
                 ApiKey = "",
             };
@@ -209,8 +209,8 @@ namespace Listenarr.Api.Tests
             var indexer = new Indexer
             {
                 Name = "Test Newznab",
-                Type = "Usenet",
-                Implementation = "Newznab",
+                Protocol = DownloadProtocol.Usenet,
+                Implementation = Implementation.Newznab,
                 Url = "https://api.example.com/api",
                 ApiKey = "test_key",
             };
@@ -247,8 +247,8 @@ namespace Listenarr.Api.Tests
             var indexer = new Indexer
             {
                 Name = "Test Newznab",
-                Type = "Usenet",
-                Implementation = "Newznab",
+                Protocol = DownloadProtocol.Usenet,
+                Implementation = Implementation.Newznab,
                 Url = "https://api.example.com/api",
                 ApiKey = "bad_key",
             };
@@ -280,8 +280,8 @@ namespace Listenarr.Api.Tests
             var indexer = new Indexer
             {
                 Name = "Test Newznab",
-                Type = "Usenet",
-                Implementation = "Newznab",
+                Protocol = DownloadProtocol.Usenet,
+                Implementation = Implementation.Newznab,
                 Url = "https://api.example.com/api",
                 ApiKey = "bad_key",
             };
@@ -307,8 +307,8 @@ namespace Listenarr.Api.Tests
             var indexer = new Indexer
             {
                 Name = "Test Newznab",
-                Type = "Usenet",
-                Implementation = "Newznab",
+                Protocol = DownloadProtocol.Usenet,
+                Implementation = Implementation.Newznab,
                 Url = "https://api.example.com/api",
                 ApiKey = "bad_key",
             };
@@ -334,8 +334,8 @@ namespace Listenarr.Api.Tests
             var indexer = new Indexer
             {
                 Name = "Test Newznab",
-                Type = "Usenet",
-                Implementation = "Newznab",
+                Protocol = DownloadProtocol.Usenet,
+                Implementation = Implementation.Newznab,
                 Url = "https://api.example.com/api",
                 ApiKey = "bad_key",
             };
@@ -371,8 +371,8 @@ namespace Listenarr.Api.Tests
             var indexer = new Indexer
             {
                 Name = "Test Torznab",
-                Type = "Torrent",
-                Implementation = "Torznab",
+                Protocol = DownloadProtocol.Torrent,
+                Implementation = Implementation.Torznab,
                 Url = "https://api.example.com/api",
                 ApiKey = "test_key",
             };
@@ -409,8 +409,8 @@ namespace Listenarr.Api.Tests
             var indexer = new Indexer
             {
                 Name = "Test Newznab",
-                Type = "Usenet",
-                Implementation = "Newznab",
+                Protocol = DownloadProtocol.Usenet,
+                Implementation = Implementation.Newznab,
                 Url = "https://api.example.com/api",
                 ApiKey = "bad_key",
                 CreatedAt = DateTime.UtcNow,
@@ -462,8 +462,8 @@ namespace Listenarr.Api.Tests
             var indexer = new Indexer
             {
                 Name = "Test Newznab",
-                Type = "Usenet",
-                Implementation = "Newznab",
+                Protocol = DownloadProtocol.Usenet,
+                Implementation = Implementation.Newznab,
                 Url = "https://api.example.com/api",
                 ApiKey = "good_key",
                 CreatedAt = DateTime.UtcNow,

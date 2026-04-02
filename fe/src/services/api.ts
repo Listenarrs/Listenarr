@@ -43,6 +43,7 @@ import type {
   RenamePreview,
   RenameOperation,
   RenameResult,
+  IndexerSearchResult,
 } from '@/types'
 import { getStartupConfigCached, getCachedStartupConfig, resetCache as resetStartupConfigCache } from './startupConfigCache'
 import { sessionTokenManager } from '@/utils/sessionToken'
@@ -319,7 +320,7 @@ class ApiService {
       mamEnrichResults?: boolean
       mamEnrichTopResults?: number
     },
-  ): Promise<SearchResult[]> {
+  ): Promise<IndexerSearchResult[]> {
     const params = new URLSearchParams({ query })
     if (category) params.append('category', category)
 
@@ -338,7 +339,7 @@ class ApiService {
     if (opts?.mamEnrichTopResults !== undefined)
       params.append('mamEnrichTopResults', String(opts.mamEnrichTopResults))
 
-    return this.request<SearchResult[]>(`/search/${apiId}?${params}`)
+    return this.request<IndexerSearchResult[]>(`/search/${apiId}?${params}`)
   }
 
   async testApiConnection(apiId: string): Promise<boolean> {

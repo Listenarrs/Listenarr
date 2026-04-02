@@ -1,9 +1,3 @@
-using System.Threading;
-using System.Threading.Tasks;
-using Listenarr.Api.Services.Adapters;
-using Listenarr.Domain.Models;
-using Microsoft.Extensions.Logging;
-
 namespace Listenarr.Api.Services
 {
     /// <summary>
@@ -26,16 +20,16 @@ namespace Listenarr.Api.Services
     public class ImportItemResolutionService : IImportItemResolutionService
     {
         private readonly IConfigurationService _configurationService;
-        private readonly IDownloadClientAdapterFactory _adapterFactory;
+        private readonly IDownloadClientGateway _clientGateway;
         private readonly ILogger<ImportItemResolutionService> _logger;
 
         public ImportItemResolutionService(
             IConfigurationService configurationService,
-            IDownloadClientAdapterFactory adapterFactory,
+            IDownloadClientGateway clientGateway,
             ILogger<ImportItemResolutionService> logger)
         {
             _configurationService = configurationService;
-            _adapterFactory = adapterFactory;
+            _clientGateway = clientGateway;
             _logger = logger;
         }
 
@@ -67,16 +61,7 @@ namespace Listenarr.Api.Services
                 return queueItem;
             }
 
-            // Get the appropriate adapter for this client type
-            var adapter = _adapterFactory.GetByIdOrType(client.Type);
-
-            // Call the adapter's GetImportItemAsync to resolve the path
-            _logger.LogDebug(
-                "Resolving import item for download {DownloadId} using {ClientType} adapter",
-                download.Id,
-                client.Type);
-
-            return await adapter.GetImportItemAsync(
+            return await _clientGateway.GetImportItemAsync(
                 client,
                 download,
                 queueItem,

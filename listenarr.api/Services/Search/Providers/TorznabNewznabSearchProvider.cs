@@ -20,6 +20,7 @@ using Listenarr.Domain.Models;
 using Listenarr.Infrastructure.Models;
 using System.Text.RegularExpressions;
 using HtmlAgilityPack;
+using SharpCompress;
 
 namespace Listenarr.Api.Services.Search.Providers;
 
@@ -32,7 +33,10 @@ public class TorznabNewznabSearchProvider : IIndexerSearchProvider
     private readonly HttpClient _httpClient;
     private readonly ILogger<TorznabNewznabSearchProvider> _logger;
 
-    public string IndexerType => "Torznab"; // Handles both Torznab and Newznab
+    public List<Implementation> Implements => [
+        Implementation.Torznab,
+        Implementation.Newznab
+    ];
 
     public TorznabNewznabSearchProvider(
         HttpClient httpClient,
@@ -84,17 +88,7 @@ public class TorznabNewznabSearchProvider : IIndexerSearchProvider
 
     private string BuildTorznabUrl(Indexer indexer, string query, string? category)
     {
-        var url = indexer.Url.TrimEnd('/');
-        
-        // Don't append /api if URL already ends with it (e.g., Prowlarr proxy URLs)
-        var apiPath = url.EndsWith("/api", StringComparison.OrdinalIgnoreCase) 
-            ? "" 
-            : indexer.Implementation.ToLower() switch
-            {
-                "torznab" => "/api",
-                "newznab" => "/api",
-                _ => "/api"
-            };
+        var baseUrl = indexer.BaseUrl();
 
         var queryParams = new List<string>
         {
@@ -122,12 +116,13 @@ public class TorznabNewznabSearchProvider : IIndexerSearchProvider
         queryParams.Add("limit=100");
 
         // Request extended info for Newznab/Torznab indexers to include grabs/snatches and other attributes when available
-        if (!string.IsNullOrEmpty(indexer.Implementation) && (indexer.Implementation.Equals("newznab", StringComparison.OrdinalIgnoreCase) || indexer.Implementation.Equals("torznab", StringComparison.OrdinalIgnoreCase)))
+        // TODO: Isnt this always the case since Search
+        if (Implementation.Newznab == indexer.Implementation || Implementation.Torznab == indexer.Implementation)
         {
             queryParams.Add("extended=1");
         }
 
-        return $"{url}{apiPath}?{string.Join("&", queryParams)}";
+        return $"{baseUrl}?{string.Join("&", queryParams)}";
     }
 
     private async Task<List<IndexerSearchResult>> ParseTorznabResponseAsync(string xmlContent, Indexer indexer)
@@ -163,7 +158,7 @@ public class TorznabNewznabSearchProvider : IIndexerSearchProvider
             }
 
             var items = channel.Elements("item");
-            var isUsenet = indexer.Type.Equals("Usenet", StringComparison.OrdinalIgnoreCase);
+            var isUsenet = DownloadProtocol.Usenet == indexer.Protocol;
 
             foreach (var item in items)
             {
@@ -177,7 +172,7 @@ public class TorznabNewznabSearchProvider : IIndexerSearchProvider
                         Category = item.Element("category")?.Value ?? "Audiobook"
                     };
                     result.IndexerId = indexer.Id;
-                    result.IndexerImplementation = indexer.Implementation;
+                    result.IndexerImplementation = indexer.Implementation.ToString();
 
                     // Track peers value for potential leechers calculation
                     int? peersValue = null;
@@ -294,7 +289,7 @@ public class TorznabNewznabSearchProvider : IIndexerSearchProvider
                                 break;
                             case "files":
                                 if (int.TryParse(value, out var files))
-                                    result.Files = files;
+                                    result.FileCount = files;
                                 break;
                             case "usenetdate":
                                 // Some indexers expose a usenet-specific date attribute; prefer it if parseable
@@ -525,11 +520,11 @@ public class TorznabNewznabSearchProvider : IIndexerSearchProvider
                         // Set download type based on what's available
                         if (!string.IsNullOrEmpty(result.NzbUrl))
                         {
-                            result.DownloadType = "Usenet";
+                            result.Protocol = DownloadProtocol.Usenet;
                         }
                         else if (!string.IsNullOrEmpty(result.MagnetLink) || !string.IsNullOrEmpty(result.TorrentUrl))
                         {
-                            result.DownloadType = "Torrent";
+                            result.Protocol = DownloadProtocol.Torrent;
                         }
 
                         results.Add(result);

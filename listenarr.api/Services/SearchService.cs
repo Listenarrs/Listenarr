@@ -33,6 +33,7 @@ using Listenarr.Api.Services.Search.Strategies;
 using Microsoft.Extensions.Caching.Memory;
 using Listenarr.Api.Extensions;
 using AsyncKeyedLock;
+using Listenarr.Domain.Models.Converters;
 
 namespace Listenarr.Api.Services
 {
@@ -312,36 +313,6 @@ namespace Listenarr.Api.Services
             return composite.Total;
         }
 
-        private double CalculateSeedScore(SearchResult result)
-        {
-            var downloadType = (result.DownloadType ?? string.Empty).ToLower();
-
-            if (downloadType.Contains("usenet") || downloadType.Contains("ddl") || !string.IsNullOrEmpty(result.NzbUrl))
-            {
-                var grabs = result.Grabs;
-                if (grabs > 0)
-                {
-                    return Math.Min(100.0, 20.0 + (Math.Log10(grabs) * 20.0));
-                }
-                return 0.0;
-            }
-
-            // Torrent
-            var seeders = result.Seeders ?? 0;
-            if (seeders <= 0) return 0.0;
-
-            var seederScore = Math.Min(100.0, 20.0 + (Math.Log10(seeders) * 20.0));
-            var leechers = result.Leechers ?? 0;
-            if (leechers > 0)
-            {
-                var ratio = (double)seeders / Math.Max(1, leechers);
-                if (ratio > 2.0) seederScore += 10.0;
-                else if (ratio > 1.0) seederScore += 5.0;
-            }
-
-            return Math.Min(100.0, seederScore);
-        }
-
         private double CalculateAgeScore(DateTime publishedDate)
         {
             if (publishedDate == DateTime.MinValue) return 50.0;
@@ -405,7 +376,7 @@ namespace Listenarr.Api.Services
             {
                 try
                 {
-                    _logger.LogInformation("Searching indexer {Name} ({Type}) for query: {Query}", indexer.Name, indexer.Type, query);
+                    _logger.LogInformation("Searching indexer {Name} ({Protocol}) for query: {Query}", indexer.Name, indexer.Protocol, query);
                     // Apply indexer-level MyAnonamouse options if not provided explicitly on the request
                     var perIndexerRequest = request;
                     if (perIndexerRequest?.MyAnonamouse == null)
@@ -1462,33 +1433,7 @@ namespace Listenarr.Api.Services
                 return null;
             }
         }
-
-        private async Task<List<SearchResult>> TraditionalSearchAsync(string query, string? category = null, List<string>? apiIds = null)
-        {
-            var results = new List<SearchResult>();
-            var apis = await _configurationService.GetApiConfigurationsAsync();
-
-            if (apiIds != null && apiIds.Any())
-            {
-                apis = apis.Where(a => apiIds.Contains(a.Id)).ToList();
-            }
-
-            var enabledApis = apis.Where(a => a.IsEnabled).OrderBy(a => a.Priority).ToList();
-
-            var searchTasks = enabledApis.Select(api => SearchByApiAsync(api.Id, query, category));
-            var apiResults = await Task.WhenAll(searchTasks);
-
-            foreach (var apiResult in apiResults)
-            {
-                foreach (var result in apiResult)
-                {
-                    results.Add(result);
-                }
-            }
-
-            return results;
-        }
-
+        
         private string ExtractAsin(string magnetLink)
         {
             // TODO: Implement ASIN extraction logic from magnet/torrent/nzb or other property
@@ -1684,9 +1629,9 @@ namespace Listenarr.Api.Services
                 {
                     fallbackName = indexer.Name;
                 }
-                else if (!string.IsNullOrWhiteSpace(indexer.Implementation))
+                else if (indexer.Implementation != Implementation.Custom)
                 {
-                    fallbackName = indexer.Implementation;
+                    fallbackName = indexer.Implementation.ToString();
                 }
                 else
                 {
@@ -1702,10 +1647,7 @@ namespace Listenarr.Api.Services
                 }
 
                 // Try to find a matching provider for this indexer type
-                var provider = _searchProviders.FirstOrDefault(p => 
-                    p.IndexerType.Equals(indexer.Implementation, StringComparison.OrdinalIgnoreCase) ||
-                    (p.IndexerType.Equals("Torznab", StringComparison.OrdinalIgnoreCase) && indexer.Implementation.Equals("Newznab", StringComparison.OrdinalIgnoreCase)));
-                
+                var provider = _searchProviders.FirstOrDefault(p => p.IsImplementing(indexer.Implementation));
                 if (provider != null)
                 {
                     var providerResults = await provider.SearchAsync(indexer, query, category, request);
@@ -2593,7 +2535,7 @@ namespace Listenarr.Api.Services
                             result.Language = ParseLanguageFromCode(rawLangCode) ?? ParseLanguageFromText(rawLangCode);
                         }
                         result.IndexerId = indexer.Id;
-                        result.IndexerImplementation = indexer.Implementation ?? string.Empty;
+                        result.IndexerImplementation = indexer.Implementation.ToString();
                         // Robust link detection: prefer magnet/hash/torrent indicators, only treat as NZB when explicit NZB fields exist
                         try
                         {
@@ -2692,9 +2634,9 @@ namespace Listenarr.Api.Services
 
                             // Prefer marking the download type when either magnet/torrent or NZB URL exists
                             if (!string.IsNullOrEmpty(result.MagnetLink) || !string.IsNullOrEmpty(result.TorrentUrl))
-                                result.DownloadType = "Torrent";
+                                result.Protocol = DownloadProtocol.Torrent;
                             else if (!string.IsNullOrEmpty(result.NzbUrl))
-                                result.DownloadType = "nzb";
+                                result.Protocol = DownloadProtocol.Usenet;
 
                             _logger.LogDebug("MyAnonamouse parsed item #{Index} link-disposition: magnet={MagnetPresent}, torrent={TorrentPresent}, nzb={NzbPresent}", _mamDebugIndex, !string.IsNullOrEmpty(result.MagnetLink), !string.IsNullOrEmpty(result.TorrentUrl), !string.IsNullOrEmpty(result.NzbUrl));
                         }
@@ -2747,14 +2689,14 @@ namespace Listenarr.Api.Services
 
                         // Apply grabs/files to the result when available
                         result.Grabs = grabs;
-                        result.Files = files;
+                        result.FileCount = files;
 
                         try
                         {
                             if (_mamDebugIndex < 5)
                             {
                                 _logger.LogDebug("ParseMyAnonamouse: constructed SearchResult #{Index} -> Id='{Id}', Title='{Title}', Size={Size}, Seeders={Seeders}, TorrentUrl='{TorrentUrl}', Artist='{Artist}', Album='{Album}', Category='{Category}', Source='{Source}', Grabs={Grabs}, Files={Files}, PublishedDate={PublishedDate}'",
-                                    _mamDebugIndex, result.Id, result.Title, result.Size, result.Seeders, result.TorrentUrl ?? "", result.Artist ?? "", result.Album ?? "", result.Category ?? "", result.Source ?? "", result.Grabs, result.Files, result.PublishedDate);
+                                    _mamDebugIndex, result.Id, result.Title, result.Size, result.Seeders, result.TorrentUrl ?? "", result.Artist ?? "", result.Album ?? "", result.Category ?? "", result.Source ?? "", result.Grabs, result.FileCount, result.PublishedDate);
                             }
                         }
                         catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
@@ -2844,7 +2786,7 @@ namespace Listenarr.Api.Services
             if (results == null || results.Count == 0) return;
             if (topN <= 0) return;
 
-            var candidates = results.Where(r => (r.Grabs == 0 || r.Files == 0 || string.IsNullOrEmpty(r.Format) || string.IsNullOrEmpty(r.Language))).Take(topN).ToList();
+            var candidates = results.Where(r => r.Grabs == 0 || r.FileCount == 0 || string.IsNullOrEmpty(r.Format) || string.IsNullOrEmpty(r.Language)).Take(topN).ToList();
             if (!candidates.Any()) return;
 
             _logger.LogDebug("Enriching {Count} MyAnonamouse results (topN={TopN})", candidates.Count, topN);
@@ -2860,7 +2802,7 @@ namespace Listenarr.Api.Services
                     {
                         // Apply cached values
                         if (cached.Grabs > 0) r.Grabs = cached.Grabs;
-                        if (cached.Files > 0) r.Files = cached.Files;
+                        if (cached.FileCount > 0) r.FileCount = cached.FileCount;
                         if (!string.IsNullOrEmpty(cached.Format) && string.IsNullOrEmpty(r.Format)) r.Format = cached.Format;
                         if (!string.IsNullOrEmpty(cached.Language) && string.IsNullOrEmpty(r.Language)) r.Language = cached.Language;
                         return;
@@ -2923,11 +2865,11 @@ namespace Listenarr.Api.Services
 
                         // Apply values
                         if (grabs > 0) r.Grabs = grabs;
-                        if (files > 0) r.Files = files;
+                        if (files > 0) r.FileCount = files;
                         if (!string.IsNullOrEmpty(format) && string.IsNullOrEmpty(r.Format)) r.Format = format.ToUpper();
                         if (!string.IsNullOrEmpty(langCode) && string.IsNullOrEmpty(r.Language)) r.Language = ParseLanguageFromCode(langCode);
                         
-                        _logger.LogDebug("Enriched MyAnonamouse result {Id}: grabs={Grabs}, files={Files}, format={Format}, language={Language}", r.Id, r.Grabs, r.Files, r.Format, r.Language);
+                        _logger.LogDebug("Enriched MyAnonamouse result {Id}: grabs={Grabs}, files={Files}, format={Format}, language={Language}", r.Id, r.Grabs, r.FileCount, r.Format, r.Language);
                     }
                     catch (Exception exParse) when (exParse is not OperationCanceledException && exParse is not OutOfMemoryException && exParse is not StackOverflowException) {
                         _logger.LogDebug(exParse, "Failed to parse MyAnonamouse detail JSON for {Id}", r.Id);
@@ -2940,7 +2882,7 @@ namespace Listenarr.Api.Services
                         try
                         {
                             var entryOptions = new Microsoft.Extensions.Caching.Memory.MemoryCacheEntryOptions() { SlidingExpiration = TimeSpan.FromHours(1) };
-                            _cache.Set(cacheKey, (object)new IndexerSearchResult { Grabs = r.Grabs, Files = r.Files, Format = r.Format, Language = r.Language }, entryOptions);
+                            _cache.Set(cacheKey, (object)new IndexerSearchResult { Grabs = r.Grabs, FileCount = r.FileCount, Format = r.Format, Language = r.Language }, entryOptions);
                         }
                         catch (Exception exCache) when (exCache is not OperationCanceledException && exCache is not OutOfMemoryException && exCache is not StackOverflowException) {
                             _logger.LogDebug(exCache, "Failed to set enrichment cache for {Key}", cacheKey);
@@ -2996,10 +2938,10 @@ namespace Listenarr.Api.Services
         private string BuildTorznabUrl(Indexer indexer, string query, string? category)
         {
             var url = indexer.Url.TrimEnd('/');
-            var apiPath = indexer.Implementation.ToLower() switch
+            var apiPath = indexer.Implementation switch
             {
-                "torznab" => "/api",
-                "newznab" => "/api",
+                Implementation.Torznab => "/api",
+                Implementation.Newznab => "/api",
                 _ => "/api"
             };
 
@@ -3029,7 +2971,7 @@ namespace Listenarr.Api.Services
             queryParams.Add("limit=100");
 
             // Request extended info for Newznab/Torznab indexers to include grabs/snatches and other attributes when available
-            if (!string.IsNullOrEmpty(indexer.Implementation) && (indexer.Implementation.Equals("newznab", StringComparison.OrdinalIgnoreCase) || indexer.Implementation.Equals("torznab", StringComparison.OrdinalIgnoreCase)))
+            if (Implementation.Newznab == indexer.Implementation || Implementation.Torznab == indexer.Implementation)
             {
                 queryParams.Add("extended=1");
             }
@@ -3235,13 +3177,13 @@ namespace Listenarr.Api.Services
                             TorrentUrl = downloadUrl, // Using TorrentUrl field for direct download URL
                             // Internet Archive item page
                             ResultUrl = !string.IsNullOrEmpty(identifier) ? $"https://archive.org/details/{identifier}" : null,
-                            DownloadType = "DDL", // Direct Download Link
+                            Protocol = DownloadProtocol.DirectDownload,
                             Format = audioFile.Format,
                             Quality = DetectQualityFromFormat(audioFile.Format),
                             Source = $"{indexer.Name} (Internet Archive)",
                             PublishedDate = string.Empty,
                             IndexerId = indexer.Id,
-                            IndexerImplementation = indexer.Implementation
+                            IndexerImplementation = indexer.Implementation.ToString()
                         };
 
                         // Ensure ResultUrl is present (fallback to item page or archive details)
@@ -3383,7 +3325,7 @@ namespace Listenarr.Api.Services
                 }
 
                 var items = channel.Elements("item");
-                var isUsenet = indexer.Type.Equals("Usenet", StringComparison.OrdinalIgnoreCase);
+                var isUsenet = indexer.Protocol == DownloadProtocol.Usenet;
 
                 foreach (var item in items)
                 {
@@ -3397,7 +3339,7 @@ namespace Listenarr.Api.Services
                             Category = item.Element("category")?.Value ?? "Audiobook"
                         };
                         result.IndexerId = indexer.Id;
-                        result.IndexerImplementation = indexer.Implementation;
+                        result.IndexerImplementation = indexer.Implementation.ToString();
 
                         // Parse published date
                         var pubDateStr = item.Element("pubDate")?.Value;
@@ -3405,10 +3347,10 @@ namespace Listenarr.Api.Services
                             ? pubDate.ToString("o")
                             : string.Empty;
 
-// Parse Torznab/Newznab attributes (support both torznab and newznab namespaces)
-                var torznabNs = System.Xml.Linq.XNamespace.Get("http://torznab.com/schemas/2015/feed");
-                var newznabNs = System.Xml.Linq.XNamespace.Get("http://www.newznab.com/DTD/2010/feeds/attributes/");
-                var attributes = item.Elements(torznabNs + "attr").Concat(item.Elements(newznabNs + "attr")).ToList();
+                        // Parse Torznab/Newznab attributes (support both torznab and newznab namespaces)
+                        var torznabNs = System.Xml.Linq.XNamespace.Get("http://torznab.com/schemas/2015/feed");
+                        var newznabNs = System.Xml.Linq.XNamespace.Get("http://www.newznab.com/DTD/2010/feeds/attributes/");
+                        var attributes = item.Elements(torznabNs + "attr").Concat(item.Elements(newznabNs + "attr")).ToList();
 
                         foreach (var attr in attributes)
                         {
@@ -3496,12 +3438,17 @@ namespace Listenarr.Api.Services
                                     }
                                     break;
                                 case "grabs":
+                                case "snatches":
+                                case "snatched":
+                                case "numgrabs":
+                                case "num_grabs":
+                                case "grab_count":
                                     if (int.TryParse(value, out var grabs))
                                         result.Grabs = grabs;
                                     break;
                                 case "files":
                                     if (int.TryParse(value, out var files))
-                                        result.Files = files;
+                                        result.FileCount = files;
                                     break;
                                 case "usenetdate":
                                     // Some indexers expose a usenet-specific date attribute; prefer it if parseable
@@ -3526,71 +3473,52 @@ namespace Listenarr.Api.Services
 
                         // Fallback: some indexers don't expose "grabs" as a standard torznab/newznab attr.
                         // Attempt a few common alternate attribute names and elements (snatches, comments, etc.)
-                        if (result.Grabs == 0)
+                        if (result.Grabs == null)
                         {
-                            var altNames = new[] { "snatches", "snatched", "numgrabs", "num_grabs", "grab_count" };
-                            foreach (var alt in altNames)
+                            // If comments element points to a details URL (althub-style), attempt to scrape comment count
+                            var commentsVal = item.Element("comments")?.Value;
+                            if (!string.IsNullOrEmpty(commentsVal))
                             {
-                                var altAttr = attributes.FirstOrDefault(a => string.Equals(a.Attribute("name")?.Value, alt, System.StringComparison.OrdinalIgnoreCase));
-                                if (altAttr != null)
+                                // If comments is a URL, try scraping the page for a numeric comments count (only for known indexers to avoid many extra requests)
+                                if (Uri.TryCreate(commentsVal, UriKind.Absolute, out var commentsUri) && indexer.Url != null && indexer.Url.Contains("althub", StringComparison.OrdinalIgnoreCase))
                                 {
-                                    var av = altAttr.Attribute("value")?.Value ?? altAttr.Value;
-                                    if (!string.IsNullOrEmpty(av) && int.TryParse(av, out var g2))
+                                    try
                                     {
-                                        result.Grabs = g2;
-                                        _logger.LogDebug("Set grabs from alternate attr '{Alt}' for {Title}: {Grabs}", alt, result.Title, g2);
-                                        break;
-                                    }
-                                }
-                            }
-
-                            // If still zero, and a comments element points to a details URL (althub-style), attempt to scrape comment count
-                            if (result.Grabs == 0)
-                            {
-                                var commentsVal = item.Element("comments")?.Value;
-                                if (!string.IsNullOrEmpty(commentsVal))
-                                {
-                                    // If comments is a URL, try scraping the page for a numeric comments count (only for known indexers to avoid many extra requests)
-                                    if (Uri.TryCreate(commentsVal, UriKind.Absolute, out var commentsUri) && indexer.Url != null && indexer.Url.Contains("althub", StringComparison.OrdinalIgnoreCase))
-                                    {
-                                        try
+                                        var commentsPageUrl = new Uri(commentsUri.GetLeftPart(UriPartial.Path));
+                                        _logger.LogDebug("Fetching comments page to extract grabs for {Title}: {Url}", result.Title, commentsPageUrl);
+                                        using var resp = await _httpClient.GetAsync(commentsPageUrl);
+                                        if (resp.IsSuccessStatusCode)
                                         {
-                                            var commentsPageUrl = new Uri(commentsUri.GetLeftPart(UriPartial.Path));
-                                            _logger.LogDebug("Fetching comments page to extract grabs for {Title}: {Url}", result.Title, commentsPageUrl);
-                                            using var resp = await _httpClient.GetAsync(commentsPageUrl);
-                                            if (resp.IsSuccessStatusCode)
+                                            var html = await resp.Content.ReadAsStringAsync();
+                                            var htmlDoc = new HtmlAgilityPack.HtmlDocument();
+                                            htmlDoc.LoadHtml(html);
+
+                                            // Look for common comment count patterns in page text
+                                            var text = htmlDoc.DocumentNode.InnerText;
+                                            var m = System.Text.RegularExpressions.Regex.Match(text, "(\\d{1,6})\\s+comments?", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                                            if (!m.Success)
                                             {
-                                                var html = await resp.Content.ReadAsStringAsync();
-                                                var htmlDoc = new HtmlAgilityPack.HtmlDocument();
-                                                htmlDoc.LoadHtml(html);
+                                                m = System.Text.RegularExpressions.Regex.Match(text, "Comments\\s*[:\\(]?\\s*(\\d{1,6})", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                                            }
 
-                                                // Look for common comment count patterns in page text
-                                                var text = htmlDoc.DocumentNode.InnerText;
-                                                var m = System.Text.RegularExpressions.Regex.Match(text, "(\\d{1,6})\\s+comments?", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                                                if (!m.Success)
-                                                {
-                                                    m = System.Text.RegularExpressions.Regex.Match(text, "Comments\\s*[:\\(]?\\s*(\\d{1,6})", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                                                }
-
-                                                if (m.Success && int.TryParse(m.Groups[1].Value, out var scrapedComments))
-                                                {
-                                                    result.Grabs = scrapedComments;
-                                                    _logger.LogDebug("Scraped comments count for {Title}: {Grabs}", result.Title, scrapedComments);
-                                                }
+                                            if (m.Success && int.TryParse(m.Groups[1].Value, out var scrapedComments))
+                                            {
+                                                result.Grabs = scrapedComments;
+                                                _logger.LogDebug("Scraped comments count for {Title}: {Grabs}", result.Title, scrapedComments);
                                             }
                                         }
-                                        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
-                                            _logger.LogDebug(ex, "Failed to scrape comments page for {Title}", result.Title);
-                                        }
                                     }
-                                    else
+                                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+                                        _logger.LogDebug(ex, "Failed to scrape comments page for {Title}", result.Title);
+                                    }
+                                }
+                                else
+                                {
+                                    // Some feeds put a numeric comments value directly; parse that
+                                    if (int.TryParse(commentsVal, out var commVal))
                                     {
-                                        // Some feeds put a numeric comments value directly; parse that
-                                        if (int.TryParse(commentsVal, out var commVal))
-                                        {
-                                            result.Grabs = commVal;
-                                            _logger.LogDebug("Set grabs from <comments> element for {Title}: {Grabs}", result.Title, commVal);
-                                        }
+                                        result.Grabs = commVal;
+                                        _logger.LogDebug("Set grabs from <comments> element for {Title}: {Grabs}", result.Title, commVal);
                                     }
                                 }
                             }
@@ -3724,11 +3652,11 @@ namespace Listenarr.Api.Services
                             // Set download type based on what's available
                             if (!string.IsNullOrEmpty(result.NzbUrl))
                             {
-                                result.DownloadType = "Usenet";
+                                result.Protocol = DownloadProtocol.Usenet;
                             }
                             else if (!string.IsNullOrEmpty(result.MagnetLink) || !string.IsNullOrEmpty(result.TorrentUrl))
                             {
-                                result.DownloadType = "Torrent";
+                                result.Protocol = DownloadProtocol.Torrent;
                             }
 
                             results.Add(result);

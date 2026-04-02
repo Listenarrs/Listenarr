@@ -179,7 +179,7 @@ namespace Listenarr.Api.Tests
                     Id = "g1",
                     Title = "Frank Herbert - Collection by Frank Herbert [ENG / MP3] [VIP]",
                     Size = 3972844800,
-                    Files = 783,
+                    FileCount = 783,
                     Grabs = 334,
                     Source = "MyAnonamouse",
                     IndexerId = 7,
@@ -189,7 +189,7 @@ namespace Listenarr.Api.Tests
                     ResultUrl = "https://www.myanonamouse.net/t/28972",
                     TorrentFileName = "Frank Herbert - Collection by Frank Herbert [ENG / MP3] [VIP].torrent",
                     PublishedDate = "2010-01-21T00:05:36Z",
-                    DownloadType = "Torrent"
+                    Protocol = DownloadProtocol.Torrent
                 }
             });            var logger = Mock.Of<ILogger<SearchController>>();
             var mockAudibleService = new FakeAudibleService(new Listenarr.Api.Services.AudibleSearchResponse
@@ -224,7 +224,7 @@ namespace Listenarr.Api.Tests
                 Id = "28972",
                 Title = "Frank Herbert - Collection by Frank Herbert [ENG / MP3] [VIP]",
                 Size = 3972844800,
-                Files = 783,
+                FileCount = 783,
                 Grabs = 334,
                 Seeders = 59,
                 Leechers = 1,

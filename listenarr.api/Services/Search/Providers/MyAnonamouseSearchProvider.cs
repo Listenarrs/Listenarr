@@ -1,15 +1,8 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Net.Http;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
 using AsyncKeyedLock;
 using Listenarr.Api.Models;
-using Listenarr.Domain.Models;
 using Listenarr.Infrastructure.Models;
-using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Api.Services.Search.Providers
 {
@@ -23,7 +16,7 @@ namespace Listenarr.Api.Services.Search.Providers
         private readonly HttpClient _httpClient;
         private readonly ListenArrDbContext _dbContext;
 
-        public string IndexerType => "MyAnonamouse";
+        public List<Implementation> Implements => [Implementation.MyAnonamouse];
 
         public MyAnonamouseSearchProvider(
             ILogger<MyAnonamouseSearchProvider> logger,
@@ -685,11 +678,11 @@ namespace Listenarr.Api.Services.Search.Providers
                             ResultUrl = !string.IsNullOrEmpty(id) ? $"https://myanonamouse.net/t/{Uri.EscapeDataString(id)}" : indexer.Url,
                             MagnetLink = "",
                             NzbUrl = "",
-                            DownloadType = "Torrent",
+                            Protocol = DownloadProtocol.Torrent,
                             IndexerId = indexer.Id,
-                            IndexerImplementation = indexer.Implementation ?? string.Empty,
+                            IndexerImplementation = indexer.Implementation.ToString(),
                             Grabs = grabs,
-                            Files = files,
+                            FileCount = files,
                             Language = language ?? string.Empty,
                             TorrentFileName = fileNameField ?? string.Empty
                         };
@@ -705,8 +698,8 @@ namespace Listenarr.Api.Services.Search.Providers
                         // Log critical fields for debugging
                         if (_mamDebugIndex < 3)
                         {
-                            _logger.LogInformation("MAM Result #{Index}: Title='{Title}', Size={Size} bytes, Seeders={Seeders}, TorrentUrl='{TorrentUrl}', DownloadType='{DownloadType}'", 
-                                _mamDebugIndex, result.Title, result.Size, result.Seeders, result.TorrentUrl, result.DownloadType);
+                            _logger.LogInformation("MAM Result #{Index}: Title='{Title}', Size={Size} bytes, Seeders={Seeders}, TorrentUrl='{TorrentUrl}', Protocol='{Protocol}'", 
+                                _mamDebugIndex, result.Title, result.Size, result.Seeders, result.TorrentUrl, result.Protocol);
                         }
 
                         results.Add(result);
@@ -729,7 +722,7 @@ namespace Listenarr.Api.Services.Search.Providers
             if (results == null || results.Count == 0) return;
             if (topN <= 0) return;
 
-            var candidates = results.Where(r => (r.Grabs == 0 || r.Files == 0 || string.IsNullOrEmpty(r.Format) || string.IsNullOrEmpty(r.Language))).Take(topN).ToList();
+            var candidates = results.Where(r => r.Grabs == 0 || r.FileCount == 0 || string.IsNullOrEmpty(r.Format) || string.IsNullOrEmpty(r.Language)).Take(topN).ToList();
             if (!candidates.Any()) return;
 
             _logger.LogDebug("Enriching {Count} MyAnonamouse results (topN={TopN})", candidates.Count, topN);
@@ -809,11 +802,11 @@ namespace Listenarr.Api.Services.Search.Providers
 
                         // Apply values
                         if (grabs > 0) r.Grabs = grabs;
-                        if (files > 0) r.Files = files;
+                        if (files > 0) r.FileCount = files;
                         if (!string.IsNullOrEmpty(format) && string.IsNullOrEmpty(r.Format)) r.Format = format.ToUpper();
                         if (!string.IsNullOrEmpty(langCode) && string.IsNullOrEmpty(r.Language)) r.Language = ParseLanguageFromCode(langCode);
                         
-                        _logger.LogDebug("Enriched MyAnonamouse result {Id}: grabs={Grabs}, files={Files}, format={Format}, language={Language}", r.Id, r.Grabs, r.Files, r.Format, r.Language);
+                        _logger.LogDebug("Enriched MyAnonamouse result {Id}: grabs={Grabs}, files={Files}, format={Format}, language={Language}", r.Id, r.Grabs, r.FileCount, r.Format, r.Language);
                     }
                     catch (Exception exParse) when (exParse is not OperationCanceledException && exParse is not OutOfMemoryException && exParse is not StackOverflowException) {
                         _logger.LogDebug(exParse, "Failed to parse MyAnonamouse detail JSON for {Id}", r.Id);

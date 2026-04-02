@@ -16,6 +16,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.SignalR;
 using Moq;
 using System.Linq;
+using SharpCompress;
+using Listenarr.Domain.Models.Converters;
 
 namespace Listenarr.Api.Tests
 {
@@ -83,7 +85,7 @@ namespace Listenarr.Api.Tests
   </channel>
 </rss>";
 
-            var indexer = new Indexer { Name = "test", Url = "https://example.com", Type = "Torrent", Implementation = "torznab" };
+            var indexer = new Indexer { Name = "test", Url = "https://example.com", Protocol = DownloadProtocol.Torrent, Implementation = Implementation.Torznab };
             var service = CreateSearchService();
 
             var results = await service.ParseTorznabResponseAsync(xml, indexer);
@@ -113,7 +115,7 @@ namespace Listenarr.Api.Tests
   </channel>
 </rss>";
 
-            var indexer = new Indexer { Name = "test", Url = "https://example.com", Type = "Torrent", Implementation = "torznab" };
+            var indexer = new Indexer { Name = "test", Url = "https://example.com", Protocol = DownloadProtocol.Torrent, Implementation = Implementation.Torznab };
             var service = CreateSearchService();
 
             var results = await service.ParseTorznabResponseAsync(xml, indexer);
@@ -122,7 +124,7 @@ namespace Listenarr.Api.Tests
             Assert.Equal("English", res.Language);
             Assert.Equal(123456, res.Size);
             Assert.Equal(42, res.Grabs);
-            Assert.Equal(10, res.Files);
+            Assert.Equal(10, res.FileCount);
             Assert.Equal("2025-06-12", DateTime.Parse(res.PublishedDate).ToString("yyyy-MM-dd"));
         }
 
@@ -150,7 +152,7 @@ namespace Listenarr.Api.Tests
   </channel>
 </rss>";
 
-            var indexer = new Indexer { Name = "altHUB", Url = "https://api.althub.co.za", Type = "Usenet", Implementation = "newznab" };
+            var indexer = new Indexer { Name = "altHUB", Url = "https://api.althub.co.za", Protocol = DownloadProtocol.Usenet, Implementation = Implementation.Newznab };
 
             // Fake HTTP handler to return a small HTML snippet for the comments page
             var handler = new DelegatingHandlerStub(req =>
@@ -186,13 +188,14 @@ namespace Listenarr.Api.Tests
                 Seeders = 5,
                 Leechers = 2,
                 Grabs = 99,
-                Files = 7,
+                Files = [.. Enumerable.Range(0, 7).Select(i => new FileResult { Filename = $"i" })],
                 Source = "test"
             };
 
-            var sr = Listenarr.Domain.Models.SearchResultConverters.ToSearchResult(idx);
+            var sr = SearchResultConverters.ToSearchResult(idx);
             Assert.Equal(99, sr.Grabs);
-            Assert.Equal(7, sr.Files);
+            Assert.Equal(7, sr.FileCount);
+            Assert.Equal(7, sr.Files.Length);
         }
 
         [Fact]
@@ -208,12 +211,12 @@ namespace Listenarr.Api.Tests
                 Leechers = 0,
                 Quality = "",
                 Grabs = 0,
-                Files = 0,
-                DownloadType = "Usenet",
+                FileCount = 0,
+                Protocol = DownloadProtocol.Usenet,
                 Source = "altHUB"
             };
 
-            var sr = Listenarr.Domain.Models.SearchResultConverters.ToSearchResult(idx);
+            var sr = SearchResultConverters.ToSearchResult(idx);
             Assert.Null(sr.Seeders);
             Assert.Null(sr.Leechers);
             Assert.Null(sr.Quality);
@@ -227,8 +230,8 @@ namespace Listenarr.Api.Tests
                 .Options;
 
             using var db = new ListenArrDbContext(options);
-            db.Indexers.Add(new Indexer { Name = "altHUB1", Url = "https://api.althub.co.za", Implementation = "newznab", Type = "Usenet", IsEnabled = true, EnableInteractiveSearch = true });
-            db.Indexers.Add(new Indexer { Name = "altHUB2", Url = "https://api.althub.co.za", Implementation = "torznab", Type = "Torrent", IsEnabled = true, EnableInteractiveSearch = true });
+            db.Indexers.Add(new Indexer { Name = "altHUB1", Url = "https://api.althub.co.za", Implementation = Implementation.Newznab, Protocol = DownloadProtocol.Usenet, IsEnabled = true, EnableInteractiveSearch = true });
+            db.Indexers.Add(new Indexer { Name = "altHUB2", Url = "https://api.althub.co.za", Implementation = Implementation.Torznab, Protocol = DownloadProtocol.Torrent, IsEnabled = true, EnableInteractiveSearch = true });
             db.SaveChanges();
 
             var handler = new DelegatingHandlerStub(req => {
@@ -242,8 +245,8 @@ namespace Listenarr.Api.Tests
             var provider = new Listenarr.Api.Services.Search.Providers.TorznabNewznabSearchProvider(httpClient, NullLogger<Listenarr.Api.Services.Search.Providers.TorznabNewznabSearchProvider>.Instance);
             var mi = typeof(Listenarr.Api.Services.Search.Providers.TorznabNewznabSearchProvider).GetMethod("BuildTorznabUrl", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             Assert.NotNull(mi);
-            var idx1 = db.Indexers.First(i => i.Implementation == "newznab");
-            var idx2 = db.Indexers.First(i => i.Implementation == "torznab");
+            var idx1 = db.Indexers.First(i => i.Implementation == Implementation.Newznab);
+            var idx2 = db.Indexers.First(i => i.Implementation == Implementation.Torznab);
 
             var url1 = (string)mi!.Invoke(provider, new object[] { idx1, "testquery", null })!;
             var url2 = (string)mi!.Invoke(provider, new object[] { idx2, "testquery", null })!;
@@ -260,7 +263,7 @@ namespace Listenarr.Api.Tests
                 .Options;
 
             using var db = new ListenArrDbContext(options);
-            db.Indexers.Add(new Indexer { Name = "MyAnonamouse1", Url = "https://www.myanonamouse.net", Implementation = "MyAnonamouse", Type = "Torrent", IsEnabled = true, EnableInteractiveSearch = true, AdditionalSettings = "{\"mam_id\":\"test_mam\", \"mam_options\": { \"searchInDescription\": false, \"searchInSeries\": true, \"searchInFilenames\": true, \"language\": \"2\", \"filter\": \"Freeleech\", \"freeleechWedge\": \"Required\" } }" });
+            db.Indexers.Add(new Indexer { Name = "MyAnonamouse1", Url = "https://www.myanonamouse.net", Implementation = Implementation.MyAnonamouse, Protocol = DownloadProtocol.Torrent, IsEnabled = true, EnableInteractiveSearch = true, AdditionalSettings = "{\"mam_id\":\"test_mam\", \"mam_options\": { \"searchInDescription\": false, \"searchInSeries\": true, \"searchInFilenames\": true, \"language\": \"2\", \"filter\": \"Freeleech\", \"freeleechWedge\": \"Required\" } }" });
             db.SaveChanges();
 
             Uri? capturedUri = null;
@@ -288,7 +291,7 @@ namespace Listenarr.Api.Tests
                 }
             };
 
-            await provider.SearchAsync(db.Indexers.First(i => i.Implementation == "MyAnonamouse"), "Test Title", null, request);
+            await provider.SearchAsync(db.Indexers.First(i => i.Implementation == Implementation.MyAnonamouse), "Test Title", null, request);
 
             Assert.NotNull(capturedUri);
             var q = capturedUri?.Query ?? string.Empty;
@@ -309,8 +312,8 @@ namespace Listenarr.Api.Tests
                 Id = 42,
                 Name = "Internet Archive",
                 Url = "https://archive.org/advancedsearch.php",
-                Type = "Torrent",
-                Implementation = "InternetArchive",
+                Protocol = DownloadProtocol.Torrent,
+                Implementation = Implementation.InternetArchive,
                 IsEnabled = true
             };
 
@@ -366,7 +369,7 @@ namespace Listenarr.Api.Tests
             var results = await provider.SearchAsync(indexer, "Artemis");
 
             var result = Assert.Single(results);
-            Assert.Equal("DDL", result.DownloadType);
+            Assert.Equal(DownloadProtocol.DirectDownload, result.Protocol);
             Assert.Equal(42, result.IndexerId);
             Assert.Equal("InternetArchive", result.IndexerImplementation);
             Assert.Equal("https://archive.org/download/artemis_book/artemis.m4b", result.TorrentUrl);
@@ -395,7 +398,7 @@ namespace Listenarr.Api.Tests
   }
 ]";
 
-            var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse" };
+            var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Protocol = DownloadProtocol.Torrent, Implementation = Implementation.MyAnonamouse };
             var service = CreateSearchService();
 
             // Use reflection to call the private parser
@@ -406,7 +409,7 @@ namespace Listenarr.Api.Tests
             Assert.Single(results);
             var r = results[0];
             Assert.Equal(3972844800, r.Size);
-            Assert.Equal(783, r.Files);
+            Assert.Equal(783, r.FileCount);
             Assert.Equal(334, r.Grabs);
             Assert.Equal(59, r.Seeders);
             Assert.Equal(1, r.Leechers);
@@ -427,7 +430,7 @@ namespace Listenarr.Api.Tests
     ""size"": 12345
   }
 ]";
-            var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse", AdditionalSettings = "{ \"mam_id\": \"test_mam\" }" };
+            var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Protocol = DownloadProtocol.Torrent, Implementation = Implementation.MyAnonamouse, AdditionalSettings = "{ \"mam_id\": \"test_mam\" }" };
             var service = CreateSearchService();
 
             var method = typeof(SearchService).GetMethod("ParseMyAnonamouseResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
@@ -451,7 +454,7 @@ namespace Listenarr.Api.Tests
 ]";
 
             // Case A: raw mam_id with + and = characters
-            var indexerRaw = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse", AdditionalSettings = "{ \"mam_id\": \"abc+def==\" }" };
+            var indexerRaw = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Protocol = DownloadProtocol.Torrent, Implementation = Implementation.MyAnonamouse, AdditionalSettings = "{ \"mam_id\": \"abc+def==\" }" };
             var method = typeof(SearchService).GetMethod("ParseMyAnonamouseResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             Assert.NotNull(method);
             var service = CreateSearchService();
@@ -460,7 +463,7 @@ namespace Listenarr.Api.Tests
             Assert.Equal("https://www.myanonamouse.net/tor/download.php/abc123?mam_id=abc%2Bdef%3D%3D", resRaw[0].TorrentUrl);
 
             // Case B: mam_id already percent-encoded (should not double-encode)
-            var indexerEnc = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse", AdditionalSettings = "{ \"mam_id\": \"abc%2Bdef%3D%3D\" }" };
+            var indexerEnc = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Protocol = DownloadProtocol.Torrent, Implementation = Implementation.MyAnonamouse, AdditionalSettings = "{ \"mam_id\": \"abc%2Bdef%3D%3D\" }" };
             var resEnc = (List<IndexerSearchResult>)method!.Invoke(service, new object[] { json, indexerEnc })!;
             Assert.Single(resEnc);
             Assert.Equal("https://www.myanonamouse.net/tor/download.php/abc123?mam_id=abc%2Bdef%3D%3D", resEnc[0].TorrentUrl);
@@ -482,7 +485,7 @@ namespace Listenarr.Api.Tests
   }
 ]";
 
-            var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse" };
+            var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Protocol = DownloadProtocol.Torrent, Implementation = Implementation.MyAnonamouse };
             var service = CreateSearchService();
 
             // Use reflection to call the private parser
@@ -510,7 +513,7 @@ namespace Listenarr.Api.Tests
   }
 ]"; 
 
-            var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse" };
+            var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Protocol = DownloadProtocol.Torrent, Implementation = Implementation.MyAnonamouse };
             var service = CreateSearchService();
 
             var method = typeof(SearchService).GetMethod("ParseMyAnonamouseResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
@@ -535,7 +538,7 @@ namespace Listenarr.Api.Tests
   }
 ]"; 
 
-            var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse" };
+            var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Protocol = DownloadProtocol.Torrent, Implementation = Implementation.MyAnonamouse };
             var service = CreateSearchService();
 
             var method = typeof(SearchService).GetMethod("ParseMyAnonamouseResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
@@ -557,7 +560,7 @@ namespace Listenarr.Api.Tests
   }
 ]";
 
-            var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse" };
+            var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Protocol = DownloadProtocol.Torrent, Implementation = Implementation.MyAnonamouse };
             var service = CreateSearchService();
 
             var method = typeof(SearchService).GetMethod("ParseMyAnonamouseResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
@@ -583,7 +586,7 @@ namespace Listenarr.Api.Tests
   }
 ]";
 
-            var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse" };
+            var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Protocol = DownloadProtocol.Torrent, Implementation = Implementation.MyAnonamouse };
             var service = CreateSearchService();
 
             var method = typeof(SearchService).GetMethod("ParseMyAnonamouseResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
@@ -612,7 +615,7 @@ namespace Listenarr.Api.Tests
   }
 ]";
 
-            var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse" };
+            var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Protocol = DownloadProtocol.Torrent, Implementation = Implementation.MyAnonamouse };
             var service = CreateSearchService();
 
             // Use reflection to call the private parser
@@ -623,7 +626,7 @@ namespace Listenarr.Api.Tests
             Assert.Single(results);
             var r = results[0];
 
-            var dto = Listenarr.Domain.Models.SearchResultConverters.ToIndexerResultDto(r);
+            var dto = SearchResultConverters.ToIndexerResultDto(r);
             Assert.Equal("MP3", dto.FileType);
             Assert.Equal("English", dto.Language);
         }
@@ -641,7 +644,7 @@ namespace Listenarr.Api.Tests
   }
 ]";
 
-            var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse" };
+            var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Protocol = DownloadProtocol.Torrent, Implementation = Implementation.MyAnonamouse };
             var service = CreateSearchService();
 
             var method = typeof(SearchService).GetMethod("ParseMyAnonamouseResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
@@ -652,11 +655,11 @@ namespace Listenarr.Api.Tests
             var r = results[0];
 
             Assert.Equal("MP3", r.Format);
-            Assert.Equal("Torrent", r.DownloadType);
+            Assert.Equal(DownloadProtocol.Torrent, r.Protocol);
 
-            var dto = Listenarr.Domain.Models.SearchResultConverters.ToIndexerResultDto(r);
+            var dto = SearchResultConverters.ToIndexerResultDto(r);
             Assert.Equal("MP3", dto.FileType);
-            Assert.Equal("torrent", dto.Protocol);
+            Assert.Equal(DownloadProtocol.Torrent, dto.Protocol);
         }
         [Fact]
         public async Task EnrichMyAnonamouse_Populates_Fields_When_Enabled()
@@ -669,7 +672,7 @@ namespace Listenarr.Api.Tests
   }
 ]"; 
 
-            var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse", IsEnabled = true, EnableInteractiveSearch = true, AdditionalSettings = "{ \"mam_id\": \"test_mam\", \"mam_options\": { \"enrichResults\": true, \"enrichTopResults\": 1 } }" };
+            var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Protocol = DownloadProtocol.Torrent, Implementation = Implementation.MyAnonamouse, IsEnabled = true, EnableInteractiveSearch = true, AdditionalSettings = "{ \"mam_id\": \"test_mam\", \"mam_options\": { \"enrichResults\": true, \"enrichTopResults\": 1 } }" };
 
             Uri? captured = null;
             var handler = new DelegatingHandlerStub(req => {
@@ -699,7 +702,7 @@ namespace Listenarr.Api.Tests
             Assert.Single(results);
             var r = results[0];
             Assert.Equal(15, r.Grabs);
-            Assert.Equal(4, r.Files);
+            Assert.Equal(4, r.FileCount);
             Assert.Equal("MP3", r.Format);
             Assert.Equal("English", r.Language);
         }

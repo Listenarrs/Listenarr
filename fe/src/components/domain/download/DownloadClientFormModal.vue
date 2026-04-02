@@ -32,10 +32,7 @@
             <div class="form-group">
               <label for="type">Type *</label>
               <select id="type" v-model="formData.type" required @change="onTypeChange">
-                <option value="qbittorrent">qBittorrent</option>
-                <option value="transmission">Transmission</option>
-                <option value="sabnzbd">SABnzbd</option>
-                <option value="nzbget">NZBGet</option>
+                <option v-for="(config, client) in DownloadClientConfigs" :value="client">{{ config.label }}</option>
               </select>
             </div>
 
@@ -101,7 +98,7 @@
           </FormSection>
 
           <!-- Authentication -->
-          <FormSection title="Authentication" :icon="PhLock" v-if="requiresAuth">
+          <FormSection title="Authentication" :icon="PhLock">
             <div class="form-group" v-if="requiresApiKey">
               <label for="apiKey">API Key *</label>
               <PasswordInput
@@ -122,9 +119,9 @@
                   v-model="formData.username"
                   type="text"
                   placeholder="admin"
-                  :required="formData.type === 'nzbget'"
+                  :required="formData.type === DownloadClient.nzbget"
                 />
-                <small v-if="formData.type === 'nzbget'"
+                <small v-if="formData.type === DownloadClient.nzbget"
                   >Required when NZBGet authentication is enabled.</small
                 >
               </div>
@@ -135,10 +132,10 @@
                   id="password"
                   v-model="formData.password"
                   :placeholder="props.editingClient && !formData.password ? '(Saved password)' : '********'"
-                  :required="formData.type === 'nzbget'"
+                  :required="formData.type === DownloadClient.nzbget"
                   class="admin-input"
                 />
-                <small v-if="formData.type === 'nzbget'"
+                <small v-if="formData.type === DownloadClient.nzbget"
                   >Use the NZBGet RPC password (default: nzbget).</small
                 >
               </div>
@@ -230,7 +227,7 @@
             </div>
           </FormSection>
 
-          <FormSection title="Advanced Settings" :icon="PhWrench" v-if="formData.type === 'qbittorrent'">
+          <FormSection title="Advanced Settings" :icon="PhWrench" v-if="formData.type === DownloadClient.qbittorrent">
             <div class="form-group">
               <label for="initialState">Initial State</label>
               <select id="initialState" v-model="formData.initialState">
@@ -328,6 +325,8 @@ import { useConfigurationStore } from '@/stores/configuration'
 import { getRemotePathMappings, testDownloadClient } from '@/services/api'
 import { logger } from '@/utils/logger'
 import type { RemotePathMapping } from '@/types'
+import { DownloadClient, DownloadClientConfigs } from '@/types/DownloadClientConfig'
+import { DownloadProtocol } from '@/types/DownloadProtocolConfig'
 
 
 interface Props {
@@ -351,7 +350,7 @@ const testing = ref(false)
 
 const defaultFormData = {
   name: '',
-  type: 'qbittorrent' as 'qbittorrent' | 'transmission' | 'sabnzbd' | 'nzbget',
+  type: DownloadClient.qbittorrent,
   host: '',
   port: 8080,
   username: '',
@@ -401,35 +400,23 @@ const normalizeHost = (value: string): string => {
 }
 
 const isUsenet = computed(() => {
-  return formData.value.type === 'sabnzbd' || formData.value.type === 'nzbget'
+  return DownloadClientConfigs[formData.value.type].protocols.includes(DownloadProtocol.Usenet)
 })
 
 const requiresAuth = computed(() => {
-  return true // All clients require some form of auth
+  return !DownloadClientConfigs[formData.value.type].requiresApiKey
 })
 
 const requiresApiKey = computed(() => {
-  return formData.value.type === 'sabnzbd'
+  return DownloadClientConfigs[formData.value.type].requiresApiKey
 })
 
 const getHostPlaceholder = () => {
-  const placeholders: Record<string, string> = {
-    qbittorrent: 'qbittorrent.tld.com',
-    transmission: 'transmission.tld.com',
-    sabnzbd: 'sabnzbd.tld.com',
-    nzbget: 'nzbget.tld.com',
-  }
-  return placeholders[formData.value.type] || 'localhost'
+  return DownloadClientConfigs[formData.value.type].url || 'localhost'
 }
 
 const getPortPlaceholder = () => {
-  const ports: Record<string, number> = {
-    qbittorrent: 8080,
-    transmission: 9091,
-    sabnzbd: 8080,
-    nzbget: 6789,
-  }
-  return ports[formData.value.type]?.toString() || '8080'
+  return DownloadClientConfigs[formData.value.type].port?.toString() || '8080'
 }
 
 const getPortHelpText = () => {
@@ -451,15 +438,9 @@ const getCategoryHelp = () => {
 
 const onTypeChange = () => {
   // Update default port when type changes
-  const defaultPorts: Record<string, number> = {
-    qbittorrent: 8080,
-    transmission: 9091,
-    sabnzbd: 8080,
-    nzbget: 6789,
-  }
-  formData.value.port = defaultPorts[formData.value.type] || 8080
+  formData.value.port = DownloadClientConfigs[formData.value.type].port || 8080
 
-  if (formData.value.type === 'sabnzbd') {
+  if (DownloadClientConfigs[formData.value.type].requiresApiKey) {
     formData.value.username = ''
     formData.value.password = ''
   } else {
@@ -536,10 +517,10 @@ const testConnection = async () => {
       isEnabled: formData.value.isEnabled,
       removeCompletedDownloads: formData.value.removeCompletedDownloads,
       settings: {
-        ...(formData.value.type === 'sabnzbd' && formData.value.apiKey
+        ...(DownloadClientConfigs[formData.value.type].requiresApiKey
           ? { apiKey: formData.value.apiKey }
           : {}),
-        ...(formData.value.type === 'transmission' && formData.value.urlBase
+        ...(formData.value.type === DownloadClient.transmission && formData.value.urlBase
           ? { urlBase: formData.value.urlBase }
           : {}),
         ...(formData.value.category && { category: formData.value.category }),
@@ -596,10 +577,10 @@ const handleSubmit = async () => {
       isEnabled: formData.value.isEnabled,
       removeCompletedDownloads: formData.value.removeCompletedDownloads,
       settings: {
-        ...(formData.value.type === 'sabnzbd' && formData.value.apiKey
+        ...(DownloadClientConfigs[formData.value.type].requiresApiKey
           ? { apiKey: formData.value.apiKey }
           : {}),
-        ...(formData.value.type === 'transmission' && formData.value.urlBase
+        ...(formData.value.type === DownloadClient.transmission && formData.value.urlBase
           ? { urlBase: formData.value.urlBase }
           : {}),
         ...(formData.value.category && { category: formData.value.category }),

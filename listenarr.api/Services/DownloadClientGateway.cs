@@ -1,10 +1,5 @@
-using System;
-using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
-using Listenarr.Domain.Models;
 using Listenarr.Api.Services.Adapters;
-using Microsoft.Extensions.Logging;
+using Microsoft.AspNetCore.Authorization.Infrastructure;
 
 namespace Listenarr.Api.Services
 {
@@ -21,27 +16,16 @@ namespace Listenarr.Api.Services
 
         private IDownloadClientAdapter ResolveAdapter(DownloadClientConfiguration client)
         {
-            if (client == null)
-            {
-                throw new ArgumentNullException(nameof(client));
-            }
+            ArgumentNullException.ThrowIfNull(client);
 
-            var attemptedKeys = new List<string?> { client.Id, client.Type };
-            foreach (var key in attemptedKeys)
+            if (!string.IsNullOrWhiteSpace(client.Type))
             {
-                if (string.IsNullOrWhiteSpace(key))
-                {
-                    continue;
-                }
-
                 try
                 {
-                    return _factory.GetByIdOrType(key);
+                    return _factory.GetByType(client.Type);
                 }
                 catch (InvalidOperationException)
                 {
-                    // Try the next key.
-                    continue;
                 }
             }
 
@@ -60,16 +44,16 @@ namespace Listenarr.Api.Services
             return adapter.TestConnectionAsync(client, ct);
         }
 
-        public Task<string?> AddAsync(DownloadClientConfiguration client, SearchResult result, CancellationToken ct = default)
+        public Task<Download?> AddAsync(DownloadClientConfiguration client, IndexerSearchResult result, CancellationToken ct = default)
         {
             var adapter = ResolveAdapter(client);
             return adapter.AddAsync(client, result, ct);
         }
 
-        public Task<bool> RemoveAsync(DownloadClientConfiguration client, string id, bool deleteFiles = false, CancellationToken ct = default)
+        public Task<bool> RemoveAsync(DownloadClientConfiguration client, Download download, bool deleteFiles = false, CancellationToken ct = default)
         {
             var adapter = ResolveAdapter(client);
-            return adapter.RemoveAsync(client, id, deleteFiles, ct);
+            return adapter.RemoveAsync(client, download, deleteFiles, ct);
         }
 
         public Task<List<QueueItem>> GetQueueAsync(DownloadClientConfiguration client, CancellationToken ct = default)
@@ -84,10 +68,27 @@ namespace Listenarr.Api.Services
             return adapter.GetRecentHistoryAsync(client, limit, ct);
         }
 
-        public Task<bool> MarkItemAsImportedAsync(DownloadClientConfiguration client, string downloadId, CancellationToken ct = default)
+        public Task<bool> MarkItemAsImportedAsync(DownloadClientConfiguration client, Download download, CancellationToken ct = default)
         {
             var adapter = ResolveAdapter(client);
-            return adapter.MarkItemAsImportedAsync(client, downloadId, ct);
+            return adapter.MarkItemAsImportedAsync(client, download, ct);
+        }
+
+        public Task<QueueItem> GetImportItemAsync(DownloadClientConfiguration client, Download download, QueueItem queueItem, QueueItem? previousAttempt = null, CancellationToken ct = default)
+        {
+            var adapter = ResolveAdapter(client);
+
+            _logger.LogDebug(
+                "Resolving import item for download {DownloadId} using {ClientType} adapter",
+                download.Id,
+                client.Type);
+
+            return adapter.GetImportItemAsync(
+                client,
+                download,
+                queueItem,
+                previousAttempt,
+                ct);
         }
     }
 }

@@ -23,8 +23,10 @@ namespace Listenarr.Domain.Models
     /// </summary>
     public enum DownloadProtocol
     {
-        Torrent,
-        Usenet
+        Torrent = 0,
+        Usenet = 1,
+        DirectDownload = 2,
+        Soulseek = 3
     }
 
     /// <summary>

@@ -66,7 +66,7 @@ namespace Listenarr.Api.Tests
                 Title = "JANE AUSTEN Pride And Prejudice [ Stevenson]",
                 Quality = "MP3 VBR",
                 Size = 809404474, // ~772 MB
-                DownloadType = "DDL",
+                Protocol = DownloadProtocol.DirectDownload,
                 Source = "Test (Internet Archive)",
                 Format = null,
                 Language = null

@@ -1,7 +1,4 @@
-﻿using System;
-using System.IO;
-using Microsoft.Extensions.Configuration;
-using System.Net.Http;
+﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
@@ -9,9 +6,7 @@ using Moq;
 using Microsoft.AspNetCore.SignalR;
 using Listenarr.Api.Services;
 using Microsoft.AspNetCore.Http;
-using System.Collections.Generic;
 using System.Text.Json.Nodes;
-using Listenarr.Domain.Models;
 
 namespace Listenarr.Api.Tests
 {
@@ -198,7 +193,7 @@ internal class TestConfigurationService : Listenarr.Api.Services.IConfigurationS
     public Task<bool> DeleteApiConfigurationAsync(string id)
         => Task.FromResult(false);
 
-    public Task<List<Listenarr.Domain.Models.DownloadClientConfiguration>> GetDownloadClientConfigurationsAsync()
+    public Task<List<Listenarr.Domain.Models.DownloadClientConfiguration>> GetDownloadClientConfigurationsAsync(DownloadProtocol? protocol = null, bool? enabled = null)
         => Task.FromResult(new List<Listenarr.Domain.Models.DownloadClientConfiguration>());
 
     public Task<Listenarr.Domain.Models.DownloadClientConfiguration?> GetDownloadClientConfigurationAsync(string id)

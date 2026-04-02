@@ -6,6 +6,6 @@ namespace Listenarr.Api.Services
 {
     public interface INzbUrlResolver
     {
-        Task<(string Url, string? IndexerApiKey)> ResolveAsync(SearchResult result, CancellationToken ct = default);
+        Task<(string Url, string? IndexerApiKey)> ResolveAsync(IndexerSearchResult result, CancellationToken ct = default);
     }
 }

@@ -1,12 +1,6 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
 using System.Reflection;
-using System.Threading;
-using System.Threading.Tasks;
 using Listenarr.Api.Hubs;
 using Listenarr.Api.Services;
-using Listenarr.Domain.Models;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -108,9 +102,6 @@ namespace Listenarr.Api.Tests
                 new Mock<ILogger<DownloadMonitorService>>().Object,
                 httpFactoryMock.Object);
 
-            var finalizeMethod = typeof(DownloadMonitorService).GetMethod("FinalizeDownloadAsync", BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.NotNull(finalizeMethod);
-
             var client = new DownloadClientConfiguration
             {
                 Id = download.DownloadClientId,
@@ -119,11 +110,7 @@ namespace Listenarr.Api.Tests
                 DownloadPath = sourceDir
             };
 
-            var finalizeTask = (Task?)finalizeMethod!.Invoke(monitor, new object[] { download, sourceDir, client, CancellationToken.None });
-            if (finalizeTask != null)
-            {
-                await finalizeTask;
-            }
+            await monitor.FinalizeDownloadAsync(download, sourceDir, client, CancellationToken.None);
 
             queueMock.Verify(q => q.QueueDownloadProcessingAsync(download.Id, It.IsAny<string>(), client.Id), Times.Once);
             Assert.Equal(Path.GetFullPath(sourceFile), Path.GetFullPath(queuedSource), ignoreCase: true);

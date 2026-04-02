@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Listenarr.Api.Models;
 using Listenarr.Api.Services;
+using Listenarr.Api.Services.Adapters;
 using Listenarr.Domain.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -58,7 +59,8 @@ namespace Listenarr.Api.Tests
                     _db,
                     _loggerFactory.CreateLogger<ConfigurationService>(),
                     new Mock<IUserService>().Object,
-                    new Mock<IStartupConfigService>().Object);
+                    new Mock<IStartupConfigService>().Object,
+                    new Mock<IDownloadClientAdapterFactory>().Object);
                 Controller = new Listenarr.Api.Controllers.IndexersController(
                     _db,
                     _loggerFactory.CreateLogger<Listenarr.Api.Controllers.IndexersController>(),
@@ -235,7 +237,7 @@ namespace Listenarr.Api.Tests
 
             var imported = await harness.Db.Indexers.AsNoTracking().SingleAsync();
             Assert.Equal("Tagged Indexer (Prowlarr)", imported.Name);
-            Assert.Equal("Torznab", imported.Implementation);
+            Assert.Equal(Implementation.Torznab, imported.Implementation);
             Assert.Equal("tag-key", imported.ApiKey);
             Assert.Equal(string.Empty, imported.Categories);
         }
@@ -392,7 +394,7 @@ namespace Listenarr.Api.Tests
 
             var imported = await harness.Db.Indexers.AsNoTracking().SingleAsync();
             Assert.Equal("Named Tag Indexer (Prowlarr)", imported.Name);
-            Assert.Equal("Torznab", imported.Implementation);
+            Assert.Equal(Implementation.Torznab, imported.Implementation);
         }
 
         [Fact]
@@ -453,7 +455,7 @@ namespace Listenarr.Api.Tests
 
             var imported = await harness.Db.Indexers.AsNoTracking().SingleAsync();
             Assert.Equal("Category Indexer (Prowlarr)", imported.Name);
-            Assert.Equal("Newznab", imported.Implementation);
+            Assert.Equal(Implementation.Newznab, imported.Implementation);
             Assert.Equal("3030", imported.Categories);
 
             var saved = await harness.ConfigurationService.GetProwlarrImportSettingsAsync();

@@ -400,28 +400,13 @@ namespace Listenarr.Api.Services
 
                     bool deleteFiles = removalPolicy == "remove_and_delete";
 
-                    // Resolve the client-side ID (prefer TorrentHash for torrents, then ClientDownloadId for usenet)
-                    string? torrentHash = null;
-                    if (download.Metadata != null && download.Metadata.TryGetValue("TorrentHash", out var hashObj))
-                    {
-                        torrentHash = hashObj?.ToString();
-                    }
-                    string? clientDownloadId = null;
-                    if (download.Metadata != null && download.Metadata.TryGetValue("ClientDownloadId", out var clientIdObj))
-                    {
-                        clientDownloadId = clientIdObj?.ToString();
-                    }
-                    string clientId = !string.IsNullOrEmpty(torrentHash) ? torrentHash
-                        : !string.IsNullOrEmpty(clientDownloadId) ? clientDownloadId
-                        : download.Id;
-
                     // Attempt 1: Try primary client
                     bool removed = false;
                     if (clientConfig != null)
                     {
                         try
                         {
-                            removed = await downloadClientGateway.RemoveAsync(clientConfig, clientId, deleteFiles);
+                            removed = await downloadClientGateway.RemoveAsync(clientConfig, download, deleteFiles);
                         }
                         catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                         {
@@ -433,7 +418,7 @@ namespace Listenarr.Api.Services
                     // Attempt 2: Cross-client fallback — if primary failed and we have a torrent
                     // hash, try all other enabled torrent clients. This handles cases where the
                     // download was recorded under the wrong DownloadClientId.
-                    if (!removed && !string.IsNullOrEmpty(torrentHash))
+                    if (!removed && download.Metadata != null && download.Metadata.ContainsKey("TorrentHash"))
                     {
                         var torrentClientTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
                             { "qbittorrent", "transmission" };
@@ -447,7 +432,7 @@ namespace Listenarr.Api.Services
                             try
                             {
                                 var altDeleteFiles = altClient.RemoveCompletedDownloads == "remove_and_delete";
-                                removed = await downloadClientGateway.RemoveAsync(altClient, torrentHash, altDeleteFiles);
+                                removed = await downloadClientGateway.RemoveAsync(altClient, download, altDeleteFiles);
                                 if (removed)
                                 {
                                     _logger.LogInformation(

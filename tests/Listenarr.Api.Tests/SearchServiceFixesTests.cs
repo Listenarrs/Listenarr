@@ -10,6 +10,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.AspNetCore.SignalR;
 using Moq;
 using System.Linq;
+using Listenarr.Domain.Models.Converters;
 
 namespace Listenarr.Api.Tests
 {
@@ -62,7 +63,7 @@ namespace Listenarr.Api.Tests
         public void ParseMyAnonamouse_With_NoDateOrAge_Sets_Empty_PublishedDate()
         {
             var json = "[ { \"guid\": \"https://www.myanonamouse.net/t/100\", \"size\": 12345, \"title\": \"Test Title\" } ]";
-            var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse" };
+            var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Protocol = DownloadProtocol.Torrent, Implementation = Implementation.MyAnonamouse };
             var service = CreateSearchService();
 
             var method = typeof(SearchService).GetMethod("ParseMyAnonamouseResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
@@ -77,7 +78,7 @@ namespace Listenarr.Api.Tests
         public void ParseMyAnonamouse_Always_Sets_Grabs_Even_If_Zero()
         {
             var json = "[ { \"guid\": \"https://www.myanonamouse.net/t/101\", \"grabs\": \"0\", \"files\": \"1\", \"title\": \"Test Title 2\" } ]";
-            var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse" };
+            var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Protocol = DownloadProtocol.Torrent, Implementation = Implementation.MyAnonamouse };
             var service = CreateSearchService();
 
             var method = typeof(SearchService).GetMethod("ParseMyAnonamouseResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
@@ -86,7 +87,7 @@ namespace Listenarr.Api.Tests
             Assert.Single(results);
             var r = results[0];
             Assert.Equal(0, r.Grabs);
-            Assert.Equal(1, r.Files);
+            Assert.Equal(1, r.FileCount);
         }
 
         [Fact]
@@ -102,12 +103,12 @@ namespace Listenarr.Api.Tests
                 Leechers = 0,
                 Quality = "",
                 Grabs = 0,
-                Files = 0,
-                DownloadType = "Usenet",
+                FileCount = 0,
+                Protocol = DownloadProtocol.Usenet,
                 Source = "altHUB"
             };
 
-            var sr = Listenarr.Domain.Models.SearchResultConverters.ToSearchResult(idx);
+            var sr = SearchResultConverters.ToSearchResult(idx);
             Assert.Null(sr.Language);
         }
 
@@ -123,7 +124,7 @@ namespace Listenarr.Api.Tests
                 PublishYear = "2020"
             };
 
-            var sr = Listenarr.Domain.Models.SearchResultConverters.ToSearchResult(md);
+            var sr = SearchResultConverters.ToSearchResult(md);
             Assert.Null(sr.Language);
         }
 
@@ -139,12 +140,12 @@ namespace Listenarr.Api.Tests
                 Leechers = 2,
                 Quality = "Unknown",
                 Grabs = 0,
-                Files = 0,
-                DownloadType = "Torrent",
+                FileCount = 0,
+                Protocol = DownloadProtocol.Torrent,
                 Source = "test"
             };
 
-            var sr = Listenarr.Domain.Models.SearchResultConverters.ToSearchResult(idx);
+            var sr = SearchResultConverters.ToSearchResult(idx);
             Assert.Null(sr.Quality);
         }
     }

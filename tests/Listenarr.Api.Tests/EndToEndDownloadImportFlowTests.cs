@@ -19,23 +19,25 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
+using Listenarr.Api.Services.Adapters;
 
 namespace Listenarr.Api.Tests
 {
     public class EndToEndDownloadImportFlowTests
     {
         [Theory]
-        [InlineData("qbittorrent", "Torrent", false)]
-        [InlineData("qbittorrent", "Torrent", true)]
-        [InlineData("transmission", "Torrent", false)]
-        [InlineData("transmission", "Torrent", true)]
-        [InlineData("sabnzbd", "Usenet", false)]
-        [InlineData("sabnzbd", "Usenet", true)]
-        [InlineData("nzbget", "Usenet", false)]
-        [InlineData("nzbget", "Usenet", true)]
+        [InlineData("qbittorrent", DownloadProtocol.Torrent, false)]
+        [InlineData("qbittorrent", DownloadProtocol.Torrent, true)]
+        [InlineData("transmission", DownloadProtocol.Torrent, false)]
+        [InlineData("transmission", DownloadProtocol.Torrent, true)]
+        [InlineData("sabnzbd", DownloadProtocol.Usenet, false)]
+        [InlineData("sabnzbd", DownloadProtocol.Usenet, true)]
+        [InlineData("nzbget", DownloadProtocol.Usenet, false)]
+        [InlineData("nzbget", DownloadProtocol.Usenet, true)]
+        [InlineData("slskd", DownloadProtocol.Soulseek, true)]
         public async Task IndexerToClientToImport_EndToEnd_Works_ForSingleAndMultiFile(
             string clientType,
-            string downloadType,
+            DownloadProtocol protocol,
             bool isMultiFile)
         {
             var dbName = Guid.NewGuid().ToString("N");
@@ -57,7 +59,7 @@ namespace Listenarr.Api.Tests
             {
                 var audiobook = new Audiobook
                 {
-                    Title = $"E2E {downloadType} {(isMultiFile ? "Multi" : "Single")}",
+                    Title = $"E2E {protocol} {(isMultiFile ? "Multi" : "Single")}",
                     Authors = new List<string> { "Test Author" },
                     BasePath = Path.Join(outputRoot, "library", Guid.NewGuid().ToString("N"))
                 };
@@ -120,8 +122,10 @@ namespace Listenarr.Api.Tests
 
             var gatewayMock = new Mock<IDownloadClientGateway>();
             gatewayMock
-                .Setup(g => g.AddAsync(downloadClient, It.IsAny<SearchResult>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync($"{downloadType}-client-item-1");
+                .Setup(g => g.AddAsync(downloadClient, It.IsAny<IndexerSearchResult>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new Download {
+                    Id = $"{protocol}-client-item-1"
+                });
             gatewayMock
                 .Setup(g => g.GetQueueAsync(downloadClient, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new List<QueueItem>());
@@ -193,6 +197,7 @@ namespace Listenarr.Api.Tests
                 completedProcessor,
                 new NoopAppMetricsService(),
                 notificationService,
+                new DownloadClientAdapterFactory([]),
                 new NoopHubBroadcaster());
 
             int audiobookId;
@@ -201,7 +206,7 @@ namespace Listenarr.Api.Tests
                 audiobookId = await verifyCtx.Audiobooks.Select(a => a.Id).SingleAsync();
             }
 
-            var searchResult = BuildIndexerResult(downloadType, isMultiFile);
+            var searchResult = BuildIndexerResult(protocol, isMultiFile);
 
             var createdDownloadId = await downloadService.StartDownloadAsync(searchResult, downloadClient.Id, audiobookId);
             await downloadService.ProcessCompletedDownloadAsync(createdDownloadId, sourcePath);
@@ -244,24 +249,24 @@ namespace Listenarr.Api.Tests
                 }
             }
 
-            gatewayMock.Verify(g => g.AddAsync(downloadClient, It.IsAny<SearchResult>(), It.IsAny<CancellationToken>()), Times.Once);
+            gatewayMock.Verify(g => g.AddAsync(downloadClient, It.IsAny<IndexerSearchResult>(), It.IsAny<CancellationToken>()), Times.Once);
         }
 
-        private static SearchResult BuildIndexerResult(string downloadType, bool isMultiFile)
+        private static SearchResult BuildIndexerResult(DownloadProtocol protocol, bool isMultiFile)
         {
             var titleSuffix = isMultiFile ? "Multi" : "Single";
             var result = new SearchResult
             {
                 Id = Guid.NewGuid().ToString("N"),
-                Title = $"Indexer Result {downloadType} {titleSuffix}",
+                Title = $"Indexer Result {protocol} {titleSuffix}",
                 Artist = "Test Author",
                 Source = "Test Indexer",
                 Size = 10_000_000,
-                DownloadType = downloadType,
+                Protocol = protocol,
                 Quality = "Good"
             };
 
-            if (downloadType.Equals("Torrent", StringComparison.OrdinalIgnoreCase))
+            if (DownloadProtocol.Torrent == protocol)
             {
                 result.MagnetLink = "magnet:?xt=urn:btih:ABCDEF1234567890";
                 result.TorrentUrl = "http://indexer.local/torrent/1";

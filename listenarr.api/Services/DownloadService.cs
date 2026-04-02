@@ -32,6 +32,7 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using Listenarr.Api.Services.Adapters;
+using Listenarr.Domain.Models.Converters;
 
 namespace Listenarr.Api.Services
 {
@@ -41,14 +42,6 @@ namespace Listenarr.Api.Services
         private const int QueueCacheExpirationSeconds = 10;
         private const int ClientStatusCacheExpirationSeconds = 30;
         private const int DirectDownloadTimeoutHours = 2;
-
-        private enum EffectiveDownloadType
-        {
-            Unknown,
-            Torrent,
-            Usenet,
-            DirectDownload
-        }
 
         private readonly IHubContext<DownloadHub> _hubContext;
         private readonly Listenarr.Application.Services.IHubBroadcaster _hubBroadcaster;
@@ -69,6 +62,7 @@ namespace Listenarr.Api.Services
         private readonly IDownloadQueueService _downloadQueueService;
         private readonly ICompletedDownloadProcessor _completedDownloadProcessor;
         private readonly IDownloadHistoryService? _downloadHistoryService;
+        private readonly IDownloadClientAdapterFactory _downloadClientAdapter;
 
         // Track qBittorrent sync state for incremental updates (clientId -> last rid)
         private readonly Dictionary<string, int> _qbittorrentSyncState = new();
@@ -94,6 +88,7 @@ namespace Listenarr.Api.Services
             ICompletedDownloadProcessor completedDownloadProcessor,
             IAppMetricsService metrics,
             NotificationService notificationService,
+            IDownloadClientAdapterFactory downloadClientAdapter,
             Listenarr.Application.Services.IHubBroadcaster? hubBroadcaster = null,
             IDownloadHistoryService? downloadHistoryService = null)
         {
@@ -117,6 +112,7 @@ namespace Listenarr.Api.Services
             _downloadQueueService = downloadQueueService ?? throw new ArgumentNullException(nameof(downloadQueueService));
             _completedDownloadProcessor = completedDownloadProcessor ?? throw new ArgumentNullException(nameof(completedDownloadProcessor));
             _downloadHistoryService = downloadHistoryService;
+            _downloadClientAdapter = downloadClientAdapter;
         }
 
         /// <summary>
@@ -135,7 +131,7 @@ namespace Listenarr.Api.Services
             return Uri.EscapeDataString(decoded);
         }
 
-        public async Task<string> StartDownloadAsync(SearchResult searchResult, string downloadClientId, int? audiobookId = null)
+        public async Task<string?> StartDownloadAsync(SearchResult searchResult, string downloadClientId, int? audiobookId = null)
         {
             return await SendToDownloadClientAsync(searchResult, downloadClientId, audiobookId);
         }
@@ -441,23 +437,10 @@ namespace Listenarr.Api.Services
             // Assign score to SearchResult
             topResult.SearchResult.Score = topResult.TotalScore;
 
-            var effectiveDownloadType = await ResolveEffectiveDownloadTypeAsync(topResult.SearchResult);
-            topResult.SearchResult.DownloadType = GetDownloadTypeLabel(effectiveDownloadType);
-
-            if (effectiveDownloadType == EffectiveDownloadType.Unknown)
-            {
-                _logger.LogWarning(
-                    "Top search result for audiobook '{Title}' could not be mapped to a trusted download type",
-                    audiobook.Title);
-                return new SearchAndDownloadResult
-                {
-                    Success = false,
-                    Message = "Top search result could not be mapped to a valid download target"
-                };
-            }
+            var protocol = await ResolveDownloadProtocolAsync(topResult.SearchResult);
 
             // Handle trusted direct-download results directly
-            if (effectiveDownloadType == EffectiveDownloadType.DirectDownload)
+            if (DownloadProtocol.DirectDownload == protocol)
             {
                 _logger.LogInformation("Top result is DDL, processing directly for: {Title}", topResult.SearchResult.Title);
                 var downloadId = await DownloadDirectlyAsync(topResult.SearchResult, audiobookId);
@@ -474,12 +457,12 @@ namespace Listenarr.Api.Services
             }
 
             // Use topResult.SearchResult for torrent/nzb download
-            var isTorrent = effectiveDownloadType == EffectiveDownloadType.Torrent;
-            var downloadClientId = await GetAppropriateDownloadClient(isTorrent);
+            var isTorrent = DownloadProtocol.Torrent == protocol;
+            var downloadClient = await GetAppropriateDownloadClient((DownloadProtocol)protocol);
 
-            if (downloadClientId == null)
+            if (downloadClient == null)
             {
-                _logger.LogWarning("No suitable download client found for type: {Type}", isTorrent ? "Torrent" : "NZB");
+                _logger.LogWarning("No suitable download client found for protocol: {Protocol}", protocol);
                 return new SearchAndDownloadResult
                 {
                     Success = false,
@@ -488,7 +471,15 @@ namespace Listenarr.Api.Services
             }
 
             // Send to download client with audiobookId for proper metadata linking
-            var downloadId2 = await SendToDownloadClientAsync(topResult.SearchResult, downloadClientId, audiobookId);
+            var downloadId2 = await SendToDownloadClientAsync(topResult.SearchResult, downloadClient.Id, audiobookId);
+            if (downloadId2 == null)
+            {
+                return new SearchAndDownloadResult
+                {
+                    Success = false,
+                    Message = $"Download client failed to process the download. Check your client configuration for {downloadClient.ToString()}"
+                };
+            }
 
             // Log to history
             await LogDownloadHistory(audiobook, "Search", topResult.SearchResult);
@@ -499,64 +490,57 @@ namespace Listenarr.Api.Services
                 Message = $"Successfully sent to download client",
                 DownloadId = downloadId2,
                 IndexerUsed = "Search",
-                DownloadClientUsed = downloadClientId,
+                DownloadClientUsed = downloadClient.Id,
                 SearchResult = topResult.SearchResult
             };
         }
 
-        public async Task<string> SendToDownloadClientAsync(SearchResult searchResult, string? downloadClientId = null, int? audiobookId = null)
+        public async Task<string?> SendToDownloadClientAsync(SearchResult searchResult, string? downloadClientId = null, int? audiobookId = null)
         {
             _logger.LogInformation("SendToDownloadClientAsync called - Title: {Title}, DownloadType: '{DownloadType}', TorrentUrl: {TorrentUrl}, AudiobookId: {AudiobookId}",
                 searchResult.Title,
-                searchResult.DownloadType ?? "(null)",
+                searchResult.Protocol.ToString(),
                 searchResult.TorrentUrl ?? "(null)",
                 audiobookId);
 
-            var effectiveDownloadType = await ResolveEffectiveDownloadTypeAsync(searchResult);
-            searchResult.DownloadType = GetDownloadTypeLabel(effectiveDownloadType);
-
-            if (effectiveDownloadType == EffectiveDownloadType.Unknown)
-            {
-                throw new InvalidOperationException("Unable to determine a trusted download type from the selected search result.");
-            }
+            await ResolveDownloadProtocolAsync(searchResult);
 
             // Check if this is a trusted direct download and handle it differently
-            if (effectiveDownloadType == EffectiveDownloadType.DirectDownload)
+            if (DownloadProtocol.DirectDownload == searchResult.Protocol)
             {
                 _logger.LogInformation("Processing DDL for: {Title}, AudiobookId: {AudiobookId}", searchResult.Title, audiobookId);
                 return await DownloadDirectlyAsync(searchResult, audiobookId);
             }
 
-            var isTorrent = effectiveDownloadType == EffectiveDownloadType.Torrent;
-
             _logger.LogInformation(
                 "Processing as {DownloadType} after server-side validation for '{Title}'",
-                searchResult.DownloadType,
+                searchResult.Protocol,
                 searchResult.Title);
 
+            DownloadClientConfiguration? downloadClient = null;
             if (downloadClientId == null)
             {
-                downloadClientId = await GetAppropriateDownloadClient(isTorrent);
-
-                if (downloadClientId == null)
+                downloadClient = await GetAppropriateDownloadClient(searchResult.Protocol);
+                if (downloadClient == null)
                 {
-                    var clientType = isTorrent ? "torrent" : "NZB";
-                    var neededClients = isTorrent ? "qBittorrent or Transmission" : "SABnzbd or NZBGet";
-                    throw new Exception($"No suitable download client found for {clientType}. Please configure and enable a {clientType} client ({neededClients}) in Settings.");
+                    List<string> validDownloadClientTypes = _downloadClientAdapter.GetClientTypeSupportingProtocol(searchResult.Protocol);
+                    throw new Exception($"No suitable download client found for {searchResult.Protocol}. Please configure and enable a {searchResult.Protocol} client ({string.Join(", ", validDownloadClientTypes)}) in Settings.");
                 }
 
-                _logger.LogInformation("Auto-selected download client {ClientId} for {ClientType}", downloadClientId, isTorrent ? "torrent" : "NZB");
+                downloadClientId = downloadClient.Id;
+                _logger.LogInformation("Auto-selected download client {ClientId} for {Protocol}", downloadClientId, searchResult.Protocol);
+            } 
+            else
+            {
+                downloadClient = await _configurationService.GetDownloadClientConfigurationAsync(downloadClientId);
             }
 
-            var downloadClient = await _configurationService.GetDownloadClientConfigurationAsync(downloadClientId);
             if (downloadClient == null || !downloadClient.IsEnabled)
             {
                 throw new Exception("Download client not found or disabled");
             }
 
             _logger.LogInformation("Sending to {ClientType} download client: {ClientName}", downloadClient.Type, downloadClient.Name);
-
-            var downloadId = Guid.NewGuid().ToString();
 
             // Ensure downloadClientId is non-null before assignment into model
             var downloadClientIdForModel = downloadClientId ?? string.Empty;
@@ -601,59 +585,11 @@ namespace Listenarr.Api.Services
                 }
             }
 
-            // Create Download record in database before sending to client
-            var download = new Download
+            if (DownloadProtocol.Torrent == searchResult.Protocol)
             {
-                Id = downloadId,
-                AudiobookId = audiobookId,
-                Title = searchResult.Title ?? string.Empty,
-                Artist = searchResult.Artist ?? string.Empty,
-                Album = searchResult.Album ?? string.Empty,
-                Language = searchResult.Language,
-                OriginalUrl = !string.IsNullOrEmpty(searchResult.MagnetLink) ? searchResult.MagnetLink : (searchResult.TorrentUrl ?? searchResult.NzbUrl ?? string.Empty),
-                Status = DownloadStatus.Queued,
-                Progress = 0,
-                TotalSize = searchResult.Size,
-                DownloadedSize = 0,
-                DownloadPath = downloadClient.DownloadPath ?? string.Empty,
-                FinalPath = string.Empty,
-                StartedAt = DateTime.UtcNow,
-                DownloadClientId = downloadClientIdForModel,
-                Metadata = new Dictionary<string, object>
-                {
-                    ["Source"] = searchResult.Source ?? string.Empty,
-                    ["Seeders"] = searchResult.Seeders ?? 0,
-                    ["Quality"] = searchResult.Quality ?? string.Empty,
-                    ["Language"] = searchResult.Language ?? string.Empty,
-                    ["DownloadType"] = searchResult.DownloadType
-                }
-            };
-
-            var dbContext = await _dbContextFactory.CreateDbContextAsync();
-            dbContext.Downloads.Add(download);
-            await dbContext.SaveChangesAsync();
-            _logger.LogInformation("Created download record in database: {DownloadId} for '{Title}'", downloadId, searchResult.Title);
-            
-            // Record in download history for idempotency tracking
-            if (_downloadHistoryService != null && !string.IsNullOrEmpty(downloadClientIdForModel))
-            {
-                try
-                {
-                    var protocol = isTorrent ? Listenarr.Domain.Models.DownloadProtocol.Torrent : Listenarr.Domain.Models.DownloadProtocol.Usenet;
-                    await _downloadHistoryService.RecordGrabbedAsync(
-                        downloadId,
-                        downloadClientIdForModel,
-                        searchResult.Title ?? "Unknown",
-                        protocol);
-                    _logger.LogInformation("Recorded grabbed event in history for download {DownloadId}", downloadId);
-                }
-                catch (Exception histEx) when (histEx is not OperationCanceledException && histEx is not OutOfMemoryException && histEx is not StackOverflowException) {
-                    _logger.LogWarning(histEx, "Failed to record grabbed event in history for download {DownloadId} (non-critical)", downloadId);
-                }
+                // Attempt to cache MyAnonamouse torrents ahead of handing off to qBittorrent
+                await TryPrepareMyAnonamouseTorrentAsync(searchResult);
             }
-
-            // Attempt to cache MyAnonamouse torrents ahead of handing off to qBittorrent
-            await TryPrepareMyAnonamouseTorrentAsync(searchResult, downloadId);
 
             if (_clientGateway == null)
             {
@@ -661,32 +597,33 @@ namespace Listenarr.Api.Services
             }
 
             // Route to appropriate client handler via adapter and capture client-specific IDs when provided
-            string? clientSpecificId = await _clientGateway.AddAsync(downloadClient, searchResult);
-            clientSpecificId ??= TryResolveClientSpecificIdFallback(downloadClient, searchResult);
-
-            // Update download record with client-specific ID if available
-            if (!string.IsNullOrEmpty(clientSpecificId))
+            var download = await _clientGateway.AddAsync(downloadClient, SearchResultConverters.ToIndexerSearchResult(searchResult));
+            if (download == null)
             {
-                var updateContext = await _dbContextFactory.CreateDbContextAsync();
-                var downloadToUpdate = await updateContext.Downloads.FindAsync(downloadId);
-                if (downloadToUpdate != null)
+                _logger.LogError("Unable to add the search result to the appropriate download client");
+                return null; 
+            }
+
+            download.AudiobookId = audiobookId;
+            var dbContext = await _dbContextFactory.CreateDbContextAsync();
+            dbContext.Downloads.Add(download);
+            await dbContext.SaveChangesAsync();
+            _logger.LogInformation("Created download record in database: {DownloadId} for '{Title}'", download.Id, searchResult.Title);
+            
+            // Record in download history for idempotency tracking
+            if (_downloadHistoryService != null && !string.IsNullOrEmpty(downloadClientIdForModel))
+            {
+                try
                 {
-                    if (downloadToUpdate.Metadata == null)
-                        downloadToUpdate.Metadata = new Dictionary<string, object>();
-
-                    // Persist client-specific ID for all clients (NZBGet/SABnzbd/etc.)
-                    downloadToUpdate.Metadata["ClientDownloadId"] = clientSpecificId;
-
-                    // Store TorrentHash for all torrent clients (qBittorrent, Transmission)
-                    if (downloadClient.Type.Equals("qbittorrent", StringComparison.OrdinalIgnoreCase) ||
-                        downloadClient.Type.Equals("transmission", StringComparison.OrdinalIgnoreCase))
-                    {
-                        downloadToUpdate.Metadata["TorrentHash"] = clientSpecificId;
-                    }
-
-                    updateContext.Downloads.Update(downloadToUpdate);
-                    await updateContext.SaveChangesAsync();
-                    _logger.LogInformation("Updated download {DownloadId} with client-specific ID: {ClientId}", downloadId, clientSpecificId);
+                    await _downloadHistoryService.RecordGrabbedAsync(
+                        download.Id,
+                        downloadClientIdForModel,
+                        searchResult.Title ?? "Unknown",
+                        searchResult.Protocol);
+                    _logger.LogInformation("Recorded grabbed event in history for download {DownloadId}", download.Id);
+                }
+                catch (Exception histEx) when (histEx is not OperationCanceledException && histEx is not OutOfMemoryException && histEx is not StackOverflowException) {
+                    _logger.LogWarning(histEx, "Failed to record grabbed event in history for download {DownloadId} (non-critical)", download.Id);
                 }
             }
 
@@ -716,14 +653,14 @@ namespace Listenarr.Api.Services
                                 imageUrl = audiobook.ImageUrl,
                                 narrators = audiobook.Narrators,
                                 description = audiobook.Description,
-                                downloadId = downloadId,
+                                downloadId = download.Id,
                                 source = searchResult.Source ?? "Unknown Source",
                                 downloadClient = downloadClient.Name ?? "Unknown Client",
                                 size = searchResult.Size
                             }
                             : new
                             {
-                                downloadId = downloadId,
+                                downloadId = download.Id,
                                 title = searchResult.Title ?? "Unknown Title",
                                 artist = searchResult.Artist ?? "Unknown Artist",
                                 album = searchResult.Album ?? "Unknown Album",
@@ -738,7 +675,7 @@ namespace Listenarr.Api.Services
                         // No audiobook ID, use search result data
                         notificationData = new
                         {
-                            downloadId = downloadId,
+                            downloadId = download.Id,
                             title = searchResult.Title ?? "Unknown Title",
                             artist = searchResult.Artist ?? "Unknown Artist",
                             album = searchResult.Album ?? "Unknown Album",
@@ -784,7 +721,7 @@ namespace Listenarr.Api.Services
                 _logger.LogWarning(ex, "Failed to trigger immediate queue update (non-fatal)");
             }
 
-            return downloadId;
+            return download.Id;
         }
 
         private async Task TryPrepareMyAnonamouseTorrentAsync(SearchResult searchResult, string? downloadId = null)
@@ -833,7 +770,7 @@ namespace Listenarr.Api.Services
                 }
 
                 // Security: Validate against database-stored indexer configuration, not user-provided search result
-                if (!string.Equals(indexer.Implementation, "MyAnonamouse", StringComparison.OrdinalIgnoreCase))
+                if (Implementation.MyAnonamouse != indexer.Implementation)
                 {
                     _logger.LogDebug("Skipping MyAnonamouse cache: indexer {IndexerName} is not MyAnonamouse (is {Implementation})", 
                         indexer.Name, indexer.Implementation);
@@ -1244,46 +1181,51 @@ namespace Listenarr.Api.Services
             return indexerType.ToLower() == "torrent";
         }
 
-        private async Task<EffectiveDownloadType> ResolveEffectiveDownloadTypeAsync(SearchResult result)
+        /// <summary>
+        /// Derives the protocol to use for this search result
+        /// Serves as a spoof protection and gives back the original protocol if none is found
+        /// </summary>
+        /// <param name="result">Search result to check</param>
+        /// <returns></returns>
+        private async Task<DownloadProtocol> ResolveDownloadProtocolAsync(SearchResult result)
         {
             ArgumentNullException.ThrowIfNull(result);
+
+            var protocol = result.Protocol;
 
             if (!string.IsNullOrWhiteSpace(result.NzbUrl))
             {
                 _logger.LogDebug("Result identified as Usenet from NzbUrl: {Title}", result.Title);
-                return EffectiveDownloadType.Usenet;
+                protocol = DownloadProtocol.Usenet;
             }
 
-            if (!string.IsNullOrWhiteSpace(result.MagnetLink))
+            else if (!string.IsNullOrWhiteSpace(result.MagnetLink))
             {
                 _logger.LogDebug("Result identified as Torrent from MagnetLink: {Title}", result.Title);
-                return EffectiveDownloadType.Torrent;
+                protocol = DownloadProtocol.Torrent;
             }
 
-            if (result.TorrentFileContent != null && result.TorrentFileContent.Length > 0)
+            else if (result.TorrentFileContent != null && result.TorrentFileContent.Length > 0)
             {
                 _logger.LogDebug("Result identified as Torrent from cached torrent bytes: {Title}", result.Title);
-                return EffectiveDownloadType.Torrent;
+                protocol = DownloadProtocol.Torrent;
             }
 
-            if (await IsTrustedDirectDownloadAsync(result))
+            else if (await IsTrustedDirectDownloadAsync(result))
             {
                 _logger.LogDebug("Result identified as trusted DDL from configured Internet Archive indexer: {Title}", result.Title);
-                return EffectiveDownloadType.DirectDownload;
+                protocol = DownloadProtocol.DirectDownload;
             }
 
-            if (DownloadClientUriBuilder.TryParseHttpOrHttpsAbsoluteUri(result.TorrentUrl, out _))
+            else if (DownloadClientUriBuilder.TryParseHttpOrHttpsAbsoluteUri(result.TorrentUrl, out _))
             {
                 _logger.LogDebug("Result identified as Torrent from TorrentUrl: {Title}", result.Title);
-                return EffectiveDownloadType.Torrent;
+                protocol = DownloadProtocol.Torrent;
             }
 
-            _logger.LogWarning(
-                "Unable to derive effective download type for '{Title}'. Incoming DownloadType '{DownloadType}' was ignored because no trusted download target was present.",
-                result.Title,
-                result.DownloadType ?? "(null)");
+            result.Protocol = protocol;
 
-            return EffectiveDownloadType.Unknown;
+            return protocol;
         }
 
         private async Task<bool> IsTrustedDirectDownloadAsync(SearchResult result)
@@ -1321,7 +1263,7 @@ namespace Listenarr.Api.Services
                     return false;
                 }
 
-                if (!string.Equals(indexer.Implementation, "InternetArchive", StringComparison.OrdinalIgnoreCase))
+                if (Implementation.InternetArchive != indexer.Implementation)
                 {
                     _logger.LogDebug(
                         "Direct-download validation rejected '{Title}': indexer {IndexerId} implementation was {Implementation}",
@@ -1361,43 +1303,32 @@ namespace Listenarr.Api.Services
                    host.EndsWith(".archive.org", StringComparison.OrdinalIgnoreCase);
         }
 
-        private static string GetDownloadTypeLabel(EffectiveDownloadType effectiveDownloadType)
-        {
-            return effectiveDownloadType switch
-            {
-                EffectiveDownloadType.Torrent => "Torrent",
-                EffectiveDownloadType.Usenet => "Usenet",
-                EffectiveDownloadType.DirectDownload => "DDL",
-                _ => string.Empty
-            };
-        }
-
-        private bool IsTorrentResult(SearchResult result)
+        private static bool IsTorrentResult(SearchResult result)
         {
             // Use transport indicators only. Do not trust caller-provided DownloadType.
             if (!string.IsNullOrEmpty(result.NzbUrl))
             {
-                _logger.LogDebug("Result identified as NZB (has NzbUrl): {Title}", result.Title);
+                //_logger.LogDebug("Result identified as NZB (has NzbUrl): {Title}", result.Title);
                 return false;
             }
 
             if (result.TorrentFileContent != null && result.TorrentFileContent.Length > 0)
             {
-                _logger.LogDebug("Result identified as Torrent (has cached torrent bytes): {Title}", result.Title);
+                //_logger.LogDebug("Result identified as Torrent (has cached torrent bytes): {Title}", result.Title);
                 return true;
             }
 
             if (!string.IsNullOrEmpty(result.MagnetLink) ||
                 DownloadClientUriBuilder.TryParseHttpOrHttpsAbsoluteUri(result.TorrentUrl, out _))
             {
-                _logger.LogDebug("Result identified as Torrent (has MagnetLink or TorrentUrl): {Title}", result.Title);
+                //_logger.LogDebug("Result identified as Torrent (has MagnetLink or TorrentUrl): {Title}", result.Title);
                 return true;
             }
 
             // If neither is set, we can't reliably determine the type
             // Log a warning and default to false (NZB) as a safer choice
-            _logger.LogWarning("Unable to determine result type for '{Title}' from source '{Source}'. No MagnetLink, TorrentUrl, or NzbUrl found. Defaulting to NZB.",
-                result.Title, result.Source);
+            //_logger.LogWarning("Unable to determine result type for '{Title}' from source '{Source}'. No MagnetLink, TorrentUrl, or NzbUrl found. Defaulting to NZB.",
+            //    result.Title, result.Source);
             return false;
         }
 
@@ -1408,50 +1339,31 @@ namespace Listenarr.Api.Services
             public string? FileName { get; set; }
         }
 
-        private async Task<string?> GetAppropriateDownloadClient(bool isTorrent)
+        private async Task<DownloadClientConfiguration?> GetAppropriateDownloadClient(DownloadProtocol protocol)
         {
             var downloadClients = await _configurationService.GetDownloadClientConfigurationsAsync();
             var enabledClients = downloadClients.Where(c => c.IsEnabled).ToList();
 
-            _logger.LogInformation("Looking for {ClientType} client. Found {Count} enabled download clients: {Clients}",
-                isTorrent ? "torrent" : "NZB",
+            _logger.LogInformation("Looking for {Protocol} client. Found {Count} enabled download clients: {Clients}",
+                protocol,
                 enabledClients.Count,
-                string.Join(", ", enabledClients.Select(c => $"{c.Name} ({c.Type})")));
-
-            if (isTorrent)
+                string.Join(", ", enabledClients.Select(c => c.ToString())));
+            
+            // Check type of download client required based on existing IDownloadClientAdapter
+            List<string> validDownloadClientTypes = _downloadClientAdapter.GetClientTypeSupportingProtocol(protocol);
+            
+            _logger.LogDebug("Found the following valid client types: {types}", string.Join(", ", validDownloadClientTypes));
+            
+            var client = downloadClients
+                .FirstOrDefault(configuration => validDownloadClientTypes.Contains(configuration.Type));
+            if (client != null)
             {
-                // Prefer qBittorrent, then Transmission
-                var client = enabledClients.FirstOrDefault(c => c.Type.Equals("qbittorrent", StringComparison.OrdinalIgnoreCase))
-                          ?? enabledClients.FirstOrDefault(c => c.Type.Equals("transmission", StringComparison.OrdinalIgnoreCase));
-
-                if (client != null)
-                {
-                    _logger.LogInformation("Selected torrent client: {ClientName} ({ClientType})", client.Name, client.Type);
-                }
-                else
-                {
-                    _logger.LogWarning("No torrent client (qBittorrent or Transmission) found among enabled clients");
-                }
-
-                return client?.Id;
+                _logger.LogInformation("Selected {Protocol} client: {ClientName} ({ClientType})", protocol, client.Name, client.Type);
+                return client;
             }
-            else
-            {
-                // Prefer SABnzbd, then NZBGet
-                var client = enabledClients.FirstOrDefault(c => c.Type.Equals("sabnzbd", StringComparison.OrdinalIgnoreCase))
-                          ?? enabledClients.FirstOrDefault(c => c.Type.Equals("nzbget", StringComparison.OrdinalIgnoreCase));
 
-                if (client != null)
-                {
-                    _logger.LogInformation("Selected NZB client: {ClientName} ({ClientType})", client.Name, client.Type);
-                }
-                else
-                {
-                    _logger.LogWarning("No NZB client (SABnzbd or NZBGet) found among enabled clients");
-                }
-
-                return client?.Id;
-            }
+            _logger.LogWarning("No {Protocol} client found among enabled clients", protocol);
+            return null;
         }
 
         public async Task<List<QueueItem>> GetQueueAsync()
@@ -1508,6 +1420,18 @@ namespace Listenarr.Api.Services
                     }
                 }
 
+                // FIXME: Rework this so the method does not accepts download ID in the first place
+                // Nothing worked, create a fake Download record with the given ID
+                if (downloadRecord == null)
+                {
+                    // Create a fake record for now so this does not needs to be refactored just now
+                    downloadRecord = new Download()
+                    {
+                        Id = downloadId,
+                        ErrorMessage = "NO_DB_RECORD"
+                    };
+                }
+
                 // If force=true, skip client removal and just remove from database
                 if (force)
                 {
@@ -1522,7 +1446,7 @@ namespace Listenarr.Api.Services
 
                     foreach (var client in enabledClients)
                     {
-                        removedFromClient = await RemoveFromClientAsync(client, downloadId, downloadRecord);
+                        removedFromClient = await RemoveFromClientAsync(client, downloadRecord);
                         if (removedFromClient)
                         {
                             downloadClientId = client.Id; // Track which client it was removed from
@@ -1540,13 +1464,13 @@ namespace Listenarr.Api.Services
                     }
                     else if (client != null)
                     {
-                        removedFromClient = await RemoveFromClientAsync(client, downloadId, downloadRecord);
+                        removedFromClient = await RemoveFromClientAsync(client, downloadRecord);
                     }
                     else
                     {
                         // If client not found by ID, this might be a legacy/invalid client ID
                         // Try to find the download in the database and check if it's DDL or has a valid client
-                        if (downloadRecord != null)
+                        if (downloadRecord.ErrorMessage != "NO_DB_RECORD")
                         {
                             if (downloadRecord.DownloadClientId == "DDL")
                             {
@@ -1565,7 +1489,7 @@ namespace Listenarr.Api.Services
                                 }
                                 else if (recordClient != null)
                                 {
-                                    removedFromClient = await RemoveFromClientAsync(recordClient, downloadId, downloadRecord);
+                                    removedFromClient = await RemoveFromClientAsync(recordClient, downloadRecord);
                                     downloadClientId = recordClient.Id;
                                 }
                                 else
@@ -1590,7 +1514,7 @@ namespace Listenarr.Api.Services
 
                             foreach (var tryClient in enabledClients)
                             {
-                                removedFromClient = await RemoveFromClientAsync(tryClient, downloadId, downloadRecord);
+                                removedFromClient = await RemoveFromClientAsync(tryClient, downloadRecord);
                                 if (removedFromClient)
                                 {
                                     downloadClientId = tryClient.Id;
@@ -1882,35 +1806,20 @@ namespace Listenarr.Api.Services
             // Create a Download record in the database so it's tracked like other downloads.
             try
             {
-                var id = Guid.NewGuid().ToString();
-                var download = new Download
+                var downloadClient = new DownloadClientConfiguration
                 {
-                    Id = id,
-                    AudiobookId = audiobookId,
-                    Title = searchResult.Title,
-                    Language = searchResult.Language,
-                    OriginalUrl = searchResult.TorrentUrl ?? searchResult.NzbUrl ?? searchResult.MagnetLink ?? string.Empty,
-                    Status = DownloadStatus.Queued,
-                    Progress = 0,
-                    TotalSize = searchResult.Size,
-                    DownloadedSize = 0,
-                    DownloadPath = string.Empty,
-                    FinalPath = string.Empty,
-                    StartedAt = DateTime.UtcNow,
-                    DownloadClientId = "DDL",
-                    Metadata = new Dictionary<string, object>
-                    {
-                        ["Source"] = searchResult.Source ?? string.Empty,
-                        ["Quality"] = searchResult.Quality ?? string.Empty,
-                        ["Language"] = searchResult.Language ?? string.Empty,
-                        ["DownloadType"] = "DDL"
-                    }
+                    Id = "DDL"
                 };
+                var download = new Download(searchResult, downloadClient)
+                {
+                    AudiobookId = audiobookId
+                };
+                download.Metadata["Protocol"] = DownloadProtocol.DirectDownload;
 
                 var ctx = await _dbContextFactory.CreateDbContextAsync();
                 ctx.Downloads.Add(download);
                 await ctx.SaveChangesAsync();
-                return id;
+                return download.Id;
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogWarning(ex, "DownloadDirectlyAsync: failed to create DDL download record");
@@ -1931,7 +1840,7 @@ namespace Listenarr.Api.Services
             await Task.CompletedTask;
         }
 
-        private string? TryResolveClientSpecificIdFallback(DownloadClientConfiguration client, SearchResult searchResult)
+        private static string? TryResolveClientSpecificIdFallback(DownloadClientConfiguration client, SearchResult searchResult)
         {
             if (client == null || searchResult == null || !IsTorrentResult(searchResult))
             {
@@ -1941,10 +1850,6 @@ namespace Listenarr.Api.Services
             var magnetHash = TryExtractMagnetHash(searchResult.MagnetLink);
             if (!string.IsNullOrWhiteSpace(magnetHash))
             {
-                _logger.LogInformation(
-                    "Using magnet hash fallback for download '{Title}' on client {ClientName}",
-                    LogRedaction.SanitizeText(searchResult.Title),
-                    LogRedaction.SanitizeText(client.Name ?? client.Id));
                 return magnetHash;
             }
 
@@ -2267,94 +2172,64 @@ namespace Listenarr.Api.Services
             return d[n, m];
         }
 
-        private async Task<bool> RemoveFromClientAsync(DownloadClientConfiguration client, string downloadId, Download? downloadRecord = null)
+        private async Task<bool> RemoveFromClientAsync(DownloadClientConfiguration client, Download download)
         {
             try
             {
                 if (client == null) return false;
 
-                // Resolve the client-specific ID (torrent hash, NZB ID, etc.) from the download record.
-                // The download record's Metadata dictionary stores the mapping set during AddAsync.
-                // Without this, Transmission/qBittorrent receive the Listenarr UUID which they don't recognise.
-                var clientItemId = downloadId;
-                if (downloadRecord?.Metadata != null)
-                {
-                    if ((string.Equals(client.Type, "qbittorrent", StringComparison.OrdinalIgnoreCase) ||
-                         string.Equals(client.Type, "transmission", StringComparison.OrdinalIgnoreCase)) &&
-                        downloadRecord.Metadata.TryGetValue("TorrentHash", out var hashObj))
-                    {
-                        var hash = hashObj?.ToString();
-                        if (!string.IsNullOrEmpty(hash))
-                        {
-                            clientItemId = hash;
-                            _logger.LogDebug("RemoveFromClientAsync: Using torrent hash {Hash} instead of download ID for {ClientType} removal",
-                                hash, client.Type);
-                        }
-                    }
-                    else if (downloadRecord.Metadata.TryGetValue("ClientDownloadId", out var clientIdObj))
-                    {
-                        var resolvedId = clientIdObj?.ToString();
-                        if (!string.IsNullOrEmpty(resolvedId))
-                        {
-                            clientItemId = resolvedId;
-                            _logger.LogDebug("RemoveFromClientAsync: Using client-specific ID {ClientId} for {ClientType} removal",
-                                resolvedId, client.Type);
-                        }
-                    }
-                }
-
                 if (_clientGateway != null)
                 {
                     try
                     {
-                        var removed = await _clientGateway.RemoveAsync(client, clientItemId, false);
+                        var removed = await _clientGateway.RemoveAsync(client, download, false);
                         if (removed)
                         {
-                            _logger.LogInformation("Successfully removed {DownloadId} from client {ClientName}", downloadId, client.Name ?? client.Id);
+                            _logger.LogInformation("Successfully removed {DownloadId} from client {ClientName}", download.Id, client.Name ?? client.Id);
                             return true;
                         }
 
                         // If removal returned false, verify if the item is still in the client's queue
                         // If it's not in the queue, consider removal successful (item already gone)
-                        _logger.LogWarning("Client reported removal failed for {DownloadId}, checking if item still exists in queue", downloadId);
+                        _logger.LogWarning("Client reported removal failed for {DownloadId}, checking if item still exists in queue", download.Id);
                         try
                         {
                             var queue = await _clientGateway.GetQueueAsync(client);
-                            var stillExists = queue.Any(q => q.Id.Equals(downloadId, StringComparison.OrdinalIgnoreCase));
+                            var stillExists = queue.Any(q => q.Id.Equals(download.Id, StringComparison.OrdinalIgnoreCase));
                             
                             if (!stillExists)
                             {
-                                _logger.LogInformation("Item {DownloadId} no longer in {ClientName} queue, treating removal as successful", downloadId, client.Name ?? client.Id);
+                                _logger.LogInformation("Item {DownloadId} no longer in {ClientName} queue, treating removal as successful", download.Id, client.Name ?? client.Id);
                                 return true;
                             }
                             
-                            _logger.LogWarning("Item {DownloadId} still exists in {ClientName} queue after removal attempt", downloadId, client.Name ?? client.Id);
+                            _logger.LogWarning("Item {DownloadId} still exists in {ClientName} queue after removal attempt", download.Id, client.Name ?? client.Id);
                             return false;
                         }
                         catch (Exception queueEx) when (queueEx is not OperationCanceledException && queueEx is not OutOfMemoryException && queueEx is not StackOverflowException) {
-                            _logger.LogWarning(queueEx, "Failed to verify queue status for {DownloadId} on {ClientName}, assuming removal failed", downloadId, client.Name ?? client.Id);
+                            _logger.LogWarning(queueEx, "Failed to verify queue status for {DownloadId} on {ClientName}, assuming removal failed", download.Id, client.Name ?? client.Id);
                             return false;
                         }
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                         _logger.LogWarning(ex, "RemoveFromClientAsync: Exception removing {DownloadId} from {Client}: {Message}", 
-                            LogRedaction.SanitizeText(downloadId), LogRedaction.SanitizeText(client.Name ?? client.Id), ex.Message);
+                            LogRedaction.SanitizeText(download.Id), LogRedaction.SanitizeText(client.Name ?? client.Id), ex.Message);
                         
                         // Check if item still exists in queue - if not, consider removal successful
                         try
                         {
                             var queue = await _clientGateway.GetQueueAsync(client);
-                            var stillExists = queue.Any(q => q.Id.Equals(downloadId, StringComparison.OrdinalIgnoreCase));
+                            var stillExists = queue.Any(q => q.Id.Equals(download.Id, StringComparison.OrdinalIgnoreCase));
                             
                             if (!stillExists)
                             {
                                 _logger.LogInformation("After exception, item {DownloadId} not found in {ClientName} queue, treating as successfully removed", 
-                                    downloadId, client.Name ?? client.Id);
+                                    download.Id, client.Name ?? client.Id);
                                 return true;
                             }
                         }
                         catch (Exception queueEx) when (queueEx is not OperationCanceledException && queueEx is not OutOfMemoryException && queueEx is not StackOverflowException) {
-                            _logger.LogDebug(queueEx, "Failed to verify queue after exception for {DownloadId}", downloadId);
+                            _logger.LogDebug(queueEx, "Failed to verify queue after exception for {DownloadId}", download.Id);
                         }
                         
                         return false;

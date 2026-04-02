@@ -13,7 +13,7 @@
       <div v-else-if="configStore.downloadClientConfigurations.length === 0" class="empty-state">
         <PhDownloadSimple />
         <p>
-          No download clients configured. Add qBittorrent, Transmission, SABnzbd, or NZBGet to
+          No download clients configured. Add qBittorrent, Transmission, SABnzbd, NZBGet or Slskd to
           download audiobooks.
         </p>
       </div>
@@ -29,32 +29,10 @@
             <div class="indexer-info">
               <h4>{{ client.name }}</h4>
               <img 
-                v-if="client.type === 'qbittorrent'"
-                src="@/assets/icons/clients/qbittorrent.svg" 
-                alt="qBittorrent" 
-                class="client-type-icon" 
-                title="qBittorrent"
-              />
-              <img 
-                v-else-if="client.type === 'transmission'"
-                src="@/assets/icons/clients/transmission.svg" 
-                alt="Transmission" 
-                class="client-type-icon" 
-                title="Transmission"
-              />
-              <img 
-                v-else-if="client.type === 'sabnzbd'"
-                src="@/assets/icons/clients/sabnzbd.svg" 
-                alt="SABnzbd" 
-                class="client-type-icon" 
-                title="SABnzbd"
-              />
-              <img 
-                v-else-if="client.type === 'nzbget'"
-                src="@/assets/icons/clients/nzbget.svg" 
-                alt="NZBGet" 
-                class="client-type-icon" 
-                title="NZBGet"
+                :src="getLogo(client.type)"
+                :alt="DownloadClientConfigs[client.type].label"
+                class="client-type-icon"
+                :title="DownloadClientConfigs[client.type].label"
               />
             </div>
             <div class="indexer-actions">
@@ -281,6 +259,7 @@ import {
   deleteRemotePathMapping,
   testDownloadClient as apiTestDownloadClient,
 } from '@/services/api'
+import { getLogo, DownloadClientConfigs } from '@/types/DownloadClientConfig'
 
 // State
 const configStore = useConfigurationStore()

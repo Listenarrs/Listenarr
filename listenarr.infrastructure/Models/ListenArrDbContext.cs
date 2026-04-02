@@ -1,6 +1,7 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Listenarr.Domain.Models;
+using Listenarr.Infrastructure.Persistence.Converters;
 
 namespace Listenarr.Infrastructure.Models
 {
@@ -97,6 +98,17 @@ namespace Listenarr.Infrastructure.Models
 
             // RootFolders table configuration
             modelBuilder.ApplyConfiguration(new Configurations.RootFolderConfiguration());
+        }
+
+        protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
+        {
+            configurationBuilder
+                .Properties<DownloadProtocol>()
+                .HaveConversion<DownloadProtocolConverter>();
+                
+            configurationBuilder
+                .Properties<Implementation>()
+                .HaveConversion<ImplementationConverter>();
         }
     }
 }
