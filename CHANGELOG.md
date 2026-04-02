@@ -5,13 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.66] - ?
+## [0.2.66] - current
+
+### Changed
+- **Reduced redundancy for the manual import modal:** Small improvement that make it easier to add or edit import fields.
 
 ### Added
-- **Library import:**
-  - Ability to add root folders while selecting the root folder from which we want to import files
-  - Ability to leave files in place when importing library
-  - Ability to set the desired monitoring for audiobooks added through library importation
+- **Bulk field editing in Manual Import:** The Manual Import modal now includes a field-selector dropdown (Audiobook, Release Group, Quality, Language) that opens the cell editor for all selected files at once, allowing a single value to be applied across multiple files instead of having to edit each row individually.
 
 ## [0.2.65] - 2026-04-01
 
