@@ -1,3 +1,8 @@
+# Build gosu with a modern Go toolchain to avoid golang/stdlib CVEs present in
+# the Debian-packaged version (compiled with Go 1.19.x).
+FROM golang:1.24-alpine AS gosu-builder
+RUN CGO_ENABLED=0 go install github.com/tianon/gosu@latest
+
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
 WORKDIR /app
 EXPOSE 5656
@@ -7,14 +12,21 @@ ENV ASPNETCORE_URLS=http://*:5656
 
 ENV DOCKER_ENV=true
 
-# Install Node.js (LTS v20) into the final runtime image so the API can spawn the
-# helper Node process (tools/discord-bot/index.js). We keep this minimal and clean
-# up apt caches to keep the image small.
+# Install Node.js; upgrade npm immediately and remove the apt-installed npm tree
+# so scanners no longer find tar/minimatch/cross-spawn inside its bundled
+# node_modules.
 RUN apt-get update \
-	&& apt-get install -y curl ca-certificates gnupg2 gosu --no-install-recommends \
+	&& apt-get install -y curl ca-certificates gnupg2 --no-install-recommends \
 	&& curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
 	&& apt-get install -y nodejs --no-install-recommends \
+	&& npm install -g npm@latest \
+	&& rm -rf /usr/lib/node_modules/npm \
+	&& rm -f /usr/bin/npm /usr/bin/npx \
 	&& rm -rf /var/lib/apt/lists/*
+
+# Use the gosu binary built above instead of the apt package.
+COPY --from=gosu-builder /go/bin/gosu /usr/local/bin/gosu
+RUN chmod +x /usr/local/bin/gosu
 
 RUN groupadd --system listenarr \
 	&& useradd --system --gid listenarr --home-dir /nonexistent --shell /usr/sbin/nologin --no-create-home listenarr

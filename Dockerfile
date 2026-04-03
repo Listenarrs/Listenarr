@@ -1,5 +1,11 @@
 # Listenarr Monorepo Dockerfile
 # Builds both backend (.NET API) and frontend (Vue.js) into a single container
+
+# Build gosu with a modern Go toolchain to avoid golang/stdlib CVEs present in
+# the Debian-packaged version (compiled with Go 1.19.x).
+FROM golang:1.24-alpine AS gosu-builder
+RUN CGO_ENABLED=0 go install github.com/tianon/gosu@latest
+
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
 WORKDIR /app
 EXPOSE 4545
@@ -26,14 +32,26 @@ RUN dotnet build "Listenarr.Api.csproj" -c Release -o /app/build \
 
 FROM base AS final
 WORKDIR /app
-# Install Node.js in the runtime image for Discord bot support
+# Install Node.js in the runtime image for Discord bot support.
+# After installing Node.js, upgrade npm to its latest release and remove the
+# apt-installed npm tree — scanners flag tar/minimatch/cross-spawn inside
+# /usr/lib/node_modules/npm/node_modules which belong to the bundled npm that
+# ships with the NodeSource package.  The upgraded npm lives in /usr/local and
+# is the only copy left after the cleanup.
 RUN apt-get update \
-	&& apt-get install -y --no-install-recommends curl ca-certificates gnupg gosu \
+	&& apt-get install -y --no-install-recommends curl ca-certificates gnupg \
 	&& curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
 	&& apt-get install -y --no-install-recommends nodejs \
+	&& npm install -g npm@latest \
+	&& rm -rf /usr/lib/node_modules/npm \
+	&& rm -f /usr/bin/npm /usr/bin/npx \
 	&& node --version \
 	&& npm --version \
 	&& rm -rf /var/lib/apt/lists/*
+
+# Use the gosu binary built above instead of the apt package.
+COPY --from=gosu-builder /go/bin/gosu /usr/local/bin/gosu
+RUN chmod +x /usr/local/bin/gosu
 
 RUN groupadd --system listenarr \
 	&& useradd --system --gid listenarr --home-dir /nonexistent --shell /usr/sbin/nologin --no-create-home listenarr

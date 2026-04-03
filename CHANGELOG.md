@@ -5,7 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.66] - current
+## [0.2.68] - 2026-04-03
+
+### Changed
+- **Bump lodash from 4.17.23 to 4.18.1 in /fe and /listenarr.api/tools/discord-bot:** Updated lodash to the latest release in both the frontend and Discord bot lockfiles. Resolves CVE-2026-4800 (code injection via `_.template`) and CVE-2026-2950 (prototype pollution via `_.unset`/`_.omit`).
+- **Eliminated golang/stdlib CVEs from Docker image (CVE-2023-29403, CVE-2022-30635):** The Debian-packaged `gosu` binary was compiled with Go 1.19.8 and flagged by scanners. Both `Dockerfile` and `Dockerfile.runtime` now build `gosu` from source in a `golang:1.24-alpine` multi-stage builder stage (`CGO_ENABLED=0 go install github.com/tianon/gosu@latest`), replacing the apt package entirely. The resulting static binary is copied into the runtime image.
+- **Eliminated npm bundled CVEs from Docker image (tar CVE-2026-23950 / CVE-2026-29786 / CVE-2026-31802 / CVE-2026-24842 / CVE-2026-23745, minimatch CVE-2026-26996, cross-spawn CVE-2024-21538):** The NodeSource `nodejs` apt package ships npm with an older bundled node_modules tree (tar 6.2.1, minimatch 9.0.5, cross-spawn 7.0.3). After installing Node.js, both Dockerfiles now run `npm install -g npm@latest` and remove the stale apt npm tree (`/usr/lib/node_modules/npm`, `/usr/bin/npm`, `/usr/bin/npx`), leaving only the upgraded npm in `/usr/local`.
+
+## [0.2.67] - 2026-04-02
 
 ### Changed
 - **Reduced redundancy for the manual import modal:** Small improvement that make it easier to add or edit import fields.
@@ -13,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Bulk field editing in Manual Import:** The Manual Import modal now includes a field-selector dropdown (Audiobook, Release Group, Quality, Language) that opens the cell editor for all selected files at once, allowing a single value to be applied across multiple files instead of having to edit each row individually.
 
-## [0.2.65] - 2026-04-01
+## [0.2.66] - 2026-04-01
 
 ### Fixed
 - **Log injection (CWE-117) remediated across all services:** File paths, URLs, search result fields, download IDs, ASINs, and other user-controlled strings are now run through `LogRedaction` helpers (`SanitizeFilePath`, `SanitizeUrl`, `SanitizeText`) before being written to structured log statements, preventing newline injection attacks across controllers, background services, and adapters.
@@ -38,7 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Reflection-based tests guarded against renamed private methods:** All `GetMethod()`/`Invoke()` call sites in `IndexersNewznabParsingTests` now include `Assert.NotNull` checks and null-forgiving operators so a refactored method name produces a clear test failure rather than a `NullReferenceException`.
 - **Shared `HttpResponseMessage` instances in mock handlers replaced:** `DownloadService_ImportTests` mock HTTP handlers now create a fresh `HttpResponseMessage` per call via local factory methods instead of returning a shared instance whose content stream may already be consumed, satisfying CodeQL's IDisposable-not-disposed analysis and eliminating flaky test failures.
 
-## [0.2.64] - 2026-03-29
+## [0.2.65] - 2026-03-29
 
 ### Added
 - **User-defined `{Edition}` naming token:** Audiobooks now support a separate user-managed `Edition` field that can be used in folder and file naming patterns to distinguish alternate recordings, custom release labels, or local library variants without reusing source-provided `Version` metadata.
@@ -57,6 +64,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **`{Author}` token could drift into narrator metadata:** Author resolution for generated paths now ignores explicit narrator values instead of reusing them as the author fallback when author metadata is missing or noisy.
+
+## [0.2.64] - Accidentally skipped while fixing the workflow.
 
 ## [0.2.63] - 2026-03-29
 
