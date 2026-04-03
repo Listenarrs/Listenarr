@@ -2,8 +2,8 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
-    <Version>0.2.67</Version>
-    <AssemblyVersion>0.2.67</AssemblyVersion>
+    <Version>0.2.68</Version>
+    <AssemblyVersion>0.2.68</AssemblyVersion>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <DefaultItemExcludes>$(DefaultItemExcludes);bin\**;bin/**;artifacts\**;artifacts/**</DefaultItemExcludes>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
