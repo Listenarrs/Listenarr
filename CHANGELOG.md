@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Session cookie for browser-native image authentication ([#468](https://github.com/Listenarrs/Listenarr/pull/468)):** Login now sets an HttpOnly `listenarr_session` cookie (SameSite=Strict, Secure on HTTPS) alongside the existing JSON token response. `SessionAuthenticationMiddleware` checks this cookie as a fallback after Bearer header, X-Session-Token, and SignalR query param, enabling browsers to authenticate image requests and other resource loads without JavaScript workarounds. Existing Bearer token and API key auth are unaffected.
+
+### Changed
+- **Session duration constants consolidated ([#468](https://github.com/Listenarrs/Listenarr/pull/468)):** `SessionService` now exposes `DefaultExpiration` and `RememberMeExpiration` as public static fields so cookie MaxAge stays in sync with DB session expiry.
+- **Test infrastructure cleanup ([#468](https://github.com/Listenarrs/Listenarr/pull/468)):** `TestStartupConfigService` and `ResolveApiBasePath` moved into a shared `TestHelpers.cs` to reduce duplication across test files.
+
 ## [0.2.68] - 2026-04-03
 
 ### Changed
