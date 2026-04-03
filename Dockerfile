@@ -4,7 +4,8 @@
 # Build gosu with a modern Go toolchain to avoid golang/stdlib CVEs present in
 # the Debian-packaged version (compiled with Go 1.19.x).
 FROM golang:1.24-alpine AS gosu-builder
-RUN CGO_ENABLED=0 go install github.com/tianon/gosu@latest
+ARG GOSU_VERSION=1.19
+RUN CGO_ENABLED=0 go install github.com/tianon/gosu@${GOSU_VERSION}
 
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
 WORKDIR /app
@@ -42,7 +43,7 @@ RUN apt-get update \
 	&& apt-get install -y --no-install-recommends curl ca-certificates gnupg \
 	&& curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
 	&& apt-get install -y --no-install-recommends nodejs \
-	&& npm install -g npm@latest \
+	&& npm install -g npm@10.9.8 \
 	&& rm -rf /usr/lib/node_modules/npm \
 	&& rm -f /usr/bin/npm /usr/bin/npx \
 	&& node --version \
