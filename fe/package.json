@@ -53,7 +53,7 @@
     "concurrently": "^9.2.1",
     "cypress": "^15.11.0",
     "eslint": "^10.0.2",
-    "eslint-plugin-cypress": "^6.1.0",
+    "eslint-plugin-cypress": "^6.2.2",
     "eslint-plugin-vue": "^10.7.0",
     "jiti": "^2.5.1",
     "jsdom": "^28.1.0",
