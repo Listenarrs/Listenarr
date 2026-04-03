@@ -56,7 +56,7 @@
     "eslint-plugin-cypress": "^6.1.0",
     "eslint-plugin-vue": "^10.7.0",
     "jiti": "^2.5.1",
-    "jsdom": "^28.1.0",
+    "jsdom": "^29.0.1",
     "npm-run-all2": "^8.0.4",
     "patch-package": "^8.0.1",
     "prettier": "3.8.1",
