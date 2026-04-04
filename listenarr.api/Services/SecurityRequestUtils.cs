@@ -51,7 +51,7 @@ public static class SecurityRequestUtils
 
         var authMethod = user.FindFirst("AuthMethod")?.Value;
         if (!string.IsNullOrWhiteSpace(authMethod) &&
-            string.Equals(authMethod, "ApiKey", StringComparison.OrdinalIgnoreCase))
+            string.Equals(authMethod, "ApiKey", StringComparison.Ordinal))
         {
             return true;
         }
