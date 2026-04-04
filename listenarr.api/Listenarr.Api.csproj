@@ -58,7 +58,7 @@
     <FrontendDist>$(FrontendDir)\dist</FrontendDist>
     
     
-    <ToolsDir>$(MSBuildProjectDirectory)\..\tools</ToolsDir>
+    <ToolsDir>$(MSBuildProjectDirectory)\tools</ToolsDir>
   </PropertyGroup>
 
   <Target Name="BuildFrontend" BeforeTargets="Publish" Condition="'$(SkipFrontendBuild)'!='true'">
@@ -122,7 +122,9 @@
   
   <ItemGroup>
     
-    <Content Include="..\tools\**\*.*" Link="tools\%(RecursiveDir)%(Filename)%(Extension)">
+    <Content Remove="tools\**" />
+    <None Remove="tools\**" />
+    <Content Include="tools\**\*" Link="tools\%(RecursiveDir)%(Filename)%(Extension)">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>Never</CopyToPublishDirectory>
     </Content>

@@ -3,19 +3,20 @@
   "version": "0.1.0",
   "description": "Discord integration bot for Listenarr - registers slash commands and forwards requests to Listenarr API",
   "main": "index.js",
+  "type": "module",
   "scripts": {
     "start": "node index.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=24"
   },
   "dependencies": {
-    "@microsoft/signalr": "^8.0.0",
-    "discord.js": "^14.25.0",
-    "node-fetch": "^2.6.7",
-    "fetch-cookie": "^0.8.0",
-    "tough-cookie": "^4.0.0",
-    "sanitize-html": "^2.17.0"
+    "@microsoft/signalr": "^10.0.0",
+    "discord.js": "^14.26.2",
+    "node-fetch": "^3.3.2",
+    "fetch-cookie": "^3.2.0",
+    "tough-cookie": "^6.0.1",
+    "sanitize-html": "^2.17.2"
   }
   ,
   "overrides": {

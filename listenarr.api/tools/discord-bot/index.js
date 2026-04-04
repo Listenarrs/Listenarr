@@ -15,47 +15,47 @@
     persist sessions, and add retry/backoff and better error handling.
 */
 
-const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, InteractionType } = require('discord.js')
+import discordJs from 'discord.js'
+const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, InteractionType, Interaction, PermissionsBitField } = discordJs
+import nodeFetch from 'node-fetch'
+import makeFetchCookie from 'fetch-cookie'
+import { CookieJar } from 'tough-cookie'
+import crypto from 'crypto'
+import fs from 'fs'
+import * as signalR from '@microsoft/signalr'
+import sanitizeHtml from 'sanitize-html'
+import { fileURLToPath } from 'url'
+import path from 'path'
+import readline from 'readline'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+
 // node-fetch + fetch-cookie + tough-cookie to persist cookies across requests
-let fetch = require('node-fetch')
-try {
-  const fetchCookie = require('fetch-cookie')
-  const tough = require('tough-cookie')
-  const jar = new tough.CookieJar()
-  fetch = fetchCookie(fetch, jar)
-  console.log('Initialized cookie-aware fetch for antiforgery support')
-} catch (err) {
-  console.warn('fetch-cookie/tough-cookie not available, antiforgery token requests may fail. Install fetch-cookie and tough-cookie to fix.', err)
-}
+const jar = new CookieJar()
+let fetch = makeFetchCookie(nodeFetch, jar)
+console.log('Initialized cookie-aware fetch for antiforgery support')
 
 // Read server-provided API key (if any) so we can authenticate programmatic requests
 const LISTENARR_API_KEY = process.env.LISTENARR_API_KEY || null
 if (LISTENARR_API_KEY) {
-  try {
-    // Wrap the fetch implementation to automatically add X-Api-Key header when not present
-    const rawFetch = fetch
-    fetch = async (url, opts) => {
-      opts = opts || {}
-      opts.headers = opts.headers || {}
-      // Do not overwrite an explicit X-Api-Key header set by the caller
-      if (!opts.headers['X-Api-Key'] && !opts.headers['x-api-key']) {
-        opts.headers['X-Api-Key'] = LISTENARR_API_KEY
-      }
-      return rawFetch(url, opts)
+  // Wrap the fetch implementation to automatically add X-Api-Key header when not present
+  const rawFetch = fetch
+  fetch = async (url, opts) => {
+    opts = opts || {}
+    opts.headers = opts.headers || {}
+    // Do not overwrite an explicit X-Api-Key header set by the caller
+    if (!opts.headers['X-Api-Key'] && !opts.headers['x-api-key']) {
+      opts.headers['X-Api-Key'] = LISTENARR_API_KEY
     }
-    console.log('Configured bot to use LISTENARR_API_KEY for backend requests')
-  } catch (e) {
-    console.warn('Failed to wrap fetch with API key header', e)
+    return rawFetch(url, opts)
   }
+  console.log('Configured bot to use LISTENARR_API_KEY for backend requests')
 }
-const crypto = require('crypto')
-const fs = require('fs')
-const signalR = require('@microsoft/signalr')
 
 // Compatibility shim: translate deprecated `flags: 64` option to `flags: 64`
 // This avoids the runtime deprecation warning while keeping existing call sites unchanged.
 try {
-  const { Interaction } = require('discord.js')
   if (Interaction && Interaction.prototype) {
     const EPHEMERAL_FLAG = 64
     ;['reply', 'editReply', 'deferReply'].forEach(fn => {
@@ -84,7 +84,6 @@ try {
 }
 
 const SESSION_TIMEOUT_MS = 1000 * 60 * 10 // 10 minutes
-const sanitizeHtml = require('sanitize-html')
 
 // Determine Listenarr base URL with several fallbacks:
 // 1) process.env.LISTENARR_URL
@@ -119,7 +118,6 @@ function writeLocalEnvFile(envPath, url) {
 function promptForListenarrUrl(defaultUrl) {
   try {
     if (!process.stdin.isTTY) return defaultUrl
-    const readline = require('readline')
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
     return new Promise(resolve => {
       rl.question(`Enter Listenarr URL [${defaultUrl}]: `, answer => {
@@ -136,7 +134,7 @@ function promptForListenarrUrl(defaultUrl) {
 async function resolveListenarrUrl() {
   // env var takes precedence
   if (process.env.LISTENARR_URL && process.env.LISTENARR_URL.trim()) return process.env.LISTENARR_URL.trim()
-  const envPath = require('path').join(__dirname, '.env')
+  const envPath = path.join(__dirname, '.env')
   const local = readLocalEnvFile(envPath)
   if (local) return local
   // prompt interactively and persist
@@ -466,7 +464,6 @@ async function ensureClient(settings) {
       const channel = await client.channels.fetch(settings.discordChannelId).catch(() => null)
       if (channel) {
         const perms = channel.permissionsFor(client.user)
-        const { PermissionsBitField } = require('discord.js')
         // Set runtime flag based on actual permissions
         canManageMessages = !!(perms && perms.has(PermissionsBitField.Flags.ManageMessages))
         if (!canManageMessages) {
@@ -1085,6 +1082,23 @@ async function handleButtonInteraction(interaction) {
     if (clonedMeta.publishYear === undefined && clonedMeta.PublishYear) clonedMeta.publishYear = String(clonedMeta.PublishYear)
     if (clonedMeta.publishYear && typeof clonedMeta.publishYear !== 'string') clonedMeta.publishYear = String(clonedMeta.publishYear)
 
+    // Normalize isbn: server expects List<string>, but Audible metadata may send a plain string
+    if (clonedMeta.isbn !== undefined) {
+      if (!Array.isArray(clonedMeta.isbn)) {
+        clonedMeta.isbn = clonedMeta.isbn ? [String(clonedMeta.isbn)] : []
+      }
+    } else {
+      clonedMeta.isbn = []
+    }
+
+    // Normalize series: if it was stringified as "[]" or similar, treat it as null/undefined
+    if (typeof clonedMeta.series === 'string') {
+      const trimmed = clonedMeta.series.trim()
+      if (trimmed === '[]' || trimmed === '{}' || trimmed === 'null' || trimmed === '') {
+        clonedMeta.series = undefined
+      }
+    }
+
     const body = {
       metadata: clonedMeta,
       monitored: true,
@@ -1099,10 +1113,11 @@ async function handleButtonInteraction(interaction) {
       headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
       body: JSON.stringify(body)
     })
-    // If server rejects due to missing CSRF, try fetching antiforgery token and retry once
-    if (resp.status === 400) {
+    if (!resp.ok) {
+      // Read body once — node-fetch v3 bodies are single-use streams
       const txt = await resp.text().catch(() => '')
-      if (txt && txt.includes('CSRF')) {
+      // If server rejects due to missing CSRF, try fetching antiforgery token and retry once
+      if (resp.status === 400 && txt && txt.includes('CSRF')) {
         console.log('Library add failed due to CSRF; attempting token fetch and retry')
         const xsrf = await fetchAntiforgeryTokenForBot()
         if (xsrf) {
@@ -1137,9 +1152,6 @@ async function handleButtonInteraction(interaction) {
           return
         }
       }
-    }
-    if (!resp.ok) {
-      const txt = await resp.text()
       console.error(`API call failed: ${resp.status} ${txt}`)
       if (didDefer) await interaction.editReply({ content: `Failed to request book: ${resp.status} ${txt}` })
       else await interaction.reply({ content: `Failed to request book: ${resp.status} ${txt}`, flags: 64 })
