@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [0.2.70] - 2026-04-04
 
 ### Security
 - **CVE-2026-25679 / CVE-2026-27142 / CVE-2026-27139 (golang/stdlib):** The Docker gosu builder stage was updated from `golang:1.24-alpine` to `golang:1.26-alpine` (current stable) to compile gosu with a fully patched Go runtime.
