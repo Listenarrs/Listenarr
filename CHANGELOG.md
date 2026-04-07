@@ -5,7 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.66] - current
+## [0.2.70] - 2026-04-04
+
+### Security
+- **CVE-2026-25679 / CVE-2026-27142 / CVE-2026-27139 (golang/stdlib):** The Docker gosu builder stage was updated from `golang:1.24-alpine` to `golang:1.26-alpine` (current stable) to compile gosu with a fully patched Go runtime.
+- **CVE-2026-33671 / CVE-2026-33672 (npm/picomatch 4.0.3):** `npm@11.12.1` still bundles picomatch 4.0.3 internally. After installing npm, the Dockerfile now overwrites that bundled version with picomatch 4.0.4, the patched release.
+- **CVE-2026-33750 (npm/brace-expansion 2.0.2):** Resolved by upgrading the pinned npm in the Docker final stage from `10.9.8` to `11.12.1`, which bundles brace-expansion 5.0.4.
+- **Node.js EOL (Node 20 / Node 22):** Both Node 20 (Iron) and Node 22 (Jod) reached end-of-life on 2026-03-24 and no longer receive security patches. Both Dockerfile stages (`build` and `final`) are updated from `setup_20.x` to `setup_24.x` (Node 24 — Active LTS). The `engines` field in `fe/package.json` is updated from `^20.19.0 || >=22.12.0` to `>=24.0.0`.
+
+### Changed
+- **Bump cypress from 15.11.0 to 15.13.0 in /fe** (dependabot [#481](https://github.com/Listenarrs/Listenarr/pull/481))
+- **Bump vite from 7.3.1 to 8.0.3 in /fe** (dependabot [#480](https://github.com/Listenarrs/Listenarr/pull/480))
+- **Bump web-vitals from 5.1.0 to 5.2.0 in /fe** (dependabot [#479](https://github.com/Listenarrs/Listenarr/pull/479))
+- **Bump eslint-plugin-cypress from 6.1.0 to 6.2.2 in /fe** (dependabot [#478](https://github.com/Listenarrs/Listenarr/pull/478))
+- **Bump jsdom from 28.1.0 to 29.0.1 in /fe** (dependabot [#477](https://github.com/Listenarrs/Listenarr/pull/477))
+- **TypeScript upgraded from ~5.9 to ~6.0 in /fe:** Full type-check and build both pass with no changes required. All known TypeScript 6 breaking changes were already addressed by the existing tsconfig chain.
+- **`@microsoft/signalr` upgraded from ^8 to ^10 in discord-bot:** Ships CommonJS at `dist/cjs/` so it is compatible with both CJS and ESM consumers.
+- **Discord bot converted from CommonJS to ESM:** `discord-bot/index.js` now uses `import`/`export` syntax throughout. `"type": "module"` added to `discord-bot/package.json`. This also unlocks the previously-blocked ESM-only major bumps: `node-fetch` ^2 → ^3.3.2, `fetch-cookie` ^0.8 → ^3.2.0, `tough-cookie` ^4 → ^6.0.1. `__dirname` is now derived via `fileURLToPath(import.meta.url)`. Node.js engine minimum raised to `>=24`.
+
+### Fixed
+- **Discord bot files missing from build output:** `Listenarr.Api.csproj` had `ToolsDir` and `Content Include` pointing to the root `tools/` folder instead of `listenarr.api/tools/`. Fixed by correcting the path and switching to `Content Remove` + `Content Include` so `.js` files (excluded by SDK auto-inclusion) are also copied with `CopyToOutputDirectory: PreserveNewest`.
+- **Discord bot failed to start — `discord.js` named ESM export error:** `discord.js` is a CommonJS module; importing it with named ESM bindings (`import { Interaction, PermissionsBitField } from 'discord.js'`) fails under Node's static CJS analysis. Fixed by importing via the default export and destructuring (`import discordJs from 'discord.js'; const { ... } = discordJs`).
+- **Discord bot `library/add` blocked by antiforgery middleware:** API key authenticated requests (machine-to-machine) cannot carry a browser antiforgery cookie. `AntiforgeryValidationMiddleware` now short-circuits when the `AuthMethod == "ApiKey"` claim is present, which is set exclusively by `ApiKeyMiddleware` on a valid key match. CSRF is a browser-only attack vector and does not apply to API key callers.
+- **Discord bot "body used already" crash on library add (node-fetch v3):** node-fetch v3 response bodies are single-use streams. The old code called `resp.text()` inside the `status === 400` branch and then called `resp.text()` again in `if (!resp.ok)`. Restructured into a single `if (!resp.ok)` block that reads the body exactly once, then checks for CSRF within it.
+- **Discord bot `library/add` 400 — `isbn` type mismatch and `series: "[]"` :** `AudibleBookMetadata.Isbn` expects `List<string>` but Audible returns a plain string; JSON parse failure also caused the entire request body binding to fail. Bot now normalizes `isbn` to an array before sending. Also sanitizes `series` when it arrives as a stringified empty array (`"[]"`) to `undefined`.
+
+## [0.2.69] - 2026-04-04
+
+### Added
+- **Session cookie for browser-native image authentication ([#468](https://github.com/Listenarrs/Listenarr/pull/468)):** Login now sets an HttpOnly `listenarr_session` cookie (SameSite=Strict, Secure on HTTPS) alongside the existing JSON token response. `SessionAuthenticationMiddleware` checks this cookie as a fallback after Bearer header, X-Session-Token, and SignalR query param, enabling browsers to authenticate image requests and other resource loads without JavaScript workarounds. Existing Bearer token and API key auth are unaffected.
+
+### Changed
+- **Session duration constants consolidated ([#468](https://github.com/Listenarrs/Listenarr/pull/468)):** `SessionService` now exposes `DefaultExpiration` and `RememberMeExpiration` as public static fields so cookie MaxAge stays in sync with DB session expiry.
+- **Test infrastructure cleanup ([#468](https://github.com/Listenarrs/Listenarr/pull/468)):** `TestStartupConfigService` and `ResolveApiBasePath` moved into a shared `TestHelpers.cs` to reduce duplication across test files.
+
+## [0.2.68] - 2026-04-03
+
+### Changed
+- **Bump lodash from 4.17.23 to 4.18.1 in /fe and /listenarr.api/tools/discord-bot:** Updated lodash to the latest release in both the frontend and Discord bot lockfiles. Resolves CVE-2026-4800 (code injection via `_.template`) and CVE-2026-2950 (prototype pollution via `_.unset`/`_.omit`).
+- **Eliminated golang/stdlib CVEs from Docker image (CVE-2023-29403, CVE-2022-30635):** The Debian-packaged `gosu` binary was compiled with Go 1.19.8 and flagged by scanners. Both `Dockerfile` and `Dockerfile.runtime` now build `gosu` from source in a `golang:1.24-alpine` multi-stage builder stage (pinned to `gosu@1.19`, built with Go 1.24.6), replacing the apt package entirely. The resulting static binary is copied into the runtime image.
+- **Eliminated npm bundled CVEs from Docker image (tar CVE-2026-23950 / CVE-2026-29786 / CVE-2026-31802 / CVE-2026-24842 / CVE-2026-23745, minimatch CVE-2026-26996, cross-spawn CVE-2024-21538):** The NodeSource `nodejs` apt package ships npm with an older bundled node_modules tree (tar 6.2.1, minimatch 9.0.5, cross-spawn 7.0.3). After installing Node.js, both Dockerfiles now install `npm@10.9.8` (pinned) and remove the stale apt npm tree (`/usr/lib/node_modules/npm`, `/usr/bin/npm`, `/usr/bin/npx`), leaving only the upgraded npm in `/usr/local`.
+
+## [0.2.67] - 2026-04-02
 
 ### Changed
 - **Reduced redundancy for the manual import modal:** Small improvement that make it easier to add or edit import fields.
@@ -13,7 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Bulk field editing in Manual Import:** The Manual Import modal now includes a field-selector dropdown (Audiobook, Release Group, Quality, Language) that opens the cell editor for all selected files at once, allowing a single value to be applied across multiple files instead of having to edit each row individually.
 
-## [0.2.65] - 2026-04-01
+## [0.2.66] - 2026-04-01
 
 ### Fixed
 - **Log injection (CWE-117) remediated across all services:** File paths, URLs, search result fields, download IDs, ASINs, and other user-controlled strings are now run through `LogRedaction` helpers (`SanitizeFilePath`, `SanitizeUrl`, `SanitizeText`) before being written to structured log statements, preventing newline injection attacks across controllers, background services, and adapters.
@@ -38,7 +79,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Reflection-based tests guarded against renamed private methods:** All `GetMethod()`/`Invoke()` call sites in `IndexersNewznabParsingTests` now include `Assert.NotNull` checks and null-forgiving operators so a refactored method name produces a clear test failure rather than a `NullReferenceException`.
 - **Shared `HttpResponseMessage` instances in mock handlers replaced:** `DownloadService_ImportTests` mock HTTP handlers now create a fresh `HttpResponseMessage` per call via local factory methods instead of returning a shared instance whose content stream may already be consumed, satisfying CodeQL's IDisposable-not-disposed analysis and eliminating flaky test failures.
 
-## [0.2.64] - 2026-03-29
+## [0.2.65] - 2026-03-29
 
 ### Added
 - **User-defined `{Edition}` naming token:** Audiobooks now support a separate user-managed `Edition` field that can be used in folder and file naming patterns to distinguish alternate recordings, custom release labels, or local library variants without reusing source-provided `Version` metadata.
@@ -57,6 +98,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **`{Author}` token could drift into narrator metadata:** Author resolution for generated paths now ignores explicit narrator values instead of reusing them as the author fallback when author metadata is missing or noisy.
+
+## [0.2.64] - Accidentally skipped while fixing the workflow.
 
 ## [0.2.63] - 2026-03-29
 

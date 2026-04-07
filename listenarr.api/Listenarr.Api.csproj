@@ -2,8 +2,8 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
-    <Version>0.2.67</Version>
-    <AssemblyVersion>0.2.67</AssemblyVersion>
+    <Version>0.2.70</Version>
+    <AssemblyVersion>0.2.70</AssemblyVersion>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <DefaultItemExcludes>$(DefaultItemExcludes);bin\**;bin/**;artifacts\**;artifacts/**</DefaultItemExcludes>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
@@ -58,7 +58,7 @@
     <FrontendDist>$(FrontendDir)\dist</FrontendDist>
     
     
-    <ToolsDir>$(MSBuildProjectDirectory)\..\tools</ToolsDir>
+    <ToolsDir>$(MSBuildProjectDirectory)\tools</ToolsDir>
   </PropertyGroup>
 
   <Target Name="BuildFrontend" BeforeTargets="Publish" Condition="'$(SkipFrontendBuild)'!='true'">
@@ -122,7 +122,9 @@
   
   <ItemGroup>
     
-    <Content Include="..\tools\**\*.*" Link="tools\%(RecursiveDir)%(Filename)%(Extension)">
+    <Content Remove="tools\**" />
+    <None Remove="tools\**" />
+    <Content Include="tools\**\*" Link="tools\%(RecursiveDir)%(Filename)%(Extension)">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>Never</CopyToPublishDirectory>
     </Content>

@@ -55,6 +55,16 @@ namespace Listenarr.Api.Middleware
                     return;
                 }
 
+                // Skip antiforgery for requests authenticated via API key — these are programmatic
+                // (machine-to-machine) requests that cannot carry a browser cookie/token pair.
+                if (context.User?.Identity?.IsAuthenticated == true
+                    && context.User.FindFirst("AuthMethod")?.Value == "ApiKey")
+                {
+                    _logger?.LogDebug("AntiforgeryMiddleware: request authenticated via API key, skipping antiforgery validation");
+                    await _next(context);
+                    return;
+                }
+
                 // Allow some public endpoints without antiforgery (startup config reads, token request itself, login/logout)
                 if (normalizedApiPath.StartsWith("/api/antiforgery", StringComparison.OrdinalIgnoreCase)
                     || normalizedApiPath.StartsWith("/api/account/login", StringComparison.OrdinalIgnoreCase)

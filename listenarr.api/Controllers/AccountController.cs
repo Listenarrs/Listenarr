@@ -79,6 +79,18 @@ namespace Listenarr.Api.Controllers
             try
             {
                 var sessionToken = await _sessionService.CreateSessionAsync(req.Username, user?.IsAdmin == true, req.RememberMe);
+
+                // Set HttpOnly session cookie so browsers can authenticate resource
+                // requests (images, etc.) without JavaScript intervention.
+                Response.Cookies.Append("listenarr_session", sessionToken, new CookieOptions
+                {
+                    HttpOnly = true,
+                    Secure = HttpContext.Request.IsHttps,
+                    SameSite = SameSiteMode.Strict,
+                    Path = "/",
+                    MaxAge = req.RememberMe ? SessionService.RememberMeExpiration : SessionService.DefaultExpiration,
+                });
+
                 return Ok(new { message = "Logged in", sessionToken, authType = "session" });
             }
             catch (InvalidOperationException)
@@ -113,15 +125,27 @@ namespace Listenarr.Api.Controllers
                     await _sessionService.InvalidateSessionAsync(sessionToken);
                     _logger.LogInformation("Session invalidated for token {TokenHash}", SecurityRequestUtils.HashSecretForLog(sessionToken));
                 }
-                else if (User?.Identity?.AuthenticationType == "ApiKey" || username == "ApiKey")
+
+                // Clear the session cookie regardless of auth type
+                Response.Cookies.Delete("listenarr_session", new CookieOptions
                 {
-                    // API key authentication doesn't have a server-side session to clear
-                    // The client should stop sending the API key header
-                    _logger.LogInformation("API key authenticated user logged out (client should stop sending API key)");
-                }
-                else
+                    HttpOnly = true,
+                    Secure = HttpContext.Request.IsHttps,
+                    SameSite = SameSiteMode.Strict,
+                    Path = "/",
+                });
+
+                if (string.IsNullOrEmpty(sessionToken))
                 {
-                    _logger.LogInformation("No session token found in logout request");
+                    if (User?.Identity?.AuthenticationType == "ApiKey" || username == "ApiKey")
+                    {
+                        // API key authentication doesn't have a server-side session to clear
+                        _logger.LogInformation("API key authenticated user logged out (client should stop sending API key)");
+                    }
+                    else
+                    {
+                        _logger.LogInformation("No session token found in logout request");
+                    }
                 }
 
                 // Determine response auth type based on configuration
@@ -150,6 +174,13 @@ namespace Listenarr.Api.Controllers
             if (!string.IsNullOrEmpty(sessionHeader))
             {
                 return sessionHeader;
+            }
+
+            // Fall back to session cookie (set on login for browser resource requests)
+            var cookieToken = context.Request.Cookies["listenarr_session"];
+            if (!string.IsNullOrEmpty(cookieToken))
+            {
+                return cookieToken;
             }
 
             return null;
