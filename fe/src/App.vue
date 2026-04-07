@@ -412,6 +412,14 @@
                 <span>Discord Bot</span>
               </RouterLink>
               <RouterLink
+                :to="{ path: '/settings', hash: '#audiobookshelf' }"
+                class="nav-subitem"
+                @click="closeMobileMenu"
+                :class="{ active: route.hash === '#audiobookshelf' }"
+              >
+                <span>Audiobookshelf</span>
+              </RouterLink>
+              <RouterLink
                 :to="{ path: '/settings', hash: '#general' }"
                 class="nav-subitem"
                 @click="closeMobileMenu"

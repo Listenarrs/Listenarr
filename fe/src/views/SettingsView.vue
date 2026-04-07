@@ -68,6 +68,14 @@
             Discord Bot
           </button>
           <button
+            @click="router.push({ hash: '#audiobookshelf' })"
+            :class="{ active: activeTab === 'audiobookshelf' }"
+            class="tab-button"
+          >
+            <PhBooks />
+            Audiobookshelf
+          </button>
+          <button
             @click="router.push({ hash: '#general' })"
             :class="{ active: activeTab === 'general' }"
             class="tab-button"
@@ -151,7 +159,7 @@
 
           <!-- Save button for sections that need it -->
           <button
-            v-if="activeTab === 'general' || activeTab === 'bot'"
+            v-if="activeTab === 'general' || activeTab === 'bot' || activeTab === 'audiobookshelf'"
             @click="saveSettings"
             :disabled="configStore.isLoading"
             class="btn btn-primary"
@@ -216,6 +224,13 @@
       <!-- Discord Bot Tab -->
       <DiscordBotTab v-if="activeTab === 'bot' && settings" :settings="settings" @bot-action-completed="checkDiscordBotRunning" />
 
+      <!-- Audiobookshelf Tab -->
+      <AudiobookshelfTab
+        v-if="activeTab === 'audiobookshelf' && settings"
+        :settings="settings"
+        @update:settings="(v) => { settings = v; configStore.applicationSettings = v }"
+      />
+      
       <NotificationsTab
         v-if="activeTab === 'notifications' && settings"
         ref="notificationsRef"
@@ -337,6 +352,7 @@ import RootFoldersTab from '@/views/settings/RootFoldersTab.vue'
 import DownloadClientsTab from '@/views/settings/DownloadClientsTab.vue'
 import QualityProfilesTab from '@/views/settings/QualityProfilesTab.vue'
 import DiscordBotTab from '@/views/settings/DiscordBotTab.vue'
+import AudiobookshelfTab from '@/views/settings/AudiobookshelfTab.vue'
 import NotificationsTab from '@/views/settings/NotificationsTab.vue'
 import IndexersTab from '@/views/settings/IndexersTab.vue'
 import { Modal, ModalHeader, ModalFooter } from '@/components/feedback' 
@@ -352,6 +368,7 @@ import {
   PhBell,
   PhGlobe,
   PhSliders,
+  PhBooks,
   PhPlus,
   PhSpinner,
   PhFloppyDisk,
@@ -387,7 +404,7 @@ logger.debug(
   (globalThis as unknown as { __vitest?: unknown }).__vitest,
 )
 const activeTab = ref<
-  'rootfolders' | 'indexers' | 'clients' | 'quality-profiles' | 'notifications' | 'bot' | 'general'
+  'rootfolders' | 'indexers' | 'clients' | 'quality-profiles' | 'notifications' | 'bot' | 'audiobookshelf' | 'general'
 >('rootfolders')
 
 const mobileTabOptions = computed(() => [
@@ -397,6 +414,7 @@ const mobileTabOptions = computed(() => [
   { value: 'quality-profiles', label: 'Quality Profiles', icon: PhStar },
   { value: 'notifications', label: 'Notifications', icon: PhBell },
   { value: 'bot', label: 'Discord Bot', icon: PhGlobe },
+  { value: 'audiobookshelf', label: 'Audiobookshelf', icon: PhBooks },
   { value: 'general', label: 'General Settings', icon: PhSliders },
   // Integrations removed
 ])
@@ -1031,6 +1049,7 @@ const syncTabFromHash = () => {
     | 'quality-profiles'
     | 'notifications'
     | 'bot'
+    | 'audiobookshelf'
     | 'general'
   if (
     hash &&
@@ -1041,6 +1060,7 @@ const syncTabFromHash = () => {
       'quality-profiles',
       'notifications',
       'bot',
+      'audiobookshelf',
       'general',
     ].includes(hash)
   ) {
@@ -1078,6 +1098,7 @@ const loaded = reactive({
   general: false,
   rootfolders: false,
   bot: false,
+  audiobookshelf: false,
   integrations: false,
 })
 
@@ -1105,6 +1126,24 @@ async function loadTabContents(tab: string) {
       case 'quality-profiles':
         if (!loaded.profiles) {
           loaded.profiles = true
+        }
+        break
+      case 'audiobookshelf':
+        if (!loaded.audiobookshelf) {
+          await configStore.loadApplicationSettings()
+
+          const rawAbs = configStore.applicationSettings
+            ? { ...configStore.applicationSettings }
+            : null
+
+          if (rawAbs) {
+            settings.value = rawAbs as ApplicationSettings
+            configStore.applicationSettings = settings.value
+          } else {
+            settings.value = null
+          }
+
+          loaded.audiobookshelf = true
         }
         break
       case 'general':

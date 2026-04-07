@@ -17,6 +17,7 @@ public class ManualImportController : ControllerBase
     private readonly IConfigurationService _configService;
     private readonly IScanQueueService _scanQueueService;
     private readonly IRootFolderService _rootFolderService;
+    private readonly IAudiobookshelfService _audiobookshelfService;
     private readonly IFileMover _fileMover;
 
     public ManualImportController(
@@ -27,7 +28,8 @@ public class ManualImportController : ControllerBase
         IConfigurationService configService,
         IScanQueueService scanQueueService,
         IRootFolderService rootFolderService,
-        IFileMover fileMover)
+        IFileMover fileMover,
+        IAudiobookshelfService audiobookshelfService)
     {
         _logger = logger;
         _audiobookRepository = audiobookRepository;
@@ -37,6 +39,7 @@ public class ManualImportController : ControllerBase
         _scanQueueService = scanQueueService;
         _rootFolderService = rootFolderService;
         _fileMover = fileMover;
+        _audiobookshelfService = audiobookshelfService;
     }
 
     /// <summary>
@@ -91,6 +94,51 @@ public class ManualImportController : ControllerBase
             return StatusCode(500, new { error = "Failed to preview import" });
         }
     }
+
+    private async Task<string?> ResolveAudiobookshelfLibraryIdAsync(IEnumerable<ManualImportResult> results)
+{
+    var successfulPaths = results
+        .Where(r => r.Success && !string.IsNullOrWhiteSpace(r.DestinationPath))
+        .Select(r => r.DestinationPath!)
+        .ToList();
+
+    if (!successfulPaths.Any())
+        return null;
+
+    var rootFolders = await _rootFolderService.GetAllAsync();
+
+    foreach (var path in successfulPaths)
+    {
+        var fullPath = Path.GetFullPath(path);
+
+        var matchingRoot = rootFolders.FirstOrDefault(r =>
+        {
+            try
+            {
+                return FileUtils.IsPathWithinRoot(fullPath, r.Path)
+                    || string.Equals(fullPath, Path.GetFullPath(r.Path), StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
+            }
+        });
+
+        if (!string.IsNullOrWhiteSpace(matchingRoot?.AudiobookshelfLibraryId))
+        {
+            _logger.LogInformation(
+                "Using root-folder-mapped Audiobookshelf library {LibraryId} for path {Path}",
+                matchingRoot.AudiobookshelfLibraryId,
+                path);
+
+            return matchingRoot.AudiobookshelfLibraryId;
+        }
+    }
+
+    // fallback to global setting
+    var settings = await _configService.GetApplicationSettingsAsync();
+    return settings?.AudiobookshelfLibraryId;
+}
 
     /// <summary>
     /// Start a manual import operation, copying or moving selected files into the library.
@@ -168,7 +216,39 @@ public class ManualImportController : ControllerBase
 
                 await EnqueueFocusedScansAsync(results);
 
-                var successCount = results.Count(r => r.Success);
+                var successCount = results.Count(r => r != null && r.Success);
+
+                if (successCount > 0 &&
+                    appSettings.AudiobookshelfEnabled &&
+                    appSettings.AudiobookshelfScanAfterImport &&
+                    appSettings.AudiobookshelfScanOnManualImport)
+                {
+                    try
+                    {
+                        var libraryId = await ResolveAudiobookshelfLibraryIdAsync(results);
+
+                        if (!string.IsNullOrWhiteSpace(libraryId))
+                        {
+                            var (scanSuccess, scanMessage) =
+                                await _audiobookshelfService.TriggerLibraryScanAsync(libraryId);
+
+                            _logger.LogInformation(
+                                "Triggered Audiobookshelf scan after manual import. LibraryId={LibraryId}, Success={Success}, Message={Message}",
+                                libraryId,
+                                scanSuccess,
+                                scanMessage);
+                        }
+                        else
+                        {
+                            _logger.LogWarning("No Audiobookshelf library ID could be resolved for manual import scan");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to trigger Audiobookshelf scan after manual import");
+                    }
+                }
+
                 _logger.LogInformation("Manual import batch completed: {SuccessCount}/{TotalCount} succeeded, usedDestinations: {DestinationCount}", successCount, results.Count, usedDestinations.Count);
                 return Ok(new
                 {

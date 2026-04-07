@@ -100,6 +100,8 @@ namespace Listenarr.Api.Extensions
             // Discord bot service for managing bot process
             services.AddSingleton<IDiscordBotService, DiscordBotService>();
 
+            services.AddScoped<IAudiobookshelfService, AudiobookshelfService>();
+
             // Toast service for broadcasting UI toasts via SignalR
             services.AddSingleton<IToastService, ToastService>();
 

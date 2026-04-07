@@ -272,6 +272,7 @@ export interface RootFolder {
   isDefault: boolean
   createdAt: string
   updatedAt?: string
+  audiobookshelfLibraryId?: string | null
 }
 
 export interface TranslatePathRequest {
@@ -349,6 +350,15 @@ export interface ApplicationSettings {
   enableOpenLibrarySearch?: boolean
   defaultSearchRegion?: string
   defaultSearchLanguage?: string
+
+  audiobookshelfEnabled?: boolean
+  audiobookshelfUrl?: string
+  audiobookshelfApiKey?: string
+  audiobookshelfLibraryId?: string
+  audiobookshelfScanAfterImport?: boolean
+  audiobookshelfVerifySsl?: boolean
+  audiobookshelfScanOnManualImport?: boolean
+  audiobookshelfScanOnCompletedDownload?: boolean
 }
 
 export interface ProwlarrImportConnectionSettings {

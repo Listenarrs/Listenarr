@@ -18,6 +18,7 @@ export interface LibraryImportItem {
   detectedAuthor?: string
   detectedAsin?: string
   detectedSeries?: string
+
   format: string
   fileCount: number
   // Match state
@@ -26,6 +27,11 @@ export interface LibraryImportItem {
   isSearching: boolean  // currently in-flight
   // Selection
   selected: boolean
+
+  // ABS-only / multi-source support
+  source?: 'rootFolder' | 'audiobookshelf'
+  absItemId?: string
+  match?: string
 }
 
 function extractFolderName(relativePath: string): string {
@@ -71,6 +77,7 @@ function unmatchedToImportItem(item: UnmatchedFileItem): LibraryImportItem {
     hasSearched: false,
     isSearching: false,
     selected: false,
+    source: 'rootFolder',
   }
 }
 
@@ -158,6 +165,14 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
       logger.debug('[libraryImport] Failed to load saved results:', e)
     }
   }
+
+  function replaceItems(nextItems: LibraryImportItem[]) {
+  const mapped: Record<string, LibraryImportItem> = {}
+  for (const item of nextItems) {
+    mapped[item.id] = item
+  }
+  items.value = mapped
+}
 
   async function triggerScan(id: number) {
     rootFolderId.value = id
@@ -515,6 +530,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
     toggleSelect,
     toggleSelectAll,
     importSelected,
+    replaceItems,
   }
 })
 

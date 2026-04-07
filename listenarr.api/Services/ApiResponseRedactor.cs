@@ -55,6 +55,11 @@ public static class ApiResponseRedactor
             clone.DiscordBotToken = RedactedValue;
         }
 
+        if (!string.IsNullOrWhiteSpace(clone.AudiobookshelfApiKey))
+        {
+            clone.AudiobookshelfApiKey = RedactedValue;
+        }
+
         if (!string.IsNullOrWhiteSpace(clone.ProwlarrApiKeyEncrypted))
         {
             clone.ProwlarrApiKeyEncrypted = RedactedValue;

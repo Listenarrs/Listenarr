@@ -297,6 +297,14 @@ namespace Listenarr.Domain.Models
         /// </summary>
         public string DefaultSearchLanguage { get; set; } = "english";
 
+        public bool AudiobookshelfEnabled { get; set; } = false;
+        public string? AudiobookshelfUrl { get; set; }
+        public string? AudiobookshelfApiKey { get; set; }
+        public string? AudiobookshelfLibraryId { get; set; }
+        public bool AudiobookshelfScanAfterImport { get; set; } = true;
+        public bool AudiobookshelfVerifySsl { get; set; } = true;
+        public bool AudiobookshelfScanOnManualImport { get; set; } = true;
+        public bool AudiobookshelfScanOnCompletedDownload { get; set; } = true;
         
     }
 }

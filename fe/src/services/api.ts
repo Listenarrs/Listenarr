@@ -875,6 +875,78 @@ class ApiService {
     })
   }
 
+    async testAudiobookshelf(): Promise<{ success: boolean; message?: string }> {
+    return this.request<{ success: boolean; message?: string }>('/audiobookshelf/test', {
+      method: 'POST',
+    })
+  }
+
+  async getAudiobookshelfLibraries(): Promise<
+    Array<{ id: string; name: string; mediaType?: string }>
+  > {
+    return this.request<Array<{ id: string; name: string; mediaType?: string }>>(
+      '/audiobookshelf/libraries'
+    )
+  }
+
+  async getAudiobookshelfLibraryItems(libraryId: string) {
+  return this.request<Array<{
+    id: string
+    path: string
+    mediaType?: string
+    metadata: {
+      title?: string
+      subtitle?: string
+      authors?: string[]
+      narrators?: string[]
+      series?: string
+      publisher?: string
+      language?: string
+      asin?: string
+      isbn?: string[]
+      publishedYear?: string
+      description?: string
+    }
+  }>>(`/audiobookshelf/libraries/${encodeURIComponent(libraryId)}/items`)
+}
+
+async previewAudiobookshelfImport(libraryId: string): Promise<any[]> {
+  return this.request<any[]>('/audiobookshelf/import/preview', {
+    method: 'POST',
+    body: JSON.stringify({ libraryId }),
+  })
+}
+
+async importAudiobookshelfItems(payload: {
+  libraryId: string
+  itemIds: string[]
+  qualityProfileId?: number
+  monitored?: boolean
+  skipExisting?: boolean
+}): Promise<{
+  importedCount: number
+  skippedCount: number
+  messages: string[]
+}> {
+  return this.request<{
+    importedCount: number
+    skippedCount: number
+    messages: string[]
+  }>('/audiobookshelf/import', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+  async triggerAudiobookshelfScan(
+    libraryId?: string,
+  ): Promise<{ success: boolean; message?: string }> {
+    return this.request<{ success: boolean; message?: string }>('/audiobookshelf/scan', {
+      method: 'POST',
+      body: JSON.stringify({ libraryId }),
+    })
+  }
+
   async getProwlarrImportSettings(): Promise<ProwlarrImportConnectionSettings> {
     return this.request<ProwlarrImportConnectionSettings>('/configuration/prowlarr-import')
   }
@@ -888,15 +960,22 @@ class ApiService {
     name: string
     path: string
     isDefault?: boolean
+    audiobookshelfLibraryId?: string | null
   }): Promise<RootFolder> {
     return this.request<RootFolder>('/rootfolders', { method: 'POST', body: JSON.stringify(root) })
   }
 
   async updateRootFolder(
-    id: number,
-    root: { id: number; name: string; path: string; isDefault?: boolean },
-    opts?: { moveFiles?: boolean; deleteEmptySource?: boolean },
-  ): Promise<RootFolder> {
+  id: number,
+  root: {
+    id: number
+    name: string
+    path: string
+    isDefault?: boolean
+    audiobookshelfLibraryId?: string | null
+  },
+  opts?: { moveFiles?: boolean; deleteEmptySource?: boolean },
+): Promise<RootFolder> {
     const qs = opts
       ? `?moveFiles=${opts.moveFiles === true}&deleteEmptySource=${opts.deleteEmptySource !== false}`
       : ''
@@ -2100,6 +2179,8 @@ class ApiService {
       }
     }
   }
+
+  
 
   // Admin users
   async getAdminUsers(): Promise<

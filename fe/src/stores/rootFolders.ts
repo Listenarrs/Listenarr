@@ -27,7 +27,7 @@ export const useRootFoldersStore = defineStore('rootFolders', () => {
     }
   }
 
-  async function create(payload: { name: string; path: string; isDefault?: boolean }) {
+  async function create(payload: { name: string; path: string; isDefault?: boolean;audiobookshelfLibraryId?: string | null }) {
     const r = await apiService.createRootFolder(payload)
     await load()
     return r
@@ -35,7 +35,7 @@ export const useRootFoldersStore = defineStore('rootFolders', () => {
 
   async function update(
     id: number,
-    payload: { id: number; name: string; path: string; isDefault?: boolean },
+    payload: { id: number; name: string; path: string; isDefault?: boolean;audiobookshelfLibraryId?: string | null },
     opts?: { moveFiles?: boolean; deleteEmptySource?: boolean },
   ) {
     const r = await apiService.updateRootFolder(id, payload, opts)

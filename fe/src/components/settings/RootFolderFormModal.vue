@@ -28,6 +28,22 @@
           <FolderBrowserModal v-model:visible="showBrowser" v-model:modelValue="form.path" :show-input="false" @close="closeBrowser" />
         </FormRow>
 
+        <FormRow label="Audiobookshelf Library">
+        <select v-model="form.audiobookshelfLibraryId" class="form-input">
+          <option :value="null">None</option>
+          <option
+            v-for="library in audiobookshelfLibraries"
+            :key="library.id"
+            :value="library.id"
+          >
+            {{ library.name }}{{ library.mediaType ? ` (${library.mediaType})` : '' }}
+          </option>
+        </select>
+        <small class="form-help">
+          Optional. If selected, imports into this root folder will trigger scans for this Audiobookshelf library.
+        </small>
+      </FormRow>
+
         <CheckboxCard v-model="form.isDefault" title="Set as default root folder" />
       </FormSection>
     </template>
@@ -49,7 +65,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import FolderBrowserModal from '@/components/feedback/FolderBrowserModal.vue'
 import { Modal, ModalHeader, ModalFooter } from '@/components/feedback'
 import MoveAudiobookModal from '@/components/feedback/MoveAudiobookModal.vue'
@@ -60,6 +76,7 @@ import CheckboxCard from '@/components/settings/CheckboxCard.vue'
 import { PhFolder } from '@phosphor-icons/vue'
 import { useRootFoldersStore } from '@/stores/rootFolders'
 import { useToast } from '@/services/toastService'
+import { apiService } from '@/services/api'
 import type { RootFolder } from '@/types'
 
 const { root } = defineProps<{ root?: RootFolder }>()
@@ -68,7 +85,12 @@ const emit = defineEmits(['close', 'saved'])
 const store = useRootFoldersStore()
 const toast = useToast()
 
-const form = ref({ name: root?.name || '', path: root?.path || '', isDefault: !!root?.isDefault })
+const form = ref({
+  name: root?.name || '',
+  path: root?.path || '',
+  isDefault: !!root?.isDefault,
+  audiobookshelfLibraryId: root?.audiobookshelfLibraryId ?? null,
+})
 
 const showConfirm = ref(false)
 const modalMoveFiles = ref(true)
@@ -76,6 +98,20 @@ const modalDeleteEmpty = ref(true)
 
 // Local state for showing the inline folder browser
 const showBrowser = ref(false)
+
+const audiobookshelfLibraries = ref<Array<{ id: string; name: string; mediaType?: string }>>([])
+
+onMounted(async () => {
+  try {
+    const libs = await apiService.getAudiobookshelfLibraries()
+    console.log('ABS libs (modal):', libs)
+
+    audiobookshelfLibraries.value = Array.isArray(libs) ? libs : []
+  } catch (error) {
+    console.error('Failed to fetch Audiobookshelf libraries:', error)
+    audiobookshelfLibraries.value = []
+  }
+})
 
 function openBrowser() {
   showBrowser.value = true
@@ -104,6 +140,7 @@ async function save() {
         name: form.value.name,
         path: form.value.path,
         isDefault: form.value.isDefault,
+        audiobookshelfLibraryId: form.value.audiobookshelfLibraryId,
       })
       toast.success('Success', 'Root folder updated')
     } else {
@@ -111,6 +148,7 @@ async function save() {
         name: form.value.name,
         path: form.value.path,
         isDefault: form.value.isDefault,
+        audiobookshelfLibraryId: form.value.audiobookshelfLibraryId,
       })
       toast.success('Success', 'Root folder created')
     }
@@ -131,6 +169,7 @@ async function confirmChange(moveFiles: boolean) {
         name: form.value.name,
         path: form.value.path,
         isDefault: form.value.isDefault,
+        audiobookshelfLibraryId: form.value.audiobookshelfLibraryId,
       },
       { moveFiles: moveFiles, deleteEmptySource: modalDeleteEmpty.value },
     )
@@ -189,6 +228,13 @@ async function confirmChange(moveFiles: boolean) {
   margin-bottom: 0.5rem;
   font-weight: 500;
   color: #fff;
+}
+
+.form-help {
+  display: block;
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  color: #868e96;
 }
 
 .form-row input {

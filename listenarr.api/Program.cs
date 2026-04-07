@@ -353,6 +353,9 @@ builder.Services.AddScoped<SearchResultScorer>();
 // Add ASIN search handler
 builder.Services.AddScoped<AsinSearchHandler>();
 
+// builder.Services.AddScoped<IAudiobookshelfService, AudiobookshelfService>();
+builder.Services.AddScoped<IAudiobookshelfImportService, AudiobookshelfImportService>();
+
 // Add default HTTP client for other services
 builder.Services.AddHttpClient();
 
