@@ -1,10 +1,13 @@
 <template>
-  <tr class="import-row" :class="{ selected: item.selected, 'no-match': item.hasSearched && !item.selectedMatch }">
+  <tr class="import-row" :class="{
+  selected: item.selected,
+  'no-match': !item.absItemId && item.hasSearched && !item.selectedMatch
+}" >
     <td class="cell-check">
       <input
         type="checkbox"
         :checked="item.selected"
-        :disabled="!item.selectedMatch"
+        :disabled="!item.absItemId && !item.selectedMatch"
         @change="store.toggleSelect(item.id)"
       />
     </td>
@@ -47,48 +50,53 @@
 
     <td class="cell-match" data-label="Match">
       <div class="match-area">
-        <div v-if="item.isSearching" class="match-status searching">
-          <PhSpinner class="ph-spin" :size="14" />
-          <span>Searching...</span>
-        </div>
 
-        <div v-else-if="item.selectedMatch" class="match-status matched">
+        <!-- Audiobookshelf mode -->
+        <div v-if="item.absItemId" class="match-status matched">
           <PhCheckCircle :size="14" class="match-icon-ok" />
-          <div class="match-copy">
-            <span
-              class="match-title"
-              :title="item.selectedMatch.asin ? `ASIN: ${item.selectedMatch.asin}` : undefined"
-            >
-              {{ item.selectedMatch.title }}
-            </span>
-            <span
-              v-if="item.selectedMatch.authors?.length"
-              class="match-author"
-              :class="{ 'author-mismatch': isAuthorMismatch(item) }"
-              :title="isAuthorMismatch(item) ? `Detected: ${item.detectedAuthor}` : undefined"
-            >
-              {{ item.selectedMatch.authors[0]?.name }}
-            </span>
+          <span>{{ item.match }}</span>
+        </div>
+
+        <!-- Existing root-folder logic -->
+        <template v-else>
+
+          <div v-if="item.isSearching" class="match-status searching">
+            <PhSpinner class="ph-spin" :size="14" />
+            <span>Searching...</span>
           </div>
-          <button class="btn-clear-match" title="Clear match" @click="store.clearMatch(item.id)">x</button>
-        </div>
 
-        <div v-else-if="item.hasSearched" class="match-status no-match">
-          <PhWarningCircle :size="14" class="match-icon-warn" />
-          <span>No match found</span>
-        </div>
+          <div v-else-if="item.selectedMatch" class="match-status matched">
+            <PhCheckCircle :size="14" class="match-icon-ok" />
+            <div class="match-copy">
+              <span class="match-title">
+                {{ item.selectedMatch.title }}
+              </span>
+              <span v-if="item.selectedMatch.authors?.length" class="match-author">
+                {{ item.selectedMatch.authors[0]?.name }}
+              </span>
+            </div>
+            <button class="btn-clear-match" @click="store.clearMatch(item.id)">x</button>
+          </div>
 
-        <div v-else class="match-status unsearched">
-          <span>-</span>
-        </div>
+          <div v-else-if="item.hasSearched" class="match-status no-match">
+            <PhWarningCircle :size="14" class="match-icon-warn" />
+            <span>No match found</span>
+          </div>
 
-        <button
-          class="btn-search-toggle"
-          title="Search for a match"
-          @click="showSearchModal = true"
-        >
-          <PhMagnifyingGlass :size="14" />
-        </button>
+          <div v-else class="match-status unsearched">
+            <span>-</span>
+          </div>
+
+          <button
+            v-if="!item.absItemId"
+            class="btn-search-toggle"
+            @click="showSearchModal = true"
+          >
+            <PhMagnifyingGlass :size="14" />
+          </button>
+
+        </template>
+
       </div>
     </td>
   </tr>

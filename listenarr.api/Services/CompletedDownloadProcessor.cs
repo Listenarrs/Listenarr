@@ -26,6 +26,7 @@ namespace Listenarr.Api.Services
         private readonly IHubContext<Listenarr.Api.Hubs.DownloadHub> _hubContext;
         private readonly IDownloadQueueService _downloadQueueService;
         private readonly IDownloadHistoryService? _downloadHistoryService;
+        private readonly IAudiobookshelfService _audiobookshelfService;
         private readonly ILogger<CompletedDownloadProcessor> _logger;
         private readonly IAppMetricsService _metrics;
 
@@ -39,6 +40,7 @@ namespace Listenarr.Api.Services
             IDownloadQueueService downloadQueueService,
             IHubContext<Listenarr.Api.Hubs.DownloadHub> hubContext,
             ILogger<CompletedDownloadProcessor> logger,
+            IAudiobookshelfService audiobookshelfService,
             IHubBroadcaster? hubBroadcaster = null,
             IAppMetricsService? metrics = null,
             IDownloadHistoryService? downloadHistoryService = null)
@@ -53,6 +55,7 @@ namespace Listenarr.Api.Services
             _hubContext = hubContext;
             _hubBroadcaster = hubBroadcaster;
             _logger = logger;
+            _audiobookshelfService = audiobookshelfService;
             _metrics = metrics ?? new NoopAppMetricsService();
             _downloadHistoryService = downloadHistoryService;
         }
@@ -113,6 +116,7 @@ namespace Listenarr.Api.Services
                 }
 
                 var importToastSent = false;
+                var anyImportSucceeded = false;
                 ApplicationSettings settings;
                 try
                 {
@@ -157,6 +161,11 @@ namespace Listenarr.Api.Services
                             {
                                 importResults = await _fileFinalizer.ImportFilesFromDirectoryAsync(downloadId, download?.AudiobookId, directImportFiles, settings);
                                 _logger.LogInformation("FileFinalizer.ImportFilesFromDirectoryAsync returned {Count} results for download {DownloadId}", importResults?.Count ?? 0, downloadId);
+                            }
+
+                            if (importResults != null && importResults.Any(r => r != null && r.Success))
+                            {
+                                anyImportSucceeded = true;
                             }
 
                             // if any successful imports returned final paths, set Download.FinalPath to the first one
@@ -294,6 +303,10 @@ namespace Listenarr.Api.Services
                                                 var extractedResults = await _fileFinalizer.ImportFilesFromDirectoryAsync(downloadId, download?.AudiobookId, extractedFiles, settings);
                                                 _logger.LogInformation("Imported {Count} files extracted from archive {Archive} for download {DownloadId}", extractedResults?.Count ?? 0, archivePath, downloadId);
 
+                                                if (extractedResults != null && extractedResults.Any(r => r != null && r.Success))
+                                                {
+                                                    anyImportSucceeded = true;
+                                                }
                                                 var finalFromExtracted = SelectPrimaryImportedPath(extractedResults);
                                                 if (!string.IsNullOrWhiteSpace(finalFromExtracted))
                                                 {
@@ -390,6 +403,10 @@ namespace Listenarr.Api.Services
                                             var extractedResults = await _fileFinalizer.ImportFilesFromDirectoryAsync(downloadId, download?.AudiobookId, extractedFiles, settings);
                                             _logger.LogInformation("Imported {Count} files extracted from archive {Archive} for download {DownloadId}", extractedResults?.Count ?? 0, finalPath, downloadId);
 
+                                            if (extractedResults != null && extractedResults.Any(r => r != null && r.Success))
+                                            {
+                                                anyImportSucceeded = true;
+                                            }
                                             var finalFromExtracted = SelectPrimaryImportedPath(extractedResults);
                                             if (!string.IsNullOrWhiteSpace(finalFromExtracted))
                                             {
@@ -460,8 +477,14 @@ namespace Listenarr.Api.Services
                                 var importResult = await _fileFinalizer.ImportSingleFileAsync(downloadId, download?.AudiobookId, finalPath, settings);
                                 _logger.LogInformation("FileFinalizer.ImportSingleFileAsync result for download {DownloadId}: Success={Success}, FinalPath={FinalPath}", downloadId, importResult?.Success, importResult?.FinalPath);
 
+                                if (importResult != null && importResult.Success)
+                                {
+                                    anyImportSucceeded = true;
+                                }
+
                                 if (importResult != null && importResult.Success && !string.IsNullOrWhiteSpace(importResult.FinalPath))
                                 {
+                                
                                     try
                                     {
                                         var tracked = await _downloadRepository.FindAsync(downloadId);
@@ -614,6 +637,47 @@ namespace Listenarr.Api.Services
                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                 {
                     _logger.LogWarning(ex, "Failed to evaluate post-import state for download {DownloadId}", downloadId);
+                }
+
+                try
+                {
+                    var downloadAfterImport = await _downloadRepository.FindAsync(downloadId);
+
+                    if (anyImportSucceeded &&
+                        downloadAfterImport != null &&
+                        downloadAfterImport.Status == DownloadStatus.Moved &&
+                        settings.AudiobookshelfEnabled &&
+                        settings.AudiobookshelfScanAfterImport &&
+                        settings.AudiobookshelfScanOnCompletedDownload)
+                    try
+                        {
+                            var libraryId = await ResolveAudiobookshelfLibraryIdAsync(downloadAfterImport.FinalPath);
+
+                            if (!string.IsNullOrWhiteSpace(libraryId))
+                            {
+                                var (scanSuccess, scanMessage) =
+                                    await _audiobookshelfService.TriggerLibraryScanAsync(libraryId);
+
+                                _logger.LogInformation(
+                                    "Triggered Audiobookshelf scan after completed download import for {DownloadId}. LibraryId={LibraryId}, Success={Success}, Message={Message}",
+                                    downloadId,
+                                    libraryId,
+                                    scanSuccess,
+                                    scanMessage);
+                            }
+                            else
+                            {
+                                _logger.LogWarning("No Audiobookshelf library ID resolved for completed download {DownloadId}", downloadId);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to trigger Audiobookshelf scan after completed download import for {DownloadId}", downloadId);
+                        }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                {
+                    _logger.LogWarning(ex, "Failed to trigger Audiobookshelf scan after completed download import for {DownloadId}", downloadId);
                 }
 
                 // Add history entry and send notifications after successful import
@@ -1054,6 +1118,47 @@ namespace Listenarr.Api.Services
                     forceBlock: false);
             }
         }
+
+        private async Task<string?> ResolveAudiobookshelfLibraryIdAsync(string? destinationPath)
+{
+    if (string.IsNullOrWhiteSpace(destinationPath))
+        return null;
+
+    var fullPath = Path.GetFullPath(destinationPath);
+
+    using var scope = _serviceScopeFactory.CreateScope();
+    var rootFolderService = scope.ServiceProvider.GetRequiredService<IRootFolderService>();
+    var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
+
+    var rootFolders = await rootFolderService.GetAllAsync();
+
+    var matchingRoot = rootFolders.FirstOrDefault(r =>
+    {
+        try
+        {
+            return FileUtils.IsPathWithinRoot(fullPath, r.Path)
+                || string.Equals(fullPath, Path.GetFullPath(r.Path), StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    });
+
+    if (!string.IsNullOrWhiteSpace(matchingRoot?.AudiobookshelfLibraryId))
+    {
+        _logger.LogInformation(
+            "Using root-folder-mapped Audiobookshelf library {LibraryId} for path {Path}",
+            matchingRoot.AudiobookshelfLibraryId,
+            destinationPath);
+
+        return matchingRoot.AudiobookshelfLibraryId;
+    }
+
+    // fallback to global
+    var settings = await configService.GetApplicationSettingsAsync();
+    return settings?.AudiobookshelfLibraryId;
+}
 
         private async Task<string[]> FilterDirectoryAudioFilesAsync(Download? download, string[] files)
         {

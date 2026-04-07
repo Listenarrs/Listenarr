@@ -27,7 +27,7 @@ namespace Listenarr.Api.Models
         public string[]? Authors { get; set; }
         public string[]? Narrators { get; set; }
         public string? Asin { get; set; }
-        public List<string>? Isbn { get; set; }
+        public object? Isbn { get; set; }
         public string? Language { get; set; }
         public List<string>? Genres { get; set; }
         public string[]? Tags { get; set; }

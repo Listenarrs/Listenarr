@@ -136,6 +136,7 @@ private readonly ILogger<RootFolderService>? _logger;
                 trackedRoot.Name = root.Name;
                 trackedRoot.Path = root.Path;
                 trackedRoot.IsDefault = root.IsDefault;
+                trackedRoot.AudiobookshelfLibraryId = root.AudiobookshelfLibraryId;
                 trackedRoot.UpdatedAt = DateTime.UtcNow;
 
                 if (!string.Equals(oldPath, newPath, StringComparison.OrdinalIgnoreCase))
@@ -219,6 +220,7 @@ private readonly ILogger<RootFolderService>? _logger;
                 existing.Name = trackedRoot.Name;
                 existing.Path = trackedRoot.Path;
                 existing.IsDefault = trackedRoot.IsDefault;
+                existing.AudiobookshelfLibraryId = trackedRoot.AudiobookshelfLibraryId;
                 existing.UpdatedAt = trackedRoot.UpdatedAt;
             }
 

@@ -9,18 +9,26 @@
 
     <div class="scan-controls">
       <div class="folder-select-wrap">
-        <label class="control-label">Root folder</label>
-        <select v-model="selectedFolderId" class="folder-select" @change="onFolderChange">
-          <option v-for="f in rootFoldersStore.folders" :key="f.id" :value="f.id">
-            {{ f.name || f.path }}
-          </option>
+        <label class="control-label">Import Source</label>
+        <select v-model="selectedSource" class="folder-select" @change="onSourceChange">
+          <optgroup label="Root Folders">
+            <option v-for="f in rootFoldersStore.folders" :key="'rf-' + f.id" :value="{ type: 'rootFolder', id: f.id }">
+              {{ f.name || f.path }}
+            </option>
+          </optgroup>
+
+          <optgroup label="Audiobookshelf">
+            <option v-for="lib in audiobookshelfLibraries" :key="'abs-' + lib.id" :value="{ type: 'audiobookshelf', id: lib.id }">
+              {{ lib.name }}
+            </option>
+          </optgroup>
         </select>
       </div>
 
       <button
         class="btn btn-primary btn-sm"
-        :disabled="!selectedFolderId || store.scanStatus === 'scanning'"
-        @click="startScan"
+        :disabled="!selectedSource || store.scanStatus === 'scanning'"
+        @click="handleScan"
       >
         <PhSpinner v-if="store.scanStatus === 'scanning'" class="ph-spin" :size="15" />
         <PhMagnifyingGlass v-else :size="15" />
@@ -29,7 +37,10 @@
 
       <span v-if="store.lastScannedAt" class="scan-meta">
         Last scanned {{ timeAgo(store.lastScannedAt) }}
-        <span v-if="store.itemList.length > 0"> · {{ store.itemList.length }} unmatched</span>
+        <span v-if="store.itemList.length > 0">
+          · {{ store.itemList.length }}
+          {{ selectedSource?.type === 'audiobookshelf' ? 'items' : 'unmatched' }}
+        </span>
       </span>
 
       <span v-if="store.scanStatus === 'error'" class="scan-error">
@@ -100,7 +111,7 @@
                   type="checkbox"
                   :checked="allMatchedSelected"
                   :indeterminate="someSelected && !allMatchedSelected"
-                  @change="store.toggleSelectAll()"
+                  @change="toggleSelectAllCurrentSource()"
                   title="Select all matched"
                 />
               </th>
@@ -171,9 +182,12 @@
     </div>
 
     <LibraryImportFooter
-      v-if="rootFoldersStore.folders.length > 0"
-      :folders="rootFoldersStore.folders"
-    />
+  v-if="rootFoldersStore.folders.length > 0"
+  :folders="rootFoldersStore.folders"
+  :source-type="selectedSource?.type ?? 'rootFolder'"
+  :audiobookshelf-library-id="selectedSource?.type === 'audiobookshelf' ? String(selectedSource.id) : null"
+  @imported="handleImportCompleted"
+/>
   </div>
 </template>
 
@@ -191,6 +205,7 @@ import {
 import { useLibraryImportStore } from '@/stores/libraryImport'
 import { useRootFoldersStore } from '@/stores/rootFolders'
 import { useConfigurationStore } from '@/stores/configuration'
+import type { LibraryImportItem } from '@/stores/libraryImport'
 import LibraryImportRow from '@/components/domain/audiobook/LibraryImportRow.vue'
 import LibraryImportFooter from '@/components/domain/audiobook/LibraryImportFooter.vue'
 import {
@@ -202,6 +217,7 @@ import {
   type LibraryImportSortDirection,
   type LibraryImportSortKey,
 } from '@/utils/libraryImportTable'
+import { apiService } from '@/services/api'
 
 const COLUMN_WIDTH_STORAGE_KEY = 'listenarr.libraryImport.columnWidths.v1'
 const MAX_COLUMN_WIDTH = 960
@@ -211,7 +227,9 @@ const store = useLibraryImportStore()
 const rootFoldersStore = useRootFoldersStore()
 const configStore = useConfigurationStore()
 
-const selectedFolderId = ref<number | null>(null)
+const selectedSource = ref<{ type: 'rootFolder' | 'audiobookshelf'; id: number | string } | null>(null)
+const audiobookshelfLibraries = ref<any[]>([])
+
 const sortKey = ref<LibraryImportSortKey>('folder')
 const sortDirection = ref<LibraryImportSortDirection>('asc')
 const columnWidths = ref<LibraryImportColumnWidths>({ ...DEFAULT_LIBRARY_IMPORT_COLUMN_WIDTHS })
@@ -225,8 +243,12 @@ const sortOptions: Array<{ value: LibraryImportSortKey; label: string }> = [
 ]
 
 const allMatchedSelected = computed(() => {
-  const matched = store.itemList.filter((item) => item.selectedMatch)
-  return matched.length > 0 && matched.every((item) => item.selected)
+  const importable =
+    selectedSource.value?.type === 'audiobookshelf'
+      ? store.itemList.filter((item: any) => item.source === 'audiobookshelf' && item.match === 'Ready')
+      : store.itemList.filter((item) => item.selectedMatch)
+
+  return importable.length > 0 && importable.every((item) => item.selected)
 })
 
 const someSelected = computed(() => store.selectedCount > 0)
@@ -234,6 +256,12 @@ const someSelected = computed(() => store.selectedCount > 0)
 const sortedItems = computed(() =>
   sortLibraryImportItems(store.itemList, sortKey.value, sortDirection.value),
 )
+
+async function handleImportCompleted() {
+  if (selectedSource.value?.type === 'audiobookshelf') {
+    await loadAudiobookshelfPreview(String(selectedSource.value.id))
+  }
+}
 
 const currentSortLabel = computed(
   () => sortOptions.find((option) => option.value === sortKey.value)?.label ?? 'Book',
@@ -263,31 +291,101 @@ let resizeState:
 onMounted(async () => {
   if (rootFoldersStore.folders.length === 0) await rootFoldersStore.load()
   await configStore.loadApplicationSettings()
+
+  try {
+    audiobookshelfLibraries.value = await apiService.getAudiobookshelfLibraries()
+  } catch (e) {
+    console.warn('Failed to load Audiobookshelf libraries', e)
+  }
+
   loadColumnWidths()
 
   const defaultFolder = rootFoldersStore.defaultFolder ?? rootFoldersStore.folders[0] ?? null
   if (defaultFolder) {
-    selectedFolderId.value = defaultFolder.id
+    selectedSource.value = { type: 'rootFolder', id: defaultFolder.id }
     await store.initFromRootFolder(defaultFolder.id)
   }
 
-  const action = configStore.applicationSettings?.completedFileAction
-  store.inputMode = action === 'Move' || !action ? 'move' : 'hardlink/copy'
 })
 
 onBeforeUnmount(() => {
   stopResize()
 })
 
-async function onFolderChange() {
-  if (!selectedFolderId.value) return
+
+async function onSourceChange() {
+  if (!selectedSource.value) return
+
   store.stopProcessing()
-  await store.initFromRootFolder(selectedFolderId.value)
+
+  if (selectedSource.value.type === 'rootFolder') {
+    await store.initFromRootFolder(selectedSource.value.id as number)
+  } else {
+    await loadAudiobookshelfPreview(selectedSource.value.id as string)
+  }
 }
 
-async function startScan() {
-  if (!selectedFolderId.value) return
-  await store.triggerScan(selectedFolderId.value)
+async function handleScan() {
+  if (!selectedSource.value) return
+
+  if (selectedSource.value.type === 'rootFolder') {
+    await store.triggerScan(selectedSource.value.id as number)
+  } else {
+    await loadAudiobookshelfPreview(selectedSource.value.id as string)
+  }
+}
+
+function toggleSelectAllCurrentSource() {
+  if (selectedSource.value?.type === 'audiobookshelf') {
+    const absItems = store.itemList.filter((item: any) => item.source === 'audiobookshelf' && item.match === 'Ready')
+    const allSelected = absItems.length > 0 && absItems.every((item) => item.selected)
+
+    for (const item of absItems) {
+      item.selected = !allSelected
+    }
+    return
+  }
+
+  store.toggleSelectAll()
+}
+
+
+async function loadAudiobookshelfPreview(libraryId: string) {
+  store.scanStatus = 'scanning'
+  store.replaceItems([])
+
+  try {
+    const results = await apiService.previewAudiobookshelfImport(libraryId)
+
+    // map ABS → existing table format
+    store.replaceItems(
+      results.map((item: any): LibraryImportItem => ({
+        id: item.itemId,
+        fullPath: item.path,
+        sourceFiles: [item.path],
+        folderPath: item.path,
+        relativePath: item.path,
+        folderName: item.title,
+        detectedTitle: item.title,
+        detectedAuthor: item.author,
+        format: 'ABS',
+        fileCount: 1,
+        selectedMatch: null,
+        hasSearched: false,
+        isSearching: false,
+        selected: item.willImport,
+        absItemId: item.itemId,
+        source: 'audiobookshelf',
+        match: item.willImport ? 'Ready' : 'Duplicate',
+      }))
+    )
+
+    store.scanStatus = 'done'
+    store.lastScannedAt = new Date().toISOString()
+  } catch (e) {
+    store.scanStatus = 'error'
+    store.scanError = 'Failed to load Audiobookshelf items'
+  }
 }
 
 function timeAgo(isoString: string): string {

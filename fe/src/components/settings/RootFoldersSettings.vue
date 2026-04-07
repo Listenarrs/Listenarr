@@ -138,7 +138,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 const store = useRootFoldersStore()
 const showForm = ref(false)
-const editing = ref<{ id?: number; name: string; path: string } | null>(null)
+const editing = ref<RootFolder | null>(null)
 const showUnmatchedModal = ref(false)
 const scanningFolder = ref<RootFolder | null>(null)
 import { computed } from 'vue'
@@ -159,14 +159,14 @@ function scanUnmatched(folder: RootFolder) {
   showUnmatchedModal.value = true
 }
 
-function edit(r: { id?: number; name: string; path: string }) {
+function edit(r: RootFolder) {
   editing.value = { ...r }
   showForm.value = true
 }
 
-const folderToDelete = ref<{ id?: number; name: string; path: string } | null>(null)
+const folderToDelete = ref<RootFolder | null>(null)
 
-function confirmDelete(r: { id?: number; name: string; path: string }) {
+function confirmDelete(r: RootFolder) {
   if (!r.id) return
   folderToDelete.value = r
 }

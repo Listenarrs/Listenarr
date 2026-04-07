@@ -1,6 +1,6 @@
 <template>
   <div class="import-footer">
-    <div class="footer-left">
+    <div class="footer-left" v-if="props.sourceType === 'rootFolder'">
       <label class="footer-label">
         <select v-model="store.inputMode" class="mode-select" :disabled="isImporting">
           <option value="move">Move</option>
@@ -24,7 +24,11 @@
       </div>
     </div>
 
-    <div class="footer-center">
+    <div class="footer-left" v-else>
+      <span class="footer-label">Audiobookshelf import</span>
+    </div>
+
+    <div class="footer-center" v-if="props.sourceType === 'rootFolder'">
       <button
         v-if="store.hasUnprocessedItems && !store.isProcessing"
         class="btn btn-secondary btn-sm"
@@ -70,11 +74,19 @@ import { PhWarning, PhPlay, PhStop, PhSpinner, PhDownload } from '@phosphor-icon
 import { useLibraryImportStore } from '@/stores/libraryImport'
 import { useToast } from '@/services/toastService'
 import type { RootFolder } from '@/types'
+import { apiService } from '@/services/api'
 
-const props = defineProps<{ folders: RootFolder[] }>()
+
+const props = defineProps<{
+  folders: RootFolder[]
+  sourceType: 'rootFolder' | 'audiobookshelf'
+  audiobookshelfLibraryId?: string | null
+}>()
 
 const store = useLibraryImportStore()
 const toast = useToast()
+
+const emit = defineEmits(['imported'])
 
 const destinationFolderId = ref<number | null>(props.folders[0]?.id ?? null)
 const isImporting = ref(false)
@@ -91,8 +103,13 @@ const displayImportCount = computed(() =>
 const importButtonLabel = computed(() => {
   const count = displayImportCount.value
   const noun = `Book${count !== 1 ? 's' : ''}`
+
   if (isImporting.value) {
     return `Importing ${count > 0 ? count : ''} ${noun}...`.replace(/\s+/g, ' ').trim()
+  }
+
+  if (props.sourceType === 'audiobookshelf') {
+    return `Import ${count > 0 ? count : ''} from Audiobookshelf`.replace(/\s+/g, ' ').trim()
   }
 
   return `Import ${count > 0 ? count : ''} ${noun}`.replace(/\s+/g, ' ').trim()
@@ -105,6 +122,38 @@ async function handleImport() {
   isImporting.value = true
 
   try {
+    const selectedItems = store.itemList.filter((item: any) => item.selected)
+
+    // Detect Audiobookshelf rows
+    if (props.sourceType === 'audiobookshelf') {
+      const absItems = selectedItems.filter((item: any) => item.source === 'audiobookshelf')
+
+      if (!absItems.length) return
+
+      const libraryId = props.audiobookshelfLibraryId
+      if (!libraryId) {
+        toast.error('Import failed', 'No Audiobookshelf library selected')
+        return
+      }
+
+      const result = await apiService.importAudiobookshelfItems({
+        libraryId,
+        itemIds: absItems.map((item: any) => item.absItemId),
+        monitored: true,
+        skipExisting: true,
+      })
+
+      toast.success(
+        'Import complete',
+        `Imported ${result.importedCount}, skipped ${result.skippedCount}`
+      )
+
+      emit('imported')
+
+      return
+    }
+
+    // Default = root folder import (your existing logic)
     const { imported, errors } = await store.importSelected(destinationPath.value)
 
     if (imported > 0) {
@@ -114,13 +163,20 @@ async function handleImport() {
     }
 
     if (errors.length > 0) {
-      toast.error('Import errors', `${errors.length} item${errors.length !== 1 ? 's' : ''} failed - check logs`)
+      toast.error(
+        'Import errors',
+        `${errors.length} item${errors.length !== 1 ? 's' : ''} failed - check logs`
+      )
     }
+
   } finally {
     isImporting.value = false
     importingCount.value = 0
   }
 }
+
+
+
 </script>
 
 <style scoped>
