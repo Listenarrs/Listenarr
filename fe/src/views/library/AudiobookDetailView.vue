@@ -337,7 +337,7 @@
           </div>
         </div>
         <div v-if="audiobook.files && audiobook.files.length" class="file-list">
-          <div v-for="f in audiobook.files" :key="f.id" class="file-item"
+          <div v-for="f in audiobook.files.sort((a, b) => getFileName(a.path).localeCompare(getFileName(b.path)))" :key="f.id" class="file-item"
             :class="{ expanded: isFileAccordionExpanded(f.id) }">
             <div class="file-header" @click="toggleFileAccordion(f.id)">
               <div class="file-info">
