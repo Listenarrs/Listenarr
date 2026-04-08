@@ -164,7 +164,12 @@
           </thead>
 
           <tbody>
-            <LibraryImportRow v-for="item in sortedItems" :key="item.id" :item="item" />
+            <LibraryImportRow 
+              v-for="item in sortedItems" 
+              :key="item.id" 
+              :item="item" 
+              @search="searchMatch"
+            />
           </tbody>
         </table>
       </div>
@@ -175,6 +180,14 @@
       :folders="rootFoldersStore.folders"
     />
   </div>
+
+  <LibraryImportSearchModal
+    v-if="showSearchModal"
+    :item="selectedItem"
+    :lastSelected="lastSelectedResult"
+    @close="showSearchModal = false"
+    @select="applyMatch"
+  />
 </template>
 
 <script setup lang="ts">
@@ -188,9 +201,10 @@ import {
   PhArrowUp,
   PhArrowsDownUp,
 } from '@phosphor-icons/vue'
-import { useLibraryImportStore } from '@/stores/libraryImport'
+import { useLibraryImportStore, type LibraryImportItem } from '@/stores/libraryImport'
 import { useRootFoldersStore } from '@/stores/rootFolders'
 import { useConfigurationStore } from '@/stores/configuration'
+import LibraryImportSearchModal from '@/components/domain/audiobook/LibraryImportSearchModal.vue'
 import LibraryImportRow from '@/components/domain/audiobook/LibraryImportRow.vue'
 import LibraryImportFooter from '@/components/domain/audiobook/LibraryImportFooter.vue'
 import {
@@ -202,6 +216,7 @@ import {
   type LibraryImportSortDirection,
   type LibraryImportSortKey,
 } from '@/utils/libraryImportTable'
+import type { SearchResult } from '@/types'
 
 const COLUMN_WIDTH_STORAGE_KEY = 'listenarr.libraryImport.columnWidths.v1'
 const MAX_COLUMN_WIDTH = 960
@@ -251,6 +266,10 @@ const tableMinWidth = computed(
     columnWidths.value.format +
     columnWidths.value.match,
 )
+
+const showSearchModal = ref(false)
+const selectedItem = ref<LibraryImportItem>()
+const lastSelectedResult = ref<SearchResult | null>(null)
 
 let resizeState:
   | {
@@ -402,6 +421,18 @@ function persistColumnWidths() {
     localStorage.setItem(COLUMN_WIDTH_STORAGE_KEY, JSON.stringify(columnWidths.value))
   } catch {
     // Non-fatal: resizing still works for the current session.
+  }
+}
+
+function searchMatch(item: LibraryImportItem) {
+  selectedItem.value = item
+  showSearchModal.value = true
+}
+
+function applyMatch(result: SearchResult) {
+  if (selectedItem.value != null) {
+    lastSelectedResult.value = result
+    store.selectMatch(selectedItem.value.id, result)
   }
 }
 </script>

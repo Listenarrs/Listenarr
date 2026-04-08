@@ -85,20 +85,13 @@
         <button
           class="btn-search-toggle"
           title="Search for a match"
-          @click="showSearchModal = true"
+          @click="emit('search', item)"
         >
           <PhMagnifyingGlass :size="14" />
         </button>
       </div>
     </td>
   </tr>
-
-  <LibraryImportSearchModal
-    v-if="showSearchModal"
-    :item="item"
-    @close="showSearchModal = false"
-    @select="applyMatch"
-  />
 </template>
 
 <script setup lang="ts">
@@ -111,13 +104,13 @@ import {
 } from '@phosphor-icons/vue'
 import { useLibraryImportStore } from '@/stores/libraryImport'
 import type { LibraryImportItem } from '@/stores/libraryImport'
-import type { SearchResult } from '@/types'
-import LibraryImportSearchModal from './LibraryImportSearchModal.vue'
 
 const props = defineProps<{ item: LibraryImportItem }>()
+const emit = defineEmits<{
+  search: [item: LibraryImportItem]
+}>()
 
 const store = useLibraryImportStore()
-const showSearchModal = ref(false)
 
 const bookDisplayTitle = computed(() => props.item.detectedTitle?.trim() || props.item.folderName)
 const bookMetaLine = computed(() =>
@@ -132,10 +125,6 @@ function isAuthorMismatch(item: LibraryImportItem): boolean {
   const detected = item.detectedAuthor.toLowerCase()
   const matched = (item.selectedMatch.authors[0]?.name ?? '').toLowerCase()
   return !!matched && !matched.includes(detected) && !detected.includes(matched)
-}
-
-function applyMatch(result: SearchResult) {
-  store.selectMatch(props.item.id, result)
 }
 
 function formatGroupedFileLabel(sourceFile: string): string {
