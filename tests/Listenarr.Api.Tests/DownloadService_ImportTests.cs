@@ -1,19 +1,12 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Net.Http;
-using Listenarr.Api.Controllers;
-using System.IO;
-using System.Linq;
-using System.Threading.Tasks;
+﻿using Listenarr.Api.Services;
+using Listenarr.Api.Hubs;
+using Listenarr.Domain.Models.Configurations;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Caching.Memory;
-using Xunit;
 using Moq;
-using Listenarr.Domain.Models;
-using Listenarr.Api.Services;
-using Microsoft.AspNetCore.SignalR;
-using Listenarr.Api.Hubs;
+using Xunit;
 
 namespace Listenarr.Api.Tests
 {

@@ -1,7 +1,4 @@
-﻿using System;
-using System.IO;
-using Microsoft.Extensions.Configuration;
-using System.Net.Http;
+﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
@@ -9,9 +6,8 @@ using Moq;
 using Microsoft.AspNetCore.SignalR;
 using Listenarr.Api.Services;
 using Microsoft.AspNetCore.Http;
-using System.Collections.Generic;
 using System.Text.Json.Nodes;
-using Listenarr.Domain.Models;
+using Listenarr.Domain.Models.Configurations;
 
 namespace Listenarr.Api.Tests
 {
@@ -184,52 +180,52 @@ namespace Listenarr.Api.Tests
     }
 }
 
-internal class TestConfigurationService : Listenarr.Api.Services.IConfigurationService
+internal class TestConfigurationService : IConfigurationService
 {
-    public Task<List<Listenarr.Domain.Models.ApiConfiguration>> GetApiConfigurationsAsync()
-        => Task.FromResult(new List<Listenarr.Domain.Models.ApiConfiguration>());
+    public Task<List<ApiConfiguration>> GetApiConfigurationsAsync()
+        => Task.FromResult(new List<ApiConfiguration>());
 
-    public Task<Listenarr.Domain.Models.ApiConfiguration?> GetApiConfigurationAsync(string id)
-        => Task.FromResult<Listenarr.Domain.Models.ApiConfiguration?>(null);
+    public Task<ApiConfiguration?> GetApiConfigurationAsync(string id)
+        => Task.FromResult<ApiConfiguration?>(null);
 
-    public Task<string> SaveApiConfigurationAsync(Listenarr.Domain.Models.ApiConfiguration config)
+    public Task<string> SaveApiConfigurationAsync(ApiConfiguration config)
         => Task.FromResult(config.Id ?? string.Empty);
 
     public Task<bool> DeleteApiConfigurationAsync(string id)
         => Task.FromResult(false);
 
-    public Task<List<Listenarr.Domain.Models.DownloadClientConfiguration>> GetDownloadClientConfigurationsAsync()
-        => Task.FromResult(new List<Listenarr.Domain.Models.DownloadClientConfiguration>());
+    public Task<List<DownloadClientConfiguration>> GetDownloadClientConfigurationsAsync()
+        => Task.FromResult(new List<DownloadClientConfiguration>());
 
-    public Task<Listenarr.Domain.Models.DownloadClientConfiguration?> GetDownloadClientConfigurationAsync(string id)
-        => Task.FromResult<Listenarr.Domain.Models.DownloadClientConfiguration?>(null);
+    public Task<DownloadClientConfiguration?> GetDownloadClientConfigurationAsync(string id)
+        => Task.FromResult<DownloadClientConfiguration?>(null);
 
-    public Task<string> SaveDownloadClientConfigurationAsync(Listenarr.Domain.Models.DownloadClientConfiguration config)
+    public Task<string> SaveDownloadClientConfigurationAsync(DownloadClientConfiguration config)
         => Task.FromResult(config.Id ?? string.Empty);
 
     public Task<bool> DeleteDownloadClientConfigurationAsync(string id)
         => Task.FromResult(false);
 
-    public Task<Listenarr.Domain.Models.ApplicationSettings> GetApplicationSettingsAsync()
-        => Task.FromResult(new Listenarr.Domain.Models.ApplicationSettings());
+    public Task<ApplicationSettings> GetApplicationSettingsAsync()
+        => Task.FromResult(new ApplicationSettings());
 
-    public Task SaveApplicationSettingsAsync(Listenarr.Domain.Models.ApplicationSettings settings)
+    public Task SaveApplicationSettingsAsync(ApplicationSettings settings)
         => Task.CompletedTask;
 
-    public Task<Listenarr.Domain.Models.ProwlarrImportConnectionSettings> GetProwlarrImportSettingsAsync(bool includeSecret = false)
-        => Task.FromResult(new Listenarr.Domain.Models.ProwlarrImportConnectionSettings());
+    public Task<ProwlarrImportConnectionSettings> GetProwlarrImportSettingsAsync(bool includeSecret = false)
+        => Task.FromResult(new ProwlarrImportConnectionSettings());
 
-    public Task<Listenarr.Domain.Models.ProwlarrImportConnectionSettings> SaveProwlarrImportSettingsAsync(Listenarr.Domain.Models.ProwlarrImportConnectionSettings settings)
+    public Task<ProwlarrImportConnectionSettings> SaveProwlarrImportSettingsAsync(ProwlarrImportConnectionSettings settings)
         => Task.FromResult(settings);
 
-    public Task<Listenarr.Domain.Models.StartupConfig> GetStartupConfigAsync()
-        => Task.FromResult(new Listenarr.Domain.Models.StartupConfig());
+    public Task<StartupConfig> GetStartupConfigAsync()
+        => Task.FromResult(new StartupConfig());
 
-    public Task SaveStartupConfigAsync(Listenarr.Domain.Models.StartupConfig config)
+    public Task SaveStartupConfigAsync(StartupConfig config)
         => Task.CompletedTask;
 
-    public Task<List<Listenarr.Domain.Models.WebhookConfiguration>> GetWebhookConfigurationsAsync()
-        => Task.FromResult(new List<Listenarr.Domain.Models.WebhookConfiguration>());
+    public Task<List<WebhookConfiguration>> GetWebhookConfigurationsAsync()
+        => Task.FromResult(new List<WebhookConfiguration>());
 
     // Other IConfigurationService members (if added later) should be implemented here with sensible defaults.
 }

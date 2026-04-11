@@ -1,5 +1,4 @@
-using System;
-using Listenarr.Domain.Models;
+using Listenarr.Domain.Models.Configurations;
 
 namespace Listenarr.Api.Services.Adapters
 {

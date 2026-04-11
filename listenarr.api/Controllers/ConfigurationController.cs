@@ -16,13 +16,12 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using Listenarr.Domain.Models;
 using Listenarr.Api.Services;
 using Listenarr.Api.Hubs;
 using Microsoft.AspNetCore.Mvc;
-using System.Linq;
 using System.Text.Json;
 using Microsoft.AspNetCore.SignalR;
+using Listenarr.Domain.Models.Configurations;
 
 namespace Listenarr.Api.Controllers
 {

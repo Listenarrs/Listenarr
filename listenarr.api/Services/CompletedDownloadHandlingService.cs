@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using Listenarr.Domain.Models.Configurations;
 using Listenarr.Infrastructure.Models;
 using Microsoft.EntityFrameworkCore;
 

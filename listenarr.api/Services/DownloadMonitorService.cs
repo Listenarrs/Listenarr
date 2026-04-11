@@ -23,12 +23,11 @@ using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Runtime.InteropServices;
 using Listenarr.Api.Hubs;
-using Listenarr.Domain.Models;
 using System.Text.Json;
 using System.Text.Encodings.Web;
-using Microsoft.Extensions.Caching.Memory;
 using Listenarr.Application.Services;
 using Listenarr.Api.Services.Adapters;
+using Listenarr.Domain.Models.Configurations;
 
 namespace Listenarr.Api.Services
 {
@@ -893,12 +892,12 @@ namespace Listenarr.Api.Services
                     }
                     else
                     {
-                        var configuredCategory = DownloadClientCategoryFilter.GetConfiguredCategory(client);
-                        if (!string.IsNullOrWhiteSpace(configuredCategory))
+                        var category = client.GetCategory();
+                        if (!string.IsNullOrWhiteSpace(category.Value))
                         {
-                            var cat = Uri.EscapeDataString(configuredCategory);
+                            var cat = Uri.EscapeDataString(category.Value);
                             var query = $"?category={cat}&fields={Uri.EscapeDataString(fields)}";
-                            _logger.LogDebug("Querying qBittorrent by category: {Category}", configuredCategory);
+                            _logger.LogDebug("Querying qBittorrent by category: {Category}", category);
 
                             using var torrentsResp = await http.GetAsync($"{baseUrl}/api/v2/torrents/info{query}", cancellationToken);
                             if (!torrentsResp.IsSuccessStatusCode)

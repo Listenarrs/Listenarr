@@ -3,7 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
-using Listenarr.Domain.Models;
+using Listenarr.Domain.Models.Configurations;
 
 namespace Listenarr.Infrastructure.Models.Configurations
 {

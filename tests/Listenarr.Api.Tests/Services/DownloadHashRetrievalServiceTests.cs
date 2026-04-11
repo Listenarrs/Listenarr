@@ -16,15 +16,9 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using System;
-using System.Collections.Generic;
-using System.Net.Http;
-using System.Threading;
-using System.Threading.Tasks;
 using Listenarr.Api.Services;
 using Listenarr.Api.Services.Adapters;
-using Listenarr.Domain.Models;
-using Listenarr.Infrastructure.Models;
+using Listenarr.Domain.Models.Configurations;
 using Listenarr.Infrastructure.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;

@@ -1,11 +1,6 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
 using System.Reflection;
-using System.Threading;
-using System.Threading.Tasks;
 using Listenarr.Api.Services;
-using Listenarr.Domain.Models;
+using Listenarr.Domain.Models.Configurations;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;

@@ -1,18 +1,10 @@
-using System;
-using System.Collections.Generic;
 using System.Globalization;
-using System.Linq;
 using System.Net;
-using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
-using Listenarr.Api.Services;
-using Listenarr.Domain.Models;
-using Microsoft.Extensions.Logging;
+using Listenarr.Domain.Models.Configurations;
 
 namespace Listenarr.Api.Services.Adapters
 {
@@ -316,7 +308,7 @@ namespace Listenarr.Api.Services.Adapters
             var items = new List<QueueItem>();
             if (client == null) return items;
 
-            var configuredCategory = DownloadClientCategoryFilter.GetConfiguredCategory(client);
+            var category = client.GetCategory();
 
             // Use old format for compatibility with Transmission < 4.1.0
             var payload = new
@@ -346,7 +338,7 @@ namespace Listenarr.Api.Services.Adapters
                     try
                     {
                         var labels = ExtractLabels(torrent);
-                        if (!DownloadClientCategoryFilter.MatchesAny(configuredCategory, labels))
+                        if (!category.MatchesAny(labels))
                         {
                             continue;
                         }
@@ -380,7 +372,7 @@ namespace Listenarr.Api.Services.Adapters
             var items = new List<DownloadClientItem>();
             if (client == null) return items;
 
-            var configuredCategory = DownloadClientCategoryFilter.GetConfiguredCategory(client);
+            var category = client.GetCategory();
 
             // Fetch session-level seed config for Sonarr-parity seed limit evaluation
             bool sessionSeedRatioLimited = false;
@@ -433,8 +425,7 @@ namespace Listenarr.Api.Services.Adapters
                 {
                     try
                     {
-                        var labels = ExtractLabels(torrent);
-                        if (!DownloadClientCategoryFilter.MatchesAny(configuredCategory, labels))
+                        if (!category.MatchesAny(ExtractLabels(torrent)))
                         {
                             continue;
                         }

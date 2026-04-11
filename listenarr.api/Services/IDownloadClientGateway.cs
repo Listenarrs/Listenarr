@@ -1,7 +1,4 @@
-using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
-using Listenarr.Domain.Models;
+using Listenarr.Domain.Models.Configurations;
 
 namespace Listenarr.Api.Services
 {

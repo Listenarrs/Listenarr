@@ -1,6 +1,5 @@
-using System.Linq;
 using System.Text.Json;
-using Listenarr.Domain.Models;
+using Listenarr.Domain.Models.Configurations;
 
 namespace Listenarr.Api.Services;
 

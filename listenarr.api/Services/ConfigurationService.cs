@@ -18,6 +18,7 @@
 
 using System.Text.Json;
 using Listenarr.Domain.Models;
+using Listenarr.Domain.Models.Configurations;
 using Listenarr.Infrastructure.Models;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;

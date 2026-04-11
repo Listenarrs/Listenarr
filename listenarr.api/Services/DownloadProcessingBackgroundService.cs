@@ -17,10 +17,9 @@
  */
 
 using System.Runtime.InteropServices;
-using Listenarr.Domain.Models;
 using Microsoft.EntityFrameworkCore;
-using System.Linq;
 using Listenarr.Infrastructure.Models;
+using Listenarr.Domain.Models.Configurations;
 
 namespace Listenarr.Api.Services
 {
