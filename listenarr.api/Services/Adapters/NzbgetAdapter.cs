@@ -1,19 +1,10 @@
-using System;
-using System.Collections.Generic;
 using System.Globalization;
-using System.Linq;
 using System.Net;
-using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
-using Listenarr.Api.Services;
-using Listenarr.Domain.Models;
-using Microsoft.Extensions.Logging;
-using System.IO;
 using System.Xml.Linq;
+using Listenarr.Domain.Models.Configurations;
 
 namespace Listenarr.Api.Services.Adapters
 {
@@ -386,7 +377,7 @@ namespace Listenarr.Api.Services.Adapters
             var items = new List<QueueItem>();
             if (client == null) return items;
 
-            var configuredCategory = DownloadClientCategoryFilter.GetConfiguredCategory(client);
+            var category = client.GetCategory();
 
             try
             {
@@ -409,7 +400,7 @@ namespace Listenarr.Api.Services.Adapters
                                 .FirstOrDefault(m => string.Equals(m.Element("name")?.Value, "Category", StringComparison.Ordinal))?
                                 .Element("value")?.Elements().FirstOrDefault()?.Value ?? string.Empty;
 
-                            if (!DownloadClientCategoryFilter.Matches(configuredCategory, groupCategory))
+                            if (!category.Matches(groupCategory))
                             {
                                 continue;
                             }
@@ -488,7 +479,7 @@ namespace Listenarr.Api.Services.Adapters
             var items = new List<DownloadClientItem>();
             if (client == null) return items;
 
-            var configuredCategory = DownloadClientCategoryFilter.GetConfiguredCategory(client);
+            var category = client.GetCategory();
 
             try
             {
@@ -511,7 +502,7 @@ namespace Listenarr.Api.Services.Adapters
                                 .FirstOrDefault(m => string.Equals(m.Element("name")?.Value, "Category", StringComparison.Ordinal))?
                                 .Element("value")?.Elements().FirstOrDefault()?.Value ?? string.Empty;
 
-                            if (!DownloadClientCategoryFilter.Matches(configuredCategory, groupCategory))
+                            if (!category.Matches(groupCategory))
                             {
                                 continue;
                             }

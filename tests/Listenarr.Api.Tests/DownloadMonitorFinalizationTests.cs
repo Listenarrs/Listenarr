@@ -1,21 +1,14 @@
-﻿using System;
-using System.IO;
-using System.Linq;
-using System.Reflection;
-using System.Threading;
-using System.Threading.Tasks;
+﻿using System.Reflection;
 using Microsoft.EntityFrameworkCore;
-using System.Net.Http;
-using System.Collections.Generic;
 using System.Net;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
-using Listenarr.Domain.Models;
 using Listenarr.Api.Services;
 using Microsoft.AspNetCore.SignalR;
 using Listenarr.Api.Hubs;
+using Listenarr.Domain.Models.Configurations;
 
 namespace Listenarr.Api.Tests
 {

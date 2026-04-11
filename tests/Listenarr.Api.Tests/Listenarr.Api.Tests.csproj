@@ -23,5 +23,6 @@
 	<ItemGroup>
 		<ProjectReference Include="..\..\listenarr.api\Listenarr.Api.csproj" />
 		<ProjectReference Include="..\..\listenarr.infrastructure\Listenarr.Infrastructure.csproj" />
+		<ProjectReference Include="..\..\listenarr.domain\Listenarr.Domain.csproj" />
 	</ItemGroup>
 </Project>

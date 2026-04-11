@@ -1,7 +1,7 @@
-using System.Net.Http;
 using System.Reflection;
 using Listenarr.Api.Hubs;
 using Listenarr.Api.Services;
+using Listenarr.Domain.Models.Configurations;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;

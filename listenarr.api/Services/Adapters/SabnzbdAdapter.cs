@@ -1,14 +1,6 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Net;
-using System.Net.Http;
 using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
-using Listenarr.Api.Services;
-using Listenarr.Domain.Models;
-using Microsoft.Extensions.Logging;
+using Listenarr.Domain.Models.Configurations;
 
 namespace Listenarr.Api.Services.Adapters
 {
@@ -293,7 +285,7 @@ namespace Listenarr.Api.Services.Adapters
             var items = new List<QueueItem>();
             if (client == null) return items;
 
-            var configuredCategory = DownloadClientCategoryFilter.GetConfiguredCategory(client);
+            var configuredCategory = client.GetCategory();
 
             try
             {
@@ -361,7 +353,7 @@ namespace Listenarr.Api.Services.Adapters
                         var timeLeft = slot.TryGetProperty("timeleft", out var time) ? time.GetString() ?? "0:00:00" : "0:00:00";
                         var category = slot.TryGetProperty("cat", out var cat) ? cat.GetString() ?? "" : "";
 
-                        if (!DownloadClientCategoryFilter.Matches(configuredCategory, category))
+                        if (!configuredCategory.Matches(category))
                         {
                             continue;
                         }
@@ -469,7 +461,7 @@ namespace Listenarr.Api.Services.Adapters
                                         var histBytes = slot.TryGetProperty("bytes", out var hb) && hb.TryGetInt64(out var hbl) ? hbl : 0L;
                                         var storagePath = slot.TryGetProperty("storage", out var sp) ? sp.GetString() ?? "" : "";
 
-                                        if (!DownloadClientCategoryFilter.Matches(configuredCategory, histCategory))
+                                        if (!configuredCategory.Matches(histCategory))
                                             continue;
 
                                         var mappedStatus = histStatus.ToLower() switch
@@ -586,7 +578,7 @@ namespace Listenarr.Api.Services.Adapters
             var items = new List<DownloadClientItem>();
             if (client == null) return items;
 
-            var configuredCategory = DownloadClientCategoryFilter.GetConfiguredCategory(client);
+            var configuredCategory = client.GetCategory();
 
             try
             {
@@ -657,7 +649,7 @@ namespace Listenarr.Api.Services.Adapters
                         var timeLeft = slot.TryGetProperty("timeleft", out var time) ? time.GetString() ?? "0:00:00" : "0:00:00";
                         var category = slot.TryGetProperty("cat", out var cat) ? cat.GetString() ?? "" : "";
 
-                        if (!DownloadClientCategoryFilter.Matches(configuredCategory, category))
+                        if (!configuredCategory.Matches(category))
                         {
                             continue;
                         }

@@ -1,13 +1,8 @@
-using System;
-using System.Collections.Generic;
 using System.Net;
-using System.Net.Http;
 using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
 using Listenarr.Api.Services;
 using Listenarr.Api.Services.Adapters;
-using Listenarr.Domain.Models;
+using Listenarr.Domain.Models.Configurations;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -28,23 +23,29 @@ namespace Listenarr.Api.Tests
                 }
             };
 
-            var category = DownloadClientCategoryFilter.GetConfiguredCategory(client);
+            var category = client.GetCategory();
 
-            Assert.Equal("audiobooks", category);
+            Assert.Equal("audiobooks", category.Value);
         }
 
         [Fact]
         public void Matches_NoConfiguredCategory_AllowsAny()
         {
-            Assert.True(DownloadClientCategoryFilter.Matches(null, "anything"));
-            Assert.True(DownloadClientCategoryFilter.Matches(string.Empty, "anything"));
+            var category = new CategoryConfiguration(null);
+            Assert.True(category.Matches("anything"));
+
+            category.Value = string.Empty;
+            Assert.True(category.Matches("anything"));
         }
 
         [Fact]
         public void Matches_ConfiguredCategory_IsCaseInsensitive()
         {
-            Assert.True(DownloadClientCategoryFilter.Matches("AudioBooks", "audiobooks"));
-            Assert.False(DownloadClientCategoryFilter.Matches("audiobooks", "movies"));
+            var category = new CategoryConfiguration("AudioBooks");
+            Assert.True(category.Matches("audiobooks"));
+
+            category.Value = "audiobooks";
+            Assert.False(category.Matches("movies"));
         }
 
         [Fact]
@@ -52,7 +53,8 @@ namespace Listenarr.Api.Tests
         {
             var labels = new[] { "movies", "audiobooks", "tv" };
 
-            var matches = DownloadClientCategoryFilter.MatchesAny("AudioBooks", labels);
+            var category = new CategoryConfiguration("AudioBooks");
+            var matches = category.MatchesAny(labels);
 
             Assert.True(matches);
         }

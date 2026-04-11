@@ -16,22 +16,17 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using Listenarr.Domain.Models;
 using Listenarr.Infrastructure.Models;
 using Listenarr.Application.Services;
 using Microsoft.AspNetCore.SignalR;
 using Listenarr.Api.Hubs;
-using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
-using System.IO;
-using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Net;
-using System.Net.Http;
-using System.Net.Http.Headers;
 using Listenarr.Api.Services.Adapters;
+using Listenarr.Domain.Models.Configurations;
 
 namespace Listenarr.Api.Services
 {

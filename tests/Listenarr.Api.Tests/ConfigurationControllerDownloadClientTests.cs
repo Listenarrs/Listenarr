@@ -2,6 +2,7 @@ using System.Net;
 using Listenarr.Api.Controllers;
 using Listenarr.Api.Hubs;
 using Listenarr.Api.Services;
+using Listenarr.Domain.Models.Configurations;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;

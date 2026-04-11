@@ -1,11 +1,5 @@
-using System;
-using System.Collections.Generic;
-using System.Net.Http;
 using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
-using Listenarr.Domain.Models;
-using Listenarr.Api.Services.Adapters;
+using Listenarr.Domain.Models.Configurations;
 
 namespace Listenarr.Api.Tests
 {
