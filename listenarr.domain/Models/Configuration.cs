@@ -87,11 +87,11 @@ namespace Listenarr.Domain.Models
         public int Id { get; set; } = 1; // Singleton pattern - only one settings record
         public string OutputPath 
         {
-            get 
+            get;
+            set
             {
-                return FileUtils.NormalizeStoredPath(field);
-            } 
-            set; 
+                field = FileUtils.NormalizeStoredPath(value);
+            }
         } = string.Empty;
         
         // Folder naming pattern (base directory structure)
