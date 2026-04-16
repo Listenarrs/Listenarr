@@ -9,12 +9,27 @@ public class ManualImportItemDto
     [JsonPropertyName("fullPath")]
     [Required]
     public string? FullPath {
-        get
+        get;
+        set
         {
-            if (field == null) return null;
-            return Path.GetFullPath(field);
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                field = null;
+                return;
+            }
+
+            if (value.IndexOfAny(Path.GetInvalidPathChars()) != -1)
+            {
+                throw new ArgumentException("Path is empty or contains invalid characters.", nameof(value));
+            }
+
+            if (value.Contains("..") || value.Contains("./") || value.Contains(".\\"))
+            {
+                throw new ArgumentException("Path traversal attempts are not allowed.", nameof(value));
+            }
+
+            field = Path.GetFullPath(value);
         }
-        set;
     }
 
     [JsonPropertyName("matchedAudiobookId")]

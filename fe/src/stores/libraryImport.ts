@@ -464,7 +464,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
           path: item.folderPath,
           mode: 'interactive',
           action: action.value,
-          includeCompanionFiles: true,
+          includeCompanionFiles: action.value !== 'none',
           cleanupEmptySourceFolders: action.value === 'move',
           items: item.sourceFiles.map((fullPath) => ({
             fullPath,

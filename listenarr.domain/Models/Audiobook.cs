@@ -63,11 +63,12 @@ namespace Listenarr.Domain.Models
 
         // Base path for multi-file audiobooks (common root directory)
         public string? BasePath {
-            get;
-            set
+            get
             {
-                field = FileUtils.NormalizeStoredPath(value);
+                // TODO: Should be put on the set operation with appropriate DB migration to normalize existing data
+                return FileUtils.NormalizeStoredPath(field);
             }
+            set;
         }
 
         // Multi-file support: store zero or more file records for this audiobook

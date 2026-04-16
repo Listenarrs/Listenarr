@@ -146,7 +146,7 @@ public class ManualImportController : ControllerBase
             {
                 var fileCount = orderedItems.Count(f => f.MatchedAudiobookId == item.MatchedAudiobookId);
                 _logger.LogDebug("Importing item {Index}: {Path} for audiobook {AudiobookId}, fileCount: {FileCount}", orderedItems.IndexOf(item), item.FullPath, item.MatchedAudiobookId, fileCount);
-                var result = await ImportFileAsync(item, request.Action, sourceDirectory, usedDestinations, fileCount > 1);
+                var result = await ImportFileAsync(item, request.Action, sourceDirectory, usedDestinations, rootFolders, appSettings, fileCount > 1);
                 _logger.LogDebug("Import result {Index}: Success={Success}, Destination={Destination}, Error={Error}", orderedItems.IndexOf(item), result.Success, result.DestinationPath, result.Error);
                 results.Add(result);
             }
@@ -192,15 +192,19 @@ public class ManualImportController : ControllerBase
     /// <param name="item">File to import into the library</param>
     /// <param name="action">Action to perform on the file</param>
     /// <param name="sourceDirectory">Directory from which we are importing the file</param>
-    /// <param name="usedDestinations"></param>
+    /// <param name="usedDestinations">Already used file names to avoid collisions</param>
+    /// <param name="rootFolders">Previously fetched list of configured root folders (to save DB hits)</param>
+    /// <param name="settings">Application settings (to save DB hits)</param>
     /// <param name="hasMultipleFile">Indicates if this file is part of multiple files for a same audiobook</param>
-    /// <returns></returns>
+    /// <returns>Result of the importation</returns>
     /// <exception cref="IOException"></exception>
     private async Task<ManualImportResultDto> ImportFileAsync(
         ManualImportItemDto item, 
         FileAction action,
         string sourceDirectory,
         HashSet<string> usedDestinations, 
+        List<RootFolder> rootFolders,
+        ApplicationSettings settings,
         bool hasMultipleFile = false)
     {
         try
@@ -227,7 +231,6 @@ public class ManualImportController : ControllerBase
             // Validate source is within a configured root folder (prevents path traversal)
             var isUnderSourceDirectory = FileUtils.IsPathInsideOf(item.FullPath, sourceDirectory);
             
-            var rootFolders = await _rootFolderService.GetAllAsync();
             var isUnderConfiguredRoot = rootFolders.Any(r =>  FileUtils.IsPathInsideOf(item.FullPath, r.Path));
 
             if (!isUnderSourceDirectory && !isUnderConfiguredRoot)
@@ -254,7 +257,7 @@ public class ManualImportController : ControllerBase
             if (action != FileAction.None)
             {
                 // Generate destination path using appropriate naming pattern
-                destinationPath = await GenerateManualImportPathAsync(audiobook, metadata, item, hasMultipleFile);
+                destinationPath = await GenerateManualImportPathAsync(audiobook, metadata, item, rootFolders, settings, hasMultipleFile);
 
                 await _fileMover.PerformActionOn(action, item.FullPath, destinationPath, usedDestinations);
 
@@ -369,11 +372,20 @@ public class ManualImportController : ControllerBase
         return FileUtils.GetCommonDirectory(destinationPaths);
     }
 
-    private async Task<string> GenerateManualImportPathAsync(Audiobook audiobook, AudioMetadata metadata, ManualImportItemDto item, bool isMultiFile = false)
+    /// <summary>
+    /// Generate the path where the file should be imported
+    /// </summary>
+    /// <param name="audiobook">Audiobook related to the imported file</param>
+    /// <param name="metadata">Metadata related to the imported file</param>
+    /// <param name="item">File to import into the library</param>
+    /// <param name="rootFolders">Previously fetched list of configured root folders (to save DB hits)</param>
+    /// <param name="settings">Application settings (to save DB hits)</param>
+    /// <param name="isMultiFile">Does the original import operation contained multiple files for this audiobook ?</param>
+    /// <returns>Path where we should put the file</returns>
+    private async Task<string> GenerateManualImportPathAsync(Audiobook audiobook, AudioMetadata metadata, ManualImportItemDto item, List<RootFolder> rootFolders, ApplicationSettings settings, bool isMultiFile = false)
     {
         var sourceFilePath = item.FullPath ?? string.Empty;
         // Get the configured folder/file naming patterns from settings
-        var settings = await _configService.GetApplicationSettingsAsync();
         var folderPattern = settings.FolderNamingPattern;
         var filePattern = isMultiFile ? settings.MultiFileNamingPattern : settings.FileNamingPattern;
 
@@ -398,7 +410,6 @@ public class ManualImportController : ControllerBase
                 // matches a configured root folder — those are all valid library destinations.
                 if (isCustomBasePath)
                 {
-                    var rootFolders = await _rootFolderService.GetAllAsync();
                     var isRootFolder = rootFolders.Any(r =>
                     {
                         try { return string.Equals(FileUtils.NormalizeStoredPath(r.Path), baseFull, StringComparison.OrdinalIgnoreCase); }

@@ -65,7 +65,7 @@ namespace Listenarr.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("ApiConfigurations");
+                    b.ToTable("ApiConfigurations", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Models.ApplicationSettings", b =>
@@ -214,7 +214,7 @@ namespace Listenarr.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("ApplicationSettings");
+                    b.ToTable("ApplicationSettings", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Models.Audiobook", b =>
@@ -321,7 +321,7 @@ namespace Listenarr.Infrastructure.Migrations
 
                     b.HasIndex("QualityProfileId");
 
-                    b.ToTable("Audiobooks");
+                    b.ToTable("Audiobooks", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Models.AudiobookExternalIdentifier", b =>
@@ -425,7 +425,7 @@ namespace Listenarr.Infrastructure.Migrations
 
                     b.HasIndex("AudiobookId");
 
-                    b.ToTable("AudiobookFiles");
+                    b.ToTable("AudiobookFiles", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Models.AudiobookSeriesMembership", b =>
@@ -520,7 +520,7 @@ namespace Listenarr.Infrastructure.Migrations
                     b.HasIndex("AuthorNameNormalized", "Region")
                         .IsUnique();
 
-                    b.ToTable("AuthorCacheEntries");
+                    b.ToTable("AuthorCacheEntries", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Models.Download", b =>
@@ -632,7 +632,7 @@ namespace Listenarr.Infrastructure.Migrations
 
                     b.HasIndex("Status");
 
-                    b.ToTable("Downloads");
+                    b.ToTable("Downloads", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Models.DownloadClientConfiguration", b =>
@@ -687,7 +687,7 @@ namespace Listenarr.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("DownloadClientConfigurations");
+                    b.ToTable("DownloadClientConfigurations", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Models.DownloadHistory", b =>
@@ -826,7 +826,7 @@ namespace Listenarr.Infrastructure.Migrations
 
                     b.HasIndex("DownloadId", "Status");
 
-                    b.ToTable("DownloadProcessingJobs");
+                    b.ToTable("DownloadProcessingJobs", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Models.History", b =>
@@ -864,7 +864,7 @@ namespace Listenarr.Infrastructure.Migrations
 
                     b.HasIndex("Timestamp");
 
-                    b.ToTable("History");
+                    b.ToTable("History", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Models.Indexer", b =>
@@ -948,7 +948,7 @@ namespace Listenarr.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Indexers");
+                    b.ToTable("Indexers", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Models.MonitoredAuthor", b =>
@@ -1004,7 +1004,7 @@ namespace Listenarr.Infrastructure.Migrations
                     b.HasIndex("AuthorNameNormalized", "Region", "Language")
                         .IsUnique();
 
-                    b.ToTable("MonitoredAuthors");
+                    b.ToTable("MonitoredAuthors", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Models.MonitoredSeries", b =>
@@ -1060,7 +1060,7 @@ namespace Listenarr.Infrastructure.Migrations
                     b.HasIndex("SeriesNameNormalized", "Region", "Language")
                         .IsUnique();
 
-                    b.ToTable("MonitoredSeries");
+                    b.ToTable("MonitoredSeries", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Models.MoveJob", b =>
@@ -1098,7 +1098,7 @@ namespace Listenarr.Infrastructure.Migrations
 
                     b.HasIndex("AudiobookId", "Status");
 
-                    b.ToTable("MoveJobs");
+                    b.ToTable("MoveJobs", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Models.ProcessExecutionLog", b =>
@@ -1136,7 +1136,7 @@ namespace Listenarr.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("ProcessExecutionLogs");
+                    b.ToTable("ProcessExecutionLogs", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Models.QualityProfile", b =>
@@ -1218,7 +1218,7 @@ namespace Listenarr.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("QualityProfiles");
+                    b.ToTable("QualityProfiles", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Models.RemotePathMapping", b =>
@@ -1250,7 +1250,7 @@ namespace Listenarr.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("RemotePathMappings");
+                    b.ToTable("RemotePathMappings", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Models.RootFolder", b =>
@@ -1343,7 +1343,7 @@ namespace Listenarr.Infrastructure.Migrations
                     b.HasIndex("SeriesNameNormalized", "Region")
                         .IsUnique();
 
-                    b.ToTable("SeriesCacheEntries");
+                    b.ToTable("SeriesCacheEntries", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Models.User", b =>
@@ -1371,7 +1371,7 @@ namespace Listenarr.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Users");
+                    b.ToTable("Users", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Models.UserSession", b =>
@@ -1414,7 +1414,7 @@ namespace Listenarr.Infrastructure.Migrations
 
                     b.HasIndex("Username");
 
-                    b.ToTable("UserSessions");
+                    b.ToTable("UserSessions", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Models.Audiobook", b =>
