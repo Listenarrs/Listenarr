@@ -358,7 +358,7 @@ async function onAdded(audiobook: Audiobook) {
     await apiService.startManualImport({
       path: item.bookFolder,
       mode: 'interactive',
-      inputMode: fileInputMode.value,
+      action: fileInputMode.value,
       items: [
         {
           fullPath: item.fullPath,
@@ -453,7 +453,7 @@ async function addAllWithAsin() {
         const importResult = await apiService.startManualImport({
           path: item.bookFolder,
           mode: 'interactive',
-          inputMode: fileInputMode.value,
+          action: fileInputMode.value,
           items: [{ fullPath: item.fullPath, matchedAudiobookId: audiobook.id }],
         })
         if (importResult && importResult.importedCount === 0) {

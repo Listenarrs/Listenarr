@@ -125,7 +125,7 @@
             <option v-for="(field, _) in importFields.filter((field: ImportField) => field.editable)" :value="field.key">{{ field.label }}</option>
           </select>
 
-          <select v-if="showPreview" class="extra-select" v-model="inputMode">
+          <select v-if="showPreview" class="extra-select" v-model="action">
             <option value="">Select Import Mode</option>
             <option value="move">Move</option>
             <option value="hardlink/copy">Hardlink/Copy</option>
@@ -299,7 +299,7 @@ const selectedPath = ref(props.initialPath || '')
 const loading = ref(false)
 const browserMode = ref(false)
 const inputField = ref<string>('')
-const inputMode = ref<'move' | 'hardlink/copy' | ''>('')
+const action = ref<'move' | 'hardlink/copy' | ''>('')
 
 const showPreview = ref(false)
 interface PreviewItem {
@@ -624,8 +624,8 @@ const startAutomaticImport = async () => {
   try {
     // When running automatic import, send minimal request; backend will handle scanning
     const autoPayload: ManualImportRequest = { path: selectedPath.value, mode: 'automatic' }
-    if (inputMode.value === 'move' || inputMode.value === 'hardlink/copy')
-      autoPayload.inputMode = inputMode.value
+    if (action.value !== '')
+      autoPayload.action = action.value
     const resp = await apiService.startManualImport(autoPayload)
     // resp should contain import summary
     emit('imported', { imported: resp.importedCount ?? 0 })
@@ -667,7 +667,7 @@ const importSelected = async () => {
       path: selectedPath.value,
       mode: 'interactive',
       items: payloadItems,
-      inputMode: inputMode.value || 'hardlink/copy',
+      action: action.value || 'hardlink/copy',
     }
     const resp = await apiService.startManualImport(manualPayload)
     emit('imported', { imported: resp.importedCount ?? selected.length })

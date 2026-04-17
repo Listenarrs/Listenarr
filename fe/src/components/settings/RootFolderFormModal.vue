@@ -142,7 +142,7 @@ async function confirmChange(moveFiles: boolean) {
       'Success',
       moveFiles ? 'Root renamed and move jobs queued' : 'Root renamed (files unchanged)',
     )
-    emit('saved')
+    emit('saved', root!)
   } catch (e: unknown) {
     const error = e as Error
     toast.error('Error', error?.message || 'Failed to save root folder')
