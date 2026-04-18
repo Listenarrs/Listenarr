@@ -21,7 +21,7 @@ namespace Listenarr.Api.Services
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
-        public async Task<(string Url, string? IndexerApiKey)> ResolveAsync(SearchResult result, CancellationToken ct = default)
+        public async Task<(string Url, string? IndexerApiKey)> ResolveAsync(IndexerSearchResult result, CancellationToken ct = default)
         {
             if (result == null) throw new ArgumentNullException(nameof(result));
 

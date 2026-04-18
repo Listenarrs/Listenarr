@@ -1,3 +1,6 @@
+import type { DownloadClient } from "./DownloadClientConfig"
+import type { DownloadProtocol } from "./DownloadProtocolConfig"
+
 export interface BaseSearchResult {
   id: string
   title: string
@@ -8,7 +11,61 @@ export interface BaseSearchResult {
   sourceLink?: string
   publishedDate: string
   format: string
+  uploader: string
   score?: number
+}
+
+export interface FileResult {
+  filename: string
+  size: number
+}
+
+export interface IndexerSearchResult extends BaseSearchResult {
+  size: number
+  fileCount: number
+  seeders?: number
+  leechers?: number
+  magnetLink: string
+  torrentUrl: string
+  nzbUrl: string
+  protocol: DownloadProtocol
+  quality?: string
+  resultUrl?: string // Canonical indexer page for the result
+  grabs?: number
+  files: FileResult[]
+}
+
+// Legacy SearchResult interface - kept for backwards compatibility
+// Combines both indexer and metadata properties
+export interface SearchResult extends IndexerSearchResult {
+  // Indexer-specific properties
+  thumbnailRetentionDays?: number
+
+  // Metadata-specific properties
+  description?: string
+  subtitle?: string
+  publisher?: string
+  language?: string
+  runtime?: number
+  narrator?: string
+  imageUrl?: string
+  asin?: string
+  isbn?: string
+  series?: string
+  seriesNumber?: string
+  seriesAsin?: string
+  seriesList?: string[]
+  genres?: string[] // Genres from metadata sources (e.g., Audible)
+  productUrl?: string // Direct link to Amazon/Audible product page
+  isEnriched?: boolean
+  metadataSource?: string // Which metadata API enriched this result
+  // Audible-style fields
+  authors?: AudibleAuthor[]
+  narrators?: AudibleNarrator[]
+  lengthMinutes?: number
+  link?: string
+  releaseDate?: string
+  publishDate?: string
 }
 
 export interface OpenLibraryBook {
@@ -32,18 +89,6 @@ export interface OpenLibraryBook {
   seriesList?: string[]
 }
 
-export interface IndexerSearchResult extends BaseSearchResult {
-  size: number
-  seeders?: number
-  leechers?: number
-  magnetLink: string
-  torrentUrl: string
-  nzbUrl: string
-  downloadType: string // "Torrent", "Usenet", or "DDL"
-  quality?: string
-  resultUrl?: string // Canonical indexer page for the result
-}
-
 export interface MetadataSearchResult extends BaseSearchResult {
   description?: string
   subtitle?: string
@@ -63,50 +108,6 @@ export interface MetadataSearchResult extends BaseSearchResult {
   isEnriched?: boolean
   metadataSource?: string // Which metadata API enriched this result
   // Audible-style fields (when backend returns Audible-shaped JSON)
-  authors?: AudibleAuthor[]
-  narrators?: AudibleNarrator[]
-  lengthMinutes?: number
-  link?: string
-  releaseDate?: string
-  publishDate?: string
-}
-
-// Legacy SearchResult interface - kept for backwards compatibility
-// Combines both indexer and metadata properties
-export interface SearchResult extends BaseSearchResult {
-  // Indexer-specific properties
-  thumbnailRetentionDays?: number
-  size: number
-  seeders?: number
-  leechers?: number
-  grabs?: number
-  files?: number
-  magnetLink: string
-  torrentUrl: string
-  nzbUrl: string
-  downloadType: string // "Torrent", "Usenet", or "DDL"
-  quality?: string
-  resultUrl?: string // Canonical indexer page for the result
-
-  // Metadata-specific properties
-  description?: string
-  subtitle?: string
-  publisher?: string
-  language?: string
-  runtime?: number
-  narrator?: string
-  imageUrl?: string
-  asin?: string
-  isbn?: string
-  series?: string
-  seriesNumber?: string
-  seriesAsin?: string
-  seriesList?: string[]
-  genres?: string[] // Genres from metadata sources (e.g., Audible)
-  productUrl?: string // Direct link to Amazon/Audible product page
-  isEnriched?: boolean
-  metadataSource?: string // Which metadata API enriched this result
-  // Audible-style fields
   authors?: AudibleAuthor[]
   narrators?: AudibleNarrator[]
   lengthMinutes?: number
@@ -222,7 +223,7 @@ export interface ApiConfiguration {
 export interface DownloadClientConfiguration {
   id: string
   name: string
-  type: 'qbittorrent' | 'transmission' | 'sabnzbd' | 'nzbget'
+  type: DownloadClient
   host: string
   port: number
   username: string
@@ -656,8 +657,8 @@ export interface History {
 export interface Indexer {
   id: number
   name: string
-  type: string // "Torrent" or "Usenet"
-  implementation: string // "Newznab", "Torznab", "Custom"
+  protocol: DownloadProtocol
+  implementation: string
   url: string
   apiKey?: string
   categories?: string

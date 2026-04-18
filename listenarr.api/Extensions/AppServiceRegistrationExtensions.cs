@@ -23,6 +23,7 @@ namespace Listenarr.Api.Extensions
             services.AddScoped<Listenarr.Api.Services.Search.Providers.IIndexerSearchProvider, Listenarr.Api.Services.Search.Providers.InternetArchiveSearchProvider>();
             services.AddScoped<Listenarr.Api.Services.Search.Providers.IIndexerSearchProvider, Listenarr.Api.Services.Search.Providers.TorznabNewznabSearchProvider>();
             services.AddScoped<Listenarr.Api.Services.Search.Providers.IIndexerSearchProvider, Listenarr.Api.Services.Search.Providers.MyAnonamouseSearchProvider>();
+            services.AddScoped<Listenarr.Api.Services.Search.Providers.IIndexerSearchProvider, Listenarr.Api.Services.Search.Providers.SlskdSearchProvider>();
             
             services.AddScoped<ISearchService, SearchService>();
             services.AddScoped<IMetadataService, MetadataService>();

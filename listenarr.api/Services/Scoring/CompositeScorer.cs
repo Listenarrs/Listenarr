@@ -35,7 +35,7 @@ namespace Listenarr.Api.Services.Scoring
             res.Breakdown["Indexer"] = indexerScore;
 
             // Tier 4: Seeds/Grabs (0-100) * 100
-            double seedScore = CalculateSeedScore(result) * 100.0;
+            double seedScore = result.CalculateSeedScore() * 100.0;
             res.Breakdown["Seed"] = seedScore;
 
             // Tier 5: Age (0-100) * 10
@@ -57,36 +57,6 @@ namespace Listenarr.Api.Services.Scoring
                 result.Title, qualityScore, formatScore, indexerScore, seedScore, ageScore, sizeScore, res.Total);
 
             return res;
-        }
-
-        private static double CalculateSeedScore(SearchResult result)
-        {
-            var downloadType = (result.DownloadType ?? string.Empty).ToLower();
-
-            if (downloadType.Contains("usenet") || downloadType.Contains("ddl") || !string.IsNullOrEmpty(result.NzbUrl))
-            {
-                var grabs = result.Grabs;
-                if (grabs > 0)
-                {
-                    return Math.Min(100.0, 20.0 + (Math.Log10(grabs) * 20.0));
-                }
-                return 0.0;
-            }
-
-            // Torrent
-            var seeders = result.Seeders ?? 0;
-            if (seeders <= 0) return 0.0;
-
-            var seederScore = Math.Min(100.0, 20.0 + (Math.Log10(seeders) * 20.0));
-            var leechers = result.Leechers ?? 0;
-            if (leechers > 0)
-            {
-                var ratio = (double)seeders / Math.Max(1, leechers);
-                if (ratio > 2.0) seederScore += 10.0;
-                else if (ratio > 1.0) seederScore += 5.0;
-            }
-
-            return Math.Min(100.0, seederScore);
         }
 
         private static double CalculateAgeScore(DateTime publishedDate)

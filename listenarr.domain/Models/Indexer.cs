@@ -16,12 +16,20 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using System;
-using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 
 namespace Listenarr.Domain.Models
 {
+    public enum Implementation
+    {
+        Custom = 0,
+        InternetArchive = 1,
+        MyAnonamouse = 2,
+        Newznab = 3,
+        Slskd = 4,
+        Torznab = 5
+    }
+
     public class Indexer
     {
         [Key]
@@ -33,19 +41,43 @@ namespace Listenarr.Domain.Models
         public string Name { get; set; } = string.Empty;
 
         /// <summary>
-        /// Type of indexer: Torrent or Usenet
+        /// Type of download provided
         /// </summary>
-        public string Type { get; set; } = string.Empty; // "Torrent" or "Usenet"
+        public DownloadProtocol Protocol { get; set; }
 
         /// <summary>
-        /// Implementation type (e.g., "Newznab", "Torznab", "Custom")
+        /// Implementation type (e.g., "Newznab", "Torznab", ...)
         /// </summary>
-        public string Implementation { get; set; } = string.Empty;
+        public Implementation Implementation { get; set; }
 
         /// <summary>
         /// Base URL for the indexer API
         /// </summary>
-        public string Url { get; set; } = string.Empty;
+        private String _url = string.Empty;
+        public string Url
+        {
+            get{
+                return _url;
+            }
+            set{
+                value = value.Trim().TrimEnd('/');
+
+                // Add scheme if missing (assume https)
+                if (!value.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !value.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                {
+                    value = "https://" + value;
+                }
+
+                // Remove repeated '/api/api' or trailing '/api'
+                // Normalize multiple slashes
+                while (value.Contains("/api/api", StringComparison.OrdinalIgnoreCase))
+                {
+                    value = value.Replace("/api/api", "/api", StringComparison.OrdinalIgnoreCase);
+                }
+
+                _url = value;
+            }
+        }
 
         /// <summary>
         /// API key for authentication
@@ -141,6 +173,18 @@ namespace Listenarr.Domain.Models
         /// Error message from last test
         /// </summary>
         public string? LastTestError { get; set; }
+
+        public string BaseUrl()
+        {
+            if (string.IsNullOrWhiteSpace(Url)) return Url ?? string.Empty;
+
+            // Don't append /api if URL already ends with it (e.g., Prowlarr proxy URLs)
+            var apiPath = Url.EndsWith("/api", StringComparison.OrdinalIgnoreCase)
+                ? ""
+                : "/api";
+
+            return $"{Url}{apiPath}";
+        }
     }
 }
 

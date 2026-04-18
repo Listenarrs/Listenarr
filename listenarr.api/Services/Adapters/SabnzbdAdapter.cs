@@ -8,85 +8,77 @@ using System.Threading;
 using System.Threading.Tasks;
 using Listenarr.Api.Services;
 using Listenarr.Domain.Models;
+using Listenarr.Infrastructure.Models;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Polly;
+using Polly.Extensions.Http;
 
 namespace Listenarr.Api.Services.Adapters
 {
-    public class SabnzbdAdapter : IDownloadClientAdapter
+    public class SabnzbdAdapter : DownloadClientAdapter, IDownloadClientAdapter
     {
-        public string ClientId => "sabnzbd";
-        public string ClientType => "sabnzbd";
-        public DownloadProtocol Protocol => DownloadProtocol.Usenet;
+        private const string CLIENT_TYPE = "sabnzbd";
+        public string ClientType => CLIENT_TYPE;
+        public List<DownloadProtocol> Protocols => [DownloadProtocol.Usenet];
 
-        private readonly IHttpClientFactory _httpFactory;
         private readonly IRemotePathMappingService _pathMappingService;
         private readonly INzbUrlResolver _nzbUrlResolver;
-        private readonly ILogger<SabnzbdAdapter> _logger;
 
         public SabnzbdAdapter(
-            IHttpClientFactory httpFactory,
+            IDbContextFactory<ListenArrDbContext> dbFactory,
+            HttpClient httpClient,
             IRemotePathMappingService pathMappingService,
             INzbUrlResolver nzbUrlResolver,
-            ILogger<SabnzbdAdapter> logger)
+            ILogger<SabnzbdAdapter> logger) : base(dbFactory, httpClient, logger)
         {
-            _httpFactory = httpFactory ?? throw new ArgumentNullException(nameof(httpFactory));
             _pathMappingService = pathMappingService ?? throw new ArgumentNullException(nameof(pathMappingService));
             _nzbUrlResolver = nzbUrlResolver ?? throw new ArgumentNullException(nameof(nzbUrlResolver));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        }
+
+        public static void AddToServices(IServiceCollection services)
+        {
+            services.AddScoped<IDownloadClientAdapter, SabnzbdAdapter>();
+            services.AddHttpClient<SabnzbdAdapter>()
+                .ConfigureHttpClient(client =>
+                {
+                    client.Timeout = TimeSpan.FromSeconds(30);
+                })
+                .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler()
+                {
+                    AutomaticDecompression = System.Net.DecompressionMethods.All,
+                    UseCookies = false
+                })
+                .SetHandlerLifetime(TimeSpan.FromMinutes(5))
+                .AddPolicyHandler(HttpPolicyExtensions
+                    .HandleTransientHttpError()
+                    .CircuitBreakerAsync(3, TimeSpan.FromSeconds(30)))
+                .AddPolicyHandler(HttpPolicyExtensions.HandleTransientHttpError()
+                    .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
         }
 
         public async Task<(bool Success, string Message)> TestConnectionAsync(DownloadClientConfiguration client, CancellationToken ct = default)
         {
+            ArgumentNullException.ThrowIfNull(client);
+
+            var apiKey = client.GetApiKey();
+            if (string.IsNullOrEmpty(apiKey))
+                    return (false, "SABnzbd API key not configured in client settings");
+            var request = BuildHttpRequestMessage(HttpMethod.Get, client, "api", $"mode=version&output=json&apikey={Uri.EscapeDataString(apiKey)}");
+
             try
             {
-                if (client == null) throw new ArgumentNullException(nameof(client));
-
-                var baseUrl = DownloadClientUriBuilder.BuildUri(client, "/api").ToString();
-                var apiKey = "";
-                if (client.Settings != null && client.Settings.TryGetValue("apiKey", out var apiKeyObj))
-                    apiKey = apiKeyObj?.ToString() ?? "";
-
-                if (string.IsNullOrEmpty(apiKey))
-                    return (false, "SABnzbd API key not configured in client settings");
-
-                var url = $"{baseUrl}?mode=version&output=json&apikey={Uri.EscapeDataString(apiKey)}";
-                var http = _httpFactory.CreateClient("DownloadClient");
-                var resp = await http.GetAsync(url, ct);
-                if (!resp.IsSuccessStatusCode)
-                {
-                    // Map common statuses to simple, actionable messages
-                    if (resp.StatusCode == HttpStatusCode.Unauthorized || resp.StatusCode == HttpStatusCode.Forbidden)
-                    {
-                        return (false, "SABnzbd: API key invalid or unauthorized");
-                    }
-
-                    if (resp.StatusCode == HttpStatusCode.NotFound)
-                    {
-                        return (false, "SABnzbd: host or endpoint not found (check host/port)");
-                    }
-
-                    return (false, $"SABnzbd: returned {resp.StatusCode}");
-                }
-
-                return (true, "SABnzbd: connected");
+                await Call(request);
             }
-            catch (HttpRequestException httpEx)
+            catch(DownloadClientException exception)
             {
-                _logger.LogDebug(httpEx, "SABnzbd TestConnection network error");
-                return (false, $"SABnzbd: network error ({httpEx.StatusCode?.ToString() ?? "unavailable"})");
+                return (false, exception.Message);
             }
-            catch (TaskCanceledException tce)
-            {
-                _logger.LogDebug(tce, "SABnzbd TestConnection timed out");
-                return (false, "SABnzbd: connection timed out");
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
-                _logger.LogDebug(ex, "SABnzbd TestConnection failed");
-                return (false, "SABnzbd: connection failed");
-            }
+
+            return (true, "Connected");
         }
 
-        public async Task<string?> AddAsync(DownloadClientConfiguration client, SearchResult result, CancellationToken ct = default)
+        public async Task<Download?> AddAsync(DownloadClientConfiguration client, IndexerSearchResult result, CancellationToken ct = default)
         {
             if (client == null) throw new ArgumentNullException(nameof(client));
             if (result == null) throw new ArgumentNullException(nameof(result));
@@ -153,8 +145,7 @@ namespace Listenarr.Api.Services.Adapters
 
                 _logger.LogDebug("SABnzbd request URL: {Url}", LogRedaction.RedactText(requestUrl, sensitiveValues));
 
-                var http = _httpFactory.CreateClient("DownloadClient");
-                var response = await http.GetAsync(requestUrl, ct);
+                var response = await _httpClient.GetAsync(requestUrl, ct);
                 var responseContent = await response.Content.ReadAsStringAsync(ct);
 
                 if (!response.IsSuccessStatusCode)
@@ -192,7 +183,9 @@ namespace Listenarr.Api.Services.Adapters
                 }
 
                 _logger.LogInformation("Successfully added NZB to SABnzbd with ID: {DownloadId}", LogRedaction.SanitizeText(downloadId));
-                return downloadId;
+                var download = new Download(result, client);
+                download.SetClientDownloadId(downloadId);
+                return download;
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
                 _logger.LogError(ex, "Failed to send NZB to SABnzbd");
@@ -200,10 +193,9 @@ namespace Listenarr.Api.Services.Adapters
             }
         }
 
-        public async Task<bool> RemoveAsync(DownloadClientConfiguration client, string id, bool deleteFiles = false, CancellationToken ct = default)
+        public async Task<bool> RemoveAsync(DownloadClientConfiguration client, Download download, bool deleteFiles = false, CancellationToken ct = default)
         {
             if (client == null) throw new ArgumentNullException(nameof(client));
-            if (string.IsNullOrEmpty(id)) throw new ArgumentNullException(nameof(id));
 
             try
             {
@@ -221,18 +213,17 @@ namespace Listenarr.Api.Services.Adapters
                     return false;
                 }
 
-                var http = _httpFactory.CreateClient("DownloadClient");
                 bool removedFromQueue = false;
                 bool removedFromHistory = false;
 
                 // Try to remove from queue first (for active downloads)
-                var queueRemoveUrl = $"{baseUrl}?mode=queue&name=delete&value={Uri.EscapeDataString(id)}&apikey={Uri.EscapeDataString(apiKey)}&output=json";
+                var queueRemoveUrl = $"{baseUrl}?mode=queue&name=delete&value={Uri.EscapeDataString(download.Id)}&apikey={Uri.EscapeDataString(apiKey)}&output=json";
                 if (deleteFiles)
                     queueRemoveUrl += "&del_files=1";
 
                 try
                 {
-                    var queueResponse = await http.GetAsync(queueRemoveUrl, ct);
+                    var queueResponse = await _httpClient.GetAsync(queueRemoveUrl, ct);
                     if (queueResponse.IsSuccessStatusCode)
                     {
                         var queueContent = await queueResponse.Content.ReadAsStringAsync(ct);
@@ -244,17 +235,17 @@ namespace Listenarr.Api.Services.Adapters
                     }
                 }
                 catch (Exception queueEx) when (queueEx is not OperationCanceledException && queueEx is not OutOfMemoryException && queueEx is not StackOverflowException) {
-                    _logger.LogDebug(queueEx, "Could not remove {DownloadId} from SABnzbd queue (may not be in queue)", id);
+                    _logger.LogDebug(queueEx, "Could not remove {DownloadId} from SABnzbd queue (may not be in queue)", download.Id);
                 }
 
                 // Try to remove from history (for completed downloads)
-                var historyRemoveUrl = $"{baseUrl}?mode=history&name=delete&value={Uri.EscapeDataString(id)}&apikey={Uri.EscapeDataString(apiKey)}&output=json";
+                var historyRemoveUrl = $"{baseUrl}?mode=history&name=delete&value={Uri.EscapeDataString(download.Id)}&apikey={Uri.EscapeDataString(apiKey)}&output=json";
                 if (deleteFiles)
                     historyRemoveUrl += "&del_files=1";
 
                 try
                 {
-                    var historyResponse = await http.GetAsync(historyRemoveUrl, ct);
+                    var historyResponse = await _httpClient.GetAsync(historyRemoveUrl, ct);
                     if (historyResponse.IsSuccessStatusCode)
                     {
                         var historyContent = await historyResponse.Content.ReadAsStringAsync(ct);
@@ -266,24 +257,24 @@ namespace Listenarr.Api.Services.Adapters
                     }
                 }
                 catch (Exception historyEx) when (historyEx is not OperationCanceledException && historyEx is not OutOfMemoryException && historyEx is not StackOverflowException) {
-                    _logger.LogDebug(historyEx, "Could not remove {DownloadId} from SABnzbd history (may not be in history)", id);
+                    _logger.LogDebug(historyEx, "Could not remove {DownloadId} from SABnzbd history (may not be in history)", download.Id);
                 }
 
                 var success = removedFromQueue || removedFromHistory;
                 if (success)
                 {
                     _logger.LogInformation("Removed {DownloadId} from SABnzbd (queue: {Queue}, history: {History}, deleteFiles: {DeleteFiles})", 
-                        LogRedaction.SanitizeText(id), removedFromQueue, removedFromHistory, deleteFiles);
+                        LogRedaction.SanitizeText(download.Id), removedFromQueue, removedFromHistory, deleteFiles);
                 }
                 else
                 {
-                    _logger.LogWarning("Failed to remove {DownloadId} from SABnzbd (not found in queue or history)", LogRedaction.SanitizeText(id));
+                    _logger.LogWarning("Failed to remove {DownloadId} from SABnzbd (not found in queue or history)", LogRedaction.SanitizeText(download.Id));
                 }
 
                 return success;
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
-                _logger.LogError(ex, "Error removing from SABnzbd: {DownloadId}", LogRedaction.SanitizeText(id));
+                _logger.LogError(ex, "Error removing from SABnzbd: {DownloadId}", LogRedaction.SanitizeText(download.Id));
                 return false;
             }
         }
@@ -313,8 +304,7 @@ namespace Listenarr.Api.Services.Adapters
                 var requestUrl = $"{baseUrl}?mode=queue&output=json&apikey={Uri.EscapeDataString(apiKey)}";
                 _logger.LogDebug("SABnzbd queue request (redacted): {Url}", LogRedaction.RedactText(requestUrl, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { apiKey })));
 
-                var http = _httpFactory.CreateClient("DownloadClient");
-                var response = await http.GetAsync(requestUrl, ct);
+                var response = await _httpClient.GetAsync(requestUrl, ct);
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogWarning("SABnzbd queue request failed with status {Status}", response.StatusCode);
@@ -444,7 +434,7 @@ namespace Listenarr.Api.Services.Adapters
                 try
                 {
                     var historyUrl = $"{baseUrl}?mode=history&output=json&limit=30&apikey={Uri.EscapeDataString(apiKey)}";
-                    var historyResp = await http.GetAsync(historyUrl, ct);
+                    var historyResp = await _httpClient.GetAsync(historyUrl, ct);
                     if (historyResp.IsSuccessStatusCode)
                     {
                         var historyText = await historyResp.Content.ReadAsStringAsync(ct);
@@ -553,8 +543,7 @@ namespace Listenarr.Api.Services.Adapters
                 if (string.IsNullOrEmpty(apiKey)) return result;
 
                 var historyUrl = $"{baseUrl}?mode=history&output=json&limit={limit}&apikey={Uri.EscapeDataString(apiKey)}";
-                var http = _httpFactory.CreateClient("DownloadClient");
-                var historyResp = await http.GetAsync(historyUrl, ct);
+                var historyResp = await _httpClient.GetAsync(historyUrl, ct);
                 if (!historyResp.IsSuccessStatusCode) return result;
 
                 var historyText = await historyResp.Content.ReadAsStringAsync(ct);
@@ -603,8 +592,7 @@ namespace Listenarr.Api.Services.Adapters
                 }
 
                 var requestUrl = $"{baseUrl}?mode=queue&output=json&apikey={Uri.EscapeDataString(apiKey)}";
-                var http = _httpFactory.CreateClient("DownloadClient");
-                var response = await http.GetAsync(requestUrl, ct);
+                var response = await _httpClient.GetAsync(requestUrl, ct);
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogWarning("SABnzbd queue request failed with status {Status}", response.StatusCode);
@@ -776,8 +764,7 @@ namespace Listenarr.Api.Services.Adapters
 
                 // Query history with nzo_id filter
                 var historyUrl = $"{baseUrl}?mode=history&output=json&apikey={Uri.EscapeDataString(apiKey)}";
-                var http = _httpFactory.CreateClient("DownloadClient");
-                var historyResp = await http.GetAsync(historyUrl, ct);
+                var historyResp = await _httpClient.GetAsync(historyUrl, ct);
 
                 if (!historyResp.IsSuccessStatusCode)
                 {
@@ -939,8 +926,7 @@ namespace Listenarr.Api.Services.Adapters
 
                 // Query history with nzo_id filter
                 var historyUrl = $"{baseUrl}?mode=history&output=json&apikey={Uri.EscapeDataString(apiKey)}";
-                var http = _httpFactory.CreateClient("DownloadClient");
-                var historyResp = await http.GetAsync(historyUrl, ct);
+                var historyResp = await _httpClient.GetAsync(historyUrl, ct);
 
                 if (!historyResp.IsSuccessStatusCode)
                 {
@@ -1022,6 +1008,14 @@ namespace Listenarr.Api.Services.Adapters
             return string.IsNullOrEmpty(normalizedBasePath)
                 ? relativePath
                 : normalizedBasePath + Path.DirectorySeparatorChar + relativePath;
+        }
+
+        public async Task<List<Download>> PollAsync(DownloadMonitorService service, DownloadClientConfiguration client, List<Download> downloads, ApplicationSettings appSettings, CancellationToken ct = default)
+        {
+            using var db = _dbFactory.CreateDbContext();
+            await service.PollSABnzbdAsync(client, downloads, db, appSettings, ct);
+
+            return [];
         }
     }
 }

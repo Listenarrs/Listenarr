@@ -23,10 +23,8 @@ using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Runtime.InteropServices;
 using Listenarr.Api.Hubs;
-using Listenarr.Domain.Models;
 using System.Text.Json;
 using System.Text.Encodings.Web;
-using Microsoft.Extensions.Caching.Memory;
 using Listenarr.Application.Services;
 using Listenarr.Api.Services.Adapters;
 
@@ -654,6 +652,11 @@ namespace Listenarr.Api.Services
         /// Broadcast a candidate update for a download so clients can show completion candidates
         /// without requiring the DB status to change.
         /// </summary>
+        private async Task BroadcastCandidateUpdateAsync(Download dl, CancellationToken cancellationToken)
+        {
+            await BroadcastCandidateUpdateAsync(dl, true, cancellationToken);
+        }
+
         private async Task BroadcastCandidateUpdateAsync(Download dl, bool isCandidate, CancellationToken cancellationToken)
         {
             try
@@ -727,21 +730,36 @@ namespace Listenarr.Api.Services
 
                     _logger.LogInformation("Client {ClientName} (Type={Type}) is enabled, routing to poll method", client.Name, client.Type);
 
-                    // Poll based on client type
-                    switch (client.Type.ToLower())
+                    using (var scope = _serviceScopeFactory.CreateScope())
                     {
-                        case "qbittorrent":
-                            await PollQBittorrentAsync(client, clientGroup.ToList(), dbContext, appSettings, cancellationToken);
-                            break;
-                        case "transmission":
-                            await PollTransmissionAsync(client, clientGroup.ToList(), dbContext, appSettings, cancellationToken);
-                            break;
-                        case "sabnzbd":
-                            await PollSABnzbdAsync(client, clientGroup.ToList(), dbContext, appSettings, cancellationToken);
-                            break;
-                        case "nzbget":
-                            await PollNZBGetAsync(client, clientGroup.ToList(), dbContext, appSettings, cancellationToken);
-                            break;
+                        var downloadClientAdapterFactory = scope.ServiceProvider.GetRequiredService<IDownloadClientAdapterFactory>();
+                        IDownloadClientAdapter adapter;
+                        try
+                        {
+                            adapter = downloadClientAdapterFactory.GetByType(client.Type);
+                        } catch (InvalidOperationException exception)
+                        {
+                            _logger.LogCritical(exception, $"No download client adapter exists for: {client.Type}");
+                            continue;
+                        }
+                        
+                        var updatedDownloads = await adapter.PollAsync(this, client, clientGroup.ToList(), appSettings, cancellationToken);
+
+                        // Persists download updates
+                        foreach (var download in updatedDownloads)
+                        {
+                            dbContext.Downloads.Update(download);
+
+                            // FIXME: Should update download progress here and remove the responsability from Polling logic
+                        }
+
+                        await dbContext.SaveChangesAsync();
+
+                        // Broadcast download update after DB persisted them
+                        foreach (var download in updatedDownloads)
+                        {
+                            await BroadcastCandidateUpdateAsync(download, cancellationToken);
+                        }
                     }
                 }
                 catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
@@ -755,7 +773,7 @@ namespace Listenarr.Api.Services
             }
         }
 
-        private Task PollQBittorrentAsync(
+        public Task PollQBittorrentAsync(
             DownloadClientConfiguration client,
             List<Download> downloads,
             ListenArrDbContext dbContext,
@@ -1097,7 +1115,7 @@ namespace Listenarr.Api.Services
                             }
 
                             // Update database with real-time progress information
-                            await UpdateDownloadProgressAsync(dl.Id, matched.Progress * 100, matched.AmountLeft, matched.State, dbContext, cancellationToken);
+                            await UpdateDownloadProgressAsync(dl, matched.Progress * 100, matched.AmountLeft, matched.State, dbContext, cancellationToken);
 
                             // Skip finalization/progress logic for downloads that are already
                             // being processed, awaiting import, or fully imported. Re-entering
@@ -1232,7 +1250,7 @@ namespace Listenarr.Api.Services
             }, cancellationToken);
         }
 
-        private Task PollTransmissionAsync(
+        public Task PollTransmissionAsync(
             DownloadClientConfiguration client,
             List<Download> downloads,
             ListenArrDbContext dbContext,
@@ -1469,7 +1487,7 @@ namespace Listenarr.Api.Services
                                 };
 
                                 // Update database with real-time progress information
-                                await UpdateDownloadProgressAsync(dl.Id, percent * 100, left, status, dbContext, cancellationToken);
+                                await UpdateDownloadProgressAsync(dl, percent * 100, left, status, dbContext, cancellationToken);
 
                                 // Compute and persist CanMoveFiles/CanBeRemoved (Sonarr parity)
                                 try
@@ -1593,7 +1611,7 @@ namespace Listenarr.Api.Services
         /// the best candidate to the final destination determined by the file naming service
         /// or settings.OutputPath.
         /// </summary>
-        private async Task FinalizeDownloadAsync(Download download, string clientPath, DownloadClientConfiguration client, CancellationToken cancellationToken)
+        public virtual async Task FinalizeDownloadAsync(Download download, string clientPath, DownloadClientConfiguration client, CancellationToken cancellationToken)
         {
             try
             {
@@ -2028,7 +2046,7 @@ namespace Listenarr.Api.Services
             }
         }
 
-        private Task PollSABnzbdAsync(
+        public Task PollSABnzbdAsync(
             DownloadClientConfiguration client,
             List<Download> downloads,
             ListenArrDbContext dbContext,
@@ -2137,7 +2155,7 @@ namespace Listenarr.Api.Services
                                         var amountLeft = (long)(mbleft * 1024 * 1024);
 
                                         // Update progress using percent and amountLeft (UpdateDownloadProgressAsync uses percent->downloaded size calculation when TotalSize is set)
-                                        await UpdateDownloadProgressAsync(matchingDownload.Id, progressPercent, amountLeft, status, dbContext, cancellationToken);
+                                        await UpdateDownloadProgressAsync(matchingDownload, progressPercent, amountLeft, status, dbContext, cancellationToken);
 
                                         if (status.Equals("Failed", StringComparison.OrdinalIgnoreCase))
                                         {
@@ -2369,7 +2387,7 @@ namespace Listenarr.Api.Services
             }, cancellationToken);
         }
 
-        private Task PollNZBGetAsync(
+        public Task PollNZBGetAsync(
             DownloadClientConfiguration client,
             List<Download> downloads,
             ListenArrDbContext dbContext,
@@ -2469,7 +2487,7 @@ namespace Listenarr.Api.Services
                                                 var progress = totalMB > 0 ? (totalMB - remainingMB) / totalMB : 0.0;
                                                 var amountLeft = (long)(remainingMB * 1024 * 1024); // Convert MB to bytes
 
-                                                await UpdateDownloadProgressAsync(matchingDownload.Id, progress, amountLeft, status, dbContext, cancellationToken);
+                                                await UpdateDownloadProgressAsync(matchingDownload, progress, amountLeft, status, dbContext, cancellationToken);
 
                                                 if (status.Equals("FAILURE", StringComparison.OrdinalIgnoreCase) ||
                                                     status.Equals("FAILED", StringComparison.OrdinalIgnoreCase))
@@ -2685,13 +2703,10 @@ namespace Listenarr.Api.Services
             }, cancellationToken);
         }
 
-        private async Task UpdateDownloadProgressAsync(string downloadId, double progress, long amountLeft, string clientState, ListenArrDbContext dbContext, CancellationToken cancellationToken)
+        public async Task UpdateDownloadProgressAsync(Download download, double progress, long amountLeft, string clientState, ListenArrDbContext dbContext, CancellationToken cancellationToken)
         {
             try
             {
-                var download = await dbContext.Downloads.FindAsync(new object[] { downloadId }, cancellationToken);
-                if (download == null) return;
-
                 var normalizedState = (clientState ?? string.Empty).ToLowerInvariant();
 
                 // Map client state to our DownloadStatus
@@ -2746,7 +2761,7 @@ namespace Listenarr.Api.Services
                     // Allow transition to Completed always (finalization or client reports complete)
                     if (mappedStatus == DownloadStatus.Completed)
                     {
-                        _logger.LogInformation("Allowing Failed->Completed for {DownloadId} because client reports completion", downloadId);
+                        _logger.LogInformation("Allowing Failed->Completed for {DownloadId} because client reports completion", download.Id);
                         download.Status = mappedStatus;
                     }
                     else
@@ -2754,7 +2769,7 @@ namespace Listenarr.Api.Services
                         // Only allow non-failed status if progress increased
                         if (incomingProgress <= download.Progress)
                         {
-                            _logger.LogDebug("Skipping status overwrite for failed download {DownloadId}: incoming progress {Incoming} <= current {Current}", downloadId, incomingProgress, download.Progress);
+                            _logger.LogDebug("Skipping status overwrite for failed download {DownloadId}: incoming progress {Incoming} <= current {Current}", download.Id, incomingProgress, download.Progress);
                             // still update metadata for visibility
                             download.Metadata ??= new Dictionary<string, object>();
                             download.Metadata!["ClientState"] = clientState ?? "Unknown";
@@ -2764,7 +2779,7 @@ namespace Listenarr.Api.Services
                             return;
                         }
 
-                        _logger.LogInformation("Updating Failed -> {MappedStatus} for {DownloadId} because progress increased ({Old} -> {New})", mappedStatus, downloadId, download.Progress, incomingProgress);
+                        _logger.LogInformation("Updating Failed -> {MappedStatus} for {DownloadId} because progress increased ({Old} -> {New})", mappedStatus, download.Id, download.Progress, incomingProgress);
                         download.Status = mappedStatus;
                     }
                 }
@@ -2777,7 +2792,7 @@ namespace Listenarr.Api.Services
                 }
                 else
                 {
-                    _logger.LogDebug("Preserving {Status} status for {DownloadId} - not overwriting with client state {ClientState}", download.Status, downloadId, clientState);
+                    _logger.LogDebug("Preserving {Status} status for {DownloadId} - not overwriting with client state {ClientState}", download.Status, download.Id, clientState);
                 }
 
                 // Add metadata for real-time updates
@@ -2789,10 +2804,10 @@ namespace Listenarr.Api.Services
                 await dbContext.SaveChangesAsync(cancellationToken);
 
                 _logger.LogDebug("Updated download {DownloadId} progress: {Progress:F1}%, Status: {Status}, Downloaded: {Downloaded:N0} bytes",
-                    downloadId, progress, mappedStatus, downloadedSize);
+                    download.Id, progress, mappedStatus, downloadedSize);
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
-                _logger.LogWarning(ex, "Error updating download progress for {DownloadId}", downloadId);
+                _logger.LogWarning(ex, "Error updating download progress for {DownloadId}", download.Id);
             }
         }
 
@@ -2800,10 +2815,10 @@ namespace Listenarr.Api.Services
         {
             if (download?.Metadata == null) return null;
 
-            if (download.Metadata.TryGetValue("ClientDownloadId", out var clientIdObj))
+            var clientId = download.GetClientDownloadId<string>();
+            if (!string.IsNullOrWhiteSpace(clientId))
             {
-                var clientId = clientIdObj?.ToString();
-                if (!string.IsNullOrWhiteSpace(clientId)) return clientId;
+                return clientId;
             }
 
             if (download.Metadata.TryGetValue("TorrentHash", out var hashObj))
@@ -2815,7 +2830,7 @@ namespace Listenarr.Api.Services
             return null;
         }
 
-        private async Task HandleFailedDownloadAsync(
+        public async Task HandleFailedDownloadAsync(
             Download download,
             DownloadClientConfiguration client,
             ListenArrDbContext dbContext,
@@ -2878,10 +2893,9 @@ namespace Listenarr.Api.Services
             try
             {
                 var gateway = scope.ServiceProvider.GetService<IDownloadClientGateway>();
-                var clientItemId = GetClientItemId(download) ?? download.Id;
-                if (gateway != null && !string.IsNullOrWhiteSpace(clientItemId))
+                if (gateway != null)
                 {
-                    await gateway.RemoveAsync(client, clientItemId, deleteFiles: false, cancellationToken);
+                    await gateway.RemoveAsync(client, download, deleteFiles: false, cancellationToken);
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {

@@ -18,6 +18,7 @@ using System.Reflection;
 using Listenarr.Domain.Models;
 using System.Text;
 using System;
+using Listenarr.Api.Services.Adapters;
 
 namespace Listenarr.Api.Tests
 {
@@ -43,7 +44,7 @@ namespace Listenarr.Api.Tests
                 .Options;
 
             using var db = new ListenArrDbContext(options);
-            var indexer = new Indexer { Name = "MyAnonamouse1", Url = "https://www.myanonamouse.net", Implementation = "MyAnonamouse", Type = "Torrent", IsEnabled = true, EnableInteractiveSearch = true, AdditionalSettings = "{ \"mam_id\": \"old_mam\" }" };
+            var indexer = new Indexer { Name = "MyAnonamouse1", Url = "https://www.myanonamouse.net", Implementation = Implementation.MyAnonamouse, Protocol = DownloadProtocol.Torrent, IsEnabled = true, EnableInteractiveSearch = true, AdditionalSettings = "{ \"mam_id\": \"old_mam\" }" };
             db.Indexers.Add(indexer);
             db.SaveChanges();
             // Ensure initial mam_id present
@@ -88,7 +89,7 @@ namespace Listenarr.Api.Tests
                 .Options;
 
             using var db = new ListenArrDbContext(options);
-            var idx = new Indexer { Name = "MyAnonamouse1", Url = "https://www.myanonamouse.net", Implementation = "MyAnonamouse", Type = "Torrent", IsEnabled = true, EnableInteractiveSearch = true, AdditionalSettings = "{ \"mam_id\": \"test_mam\" }" };
+            var idx = new Indexer { Name = "MyAnonamouse1", Url = "https://www.myanonamouse.net", Implementation = Implementation.MyAnonamouse, Protocol = DownloadProtocol.Torrent, IsEnabled = true, EnableInteractiveSearch = true, AdditionalSettings = "{ \"mam_id\": \"test_mam\" }" };
             db.Indexers.Add(idx);
             db.SaveChanges();
 
@@ -151,6 +152,7 @@ namespace Listenarr.Api.Tests
                 completedProc,
                 metricsSvc,
                 notificationSvc,
+                new DownloadClientAdapterFactory([]),
                 hubBroadcaster );
 
             // Build a SearchResult that references the indexer and uses a different host for torrent URL
@@ -186,7 +188,7 @@ namespace Listenarr.Api.Tests
                 .Options;
 
             using var db = new ListenArrDbContext(options);
-            var idx = new Indexer { Name = "MyAnonamouse1", Url = "https://www.myanonamouse.net", Implementation = "MyAnonamouse", Type = "Torrent", IsEnabled = true, EnableInteractiveSearch = true, AdditionalSettings = "{ \"mam_id\": \"test_mam\" }" };
+            var idx = new Indexer { Name = "MyAnonamouse1", Url = "https://www.myanonamouse.net", Implementation = Implementation.MyAnonamouse, Protocol = DownloadProtocol.Torrent, IsEnabled = true, EnableInteractiveSearch = true, AdditionalSettings = "{ \"mam_id\": \"test_mam\" }" };
             db.Indexers.Add(idx);
             db.SaveChanges();
 
@@ -246,6 +248,7 @@ namespace Listenarr.Api.Tests
                 completedProc,
                 metricsSvc,
                 notificationSvc,
+                new DownloadClientAdapterFactory([]),
                 hubBroadcaster );
 
             // Build a SearchResult that references the indexer and uses a different host for torrent URL
@@ -277,7 +280,7 @@ namespace Listenarr.Api.Tests
                 .Options;
 
             using var db = new ListenArrDbContext(options);
-            var idx = new Indexer { Name = "MyAnonamouse1", Url = "https://www.myanonamouse.net", Implementation = "MyAnonamouse", Type = "Torrent", IsEnabled = true, EnableInteractiveSearch = true, AdditionalSettings = "{ \"mam_id\": \"orig_mam\" }" };
+            var idx = new Indexer { Name = "MyAnonamouse1", Url = "https://www.myanonamouse.net", Implementation = Implementation.MyAnonamouse, Protocol = DownloadProtocol.Torrent, IsEnabled = true, EnableInteractiveSearch = true, AdditionalSettings = "{ \"mam_id\": \"orig_mam\" }" };
             db.Indexers.Add(idx);
             db.SaveChanges();
 
@@ -348,6 +351,7 @@ namespace Listenarr.Api.Tests
                 completedProc,
                 metricsSvc,
                 notificationSvc,
+                new DownloadClientAdapterFactory([]),
                 hubBroadcaster );
 
             var sr = new SearchResult
@@ -384,7 +388,7 @@ namespace Listenarr.Api.Tests
                 .Options;
 
             using var db = new ListenArrDbContext(options);
-            var idx = new Indexer { Name = "MyAnonamouse1", Url = "https://www.myanonamouse.net", Implementation = "MyAnonamouse", Type = "Torrent", IsEnabled = true, EnableInteractiveSearch = true, AdditionalSettings = "{ \"mam_id\": \"test_mam\" }" };
+            var idx = new Indexer { Name = "MyAnonamouse1", Url = "https://www.myanonamouse.net", Implementation = Implementation.MyAnonamouse, Protocol = DownloadProtocol.Torrent, IsEnabled = true, EnableInteractiveSearch = true, AdditionalSettings = "{ \"mam_id\": \"test_mam\" }" };
             db.Indexers.Add(idx);
             db.SaveChanges();
 
@@ -441,6 +445,7 @@ namespace Listenarr.Api.Tests
                 completedProc,
                 metricsSvc,
                 notificationSvc,
+                new DownloadClientAdapterFactory([]),
                 hubBroadcaster );
 
             var sr = new SearchResult
@@ -470,7 +475,7 @@ namespace Listenarr.Api.Tests
                 .Options;
 
             using var db = new ListenArrDbContext(options);
-            var idx = new Indexer { Name = "MyAnonamouse1", Url = "https://www.myanonamouse.net", Implementation = "MyAnonamouse", Type = "Torrent", IsEnabled = true, EnableInteractiveSearch = true, AdditionalSettings = "{ \"mam_id\": \"test_mam\" }" };
+            var idx = new Indexer { Name = "MyAnonamouse1", Url = "https://www.myanonamouse.net", Implementation = Implementation.MyAnonamouse, Protocol = DownloadProtocol.Torrent, IsEnabled = true, EnableInteractiveSearch = true, AdditionalSettings = "{ \"mam_id\": \"test_mam\" }" };
             db.Indexers.Add(idx);
             db.SaveChanges();
 
@@ -525,6 +530,7 @@ namespace Listenarr.Api.Tests
                 completedProc,
                 metricsSvc,
                 notificationSvc,
+                new DownloadClientAdapterFactory([]),
                 hubBroadcaster );
 
             var sr = new SearchResult
@@ -562,7 +568,7 @@ namespace Listenarr.Api.Tests
                 .Options;
 
             using var db = new ListenArrDbContext(options);
-            var idx = new Indexer { Name = "MyAnonamouse1", Url = "https://www.myanonamouse.net", Implementation = "MyAnonamouse", Type = "Torrent", IsEnabled = true, EnableInteractiveSearch = true, AdditionalSettings = "{ \"mam_id\": \"old_mam\" }" };
+            var idx = new Indexer { Name = "MyAnonamouse1", Url = "https://www.myanonamouse.net", Implementation = Implementation.MyAnonamouse, Protocol = DownloadProtocol.Torrent, IsEnabled = true, EnableInteractiveSearch = true, AdditionalSettings = "{ \"mam_id\": \"old_mam\" }" };
             db.Indexers.Add(idx);
             db.SaveChanges();
 
@@ -624,6 +630,7 @@ namespace Listenarr.Api.Tests
                 completedProc,
                 metricsSvc,
                 notificationSvc,
+                new DownloadClientAdapterFactory([]),
                 hubBroadcaster );
 
             var sr = new SearchResult

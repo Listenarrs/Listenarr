@@ -16,7 +16,9 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using System.Text.Json;
 using System.Text.Json.Serialization;
+using Listenarr.Domain.Models.Converters;
 
 namespace Listenarr.Domain.Models
 {
@@ -36,7 +38,10 @@ namespace Listenarr.Domain.Models
 
     public class Download
     {
+        public static string METADATA_CLIENT_DOWNLOAD_ID_KEY = "ClientDownloadId";
+
         public string Id { get; set; } = Guid.NewGuid().ToString();
+        
         public int? AudiobookId { get; set; } // Link to Audiobook record for metadata
         public string Title { get; set; } = string.Empty;
         public string Artist { get; set; } = string.Empty;
@@ -93,6 +98,75 @@ namespace Listenarr.Domain.Models
         /// Links to DownloadHistory.Id for audit trail
         /// </summary>
         public int? HistoryId { get; set; }
+
+        public Download() {}
+
+        public Download(SearchResult searchResult, DownloadClientConfiguration downloadClient) : this(SearchResultConverters.ToIndexerSearchResult(searchResult), downloadClient)
+        {
+        }
+
+        public Download(IndexerSearchResult searchResult, DownloadClientConfiguration downloadClient)
+        {
+            Id = Guid.NewGuid().ToString();
+            Title = searchResult.Title ?? string.Empty;
+            Artist = searchResult.Artist ?? string.Empty;
+            Album = searchResult.Album ?? string.Empty;
+            Language = searchResult.Language;
+            OriginalUrl = !string.IsNullOrEmpty(searchResult.MagnetLink) ? searchResult.MagnetLink : (searchResult.TorrentUrl ?? searchResult.NzbUrl ?? string.Empty);
+            Status = DownloadStatus.Queued;
+            Progress = 0;
+            TotalSize = searchResult.Size;
+            DownloadedSize = 0;
+            DownloadPath = downloadClient.DownloadPath ?? string.Empty;
+            FinalPath = string.Empty;
+            StartedAt = DateTime.UtcNow;
+            DownloadClientId = downloadClient.Id;
+            Metadata = new Dictionary<string, object>
+            {
+                ["Source"] = searchResult.Source ?? string.Empty,
+                ["Seeders"] = searchResult.Seeders ?? 0,
+                ["Quality"] = searchResult.Quality ?? string.Empty,
+                ["Language"] = searchResult.Language ?? string.Empty,
+                ["Protocol"] = searchResult.Protocol
+            };
+        }
+
+        public void SetClientDownloadId(object clientDownloadId)
+        {
+            Metadata[METADATA_CLIENT_DOWNLOAD_ID_KEY] = clientDownloadId;
+        }
+
+        public T GetClientDownloadId<T>(T defaultValue = default!)
+        {
+            return GetMetadata<T>(METADATA_CLIENT_DOWNLOAD_ID_KEY, defaultValue);
+        }
+
+        public T GetMetadata<T>(string key, T defaultValue = default!)
+        {
+            if (!Metadata.TryGetValue(key, out object? value) || value == null)
+            {
+                return defaultValue;
+            }
+
+            if (value is T dto)
+            {
+                return dto;
+            }
+
+            if (value is JsonElement element)
+            {
+                try
+                {
+                    return element.Deserialize<T>() ?? defaultValue;
+                }
+                catch
+                {
+                    return defaultValue;
+                }
+            }
+            
+            return defaultValue;
+        }
     }
 
     /// <summary>

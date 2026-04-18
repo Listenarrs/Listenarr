@@ -95,7 +95,6 @@ Note: there is also a `watch` task available in the workspace tasks that runs `d
 - If adding something not already requested, please create an issue first to discuss it
 - Reach out on [Discussions](https://github.com/Listenarrs/Listenarr/discussions) if you have questions
 
- - Run frontend tests: `cd fe && npm test` (the frontend uses Vitest/Vite; check `fe/package.json` for exact scripts)
 - Rebase from Listenarr's `develop` branch, don't merge
 - Make meaningful commits, or squash them before submitting PR
 - Feel free to make a pull request before work is complete (mark as draft) - this lets us see progress and provide feedback

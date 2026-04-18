@@ -3,6 +3,7 @@ import { nextTick } from 'vue'
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import ManualSearchModal from '@/components/domain/search/ManualSearchModal.vue'
 import * as apiModule from '@/services/api'
+import { DownloadProtocol } from '@/types/DownloadProtocolConfig'
 
 const { apiService } = apiModule
 
@@ -32,7 +33,7 @@ if (!(apiService as unknown as Record<string, unknown>).scoreSearchResults) {
 type ManualSearchResult = {
   id: string
   title?: string
-  downloadType?: string
+  protocol: DownloadProtocol
   resultUrl?: string
   source?: string
   nzbUrl?: string
@@ -104,8 +105,8 @@ describe('ManualSearchModal.vue', () => {
       {
         id: 'https://indexer/info/123',
         title: 'Test Usenet',
-        downloadType: 'Usenet',
-        resultUrl: '',
+        protocol: DownloadProtocol.Usenet,
+        resultUrl: 'https://indexer/info/123',
         sourceLink: 'https://indexer/info/123',
         nzbUrl: 'https://indexer/download/123.nzb',
         source: 'altHUB',
@@ -138,7 +139,7 @@ describe('ManualSearchModal.vue', () => {
         id: 'u2',
         title: 'Lang Test',
         language: 'Unknown',
-        downloadType: 'Usenet',
+        protocol: DownloadProtocol.Usenet,
         resultUrl: 'https://indexer/info/2',
         source: 'alt',
         size: 0,
@@ -167,7 +168,7 @@ describe('ManualSearchModal.vue', () => {
         title: 'Format Fallback Test',
         quality: 'FLAC',
         format: 'FLAC',
-        downloadType: 'Torrent',
+        protocol: DownloadProtocol.Torrent,
         resultUrl: 'https://indexer/info/4',
         source: 'test',
         size: 0,
@@ -196,7 +197,7 @@ describe('ManualSearchModal.vue', () => {
     const fake = {
       id: 'r3',
       title: 'Rejected Test',
-      downloadType: 'Torrent',
+      protocol: DownloadProtocol.Torrent,
       resultUrl: 'https://indexer/info/3',
       source: 'test',
       size: 0,
@@ -278,7 +279,7 @@ describe('ManualSearchModal.vue', () => {
       {
         id: 'r1',
         title: 'Smart Score Test',
-        downloadType: 'Torrent',
+        protocol: DownloadProtocol.Torrent,
         resultUrl: 'https://indexer/info/1',
         source: 'test',
         size: 0,

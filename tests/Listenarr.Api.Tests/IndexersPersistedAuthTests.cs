@@ -60,8 +60,8 @@ namespace Listenarr.Api.Tests
             var persisted = new Indexer
             {
                 Name = "althub",
-                Type = "Usenet",
-                Implementation = "Newznab",
+                Protocol = DownloadProtocol.Usenet,
+                Implementation = Implementation.Newznab,
                 Url = "https://api.althub.co.za",
                 ApiKey = "BAD_KEY",
             };
@@ -90,8 +90,8 @@ namespace Listenarr.Api.Tests
             var persisted = new Indexer
             {
                 Name = "althub",
-                Type = "Usenet",
-                Implementation = "Newznab",
+                Protocol = DownloadProtocol.Usenet,
+                Implementation = Implementation.Newznab,
                 Url = "https://api.althub.co.za",
                 ApiKey = "GOOD_KEY",
             };

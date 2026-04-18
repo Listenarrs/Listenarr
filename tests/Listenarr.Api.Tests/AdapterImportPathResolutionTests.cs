@@ -1,14 +1,9 @@
-using System;
-using System.Collections.Generic;
 using System.Net;
-using System.Net.Http;
 using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
 using Listenarr.Api.Services;
 using Listenarr.Api.Services.Adapters;
-using Listenarr.Domain.Models;
 using Listenarr.Domain.Utils;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -53,7 +48,8 @@ namespace Listenarr.Api.Tests
 
             using var httpClient = new HttpClient(handler);
             var adapter = new TransmissionAdapter(
-                new TestHttpClientFactory(httpClient),
+                new Mock<IDbContextFactory<ListenArrDbContext>>().Object,
+                httpClient,
                 pathMapMock.Object,
                 Mock.Of<ITorrentFileDownloader>(),
                 NullLogger<TransmissionAdapter>.Instance);
@@ -93,7 +89,8 @@ namespace Listenarr.Api.Tests
 
             using var httpClient = new HttpClient(handler);
             var adapter = new TransmissionAdapter(
-                new TestHttpClientFactory(httpClient),
+                new Mock<IDbContextFactory<ListenArrDbContext>>().Object,
+                httpClient,
                 pathMapMock.Object,
                 Mock.Of<ITorrentFileDownloader>(),
                 NullLogger<TransmissionAdapter>.Instance);
@@ -143,7 +140,8 @@ namespace Listenarr.Api.Tests
 
             using var httpClient = new HttpClient(handler);
             var adapter = new TransmissionAdapter(
-                new TestHttpClientFactory(httpClient),
+                new Mock<IDbContextFactory<ListenArrDbContext>>().Object,
+                httpClient,
                 pathMapMock.Object,
                 Mock.Of<ITorrentFileDownloader>(),
                 NullLogger<TransmissionAdapter>.Instance);
@@ -190,7 +188,8 @@ namespace Listenarr.Api.Tests
 
             using var httpClient = new HttpClient(handler);
             var adapter = new SabnzbdAdapter(
-                new TestHttpClientFactory(httpClient),
+                new Mock<IDbContextFactory<ListenArrDbContext>>().Object,
+                httpClient,
                 pathMapMock.Object,
                 Mock.Of<INzbUrlResolver>(),
                 NullLogger<SabnzbdAdapter>.Instance);
@@ -229,7 +228,8 @@ namespace Listenarr.Api.Tests
 
             using var httpClient = new HttpClient(handler);
             var adapter = new SabnzbdAdapter(
-                new TestHttpClientFactory(httpClient),
+                new Mock<IDbContextFactory<ListenArrDbContext>>().Object,
+                httpClient,
                 pathMapMock.Object,
                 Mock.Of<INzbUrlResolver>(),
                 NullLogger<SabnzbdAdapter>.Instance);
@@ -268,7 +268,8 @@ namespace Listenarr.Api.Tests
 
             using var httpClient = new HttpClient(handler);
             var adapter = new NzbgetAdapter(
-                new TestHttpClientFactory(httpClient),
+                new Mock<IDbContextFactory<ListenArrDbContext>>().Object,
+                httpClient,
                 Mock.Of<INzbUrlResolver>(),
                 pathMapMock.Object,
                 NullLogger<NzbgetAdapter>.Instance);
@@ -306,7 +307,8 @@ namespace Listenarr.Api.Tests
 
             using var httpClient = new HttpClient(handler);
             var adapter = new NzbgetAdapter(
-                new TestHttpClientFactory(httpClient),
+                new Mock<IDbContextFactory<ListenArrDbContext>>().Object,
+                httpClient,
                 Mock.Of<INzbUrlResolver>(),
                 pathMapMock.Object,
                 NullLogger<NzbgetAdapter>.Instance);

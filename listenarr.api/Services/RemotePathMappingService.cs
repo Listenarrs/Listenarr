@@ -1,5 +1,6 @@
 using AsyncKeyedLock;
 using Listenarr.Domain.Models;
+using Listenarr.Domain.Utils;
 using Listenarr.Infrastructure.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
@@ -149,7 +150,7 @@ public class RemotePathMappingService : IRemotePathMappingService
         }
 
         // Normalize the input path for consistent comparison
-        var normalizedRemotePath = NormalizePath(remotePath);
+        var normalizedRemotePath = FileUtils.NormalizeStoredPath(remotePath);
 
         // Get all mappings for this client, ordered by path length (longest first)
         // This ensures we match the most specific path first
@@ -158,14 +159,14 @@ public class RemotePathMappingService : IRemotePathMappingService
 
         foreach (var mapping in mappings)
         {
-            var normalizedMappingPath = NormalizePath(mapping.RemotePath);
+            var normalizedMappingPath = FileUtils.NormalizeStoredPath(mapping.RemotePath);
 
             // Check if the remote path starts with this mapping's remote path
             if (normalizedRemotePath.StartsWith(normalizedMappingPath, StringComparison.OrdinalIgnoreCase))
             {
                 // Replace the remote path prefix with the local path
                 var relativePath = normalizedRemotePath.Substring(normalizedMappingPath.Length);
-                var localPath = NormalizePath(mapping.LocalPath) + relativePath;
+                var localPath = FileUtils.NormalizeStoredPath(mapping.LocalPath) + relativePath;
 
                 _logger.LogDebug(
                     "Translated path for client {ClientId}: {RemotePath} -> {LocalPath} (using mapping {MappingId})",
@@ -190,35 +191,11 @@ public class RemotePathMappingService : IRemotePathMappingService
             return false;
         }
 
-        var normalizedRemotePath = NormalizePath(remotePath);
+        var normalizedRemotePath = FileUtils.NormalizeStoredPath(remotePath);
 
         // Use cached mappings to avoid hitting the database on every check.
         var mappings = await GetByClientIdAsync(downloadClientId);
-        return mappings.Any(m => normalizedRemotePath.StartsWith(NormalizePath(m.RemotePath)));
-    }
-
-    /// <summary>
-    /// Normalize a path for consistent comparison:
-    /// - Convert backslashes to forward slashes
-    /// - Ensure trailing slash
-    /// - Trim whitespace
-    /// </summary>
-    private static string NormalizePath(string path)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return string.Empty;
-        }
-
-        path = path.Trim().Replace('\\', '/');
-
-        // Ensure trailing slash for directory paths
-        if (!path.EndsWith('/'))
-        {
-            path += '/';
-        }
-
-        return path;
+        return mappings.Any(m => normalizedRemotePath.StartsWith(FileUtils.NormalizeStoredPath(m.RemotePath)));
     }
 }
 

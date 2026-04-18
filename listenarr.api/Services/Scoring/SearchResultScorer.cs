@@ -96,7 +96,7 @@ namespace Listenarr.Api.Services.Scoring
             }
 
             // Seeders requirement (treat null as 0)
-            if (searchResult.DownloadType == "torrent" && (searchResult.Seeders ?? 0) < profile.MinimumSeeders)
+            if (DownloadProtocol.Torrent == searchResult.Protocol && (searchResult.Seeders ?? 0) < profile.MinimumSeeders)
             {
                 var seedersValue = (searchResult.Seeders.HasValue) ? searchResult.Seeders.Value.ToString() : "(none)";
                 score.RejectionReasons.Add($"Not enough seeders ({seedersValue} < {profile.MinimumSeeders})");
@@ -115,10 +115,10 @@ namespace Listenarr.Api.Services.Scoring
                     if (idx != null)
                     {
                         indexerRetention = idx.Retention;
-                        if (!isNzb && !string.IsNullOrWhiteSpace(idx.Type) && string.Equals(idx.Type, "Usenet", StringComparison.OrdinalIgnoreCase))
+                        if (!isNzb && DownloadProtocol.Usenet == idx.Protocol)
                         {
                             isNzb = true;
-                            _logger.LogDebug("Indexer {IndexerId} type '{Type}' detected as Usenet; applying NZB/Usenet exemptions", searchResult.IndexerId.Value, idx.Type);
+                            _logger.LogDebug("Indexer {IndexerId} type '{Type}' detected as Usenet; applying NZB/Usenet exemptions", searchResult.IndexerId.Value, idx.Protocol);
                         }
                     }
                 }
@@ -427,8 +427,7 @@ namespace Listenarr.Api.Services.Scoring
         private static bool IsNzbResult(SearchResult r)
         {
             bool hasNzbUrl = !string.IsNullOrEmpty(r.NzbUrl);
-            bool isNzbType = string.Equals(r.DownloadType, "nzb", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(r.DownloadType, "usenet", StringComparison.OrdinalIgnoreCase);
+            bool isNzbType = DownloadProtocol.Usenet == r.Protocol;
             bool indexerIndicatesNzb = !string.IsNullOrEmpty(r.IndexerImplementation)
                 && (r.IndexerImplementation.IndexOf("nzb", StringComparison.OrdinalIgnoreCase) >= 0
                     || r.IndexerImplementation.IndexOf("usenet", StringComparison.OrdinalIgnoreCase) >= 0);

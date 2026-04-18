@@ -5,12 +5,15 @@ using System.Threading.Tasks;
 using Listenarr.Api.Services;
 using Listenarr.Api.Services.Adapters;
 using Listenarr.Domain.Models;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
 namespace Listenarr.Api.Tests
 {
+    [Trait("Category", "DownloadClientAdapter")]
+    [Trait("Third-Party", "NZBGet")]
     public class NzbgetAdapterTests
     {
         private sealed class TestHttpClientFactory : IHttpClientFactory
@@ -42,7 +45,8 @@ namespace Listenarr.Api.Tests
 
             using var http = new HttpClient(handler);
             var adapter = new NzbgetAdapter(
-                new TestHttpClientFactory(http),
+                new Mock<IDbContextFactory<ListenArrDbContext>>().Object,
+                http,
                 Mock.Of<INzbUrlResolver>(),
                 Mock.Of<IRemotePathMappingService>(),
                 NullLogger<NzbgetAdapter>.Instance);
@@ -84,7 +88,8 @@ namespace Listenarr.Api.Tests
 
             using var http = new HttpClient(handler);
             var adapter = new NzbgetAdapter(
-                new TestHttpClientFactory(http),
+                new Mock<IDbContextFactory<ListenArrDbContext>>().Object,
+                http,
                 Mock.Of<INzbUrlResolver>(),
                 Mock.Of<IRemotePathMappingService>(),
                 NullLogger<NzbgetAdapter>.Instance);
@@ -123,7 +128,8 @@ namespace Listenarr.Api.Tests
 
             using var http = new HttpClient(handler);
             var adapter = new NzbgetAdapter(
-                new TestHttpClientFactory(http),
+                new Mock<IDbContextFactory<ListenArrDbContext>>().Object,
+                http,
                 Mock.Of<INzbUrlResolver>(),
                 Mock.Of<IRemotePathMappingService>(),
                 NullLogger<NzbgetAdapter>.Instance);

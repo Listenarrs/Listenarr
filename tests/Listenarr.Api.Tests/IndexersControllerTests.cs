@@ -54,8 +54,8 @@ namespace Listenarr.Api.Tests
             var indexer = new Indexer
             {
                 Name = "althub",
-                Type = "Usenet",
-                Implementation = "Newznab",
+                Protocol = DownloadProtocol.Usenet,
+                Implementation = Implementation.Newznab,
                 Url = "https://api.althub.co.za",
                 ApiKey = "MY_SUPER_KEY",
                 Categories = "3030",

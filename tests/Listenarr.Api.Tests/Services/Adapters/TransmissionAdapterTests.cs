@@ -7,12 +7,15 @@ using System.Threading.Tasks;
 using Listenarr.Api.Services;
 using Listenarr.Api.Services.Adapters;
 using Listenarr.Domain.Models;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
 namespace Listenarr.Api.Tests
 {
+    [Trait("Category", "DownloadClientAdapter")]
+    [Trait("Third-Party", "Transmission")]
     public class TransmissionAdapterTests
     {
         private sealed class TestHttpClientFactory : IHttpClientFactory
@@ -51,7 +54,8 @@ namespace Listenarr.Api.Tests
 
             using var httpClient = new HttpClient(handler);
             var adapter = new TransmissionAdapter(
-                new TestHttpClientFactory(httpClient),
+                new Mock<IDbContextFactory<ListenArrDbContext>>().Object,
+                httpClient,
                 Mock.Of<IRemotePathMappingService>(),
                 Mock.Of<ITorrentFileDownloader>(),
                 NullLogger<TransmissionAdapter>.Instance);
@@ -71,9 +75,9 @@ namespace Listenarr.Api.Tests
                 MagnetLink = "magnet:?xt=urn:btih:ABCDEF1234567890&tr=http%3A%2F%2Ftracker.example.com%2Fannounce%3Ffoo%3D1%26bar%3D2&dn=Book%20Title"
             };
 
-            var addedId = await adapter.AddAsync(client, searchResult);
+            var added = await adapter.AddAsync(client, searchResult);
 
-            Assert.Equal("HASH1", addedId);
+            Assert.Equal("HASH1", added.GetClientDownloadId<string>());
             Assert.Equal(
                 "magnet:?xt=urn:btih:ABCDEF1234567890&tr=http%3A%2F%2Ftracker.example.com%2Fannounce%3Ffoo%3D1%26bar%3D2&dn=Book Title",
                 postedFilename);
@@ -95,7 +99,8 @@ namespace Listenarr.Api.Tests
 
             using var httpClient = new HttpClient(handler);
             var adapter = new TransmissionAdapter(
-                new TestHttpClientFactory(httpClient),
+                new Mock<IDbContextFactory<ListenArrDbContext>>().Object,
+                httpClient,
                 Mock.Of<IRemotePathMappingService>(),
                 Mock.Of<ITorrentFileDownloader>(),
                 NullLogger<TransmissionAdapter>.Instance);
@@ -152,7 +157,8 @@ namespace Listenarr.Api.Tests
                 .ReturnsAsync(TorrentDownloadResult.FromBytes(new byte[] { (byte)'d', (byte)'e' }));
 
             var adapter = new TransmissionAdapter(
-                new TestHttpClientFactory(httpClient),
+                new Mock<IDbContextFactory<ListenArrDbContext>>().Object,
+                httpClient,
                 Mock.Of<IRemotePathMappingService>(),
                 downloader.Object,
                 NullLogger<TransmissionAdapter>.Instance);
@@ -173,9 +179,9 @@ namespace Listenarr.Api.Tests
                 TorrentUrl = "https://indexer.example.com/book.torrent"
             };
 
-            var addedId = await adapter.AddAsync(client, searchResult);
+            var added = await adapter.AddAsync(client, searchResult);
 
-            Assert.Equal("HASH1", addedId);
+            Assert.Equal("HASH1", added.GetClientDownloadId<string>());
             Assert.Equal("https://indexer.example.com/book.torrent", downloadedUrl);
             Assert.Equal(Convert.ToBase64String(new byte[] { (byte)'d', (byte)'e' }), metainfo);
             downloader.Verify(x => x.DownloadAsync("https://indexer.example.com/book.torrent", It.IsAny<CancellationToken>()), Times.Once);
@@ -187,8 +193,11 @@ namespace Listenarr.Api.Tests
             using var httpClient = new HttpClient(new DelegatingHandlerMock((_, _) =>
                 throw new InvalidOperationException("Network should not be hit for invalid torrent URLs.")));
 
+            var dbFactory = new Mock<IDbContextFactory<ListenArrDbContext>>();
+
             var adapter = new TransmissionAdapter(
-                new TestHttpClientFactory(httpClient),
+                new Mock<IDbContextFactory<ListenArrDbContext>>().Object,
+                httpClient,
                 Mock.Of<IRemotePathMappingService>(),
                 Mock.Of<ITorrentFileDownloader>(),
                 NullLogger<TransmissionAdapter>.Instance);

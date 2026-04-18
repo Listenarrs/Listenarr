@@ -31,7 +31,7 @@ public class InternetArchiveSearchProvider : IIndexerSearchProvider
     private readonly HttpClient _httpClient;
     private readonly ILogger<InternetArchiveSearchProvider> _logger;
 
-    public string IndexerType => "InternetArchive";
+    public List<Implementation> Implements => [Implementation.InternetArchive];
 
     public InternetArchiveSearchProvider(
         HttpClient httpClient,
@@ -189,13 +189,13 @@ public class InternetArchiveSearchProvider : IIndexerSearchProvider
                         TorrentUrl = downloadUrl, // Using TorrentUrl field for direct download URL
                         // Internet Archive item page
                         ResultUrl = !string.IsNullOrEmpty(identifier) ? $"https://archive.org/details/{identifier}" : null,
-                        DownloadType = "DDL", // Direct Download Link
+                        Protocol = DownloadProtocol.DirectDownload,
                         Format = audioFile.Format,
                         Quality = DetectQualityFromFormat(audioFile.Format),
                         Source = $"{indexer.Name} (Internet Archive)",
                         PublishedDate = string.Empty,
                         IndexerId = indexer.Id,
-                        IndexerImplementation = indexer.Implementation
+                        IndexerImplementation = indexer.Implementation.ToString()
                     };
 
                     // Ensure ResultUrl is present (fallback to item page or archive details)

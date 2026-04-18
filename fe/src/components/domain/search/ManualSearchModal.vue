@@ -102,7 +102,7 @@
                       <component :is="getSortIcon('Leechers')" class="sort-icon" />
                     </span>
                   </th>
-                  <th class="col-grabs sortable" @click="setSort('Grabs')">
+                  <th v-if="anyHasGrabs" class="col-grabs sortable" @click="setSort('Grabs')">
                     <span class="header-content">
                       Grabs
                       <component :is="getSortIcon('Grabs')" class="sort-icon" />
@@ -136,16 +136,16 @@
               <tbody>
                 <tr v-for="result in displayResults" :key="result.id" class="result-row">
                   <td class="col-source">
-                    <span :class="['source-badge', getSourceType(result).toLowerCase()]">
-                      {{ getSourceType(result).toUpperCase() }}
+                    <span :class="['source-badge', DownloadProtocolConfigs[result.protocol].short]">
+                      {{ DownloadProtocolConfigs[result.protocol].label }}
                     </span>
                   </td>
                   <td class="col-age">{{ formatAge(result.publishedDate) }}</td>
                   <td class="col-title">
                     <div class="title-cell">
                         <a
-                          v-if="result.id"
-                          :href="result.id"
+                          v-if="result.resultUrl"
+                          :href="result.resultUrl"
                           class="title-text"
                           target="_blank"
                           rel="noopener noreferrer"
@@ -179,7 +179,7 @@
                       <PhArrowDown /> {{ result.leechers }}
                     </span>
                   </td>
-                  <td class="col-grabs">
+                  <td v-if="anyHasGrabs" class="col-grabs">
                     <span v-if="result.grabs !== undefined" class="grabs-badge"
                       ><strong>{{ result.grabs }}</strong></span
                     >
@@ -267,6 +267,7 @@ import type {
 import { getScoreBreakdownTooltip, computeNormalizedSmart } from '@/composables/useScore'
 import ScorePopover from '@/components/ui/ScorePopover.vue'
 import { safeText } from '@/utils/textUtils'
+import { DownloadProtocol, DownloadProtocolConfigs } from '@/types/DownloadProtocolConfig'
 
 interface Props {
   isOpen: boolean
@@ -340,6 +341,9 @@ const anyHasPeers = computed(() =>
 )
 const anyHasLanguage = computed(() =>
   displayResults.value.some((r) => !!normalizeLanguage(r.language)),
+)
+const anyHasGrabs = computed(() =>
+  displayResults.value.some((r) => r.grabs !== undefined && r.grabs !== null),
 )
 
 // Normalize language values from DTOs/indexers: treat explicit 'unknown' strings as absent
@@ -490,11 +494,11 @@ async function search() {
             seeders: typeof dto.seeders === 'string' ? Number(dto.seeders) || 0 : typeof dto.seeders === 'number' ? dto.seeders : undefined,
             leechers: typeof dto.leechers === 'string' ? Number(dto.leechers) || 0 : typeof dto.leechers === 'number' ? dto.leechers : undefined,
             grabs: typeof dto.grabs === 'string' ? Number(dto.grabs) || 0 : typeof dto.grabs === 'number' ? dto.grabs : 0,
-            files: typeof dto.files === 'string' ? Number(dto.files) || 0 : typeof dto.files === 'number' ? dto.files : 0,
+            fileCount: typeof dto.files === 'string' ? Number(dto.files) || 0 : typeof dto.files === 'number' ? dto.files : 0,
             magnetLink: '',
             torrentUrl: String(dto.downloadUrl ?? ''),
             nzbUrl: '',
-            downloadType: String(dto.protocol ?? ''),
+            protocol: String(dto.protocol) in DownloadProtocol ? DownloadProtocol[dto.protocol as keyof typeof DownloadProtocol] : DownloadProtocol.Unknown,
             quality: undefined,
             indexerId: String(dto.indexerId ?? indexer.id),
             indexerImplementation: String(dto.indexer ?? indexer.name),
@@ -523,6 +527,8 @@ async function search() {
             // Use filetype when available (MP3/M4B/etc), fallback to protocol (torrent/nzb)
             format: String(dto.filetype ?? dto.protocol ?? ''),
             score: 0,
+            uploader: '',
+            files: []
           }))
         } else {
           // Already in SearchResult shape
@@ -659,32 +665,15 @@ async function downloadResult(result: SearchResult) {
   const toast = useToast()
 
   try {
-    // Check if this is a DDL
-    const isDDL = getSourceType(result) === 'ddl'
     const audiobookId = props.audiobook?.id
 
-    if (isDDL) {
-      // For DDL, start download in background and add to activity
-      await apiService.sendToDownloadClient(result, undefined, audiobookId)
+    await apiService.sendToDownloadClient(result, undefined, audiobookId)
+    emit('downloaded', result)
 
-      // Add to activity/downloads view (will be tracked there)
-      // Show success message
-      emit('downloaded', result)
-
-      // Show feedback briefly
-      setTimeout(() => {
-        delete downloading.value[result.id]
-      }, 1000)
-    } else {
-      // For torrents/NZB, send to download client (also pass audiobookId for future processing)
-      await apiService.sendToDownloadClient(result, undefined, audiobookId)
-      emit('downloaded', result)
-
-      // Show success feedback briefly, then remove
-      setTimeout(() => {
-        delete downloading.value[result.id]
-      }, 2000)
-    }
+    // Show success feedback briefly, then remove
+    setTimeout(() => {
+      delete downloading.value[result.id]
+    }, 2000)
   } catch (err) {
     console.error('Download failed:', err)
     const errorMessage = err instanceof Error ? err.message : 'Unknown error'
@@ -704,29 +693,6 @@ async function downloadResult(result: SearchResult) {
 
 function close() {
   emit('close')
-}
-
-function getSourceType(result: SearchResult): string {
-  // Check downloadType first if it's set
-  if (result.downloadType) {
-    return result.downloadType.toLowerCase()
-  }
-
-  // Fallback to legacy detection logic
-  // Check for torrent indicators
-  if (result.magnetLink || result.torrentUrl) {
-    return 'torrent'
-  }
-  // Check for NZB indicator
-  if (result.nzbUrl) {
-    return 'nzb'
-  }
-  // Check source name
-  if (result.source?.toLowerCase().includes('torrent')) {
-    return 'torrent'
-  }
-  // Default to NZB for usenet
-  return 'nzb'
 }
 
 function formatAge(date: Date | string): string {

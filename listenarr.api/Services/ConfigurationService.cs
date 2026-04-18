@@ -17,7 +17,7 @@
  */
 
 using System.Text.Json;
-using Listenarr.Domain.Models;
+using Listenarr.Api.Services.Adapters;
 using Listenarr.Infrastructure.Models;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
@@ -31,18 +31,21 @@ namespace Listenarr.Api.Services
         private readonly IUserService _userService;
         private readonly IStartupConfigService _startupConfigService;
         private readonly IDataProtector _prowlarrImportProtector;
+        private readonly IDownloadClientAdapterFactory _downloadClientAdapterFactory;
 
         public ConfigurationService(
             ListenArrDbContext dbContext,
             ILogger<ConfigurationService> logger,
             IUserService userService,
             IStartupConfigService startupConfigService,
+            IDownloadClientAdapterFactory downloadClientAdapterFactory,
             IDataProtectionProvider? dataProtectionProvider = null)
         {
             _dbContext = dbContext;
             _logger = logger;
             _userService = userService;
             _startupConfigService = startupConfigService;
+            _downloadClientAdapterFactory = downloadClientAdapterFactory;
             _prowlarrImportProtector =
                 (dataProtectionProvider ?? new EphemeralDataProtectionProvider())
                     .CreateProtector("Listenarr.ConfigurationService.ProwlarrImport");
@@ -127,18 +130,27 @@ namespace Listenarr.Api.Services
         }
 
         // Download Client Configuration methods
-        public async Task<List<DownloadClientConfiguration>> GetDownloadClientConfigurationsAsync()
+        public async Task<List<DownloadClientConfiguration>> GetDownloadClientConfigurationsAsync(DownloadProtocol? protocol = null, bool? enabled = null)
         {
+            List<string> types = [];
+            if (protocol != null)
+            {
+                types = _downloadClientAdapterFactory.GetClientTypeSupportingProtocol(protocol.Value);
+            }
+
             try
             {
                 return await _dbContext.DownloadClientConfigurations
+                    .Where(c => protocol == null || types.Contains(c.Type))
+                    .Where(c => enabled == null || c.IsEnabled == enabled)
                     .OrderBy(c => c.Name)
                     .ToListAsync();
             }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
+            catch (Exception ex) when (ex is not (OperationCanceledException or OutOfMemoryException or StackOverflowException)) {
                 _logger.LogError(ex, "Error loading download client configurations from database");
-                return new List<DownloadClientConfiguration>();
             }
+
+            return [];
         }
 
         public async Task<DownloadClientConfiguration?> GetDownloadClientConfigurationAsync(string id)

@@ -1,14 +1,11 @@
-using System;
-using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
 using Moq;
 using Xunit;
 using Listenarr.Api.Services;
-using Listenarr.Domain.Models;
-using Listenarr.Infrastructure.Models;
 using Listenarr.Domain.Utils;
+using Listenarr.Api.Services.Adapters;
 
 namespace Listenarr.Api.Tests
 {
@@ -35,7 +32,7 @@ namespace Listenarr.Api.Tests
             var mockUser = new Mock<IUserService>();
             var mockStartup = new Mock<IStartupConfigService>();
 
-            var svc = new ConfigurationService(db, logger, mockUser.Object, mockStartup.Object);
+            var svc = new ConfigurationService(db, logger, mockUser.Object, mockStartup.Object, new Mock<IDownloadClientAdapterFactory>().Object);
 
             // Act - save a modified settings object
             var settings = await svc.GetApplicationSettingsAsync();
@@ -129,7 +126,7 @@ namespace Listenarr.Api.Tests
             var mockUser = new Mock<IUserService>();
             var mockStartup = new Mock<IStartupConfigService>();
 
-            var svc = new ConfigurationService(db, logger, mockUser.Object, mockStartup.Object);
+            var svc = new ConfigurationService(db, logger, mockUser.Object, mockStartup.Object, new Mock<IDownloadClientAdapterFactory>().Object);
 
             await svc.SaveProwlarrImportSettingsAsync(new ProwlarrImportConnectionSettings
             {
@@ -174,7 +171,8 @@ namespace Listenarr.Api.Tests
                 db,
                 logger,
                 new Mock<IUserService>().Object,
-                new Mock<IStartupConfigService>().Object);
+                new Mock<IStartupConfigService>().Object,
+                new Mock<IDownloadClientAdapterFactory>().Object);
 
             await svc.SaveProwlarrImportSettingsAsync(new ProwlarrImportConnectionSettings
             {

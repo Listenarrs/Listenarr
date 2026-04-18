@@ -630,7 +630,7 @@ namespace Listenarr.Domain.Utils
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern uint GetLongPathName(string shortPath, StringBuilder longPathBuffer, int bufferLength);
-
+        
         /// <summary>
         /// Returns a path composed of all the given segments. The returned path is OS agnostic (C:\ or /)
         /// </summary>
@@ -639,8 +639,6 @@ namespace Listenarr.Domain.Utils
             string root = Path.GetPathRoot(Directory.GetCurrentDirectory()) ?? "/";
             return Path.Combine(root, Path.Combine(segments));
         }
-
-        
     }
 }
 

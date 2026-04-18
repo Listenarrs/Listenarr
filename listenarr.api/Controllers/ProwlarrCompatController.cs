@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.SignalR;
 using Listenarr.Api.Hubs;
 using Listenarr.Api.Services;
+using Listenarr.Infrastructure.Persistence.Converters;
 
 namespace Listenarr.Api.Controllers
 {
@@ -482,6 +483,7 @@ namespace Listenarr.Api.Controllers
                     var baseUrlFromPayload = GetStringProperty(payload, "baseUrl", "url");
                     var apiPathFromPayload = GetStringProperty(payload, "apiPath", null);
                     var apiKeyFromPayload = GetStringProperty(payload, "apiKey", null);
+                    var protocolFromPayload = GetStringProperty(payload, "protocol", null);
                     var categoriesFromPayload = ParseCategories(payload);
 
                     // Try settings object
@@ -555,7 +557,7 @@ namespace Listenarr.Api.Controllers
                         indexer = new Listenarr.Domain.Models.Indexer
                         {
                             Name = string.IsNullOrEmpty(nameFromPayload) ? (string.IsNullOrEmpty(baseUrlFromPayload) ? "Prowlarr Indexer" : baseUrlFromPayload) : nameFromPayload,
-                            Implementation = string.IsNullOrEmpty(implementationFromPayload) ? "Custom" : implementationFromPayload,
+                            Implementation = ParseImplementation(implementationFromPayload),
                             Url = urlFromPayload,
                             ApiKey = string.IsNullOrEmpty(apiKeyFromPayload) ? null : apiKeyFromPayload,
                             Categories = categoriesFromPayload ?? string.Empty,
@@ -563,11 +565,9 @@ namespace Listenarr.Api.Controllers
                             UpdatedAt = DateTime.UtcNow,
                             IsEnabled = true,
                             Tags = string.Empty,
-                            AdditionalSettings = string.Empty
+                            AdditionalSettings = string.Empty,
+                            Protocol = DownloadProtocolConverter.ConvertStringToDownloadProtocol(protocolFromPayload)
                         };
-
-                        var implLower = (indexer.Implementation ?? string.Empty).ToLowerInvariant();
-                        indexer.Type = implLower.Contains("newznab") ? "Usenet" : (implLower.Contains("torznab") ? "Torrent" : "Custom");
 
                         _dbContext.Indexers.Add(indexer);
                         created = true;
@@ -655,7 +655,7 @@ namespace Listenarr.Api.Controllers
 
                 // Apply updates
                 if (!string.IsNullOrEmpty(name)) indexer.Name = name;
-                if (!string.IsNullOrEmpty(implementation)) indexer.Implementation = implementation;
+                indexer.Implementation = ParseImplementation(implementation);
 
                 var url = (baseUrl ?? string.Empty).Trim();
                 if (!string.IsNullOrEmpty(apiPath) && !string.IsNullOrEmpty(url))
@@ -780,6 +780,7 @@ namespace Listenarr.Api.Controllers
 
         // Remove duplicate persisted indexers that share the same normalized URL + ApiKey.
         // Keeps the earliest created (lowest Id) and removes the rest.
+
         private async Task CleanupDuplicateIndexersAsync(string normalizedUrl, string apiKey)
         {
             try
@@ -867,6 +868,7 @@ namespace Listenarr.Api.Controllers
                 var baseUrl = getString(item, "baseUrl", "url");
                 var apiPath = getString(item, "apiPath", null);
                 var apiKey = getString(item, "apiKey", null);
+                var protocol = getString(item, "protocol", null);
 
                 // categories can be array or string
                 string? categories = null;
@@ -952,7 +954,6 @@ namespace Listenarr.Api.Controllers
                 }
 
                 if (string.IsNullOrEmpty(name)) name = baseUrl ?? "Prowlarr Indexer";
-                if (string.IsNullOrEmpty(implementation)) implementation = "Custom";
 
                 // Normalize URLs
                 var url = (baseUrl ?? string.Empty).Trim();
@@ -971,7 +972,7 @@ namespace Listenarr.Api.Controllers
                 var indexer = new Listenarr.Domain.Models.Indexer
                 {
                     Name = name,
-                    Implementation = implementation,
+                    Implementation = ParseImplementation(implementation),
                     Url = url,
                     ApiKey = string.IsNullOrEmpty(apiKey) ? null : apiKey,
                     Categories = categories ?? string.Empty,
@@ -979,12 +980,9 @@ namespace Listenarr.Api.Controllers
                     AdditionalSettings = string.Empty,
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow,
-                    IsEnabled = true
+                    IsEnabled = true,
+                    Protocol = DownloadProtocolConverter.ConvertStringToDownloadProtocol(protocol)
                 };
-
-                // Guess Type from implementation
-                var implLower = (implementation ?? string.Empty).ToLowerInvariant();
-                indexer.Type = implLower.Contains("newznab") ? "Usenet" : (implLower.Contains("torznab") ? "Torrent" : "Custom");
 
                 _dbContext.Indexers.Add(indexer);
                 created++;
@@ -1308,6 +1306,15 @@ namespace Listenarr.Api.Controllers
             }
 
             return null;
+        }
+
+        private static Implementation ParseImplementation(string value)
+        {
+            if (string.Equals(value, "Newznab", StringComparison.OrdinalIgnoreCase))
+            {
+                return Implementation.Newznab;
+            }
+            return Implementation.Torznab;
         }
 
         // DTOs

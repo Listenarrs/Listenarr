@@ -12,27 +12,54 @@ using System.Threading;
 using System.Threading.Tasks;
 using Listenarr.Api.Services;
 using Listenarr.Domain.Models;
+using Listenarr.Infrastructure.Models;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Polly;
+using Polly.Extensions.Http;
 
 namespace Listenarr.Api.Services.Adapters
 {
-    public class TransmissionAdapter : IDownloadClientAdapter
+    public class TransmissionAdapter : DownloadClientAdapter, IDownloadClientAdapter
     {
-        public string ClientId => "transmission";
-        public string ClientType => "transmission";
-        public DownloadProtocol Protocol => DownloadProtocol.Torrent;
+        private const string CLIENT_TYPE = "transmission";
 
-        private readonly IHttpClientFactory _httpClientFactory;
+        public string ClientType => CLIENT_TYPE;
+        public List<DownloadProtocol> Protocols => [DownloadProtocol.Torrent];
+
         private readonly IRemotePathMappingService _pathMappingService;
         private readonly ITorrentFileDownloader _torrentFileDownloader;
-        private readonly ILogger<TransmissionAdapter> _logger;
 
-        public TransmissionAdapter(IHttpClientFactory httpClientFactory, IRemotePathMappingService pathMappingService, ITorrentFileDownloader torrentFileDownloader, ILogger<TransmissionAdapter> logger)
+        public TransmissionAdapter(
+            IDbContextFactory<ListenArrDbContext> dbFactory,
+            HttpClient httpClient,
+            IRemotePathMappingService pathMappingService, 
+            ITorrentFileDownloader torrentFileDownloader, 
+            ILogger<TransmissionAdapter> logger) : base(dbFactory, httpClient, logger)
         {
-            _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
             _pathMappingService = pathMappingService ?? throw new ArgumentNullException(nameof(pathMappingService));
             _torrentFileDownloader = torrentFileDownloader ?? throw new ArgumentNullException(nameof(torrentFileDownloader));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        }
+
+        public static void AddToServices(IServiceCollection services)
+        {
+            services.AddScoped<IDownloadClientAdapter, TransmissionAdapter>();
+            services.AddHttpClient(CLIENT_TYPE)
+                .ConfigureHttpClient(client =>
+                {
+                    client.Timeout = TimeSpan.FromSeconds(30);
+                })
+                .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler()
+                {
+                    AutomaticDecompression = System.Net.DecompressionMethods.All,
+                    UseCookies = false
+                })
+                .SetHandlerLifetime(TimeSpan.FromMinutes(5))
+                .AddPolicyHandler(HttpPolicyExtensions
+                    .HandleTransientHttpError()
+                    .CircuitBreakerAsync(3, TimeSpan.FromSeconds(30)))
+                .AddPolicyHandler(HttpPolicyExtensions.HandleTransientHttpError()
+                    .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
         }
 
         public async Task<(bool Success, string Message)> TestConnectionAsync(DownloadClientConfiguration client, CancellationToken ct = default)
@@ -81,7 +108,7 @@ namespace Listenarr.Api.Services.Adapters
             }
         }
 
-        public async Task<string?> AddAsync(DownloadClientConfiguration client, SearchResult result, CancellationToken ct = default)
+        public async Task<Download?> AddAsync(DownloadClientConfiguration client, IndexerSearchResult result, CancellationToken ct = default)
         {
             if (client == null) throw new ArgumentNullException(nameof(client));
             if (result == null) throw new ArgumentNullException(nameof(result));
@@ -248,19 +275,24 @@ namespace Listenarr.Api.Services.Adapters
 
                 if (response.TryGetProperty("arguments", out var args))
                 {
+                    var download = new Download(result, client);
+
                     if (args.TryGetProperty("torrent-added", out var added) && added.ValueKind == JsonValueKind.Object)
                     {
                         var torrentId = ExtractTorrentIdentifier(added);
                         _logger.LogInformation("Transmission successfully added torrent '{Title}' with id/hash: {Id}", LogRedaction.SanitizeText(result.Title), LogRedaction.SanitizeText(torrentId));
-                        return torrentId;
+                        download.SetClientDownloadId(torrentId);
+                        return download;
                     }
 
                     if (args.TryGetProperty("torrent-duplicate", out var duplicate) && duplicate.ValueKind == JsonValueKind.Object)
                     {
                         var existingId = ExtractTorrentIdentifier(duplicate);
                         _logger.LogInformation("Transmission reported duplicate torrent for '{Title}' with id/hash {Id}", LogRedaction.SanitizeText(result.Title), LogRedaction.SanitizeText(existingId));
-                        return existingId;
+                        download.SetClientDownloadId(existingId);
                     }
+
+                    return download;
                 }
 
                 _logger.LogWarning("Transmission AddAsync returning null - torrent may not have been added");
@@ -272,12 +304,12 @@ namespace Listenarr.Api.Services.Adapters
             }
         }
 
-        public async Task<bool> RemoveAsync(DownloadClientConfiguration client, string id, bool deleteFiles = false, CancellationToken ct = default)
+        public async Task<bool> RemoveAsync(DownloadClientConfiguration client, Download download, bool deleteFiles = false, CancellationToken ct = default)
         {
             if (client == null) throw new ArgumentNullException(nameof(client));
-            if (string.IsNullOrWhiteSpace(id)) throw new ArgumentNullException(nameof(id));
+            if (string.IsNullOrWhiteSpace(download.Id)) throw new ArgumentNullException(nameof(download.Id));
 
-            var idsPayload = ParseTransmissionIds(id);
+            var idsPayload = ParseTransmissionIds(download.Id);
             var arguments = new Dictionary<string, object>
             {
                 ["ids"] = idsPayload,
@@ -297,16 +329,16 @@ namespace Listenarr.Api.Services.Adapters
                 var response = await InvokeRpcAsync(client, payload, ct);
                 if (response.TryGetProperty("result", out var resultProp) && string.Equals(resultProp.GetString(), "success", StringComparison.OrdinalIgnoreCase))
                 {
-                    _logger.LogInformation("Removed torrent {Id} from Transmission (deleteFiles={DeleteFiles})", LogRedaction.SanitizeText(id), deleteFiles);
+                    _logger.LogInformation("Removed torrent {Id} from Transmission (deleteFiles={DeleteFiles})", LogRedaction.SanitizeText(download.Id), deleteFiles);
                     return true;
                 }
 
                 var errorMsg = resultProp.ValueKind == JsonValueKind.String ? resultProp.GetString() ?? "Unknown error" : "Unknown error";
-                _logger.LogWarning("Transmission failed to remove torrent {Id}: {Message}", LogRedaction.SanitizeText(id), LogRedaction.SanitizeText(errorMsg));
+                _logger.LogWarning("Transmission failed to remove torrent {Id}: {Message}", LogRedaction.SanitizeText(download.Id), LogRedaction.SanitizeText(errorMsg));
                 return false;
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) {
-                _logger.LogError(ex, "Error removing torrent {Id} from Transmission", LogRedaction.SanitizeText(id));
+                _logger.LogError(ex, "Error removing torrent {Id} from Transmission", LogRedaction.SanitizeText(download.Id));
                 return false;
             }
         }
@@ -1028,7 +1060,6 @@ namespace Listenarr.Api.Services.Adapters
 
         private async Task<JsonElement> InvokeRpcAsync(DownloadClientConfiguration client, object payload, CancellationToken ct)
         {
-            var httpClient = _httpClientFactory.CreateClient("transmission");
             var baseUrl = BuildBaseUrl(client);
             var serializedPayload = JsonSerializer.Serialize(payload, s_rpcJsonOptions);
             string? sessionId = null;
@@ -1054,7 +1085,7 @@ namespace Listenarr.Api.Services.Adapters
                     request.Headers.Authorization = authHeader;
                 }
 
-                var response = await httpClient.SendAsync(request, ct);
+                var response = await _httpClient.SendAsync(request, ct);
                 var body = await response.Content.ReadAsStringAsync(ct);
 
                 if (response.StatusCode == HttpStatusCode.Conflict && attempt == 0 && response.Headers.TryGetValues("X-Transmission-Session-Id", out var values))
@@ -1280,15 +1311,15 @@ namespace Listenarr.Api.Services.Adapters
             return null;
         }
 
-        private static string? ExtractTorrentIdentifier(JsonElement element)
+        private static string ExtractTorrentIdentifier(JsonElement element)
         {
             if (element.ValueKind != JsonValueKind.Object)
             {
-                return null;
+                throw new Exception("Unexpected JSON reply from Transmission RPC");
             }
 
             // Try snake_case (JSON-RPC 2.0 / Transmission 4.1+) first, fall back to camelCase
-            if ((element.TryGetProperty("hash_string", out var hashProp) || element.TryGetProperty("hashString", out hashProp)))
+            if (element.TryGetProperty("hash_string", out var hashProp) || element.TryGetProperty("hashString", out hashProp))
             {
                 var hash = hashProp.GetString();
                 if (!string.IsNullOrWhiteSpace(hash))
@@ -1302,7 +1333,15 @@ namespace Listenarr.Api.Services.Adapters
                 return idProp.GetInt32().ToString(CultureInfo.InvariantCulture);
             }
 
-            return null;
+            throw new Exception("Unexpected JSON reply from Transmission RPC: Missing torrent identifier");
+        }
+
+        public async Task<List<Download>> PollAsync(DownloadMonitorService service, DownloadClientConfiguration client, List<Download> downloads, ApplicationSettings appSettings, CancellationToken ct = default)
+        {
+            using var db = _dbFactory.CreateDbContext();
+            await service.PollTransmissionAsync(client, downloads, db, appSettings, ct);
+
+            return [];
         }
     }
 }

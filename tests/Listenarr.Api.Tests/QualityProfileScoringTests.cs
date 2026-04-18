@@ -41,7 +41,7 @@ namespace Listenarr.Api.Tests
                 Format = "mp3",
                 Quality = "320",
                 Language = "English",
-                DownloadType = "torrent",
+                Protocol = DownloadProtocol.Torrent,
                 Seeders = 5,
                 PublishedDate = DateTime.UtcNow.ToString("o")
             };
@@ -72,7 +72,7 @@ namespace Listenarr.Api.Tests
                 Format = null,
                 Quality = null,
                 Language = "English",
-                DownloadType = "torrent",
+                Protocol = DownloadProtocol.Torrent,
                 Seeders = 2,
                 PublishedDate = DateTime.UtcNow.ToString("o")
             };
@@ -104,7 +104,7 @@ namespace Listenarr.Api.Tests
                 Format = "mp3",
                 Quality = null,
                 Language = "English",
-                DownloadType = "torrent",
+                Protocol = DownloadProtocol.Torrent,
                 Seeders = 2,
                 PublishedDate = DateTime.UtcNow.ToString("o")
             };
@@ -135,7 +135,7 @@ namespace Listenarr.Api.Tests
                 Format = null,
                 Quality = null,
                 Language = "English",
-                DownloadType = "torrent",
+                Protocol = DownloadProtocol.Torrent,
                 Seeders = 2,
                 PublishedDate = DateTime.UtcNow.ToString("o")
             };
@@ -166,7 +166,7 @@ namespace Listenarr.Api.Tests
                 Format = "m4b",
                 Quality = null,
                 Language = "English",
-                DownloadType = "nzb",
+                Protocol = DownloadProtocol.Usenet,
                 NzbUrl = "http://example.com/test.nzb",
                 Seeders = 0,
                 PublishedDate = DateTime.UtcNow.ToString("o")
@@ -200,7 +200,7 @@ namespace Listenarr.Api.Tests
                 Format = null,
                 Quality = null,
                 Language = null,
-                DownloadType = "nzb",
+                Protocol = DownloadProtocol.Usenet,
                 NzbUrl = "http://example.com/test.nzb",
                 Seeders = 0,
                 PublishedDate = DateTime.UtcNow.ToString("o")
@@ -237,7 +237,7 @@ namespace Listenarr.Api.Tests
                 Format = null,
                 Quality = null,
                 Language = null,
-                DownloadType = "usenet",
+                Protocol = DownloadProtocol.Usenet,
                 ResultUrl = "https://indexer/example/info/123",
                 Seeders = 0,
                 PublishedDate = DateTime.UtcNow.ToString("o")
@@ -274,7 +274,7 @@ namespace Listenarr.Api.Tests
                 Format = "m4b",
                 Quality = "320",
                 Language = "English",
-                DownloadType = "nzb",
+                Protocol = DownloadProtocol.Usenet,
                 NzbUrl = "http://example.com/old.nzb",
                 Seeders = 0,
                 PublishedDate = DateTime.UtcNow.AddDays(-365).ToString("o") // 1 year old
@@ -310,7 +310,7 @@ namespace Listenarr.Api.Tests
                 Format = null,
                 Quality = null,
                 Language = null,
-                DownloadType = "nzb",
+                Protocol = DownloadProtocol.Usenet,
                 NzbUrl = "http://example.com/test.nzb",
                 Seeders = 0,
                 PublishedDate = DateTime.UtcNow.AddDays(-60).ToString("o")
@@ -356,7 +356,7 @@ namespace Listenarr.Api.Tests
                 Format = "mp3",
                 Quality = "256",
                 Language = "Spanish",
-                DownloadType = "torrent",
+                Protocol = DownloadProtocol.Torrent,
                 Seeders = 2,
                 PublishedDate = DateTime.UtcNow.ToString("o")
             };
@@ -388,7 +388,7 @@ namespace Listenarr.Api.Tests
                 Format = "mp3",
                 Quality = "128",
                 Language = "English",
-                DownloadType = "torrent",
+                Protocol = DownloadProtocol.Torrent,
                 Seeders = 2,
                 PublishedDate = DateTime.UtcNow.ToString("o")
             };
@@ -418,7 +418,7 @@ namespace Listenarr.Api.Tests
                 Format = "mp3",
                 Quality = "320",
                 Language = "English",
-                DownloadType = "torrent",
+                Protocol = DownloadProtocol.Torrent,
                 Seeders = null,
                 PublishedDate = DateTime.UtcNow.ToString("o")
             };
@@ -445,7 +445,7 @@ namespace Listenarr.Api.Tests
             {
                 Title = "Old-ish Result",
                 PublishedDate = DateTime.UtcNow.AddDays(-15).ToString("o"),
-                DownloadType = "torrent",
+                Protocol = DownloadProtocol.Torrent,
                 IndexerId = indexer.Id
             };
 
@@ -471,7 +471,7 @@ namespace Listenarr.Api.Tests
             {
                 Title = "Too Old Result",
                 PublishedDate = DateTime.UtcNow.AddDays(-12).ToString("o"),
-                DownloadType = "nzb",
+                Protocol = DownloadProtocol.Usenet,
                 IndexerId = indexer.Id
             };
 
@@ -497,7 +497,7 @@ namespace Listenarr.Api.Tests
             {
                 Title = "Old Torrent",
                 PublishedDate = DateTime.UtcNow.AddDays(-12).ToString("o"),
-                DownloadType = "torrent",
+                Protocol = DownloadProtocol.Torrent,
                 IndexerId = idx.Id
             };
 
@@ -531,7 +531,7 @@ namespace Listenarr.Api.Tests
                 Format = "unknown",
                 Quality = null,
                 Language = "English",
-                DownloadType = "torrent",
+                Protocol = DownloadProtocol.Torrent,
                 Seeders = 1,
                 PublishedDate = DateTime.UtcNow.ToString("o")
             };
@@ -567,7 +567,7 @@ namespace Listenarr.Api.Tests
                 Format = "mp3",
                 Quality = "128",
                 Language = "English",
-                DownloadType = "torrent",
+                Protocol = DownloadProtocol.Torrent,
                 Seeders = 1,
                 PublishedDate = DateTime.UtcNow.ToString("o")
             };

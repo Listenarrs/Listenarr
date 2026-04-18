@@ -25,22 +25,14 @@
           <div class="indexer-header">
             <div class="indexer-info">
               <h4>{{ indexer.name }}</h4>
-              <img
-                v-if="indexer.type === 'Torrent'"
-                src="@/assets/icons/indexers/torrent.svg"
-                alt="Torrent"
+              <img v-if="hasLogo(indexer.protocol)"
+                :src="getLogo(indexer.protocol)"
+                :alt="DownloadProtocolConfigs[indexer.protocol].label"
                 class="indexer-type-icon"
-                title="Torrent"
+                :title="DownloadProtocolConfigs[indexer.protocol].label"
               />
-              <img
-                v-else-if="indexer.type === 'Usenet'"
-                src="@/assets/icons/indexers/usenet.svg"
-                alt="Usenet"
-                class="indexer-type-icon"
-                title="Usenet"
-              />
-              <span v-else class="indexer-type" :class="indexer.type.toLowerCase()">
-                {{ indexer.implementation === 'InternetArchive' ? 'DDL' : indexer.type }}
+              <span v-else class="indexer-type" :class="indexer.protocol.toLowerCase()">
+                {{ DownloadProtocolConfigs[indexer.protocol].label }}
               </span>
             </div>
             <div class="indexer-actions">
@@ -286,6 +278,7 @@ import {
   importProwlarrIndexers,
 } from '@/services/api'
 import { signalRService } from '@/services/signalr'
+import { DownloadProtocolConfigs, hasLogo, getLogo } from '@/types/DownloadProtocolConfig'
 
 // State
 const toast = useToast()

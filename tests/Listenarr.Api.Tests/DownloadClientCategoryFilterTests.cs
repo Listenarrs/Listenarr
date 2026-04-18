@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Listenarr.Api.Services;
 using Listenarr.Api.Services.Adapters;
 using Listenarr.Domain.Models;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -110,15 +111,19 @@ namespace Listenarr.Api.Tests
             });
 
             using var httpClient = new HttpClient(handler);
-            var httpFactory = new Mock<IHttpClientFactory>();
-            httpFactory.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(httpClient);
 
             var pathMapping = new Mock<IRemotePathMappingService>();
             pathMapping
                 .Setup(p => p.TranslatePathAsync(It.IsAny<string>(), It.IsAny<string>()))
                 .ReturnsAsync((string _, string path) => path);
 
-            var adapter = new TransmissionAdapter(httpFactory.Object, pathMapping.Object, Mock.Of<ITorrentFileDownloader>(), NullLogger<TransmissionAdapter>.Instance);
+            var adapter = new TransmissionAdapter(
+                new Mock<IDbContextFactory<ListenArrDbContext>>().Object,
+                httpClient,
+                pathMapping.Object,
+                Mock.Of<ITorrentFileDownloader>(),
+                NullLogger<TransmissionAdapter>.Instance);
+            
             var client = new DownloadClientConfiguration
             {
                 Id = "tr-1",
@@ -200,7 +205,13 @@ namespace Listenarr.Api.Tests
                 .Setup(p => p.TranslatePathAsync(It.IsAny<string>(), It.IsAny<string>()))
                 .ReturnsAsync((string _, string path) => path);
 
-            var adapter = new TransmissionAdapter(httpFactory.Object, pathMapping.Object, Mock.Of<ITorrentFileDownloader>(), NullLogger<TransmissionAdapter>.Instance);
+            var adapter = new TransmissionAdapter(
+                new Mock<IDbContextFactory<ListenArrDbContext>>().Object,
+                httpClient,
+                pathMapping.Object,
+                Mock.Of<ITorrentFileDownloader>(),
+                NullLogger<TransmissionAdapter>.Instance);
+            
             var client = new DownloadClientConfiguration
             {
                 Id = "tr-1",

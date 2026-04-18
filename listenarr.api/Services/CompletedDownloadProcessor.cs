@@ -783,7 +783,7 @@ namespace Listenarr.Api.Services
                                 }
                                 try
                                 {
-                                    await downloadClientGateway.MarkItemAsImportedAsync(clientConfig, clientIdForMark);
+                                    await downloadClientGateway.MarkItemAsImportedAsync(clientConfig, downloadForCleanup);
                                 }
                                 catch (Exception markEx) when (markEx is not OperationCanceledException && markEx is not OutOfMemoryException && markEx is not StackOverflowException)
                                 {
@@ -845,7 +845,7 @@ namespace Listenarr.Api.Services
                                     }
                                 }
                                 
-                                var removed = await downloadClientGateway.RemoveAsync(clientConfig, clientId, deleteFiles);
+                                var removed = await downloadClientGateway.RemoveAsync(clientConfig, downloadForCleanup, deleteFiles);
                                 
                                 if (removed)
                                 {

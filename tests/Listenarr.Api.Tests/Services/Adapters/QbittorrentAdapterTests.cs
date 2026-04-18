@@ -1,21 +1,18 @@
-using System;
-using System.Collections.Generic;
 using System.Net;
-using System.Net.Http;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
 using Listenarr.Api.Services.Adapters;
-using Listenarr.Domain.Models;
 using Listenarr.Domain.Utils;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
 namespace Listenarr.Api.Tests
 {
+    [Trait("Category", "DownloadClientAdapter")]
+    [Trait("Third-Party", "qBittorrent")]
     public class QbittorrentAdapterTests
     {
         private class TestHttpClientFactory : IHttpClientFactory
@@ -61,9 +58,13 @@ namespace Listenarr.Api.Tests
             });
 
             using var http = new HttpClient(handler);
-            var factory = new TestHttpClientFactory(http);
             var pathMapMock = new Mock<Listenarr.Api.Services.IRemotePathMappingService>();
-            var adapter = new QbittorrentAdapter(factory, pathMapMock.Object, Mock.Of<ITorrentFileDownloader>(), NullLogger<QbittorrentAdapter>.Instance);
+            var adapter = new QbittorrentAdapter(
+                new Mock<IDbContextFactory<ListenArrDbContext>>().Object,
+                http,
+                pathMapMock.Object,
+                Mock.Of<ITorrentFileDownloader>(),
+                NullLogger<QbittorrentAdapter>.Instance);
 
             var cfg = new DownloadClientConfiguration
             {
@@ -99,9 +100,13 @@ namespace Listenarr.Api.Tests
             });
 
             using var http = new HttpClient(handler);
-            var factory = new TestHttpClientFactory(http);
             var pathMapMock = new Mock<Listenarr.Api.Services.IRemotePathMappingService>();
-            var adapter = new QbittorrentAdapter(factory, pathMapMock.Object, Mock.Of<ITorrentFileDownloader>(), NullLogger<QbittorrentAdapter>.Instance);
+            var adapter = new QbittorrentAdapter(
+                new Mock<IDbContextFactory<ListenArrDbContext>>().Object,
+                http,
+                pathMapMock.Object,
+                Mock.Of<ITorrentFileDownloader>(),
+                NullLogger<QbittorrentAdapter>.Instance);
 
             var cfg = new DownloadClientConfiguration
             {
@@ -133,9 +138,13 @@ namespace Listenarr.Api.Tests
             });
 
             using var http = new HttpClient(handler);
-            var factory = new TestHttpClientFactory(http);
             var pathMapMock = new Mock<Listenarr.Api.Services.IRemotePathMappingService>();
-            var adapter = new QbittorrentAdapter(factory, pathMapMock.Object, Mock.Of<ITorrentFileDownloader>(), NullLogger<QbittorrentAdapter>.Instance);
+            var adapter = new QbittorrentAdapter(
+                new Mock<IDbContextFactory<ListenArrDbContext>>().Object,
+                http,
+                pathMapMock.Object,
+                Mock.Of<ITorrentFileDownloader>(),
+                NullLogger<QbittorrentAdapter>.Instance);
 
             var cfg = new DownloadClientConfiguration
             {
@@ -211,7 +220,8 @@ namespace Listenarr.Api.Tests
                 .ReturnsAsync(TorrentDownloadResult.Empty);
 
             var adapter = new QbittorrentAdapter(
-                new TestHttpClientFactory(http),
+                new Mock<IDbContextFactory<ListenArrDbContext>>().Object,
+                http,
                 Mock.Of<Listenarr.Api.Services.IRemotePathMappingService>(),
                 downloader.Object,
                 NullLogger<QbittorrentAdapter>.Instance);
@@ -231,10 +241,10 @@ namespace Listenarr.Api.Tests
                 TorrentUrl = "https://indexer.example.com/book.torrent"
             };
 
-            var addedId = await adapter.AddAsync(client, searchResult);
+            var added = await adapter.AddAsync(client, searchResult);
             await serverTask;
 
-            Assert.Equal("NEWHASH", addedId);
+            Assert.Equal("NEWHASH", added.GetClientDownloadId<string>());
             Assert.Equal("https://indexer.example.com/book.torrent", requestedTorrentUrl);
             downloader.Verify(x => x.DownloadAsync("https://indexer.example.com/book.torrent", It.IsAny<CancellationToken>()), Times.Once);
         }
@@ -246,7 +256,8 @@ namespace Listenarr.Api.Tests
                 throw new InvalidOperationException("Network should not be hit for invalid torrent URLs.")));
 
             var adapter = new QbittorrentAdapter(
-                new TestHttpClientFactory(http),
+                new Mock<IDbContextFactory<ListenArrDbContext>>().Object,
+                http,
                 Mock.Of<Listenarr.Api.Services.IRemotePathMappingService>(),
                 Mock.Of<ITorrentFileDownloader>(),
                 NullLogger<QbittorrentAdapter>.Instance);
@@ -305,7 +316,8 @@ namespace Listenarr.Api.Tests
                 throw new InvalidOperationException("HTTP should not be called when qBittorrent content_path is already available.")));
 
             var adapter = new QbittorrentAdapter(
-                new TestHttpClientFactory(http),
+                new Mock<IDbContextFactory<ListenArrDbContext>>().Object,
+                http,
                 pathMapMock.Object,
                 Mock.Of<ITorrentFileDownloader>(),
                 NullLogger<QbittorrentAdapter>.Instance);
@@ -350,7 +362,8 @@ namespace Listenarr.Api.Tests
                 throw new InvalidOperationException("HTTP should not be called when qBittorrent content_path is already available.")));
 
             var adapter = new QbittorrentAdapter(
-                new TestHttpClientFactory(http),
+                new Mock<IDbContextFactory<ListenArrDbContext>>().Object,
+                http,
                 pathMapMock.Object,
                 Mock.Of<ITorrentFileDownloader>(),
                 NullLogger<QbittorrentAdapter>.Instance);

@@ -6,12 +6,17 @@ using System.Threading.Tasks;
 using Listenarr.Api.Services;
 using Listenarr.Api.Services.Adapters;
 using Listenarr.Domain.Models;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace Listenarr.Api.Tests
 {
+    [Trait("Category", "DownloadClientAdapter")]
+    [Trait("Third-Party", "SABnzbd")]
     public class SabnzbdAdapterTests
     {
         private sealed class TestHttpClientFactory : IHttpClientFactory
@@ -40,9 +45,9 @@ namespace Listenarr.Api.Tests
                 return Task.FromResult(response);
             });
 
-            using var http = new HttpClient(handler);
             var adapter = new SabnzbdAdapter(
-                new TestHttpClientFactory(http),
+                new Mock<IDbContextFactory<ListenArrDbContext>>().Object,
+                new HttpClient(handler),
                 Mock.Of<IRemotePathMappingService>(),
                 Mock.Of<INzbUrlResolver>(),
                 NullLogger<SabnzbdAdapter>.Instance);

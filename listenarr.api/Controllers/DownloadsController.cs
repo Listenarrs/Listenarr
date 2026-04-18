@@ -245,7 +245,6 @@ public class DownloadsController : ControllerBase
         try
         {
             var download = await _dbContext.Downloads.FindAsync(id);
-
             if (download == null)
             {
                 return NotFound(new { error = "Download not found", id });

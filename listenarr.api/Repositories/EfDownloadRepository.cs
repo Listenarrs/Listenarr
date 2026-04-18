@@ -110,7 +110,7 @@ namespace Listenarr.Api.Repositories
                     continue;
                 }
 
-                if (TryGetMetadataString(metadata, "ClientDownloadId", out var clientDownloadId))
+                if (TryGetMetadataString(metadata, Download.METADATA_CLIENT_DOWNLOAD_ID_KEY, out var clientDownloadId))
                 {
                     ids.Add(clientDownloadId);
                 }

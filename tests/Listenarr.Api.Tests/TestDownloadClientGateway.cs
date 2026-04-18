@@ -1,11 +1,4 @@
-using System;
-using System.Collections.Generic;
-using System.Net.Http;
 using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
-using Listenarr.Domain.Models;
-using Listenarr.Api.Services.Adapters;
 
 namespace Listenarr.Api.Tests
 {
@@ -44,12 +37,12 @@ namespace Listenarr.Api.Tests
             return Task.FromResult((true, "ok"));
         }
 
-        public Task<string?> AddAsync(DownloadClientConfiguration client, SearchResult result, CancellationToken ct = default)
+        public Task<Download?> AddAsync(DownloadClientConfiguration client, IndexerSearchResult result, CancellationToken ct = default)
         {
-            return Task.FromResult<string?>(null);
+            return Task.FromResult<Download?>(null);
         }
 
-        public Task<bool> RemoveAsync(DownloadClientConfiguration client, string id, bool deleteFiles = false, CancellationToken ct = default)
+        public Task<bool> RemoveAsync(DownloadClientConfiguration client, Download download, bool deleteFiles = false, CancellationToken ct = default)
         {
             return Task.FromResult(false);
         }
@@ -124,9 +117,15 @@ namespace Listenarr.Api.Tests
             return outList;
         }
 
-        public Task<bool> MarkItemAsImportedAsync(DownloadClientConfiguration client, string downloadId, CancellationToken ct = default)
+        public Task<bool> MarkItemAsImportedAsync(DownloadClientConfiguration client, Download download, CancellationToken ct = default)
         {
             return Task.FromResult(true);
         }
+
+        public async Task<QueueItem> GetImportItemAsync(DownloadClientConfiguration client, Download download, QueueItem queueItem, QueueItem? previousAttempt = null, CancellationToken ct = default)
+        {
+            return new QueueItem();
+        }
+
     }
 }

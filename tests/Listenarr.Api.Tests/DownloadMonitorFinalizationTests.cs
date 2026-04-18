@@ -147,17 +147,12 @@ namespace Listenarr.Api.Tests
 
             var monitor = new DownloadMonitorService(scopeFactory, hubContextMock.Object, loggerMock.Object, httpFactoryMock.Object);
 
-            // Invoke private PollSABnzbdAsync via reflection
-            var method = typeof(DownloadMonitorService).GetMethod("PollSABnzbdAsync", BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.NotNull(method);
-
             var clientConfig = new DownloadClientConfiguration { Id = "c-queue-test", Name = "Sabnzbd", Host = "localhost", Port = 8080, UseSSL = false, Settings = new Dictionary<string, object> { { "apiKey", "apikey" } }, DownloadPath = "/downloads/complete" };
 
             var downloads = new List<Download> { download };
             var appSettings = new ApplicationSettings();
 
-            var task = (Task?)method.Invoke(monitor, new object[] { clientConfig, downloads, db, appSettings, CancellationToken.None });
-            if (task != null) await task;
+            await monitor.PollSABnzbdAsync(clientConfig, downloads, db, appSettings, CancellationToken.None);
 
             // Verify the DB download was updated with progress ~50.5 (progress is stored as decimal)
             var updated = await db.Downloads.FindAsync(download.Id);
@@ -258,18 +253,13 @@ namespace Listenarr.Api.Tests
             var candidates = (Dictionary<string, DateTime>)field.GetValue(monitor)!;
             candidates[download.Id] = DateTime.UtcNow - TimeSpan.FromSeconds(20);
 
-            // Invoke private PollSABnzbdAsync via reflection with client.DownloadPath empty
-            var method = typeof(DownloadMonitorService).GetMethod("PollSABnzbdAsync", BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.NotNull(method);
-
             var clientConfig = new DownloadClientConfiguration { Id = "1763948475200-ywwemp9kd", Name = "Sabnzbd", Host = "localhost", Port = 8080, UseSSL = false, Settings = new Dictionary<string, object> { { "apiKey", "apikey" } }, DownloadPath = string.Empty };
 
             var downloads = new List<Download> { download };
             var appSettings = new ApplicationSettings();
 
             // If FinalizeDownloadAsync throws due to unguarded Replace calls when DownloadPath is empty, this will blow up.
-            var task = (Task?)method.Invoke(monitor, new object[] { clientConfig, downloads, db, appSettings, CancellationToken.None });
-            if (task != null) await task;
+            await monitor.PollSABnzbdAsync(clientConfig, downloads, db, appSettings, CancellationToken.None);
 
             // Finalization should have completed gracefully and candidate should be removed
             var candidatesAfter = (Dictionary<string, DateTime>)field.GetValue(monitor)!;
@@ -405,17 +395,12 @@ namespace Listenarr.Api.Tests
             var candidates = (Dictionary<string, DateTime>)field.GetValue(monitor)!;
             candidates[download.Id] = DateTime.UtcNow - TimeSpan.FromSeconds(20);
 
-            // Invoke private PollSABnzbdAsync via reflection
-            var method = typeof(DownloadMonitorService).GetMethod("PollSABnzbdAsync", BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.NotNull(method);
-
             var clientConfig = new DownloadClientConfiguration { Id = "1763948475200-ywwemp9kd", Name = "Sabnzbd", Host = "localhost", Port = 8080, UseSSL = false, Settings = new Dictionary<string, object> { { "apiKey", "apikey" } } };
 
             var downloads = new List<Download> { download };
             var appSettings = new ApplicationSettings();
 
-            var task = (Task?)method.Invoke(monitor, new object[] { clientConfig, downloads, db, appSettings, CancellationToken.None });
-            if (task != null) await task;
+            await monitor.PollSABnzbdAsync(clientConfig, downloads, db, appSettings, CancellationToken.None);
 
             // After finalization, the completion candidate should be removed and the ProcessCompletedDownloadAsync should have been invoked
             var candidatesAfter = (Dictionary<string, DateTime>)field.GetValue(monitor)!;
@@ -589,15 +574,10 @@ namespace Listenarr.Api.Tests
 
             var clientConfig = new DownloadClientConfiguration { Id = "c-retry", Name = "Sabnzbd", Host = "localhost", Port = 8080, UseSSL = false, Settings = new Dictionary<string, object> { { "apiKey", "apikey" } }, DownloadPath = string.Empty };
 
-            // Start poll (initial run) which should detect missing file and schedule a retry
-            var method = typeof(DownloadMonitorService).GetMethod("PollSABnzbdAsync", BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.NotNull(method);
-
             var downloads = new List<Download> { download };
             var appSettings = new ApplicationSettings();
 
-            var task = (Task?)method.Invoke(monitor, new object[] { clientConfig, downloads, db, appSettings, CancellationToken.None });
-            if (task != null) await task;
+            await monitor.PollSABnzbdAsync(clientConfig, downloads, db, appSettings, CancellationToken.None);
 
             // Wait a short time then create the file so the scheduled retry will find it
             await Task.Delay(200);
@@ -685,13 +665,8 @@ namespace Listenarr.Api.Tests
 
             var monitor = new DownloadMonitorService(scopeFactory, hubContextMock.Object, loggerMock.Object, httpFactoryMock.Object);
 
-            // Invoke private FinalizeDownloadAsync via reflection with directory as clientPath
-            var method = typeof(DownloadMonitorService).GetMethod("FinalizeDownloadAsync", BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.NotNull(method);
-
             // Call finalize: pass the download entity and the directory path
-            var task = (Task?)method.Invoke(monitor, new object[] { download, dir, clientConfig, CancellationToken.None });
-            if (task != null) await task;
+            await monitor.FinalizeDownloadAsync(download, dir, clientConfig, CancellationToken.None);
 
             // Verify the download record was updated to Processing (indicates finalization proceeded)
             // Accept either Processing (immediate) or Queued (deferred/queued) depending on implementation timing.
@@ -813,14 +788,9 @@ namespace Listenarr.Api.Tests
 
             // (No-op) - http factory used only for qBittorrent test here
 
-            // Invoke private FinalizeDownloadAsync via reflection
-            var method = typeof(DownloadMonitorService).GetMethod("FinalizeDownloadAsync", BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.NotNull(method);
-
             var clientConfig = new DownloadClientConfiguration { Id = "c1", Name = "Local", DownloadPath = tempDir };
 
-            var task = (Task?)method.Invoke(monitor, new object[] { download, tempDir, clientConfig, CancellationToken.None });
-            if (task != null) await task;
+            await monitor.FinalizeDownloadAsync(download, tempDir, clientConfig, CancellationToken.None);
 
             // No factory usage expected for direct finalization test
 
@@ -923,17 +893,12 @@ namespace Listenarr.Api.Tests
             var candidates = (Dictionary<string, DateTime>)field.GetValue(monitor)!;
             candidates[download.Id] = DateTime.UtcNow - TimeSpan.FromSeconds(20);
 
-            // Invoke private PollSABnzbdAsync via reflection
-            var method = typeof(DownloadMonitorService).GetMethod("PollSABnzbdAsync", BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.NotNull(method);
-
             var clientConfig = new DownloadClientConfiguration { Id = "c3", Name = "Sabnzbd", Host = "localhost", Port = 8080, UseSSL = false, Settings = new Dictionary<string, object> { { "apiKey", "apikey" } } };
 
             var downloads = new List<Download> { download };
             var appSettings = new ApplicationSettings();
 
-            var task = (Task?)method.Invoke(monitor, new object[] { clientConfig, downloads, db, appSettings, CancellationToken.None });
-            if (task != null) await task;
+            await monitor.PollSABnzbdAsync(clientConfig, downloads, db, appSettings, CancellationToken.None);
 
             // We expect the completion candidate to be removed (finalization attempted)
             var candidatesAfter = (Dictionary<string, DateTime>)field.GetValue(monitor)!;
@@ -1034,13 +999,9 @@ namespace Listenarr.Api.Tests
 
             var monitor = new DownloadMonitorService(scopeFactory, hubContextMock.Object, loggerMock.Object, httpFactoryMock.Object);
 
-            var method = typeof(DownloadMonitorService).GetMethod("FinalizeDownloadAsync", BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.NotNull(method);
-
             var clientConfig = new DownloadClientConfiguration { Id = "c2", Name = "Local", DownloadPath = tempDir };
 
-            var task = (Task?)method.Invoke(monitor, new object[] { download, tempDir, clientConfig, CancellationToken.None });
-            if (task != null) await task;
+            await monitor.FinalizeDownloadAsync(download, tempDir, clientConfig, CancellationToken.None);
 
             // Expect file copied to output OR that a processing job was queued for the copy (deferred)
             var destFile = Path.Join(outDir, Path.GetFileName(sourceFile));
@@ -1114,14 +1075,9 @@ namespace Listenarr.Api.Tests
 
             var monitor = new DownloadMonitorService(scopeFactory, hubContextMock.Object, loggerMock.Object, httpFactoryMock.Object, metricsMock.Object);
 
-            // Call FinalizeDownloadAsync with an empty client path so no source file is found
-            var method = typeof(DownloadMonitorService).GetMethod("FinalizeDownloadAsync", BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.NotNull(method);
-
             var clientConfig = new DownloadClientConfiguration { Id = "c-skip", Name = "Local", DownloadPath = string.Empty };
 
-            var task = (Task?)method.Invoke(monitor, new object[] { download, Path.Join(Path.GetTempPath(), Guid.NewGuid().ToString()), clientConfig, CancellationToken.None });
-            if (task != null) await task;
+            await monitor.FinalizeDownloadAsync(download, Path.Join(Path.GetTempPath(), Guid.NewGuid().ToString()), clientConfig, CancellationToken.None);
 
             // Since a processing job was present, we expect the monitor to NOT increment the file_not_found metric
             metricsMock.Verify(m => m.Increment("finalize.failed.file_not_found", It.IsAny<double>()), Times.Never);

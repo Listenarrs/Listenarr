@@ -26,6 +26,7 @@ using Listenarr.Domain.Models;
 using Listenarr.Api.Services;
 using Listenarr.Api.Services.Search;
 using Microsoft.AspNetCore.Mvc;
+using Listenarr.Domain.Models.Converters;
 
 namespace Listenarr.Api.Controllers
 {
@@ -1376,12 +1377,12 @@ namespace Listenarr.Api.Controllers
                 // If the underlying indexer implementation indicates MyAnonamouse (set on results by SearchIndexerAsync), return Prowlarr-like DTO shape
                 if (idxResults.Count > 0 && !string.IsNullOrWhiteSpace(idxResults[0].IndexerImplementation) && string.Equals(idxResults[0].IndexerImplementation, "MyAnonamouse", StringComparison.OrdinalIgnoreCase))
                 {
-                    var dtos = idxResults.Select(r => Listenarr.Domain.Models.SearchResultConverters.ToIndexerResultDto(r)).ToList();
+                    var dtos = idxResults.Select(r => SearchResultConverters.ToIndexerResultDto(r)).ToList();
                     return Ok(dtos);
                 }
 
                 // Otherwise, return the legacy SearchResult shape
-                var results = idxResults.Select(r => Listenarr.Domain.Models.SearchResultConverters.ToSearchResult(r)).ToList();
+                var results = idxResults.Select(r => SearchResultConverters.ToSearchResult(r)).ToList();
                 _logger.LogInformation("SearchByApi returning {Count} results for apiId: {ApiId}", results.Count, apiId);
                 return Ok(results);
             }
