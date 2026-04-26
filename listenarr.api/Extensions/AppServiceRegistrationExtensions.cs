@@ -16,10 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 // csharp
-using System;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Listenarr.Api.Services;
 using Listenarr.Api.Services.Metadata;
 
 namespace Listenarr.Api.Extensions
@@ -81,7 +77,7 @@ namespace Listenarr.Api.Extensions
             services.AddSingleton<IImageCacheService>(sp => new ImageCacheService(
                 sp.GetRequiredService<ILogger<ImageCacheService>>(),
                 sp.GetRequiredService<IHttpClientFactory>(),
-                sp.GetRequiredService<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>().ContentRootPath
+                sp.GetRequiredService<IWebHostEnvironment>().ContentRootPath
             ));
             services.AddScoped<IFileNamingService, FileNamingService>();
             services.AddScoped<IRenameService, RenameService>();

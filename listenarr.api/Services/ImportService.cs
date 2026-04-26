@@ -108,7 +108,7 @@ namespace Listenarr.Api.Services
                             metadata.TrackNumber ??= extractedMetadata.TrackNumber;
                             metadata.DiscNumber ??= extractedMetadata.DiscNumber;
                             metadata.Year ??= extractedMetadata.Year;
-                            metadata.Bitrate ??= extractedMetadata.Bitrate;
+                            metadata.BitRate ??= extractedMetadata.BitRate;
                             metadata.Format ??= extractedMetadata.Format;
                             _logger.LogDebug("ImportSingleFile: merged extracted metadata for {File}", sourcePath);
                         }
@@ -217,7 +217,7 @@ namespace Listenarr.Api.Services
                     { "Asin", string.IsNullOrWhiteSpace(metadataForNaming.Asin) ? string.Empty : metadataForNaming.Asin },
                     { "SeriesNumber", metadataForNaming.SeriesPosition?.ToString() ?? metadataForNaming.TrackNumber?.ToString() ?? string.Empty },
                     { "Year", metadataForNaming.Year?.ToString() ?? string.Empty },
-                    { "Quality", (metadataForNaming.Bitrate.HasValue ? $"{metadataForNaming.Bitrate}kbps" : null) ?? metadataForNaming.Format ?? string.Empty },
+                    { "Quality", (metadataForNaming.BitRate.HasValue ? $"{metadataForNaming.BitRate}kbps" : null) ?? metadataForNaming.Format ?? string.Empty },
                     { "DiskNumber", metadataForNaming.DiscNumber?.ToString() ?? string.Empty },
                     { "ChapterNumber", metadataForNaming.TrackNumber?.ToString() ?? string.Empty }
                 };
@@ -652,7 +652,7 @@ namespace Listenarr.Api.Services
                             { "Asin", string.IsNullOrWhiteSpace(namingMetadata.Asin) ? string.Empty : namingMetadata.Asin },
                             { "SeriesNumber", namingMetadata.SeriesPosition?.ToString() ?? effectiveChapterNumber?.ToString() ?? string.Empty },
                             { "Year", namingMetadata.Year?.ToString() ?? string.Empty },
-                            { "Quality", (namingMetadata.Bitrate.HasValue ? $"{namingMetadata.Bitrate}kbps" : null) ?? namingMetadata.Format ?? string.Empty },
+                            { "Quality", (namingMetadata.BitRate.HasValue ? $"{namingMetadata.BitRate}kbps" : null) ?? namingMetadata.Format ?? string.Empty },
                             { "DiskNumber", effectiveDiskNumber?.ToString() ?? string.Empty },
                             { "ChapterNumber", effectiveChapterNumber?.ToString() ?? string.Empty }
                         };
@@ -908,7 +908,7 @@ namespace Listenarr.Api.Services
                         : extractedMetadata?.Year,
                     TrackNumber = extractedMetadata?.TrackNumber,
                     DiscNumber = extractedMetadata?.DiscNumber,
-                    Bitrate = extractedMetadata?.Bitrate,
+                    BitRate = extractedMetadata?.BitRate,
                     Format = extractedMetadata?.Format
                 };
             }
@@ -1060,7 +1060,7 @@ namespace Listenarr.Api.Services
             if (metadata != null)
             {
                 if (!string.IsNullOrEmpty(metadata.Format)) return metadata.Format;
-                if (metadata.Bitrate.HasValue) return metadata.Bitrate.Value + "kbps";
+                if (metadata.BitRate.HasValue) return metadata.BitRate.Value + "kbps";
             }
 
             // Best-effort from filename (bitrate patterns)

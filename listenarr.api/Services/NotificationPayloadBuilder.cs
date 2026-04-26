@@ -359,14 +359,14 @@ namespace Listenarr.Api.Services
             {
                 try
                 {
-                    Console.WriteLine($"DEBUG: Attempting to download image for attachment: {absoluteImageUrl}");
+                    //Console.WriteLine($"DEBUG: Attempting to download image for attachment: {absoluteImageUrl}");
                     logInfo?.Invoke($"Attempting to download image for attachment: {absoluteImageUrl}");
                     var imageResponse = await httpClient.GetAsync(absoluteImageUrl);
-                    Console.WriteLine($"DEBUG: image GET status: {imageResponse.StatusCode}");
+                    //Console.WriteLine($"DEBUG: image GET status: {imageResponse.StatusCode}");
                     if (imageResponse.IsSuccessStatusCode)
                     {
                         var imageData = await imageResponse.Content.ReadAsByteArrayAsync();
-                        Console.WriteLine($"DEBUG: downloaded image data length: {imageData?.Length}");
+                        //Console.WriteLine($"DEBUG: downloaded image data length: {imageData?.Length}");
                         if (imageData != null && imageData.Length > 0)
                         {
                             var contentType = imageResponse.Content.Headers.ContentType?.MediaType ?? "image/jpeg";

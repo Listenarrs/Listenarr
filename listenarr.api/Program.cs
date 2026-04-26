@@ -207,6 +207,11 @@ Log.Logger = new Serilog.LoggerConfiguration()
 // Use Serilog for logging
 builder.Host.UseSerilog();
 
+if (isLikelyTestHost)
+{
+    Log.Logger = Serilog.Core.Logger.None;
+}
+
 // Configure URLs to listen on port 4545 (main Listenarr port) - can be overridden by --urls
 if (!args?.Any(arg => arg.StartsWith("--urls")) ?? true)
 {
@@ -350,9 +355,9 @@ builder.Services.AddScoped<AsinSearchHandler>();
 // Add default HTTP client for other services
 builder.Services.AddHttpClient();
 
-// Add named HttpClient for download operations (qBittorrent, Transmission, etc.)
+// Add named HttpClient for sabnzbd
 // Prevents socket exhaustion by reusing connections
-builder.Services.AddHttpClient("DownloadClient")
+builder.Services.AddHttpClient("sabnzbd")
     .ConfigureHttpClient(client =>
     {
         client.Timeout = TimeSpan.FromSeconds(30);

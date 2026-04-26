@@ -15,6 +15,12 @@ indent_style = space
 indent_size = 4
 
 # ─── XML / project files ──────────────────────────────────────────────────────
+
+# IDE0005: Using directive is unnecessary.
+dotnet_diagnostic.IDE0005.severity = warning
+# IDE0130: Namespace does not match the directory.
+dotnet_diagnostic.IDE0130.severity = warning
+
 [*.{csproj,props,targets,slnx,xml,config,resx}]
 indent_style = space
 indent_size = 2

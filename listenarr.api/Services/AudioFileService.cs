@@ -215,7 +215,7 @@ namespace Listenarr.Api.Services
                     Format = meta?.Format,
                     Container = meta?.Container,
                     Codec = meta?.Codec,
-                    Bitrate = meta?.Bitrate,
+                    Bitrate = meta?.BitRate,
                     SampleRate = meta?.SampleRate,
                     Channels = meta?.Channels
                 };

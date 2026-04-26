@@ -10,7 +10,7 @@
                 "${workspaceFolder}/listenarr.slnx",
                 "/property:GenerateFullPaths=true",
                 "\"/consoleloggerparameters:NoSummary;ForceNoAlign\""
-            ]
+            ],
             "problemMatcher": "$msCompile"
         },
         {

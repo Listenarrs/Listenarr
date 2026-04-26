@@ -15,11 +15,8 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
-using Listenarr.Application.Repositories;
-using Listenarr.Domain.Models;
 using Listenarr.Domain.Utils;
 
 namespace Listenarr.Api.Services
@@ -118,48 +115,11 @@ namespace Listenarr.Api.Services
 
             var imageUrl = await MoveImageToLibraryStorageAsync(metadata, request.SearchResult, firstIsbn);
 
-            var audiobook = new Audiobook
-            {
-                Title = metadata.Title,
-                Subtitle = metadata.Subtitle,
-                Authors = (metadata.Authors != null && metadata.Authors.Any())
-                    ? metadata.Authors
-                    : (!string.IsNullOrWhiteSpace(metadata.Author)
-                        ? new List<string> { metadata.Author! }
-                        : new List<string>()),
-                ImageUrl = imageUrl,
-                OpenLibraryId = metadata.OpenLibraryId,
-                PublishYear = metadata.PublishYear,
-                PublishedDate = metadata.PublishedDate,
-                Series = metadata.Series,
-                SeriesNumber = ToStringOrFirst(metadata.SeriesNumber),
-                Description = ToStringOrFirst(metadata.Description),
-                Publisher = ToStringOrFirst(metadata.Publisher),
-                Genres = (metadata.Genres != null && metadata.Genres.Any()) ? metadata.Genres : null,
-                Tags = metadata.Tags,
-                Narrators = (metadata.Narrators != null && metadata.Narrators.Any())
-                    ? metadata.Narrators
-                    : (!string.IsNullOrWhiteSpace(metadata.Narrator)
-                        ? new List<string> { metadata.Narrator! }
-                        : new List<string>()),
-                Isbn = metadata.Isbn ?? new List<string>(),
-                Asin = metadata.Asin,
-                ExternalIdentifiers = new List<AudiobookExternalIdentifier>(),
-                Language = metadata.Language,
-                Runtime = metadata.Runtime,
-                Edition = metadata.Edition,
-                Version = metadata.Version,
-                Explicit = metadata.Explicit,
-                Abridged = metadata.Abridged,
-                Monitored = request.Monitored,
-                BasePath = string.IsNullOrWhiteSpace(request.DestinationPath) ? null : FileUtils.NormalizeStoredPath(request.DestinationPath)
-            };
+            var audiobook = metadata.ToAudiobook();
 
-            AudiobookSeriesMembershipHelper.ApplyToAudiobook(
-                audiobook,
-                metadata.SeriesMemberships,
-                metadata.Series,
-                ToStringOrFirst(metadata.SeriesNumber));
+            audiobook.ImageUrl = imageUrl;
+            audiobook.Monitored = request.Monitored;
+            audiobook.BasePath = string.IsNullOrWhiteSpace(request.DestinationPath) ? null : FileUtils.NormalizeStoredPath(request.DestinationPath);
 
             SyncImportedIdentifiersFromLegacyFields(audiobook);
 

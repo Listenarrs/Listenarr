@@ -476,7 +476,7 @@ namespace Listenarr.Api.Services
                                             if (metadataSvc != null)
                                             {
                                                 var meta = await metadataSvc.ExtractFileMetadataAsync(importResult.FinalPath);
-                                                candidateBitrate = meta?.Bitrate;
+                                                candidateBitrate = meta?.BitRate;
                                             }
                                         }
                                         catch (Exception caughtEx_3) when (caughtEx_3 is not OperationCanceledException && caughtEx_3 is not OutOfMemoryException && caughtEx_3 is not StackOverflowException)

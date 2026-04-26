@@ -767,7 +767,7 @@ namespace Listenarr.Api.Services
                 }
                 if (fmt.TryGetProperty("bit_rate", out var br) && br.ValueKind == JsonValueKind.String && int.TryParse(br.GetString(), out var bitRate))
                 {
-                    metadata.Bitrate = bitRate;
+                    metadata.BitRate = bitRate;
                 }
                 if (fmt.TryGetProperty("tags", out var formatTags) && formatTags.ValueKind == JsonValueKind.Object)
                 {
@@ -792,7 +792,7 @@ namespace Listenarr.Api.Services
                     }
                     if (s.TryGetProperty("bit_rate", out var sbr) && sbr.ValueKind == JsonValueKind.String && int.TryParse(sbr.GetString(), out var sbit))
                     {
-                        metadata.Bitrate = metadata.Bitrate == 0 ? sbit : metadata.Bitrate;
+                        metadata.BitRate = metadata.BitRate == 0 ? sbit : metadata.BitRate;
                     }
                     if (s.TryGetProperty("codec_name", out var codecName) && codecName.ValueKind == JsonValueKind.String)
                     {
@@ -812,7 +812,7 @@ namespace Listenarr.Api.Services
             if (string.IsNullOrEmpty(metadata.Container)) metadata.Container = Path.GetExtension(filePath).TrimStart('.').ToUpper();
 
             _logger.LogInformation("Extracted ffprobe metadata from file: {File}", LogRedaction.SanitizeText(filePath));
-            _logger.LogDebug("Parsed metadata: Duration={Duration} seconds, Format={Format}, Bitrate={Bitrate}, SampleRate={SampleRate}, Channels={Channels}", metadata.Duration.TotalSeconds, metadata.Format, metadata.Bitrate, metadata.SampleRate, metadata.Channels);
+            _logger.LogDebug("Parsed metadata: Duration={Duration} seconds, Format={Format}, Bitrate={Bitrate}, SampleRate={SampleRate}, Channels={Channels}", metadata.Duration.TotalSeconds, metadata.Format, metadata.BitRate, metadata.SampleRate, metadata.Channels);
 
             return metadata;
         }

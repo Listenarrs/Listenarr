@@ -267,7 +267,7 @@ Listenarr/
 │   │   ├── services/     # API client services
 │   │   └── types/        # TypeScript type definitions
 │   └── public/           # Static assets
-├── tests/                # Test scripts
+├── tests/                # Backend tests
 ├── .github/              # GitHub configuration
 ├── docker-compose.yml    # Docker setup
 └── README.md            # Main documentation

@@ -269,7 +269,7 @@ namespace Listenarr.Api.Services
                         apiVersion: ApiVersionPathBuilder.ResolveApiVersion(_httpContextAccessor?.HttpContext, startup?.ApiVersion)
                     );
 
-                    Console.WriteLine($"DEBUG: NotificationService received attachment? {attachment != null}");
+                    //Console.WriteLine($"DEBUG: NotificationService received attachment? {attachment != null}");
 
                     _logger.LogDebug("Discord payload attachment present? {HasAttachment}", attachment != null);
                     if (attachment != null)

@@ -1,8 +1,5 @@
 using System.Text.RegularExpressions;
-using Listenarr.Api.Services;
-using Listenarr.Domain.Models;
-using Microsoft.Extensions.Logging;
-using Microsoft.AspNetCore.Http;
+using Listenarr.Domain.Utils;
 
 namespace Listenarr.Api.Services.Search;
 

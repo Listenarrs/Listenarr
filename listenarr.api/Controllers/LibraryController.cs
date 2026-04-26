@@ -17,22 +17,9 @@
  */
 
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Http;
-using System.Threading.Tasks;
-using Microsoft.AspNetCore.SignalR;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Caching.Memory;
-using Listenarr.Domain.Models;
-using Listenarr.Api.Models;
-using Listenarr.Api.Services;
-using Listenarr.Application.Repositories;
-using Listenarr.Application.Services;
-using System.Collections.Generic;
-using System.Linq;
-using System;
 using System.Text.Json;
 using System.Reflection;
-using System.IO;
 using System.Text.RegularExpressions;
 using System.Security.Cryptography;
 using System.Text;
@@ -59,13 +46,6 @@ namespace Listenarr.Api.Controllers
             DownloadStatus.Processing,
             DownloadStatus.ImportPending
         };
-
-        private static string? ToStringOrFirst(object? value)
-        {
-            if (value is List<string> list)
-                return list.FirstOrDefault();
-            return value as string;
-        }
         private readonly IAudiobookRepository _repo;
         private readonly IImageCacheService _imageCacheService;
         private readonly ILogger<LibraryController> _logger;
@@ -412,44 +392,16 @@ namespace Listenarr.Api.Controllers
             }
 
             // Convert metadata to Audiobook entity and save to database
-            var audiobook = new Audiobook
-            {
-                Title = metadata.Title,
-                Subtitle = metadata.Subtitle,
-                Authors = (metadata.Authors != null && metadata.Authors.Any()) ? metadata.Authors :
-                          (!string.IsNullOrWhiteSpace(metadata.Author) ? new List<string> { metadata.Author! } : new List<string>()),
-                ImageUrl = imageUrl,
-                // Persist OpenLibrary ID when present (enables OL-only matching in the UI)
-                OpenLibraryId = metadata.OpenLibraryId,
-                PublishYear = metadata.PublishYear,
-                PublishedDate = metadata.PublishedDate, // Store full date from metadata for calendar/timeline features
-                Series = metadata.Series,
-                SeriesNumber = ToStringOrFirst(metadata.SeriesNumber),
-                Description = ToStringOrFirst(metadata.Description),
-                Publisher = ToStringOrFirst(metadata.Publisher),
-                Genres = (metadata.Genres != null && metadata.Genres.Any()) ? metadata.Genres : null,
-                Tags = metadata.Tags,
-                Narrators = (metadata.Narrators != null && metadata.Narrators.Any()) ? metadata.Narrators :
-                            (!string.IsNullOrWhiteSpace(metadata.Narrator) ? new List<string> { metadata.Narrator! } : new List<string>()),
-                Isbn = metadata.Isbn ?? new List<string>(),
-                Asin = metadata.Asin,
-                ExternalIdentifiers = new List<AudiobookExternalIdentifier>(),
-                // Removed duplicate Publisher assignment
-                Language = metadata.Language,
-                Runtime = metadata.Runtime,
-                Edition = metadata.Edition,
-                Version = metadata.Version,
-                Explicit = metadata.Explicit,
-                Abridged = metadata.Abridged,
-                Monitored = request.Monitored,  // Use custom monitored setting
-                BasePath = null  // Will be computed or set from custom destination below
-            };
+            var audiobook = metadata.ToAudiobook();
+
+            audiobook.Monitored = request.Monitored; // Use custom monitored setting
+            audiobook.ImageUrl = imageUrl;
 
             AudiobookSeriesMembershipHelper.ApplyToAudiobook(
                 audiobook,
                 metadata.SeriesMemberships,
                 metadata.Series,
-                ToStringOrFirst(metadata.SeriesNumber));
+                AudibleBookMetadata.ToStringOrFirst(metadata.SeriesNumber));
 
             SyncImportedIdentifiersFromLegacyFields(audiobook);
 
@@ -620,22 +572,7 @@ namespace Listenarr.Api.Controllers
                 var root = !string.IsNullOrEmpty(request.DestinationRoot) ? request.DestinationRoot : settings.OutputPath;
 
                 // Build a temporary Audiobook to feed naming pattern logic
-                var temp = new Audiobook
-                {
-                    Title = request.Metadata.Title,
-                    Subtitle = request.Metadata.Subtitle,
-                    Authors = request.Metadata.Authors,
-                    Narrators = (request.Metadata.Narrators != null && request.Metadata.Narrators.Any())
-                        ? request.Metadata.Narrators
-                        : (!string.IsNullOrWhiteSpace(request.Metadata.Narrator) ? new List<string> { request.Metadata.Narrator! } : null),
-                    Series = request.Metadata.Series,
-                    SeriesNumber = request.Metadata.SeriesNumber,
-                    PublishYear = request.Metadata.PublishYear,
-                    Publisher = request.Metadata.Publisher,
-                    Language = request.Metadata.Language,
-                    Asin = request.Metadata.Asin,
-                    Edition = request.Metadata.Edition
-                };
+                var temp = request.Metadata.ToAudiobook();
 
                 AudiobookSeriesMembershipHelper.ApplyToAudiobook(
                     temp,
@@ -2771,7 +2708,7 @@ namespace Listenarr.Api.Controllers
                             CreatedAt = DateTime.UtcNow,
                             DurationSeconds = meta?.Duration.TotalSeconds,
                             Format = meta?.Format,
-                            Bitrate = meta?.Bitrate,
+                            Bitrate = meta?.BitRate,
                             SampleRate = meta?.SampleRate,
                             Channels = meta?.Channels
                         };

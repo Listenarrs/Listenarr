@@ -15,22 +15,13 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using System;
-using System.Collections.Generic;
 using System.Globalization;
-using System.Linq;
 using System.Net;
-using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
-using Listenarr.Api.Services;
-using Listenarr.Domain.Models;
 using Listenarr.Domain.Utils;
-using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Api.Services.Adapters
 {
@@ -545,6 +536,7 @@ namespace Listenarr.Api.Services.Adapters
                 var contentPath = FileUtils.CombineWithOptionalBase(downloadDir, name);
 
                 // Apply path mapping
+                // FIXME: Path mapping should be the responsability of the download processors
                 var localContentPath = await _pathMappingService.TranslatePathAsync(client.Id, contentPath);
                 result.OutputPath = localContentPath;
 
@@ -1056,7 +1048,7 @@ namespace Listenarr.Api.Services.Adapters
 
         private async Task<JsonElement> InvokeRpcAsync(DownloadClientConfiguration client, object payload, CancellationToken ct)
         {
-            var httpClient = _httpClientFactory.CreateClient("transmission");
+            var httpClient = _httpClientFactory.CreateClient(ClientType);
             var baseUrl = BuildBaseUrl(client);
             var serializedPayload = JsonSerializer.Serialize(payload, s_rpcJsonOptions);
             string? sessionId = null;

@@ -349,7 +349,7 @@ namespace Listenarr.Api.Services
                 { "Asin", string.IsNullOrWhiteSpace(metadata.Asin) ? string.Empty : SanitizePathComponent(metadata.Asin) },
                 { "SeriesNumber", FirstNonEmpty(metadata.SeriesPosition?.ToString(), metadata.TrackNumber?.ToString()) },
                 { "Year", FirstNonEmpty(metadata.Year?.ToString()) },
-                { "Quality", FirstNonEmpty(metadata.Bitrate.HasValue ? metadata.Bitrate + "kbps" : null, metadata.Format) },
+                { "Quality", FirstNonEmpty(metadata.BitRate.HasValue ? metadata.BitRate + "kbps" : null, metadata.Format) },
                 { "DiskNumber", metadata.DiscNumber?.ToString() ?? string.Empty },
                 { "ChapterNumber", metadata.TrackNumber?.ToString() ?? string.Empty }
             };

@@ -174,6 +174,7 @@ namespace Listenarr.Api.Services.Search.Providers
                 mamRequest.Headers.AcceptLanguage.ParseAdd("en-US,en;q=0.9");
                 mamRequest.Headers.Referrer = new Uri("https://www.myanonamouse.net/");
 
+                // FIXME: Test driven logic should not be here
                 // Prefer using the injected HttpClient in tests (so DelegatingHandler stubs can capture requests)
                 using var disposableClient = _httpClient.BaseAddress == null
                     ? MyAnonamouseHelper.CreateAuthenticatedHttpClient(mamId, indexer.Url)

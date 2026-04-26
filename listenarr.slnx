@@ -19,7 +19,7 @@
     <File Path="global.json" />
   </Folder>
   <Folder Name="/tests/">
-    <Project Path="tests/Listenarr.Api.Tests/Listenarr.Api.Tests.csproj" />
+    <Project Path="tests/Listenarr.Tests.csproj" />
   </Folder>
   <Project Path="listenarr.api/Listenarr.Api.csproj" />
 </Solution>

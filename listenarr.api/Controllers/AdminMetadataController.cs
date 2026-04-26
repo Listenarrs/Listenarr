@@ -84,7 +84,7 @@ namespace Listenarr.Api.Controllers
             file.Size = fi.Exists ? fi.Length : file.Size;
             file.DurationSeconds = meta?.Duration.TotalSeconds ?? file.DurationSeconds;
             file.Format = string.IsNullOrEmpty(meta?.Format) ? file.Format : meta!.Format;
-            file.Bitrate = (meta?.Bitrate != 0) ? meta?.Bitrate : file.Bitrate;
+            file.Bitrate = (meta?.BitRate != 0) ? meta?.BitRate : file.Bitrate;
             file.SampleRate = meta?.SampleRate ?? file.SampleRate;
             file.Channels = meta?.Channels ?? file.Channels;
 
@@ -124,7 +124,7 @@ namespace Listenarr.Api.Controllers
                         f.Size = fi.Exists ? fi.Length : f.Size;
                         f.DurationSeconds = meta.Duration.TotalSeconds != 0 ? meta.Duration.TotalSeconds : f.DurationSeconds;
                         f.Format = !string.IsNullOrEmpty(meta.Format) ? meta.Format : f.Format;
-                        f.Bitrate = meta.Bitrate != 0 ? meta.Bitrate : f.Bitrate;
+                        f.Bitrate = meta.BitRate != 0 ? meta.BitRate : f.Bitrate;
                         f.SampleRate = meta.SampleRate != 0 ? meta.SampleRate : f.SampleRate;
                         f.Channels = meta.Channels != 0 ? meta.Channels : f.Channels;
                         await _audioFiles.UpdateAsync(f);

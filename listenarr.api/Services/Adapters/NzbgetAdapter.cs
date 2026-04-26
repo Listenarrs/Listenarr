@@ -15,21 +15,11 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using System;
-using System.Collections.Generic;
 using System.Globalization;
-using System.Linq;
 using System.Net;
-using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
-using Listenarr.Api.Services;
-using Listenarr.Domain.Models;
-using Microsoft.Extensions.Logging;
-using System.IO;
 using System.Xml.Linq;
 
 namespace Listenarr.Api.Services.Adapters
@@ -152,8 +142,8 @@ namespace Listenarr.Api.Services.Adapters
             var nzbFileName = BuildNzbFileName(result);
 
             var uploadUrl = DownloadClientUriBuilder.BuildUri(client, "/api/v2/nzb");
-
-            using var httpClient = _httpClientFactory.CreateClient();
+            
+            using var httpClient = _httpClientFactory.CreateClient(ClientType);
             using var content = new MultipartFormDataContent();
 
             // Add NZB file
@@ -614,6 +604,7 @@ namespace Listenarr.Api.Services.Adapters
                     }
 
                     // Apply path mapping
+                    // FIXME: Should not be done in adapters
                     var localContentPath = await _pathMappingService.TranslatePathAsync(client.Id, destDir);
                     result.OutputPath = localContentPath;
 
@@ -890,7 +881,7 @@ namespace Listenarr.Api.Services.Adapters
         private async Task<XElement> CallXmlRpcAsync(DownloadClientConfiguration client, string methodName, params object[] parameters)
         {
             var baseUrl = DownloadClientUriBuilder.BuildUri(client, "/xmlrpc").ToString();
-            var httpClient = _httpClientFactory.CreateClient();
+            var httpClient = _httpClientFactory.CreateClient(ClientType);
 
             // Build XML-RPC request
             var methodCall = new XElement("methodCall",
@@ -974,8 +965,8 @@ namespace Listenarr.Api.Services.Adapters
             try
             {
                 _logger.LogDebug("Downloading NZB from {Url}", LogRedaction.SanitizeUrl(nzbUrl));
-
-                var httpClient = _httpClientFactory.CreateClient();
+                
+                var httpClient = _httpClientFactory.CreateClient(ClientType);
                 using var request = new HttpRequestMessage(HttpMethod.Get, nzbUrl);
 
                 // Note: Newznab/Torznab APIs include the API key in the URL query string (e.g., &apikey=xxx)

@@ -16,22 +16,10 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using Listenarr.Domain.Models;
-using Listenarr.Application.Repositories;
-using Listenarr.Application.Services;
-using Microsoft.AspNetCore.SignalR;
-using Listenarr.Api.Hubs;
-using Microsoft.AspNetCore.WebUtilities;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
-using System.IO;
-using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Net;
-using System.Net.Http;
-using System.Net.Http.Headers;
-using Listenarr.Api.Services.Adapters;
 using Listenarr.Domain.Utils;
 
 namespace Listenarr.Api.Services
@@ -126,7 +114,7 @@ namespace Listenarr.Api.Services
         /// <summary>
         /// Normalize mam_id by decoding any existing encoding and then encoding exactly once
         /// </summary>
-        private static string NormalizeMamId(string raw)
+        public static string NormalizeMamId(string raw)
         {
             if (string.IsNullOrEmpty(raw)) return raw;
             var decoded = raw;
@@ -838,7 +826,7 @@ namespace Listenarr.Api.Services
                 // If auto-redirect drops the Cookie header, a fallback retry with
                 // CreateAuthenticatedHttpClient (AllowAutoRedirect=false) handles it below.
                 var httpClientToUse = _httpClientFactory != null
-                    ? _httpClientFactory.CreateClient()
+                    ? _httpClientFactory.CreateClient() // FIXME: Should use a named client
                     : MyAnonamouseHelper.CreateAuthenticatedHttpClient(mamId, indexer.Url);
 
                 _logger.LogDebug("Downloading MyAnonamouse torrent for '{Title}' from {Url}", searchResult.Title, LogRedaction.SanitizeUrl(searchResult.TorrentUrl));

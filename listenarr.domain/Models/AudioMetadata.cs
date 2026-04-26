@@ -16,8 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using System.Data;
-
 namespace Listenarr.Domain.Models
 {
     public class AudioMetadata
@@ -38,7 +36,7 @@ namespace Listenarr.Domain.Models
         public string? Container { get; set; }
         // Audio codec: e.g., aac, mp3, opus
         public string? Codec { get; set; }
-        public int? Bitrate { get; set; }
+        public int? BitRate { get; set; }
         public int? SampleRate { get; set; }
         public int? Channels { get; set; }
         public string? Isbn { get; set; }
@@ -54,7 +52,7 @@ namespace Listenarr.Domain.Models
         public decimal? SeriesPosition { get; set; }
         public byte[]? CoverArt { get; set; }
         public string? CoverArtUrl { get; set; }
-        public Dictionary<string, object> AdditionalData { get; set; } = new();
+        public Dictionary<string, object> AdditionalData { get; set; } = [];
 
         /// <summary>
         /// Update empty attributes with the given metadata
@@ -83,8 +81,8 @@ namespace Listenarr.Domain.Models
                 DiscNumber = value.DiscNumber;
             if (!Year.HasValue && value.Year.HasValue)
                 Year = value.Year;
-            if (!Bitrate.HasValue && value.Bitrate.HasValue)
-                Bitrate = value.Bitrate;
+            if (!BitRate.HasValue && value.BitRate.HasValue)
+                BitRate = value.BitRate;
             if (string.IsNullOrWhiteSpace(Format) && !string.IsNullOrWhiteSpace(value.Format))
                 Format = value.Format;
         }
