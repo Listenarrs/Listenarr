@@ -17,8 +17,6 @@
  */
 
 using System.Text.Json;
-using Listenarr.Application.Repositories;
-using Listenarr.Domain.Models;
 using Microsoft.AspNetCore.DataProtection;
 
 namespace Listenarr.Api.Services

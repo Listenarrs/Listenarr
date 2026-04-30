@@ -90,11 +90,11 @@ namespace Listenarr.Tests.Builders
             _applicationSettings.FolderNamingPattern = value;
             return this;
         }
-        
+
         public ApplicationSettings Build()
         {
             _applicationSettings.ImportBlacklistExtensions = _importBlacklistExtensions;
-            
+
             return _applicationSettings;
         }
     }

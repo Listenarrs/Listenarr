@@ -54,7 +54,7 @@ namespace Listenarr.Domain.Models
 
         public Audiobook ToAudiobook()
         {
-            var audiobook = new Audiobook 
+            var audiobook = new Audiobook
             {
                 Title = Title ?? string.Empty,
                 Subtitle = Subtitle,

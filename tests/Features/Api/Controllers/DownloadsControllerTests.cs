@@ -48,21 +48,21 @@ namespace Listenarr.Tests.Features.Api.Controllers
                 .WithName("Direct Download")
                 .Enabled()
                 .Build());
-                
+
             await _downloadRepository.AddAsync(new DownloadBuilder()
                 .WithId("d-enabled")
                 .WithStatus(DownloadStatus.Downloading)
                 .WithStartDate(DateTime.UtcNow.AddMinutes(-1))
                 .WithDownloadClientConfiguration(_client)
                 .Build());
-                
+
             await _downloadRepository.AddAsync(new DownloadBuilder()
                 .WithId("d-disabled")
                 .WithStatus(DownloadStatus.Queued)
                 .WithStartDate(DateTime.UtcNow.AddMinutes(-1))
                 .WithDownloadClientConfiguration(disabledClient)
                 .Build());
-                
+
             await _downloadRepository.AddAsync(new DownloadBuilder()
                 .WithId("d-ddl")
                 .WithStatus(DownloadStatus.Downloading)
@@ -114,49 +114,49 @@ namespace Listenarr.Tests.Features.Api.Controllers
                 .WithDownloadClientConfiguration(_client)
                 .WithStatus(DownloadStatus.Queued)
                 .Build());
-                
+
             await _downloadRepository.AddAsync(new DownloadBuilder()
                 .WithId("d-downloading")
                 .WithStartDate(DateTime.UtcNow.AddMinutes(-1))
                 .WithDownloadClientConfiguration(_client)
                 .WithStatus(DownloadStatus.Downloading)
                 .Build());
-                
+
             await _downloadRepository.AddAsync(new DownloadBuilder()
                 .WithId("d-processing")
                 .WithStartDate(DateTime.UtcNow.AddMinutes(-1))
                 .WithDownloadClientConfiguration(_client)
                 .WithStatus(DownloadStatus.Processing)
                 .Build());
-                
+
             await _downloadRepository.AddAsync(new DownloadBuilder()
                 .WithId("d-importpending")
                 .WithStartDate(DateTime.UtcNow.AddMinutes(-1))
                 .WithDownloadClientConfiguration(_client)
                 .WithStatus(DownloadStatus.ImportPending)
                 .Build());
-                
+
             await _downloadRepository.AddAsync(new DownloadBuilder()
                 .WithId("d-importblocked")
                 .WithStartDate(DateTime.UtcNow.AddMinutes(-1))
                 .WithDownloadClientConfiguration(_client)
                 .WithStatus(DownloadStatus.ImportBlocked)
                 .Build());
-                
+
             await _downloadRepository.AddAsync(new DownloadBuilder()
                 .WithId("d-failed")
                 .WithStartDate(DateTime.UtcNow.AddMinutes(-1))
                 .WithDownloadClientConfiguration(_client)
                 .WithStatus(DownloadStatus.Failed)
                 .Build());
-                
+
             await _downloadRepository.AddAsync(new DownloadBuilder()
                 .WithId("d-moved")
                 .WithStartDate(DateTime.UtcNow.AddMinutes(-1))
                 .WithDownloadClientConfiguration(_client)
                 .WithStatus(DownloadStatus.Moved)
                 .Build());
-            
+
             var controller = MockUtils.CreateDownloadsController(_provider);
             var action = await controller.GetActiveDownloads();
             var ok = Assert.IsType<OkObjectResult>(action.Result);
@@ -205,7 +205,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
                 .WithDownloadClientConfiguration(_client)
                 .WithCompletedStatus(DateTime.UtcNow)
                 .Build());
-            
+
             var controller = MockUtils.CreateDownloadsController(_provider);
             var action = await controller.ClearFailedDownloads();
             var ok = Assert.IsType<OkObjectResult>(action);

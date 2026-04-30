@@ -289,7 +289,7 @@ namespace Listenarr.Tests.Features.Api.Services
                     }
                 });
             _services.AddSingleton(gatewayMock.Object);
-            
+
             var queueServiceMock = new Mock<IDownloadQueueService>();
             queueServiceMock.Setup(q => q.GetQueueAsync()).ReturnsAsync(new List<QueueItem>
             {
@@ -422,7 +422,7 @@ namespace Listenarr.Tests.Features.Api.Services
         {
             var gatewayMock = new Mock<IDownloadClientGateway>();
             _services.AddSingleton(gatewayMock.Object);
-            
+
             Init();
             await InitData();
 

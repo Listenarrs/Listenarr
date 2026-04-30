@@ -15,13 +15,6 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using System;
-using System.IO;
-using System.Linq;
-using System.Threading.Tasks;
-using System.Collections.Generic;
-using Listenarr.Api.Models;
-
 namespace Listenarr.Api.Services
 {
     public static class AudiobookDtoFactory

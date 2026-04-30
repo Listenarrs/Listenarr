@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 using Moq;
 using Listenarr.Api.Services;
@@ -39,10 +39,10 @@ namespace Listenarr.Tests.Features.Api.Services
                 .WithProtocol(DownloadProtocol.Torrent)
                 .WithUploader("USER1")
                 .Build();
-            
+
             await _downloadRepository.AddAsync(_download);
         }
-        
+
         [Fact]
         [Trait("Method", "ProcessCompletedDownloadAsync")]
         public async Task ProcessCompletedDownload_CreatesAudiobookFileAndBroadcasts()
@@ -50,14 +50,14 @@ namespace Listenarr.Tests.Features.Api.Services
             var metadataMock = new Mock<IMetadataService>();
             metadataMock.Setup(m => m.ExtractFileMetadataAsync(It.IsAny<string>()))
                 .ReturnsAsync(new AudioMetadata { Title = "Test Book", Artist = "Test Author", Duration = TimeSpan.FromSeconds(3600), Format = "m4b", BitRate = 64000, SampleRate = 44100, Channels = 2 });
-            
+
             _services.AddSingleton(metadataMock.Object);
 
             Init();
             await InitData();
-            
+
             var testPath = await FileService.GetTempFileAsync("dl-test.m4b");
-            
+
             var audiobook = new AudiobookBuilder()
                 .WithId(1)
                 .WithTitle("Test Book")
@@ -70,7 +70,7 @@ namespace Listenarr.Tests.Features.Api.Services
                 .WithPath(testPath)
                 .WithStartDate(DateTime.UtcNow)
                 .Build();
-            
+
             await _audiobookRepository.AddAsync(audiobook);
             await _downloadRepository.AddAsync(download);
 
@@ -130,7 +130,7 @@ namespace Listenarr.Tests.Features.Api.Services
                 .WithPath(sourceDirectory)
                 .WithStartDate(DateTime.UtcNow)
                 .Build();
-            
+
             await _audiobookRepository.AddAsync(audiobook);
             await _downloadRepository.AddAsync(download);
 
@@ -199,17 +199,17 @@ namespace Listenarr.Tests.Features.Api.Services
                 .WithAuthor("Test Author")
                 .WithBasePath(destinationDirectory)
                 .Build();
-                
+
             var download = new DownloadBuilder()
                 .WithAudiobook(audiobook)
                 .WithStatus(DownloadStatus.Downloading)
                 .WithPath(sourceDirectory)
                 .WithStartDate(DateTime.UtcNow)
                 .Build();
-            
+
             await _audiobookRepository.AddAsync(audiobook);
             await _downloadRepository.AddAsync(download);
-            
+
 
             // Mock configuration service to return settings with metadata processing enabled
             // and a naming pattern that would normally create subdirectories
@@ -349,7 +349,7 @@ namespace Listenarr.Tests.Features.Api.Services
             {
                 return;
             }
-            
+
             var remoteSource = FileService.GetTempDirectory("dl-remote-source ");
             var localSource = FileService.GetTempDirectory("dl-local-source ");
             var localDestination = FileService.GetTempDirectory("dl-destination");

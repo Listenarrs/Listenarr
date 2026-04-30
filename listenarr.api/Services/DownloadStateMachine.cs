@@ -16,15 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
-using Listenarr.Domain.Models;
-using Listenarr.Application.Repositories;
-using Microsoft.Extensions.Logging;
-
 namespace Listenarr.Api.Services
 {
     /// <summary>

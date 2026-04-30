@@ -16,7 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using Listenarr.Domain.Models;
 using System.Text.Json;
 
 namespace Listenarr.Api.Services.Search.Providers;

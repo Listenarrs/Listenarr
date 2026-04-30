@@ -142,7 +142,7 @@ namespace Listenarr.Api.Services.Adapters
             var nzbFileName = BuildNzbFileName(result);
 
             var uploadUrl = DownloadClientUriBuilder.BuildUri(client, "/api/v2/nzb");
-            
+
             using var httpClient = _httpClientFactory.CreateClient(ClientType);
             using var content = new MultipartFormDataContent();
 
@@ -965,7 +965,7 @@ namespace Listenarr.Api.Services.Adapters
             try
             {
                 _logger.LogDebug("Downloading NZB from {Url}", LogRedaction.SanitizeUrl(nzbUrl));
-                
+
                 var httpClient = _httpClientFactory.CreateClient(ClientType);
                 using var request = new HttpRequestMessage(HttpMethod.Get, nzbUrl);
 

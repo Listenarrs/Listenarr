@@ -44,10 +44,10 @@ namespace Listenarr.Tests.Common
             {
                 return JsonDocument.Parse(_lastContent);
             }
-            catch(JsonException)
+            catch (JsonException)
             {
             }
-            catch(ArgumentException)
+            catch (ArgumentException)
             {
             }
 

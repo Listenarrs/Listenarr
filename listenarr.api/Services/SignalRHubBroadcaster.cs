@@ -15,15 +15,6 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using System;
-using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
-using Microsoft.AspNetCore.SignalR;
-using Microsoft.Extensions.Logging;
-using Listenarr.Api.Hubs;
-using Listenarr.Application.Services;
-
 namespace Listenarr.Api.Services
 {
     public class SignalRHubBroadcaster : IHubBroadcaster

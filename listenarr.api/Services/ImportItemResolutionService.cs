@@ -15,12 +15,6 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using System.Threading;
-using System.Threading.Tasks;
-using Listenarr.Api.Services.Adapters;
-using Listenarr.Domain.Models;
-using Microsoft.Extensions.Logging;
-
 namespace Listenarr.Api.Services
 {
     /// <summary>

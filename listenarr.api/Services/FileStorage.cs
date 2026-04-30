@@ -16,11 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 // csharp
-using System;
-using System.IO;
-using System.Threading;
-using System.Threading.Tasks;
-
 namespace Listenarr.Api.Services
 {
     public class FileStorage : IFileStorage

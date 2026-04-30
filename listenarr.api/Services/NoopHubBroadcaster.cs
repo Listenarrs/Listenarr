@@ -15,11 +15,6 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using System.Collections.Generic;
-using System.Threading.Tasks;
-using Listenarr.Application.Services;
-using Listenarr.Domain.Models;
-
 namespace Listenarr.Api.Services
 {
     // Minimal no-op broadcaster used as a safe fallback when the real

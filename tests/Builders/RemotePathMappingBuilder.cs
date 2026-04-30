@@ -29,7 +29,7 @@ namespace Listenarr.Tests.Builders
             _remotePathMapping.Name = value;
             return this;
         }
-        
+
         public RemotePathMapping Build()
         {
             return _remotePathMapping;

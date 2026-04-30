@@ -16,10 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 // csharp
-using System;
-using System.Collections.Generic;
-using System.Linq;
-
 namespace Listenarr.Api.Services.Adapters
 {
     public interface IDownloadClientAdapterFactory

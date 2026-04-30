@@ -20,7 +20,7 @@ namespace Listenarr.Tests.Builders
     public class ServiceCollectionBuilder
     {
         private Mock<IImportItemResolutionService> _importItemResolutionService;
-        
+
         public ServiceCollectionBuilder()
         {
             _importItemResolutionService = new Mock<IImportItemResolutionService>();
@@ -35,7 +35,7 @@ namespace Listenarr.Tests.Builders
                     return queueItem;
                 });
         }
-        
+
         public ServiceCollection Build()
         {
             var configuration = new ConfigurationManager();
@@ -51,7 +51,7 @@ namespace Listenarr.Tests.Builders
             services.AddListenarrAdapters(configuration);
             services.AddListenarrInfrastructure(options =>
                 options.UseInMemoryDatabase(databaseName: Guid.NewGuid().ToString()));
-            
+
             var appMetricsServiceMock = new Mock<IAppMetricsService>();
             services.AddSingleton(appMetricsServiceMock);
             services.AddSingleton(appMetricsServiceMock.Object);
@@ -59,7 +59,7 @@ namespace Listenarr.Tests.Builders
             var webHostEnvironmentMock = new Mock<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>();
             services.AddSingleton(webHostEnvironmentMock);
             services.AddSingleton(webHostEnvironmentMock.Object);
-            
+
             services.AddSingleton(_importItemResolutionService);
             services.AddSingleton(_importItemResolutionService.Object);
 
@@ -99,7 +99,7 @@ namespace Listenarr.Tests.Builders
 
             services.AddHttpClient("nzbget")
                 .ConfigurePrimaryHttpMessageHandler<NzbgetApiMock>();
-            
+
             services.AddHttpClient<IAudnexusService, AudnexusService>()
                 .ConfigurePrimaryHttpMessageHandler<AudnexusServiceApiMock>();
 

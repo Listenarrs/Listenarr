@@ -15,18 +15,6 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Microsoft.Extensions.Hosting;
-using System.Threading;
-using System.Threading.Tasks;
-using System;
-using System.IO;
-using System.Linq;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
-using Listenarr.Application.Repositories;
-using Listenarr.Domain.Models;
-using Microsoft.AspNetCore.SignalR;
-
 namespace Listenarr.Api.Services
 {
     public class MoveBackgroundService : BackgroundService

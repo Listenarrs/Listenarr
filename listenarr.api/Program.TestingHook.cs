@@ -1,5 +1,3 @@
-using Microsoft.AspNetCore.Builder;
-
 public partial class Program
 {
     // Declarations for test host patches used by the integration test host partial

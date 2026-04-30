@@ -16,7 +16,7 @@ namespace Listenarr.Tests.Common
         {
             throw new NotImplementedException();
         }
-        
+
         public async Task DisposeAsync()
         {
             if (_tempFolder != null && Directory.Exists(_tempFolder))
@@ -39,16 +39,19 @@ namespace Listenarr.Tests.Common
                 _tempFolder = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
                 Directory.CreateDirectory(_tempFolder);
             }
-            
+
             return _tempFolder;
         }
 
         public string GetTempDirectory(string directory)
         {
-            var path = Path.Join(GetTempPath(), directory);
-            Directory.CreateDirectory(path);
+            if (!directory.StartsWith(GetTempPath()))
+            {
+                directory = Path.Join(GetTempPath(), directory);
+            }
+            Directory.CreateDirectory(directory);
 
-            return path;
+            return directory;
         }
 
         public async Task<string> GetFileAsync(string directory, string filename, string content = "test")

@@ -24,7 +24,7 @@ namespace Listenarr.Tests.Common
         /// </summary>
         /// <param name="content">Content to use as a response body</param>
         /// <returns>HttpResponseMessage with status 200 and body</returns>
-        public static HttpResponseMessage GetCannedResponse(string content, string mediaType="application/json")
+        public static HttpResponseMessage GetCannedResponse(string content, string mediaType = "application/json")
         {
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
@@ -48,12 +48,12 @@ namespace Listenarr.Tests.Common
                 new Mock<IHttpClientFactory>().Object,
                 new Mock<IAppMetricsService>().Object);
         }
-        
+
         public static ServiceProvider CreateServiceProvider(string outputPath = "")
         {
             return CreateServiceProvider(new Mock<IImportItemResolutionService>().Object, outputPath);
         }
-        
+
         public static ServiceProvider CreateServiceProvider(IImportItemResolutionService importItemResolutionService, string outputPath = "", DownloadClientConfiguration downloadClientConfiguration = null)
         {
 
@@ -72,11 +72,11 @@ namespace Listenarr.Tests.Common
                 ]);
                 configMock.Setup(c => c.GetDownloadClientConfigurationAsync(It.IsAny<string>())).ReturnsAsync(downloadClientConfiguration);
             }
-            
+
             var services = new ServiceCollectionBuilder().Build();
             services.AddSingleton(configMock.Object);
             services.AddSingleton(importItemResolutionService);
-            
+
             return services.BuildServiceProvider();
         }
 
@@ -93,7 +93,7 @@ namespace Listenarr.Tests.Common
 
             return job;
         }
-        
+
         public static TransmissionAdapter CreateTransmissionAdapter(ServiceProvider provider, Mock<ITorrentFileDownloader>? torrentFileDOwnloader = null)
         {
             if (torrentFileDOwnloader == null)
@@ -107,7 +107,7 @@ namespace Listenarr.Tests.Common
                 torrentFileDOwnloader.Object,
                 provider.GetRequiredService<ILogger<TransmissionAdapter>>());
         }
-        
+
         public static SabnzbdAdapter CreateSabnzbdAdapter(ServiceProvider provider)
         {
             return new SabnzbdAdapter(
@@ -116,7 +116,7 @@ namespace Listenarr.Tests.Common
                 Mock.Of<INzbUrlResolver>(),
                 new Mock<ILogger<SabnzbdAdapter>>().Object);
         }
-        
+
         public static NzbgetAdapter CreateNzbgetAdapter(ServiceProvider provider)
         {
             return new NzbgetAdapter(
@@ -125,7 +125,7 @@ namespace Listenarr.Tests.Common
                 provider.GetRequiredService<IRemotePathMappingService>(),
                 new Mock<ILogger<NzbgetAdapter>>().Object);
         }
-        
+
         public static CompletedDownloadProcessor CreateCompletedDownloadProcessor(ServiceProvider provider)
         {
             return new CompletedDownloadProcessor(

@@ -16,10 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using Listenarr.Application.Repositories;
-using Listenarr.Domain.Models;
-using System.IO;
-
 namespace Listenarr.Api.Services
 {
     public class AutomaticSearchService : BackgroundService

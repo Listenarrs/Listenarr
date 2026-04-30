@@ -16,7 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using AsyncKeyedLock;
-using Listenarr.Application.Repositories;
 using Listenarr.Domain.Utils;
 
 namespace Listenarr.Api.Services.Metadata

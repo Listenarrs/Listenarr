@@ -63,13 +63,21 @@ describe('ApiService.downloadLogs', () => {
       expect(init?.credentials).toBe('include')
       expect(authHeader).toBe('Bearer session-token')
 
-      return new Response(new Blob(['log line 1'], { type: 'text/plain' }), {
-        status: 200,
-        headers: {
-          'Content-Type': 'text/plain',
-          'Content-Disposition': 'attachment; filename="listenarr-test.log"',
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('log line 1'))
+            controller.close()
+          },
+        }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'text/plain',
+            'Content-Disposition': 'attachment; filename="listenarr-test.log"',
+          },
         },
-      })
+      )
     })
 
     vi.stubGlobal('fetch', fetchSpy)

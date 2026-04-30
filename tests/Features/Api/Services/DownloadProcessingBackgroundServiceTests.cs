@@ -29,7 +29,7 @@ namespace Listenarr.Tests.Features.Api.Services
             {
                 return;
             }
-            
+
             var remoteSource = FileService.GetTempDirectory("dl-remote-source ");
             var localSource = FileService.GetTempDirectory("dl-local-source /");
             var localDestination = FileService.GetTempDirectory("dl-destination");
@@ -45,7 +45,7 @@ namespace Listenarr.Tests.Features.Api.Services
             var localChapter3 = await FileService.GetFileAsync(localSource, "03 - Seconde Fondation Isaac Asimov.mp3");
             var localChapter4 = await FileService.GetFileAsync(localSource, "04 - Seconde Fondation Isaac Asimov.mp3");
             var localCompanion = await FileService.GetFileAsync(localSource, "Seconde Fondation Isaac Asimov.nfo");
-            
+
             var client = await _downloadClientConfigurationRepository.SaveAsync(new DownloadClientConfigurationBuilder()
                 .WithId(CLIENT_CONFIG_ID)
                 .WithName("Slskd")
@@ -71,7 +71,7 @@ namespace Listenarr.Tests.Features.Api.Services
                 .WithRemotePath(remoteSource)
                 .WithName("TEST_REMOTE_MAPPING")
                 .Build());
-            
+
             var importItemResolutionServiceMock = _provider.GetRequiredService<Mock<IImportItemResolutionService>>();
             importItemResolutionServiceMock
                 .Setup(r => r.ResolveImportItemAsync(
@@ -108,14 +108,16 @@ namespace Listenarr.Tests.Features.Api.Services
         [Trait("Scenario", "StartupResetRequeuesStuckProcessingJobs")]
         public async Task ResetStuckJobsAsync_ProcessingJobs_AreResetToPending()
         {
-            await _downloadProcessingJobRepository.AddAsync(new DownloadProcessingJob {
+            await _downloadProcessingJobRepository.AddAsync(new DownloadProcessingJob
+            {
                 Id = "job-processing-1",
                 DownloadId = "dl-1",
                 JobType = ProcessingJobType.MoveOrCopyFile,
                 Status = ProcessingJobStatus.Processing,
                 SourcePath = FileUtils.GetAbsolutePath("tmp", "a.mp3")
             });
-            await _downloadProcessingJobRepository.AddAsync(new DownloadProcessingJob {
+            await _downloadProcessingJobRepository.AddAsync(new DownloadProcessingJob
+            {
                 Id = "job-pending-1",
                 DownloadId = "dl-2",
                 JobType = ProcessingJobType.MoveOrCopyFile,
@@ -166,7 +168,7 @@ namespace Listenarr.Tests.Features.Api.Services
                 .WithDownloadClientConfiguration(client)
                 .WithPath(tempFile)
                 .Build();
-            
+
             await _downloadClientConfigurationRepository.SaveAsync(client);
             await _downloadRepository.AddAsync(download);
 
@@ -181,7 +183,7 @@ namespace Listenarr.Tests.Features.Api.Services
                     queueItem.ContentPath = tempFile;
                     return queueItem;
                 });
-            
+
             var method = typeof(DownloadProcessingBackgroundService)
                 .GetMethod("EnqueueCompletedDownloadsAsync", BindingFlags.Instance | BindingFlags.NonPublic);
             Assert.NotNull(method);

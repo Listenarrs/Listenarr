@@ -99,7 +99,7 @@ namespace Listenarr.Tests.Features.Api.Services
                 .Setup(g => g.GetQueueAsync(downloadClient, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new List<QueueItem>());
             _services.AddSingleton(gatewayMock.Object);
-            
+
             Init();
 
             await _audiobookRepository.AddAsync(audiobook);

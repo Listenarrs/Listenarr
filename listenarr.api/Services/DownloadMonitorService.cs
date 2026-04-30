@@ -16,19 +16,13 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using Microsoft.AspNetCore.SignalR;
-using Listenarr.Application.Repositories;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Runtime.InteropServices;
-using Listenarr.Api.Hubs;
-using Listenarr.Domain.Models;
 using System.Text.Json;
 using System.Text.Encodings.Web;
-using Microsoft.Extensions.Caching.Memory;
-using Listenarr.Application.Services;
-using Listenarr.Api.Services.Adapters;
 using Listenarr.Domain.Utils;
+using Listenarr.Api.Utils;
 
 namespace Listenarr.Api.Services
 {

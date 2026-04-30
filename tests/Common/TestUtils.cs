@@ -24,11 +24,11 @@ namespace Listenarr.Tests.Common
 
             return string.IsNullOrWhiteSpace(groupName) ? "/api/v1" : $"/api/{groupName}";
         }
-        
+
         public static DownloadProcessingBackgroundService GetDownloadProcessingBackgroundService()
         {
             return new DownloadProcessingBackgroundService(
-                new Mock<IServiceScopeFactory>().Object, 
+                new Mock<IServiceScopeFactory>().Object,
                 new Mock<ILogger<DownloadProcessingBackgroundService>>().Object,
                 new Mock<IAppMetricsService>().Object);
         }

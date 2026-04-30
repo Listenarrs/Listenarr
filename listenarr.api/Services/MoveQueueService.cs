@@ -17,14 +17,6 @@
  */
 using System.Collections.Concurrent;
 using System.Threading.Channels;
-using System.Threading.Tasks;
-using System;
-using System.Linq;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.DependencyInjection;
-using Listenarr.Application.Repositories;
-using Listenarr.Domain.Models;
-using Microsoft.AspNetCore.SignalR;
 
 
 namespace Listenarr.Api.Services

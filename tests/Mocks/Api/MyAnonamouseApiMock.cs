@@ -20,7 +20,7 @@ namespace Listenarr.Tests.Mocks.Api
 
         public HttpResponseMessage AddCookies(HttpResponseMessage response, string value)
         {
-            response.Headers.Add("Set-Cookie", "mam_id=\""+ value + "\"; Path=/; HttpOnly");
+            response.Headers.Add("Set-Cookie", "mam_id=\"" + value + "\"; Path=/; HttpOnly");
             return response;
         }
 
@@ -32,11 +32,11 @@ namespace Listenarr.Tests.Mocks.Api
         public async Task<HttpResponseMessage> GetDummyDownload(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var content = new ByteArrayContent(Encoding.UTF8.GetBytes("dummy-torrent-bytes"));
-            content.Headers.ContentDisposition = new ContentDispositionHeaderValue("attachment") 
+            content.Headers.ContentDisposition = new ContentDispositionHeaderValue("attachment")
             {
                 FileName = "file.torrent"
             };
-        
+
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = content
@@ -44,15 +44,15 @@ namespace Listenarr.Tests.Mocks.Api
         }
 
         public async Task<HttpResponseMessage> GetDownload(HttpRequestMessage request, CancellationToken cancellationToken)
-        {            
+        {
             var stringContent = new StringBuilder()
                 .Append("d")
                 .Append("8:announce82:https://www.myanonamouse.net/tracker.php/mGDjyetAEBGCaneLZNS9OHawTo1upcwU/announce")
                 .Append("e")
                 .ToString();
-            
+
             var content = new ByteArrayContent(Encoding.UTF8.GetBytes(stringContent));
-            content.Headers.ContentDisposition = new ContentDispositionHeaderValue("attachment") 
+            content.Headers.ContentDisposition = new ContentDispositionHeaderValue("attachment")
             {
                 FileName = "file.torrent"
             };

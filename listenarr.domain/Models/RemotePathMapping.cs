@@ -95,9 +95,9 @@ namespace Listenarr.Domain.Models
         }
 
         public RemotePathMapping(
-            string downloadClientId, 
-            string remotePath, 
-            string localPath, 
+            string downloadClientId,
+            string remotePath,
+            string localPath,
             string name)
         {
             DownloadClientId = downloadClientId;

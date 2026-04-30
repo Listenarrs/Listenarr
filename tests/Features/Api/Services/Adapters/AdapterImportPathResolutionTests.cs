@@ -46,7 +46,7 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
                 .WithHost("localhost")
                 .WithPort(9091)
                 .Build());
-            
+
             _sabnzbdClient = await _downloadClientConfigurationRepository.SaveAsync(new DownloadClientConfigurationBuilder()
                 .WithId("sab-client")
                 .WithType("sabnzbd")
@@ -54,7 +54,7 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
                 .WithPort(8080)
                 .WithApiKey("apiKey")
                 .Build());
-            
+
             _nzbgetClient = await _downloadClientConfigurationRepository.SaveAsync(new DownloadClientConfigurationBuilder()
                 .WithId("nzb-client")
                 .WithType("nzbget")
@@ -103,7 +103,8 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
         [MemberData(nameof(TransmissionGetImportItemAsyncCases))]
         public async Task Transmission_GetImportItemAsync_ResolvesPath(int downloadId, string expectedPath)
         {
-            var item = new DownloadClientItem {
+            var item = new DownloadClientItem
+            {
                 DownloadId = downloadId.ToString(),
                 OutputPath = string.Empty
             };
@@ -119,7 +120,8 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
         [Trait("Method", "GetImportItemAsync")]
         public async Task Transmission_LegacyGetImportItemAsync_PopulatesClientReportedSourceFiles()
         {
-            var item = new QueueItem {
+            var item = new QueueItem
+            {
                 Id = TransmissionApiMock.MULTI_FILE_TORRENT.ToString(),
                 ContentPath = string.Empty
             };
@@ -147,7 +149,8 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
         [MemberData(nameof(SabnzbdGetImportItemAsyncCases))]
         public async Task Sabnzbd_GetImportItemAsync_ResolvesPath(string downloadId, string expectedPath)
         {
-            var item = new DownloadClientItem {
+            var item = new DownloadClientItem
+            {
                 DownloadId = downloadId,
                 OutputPath = string.Empty
             };
@@ -164,11 +167,12 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
         [MemberData(nameof(NzbgetGetImportItemAsyncCases))]
         public async Task Nzbget_GetImportItemAsync_ResolvesPath(string downloadId, string expectedPath)
         {
-            var item = new DownloadClientItem {
+            var item = new DownloadClientItem
+            {
                 DownloadId = downloadId,
                 OutputPath = string.Empty
             };
-            
+
             var adapter = MockUtils.CreateNzbgetAdapter(_provider);
             var resolved = await adapter.GetImportItemAsync(_nzbgetClient, item);
 

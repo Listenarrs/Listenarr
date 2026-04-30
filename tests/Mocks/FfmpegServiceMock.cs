@@ -21,7 +21,7 @@ namespace Listenarr.Tests.Mocks
             {
                 _ffprobePath = await _fileService.GetTempFileAsync("ffprobefake");
             }
-            
+
             return _ffprobePath;
         }
 

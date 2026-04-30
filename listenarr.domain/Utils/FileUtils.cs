@@ -17,7 +17,6 @@
  */
 using System.Runtime.InteropServices;
 using System.Text;
-using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using Listenarr.Domain.Models;
 

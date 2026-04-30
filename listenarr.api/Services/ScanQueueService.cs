@@ -16,9 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Collections.Concurrent;
-using System.Threading.Tasks;
 using System.Threading.Channels;
-using System;
 
 namespace Listenarr.Api.Services
 {

@@ -16,9 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 // csharp
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Listenarr.Api.Services;
 using Listenarr.Api.Services.Metadata;
 
 namespace Listenarr.Api.Extensions

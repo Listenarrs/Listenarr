@@ -22,7 +22,7 @@ namespace Listenarr.Tests.Mocks
             {
                 return null;
             }
-            
+
             return new AudioMetadataBuilder()
                 .WithTitle("Test Audiobook")
                 .WithArtist("Test Author")

@@ -17,10 +17,6 @@
  */
 
 using Microsoft.AspNetCore.Mvc;
-using Listenarr.Api.Services;
-using Listenarr.Application.Repositories;
-using Listenarr.Domain.Models;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace Listenarr.Api.Controllers
 {

@@ -103,7 +103,7 @@ namespace Listenarr.Tests.Builders
             _download.ImportAttempts = value;
             return this;
         }
-        
+
         public Download Build()
         {
             return _download;

@@ -19,11 +19,6 @@ using System.Diagnostics;
 using System.Reflection;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
-using System.Linq;
-using Listenarr.Application.Repositories;
-using Microsoft.AspNetCore.SignalR;
-using Listenarr.Api.Hubs;
-using Listenarr.Api.Services;
 
 namespace Listenarr.Api.Controllers
 {

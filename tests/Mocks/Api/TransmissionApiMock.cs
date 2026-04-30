@@ -23,13 +23,13 @@ namespace Listenarr.Tests.Mocks.Api
                 string method = methoPostElement.GetString();
                 if (string.Equals("torrent-get", method, StringComparison.OrdinalIgnoreCase))
                 {
-                    if (document.RootElement.TryGetProperty("arguments", out JsonElement argsElement) && 
+                    if (document.RootElement.TryGetProperty("arguments", out JsonElement argsElement) &&
                         argsElement.TryGetProperty("ids", out JsonElement idsElement))
                     {
                         var id = idsElement.EnumerateArray()
                             .Select(x => x.GetInt32())
                             .First();
-                        
+
                         if (id == SINGLE_FILE_TORRENT)
                         {
                             return SingleFileTorrentGet();

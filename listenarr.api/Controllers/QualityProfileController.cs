@@ -17,8 +17,6 @@
  */
 
 using Microsoft.AspNetCore.Mvc;
-using Listenarr.Domain.Models;
-using Listenarr.Api.Services;
 
 namespace Listenarr.Api.Controllers
 {

@@ -16,8 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Diagnostics;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace Listenarr.Api.Services
 {

@@ -35,9 +35,10 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
 
         public override async Task InitializeAsync()
         {
-            _services.AddHttpClient("", client => {
-                    client.BaseAddress = new Uri("https://www.myanonamouse.net");
-                })
+            _services.AddHttpClient("", client =>
+            {
+                client.BaseAddress = new Uri("https://www.myanonamouse.net");
+            })
                 .AddHttpMessageHandler<MyAnonamouseApiMock>();
             Init();
 

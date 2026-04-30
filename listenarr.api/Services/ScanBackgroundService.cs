@@ -15,16 +15,6 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using Microsoft.AspNetCore.SignalR;
-using Listenarr.Api.Hubs;
-using Listenarr.Application.Repositories;
-using Listenarr.Domain.Models;
-using System.IO;
-using System.Linq;
-using System.Collections.Generic;
-using System.Threading;
 using System.Text.Json;
 using Listenarr.Domain.Utils;
 

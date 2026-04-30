@@ -30,8 +30,8 @@ namespace Listenarr.Tests.Common
         }
 
         [MemberNotNull(
-            nameof(_services), 
-            nameof(_provider), 
+            nameof(_services),
+            nameof(_provider),
             nameof(_applicationSettingsRepository),
             nameof(_downloadClientConfigurationRepository),
             nameof(_downloadRepository),
@@ -48,7 +48,7 @@ namespace Listenarr.Tests.Common
             {
                 _services = services;
             }
-            
+
             _services ??= new ServiceCollectionBuilder().Build();
             _provider = _services.BuildServiceProvider();
 

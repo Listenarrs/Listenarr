@@ -6,7 +6,7 @@ namespace Listenarr.Domain.Models
     public class ApplicationSettings
     {
         public int Id { get; set; } = 1; // Singleton pattern - only one settings record
-        public string OutputPath 
+        public string OutputPath
         {
             get
             {
@@ -15,7 +15,7 @@ namespace Listenarr.Domain.Models
             }
             set;
         } = string.Empty;
-        
+
         // Folder naming pattern (base directory structure)
         // Available variables:
         // {Author} - Audiobook author
@@ -72,7 +72,8 @@ namespace Listenarr.Domain.Models
         public int MaxConcurrentDownloads { get; set; } = 3;
         public int PollingIntervalSeconds { get; set; } = 30;
         public bool EnableNotifications { get; set; } = false;
-        public List<string> AllowedFileExtensions {
+        public List<string> AllowedFileExtensions
+        {
             get
             {
                 return [.. FileUtils.NormalizeExtensions(field)];
@@ -107,7 +108,8 @@ namespace Listenarr.Domain.Models
         // Failed download handling settings
         public bool FailedDownloadHandlingEnabled { get; set; } = true;
         public bool FailedDownloadAutoSearch { get; set; } = false;
-        public List<string> ImportBlacklistExtensions {
+        public List<string> ImportBlacklistExtensions
+        {
             get
             {
                 return [.. FileUtils.NormalizeExtensions(field)];

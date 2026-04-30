@@ -68,7 +68,7 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
 
             var adapter = MockUtils.CreateTransmissionAdapter(_provider);
             var addedId = await adapter.AddAsync(_client, searchResult);
-           
+
             var transmissionApiMock = _provider.GetRequiredService<TransmissionApiMock>();
             using var document = transmissionApiMock.GetLastJsonContent();
             Assert.NotNull(document);
@@ -135,7 +135,7 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
             Assert.Equal("HASH1", addedId);
             Assert.Equal("https://indexer.example.com/book.torrent", downloadedUrl);
             downloader.Verify(x => x.DownloadAsync("https://indexer.example.com/book.torrent", It.IsAny<CancellationToken>()), Times.Once);
-           
+
             var transmissionApiMock = _provider.GetRequiredService<TransmissionApiMock>();
             using var document = transmissionApiMock.GetLastJsonContent();
             Assert.NotNull(document);

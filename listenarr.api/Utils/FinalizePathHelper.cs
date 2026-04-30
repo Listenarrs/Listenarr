@@ -15,13 +15,9 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using System;
-using System.IO;
-using System.Linq;
 using System.Text.RegularExpressions;
-using Listenarr.Domain.Models;
 
-namespace Listenarr.Api.Services
+namespace Listenarr.Api.Utils
 {
     public static class FinalizePathHelper
     {

@@ -16,9 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using Listenarr.Api.Services;
-using System.Security.Claims;
-
 namespace Listenarr.Api.Middleware
 {
     public class SessionAuthenticationMiddleware

@@ -16,12 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Microsoft.AspNetCore.Mvc;
-using Listenarr.Api.Services;
-using Listenarr.Application.Repositories;
-using System.Text.Json.Serialization;
-using System.ComponentModel.DataAnnotations;
 using Listenarr.Domain.Utils;
-using static Listenarr.Domain.Utils.FileUtils;
 using static Listenarr.Api.Services.FileMover;
 using Listenarr.Api.Services.Metadata;
 

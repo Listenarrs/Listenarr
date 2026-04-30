@@ -56,13 +56,13 @@ namespace Listenarr.Tests.Features.Api.Services
                 .WithPath(sourceFile)
                 .Build();
             await _downloadRepository.AddAsync(download);
-            
+
             await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
                 .WithOutputPath(outputRoot)
                 .WithMetadataProcessing()
                 .WithMoveFileOnCompleted()
                 .Build());
-            
+
             // Act - process completed download
             var downloadService = _provider.GetRequiredService<DownloadService>();
             await downloadService.ProcessCompletedDownloadAsync(download.Id, download.FinalPath);

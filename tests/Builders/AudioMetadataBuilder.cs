@@ -71,7 +71,7 @@ namespace Listenarr.Tests.Builders
             _audioMetadata.Year = value;
             return this;
         }
-        
+
         public AudioMetadata Build()
         {
             return _audioMetadata;

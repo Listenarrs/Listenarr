@@ -103,7 +103,7 @@ namespace Listenarr.Domain.Models
         }
 
         public Download(
-            string id, 
+            string id,
             DownloadClientConfiguration client,
             DownloadStatus status,
             DateTime startedAt,

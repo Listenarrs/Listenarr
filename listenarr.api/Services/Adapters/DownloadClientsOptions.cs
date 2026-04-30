@@ -15,8 +15,6 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using System.Collections.Generic;
-
 namespace Listenarr.Api.Services.Adapters
 {
     // Options for a single download client instance

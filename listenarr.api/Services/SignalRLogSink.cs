@@ -19,9 +19,6 @@
 using Serilog.Core;
 using Serilog.Events;
 using System.Diagnostics;
-using Microsoft.AspNetCore.SignalR;
-using Listenarr.Api.Hubs;
-using Listenarr.Domain.Models;
 
 namespace Listenarr.Api.Services
 {

@@ -17,7 +17,6 @@
  */
 using Microsoft.EntityFrameworkCore.Migrations;
 using Listenarr.Infrastructure.Models;
-using Microsoft.EntityFrameworkCore.Infrastructure;
 
 #nullable disable
 

@@ -19,7 +19,6 @@
 using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
-using Listenarr.Domain.Models;
 
 namespace Listenarr.Api.Services
 {

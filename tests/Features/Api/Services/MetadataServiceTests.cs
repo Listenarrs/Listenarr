@@ -21,18 +21,18 @@ namespace Listenarr.Tests.Features.Api.Services
         {
             var sourceDirectory = FileService.GetTempDirectory("FetchMetadataAsync");
             var filePath = await FileService.GetFileAsync(sourceDirectory, "03 - Seconde Fondation Isaac Asimov.withmetadata.mp3");
-        
+
             var client = await _downloadClientConfigurationRepository.SaveAsync(new DownloadClientConfigurationBuilder()
                 .WithId(CLIENT_CONFIG_ID)
                 .Build());
-            
+
             var download = new DownloadBuilder()
                 .WithId(DOWNLOAD_ID)
                 .WithDownloadClientConfiguration(client)
                 .WithUploader("AnotherOneBiteTheDust")
                 .WithProtocol(DownloadProtocol.Torrent)
                 .Build();
-            
+
             var audiobook = new AudiobookBuilder()
                 .WithId(AUDIOBOOK_ID)
                 .WithTitle("Seconde Fondation")
@@ -48,7 +48,7 @@ namespace Listenarr.Tests.Features.Api.Services
             {
                 SourcePath = filePath
             };
-            
+
             var metadataService = _provider.GetRequiredService<IMetadataService>();
             var metadata = await metadataService.FetchMetadataAsync(job, download, audiobook, default);
 

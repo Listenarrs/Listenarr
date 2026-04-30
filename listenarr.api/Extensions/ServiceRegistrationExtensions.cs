@@ -16,16 +16,9 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 // csharp
-using System;
-using System.Linq;
 using System.Net;
-using System.Net.Http;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
 using Polly;
 using Polly.Extensions.Http;
-using Listenarr.Api.Services.Adapters;
-using Listenarr.Api.Services;
 using Microsoft.Extensions.Options;
 
 namespace Listenarr.Api.Extensions

@@ -15,18 +15,11 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Runtime.InteropServices;
-using System.Threading.Tasks;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.Options;
-using Microsoft.Extensions.Logging;
 using System.Text.Json.Serialization;
 using Listenarr.Domain.Utils;
 

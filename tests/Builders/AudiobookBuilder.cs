@@ -48,7 +48,7 @@ namespace Listenarr.Tests.Builders
             _audiobook.PublishedDate = value.ToString();
             return this;
         }
-        
+
         public Audiobook Build()
         {
             return _audiobook;

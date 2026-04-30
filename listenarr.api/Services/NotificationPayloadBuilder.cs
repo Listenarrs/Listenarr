@@ -15,15 +15,9 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using System;
 using System.Net;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using System.Linq;
-using Microsoft.AspNetCore.Http;
-using System.Net.Http;
-using System.Threading.Tasks;
 
 namespace Listenarr.Api.Services
 {

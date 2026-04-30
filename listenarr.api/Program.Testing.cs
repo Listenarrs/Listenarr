@@ -1,12 +1,6 @@
 // This partial is compiled only for the test host. It applies small DI patches
 // so the WebApplicationFactory used by integration tests has the same persistence
 // registrations as the real app (including IDbContextFactory).
-using System;
-using Microsoft.AspNetCore.Builder;
-using System.IO;
-using System.Collections.Generic;
-using Microsoft.Extensions.Configuration;
-
 public partial class Program
 {
     static partial void ApplyTestHostPatches(WebApplicationBuilder builder)

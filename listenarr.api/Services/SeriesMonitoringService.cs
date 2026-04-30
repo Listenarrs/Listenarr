@@ -17,8 +17,6 @@
  */
 using System.Globalization;
 using System.Text;
-using Listenarr.Application.Repositories;
-using Listenarr.Domain.Models;
 
 namespace Listenarr.Api.Services
 {

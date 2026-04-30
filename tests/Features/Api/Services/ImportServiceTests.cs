@@ -76,7 +76,7 @@ namespace Listenarr.Tests.Features.Api.Services
                 EnableMetadataProcessing = false,
                 FileNamingPattern = "{Author}/{Title}/{Title} ({Year})"
             });
-            
+
             await _audiobookRepository.AddAsync(new Audiobook
             {
                 Id = 123,
@@ -178,7 +178,7 @@ namespace Listenarr.Tests.Features.Api.Services
                 .ReturnsAsync(new AudioMetadata { Title = "Jack of Shadows", Format = "mp3", TrackNumber = 1 });
             metadataMock.Setup(m => m.ExtractFileMetadataAsync(It.Is<string>(path => path.EndsWith("Chapter 02.mp3", StringComparison.OrdinalIgnoreCase))))
                 .ReturnsAsync(new AudioMetadata { Title = "Jack of Shadows", Format = "mp3", TrackNumber = 2 });
-                
+
             _services.AddSingleton(metadataMock.Object);
             Init();
 
@@ -221,7 +221,7 @@ namespace Listenarr.Tests.Features.Api.Services
             var metadataMock = new Mock<IMetadataService>();
             metadataMock.Setup(m => m.ExtractFileMetadataAsync(audioFile))
                 .ReturnsAsync(new AudioMetadata { Title = "Companion Book", Format = "mp3", BitRate = 128000 });
-                
+
             _services.AddSingleton(metadataMock.Object);
             Init();
 
@@ -263,7 +263,7 @@ namespace Listenarr.Tests.Features.Api.Services
             var metadataMock = new Mock<IMetadataService>();
             metadataMock.Setup(m => m.ExtractFileMetadataAsync(audioFile))
                 .ReturnsAsync(new AudioMetadata { Title = "Companion Book", Format = "mp3", BitRate = 128000 });
-                
+
             _services.AddSingleton(metadataMock.Object);
             Init();
 
@@ -318,7 +318,7 @@ namespace Listenarr.Tests.Features.Api.Services
                     Series = series,
                     Format = "m4b"
                 });
-            
+
             _services.AddSingleton(metadataMock.Object);
             Init();
 
@@ -331,7 +331,7 @@ namespace Listenarr.Tests.Features.Api.Services
                 FileNamingPattern = "{Title}",
                 MultiFileNamingPattern = "{Title}-{DiskNumber:00}"
             });
-            
+
             var importService = _provider.GetRequiredService<IImportService>();
             var results = await importService.ImportFilesFromDirectoryAsync(
                 "nested-torrent",
@@ -420,7 +420,7 @@ namespace Listenarr.Tests.Features.Api.Services
             var metadataMock = new Mock<IMetadataService>();
             metadataMock.Setup(m => m.ExtractFileMetadataAsync(It.IsAny<string>()))
                 .ReturnsAsync(new AudioMetadata { Title = "The Gunslinger", Format = "m4b" });
-            
+
             _services.AddSingleton(metadataMock.Object);
             Init();
 
@@ -441,7 +441,7 @@ namespace Listenarr.Tests.Features.Api.Services
                 Authors = ["Stephen King"],
                 Narrators = ["George Guidall", "Frank Muller"]
             });
-        
+
             var importService = _provider.GetRequiredService<IImportService>();
             var result = await importService.ImportSingleFileAsync("dl-narrator", 987, sourceFile, settings);
 
@@ -467,7 +467,7 @@ namespace Listenarr.Tests.Features.Api.Services
                     AlbumArtist = "George Guidall",
                     Narrator = "George Guidall"
                 });
-            
+
             _services.AddSingleton(metadataMock.Object);
             Init();
 
@@ -480,7 +480,7 @@ namespace Listenarr.Tests.Features.Api.Services
                 FileNamingPattern = "{Title}",
                 MultiFileNamingPattern = "{Title}-{DiskNumber:00}"
             });
-            
+
             await _audiobookRepository.AddAsync(new Audiobook
             {
                 Id = 988,
@@ -507,7 +507,7 @@ namespace Listenarr.Tests.Features.Api.Services
             var metadataMock = new Mock<IMetadataService>();
             metadataMock.Setup(m => m.ExtractFileMetadataAsync(It.IsAny<string>()))
                 .ReturnsAsync(new AudioMetadata { Title = "The Gunslinger", Format = "m4b" });
-            
+
             _services.AddSingleton(metadataMock.Object);
             Init();
 
@@ -532,7 +532,7 @@ namespace Listenarr.Tests.Features.Api.Services
                 Asin = "B000FC1R84",
                 Edition = "Revised Edition"
             });
-            
+
             var importService = _provider.GetRequiredService<IImportService>();
             var result = await importService.ImportSingleFileAsync("dl-metadata-vars", 989, sourceFile, settings);
 
@@ -555,7 +555,7 @@ namespace Listenarr.Tests.Features.Api.Services
                 .ReturnsAsync(new AudioMetadata { Title = "The Gunslinger", Format = "m4b", DiscNumber = 1 });
             metadataMock.Setup(m => m.ExtractFileMetadataAsync(secondSourceFile))
                 .ReturnsAsync(new AudioMetadata { Title = "The Gunslinger", Format = "m4b", DiscNumber = 2 });
-            
+
             _services.AddSingleton(metadataMock.Object);
             Init();
 
@@ -568,7 +568,7 @@ namespace Listenarr.Tests.Features.Api.Services
                 FileNamingPattern = "{Title} - {Edition} - {Subtitle}",
                 MultiFileNamingPattern = "{Title} - {Edition} - {Subtitle} - {DiskNumber:00}"
             });
-            
+
             await _audiobookRepository.AddAsync(new Audiobook
             {
                 Id = 990,

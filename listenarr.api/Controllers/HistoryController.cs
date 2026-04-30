@@ -17,10 +17,6 @@
  */
 
 using Microsoft.AspNetCore.Mvc;
-using System.Threading.Tasks;
-using System.Collections.Generic;
-using Listenarr.Application.Repositories;
-using Listenarr.Domain.Models;
 
 namespace Listenarr.Api.Controllers
 {

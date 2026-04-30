@@ -1,7 +1,5 @@
-using System;
 using Serilog;
 using Microsoft.Data.Sqlite;
-using System.IO;
 
 static class DeleteDownloadsProgram
 {

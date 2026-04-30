@@ -16,17 +16,9 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using Listenarr.Domain.Models;
-using Listenarr.Application.Repositories;
-using Microsoft.AspNetCore.SignalR;
-using Listenarr.Api.Hubs;
 using System.Text.Json;
 using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
-using HtmlAgilityPack;
-using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
-using Listenarr.Api.Services.Search;
 using Listenarr.Api.Services.Search.Filters;
 using Listenarr.Api.Services.Search.Strategies;
 using Microsoft.Extensions.Caching.Memory;

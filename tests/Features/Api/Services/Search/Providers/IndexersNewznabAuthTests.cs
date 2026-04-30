@@ -165,7 +165,7 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
                         </item>
                     </channel>
                 </rss>";
-            
+
             var resp = new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(validXml, System.Text.Encoding.UTF8, "application/xml")
@@ -202,7 +202,7 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
             // Arrange - Newznab/Torznab typically returns 200 OK with error XML when API key is invalid
             var errorXml = @"<?xml version=""1.0"" encoding=""UTF-8""?>
                 <error code=""100"" description=""Invalid API Key"" />";
-            
+
             var resp = new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(errorXml, System.Text.Encoding.UTF8, "application/xml")
@@ -234,7 +234,7 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
             // Arrange - Error with "unauthorized" in description
             var errorXml = @"<?xml version=""1.0"" encoding=""UTF-8""?>
                 <error code=""101"" description=""Unauthorized access"" />";
-            
+
             var resp = new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(errorXml, System.Text.Encoding.UTF8, "application/xml")
@@ -322,7 +322,7 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
                         <title>Test Torznab</title>
                     </channel>
                 </rss>";
-            
+
             var resp = new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(validXml, System.Text.Encoding.UTF8, "application/xml")
@@ -356,13 +356,13 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
             // Arrange - Create a persisted indexer in database
             var errorXml = @"<?xml version=""1.0"" encoding=""UTF-8""?>
                 <error code=""100"" description=""Invalid API Key"" />";
-            
+
             var resp = new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(errorXml, System.Text.Encoding.UTF8, "application/xml")
             };
             var handler = new CaptureHandler(resp);
-            
+
             var indexer = new Indexer
             {
                 Name = "Test Newznab",
@@ -398,13 +398,13 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
                         <title>Test Indexer</title>
                     </channel>
                 </rss>";
-            
+
             var resp = new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(validXml, System.Text.Encoding.UTF8, "application/xml")
             };
             var handler = new CaptureHandler(resp);
-            
+
             var indexer = new Indexer
             {
                 Name = "Test Newznab",

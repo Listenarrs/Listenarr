@@ -93,7 +93,7 @@ namespace Listenarr.Tests.Builders
             _downloadClientConfiguration.DownloadPath = value;
             return this;
         }
-        
+
         public DownloadClientConfiguration Build()
         {
             _downloadClientConfiguration.Settings = _settings;

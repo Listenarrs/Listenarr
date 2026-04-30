@@ -16,14 +16,8 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using Listenarr.Api.Services;
-using Listenarr.Api.Services.Search;
 using Listenarr.Api.Services.Search.Filters;
 using Listenarr.Api.Services.Search.Strategies;
-using Listenarr.Api.Hubs;
-using Microsoft.AspNetCore.SignalR;
-using System.Linq;
-using Listenarr.Api.Middleware;
 using System.Net;
 using Listenarr.Infrastructure.Models;
 using Asp.Versioning;

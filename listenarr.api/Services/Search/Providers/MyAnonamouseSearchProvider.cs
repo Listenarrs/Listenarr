@@ -15,18 +15,9 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Listenarr.Application.Repositories;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Net.Http;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
 using AsyncKeyedLock;
-using Listenarr.Api.Models;
-using Listenarr.Domain.Models;
-using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Api.Services.Search.Providers
 {

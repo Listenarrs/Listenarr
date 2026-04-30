@@ -18,7 +18,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 
-namespace Listenarr.Domain.Models
+namespace Listenarr.Infrastructure.Models
 {
     public static class SqlitePragmaInitializer
     {
