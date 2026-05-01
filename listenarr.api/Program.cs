@@ -33,87 +33,52 @@ using Polly.Extensions.Http;
 using Listenarr.Api.Extensions;
 using Listenarr.Infrastructure.Extensions;
 
-// Check for special CLI helpers before building the web host
-// Set ContentRootPath to a reliable value for local dev, but leave Docker/production unaffected.
-var isDocker = Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER") == "true";
-var isDev = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") == "Development";
-
-// Allow an explicit override via environment variable (robust for CI and custom installs)
-var contentRootOverride = Environment.GetEnvironmentVariable("LISTENARR_CONTENT_ROOT");
-
-WebApplicationBuilder builder;
-string? projectDir = null;
-if (!string.IsNullOrWhiteSpace(contentRootOverride))
+WebApplicationBuilder builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
-    // Validate the provided override path before using it as ContentRootPath.
-    if (Directory.Exists(contentRootOverride))
-    {
-        builder = WebApplication.CreateBuilder(new WebApplicationOptions
-        {
-            Args = args,
-            ContentRootPath = contentRootOverride
-        });
-        projectDir = contentRootOverride;
-    }
-    else
-    {
-        Console.WriteLine($"[Listenarr] Warning: LISTENARR_CONTENT_ROOT '{contentRootOverride}' does not exist; ignoring override.");
-        builder = WebApplication.CreateBuilder(args ?? Array.Empty<string>());
-    }
-}
-else if (isDev && !isDocker)
-{
-    // Resolve to the listenarr.api project directory from the build output.
-    // AppContext.BaseDirectory is typically: <project>/bin/<config>/<tfm>/
-    // Three GetParent calls navigate back to the project root.
-    var baseDir = AppContext.BaseDirectory;
-    projectDir = Directory.GetParent(
-        Directory.GetParent(
-            Directory.GetParent(baseDir)?.FullName ?? baseDir
-        )?.FullName ?? baseDir
-    )?.FullName ?? baseDir;
+    Args = args,
+    ContentRootPath = AppContext.BaseDirectory
+});
 
-    // Safety check: if the resolved directory doesn't look like the project root
-    // (i.e. no 'config' sibling or the project file), fall back to default.
-    var looksLikeProjectRoot = Directory.Exists(Path.Join(projectDir, "config"))
-        || File.Exists(Path.Join(projectDir, "listenarr.api.csproj"));
-
-    if (looksLikeProjectRoot && Directory.Exists(projectDir))
-    {
-        try
-        {
-            builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = args, ContentRootPath = projectDir });
-        }
-        catch (Exception ex) when (ex is DirectoryNotFoundException || ex is IOException || ex is UnauthorizedAccessException)
-        {
-            // If for some reason the ContentRootPath cannot be used by CreateBuilder
-            // (for example a transient IO issue or an unexpected path layout), fall
-            // back to the default builder which will use the running assembly's
-            // base directory. Log to console so developers can see the fallback.
-            Console.WriteLine($"[Listenarr] Warning: failed to use content root '{projectDir}' - falling back to default. Error: {ex.Message}");
-            builder = WebApplication.CreateBuilder(args ?? Array.Empty<string>());
-        }
-    }
-    else
-    {
-        builder = WebApplication.CreateBuilder(args ?? Array.Empty<string>());
-    }
-}
-else
-{
-    builder = WebApplication.CreateBuilder(args ?? Array.Empty<string>());
-}
-
-// repoRoot fallback used in other path computations later
-var repoRoot = projectDir ?? AppContext.BaseDirectory;
 // dotnet test hosts are typically `testhost` and may not always set
 // ASPNETCORE_ENVIRONMENT=Test; detect this explicitly to keep tests isolated.
 var processName = Path.GetFileNameWithoutExtension(Environment.ProcessPath ?? string.Empty);
-var isLikelyTestHost =
-    string.Equals(processName, "testhost", StringComparison.OrdinalIgnoreCase) ||
+if (string.Equals(processName, "testhost", StringComparison.OrdinalIgnoreCase) ||
     string.Equals(Environment.GetEnvironmentVariable("LISTENARR_TEST_MODE"), "true", StringComparison.OrdinalIgnoreCase) ||
     !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("VSTEST_SESSION_ID")) ||
-    !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DOTNET_TEST_RUNNER"));
+    !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DOTNET_TEST_RUNNER")))
+{
+    builder.Environment.EnvironmentName = "Test";
+}
+
+if (builder.Environment.IsEnvironment("Test"))
+{
+    var testContentRootPath = Path.Combine(Path.GetTempPath(), "ListenarrTests");
+    Directory.CreateDirectory(testContentRootPath); // Unchecked exception: Tests must fail if we cannot create that directory
+
+    Environment.SetEnvironmentVariable("LISTENARR_CONTENT_ROOT", testContentRootPath);
+}
+
+// Allow an explicit override via environment variable (robust for CI and custom installs)
+var contentRootOverride = Environment.GetEnvironmentVariable("LISTENARR_CONTENT_ROOT");
+if (!string.IsNullOrWhiteSpace(contentRootOverride))
+{
+    try
+    {
+        contentRootOverride = Path.GetFullPath(contentRootOverride);
+
+        if (!Directory.Exists(contentRootOverride))
+        {
+            Console.WriteLine($"[Listenarr] LISTENARR_CONTENT_ROOT '{contentRootOverride}' does not exist; creating it");
+            Directory.CreateDirectory(contentRootOverride);
+        }
+
+        builder.Environment.ContentRootPath = contentRootOverride;
+    }
+    catch (Exception)
+    {
+        Console.WriteLine($"[Listenarr] Error: LISTENARR_CONTENT_ROOT '{contentRootOverride}' cannot be used or created; ignoring override.");
+    }
+}
 
 // Configure Serilog for structured logging, file rotation and SignalR broadcasting
 var logFilePath = Path.Join(builder.Environment.ContentRootPath, "config", "logs", "listenarr-.log");
@@ -201,7 +166,7 @@ Log.Logger = new Serilog.LoggerConfiguration()
 // Use Serilog for logging
 builder.Host.UseSerilog();
 
-if (isLikelyTestHost)
+if (builder.Environment.IsEnvironment("Test"))
 {
     Log.Logger = Serilog.Core.Logger.None;
 }
@@ -218,7 +183,7 @@ if (!args?.Any(arg => arg.StartsWith("--urls")) ?? true)
 // If running as an integration test host, allow the test-side partial to apply any
 // additional registrations (for example AddListenarrInfrastructure so IDbContextFactory<>
 // is available to hosted/background services during tests).
-if (builder.Environment.IsEnvironment("Test") || isLikelyTestHost)
+if (builder.Environment.IsEnvironment("Test"))
 {
     ApplyTestHostPatches(builder);
 }
@@ -536,7 +501,7 @@ var sqliteDbPath = string.IsNullOrWhiteSpace(sqliteDbPathOverride)
         : Path.Join(builder.Environment.ContentRootPath, sqliteDbPathOverride));
 
 // Safety guard: test hosts must never write to the repository DB path.
-if (builder.Environment.IsEnvironment("Test") || isLikelyTestHost)
+if (builder.Environment.IsEnvironment("Test"))
 {
     var repoDbPath = Path.GetFullPath(Path.Join(builder.Environment.ContentRootPath, "config", "database", "listenarr.db"));
     var resolvedSqlitePath = Path.GetFullPath(sqliteDbPath);
@@ -545,100 +510,6 @@ if (builder.Environment.IsEnvironment("Test") || isLikelyTestHost)
         sqliteDbPath = Path.Join(Path.GetTempPath(), "listenarr-tests", "program-main", $"listenarr-{Guid.NewGuid():N}.db");
         Log.Logger.Warning("[Startup] Test environment attempted to use repo sqlite path; forcing isolated test DB path: {SqliteDbPath}", sqliteDbPath);
     }
-}
-
-// In development, prefer the repository database path so `npm run dev` uses
-// `listenarr.api/config/database/listenarr.db` regardless of the resolved
-// ContentRootPath. This ensures developers see and edit the canonical DB.
-if (builder.Environment.IsDevelopment() && !isDocker && !hasExplicitSqliteDbPathOverride && !isLikelyTestHost)
-{
-    // Search ancestors from the content root for a directory that contains
-    // the `listenarr.api/config` folder. This avoids duplicating `listenarr.api`
-    // when ContentRootPath is already inside a nested build folder.
-    string? repoCandidate = null;
-    try
-    {
-        var dir = new DirectoryInfo(builder.Environment.ContentRootPath);
-        const int maxDepth = 8;
-        int depth = 0;
-        while (dir != null && depth++ < maxDepth)
-        {
-            if (Directory.Exists(Path.Join(dir.FullName, "listenarr.api", "config")))
-            {
-                repoCandidate = dir.FullName;
-                break;
-            }
-            dir = dir.Parent;
-        }
-    }
-    catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is System.Security.SecurityException)
-    {
-        Log.Logger.Debug(ex, "[Startup] Failed to resolve repo candidate from ContentRootPath; continuing with fallback resolution.");
-    }
-
-    // Prefer the current working directory when running dev (npm run dev uses repo root)
-    try
-    {
-        // First, search upward from the current working directory for the repository root
-        // (identified by the presence of listenarr.sln). This is the most reliable
-        // indicator of the repo root regardless of whether the process was started
-        // from a build output folder or the repo directory itself.
-        var cwd = Directory.GetCurrentDirectory();
-        string? repoRootFromCwd = null;
-        try
-        {
-            var dir = new DirectoryInfo(cwd);
-            const int maxDepth2 = 8;
-            int depth2 = 0;
-            while (dir != null && depth2++ < maxDepth2)
-            {
-                if (File.Exists(Path.Join(dir.FullName, "listenarr.sln")))
-                {
-                    repoRootFromCwd = dir.FullName;
-                    break;
-                }
-                dir = dir.Parent;
-            }
-        }
-        catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
-        {
-            Log.Logger.Debug(ex, "[Startup] Failed to probe for repo root from current directory '{Cwd}'", cwd);
-        }
-        string devRepoRoot = repoRootFromCwd ?? repoCandidate ?? repoRoot;
-
-        // If the chosen root already points at the listenarr.api folder, avoid adding
-        // an extra 'listenarr.api' segment which previously produced duplicate paths.
-        bool rootIsListenarrApi = string.Equals(
-            Path.GetFileName(devRepoRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)),
-            "listenarr.api",
-            StringComparison.OrdinalIgnoreCase);
-
-        string devRepoDb = rootIsListenarrApi
-            ? Path.Join(devRepoRoot, "config", "database", "listenarr.db")
-            : Path.Join(devRepoRoot, "listenarr.api", "config", "database", "listenarr.db");
-
-        if (File.Exists(devRepoDb) || Directory.Exists(Path.GetDirectoryName(devRepoDb)!))
-        {
-            sqliteDbPath = devRepoDb;
-            Log.Logger.Information("[Startup] Development mode detected - forcing SQLite DB to repo path: {DevRepoDb}", devRepoDb);
-        }
-    }
-    catch (Exception ex) when (
-        ex is IOException ||
-        ex is UnauthorizedAccessException ||
-        ex is DirectoryNotFoundException ||
-        ex is PathTooLongException ||
-        ex is System.Security.SecurityException)
-    {
-        Log.Logger.Warning(ex, "Failed to resolve dev repo DB using working directory; falling back to computed repoRoot");
-        var devRepoDbFallback = Path.Join(repoRoot, "listenarr.api", "config", "database", "listenarr.db");
-        sqliteDbPath = devRepoDbFallback;
-        Log.Logger.Information("[Startup] Development mode detected - forcing SQLite DB to repo path (fallback): {DevRepoDb}", devRepoDbFallback);
-    }
-}
-else if (builder.Environment.IsDevelopment() && hasExplicitSqliteDbPathOverride)
-{
-    Log.Logger.Information("[Startup] Development mode detected but honoring explicit SQLite DB path override: {SqliteDbPathOverride}", sqliteDbPath);
 }
 // Ensure directory exists at startup so EF migrations can create the DB file there
 var sqliteDbDir = Path.GetDirectoryName(sqliteDbPath);

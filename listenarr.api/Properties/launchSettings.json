@@ -6,7 +6,7 @@
       "launchUrl": "swagger",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development",
-        "LISTENARR_CONTENT_ROOT": "."
+        "LISTENARR_CONTENT_ROOT": "../.env/development"
       },
       "dotnetRunMessages": true,
       "applicationUrl": "http://localhost:4545"
@@ -17,7 +17,7 @@
       "launchUrl": "swagger",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development",
-        "LISTENARR_CONTENT_ROOT": "."
+        "LISTENARR_CONTENT_ROOT": "../.env/development"
       },
       "dotnetRunMessages": true,
       "applicationUrl": "https://localhost:7172;http://localhost:4545"
@@ -27,7 +27,17 @@
       "launchBrowser": true,
       "launchUrl": "swagger",
       "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development"
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "LISTENARR_CONTENT_ROOT": "../.env/development"
+      }
+    },
+    "integration": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "launchUrl": "swagger",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Integration",
+        "LISTENARR_CONTENT_ROOT": "../.env/integration"
       }
     }
   },
