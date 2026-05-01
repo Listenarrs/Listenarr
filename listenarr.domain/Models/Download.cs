@@ -97,38 +97,6 @@ namespace Listenarr.Domain.Models
         /// </summary>
         public int? HistoryId { get; set; }
 
-        // FIXME: Remove me, not OOP
-        public Download()
-        {
-        }
-
-        public Download(
-            string id,
-            DownloadClientConfiguration client,
-            DownloadStatus status,
-            DateTime startedAt,
-            DateTime? completedAt,
-            string path,
-            Dictionary<string, object> metadata,
-            Audiobook audiobook,
-            int importAttempts,
-            string importBlockReason,
-            List<string> importBlockMessages)
-        {
-            Id = id;
-            DownloadClientId = client.Id;
-            Status = status;
-            StartedAt = startedAt;
-            CompletedAt = completedAt;
-            DownloadPath = path;
-            FinalPath = path;
-            Metadata = metadata;
-            AudiobookId = audiobook.Id;
-            ImportAttempts = importAttempts;
-            ImportBlockReason = importBlockReason;
-            ImportBlockMessages = importBlockMessages;
-        }
-
         public string? GetMetadataString(string key)
         {
             if (!Metadata.TryGetValue(key, out var value) || value == null)
