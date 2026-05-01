@@ -47,10 +47,14 @@ if (string.Equals(processName, "testhost", StringComparison.OrdinalIgnoreCase) |
     !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("VSTEST_SESSION_ID")) ||
     !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DOTNET_TEST_RUNNER")))
 {
+    builder.Environment.EnvironmentName = "Test";
+}
+
+if (builder.Environment.IsEnvironment("Test"))
+{
     var testContentRootPath = Path.Combine(Path.GetTempPath(), "ListenarrTests");
     Directory.CreateDirectory(testContentRootPath); // Unchecked exception: Tests must fail if we cannot create that directory
 
-    builder.Environment.EnvironmentName = "Test";
     Environment.SetEnvironmentVariable("LISTENARR_CONTENT_ROOT", testContentRootPath);
 }
 
