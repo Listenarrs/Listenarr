@@ -33,15 +33,26 @@ using Polly.Extensions.Http;
 using Listenarr.Api.Extensions;
 using Listenarr.Infrastructure.Extensions;
 
-// Check for special CLI helpers before building the web host
-// Set ContentRootPath to a reliable value for local dev, but leave Docker/production unaffected.
-var isDocker = Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER") == "true";
-
 WebApplicationBuilder builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
     Args = args,
     ContentRootPath = AppContext.BaseDirectory
 });
+
+// dotnet test hosts are typically `testhost` and may not always set
+// ASPNETCORE_ENVIRONMENT=Test; detect this explicitly to keep tests isolated.
+var processName = Path.GetFileNameWithoutExtension(Environment.ProcessPath ?? string.Empty);
+if (string.Equals(processName, "testhost", StringComparison.OrdinalIgnoreCase) ||
+    string.Equals(Environment.GetEnvironmentVariable("LISTENARR_TEST_MODE"), "true", StringComparison.OrdinalIgnoreCase) ||
+    !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("VSTEST_SESSION_ID")) ||
+    !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DOTNET_TEST_RUNNER")))
+{
+    var testContentRootPath = Path.Combine(Path.GetTempPath(), "ListenarrTests");
+    Directory.CreateDirectory(testContentRootPath); // Unchecked exception: Tests must fail if we cannot create that directory
+
+    builder.Environment.EnvironmentName = "Test";
+    Environment.SetEnvironmentVariable("LISTENARR_CONTENT_ROOT", testContentRootPath);
+}
 
 // Allow an explicit override via environment variable (robust for CI and custom installs)
 var contentRootOverride = Environment.GetEnvironmentVariable("LISTENARR_CONTENT_ROOT");
@@ -63,17 +74,6 @@ if (!string.IsNullOrWhiteSpace(contentRootOverride))
     {
         Console.WriteLine($"[Listenarr] Error: LISTENARR_CONTENT_ROOT '{contentRootOverride}' cannot be used or created; ignoring override.");
     }
-}
-
-// dotnet test hosts are typically `testhost` and may not always set
-// ASPNETCORE_ENVIRONMENT=Test; detect this explicitly to keep tests isolated.
-var processName = Path.GetFileNameWithoutExtension(Environment.ProcessPath ?? string.Empty);
-if (string.Equals(processName, "testhost", StringComparison.OrdinalIgnoreCase) ||
-    string.Equals(Environment.GetEnvironmentVariable("LISTENARR_TEST_MODE"), "true", StringComparison.OrdinalIgnoreCase) ||
-    !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("VSTEST_SESSION_ID")) ||
-    !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DOTNET_TEST_RUNNER")))
-{
-    builder.Environment.EnvironmentName = "Test";
 }
 
 // Configure Serilog for structured logging, file rotation and SignalR broadcasting
