@@ -87,6 +87,22 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
+        /// Lightweight liveness probe for Docker/TrueNAS health checks.
+        /// Returns 200 OK with no authentication required and no service calls.
+        /// </summary>
+        /// <remarks>
+        /// The leading "/" overrides the controller's route prefix so this endpoint
+        /// is reachable at GET /ping (root) instead of /api/v1/system/ping.
+        /// TrueNAS app catalog templates (and other *arr apps) expect /ping at the root.
+        /// </remarks>
+        [AllowAnonymous]
+        [HttpGet("/ping")]
+        public ActionResult Ping()
+        {
+            return Ok(new { status = "OK" });
+        }
+
+        /// <summary>
         /// Get health status of all services including download clients and external APIs.
         /// </summary>
         [HttpGet("health")]
