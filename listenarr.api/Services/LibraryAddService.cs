@@ -18,6 +18,7 @@
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.Extensions.DependencyInjection;
 using Listenarr.Application.Repositories;
 using Listenarr.Domain.Models;
 using Listenarr.Domain.Utils;
@@ -34,6 +35,7 @@ namespace Listenarr.Api.Services
         private readonly AudibleService _audibleService;
         private readonly IConfigurationService _configurationService;
         private readonly INotificationService? _notificationService;
+        private readonly IServiceScopeFactory? _scopeFactory;
 
         public LibraryAddService(
             IAudiobookRepository repo,
@@ -43,7 +45,8 @@ namespace Listenarr.Api.Services
             IQualityProfileService qualityProfileService,
             AudibleService audibleService,
             IConfigurationService configurationService,
-            INotificationService? notificationService = null)
+            INotificationService? notificationService = null,
+            IServiceScopeFactory? scopeFactory = null)
         {
             _repo = repo;
             _historyRepository = historyRepository;
@@ -53,6 +56,7 @@ namespace Listenarr.Api.Services
             _audibleService = audibleService;
             _configurationService = configurationService;
             _notificationService = notificationService;
+            _scopeFactory = scopeFactory;
         }
 
         public async Task<LibraryAddOperationResult> AddToLibraryAsync(
@@ -196,6 +200,32 @@ namespace Listenarr.Api.Services
                 request.Monitored,
                 audiobook.QualityProfileId,
                 request.AutoSearch);
+
+            if (request.AutoSearch && audiobook.Id > 0 && _scopeFactory != null)
+            {
+                var audiobookId = audiobook.Id;
+                var audiobookTitle = audiobook.Title;
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        using var scope = _scopeFactory.CreateScope();
+                        var downloadService = scope.ServiceProvider.GetService<IDownloadService>();
+                        if (downloadService == null)
+                        {
+                            _logger.LogWarning("Auto-search requested for '{Title}' (id={Id}) but IDownloadService is not registered", audiobookTitle, audiobookId);
+                            return;
+                        }
+                        _logger.LogInformation("Auto-search firing for '{Title}' (id={Id})", audiobookTitle, audiobookId);
+                        var result = await downloadService.SearchAndDownloadAsync(audiobookId);
+                        _logger.LogInformation("Auto-search result for '{Title}' (id={Id}): success={Success}, msg={Message}", audiobookTitle, audiobookId, result?.Success, result?.Message);
+                    }
+                    catch (Exception ex) when (ex is not OutOfMemoryException && ex is not StackOverflowException)
+                    {
+                        _logger.LogError(ex, "Auto-search failed for '{Title}' (id={Id})", audiobookTitle, audiobookId);
+                    }
+                });
+            }
 
             return new LibraryAddOperationResult
             {
