@@ -501,7 +501,7 @@ const qualityProfiles = ref<QualityProfile[]>([])
 const options = ref({
   monitored: true,
   qualityProfileId: null as number | null,
-  autoSearch: false,
+  autoSearch: true,
   // editable relative path portion (relative to rootPath)
   relativePath: '' as string | null,
 })

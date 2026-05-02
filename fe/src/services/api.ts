@@ -1150,7 +1150,7 @@ class ApiService {
       metadata: normalizedMetadata,
       monitored: options?.monitored ?? true,
       qualityProfileId: options?.qualityProfileId,
-      autoSearch: options?.autoSearch ?? false,
+      autoSearch: options?.autoSearch ?? true,
       searchResult: normalizedSearchResult,
       destinationPath: options?.destinationPath,
     }
