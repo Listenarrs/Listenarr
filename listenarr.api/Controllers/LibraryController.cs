@@ -4490,7 +4490,7 @@ namespace Listenarr.Api.Controllers
             public AudibleBookMetadata Metadata { get; set; } = new();
             public bool Monitored { get; set; } = true;
             public int? QualityProfileId { get; set; }
-            public bool AutoSearch { get; set; } = false;
+            public bool AutoSearch { get; set; } = true;
             // Optional destination override for placing the audiobook base directory
             public string? DestinationPath { get; set; }
             public SearchResult? SearchResult { get; set; }
