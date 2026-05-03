@@ -97,6 +97,7 @@ namespace Listenarr.Api.Controllers
         /// </remarks>
         [AllowAnonymous]
         [HttpGet("/ping")]
+        [HttpHead("/ping")]
         public ActionResult Ping()
         {
             return Ok(new { status = "OK" });

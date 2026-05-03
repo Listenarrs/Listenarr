@@ -36,7 +36,17 @@ namespace Listenarr.Api.Tests
         [Fact]
         public async Task Ping_Returns200_WhenAuthDisabled()
         {
-            using var client = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+            using var factory = _factory.WithWebHostBuilder(builder =>
+            {
+                builder.ConfigureServices(services =>
+                {
+                    services.AddSingleton<Listenarr.Api.Services.IStartupConfigService>(sp =>
+                    {
+                        return new TestStartupConfigService(new StartupConfig { AuthenticationRequired = "Disabled" });
+                    });
+                });
+            });
+            using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
 
             var resp = await client.GetAsync("/ping");
 
