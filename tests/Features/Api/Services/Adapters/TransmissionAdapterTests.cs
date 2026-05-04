@@ -66,7 +66,7 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
                 MagnetLink = "magnet:?xt=urn:btih:ABCDEF1234567890&tr=http%3A%2F%2Ftracker.example.com%2Fannounce%3Ffoo%3D1%26bar%3D2&dn=Book%20Title"
             };
 
-            var adapter = MockUtils.CreateTransmissionAdapter(_provider);
+            var adapter = _provider.GetRequiredService<TransmissionAdapter>();
             var addedId = await adapter.AddAsync(_client, searchResult);
 
             var transmissionApiMock = _provider.GetRequiredService<TransmissionApiMock>();
@@ -96,7 +96,7 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
                 .WithUrlBase("/rpc")
                 .Build());
 
-            var adapter = MockUtils.CreateTransmissionAdapter(_provider);
+            var adapter = _provider.GetRequiredService<TransmissionAdapter>();
             var (success, message) = await adapter.TestConnectionAsync(client);
 
             Assert.True(success);
@@ -121,6 +121,9 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
                 .Setup(x => x.DownloadAsync("https://indexer.example.com/book.torrent", It.IsAny<CancellationToken>()))
                 .Callback<string, CancellationToken>((url, _) => downloadedUrl = url)
                 .ReturnsAsync(TorrentDownloadResult.FromBytes("de"u8.ToArray()));
+            _services.AddSingleton(downloader.Object);
+            Init();
+            await InitDataAsync();
 
             var searchResult = new SearchResult
             {
@@ -129,7 +132,7 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
                 TorrentUrl = "https://indexer.example.com/book.torrent"
             };
 
-            var adapter = MockUtils.CreateTransmissionAdapter(_provider, downloader);
+            var adapter = _provider.GetRequiredService<TransmissionAdapter>();
             var addedId = await adapter.AddAsync(_client, searchResult);
 
             Assert.Equal("HASH1", addedId);
@@ -160,7 +163,7 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
                 TorrentUrl = "ftp://indexer.example.com/book.torrent"
             };
 
-            var adapter = MockUtils.CreateTransmissionAdapter(_provider);
+            var adapter = _provider.GetRequiredService<TransmissionAdapter>();
             var exception = await Assert.ThrowsAsync<ArgumentException>(() => adapter.AddAsync(_client, searchResult));
 
             Assert.Contains("HTTP or HTTPS", exception.Message, StringComparison.OrdinalIgnoreCase);
@@ -191,7 +194,7 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
                 DownloadClientId = _client.Id
             };
 
-            var adapter = MockUtils.CreateTransmissionAdapter(_provider);
+            var adapter = _provider.GetRequiredService<TransmissionAdapter>();
             var retrievedQeue = await adapter.GetImportItemAsync(_client, download, queueItem);
 
             Assert.NotNull(retrievedQeue);

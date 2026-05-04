@@ -1,6 +1,8 @@
+using Listenarr.Api.Controllers;
 using Listenarr.Api.Extensions;
 using Listenarr.Api.Hubs;
 using Listenarr.Api.Services;
+using Listenarr.Api.Services.Adapters;
 using Listenarr.Api.Services.Search;
 using Listenarr.Api.Services.Search.Filters;
 using Listenarr.Api.Services.Search.Strategies;
@@ -9,6 +11,7 @@ using Listenarr.Domain.Models;
 using Listenarr.Infrastructure.Extensions;
 using Listenarr.Tests.Mocks;
 using Listenarr.Tests.Mocks.Api;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -68,6 +71,9 @@ namespace Listenarr.Tests.Builders
             services.AddSingleton(new Mock<IDownloadHistoryService>().Object);
             services.AddSingleton(new Mock<IDiscordBotService>().Object);
             services.AddSingleton<IFfmpegService, FfmpegServiceMock>();
+            services.AddSingleton<IConfigurationService, ConfigurationService>();
+            services.AddSingleton<IMoveQueueService, MoveQueueService>();
+            services.AddSingleton<IScanQueueService, ScanQueueService>();
             services.AddSingleton<DownloadProcessingBackgroundService>();
             services.AddSingleton<MetadataConverters>();
             services.AddSingleton<MetadataMerger>();
@@ -79,6 +85,16 @@ namespace Listenarr.Tests.Builders
             services.AddSingleton<SearchResultScorer>();
             services.AddSingleton<AsinSearchHandler>();
             services.AddSingleton<DownloadService>();
+            services.AddSingleton<MoveBackgroundService>();
+            services.AddSingleton<MoveQueueService>();
+            services.AddSingleton<LibraryController>();
+            services.AddSingleton(new EphemeralDataProtectionProvider().CreateProtector("Listenarr.ConfigurationService.ProwlarrImport"));
+
+            // Allow to retrieve specific adapters directly in the tests
+            services.AddScoped<QbittorrentAdapter>();
+            services.AddScoped<TransmissionAdapter>();
+            services.AddScoped<SabnzbdAdapter>();
+            services.AddScoped<NzbgetAdapter>();
 
             services.AddSingleton<AudibleApiMock>();
             services.AddSingleton<AudnexusServiceApiMock>();

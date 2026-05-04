@@ -12,9 +12,8 @@ namespace Listenarr.Tests.Common
             Directory.CreateDirectory(_tempFolder);
         }
 
-        public virtual Task InitializeAsync()
+        public async Task InitializeAsync()
         {
-            throw new NotImplementedException();
         }
 
         public async Task DisposeAsync()

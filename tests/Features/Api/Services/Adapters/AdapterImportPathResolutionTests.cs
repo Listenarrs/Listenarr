@@ -15,11 +15,13 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using Listenarr.Api.Services.Adapters;
 using Listenarr.Domain.Models;
 using Listenarr.Domain.Utils;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
 using Listenarr.Tests.Mocks.Api;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Listenarr.Tests.Features.Api.Services.Adapters
@@ -109,7 +111,7 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
                 OutputPath = string.Empty
             };
 
-            var adapter = MockUtils.CreateTransmissionAdapter(_provider);
+            var adapter = _provider.GetRequiredService<TransmissionAdapter>();
             var resolved = await adapter.GetImportItemAsync(_transmissionClient, item);
 
             Assert.Equal(expectedPath, resolved.OutputPath);
@@ -130,7 +132,7 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
 
             await _downloadRepository.AddAsync(download);
 
-            var adapter = MockUtils.CreateTransmissionAdapter(_provider);
+            var adapter = _provider.GetRequiredService<TransmissionAdapter>();
             var resolved = await adapter.GetImportItemAsync(_transmissionClient, download, item);
 
             Assert.Equal(FileUtils.GetAbsolutePath("import", "Book Folder"), resolved.ContentPath);

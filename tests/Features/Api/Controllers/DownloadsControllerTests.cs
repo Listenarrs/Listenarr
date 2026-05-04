@@ -232,7 +232,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
                 .WithStartDate(DateTime.UtcNow.AddMinutes(-1))
                 .WithDownloadClientConfiguration(_client)
                 .WithBlockedStatus("NoImportableFiles")
-                .WithImportAttemps(3)
+                .WithImportAttempts(3)
                 .WithBlockMessage("Manual interaction is required.")
                 .Build());
 
@@ -263,7 +263,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
                 .WithStartDate(DateTime.UtcNow.AddMinutes(-1))
                 .WithDownloadClientConfiguration(_client)
                 .WithBlockedStatus("RepeatedFailure")
-                .WithImportAttemps(3)
+                .WithImportAttempts(3)
                 .WithBlockMessage("still failing")
                 .Build());
 

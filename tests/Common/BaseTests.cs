@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using Listenarr.Application.Repositories;
+using Listenarr.Domain.Models;
 using Listenarr.Tests.Builders;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -10,23 +11,26 @@ namespace Listenarr.Tests.Common
     {
         protected TempFileService FileService { get; set; }
 
-        public ServiceCollection _services;
-        public ServiceProvider _provider;
+        protected ServiceCollection _services;
+        protected ServiceProvider _provider;
 
-        public IApplicationSettingsRepository _applicationSettingsRepository;
-        public IDownloadRepository _downloadRepository;
-        public IDownloadClientConfigurationRepository _downloadClientConfigurationRepository;
-        public IRemotePathMappingRepository _remotePathMappingRepository;
-        public IHistoryRepository _historyRepository;
-        public IAudiobookRepository _audiobookRepository;
-        public IAudiobookFileRepository _audiobookFileRepository;
-        public IDownloadProcessingJobRepository _downloadProcessingJobRepository;
-        public IIndexerRepository _indexerRepository;
+        protected IApplicationSettingsRepository _applicationSettingsRepository;
+        protected IDownloadRepository _downloadRepository;
+        protected IDownloadClientConfigurationRepository _downloadClientConfigurationRepository;
+        protected IRemotePathMappingRepository _remotePathMappingRepository;
+        protected IHistoryRepository _historyRepository;
+        protected IAudiobookRepository _audiobookRepository;
+        protected IAudiobookFileRepository _audiobookFileRepository;
+        protected IDownloadProcessingJobRepository _downloadProcessingJobRepository;
+        protected IIndexerRepository _indexerRepository;
+        protected IDownloadHistoryRepository _downloadHistoryRepository;
+        protected IQualityProfileRepository _qualityProfileRepository;
+        protected IMoveJobRepository _moveJobRepository;
 
-        public BaseTests(ServiceCollection? services = null)
+        public BaseTests()
         {
             FileService = new TempFileService();
-            Init(services);
+            Init();
         }
 
         [MemberNotNull(
@@ -40,15 +44,13 @@ namespace Listenarr.Tests.Common
             nameof(_audiobookRepository),
             nameof(_audiobookFileRepository),
             nameof(_downloadProcessingJobRepository),
-            nameof(_indexerRepository)
+            nameof(_indexerRepository),
+            nameof(_downloadHistoryRepository),
+            nameof(_qualityProfileRepository),
+            nameof(_moveJobRepository)
         )]
-        public void Init(ServiceCollection? services = null)
+        public void Init()
         {
-            if (services != null)
-            {
-                _services = services;
-            }
-
             _services ??= new ServiceCollectionBuilder().Build();
             _provider = _services.BuildServiceProvider();
 
@@ -61,14 +63,38 @@ namespace Listenarr.Tests.Common
             _audiobookFileRepository = _provider.GetRequiredService<IAudiobookFileRepository>();
             _downloadProcessingJobRepository = _provider.GetRequiredService<IDownloadProcessingJobRepository>();
             _indexerRepository = _provider.GetRequiredService<IIndexerRepository>();
+            _downloadHistoryRepository = _provider.GetRequiredService<IDownloadHistoryRepository>();
+            _qualityProfileRepository = _provider.GetRequiredService<IQualityProfileRepository>();
+            _moveJobRepository = _provider.GetRequiredService<IMoveJobRepository>();
         }
 
         public virtual async Task InitializeAsync()
         {
+            await FileService.InitializeAsync();
         }
 
         public virtual async Task DisposeAsync()
         {
+            await FileService.DisposeAsync();
+        }
+
+        public async Task<ApplicationSettings> CreateApplicationSettings()
+        {
+            return await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
+                .Build());
+        }
+
+        public async Task<DownloadClientConfiguration> CreateDownloadClientConfiguration()
+        {
+            return await _downloadClientConfigurationRepository.SaveAsync(new DownloadClientConfigurationBuilder()
+                .Build());
+        }
+
+        public async Task<Audiobook> CreateAudiobook()
+        {
+            return await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithBasePath(FileService.GetTempPath())
+                .Build());
         }
     }
 }

@@ -5,12 +5,14 @@ namespace Listenarr.Tests.Builders
 {
     public class IndexerBuilder
     {
+        private static int IdCounter = 0;
+
         private readonly Indexer _indexer = new();
         private Dictionary<string, string> _additionalSettings = [];
 
         public IndexerBuilder()
         {
-            _indexer.Id = 1;
+            _indexer.Id = ++IdCounter;
             _indexer.Name = "";
             _indexer.Type = "torrent";
             _indexer.Implementation = "Custom";
@@ -57,13 +59,13 @@ namespace Listenarr.Tests.Builders
             return this;
         }
 
-        public IndexerBuilder Enabled()
+        public IndexerBuilder WithEnabled()
         {
             _indexer.IsEnabled = true;
             return this;
         }
 
-        public IndexerBuilder DIsabled()
+        public IndexerBuilder WithDisabled()
         {
             _indexer.IsEnabled = false;
             return this;

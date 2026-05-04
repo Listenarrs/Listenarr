@@ -74,6 +74,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
                 {
                     await dbContext.Audiobooks.AddAsync(ab);
                     await dbContext.SaveChangesAsync();
+                    return ab;
                 });
 
             var mockImageCache = new Mock<IImageCacheService>();
@@ -157,6 +158,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
                 {
                     await dbContext.Audiobooks.AddAsync(ab);
                     await dbContext.SaveChangesAsync();
+                    return ab;
                 });
 
             var mockImageCache = new Mock<IImageCacheService>();
@@ -270,6 +272,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
                 {
                     await dbContext.Audiobooks.AddAsync(ab);
                     await dbContext.SaveChangesAsync();
+                    return ab;
                 });
 
             var mockImageCache = new Mock<IImageCacheService>();
@@ -356,6 +359,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
                 {
                     await dbContext.Audiobooks.AddAsync(ab);
                     await dbContext.SaveChangesAsync();
+                    return ab;
                 });
 
             var mockImageCache = new Mock<IImageCacheService>();
@@ -440,6 +444,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
                 {
                     await dbContext.Audiobooks.AddAsync(ab);
                     await dbContext.SaveChangesAsync();
+                    return ab;
                 });
 
             var mockImageCache = new Mock<IImageCacheService>();

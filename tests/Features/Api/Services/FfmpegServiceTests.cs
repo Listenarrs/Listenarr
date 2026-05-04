@@ -29,12 +29,10 @@ namespace Listenarr.Tests.Features.Api.Services
 
             Assert.False(Path.Exists(ffmpegDirectory));
 
-            var provider = MockUtils.CreateServiceProvider();
-
             var ffmpegService = new FfmpegService(
                 new Mock<ILogger<FfmpegService>>().Object,
-                provider.GetRequiredService<IStartupConfigService>(),
-                provider.GetRequiredService<IProcessRunner>());
+                _provider.GetRequiredService<IStartupConfigService>(),
+                _provider.GetRequiredService<IProcessRunner>());
 
             var ffprobePath = await ffmpegService.EnsureFfprobeInstalledAsync();
 

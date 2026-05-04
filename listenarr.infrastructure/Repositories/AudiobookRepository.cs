@@ -89,10 +89,11 @@ namespace Listenarr.Infrastructure.Repositories
                 .ToListAsync(ct);
         }
 
-        public async Task AddAsync(Audiobook audiobook)
+        public async Task<Audiobook> AddAsync(Audiobook audiobook)
         {
             _db.Audiobooks.Add(audiobook);
             await _db.SaveChangesAsync();
+            return audiobook;
         }
 
         public async Task<bool> UpdateAsync(Audiobook audiobook)

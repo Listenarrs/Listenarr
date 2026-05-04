@@ -49,7 +49,7 @@ The `Init()` method create the following things:
 * A `ServiceProvider` using the services you injected and default ones added for you. This provider is accessible using `_provider`
 * A reference to the most useful repositories to save you some line of codes:
     * `IDownloadRepository` under `_downloadRepository`
-    * `IDownloadClientConfigurationRepository` under `_idownloadClientConfigurationRepository`
+    * `IDownloadClientConfigurationRepository` under `_downloadClientConfigurationRepository`
     * And so on...
 
 Tests cases should be defined using the following steps:
@@ -69,3 +69,9 @@ Tests cases should be defined using the following steps:
 
 * Data should be initialized using the builder pattern
 * Each data builder should produce actionable and coherent data (meaning, all mandatory field have plausible value, interdependant fields are populated and so on)
+
+### Dependancy Injection (DI)
+
+* FIXME: `ServiceCollectionBuilder` should define as few Mock as possible by default. Some mock are still there because updating all the tests is too tedious right now but as we move forward, we should aim to remove them.
+* Each test class is responsible for defining the mock it wants to use
+* Mandatory mocks are the ones that interfaces with external interfaces (search providers, download client adapters through, mostly, http clients, ...)

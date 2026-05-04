@@ -34,11 +34,12 @@ namespace Listenarr.Infrastructure.Repositories
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
-        public async Task AddAsync(Download download)
+        public async Task<Download> AddAsync(Download download)
         {
             await using var ctx = await _dbFactory.CreateDbContextAsync();
             ctx.Downloads.Add(download);
             await ctx.SaveChangesAsync();
+            return download;
         }
 
         public async Task<Download?> FindAsync(string id)

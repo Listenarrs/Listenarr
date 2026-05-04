@@ -98,7 +98,7 @@ namespace Listenarr.Tests.Builders
             return this;
         }
 
-        public DownloadBuilder WithImportAttemps(int value)
+        public DownloadBuilder WithImportAttempts(int value)
         {
             _download.ImportAttempts = value;
             return this;

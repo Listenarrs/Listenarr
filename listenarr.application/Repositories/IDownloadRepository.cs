@@ -21,7 +21,7 @@ namespace Listenarr.Application.Repositories
 {
     public interface IDownloadRepository
     {
-        Task AddAsync(Download download);
+        Task<Download> AddAsync(Download download);
         Task<Download?> FindAsync(string id);
         Task UpdateAsync(Download download);
         Task UpdateMetadataAsync(string id, string key, object? value);

@@ -48,7 +48,7 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
                 .WithUrl("https://www.myanonamouse.net")
                 .WithImplementation("MyAnonamouse")
                 .WithType("Torrent")
-                .Enabled()
+                .WithEnabled()
                 .WithInteractiveSearch()
                 .WithSetting("mam_id", "old_mam")
                 .Build());

@@ -37,7 +37,7 @@ namespace Listenarr.Tests.Features.Api.Services
                 .WithId(AUDIOBOOK_ID)
                 .WithTitle("Seconde Fondation")
                 .WithAuthor("Isaac Asimov")
-                .PublishedOn(new DateOnly(1996, 6, 1))
+                .WithPublishedDate(new DateOnly(1996, 6, 1))
                 .WithSeries("Le Cycle de Fondation")
                 .Build();
 

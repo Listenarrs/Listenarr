@@ -35,7 +35,7 @@ namespace Listenarr.Application.Repositories
         Task<SeriesCacheEntry?> GetCachedSeriesByNameAsync(string name, string region);
         Task<SeriesCacheEntry?> GetCachedSeriesByAsinAsync(string asin, string region);
         Task<SeriesCacheEntry> UpsertCachedSeriesAsync(SeriesCacheEntry seriesCacheEntry);
-        Task AddAsync(Audiobook audiobook);
+        Task<Audiobook> AddAsync(Audiobook audiobook);
         Task<bool> UpdateAsync(Audiobook audiobook);
         Task<bool> DeleteAsync(Audiobook audiobook);
         Task<bool> DeleteByIdAsync(int id);

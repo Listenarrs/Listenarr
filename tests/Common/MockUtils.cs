@@ -8,7 +8,6 @@ using Listenarr.Api.Services.Search.Providers;
 using Listenarr.Application.Repositories;
 using Listenarr.Application.Services;
 using Listenarr.Domain.Models;
-using Listenarr.Tests.Builders;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
@@ -32,54 +31,6 @@ namespace Listenarr.Tests.Common
             };
         }
 
-        public static Mock<DownloadMonitorService> GetDownloadMonitorServiceMock()
-        {
-            var scopeFactoryMock = new Mock<IServiceScopeFactory>();
-            var scopeMock = new Mock<IServiceScope>();
-            var serviceProviderMock = new Mock<IServiceProvider>();
-
-            scopeFactoryMock.Setup(x => x.CreateScope()).Returns(scopeMock.Object);
-            scopeMock.Setup(x => x.ServiceProvider).Returns(serviceProviderMock.Object);
-
-            return new Mock<DownloadMonitorService>(
-                scopeFactoryMock.Object,
-                new Mock<IHubContext<DownloadHub>>().Object,
-                new Mock<ILogger<DownloadMonitorService>>().Object,
-                new Mock<IHttpClientFactory>().Object,
-                new Mock<IAppMetricsService>().Object);
-        }
-
-        public static ServiceProvider CreateServiceProvider(string outputPath = "")
-        {
-            return CreateServiceProvider(new Mock<IImportItemResolutionService>().Object, outputPath);
-        }
-
-        public static ServiceProvider CreateServiceProvider(IImportItemResolutionService importItemResolutionService, string outputPath = "", DownloadClientConfiguration downloadClientConfiguration = null)
-        {
-
-            var configMock = new Mock<IConfigurationService>();
-            configMock.Setup(c => c.GetApplicationSettingsAsync()).ReturnsAsync(new ApplicationSettings
-            {
-                OutputPath = outputPath,
-                CompletedFileAction = "Copy",
-                EnableMetadataProcessing = false,
-                MultiFileNamingPattern = "{Title}-{DiskNumber:00}-{ChapterNumber:00}",
-            });
-            if (downloadClientConfiguration != null)
-            {
-                configMock.Setup(c => c.GetDownloadClientConfigurationsAsync()).ReturnsAsync([
-                    downloadClientConfiguration
-                ]);
-                configMock.Setup(c => c.GetDownloadClientConfigurationAsync(It.IsAny<string>())).ReturnsAsync(downloadClientConfiguration);
-            }
-
-            var services = new ServiceCollectionBuilder().Build();
-            services.AddSingleton(configMock.Object);
-            services.AddSingleton(importItemResolutionService);
-
-            return services.BuildServiceProvider();
-        }
-
         public static async Task<DownloadProcessingJob> CreateDownloadProcessingJob(ServiceProvider provider, Download download, string sourcePath)
         {
             var queueService = provider.GetRequiredService<IDownloadProcessingQueueService>();
@@ -92,20 +43,6 @@ namespace Listenarr.Tests.Common
             await queueService.UpdateJobAsync(job);
 
             return job;
-        }
-
-        public static TransmissionAdapter CreateTransmissionAdapter(ServiceProvider provider, Mock<ITorrentFileDownloader>? torrentFileDOwnloader = null)
-        {
-            if (torrentFileDOwnloader == null)
-            {
-                torrentFileDOwnloader = new Mock<ITorrentFileDownloader>();
-            }
-
-            return new TransmissionAdapter(
-                provider.GetRequiredService<IHttpClientFactory>(),
-                provider.GetRequiredService<IRemotePathMappingService>(),
-                torrentFileDOwnloader.Object,
-                provider.GetRequiredService<ILogger<TransmissionAdapter>>());
         }
 
         public static SabnzbdAdapter CreateSabnzbdAdapter(ServiceProvider provider)
@@ -160,15 +97,6 @@ namespace Listenarr.Tests.Common
                 _provider.GetRequiredService<ILogger<DownloadsController>>(),
                 _provider.GetRequiredService<IConfigurationService>(),
                 _provider.GetRequiredService<IMemoryCache>());
-        }
-
-        public static DownloadMonitorService CreateDownloadMonitorService(ServiceProvider _provider)
-        {
-            return new DownloadMonitorService(
-                _provider.GetRequiredService<IServiceScopeFactory>(),
-                _provider.GetRequiredService<IHubContext<DownloadHub>>(),
-                _provider.GetRequiredService<ILogger<DownloadMonitorService>>(),
-                _provider.GetRequiredService<IHttpClientFactory>());
         }
 
         public static IndexersController CreateIndexersController(ServiceProvider _provider, HttpMessageHandler handler)

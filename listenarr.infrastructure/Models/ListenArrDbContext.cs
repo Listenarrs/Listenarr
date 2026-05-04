@@ -22,29 +22,29 @@ namespace Listenarr.Infrastructure.Models
 {
     public class ListenArrDbContext : DbContext
     {
-        public DbSet<Audiobook> Audiobooks { get; set; }
-        public DbSet<AudiobookSeriesMembership> AudiobookSeriesMemberships { get; set; }
-        public DbSet<AudiobookExternalIdentifier> AudiobookExternalIdentifiers { get; set; }
-        public DbSet<AudiobookFile> AudiobookFiles { get; set; }
-        public DbSet<MoveJob> MoveJobs { get; set; }
-        public DbSet<ApplicationSettings> ApplicationSettings { get; set; }
-        public DbSet<History> History { get; set; }
-        public DbSet<Indexer> Indexers { get; set; }
-        public DbSet<ApiConfiguration> ApiConfigurations { get; set; }
-        public DbSet<DownloadClientConfiguration> DownloadClientConfigurations { get; set; }
-        public DbSet<User> Users { get; set; }
-        public DbSet<Download> Downloads { get; set; }
-        public DbSet<DownloadProcessingJob> DownloadProcessingJobs { get; set; }
-        public DbSet<DownloadHistory> DownloadHistories { get; set; }
-        public DbSet<QualityProfile> QualityProfiles { get; set; }
-        public DbSet<RemotePathMapping> RemotePathMappings { get; set; }
-        public DbSet<ProcessExecutionLog> ProcessExecutionLogs { get; set; }
-        public DbSet<RootFolder> RootFolders { get; set; }
-        public DbSet<MonitoredAuthor> MonitoredAuthors { get; set; }
-        public DbSet<MonitoredSeries> MonitoredSeries { get; set; }
-        public DbSet<AuthorCacheEntry> AuthorCacheEntries { get; set; }
-        public DbSet<SeriesCacheEntry> SeriesCacheEntries { get; set; }
-        public DbSet<UserSession> UserSessions { get; set; }
+        public DbSet<Audiobook>? Audiobooks { get; set; }
+        public DbSet<AudiobookSeriesMembership>? AudiobookSeriesMemberships { get; set; }
+        public DbSet<AudiobookExternalIdentifier>? AudiobookExternalIdentifiers { get; set; }
+        public DbSet<AudiobookFile>? AudiobookFiles { get; set; }
+        public DbSet<MoveJob>? MoveJobs { get; set; }
+        public DbSet<ApplicationSettings>? ApplicationSettings { get; set; }
+        public DbSet<History>? History { get; set; }
+        public DbSet<Indexer>? Indexers { get; set; }
+        public DbSet<ApiConfiguration>? ApiConfigurations { get; set; }
+        public DbSet<DownloadClientConfiguration>? DownloadClientConfigurations { get; set; }
+        public DbSet<User>? Users { get; set; }
+        public DbSet<Download>? Downloads { get; set; }
+        public DbSet<DownloadProcessingJob>? DownloadProcessingJobs { get; set; }
+        public DbSet<DownloadHistory>? DownloadHistories { get; set; }
+        public DbSet<QualityProfile>? QualityProfiles { get; set; }
+        public DbSet<RemotePathMapping>? RemotePathMappings { get; set; }
+        public DbSet<ProcessExecutionLog>? ProcessExecutionLogs { get; set; }
+        public DbSet<RootFolder>? RootFolders { get; set; }
+        public DbSet<MonitoredAuthor>? MonitoredAuthors { get; set; }
+        public DbSet<MonitoredSeries>? MonitoredSeries { get; set; }
+        public DbSet<AuthorCacheEntry>? AuthorCacheEntries { get; set; }
+        public DbSet<SeriesCacheEntry>? SeriesCacheEntries { get; set; }
+        public DbSet<UserSession>? UserSessions { get; set; }
 
         public ListenArrDbContext(DbContextOptions<ListenArrDbContext> options)
             : base(options)
