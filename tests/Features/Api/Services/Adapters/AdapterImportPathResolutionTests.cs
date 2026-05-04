@@ -16,7 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Listenarr.Domain.Models;
-using Listenarr.Domain.Utils;
+using Listenarr.Domain.Common;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
 using Listenarr.Tests.Mocks.Api;
@@ -83,18 +83,18 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
         }
 
         public static TheoryData<int, string> TransmissionGetImportItemAsyncCases => new() {
-            { TransmissionApiMock.SINGLE_FILE_TORRENT, FileUtils.GetAbsolutePath("import", "Book.m4b") },
-            { TransmissionApiMock.MULTI_FILE_TORRENT, FileUtils.GetAbsolutePath("import", "Book Folder") }
+            { TransmissionApiMock.SINGLE_FILE_TORRENT, FileUtils.GetAbsolutePath("downloads", "Book.m4b") },
+            { TransmissionApiMock.MULTI_FILE_TORRENT, FileUtils.GetAbsolutePath("downloads", "Book Folder") }
         };
 
         public static TheoryData<string, string> SabnzbdGetImportItemAsyncCases => new() {
-            { SabnzbdApiMock.SINGLE_FILE_SABNZBD, FileUtils.GetAbsolutePath("imports", "sab", "Book.m4b")  },
-            { SabnzbdApiMock.MULTI_FILE_SABNZBD, FileUtils.GetAbsolutePath("imports", "sab", "Book Folder") }
+            { SabnzbdApiMock.SINGLE_FILE_SABNZBD, FileUtils.GetAbsolutePath("completed", "Book.m4b")  },
+            { SabnzbdApiMock.MULTI_FILE_SABNZBD, FileUtils.GetAbsolutePath("completed", "Book Folder") }
         };
 
         public static TheoryData<string, string> NzbgetGetImportItemAsyncCases => new() {
-            { NzbgetApiMock.SINGLE_FILE_NZBGET, FileUtils.GetAbsolutePath("imports", "Book.m4b") },
-            { NzbgetApiMock.MULTI_FILE_NZBGET, FileUtils.GetAbsolutePath("imports", "Book Folder") }
+            { NzbgetApiMock.SINGLE_FILE_NZBGET, FileUtils.GetAbsolutePath("nzbget", "completed", "Book.m4b") },
+            { NzbgetApiMock.MULTI_FILE_NZBGET, FileUtils.GetAbsolutePath("nzbget", "completed", "Book Folder") }
         };
 
         [Theory]
@@ -133,12 +133,12 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
             var adapter = MockUtils.CreateTransmissionAdapter(_provider);
             var resolved = await adapter.GetImportItemAsync(_transmissionClient, download, item);
 
-            Assert.Equal(FileUtils.GetAbsolutePath("import", "Book Folder"), resolved.ContentPath);
+            Assert.Equal(FileUtils.GetAbsolutePath("downloads", "Book Folder"), resolved.ContentPath);
             Assert.Equal(
                 new[]
                 {
-                    FileUtils.GetAbsolutePath("import", "Book Folder", "chapter1.m4b"),
-                    FileUtils.GetAbsolutePath("import", "Book Folder", "book.txt")
+                    FileUtils.GetAbsolutePath("downloads", "Book Folder", "chapter1.m4b"),
+                    FileUtils.GetAbsolutePath("downloads", "Book Folder", "book.txt")
                 },
                 resolved.SourceFiles);
         }

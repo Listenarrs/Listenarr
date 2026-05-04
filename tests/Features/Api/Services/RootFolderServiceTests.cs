@@ -20,11 +20,12 @@ using Xunit;
 using Xunit.Abstractions;
 using Microsoft.Extensions.Logging;
 using Moq;
-using Listenarr.Infrastructure.Models;
-using Listenarr.Infrastructure.Repositories;
-using Listenarr.Api.Services;
+using Listenarr.Infrastructure.Persistence.Repositories;
 using Listenarr.Domain.Models;
-using Listenarr.Domain.Utils;
+using Listenarr.Domain.Common;
+using Listenarr.Infrastructure.Persistence;
+using Listenarr.Application.Downloads;
+using Listenarr.Application.Interfaces;
 
 namespace Listenarr.Tests.Features.Api.Services
 {

@@ -16,77 +16,45 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.EntityFrameworkCore;
 using Xunit;
 using Moq;
-using Listenarr.Api.Services;
 using Listenarr.Domain.Models;
-using Microsoft.Extensions.Logging;
-using Listenarr.Api.Services.Metadata;
-using Listenarr.Infrastructure.Models;
-using Listenarr.Application.Repositories;
-using Listenarr.Infrastructure.Repositories;
+using Listenarr.Application.Interfaces;
+using Listenarr.Tests.Common;
+using Listenarr.Application.Interfaces.Repositories;
+using Listenarr.Infrastructure.FileSystem;
 
 namespace Listenarr.Tests.Features.Api.Services
 {
-    public class MoveBackgroundService_FilePathPreservationTests
+    public class MoveBackgroundService_FilePathPreservationTests : BaseTests
     {
         [Fact(Timeout = 20000)]
         public async Task MoveBackgroundService_UpdatesLegacyFilePath_WhenFileExistsInTarget()
         {
-            var services = new ServiceCollection();
-            // Enable debug logging for diagnostics if the test fails
-            services.AddLogging(builder => builder.AddDebug().SetMinimumLevel(LogLevel.Debug));
-            var dbRoot = new Microsoft.EntityFrameworkCore.Storage.InMemoryDatabaseRoot();
-            var dbName = Guid.NewGuid().ToString();
-            services.AddDbContext<ListenArrDbContext>(opts => opts.UseInMemoryDatabase(dbName, dbRoot));
-
-            services.AddSingleton<IMoveQueueService, MoveQueueService>();
-            services.AddSingleton<IScanQueueService, ScanQueueService>();
-            services.AddSingleton<MoveBackgroundService>();
-            services.AddScoped<IMoveJobRepository, EfMoveJobRepository>();
-            services.AddScoped<IAudiobookRepository, AudiobookRepository>();
-            // Register real history repo so move path will add history entries
-            services.AddScoped<IHistoryRepository, EfHistoryRepository>();
-            // Register AudiobookFile repository so AudioFileService can associate moved files
-            services.AddScoped<IAudiobookFileRepository, EfAudiobookFileRepository>();
-
-            // Minimal services needed for AudioFileService later
-            services.AddSingleton<MetadataExtractionLimiter>();
-            services.AddMemoryCache();
-
             // Register a simple metadata service mock
             var metadataMock = new Mock<IMetadataService>();
             metadataMock.Setup(m => m.ExtractFileMetadataAsync(It.IsAny<string>())).ReturnsAsync(new AudioMetadata { Duration = TimeSpan.FromSeconds(1), Format = "m4b" });
-            services.AddSingleton<IMetadataService>(metadataMock.Object);
-
-            var provider = services.BuildServiceProvider();
-            using var rootScope = provider.CreateScope();
-            var db = rootScope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+            _services.AddSingleton(metadataMock.Object);
+            Init();
 
             // Create source and target dirs
-            var src = Path.Join(Path.GetTempPath(), "listenarr_test_move_src_" + Guid.NewGuid().ToString("N"));
-            var dst = Path.Join(Path.GetTempPath(), "listenarr_test_move_dst_" + Guid.NewGuid().ToString("N"));
-
-            Directory.CreateDirectory(src);
-            Directory.CreateDirectory(dst);
+            var source = FileService.GetTempDirectory("listenarr_test_move_src");
+            var destination = FileService.GetTempDirectory("listenarr_test_move_dst");
 
             var audioFileName = "dune.m4b";
-            var srcFile = Path.Join(src, audioFileName);
-            await File.WriteAllTextAsync(srcFile, "dummy");
+            var unprocessedFile = await FileService.GetFileAsync(source, audioFileName);
 
-            var ab = new Audiobook { Title = "MoveFilePathTest", BasePath = src, FilePath = srcFile };
-            db.Audiobooks.Add(ab);
-            await db.SaveChangesAsync();
+            var ab = new Audiobook { Title = "MoveFilePathTest", BasePath = source, FilePath = unprocessedFile };
+            await _audiobookRepository.AddAsync(ab);
 
-            var moveQueue = provider.GetRequiredService<IMoveQueueService>();
-            var bg = provider.GetRequiredService<MoveBackgroundService>();
+            var moveQueue = _provider.GetRequiredService<IMoveQueueService>();
+            var bg = _provider.GetRequiredService<MoveBackgroundService>();
 
             // Start background service
             await bg.StartAsync(CancellationToken.None);
 
             // Enqueue move (include source so move uses our exact directory)
-            var jobId = await moveQueue.EnqueueMoveAsync(ab.Id, dst, src);
+            var jobId = await moveQueue.EnqueueMoveAsync(ab.Id, destination, source);
 
             // Poll for completion
             var succeeded = false;
@@ -103,35 +71,30 @@ namespace Listenarr.Tests.Features.Api.Services
 
             Assert.True(succeeded, "Move job did not complete in time");
 
-            // Refresh audiobook from DB using a new scope so we get the latest values written by the background scope
-            using var postScope = provider.CreateScope();
-            var dbAfter = postScope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
-            var fresh = await dbAfter.Audiobooks.FirstOrDefaultAsync(a => a.Id == ab.Id);
-            Assert.NotNull(fresh);
+            // Refresh audiobook
+            using var scope = _provider.CreateScope();
+            _audiobookRepository = scope.ServiceProvider.GetRequiredService<IAudiobookRepository>();
+            var audiobook = await _audiobookRepository.GetByIdAsync(ab.Id);
+            Assert.NotNull(audiobook);
 
-            var expectedNewFilePath = Path.GetFullPath(Path.Join(dst, Path.GetRelativePath(src, srcFile)));
+            var processedFile = Path.GetFullPath(Path.Join(destination, audioFileName));
 
             // The file should have been moved to target
-            Assert.True(File.Exists(expectedNewFilePath), "Moved file not found at expected target path");
+            Assert.True(File.Exists(processedFile), "Moved file not found at expected target path");
             // Original should not exist
-            Assert.False(File.Exists(srcFile), "Source file should have been deleted after move");
+            Assert.False(File.Exists(unprocessedFile), "Source file should have been deleted after move");
 
             // The audiobook's legacy FilePath should have been updated to the new path
-            Assert.Equal(expectedNewFilePath, fresh.FilePath);
+            Assert.Equal(processedFile, audiobook.FilePath);
 
             // Now verify AudioFileService will accept/associate the moved file
-            var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
-            var loggerMock = new Mock<Microsoft.Extensions.Logging.ILogger<AudioFileService>>();
-            var audioSvc = new AudioFileService(scopeFactory, loggerMock.Object, provider.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>(), provider.GetRequiredService<MetadataExtractionLimiter>());
+            var audiobookFileService = _provider.GetRequiredService<IAudiobookFileService>();
 
-            var created = await audioSvc.EnsureAudiobookFileAsync(fresh.Id, expectedNewFilePath, "test");
+            var created = await audiobookFileService.EnsureAudiobookFileAsync(audiobook, processedFile, "test");
             Assert.True(created, "AudioFileService failed to associate moved file even though FilePath was updated");
 
-            var fileRecord = await db.AudiobookFiles.FirstOrDefaultAsync(f => f.AudiobookId == fresh.Id && f.Path == expectedNewFilePath);
+            var fileRecord = (await _audiobookFileRepository.GetByAudiobookIdAsync(ab.Id)).First(f => f.Path == processedFile);
             Assert.NotNull(fileRecord);
-
-            // Cleanup
-            try { Directory.Delete(dst, true); } catch (IOException ex) { _ = ex; } catch (UnauthorizedAccessException ex) { _ = ex; }
         }
     }
 }

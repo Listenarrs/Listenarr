@@ -16,6 +16,9 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using Listenarr.Application.Interfaces;
+using Listenarr.Application.Security;
+using Listenarr.Domain.Models;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Api.Controllers
@@ -27,18 +30,18 @@ namespace Listenarr.Api.Controllers
     {
         private readonly IDownloadService _downloadService;
         private readonly IDownloadQueueService _downloadQueueService;
-        private readonly IDownloadProcessingQueueService _processingQueueService;
+        private readonly IDownloadProcessingJobService _downloadProcessingJobService;
         private readonly ILogger<DownloadController> _logger;
 
         public DownloadController(
             IDownloadService downloadService,
             IDownloadQueueService downloadQueueService,
-            IDownloadProcessingQueueService processingQueueService,
+            IDownloadProcessingJobService downloadProcessingJobService,
             ILogger<DownloadController> logger)
         {
             _downloadService = downloadService;
             _downloadQueueService = downloadQueueService;
-            _processingQueueService = processingQueueService;
+            _downloadProcessingJobService = downloadProcessingJobService;
             _logger = logger;
         }
 
@@ -284,7 +287,7 @@ namespace Listenarr.Api.Controllers
         {
             try
             {
-                var stats = await _processingQueueService.GetStatsAsync();
+                var stats = await _downloadProcessingJobService.GetStatsAsync();
                 return Ok(stats);
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
@@ -303,7 +306,7 @@ namespace Listenarr.Api.Controllers
         {
             try
             {
-                var activity = await _processingQueueService.GetRecentActivityAsync(count);
+                var activity = await _downloadProcessingJobService.GetRecentActivityAsync(count);
                 return Ok(activity);
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)

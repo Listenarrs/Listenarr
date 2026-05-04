@@ -94,6 +94,18 @@ namespace Listenarr.Tests.Builders
             return this;
         }
 
+        public DownloadClientConfigurationBuilder WithEnabled()
+        {
+            _downloadClientConfiguration.IsEnabled = true;
+            return this;
+        }
+
+        public DownloadClientConfigurationBuilder WithDisabled()
+        {
+            _downloadClientConfiguration.IsEnabled = false;
+            return this;
+        }
+
         public DownloadClientConfiguration Build()
         {
             _downloadClientConfiguration.Settings = _settings;

@@ -16,82 +16,30 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.EntityFrameworkCore;
 using Xunit;
-using Listenarr.Api.Services;
-using Listenarr.Infrastructure.Models;
 using Listenarr.Domain.Models;
-using Listenarr.Application.Repositories;
-using Listenarr.Infrastructure.Repositories;
+using Listenarr.Tests.Common;
+using Listenarr.Application.Interfaces;
+using Listenarr.Infrastructure.FileSystem;
 
 namespace Listenarr.Tests.Features.Api.Services
 {
-    public class MoveBackgroundService_FailureTests
+    public class MoveBackgroundService_FailureTests : BaseTests
     {
-        private static void TryDeleteFile(string path)
-        {
-            try
-            {
-                File.Delete(path);
-            }
-            catch (IOException ex)
-            {
-                System.Diagnostics.Debug.WriteLine(ex.Message);
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                System.Diagnostics.Debug.WriteLine(ex.Message);
-            }
-        }
-
-        private static void TryDeleteDirectory(string path)
-        {
-            try
-            {
-                Directory.Delete(path, true);
-            }
-            catch (IOException ex)
-            {
-                System.Diagnostics.Debug.WriteLine(ex.Message);
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                System.Diagnostics.Debug.WriteLine(ex.Message);
-            }
-        }
-
         [Fact(Timeout = 20000)]
         public async Task MoveBackgroundService_Fails_WhenFileLocked_IncrementsAttemptCount()
         {
-            var services = new ServiceCollection();
-            services.AddLogging();
-            services.AddDbContext<ListenArrDbContext>(opts => opts.UseInMemoryDatabase("test_db_move_failure"));
-            services.AddSingleton<IMoveQueueService, MoveQueueService>();
-            services.AddSingleton<MoveBackgroundService>();
-            services.AddScoped<IMoveJobRepository, EfMoveJobRepository>();
-            services.AddScoped<IAudiobookRepository, AudiobookRepository>();
-
-            var provider = services.BuildServiceProvider();
-            var db = provider.GetRequiredService<ListenArrDbContext>();
-            var moveQueue = provider.GetRequiredService<IMoveQueueService>();
-            var bg = provider.GetRequiredService<MoveBackgroundService>();
+            var moveQueue = _provider.GetRequiredService<IMoveQueueService>();
+            var bg = _provider.GetRequiredService<MoveBackgroundService>();
 
             // Create source with a file
-            var src = Path.Join(Path.GetTempPath(), "listenarr_test_src_lock_" + Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(src);
-            var file = Path.Join(src, "file_locked.txt");
-            File.WriteAllText(file, "locked");
+            var src = FileService.GetTempDirectory("listenarr_test_src_lock");
+            var file = await FileService.GetFileAsync(src, "file_locked.txt", "locked");
 
-            var dst = Path.Join(Path.GetTempPath(), "listenarr_test_dst_lock_" + Guid.NewGuid().ToString("N"));
-
-            // Create a blocking file at the destination path so Directory.Move will fail
-            var dstParent = Path.GetDirectoryName(dst) ?? Path.GetTempPath();
-            Directory.CreateDirectory(dstParent);
-            File.WriteAllText(dst, "block");
+            var dst = await FileService.GetFileAsync(FileService.GetTempPath(), "listenarr_test_dst_lock", "block");
 
             var ab = new Audiobook { Title = "MoveFailTest", BasePath = src };
-            db.Audiobooks.Add(ab);
-            await db.SaveChangesAsync();
+            await _audiobookRepository.AddAsync(ab);
 
             // Start background service
             await bg.StartAsync(CancellationToken.None);
@@ -114,17 +62,8 @@ namespace Listenarr.Tests.Features.Api.Services
             Assert.True(failed, "Move job did not fail as expected when file was locked");
 
             // Check attempt count incremented in DB
-            using (var scope = provider.GetRequiredService<IServiceScopeFactory>().CreateScope())
-            {
-                var db2 = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
-                var dbJob = await db2.MoveJobs.FindAsync(jobId);
-                Assert.True(dbJob.AttemptCount > 0, "AttemptCount was not incremented on failure");
-            }
-
-            // Cleanup
-            TryDeleteFile(dst);
-            TryDeleteDirectory(src);
-            TryDeleteDirectory(dst);
+            var dbJob = await _moveJobRepository.GetByIdAsync(jobId);
+            Assert.True(dbJob.AttemptCount > 0, "AttemptCount was not incremented on failure");
         }
     }
 }

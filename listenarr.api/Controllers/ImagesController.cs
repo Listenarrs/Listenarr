@@ -16,6 +16,12 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using Listenarr.Application.Common;
+using Listenarr.Application.Interfaces;
+using Listenarr.Application.Interfaces.Repositories;
+using Listenarr.Application.Metadata;
+using Listenarr.Application.Security;
+using Listenarr.Domain.Models;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Api.Controllers

@@ -18,6 +18,7 @@
 using System.Net;
 using System.Text;
 using Asp.Versioning.ApiExplorer;
+using Listenarr.Application.Interfaces;
 using Listenarr.Domain.Models;
 using Listenarr.Tests.Mocks;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -42,7 +43,7 @@ namespace Listenarr.Tests.Features.Api.Middleware
             {
                 builder.ConfigureServices(services =>
                 {
-                    services.AddSingleton<Listenarr.Api.Services.IStartupConfigService>(sp =>
+                    services.AddSingleton<IStartupConfigService>(sp =>
                     {
                         return new StartupConfigServiceMock(new StartupConfig { AuthenticationRequired = "Enabled" });
                     });
@@ -62,7 +63,7 @@ namespace Listenarr.Tests.Features.Api.Middleware
             {
                 builder.ConfigureServices(services =>
                 {
-                    services.AddSingleton<Listenarr.Api.Services.IStartupConfigService>(sp =>
+                    services.AddSingleton<IStartupConfigService>(sp =>
                     {
                         return new StartupConfigServiceMock(new StartupConfig { AuthenticationRequired = "Enabled" });
                     });
@@ -82,7 +83,7 @@ namespace Listenarr.Tests.Features.Api.Middleware
             {
                 builder.ConfigureServices(services =>
                 {
-                    services.AddSingleton<Listenarr.Api.Services.IStartupConfigService>(sp =>
+                    services.AddSingleton<IStartupConfigService>(sp =>
                     {
                         return new StartupConfigServiceMock(new StartupConfig { AuthenticationRequired = "Enabled" });
                     });
@@ -103,7 +104,7 @@ namespace Listenarr.Tests.Features.Api.Middleware
             {
                 builder.ConfigureServices(services =>
                 {
-                    services.AddSingleton<Listenarr.Api.Services.IStartupConfigService>(sp =>
+                    services.AddSingleton<IStartupConfigService>(sp =>
                     {
                         return new StartupConfigServiceMock(new StartupConfig { AuthenticationRequired = "Enabled" });
                     });

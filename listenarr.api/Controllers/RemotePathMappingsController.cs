@@ -16,6 +16,9 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using Listenarr.Application.Interfaces;
+using Listenarr.Application.Interfaces.Repositories;
+using Listenarr.Domain.Models;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Api.Controllers;
@@ -27,19 +30,11 @@ namespace Listenarr.Api.Controllers;
 [ApiController]
 [Route("api/v{version:apiVersion}/remotepathmappings")]
 [Tags("Remote Path Mappings")]
-public class RemotePathMappingsController : ControllerBase
+public class RemotePathMappingsController(
+    IRemotePathMappingService remotePathMappingService,
+    IDownloadClientConfigurationRepository downloadClientConfigurationRepository,
+    ILogger<RemotePathMappingsController> logger) : ControllerBase
 {
-    private readonly IRemotePathMappingService _mappingService;
-    private readonly ILogger<RemotePathMappingsController> _logger;
-
-    public RemotePathMappingsController(
-        IRemotePathMappingService mappingService,
-        ILogger<RemotePathMappingsController> logger)
-    {
-        _mappingService = mappingService;
-        _logger = logger;
-    }
-
     /// <summary>
     /// Get all remote path mappings.
     /// </summary>
@@ -48,12 +43,12 @@ public class RemotePathMappingsController : ControllerBase
     {
         try
         {
-            var mappings = await _mappingService.GetAllAsync();
+            var mappings = await remotePathMappingService.GetAllAsync();
             return Ok(mappings);
         }
         catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
         {
-            _logger.LogError(ex, "Failed to retrieve remote path mappings");
+            logger.LogError(ex, "Failed to retrieve remote path mappings");
             return StatusCode(500, new { error = "Failed to retrieve remote path mappings", details = ex.Message });
         }
     }
@@ -67,7 +62,7 @@ public class RemotePathMappingsController : ControllerBase
     {
         try
         {
-            var mapping = await _mappingService.GetByIdAsync(id);
+            var mapping = await remotePathMappingService.GetByIdAsync(id);
             if (mapping == null)
             {
                 return NotFound(new { error = $"Remote path mapping with ID {id} not found" });
@@ -77,7 +72,7 @@ public class RemotePathMappingsController : ControllerBase
         }
         catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
         {
-            _logger.LogError(ex, "Failed to retrieve remote path mapping {MappingId}", id);
+            logger.LogError(ex, "Failed to retrieve remote path mapping {MappingId}", id);
             return StatusCode(500, new { error = "Failed to retrieve remote path mapping", details = ex.Message });
         }
     }
@@ -89,14 +84,20 @@ public class RemotePathMappingsController : ControllerBase
     [HttpGet("client/{downloadClientId}")]
     public async Task<ActionResult<List<RemotePathMapping>>> GetByClientId(string downloadClientId)
     {
+        var client = await downloadClientConfigurationRepository.GetByIdAsync(downloadClientId);
+        if (client == null)
+        {
+            return NotFound(new { error = $"Client {downloadClientId} not found" });
+        }
+
         try
         {
-            var mappings = await _mappingService.GetPathMappingByClientIdAsync(downloadClientId);
+            var mappings = await remotePathMappingService.GetPathMappingByClientAsync(client);
             return Ok(mappings);
         }
         catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
         {
-            _logger.LogError(ex, "Failed to retrieve remote path mappings for client {ClientId}", downloadClientId);
+            logger.LogError(ex, "Failed to retrieve remote path mappings for client {ClientId}", downloadClientId);
             return StatusCode(500, new { error = "Failed to retrieve remote path mappings", details = ex.Message });
         }
     }
@@ -126,12 +127,12 @@ public class RemotePathMappingsController : ControllerBase
                 return BadRequest(new { error = "LocalPath is required" });
             }
 
-            var created = await _mappingService.CreateAsync(mapping);
+            var created = await remotePathMappingService.CreateAsync(mapping);
             return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
         }
         catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
         {
-            _logger.LogError(ex, "Failed to create remote path mapping");
+            logger.LogError(ex, "Failed to create remote path mapping");
             return StatusCode(500, new { error = "Failed to create remote path mapping", details = ex.Message });
         }
     }
@@ -167,7 +168,7 @@ public class RemotePathMappingsController : ControllerBase
                 return BadRequest(new { error = "LocalPath is required" });
             }
 
-            var updated = await _mappingService.UpdateAsync(mapping);
+            var updated = await remotePathMappingService.UpdateAsync(mapping);
             return Ok(updated);
         }
         catch (KeyNotFoundException ex)
@@ -176,7 +177,7 @@ public class RemotePathMappingsController : ControllerBase
         }
         catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
         {
-            _logger.LogError(ex, "Failed to update remote path mapping {MappingId}", id);
+            logger.LogError(ex, "Failed to update remote path mapping {MappingId}", id);
             return StatusCode(500, new { error = "Failed to update remote path mapping", details = ex.Message });
         }
     }
@@ -190,7 +191,7 @@ public class RemotePathMappingsController : ControllerBase
     {
         try
         {
-            var deleted = await _mappingService.DeleteAsync(id);
+            var deleted = await remotePathMappingService.DeleteAsync(id);
             if (!deleted)
             {
                 return NotFound(new { error = $"Remote path mapping with ID {id} not found" });
@@ -200,7 +201,7 @@ public class RemotePathMappingsController : ControllerBase
         }
         catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
         {
-            _logger.LogError(ex, "Failed to delete remote path mapping {MappingId}", id);
+            logger.LogError(ex, "Failed to delete remote path mapping {MappingId}", id);
             return StatusCode(500, new { error = "Failed to delete remote path mapping", details = ex.Message });
         }
     }
@@ -211,32 +212,37 @@ public class RemotePathMappingsController : ControllerBase
     [HttpPost("translate")]
     public async Task<ActionResult<object>> TranslatePath([FromBody] TranslatePathRequest request)
     {
+        if (string.IsNullOrWhiteSpace(request.RemotePath))
+        {
+            return BadRequest(new { error = "RemotePath is required" });
+        }
+
+        if (string.IsNullOrWhiteSpace(request.DownloadClientId))
+        {
+            return BadRequest(new { error = "DownloadClientId is required" });
+        }
+
+        var client = await downloadClientConfigurationRepository.GetByIdAsync(request.DownloadClientId);
+        if (client == null)
+        {
+            return NotFound(new { error = $"Client {request.DownloadClientId} not found" });
+        }
+
         try
         {
-            if (string.IsNullOrWhiteSpace(request.DownloadClientId))
-            {
-                return BadRequest(new { error = "DownloadClientId is required" });
-            }
-
-            if (string.IsNullOrWhiteSpace(request.RemotePath))
-            {
-                return BadRequest(new { error = "RemotePath is required" });
-            }
-
-            var localPath = await _mappingService.TranslatePathAsync(request.DownloadClientId, request.RemotePath);
-            var requiresTranslation = await _mappingService.RequiresTranslationAsync(request.DownloadClientId, request.RemotePath);
+            var localPath = await remotePathMappingService.TranslatePathAsync(client, request.RemotePath);
 
             return Ok(new
             {
                 downloadClientId = request.DownloadClientId,
                 remotePath = request.RemotePath,
                 localPath,
-                translated = requiresTranslation
+                translated = string.Compare(localPath, request.RemotePath) != 0
             });
         }
         catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
         {
-            _logger.LogError(ex, "Failed to translate path");
+            logger.LogError(ex, "Failed to translate path");
             return StatusCode(500, new { error = "Failed to translate path", details = ex.Message });
         }
     }

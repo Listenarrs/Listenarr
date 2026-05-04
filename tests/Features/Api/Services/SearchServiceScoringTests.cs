@@ -15,18 +15,19 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Listenarr.Api.Services;
-using Listenarr.Application.Repositories;
-using Listenarr.Api.Services.Search;
-using Listenarr.Api.Services.Search.Filters;
-using Listenarr.Api.Services.Search.Strategies;
-using Listenarr.Api.Hubs;
+using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Domain.Models;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.AspNetCore.SignalR;
 using Moq;
 using Xunit;
-using Listenarr.Api.Services.Search.Providers;
+using Listenarr.Application.Interfaces;
+using Listenarr.Application.Search;
+using Listenarr.Application.Common;
+using Listenarr.Application.Metadata;
+using Listenarr.Application.Notification;
+using Listenarr.Application.Search.Strategies;
+using Listenarr.Application.Search.Filters;
 
 namespace Listenarr.Tests.Features.Api.Services
 {
@@ -49,7 +50,7 @@ namespace Listenarr.Tests.Features.Api.Services
             var coordinator = new MetadataStrategyCoordinator(Enumerable.Empty<IMetadataStrategy>(), NullLogger<MetadataStrategyCoordinator>.Instance);
             var collector = new AsinCandidateCollector(NullLogger<AsinCandidateCollector>.Instance, openLibraryService, converters, progress);
             var enricher = new AsinEnricher(NullLogger<AsinEnricher>.Instance, coordinator, converters, pipeline, progress);
-            var scorer = new SearchResultScorer(NullLogger<SearchResultScorer>.Instance);
+            var scorer = new SearchResultScorerService(NullLogger<SearchResultScorerService>.Instance);
             var handler = new AsinSearchHandler(NullLogger<AsinSearchHandler>.Instance, configuration, audible, Mock.Of<IAudnexusService>(), converters, progress);
 
             return new SearchService(

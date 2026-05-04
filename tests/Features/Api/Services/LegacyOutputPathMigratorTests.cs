@@ -18,9 +18,11 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
-using Listenarr.Api.Services;
-using Listenarr.Domain.Utils;
+using Listenarr.Domain.Common;
 using Listenarr.Domain.Models;
+using Listenarr.Application.Interfaces;
+using Listenarr.Domain.Models.Configurations;
+using Listenarr.Application.Common;
 
 namespace Listenarr.Tests.Features.Api.Services
 {
@@ -33,7 +35,7 @@ namespace Listenarr.Tests.Features.Api.Services
         public async Task Migrate_CreatesRoot_WhenNoExistingAndOutputPathPresent()
         {
             var mockConfig = new Mock<IConfigurationService>();
-            mockConfig.Setup(c => c.GetApplicationSettingsAsync()).ReturnsAsync(new Listenarr.Domain.Models.ApplicationSettings { OutputPath = booksPath });
+            mockConfig.Setup(c => c.GetApplicationSettingsAsync()).ReturnsAsync(new ApplicationSettings { OutputPath = booksPath });
 
             var mockRootService = new Mock<IRootFolderService>();
             mockRootService.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<RootFolder>());
@@ -50,7 +52,7 @@ namespace Listenarr.Tests.Features.Api.Services
         public async Task Migrate_DoesNotCreate_WhenRootsExist()
         {
             var mockConfig = new Mock<IConfigurationService>();
-            mockConfig.Setup(c => c.GetApplicationSettingsAsync()).ReturnsAsync(new Listenarr.Domain.Models.ApplicationSettings { OutputPath = booksPath });
+            mockConfig.Setup(c => c.GetApplicationSettingsAsync()).ReturnsAsync(new ApplicationSettings { OutputPath = booksPath });
 
             var mockRootService = new Mock<IRootFolderService>();
             mockRootService.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<RootFolder> { new RootFolder { Name = "X", Path = otherPath } });
@@ -66,7 +68,7 @@ namespace Listenarr.Tests.Features.Api.Services
         public async Task Migrate_DoesNotCreate_WhenOutputPathEmpty()
         {
             var mockConfig = new Mock<IConfigurationService>();
-            mockConfig.Setup(c => c.GetApplicationSettingsAsync()).ReturnsAsync(new Listenarr.Domain.Models.ApplicationSettings { OutputPath = "" });
+            mockConfig.Setup(c => c.GetApplicationSettingsAsync()).ReturnsAsync(new ApplicationSettings { OutputPath = "" });
 
             var mockRootService = new Mock<IRootFolderService>();
             mockRootService.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<RootFolder>());

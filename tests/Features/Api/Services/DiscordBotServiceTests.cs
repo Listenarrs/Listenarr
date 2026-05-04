@@ -21,10 +21,11 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.AspNetCore.Http;
 using Xunit;
-using Listenarr.Api.Services;
 using System.Runtime.InteropServices;
 using Listenarr.Domain.Models;
 using Moq;
+using Listenarr.Application.Interfaces;
+using Listenarr.Application.Notification;
 
 namespace Listenarr.Tests.Features.Api.Services
 {

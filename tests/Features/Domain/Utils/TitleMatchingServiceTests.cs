@@ -16,7 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Xunit;
-using Listenarr.Domain.Utils;
+using Listenarr.Domain.Common;
 
 namespace Listenarr.Tests.Features.Domain.Utils
 {

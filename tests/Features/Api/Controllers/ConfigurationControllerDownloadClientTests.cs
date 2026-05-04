@@ -17,8 +17,9 @@
  */
 using System.Net;
 using Listenarr.Api.Controllers;
-using Listenarr.Api.Hubs;
-using Listenarr.Api.Services;
+using Listenarr.Application.Interfaces;
+using Listenarr.Application.Notification;
+using Listenarr.Application.Security;
 using Listenarr.Domain.Models;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -36,7 +37,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
         {
             // Arrange
             var configurationService = new Mock<IConfigurationService>(MockBehavior.Strict);
-            var downloadService = new Mock<IDownloadService>(MockBehavior.Strict);
+            var downloadClientGateway = new Mock<IDownloadClientGateway>(MockBehavior.Strict);
             var logger = NullLogger<ConfigurationController>.Instance;
             var userService = Mock.Of<IUserService>();
             var settingsHub = Mock.Of<IHubContext<SettingsHub>>();
@@ -58,16 +59,16 @@ namespace Listenarr.Tests.Features.Api.Controllers
                 }
             };
 
-            downloadService
-                .Setup(x => x.TestDownloadClientAsync(It.IsAny<DownloadClientConfiguration>()))
-                .ReturnsAsync((true, "Connection successful", testedClient));
+            downloadClientGateway
+                .Setup(x => x.TestConnectionAsync(It.IsAny<DownloadClientConfiguration>()))
+                .ReturnsAsync((true, "Connection successful"));
 
             var controller = new ConfigurationController(
                 configurationService.Object,
                 logger,
                 userService,
                 settingsHub,
-                downloadService.Object,
+                downloadClientGateway.Object,
                 null!);
 
             var httpContext = new DefaultHttpContext();
@@ -112,8 +113,8 @@ namespace Listenarr.Tests.Features.Api.Controllers
             Assert.True(redactedClient.Settings.TryGetValue("apiKey", out var redactedApiKey));
             Assert.Equal(ApiResponseRedactor.RedactedValue, redactedApiKey?.ToString());
 
-            downloadService.Verify(
-                x => x.TestDownloadClientAsync(It.Is<DownloadClientConfiguration>(c =>
+            downloadClientGateway.Verify(
+                x => x.TestConnectionAsync(It.Is<DownloadClientConfiguration>(c =>
                     c.Host == "192.168.1.50" && c.Port == 6789)),
                 Times.Once);
             configurationService.VerifyNoOtherCalls();
@@ -124,7 +125,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
         {
             // Arrange
             var configurationService = new Mock<IConfigurationService>(MockBehavior.Strict);
-            var downloadService = new Mock<IDownloadService>(MockBehavior.Strict);
+            var downloadClientGateway = new Mock<IDownloadClientGateway>(MockBehavior.Strict);
             var logger = NullLogger<ConfigurationController>.Instance;
             var userService = Mock.Of<IUserService>();
             var settingsHub = Mock.Of<IHubContext<SettingsHub>>();
@@ -146,16 +147,16 @@ namespace Listenarr.Tests.Features.Api.Controllers
                 }
             };
 
-            downloadService
-                .Setup(x => x.TestDownloadClientAsync(It.IsAny<DownloadClientConfiguration>()))
-                .ReturnsAsync((true, "Connection successful", testedClient));
+            downloadClientGateway
+                .Setup(x => x.TestConnectionAsync(It.IsAny<DownloadClientConfiguration>()))
+                .ReturnsAsync((true, "Connection successful"));
 
             var controller = new ConfigurationController(
                 configurationService.Object,
                 logger,
                 userService,
                 settingsHub,
-                downloadService.Object,
+                downloadClientGateway.Object,
                 null!);
 
             var httpContext = new DefaultHttpContext();
@@ -200,8 +201,8 @@ namespace Listenarr.Tests.Features.Api.Controllers
             Assert.True(returnedClient.Settings.TryGetValue("apiKey", out var apiKey));
             Assert.Equal("very-secret-api-key", apiKey?.ToString());
 
-            downloadService.Verify(
-                x => x.TestDownloadClientAsync(It.Is<DownloadClientConfiguration>(c =>
+            downloadClientGateway.Verify(
+                x => x.TestConnectionAsync(It.Is<DownloadClientConfiguration>(c =>
                     c.Host == "192.168.1.50" && c.Port == 6789)),
                 Times.Once);
             configurationService.VerifyNoOtherCalls();

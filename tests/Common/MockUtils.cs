@@ -1,13 +1,15 @@
 using System.Net;
 using System.Text;
 using Listenarr.Api.Controllers;
-using Listenarr.Api.Hubs;
-using Listenarr.Api.Services;
-using Listenarr.Api.Services.Adapters;
-using Listenarr.Api.Services.Search.Providers;
-using Listenarr.Application.Repositories;
-using Listenarr.Application.Services;
+using Listenarr.Application.Downloads;
+using Listenarr.Application.Interfaces;
+using Listenarr.Application.Interfaces.Repositories;
+using Listenarr.Application.Notification;
 using Listenarr.Domain.Models;
+using Listenarr.Domain.Models.Configurations;
+using Listenarr.Domain.Models.Enumerations;
+using Listenarr.Infrastructure.Adapters;
+using Listenarr.Infrastructure.Search.Providers;
 using Listenarr.Tests.Builders;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Caching.Memory;
@@ -32,6 +34,19 @@ namespace Listenarr.Tests.Common
             };
         }
 
+        /// <summary>
+        /// Allows to replace a given tag with a path that has been processed to be portable
+        /// </summary>
+        /// <param name="response"></param>
+        /// <param name="pattern"></param>
+        /// <param name="path">Supports path gotten through FileUtils.GetAbsolutePath for example</param>
+        /// <returns></returns>
+        public static string PutPathInResponse(string response, string pattern, string path)
+        {
+            path = path.Replace(@"\", @"\\");
+            return response.Replace(pattern, path);
+        }
+
         public static Mock<DownloadMonitorService> GetDownloadMonitorServiceMock()
         {
             var scopeFactoryMock = new Mock<IServiceScopeFactory>();
@@ -51,17 +66,17 @@ namespace Listenarr.Tests.Common
 
         public static ServiceProvider CreateServiceProvider(string outputPath = "")
         {
-            return CreateServiceProvider(new Mock<IImportItemResolutionService>().Object, outputPath);
+            return CreateServiceProvider(new Mock<IDownloadItemService>().Object, outputPath);
         }
 
-        public static ServiceProvider CreateServiceProvider(IImportItemResolutionService importItemResolutionService, string outputPath = "", DownloadClientConfiguration downloadClientConfiguration = null)
+        public static ServiceProvider CreateServiceProvider(IDownloadItemService importItemResolutionService, string outputPath = "", DownloadClientConfiguration downloadClientConfiguration = null)
         {
 
             var configMock = new Mock<IConfigurationService>();
             configMock.Setup(c => c.GetApplicationSettingsAsync()).ReturnsAsync(new ApplicationSettings
             {
                 OutputPath = outputPath,
-                CompletedFileAction = "Copy",
+                CompletedFileAction = FileAction.Copy,
                 EnableMetadataProcessing = false,
                 MultiFileNamingPattern = "{Title}-{DiskNumber:00}-{ChapterNumber:00}",
             });
@@ -82,8 +97,8 @@ namespace Listenarr.Tests.Common
 
         public static async Task<DownloadProcessingJob> CreateDownloadProcessingJob(ServiceProvider provider, Download download, string sourcePath)
         {
-            var queueService = provider.GetRequiredService<IDownloadProcessingQueueService>();
-            var jobId = await queueService.QueueDownloadProcessingAsync(download.Id, sourcePath, null);
+            var queueService = provider.GetRequiredService<IDownloadProcessingJobService>();
+            var jobId = await queueService.EnqueueAsync(download);
             var job = await queueService.GetJobAsync(jobId);
 
             // Set job to processing (the outer loop normally does this)
@@ -103,7 +118,6 @@ namespace Listenarr.Tests.Common
 
             return new TransmissionAdapter(
                 provider.GetRequiredService<IHttpClientFactory>(),
-                provider.GetRequiredService<IRemotePathMappingService>(),
                 torrentFileDOwnloader.Object,
                 provider.GetRequiredService<ILogger<TransmissionAdapter>>());
         }
@@ -112,9 +126,9 @@ namespace Listenarr.Tests.Common
         {
             return new SabnzbdAdapter(
                 provider.GetRequiredService<IHttpClientFactory>(),
-                provider.GetRequiredService<IRemotePathMappingService>(),
                 Mock.Of<INzbUrlResolver>(),
-                new Mock<ILogger<SabnzbdAdapter>>().Object);
+                new Mock<ILogger<SabnzbdAdapter>>().Object,
+                new Mock<IAppMetricsService>().Object);
         }
 
         public static NzbgetAdapter CreateNzbgetAdapter(ServiceProvider provider)
@@ -122,62 +136,36 @@ namespace Listenarr.Tests.Common
             return new NzbgetAdapter(
                 provider.GetRequiredService<IHttpClientFactory>(),
                 Mock.Of<INzbUrlResolver>(),
-                provider.GetRequiredService<IRemotePathMappingService>(),
                 new Mock<ILogger<NzbgetAdapter>>().Object);
         }
 
-        public static CompletedDownloadProcessor CreateCompletedDownloadProcessor(ServiceProvider provider)
+        public static MyAnonamouseSearchProvider CreateMyAnonamouseSearchProvider(ServiceProvider provider)
         {
-            return new CompletedDownloadProcessor(
-                provider.GetRequiredService<IDownloadRepository>(),
-                provider.GetRequiredService<IFileFinalizer>(),
-                provider.GetRequiredService<IConfigurationService>(),
-                provider.GetRequiredService<IServiceScopeFactory>(),
-                provider.GetRequiredService<IImportService>(),
-                provider.GetRequiredService<IArchiveExtractor>(),
-                provider.GetRequiredService<IDownloadQueueService>(),
-                provider.GetRequiredService<IHubContext<DownloadHub>>(),
-                provider.GetRequiredService<ILogger<CompletedDownloadProcessor>>(),
-                hubBroadcaster: null,
-                metrics: null,
-                provider.GetRequiredService<IDownloadHistoryService>());
-        }
-
-        public static MyAnonamouseSearchProvider CreateMyAnonamouseSearchProvider(ServiceProvider _provider)
-        {
-            var httpClientFactory = _provider.GetRequiredService<IHttpClientFactory>();
+            var httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
             var httpClient = httpClientFactory.CreateClient();
             return new MyAnonamouseSearchProvider(
-                _provider.GetRequiredService<ILogger<MyAnonamouseSearchProvider>>(),
+                provider.GetRequiredService<ILogger<MyAnonamouseSearchProvider>>(),
                 httpClient,
-                _provider.GetRequiredService<IIndexerRepository>());
+                provider.GetRequiredService<IIndexerRepository>());
         }
 
-        public static DownloadsController CreateDownloadsController(ServiceProvider _provider)
+        public static DownloadsController CreateDownloadsController(ServiceProvider provider)
         {
             return new DownloadsController(
-                _provider.GetRequiredService<IDownloadRepository>(),
-                _provider.GetRequiredService<ILogger<DownloadsController>>(),
-                _provider.GetRequiredService<IConfigurationService>(),
-                _provider.GetRequiredService<IMemoryCache>());
+                provider.GetRequiredService<IDownloadRepository>(),
+                provider.GetRequiredService<IDownloadService>(),
+                provider.GetRequiredService<ILogger<DownloadsController>>(),
+                provider.GetRequiredService<IConfigurationService>(),
+                provider.GetRequiredService<IMemoryCache>());
         }
 
-        public static DownloadMonitorService CreateDownloadMonitorService(ServiceProvider _provider)
-        {
-            return new DownloadMonitorService(
-                _provider.GetRequiredService<IServiceScopeFactory>(),
-                _provider.GetRequiredService<IHubContext<DownloadHub>>(),
-                _provider.GetRequiredService<ILogger<DownloadMonitorService>>(),
-                _provider.GetRequiredService<IHttpClientFactory>());
-        }
-
-        public static IndexersController CreateIndexersController(ServiceProvider _provider, HttpMessageHandler handler)
+        public static IndexersController CreateIndexersController(ServiceProvider provider, HttpMessageHandler handler)
         {
             return new IndexersController(
-                _provider.GetRequiredService<IIndexerRepository>(),
-                _provider.GetRequiredService<ILogger<IndexersController>>(),
+                provider.GetRequiredService<IIndexerRepository>(),
+                provider.GetRequiredService<ILogger<IndexersController>>(),
                 new HttpClient(handler),
-                _provider.GetRequiredService<IConfigurationService>());
+                provider.GetRequiredService<IConfigurationService>());
         }
     }
 }

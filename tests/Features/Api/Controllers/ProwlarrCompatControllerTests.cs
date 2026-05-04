@@ -21,12 +21,13 @@ using Moq;
 using Xunit;
 using Listenarr.Api.Controllers;
 using Listenarr.Domain.Models;
-using Listenarr.Api.Services;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 using System.Reflection;
-using Listenarr.Infrastructure.Models;
-using Listenarr.Infrastructure.Repositories;
+using Listenarr.Infrastructure.Persistence.Repositories;
+using Listenarr.Infrastructure.Persistence;
+using Listenarr.Application.Interfaces;
+using Listenarr.Application.Notification;
 
 namespace Listenarr.Tests.Features.Api.Controllers
 {
@@ -48,7 +49,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
             var mockHubClients = new Mock<IHubClients>();
             mockHubClients.Setup(c => c.All).Returns(mockClientProxy.Object);
 
-            var mockHubContext = new Mock<IHubContext<Listenarr.Api.Hubs.SettingsHub>>();
+            var mockHubContext = new Mock<IHubContext<SettingsHub>>();
             mockHubContext.SetupGet(h => h.Clients).Returns(mockHubClients.Object);
 
             var mockLogger = new Mock<ILogger<ProwlarrCompatController>>();
@@ -97,7 +98,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
             var mockClientProxy = new Mock<IClientProxy>();
             var mockHubClients = new Mock<IHubClients>();
             mockHubClients.Setup(c => c.All).Returns(mockClientProxy.Object);
-            var mockHubContext = new Mock<IHubContext<Listenarr.Api.Hubs.SettingsHub>>();
+            var mockHubContext = new Mock<IHubContext<SettingsHub>>();
             mockHubContext.SetupGet(h => h.Clients).Returns(mockHubClients.Object);
             var mockLogger = new Mock<ILogger<ProwlarrCompatController>>();
             var mockToastService = new Mock<IToastService>();
@@ -227,7 +228,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
             var mockClientProxy = new Mock<IClientProxy>();
             var mockHubClients = new Mock<IHubClients>();
             mockHubClients.Setup(c => c.All).Returns(mockClientProxy.Object);
-            var mockHubContext = new Mock<IHubContext<Listenarr.Api.Hubs.SettingsHub>>();
+            var mockHubContext = new Mock<IHubContext<SettingsHub>>();
             mockHubContext.SetupGet(h => h.Clients).Returns(mockHubClients.Object);
             var mockLogger = new Mock<ILogger<ProwlarrCompatController>>();
             var mockToastService = new Mock<IToastService>();
@@ -270,7 +271,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
             var mockClientProxy = new Mock<IClientProxy>();
             var mockHubClients = new Mock<IHubClients>();
             mockHubClients.Setup(c => c.All).Returns(mockClientProxy.Object);
-            var mockHubContext = new Mock<IHubContext<Listenarr.Api.Hubs.SettingsHub>>();
+            var mockHubContext = new Mock<IHubContext<SettingsHub>>();
             mockHubContext.SetupGet(h => h.Clients).Returns(mockHubClients.Object);
             var mockLogger = new Mock<ILogger<ProwlarrCompatController>>();
             var mockToastService = new Mock<IToastService>();
@@ -327,7 +328,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
             var mockClientProxy = new Mock<IClientProxy>();
             var mockHubClients = new Mock<IHubClients>();
             mockHubClients.Setup(c => c.All).Returns(mockClientProxy.Object);
-            var mockHubContext = new Mock<IHubContext<Listenarr.Api.Hubs.SettingsHub>>();
+            var mockHubContext = new Mock<IHubContext<SettingsHub>>();
             mockHubContext.SetupGet(h => h.Clients).Returns(mockHubClients.Object);
             var mockLogger = new Mock<ILogger<ProwlarrCompatController>>();
             var mockToastService = new Mock<IToastService>();

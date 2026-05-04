@@ -17,37 +17,79 @@
  */
 using System.Runtime.InteropServices;
 using System.Text;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Xunit;
-using Listenarr.Api.Services;
 using Listenarr.Domain.Models;
-using Listenarr.Api.Services.Metadata;
-using Listenarr.Infrastructure.Models;
 using Listenarr.Tests.Common;
+using Listenarr.Application.Interfaces;
+using Listenarr.Tests.Builders;
+using Listenarr.Domain.Models.Configurations;
+using Listenarr.Domain.Models.Enumerations;
 
 namespace Listenarr.Tests.Features.Api.Services
 {
-    public class ImportServiceTests : BaseTests
+    public class downloadImportServiceTests : BaseTests
     {
+        private string _outputRoot = "";
+
+        private ApplicationSettings _settings = new ApplicationSettingsBuilder()
+            .WithMoveFileOnCompleted()
+            .WithoutMetadataProcessing()
+            .WithFolderNamingPattern("{Author}/{Title}")
+            .WithMultiFileNamingPattern("{Title} ({Year})")
+            .WithFileNamingPattern("{Title} ({Year})")
+            .Build();
+
+        private DownloadClientConfiguration _client = new DownloadClientConfigurationBuilder()
+            .Build();
+
+        private Audiobook _audiobook = new AudiobookBuilder()
+            .WithTitle("Dune")
+            .WithAuthor("Frank Herbert")
+            .WithId(123)
+            .WithYear("2021")
+            .Build();
+
+        private Download _download = new DownloadBuilder()
+            .Build();
+
+        public override async Task InitializeAsync()
+        {
+            _outputRoot = FileService.GetTempDirectory("import-out");
+
+            await InitDataAsync();
+        }
+
+        private async Task InitDataAsync()
+        {
+            _settings.OutputPath = _outputRoot;
+            await _applicationSettingsRepository.SaveAsync(_settings);
+
+            await _downloadClientConfigurationRepository.SaveAsync(_client);
+
+            _audiobook.BasePath = _outputRoot;
+            await _audiobookRepository.AddAsync(_audiobook);
+
+            _download.DownloadClientId = _client.Id;
+            _download.AudiobookId = _audiobook.Id;
+            await _downloadRepository.AddAsync(_download);
+        }
+
         [Fact]
         public async Task ImportFilesFromDirectory_CreatesDestinationDirectory_WhenMissing()
         {
             // Arrange
-            var outputRoot = FileService.GetTempDirectory("import-out");
             var sourceDir = FileService.GetTempDirectory("import-src");
             var file1 = await FileService.GetFileAsync(sourceDir, "track1.m4b");
             var file2 = await FileService.GetFileAsync(sourceDir, "track2.m4b");
 
-            var settings = new ApplicationSettings { OutputPath = outputRoot, CompletedFileAction = "Move", EnableMetadataProcessing = false };
-
             // Act
-            var importService = _provider.GetRequiredService<IImportService>();
-            var results = await importService.ImportFilesFromDirectoryAsync("dl-1", null, [file1, file2], settings);
+            var downloadImportService = _provider.GetRequiredService<IDownloadImportService>();
+            var results = await downloadImportService.ImportDownloadFilesAsync(_audiobook, [file1, file2]);
 
             // Assert: destination directory created
-            Assert.True(Directory.Exists(outputRoot));
+            Assert.True(Directory.Exists(_outputRoot));
 
             // At least one successful import result should be present
             Assert.Contains(results, r => r.Success);
@@ -55,7 +97,7 @@ namespace Listenarr.Tests.Features.Api.Services
             // All successful results should point to files under the output root
             foreach (var r in results.Where(r => r.Success))
             {
-                Assert.StartsWith(outputRoot.TrimEnd(Path.DirectorySeparatorChar), r.FinalPath, StringComparison.OrdinalIgnoreCase);
+                Assert.StartsWith(_outputRoot.TrimEnd(Path.DirectorySeparatorChar), r.FinalPath, StringComparison.OrdinalIgnoreCase);
                 Assert.True(File.Exists(r.FinalPath));
             }
         }
@@ -69,26 +111,14 @@ namespace Listenarr.Tests.Features.Api.Services
             var sourceDir = FileService.GetTempDirectory("import-src");
             var sourceFile = await FileService.GetFileAsync(sourceDir, "dune-source.m4b");
 
-            var settings = await _applicationSettingsRepository.SaveAsync(new ApplicationSettings
-            {
-                OutputPath = outputRoot,
-                CompletedFileAction = "Move",
-                EnableMetadataProcessing = false,
-                FileNamingPattern = "{Author}/{Title}/{Title} ({Year})"
-            });
+            _audiobook.BasePath = basePath;
+            await _audiobookRepository.UpdateAsync(_audiobook);
 
-            await _audiobookRepository.AddAsync(new Audiobook
-            {
-                Id = 123,
-                Title = "Dune",
-                Authors = ["Frank Herbert"],
-                PublishYear = "2021",
-                BasePath = basePath
-            });
+            var downloadImportService = _provider.GetRequiredService<IDownloadImportService>();
 
-            var importService = _provider.GetRequiredService<IImportService>();
-
-            var result = await importService.ImportSingleFileAsync("dl-1", 123, sourceFile, settings);
+            var results = await downloadImportService.ImportDownloadFilesAsync(_audiobook, [sourceFile]);
+            Assert.Single(results);
+            var result = results.First();
 
             Assert.True(result.Success);
             Assert.NotNull(result.FinalPath);
@@ -98,67 +128,6 @@ namespace Listenarr.Tests.Features.Api.Services
             Assert.Equal(Path.GetFileName(relative), relative);
             Assert.DoesNotContain($"Frank Herbert{Path.DirectorySeparatorChar}", relative, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain($"Dune{Path.DirectorySeparatorChar}", relative, StringComparison.OrdinalIgnoreCase);
-        }
-
-        [Fact]
-        public async Task ImportFilesFromDirectory_WithLegacyFilePathAndNoBasePath_RegistersImportedFiles()
-        {
-            var metadataMock = new Mock<IMetadataService>();
-            metadataMock.Setup(m => m.ExtractFileMetadataAsync(It.IsAny<string>()))
-                .ReturnsAsync(new AudioMetadata { Title = "Jack of Shadows", Format = "mp3", BitRate = 128000 });
-
-            _services.AddSingleton(metadataMock.Object);
-            Init();
-
-            var outputRoot = FileService.GetTempDirectory("import-out");
-            var sourceDir = FileService.GetTempDirectory("import-src");
-
-            var part2 = await FileService.GetFileAsync(sourceDir, "Part 2.mp3");
-            var part1 = await FileService.GetFileAsync(sourceDir, "Part 1.mp3");
-
-            var legacyDir = FileService.GetTempDirectory("import-legacy");
-            var legacyPath = Path.Join(legacyDir, "legacy.mp3");
-
-            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
-                .UseInMemoryDatabase(Guid.NewGuid().ToString())
-                .Options;
-
-            await _audiobookRepository.AddAsync(new Audiobook
-            {
-                Id = 456,
-                Title = "Jack of Shadows",
-                Authors = ["Roger Zelazny"],
-                FilePath = legacyPath,
-                BasePath = null
-            });
-
-            var settings = await _applicationSettingsRepository.SaveAsync(new ApplicationSettings
-            {
-                OutputPath = outputRoot,
-                CompletedFileAction = "Copy",
-                EnableMetadataProcessing = false,
-                FolderNamingPattern = "",
-                FileNamingPattern = "{Title}",
-                MultiFileNamingPattern = "{Title}-{DiskNumber:00}"
-            });
-
-            var importService = _provider.GetRequiredService<IImportService>();
-            var results = await importService.ImportFilesFromDirectoryAsync(
-                "legacy-basepath",
-                456,
-                [part2, part1],
-                settings);
-
-            Assert.Equal(2, results.Count(r => r.Success));
-
-            var audiobook = await _audiobookRepository.GetByIdAsync(456);
-            var files = await _audiobookFileRepository.GetByAudiobookIdAsync(456);
-
-            Assert.NotNull(audiobook);
-            Assert.Equal(Path.GetFullPath(outputRoot), audiobook!.BasePath);
-            Assert.Equal(2, files.Count);
-            Assert.Contains(files, f => f.Path == Path.Join(outputRoot, "Jack of Shadows-01.mp3"));
-            Assert.Contains(files, f => f.Path == Path.Join(outputRoot, "Jack of Shadows-02.mp3"));
         }
 
         [Fact]
@@ -179,25 +148,30 @@ namespace Listenarr.Tests.Features.Api.Services
             metadataMock.Setup(m => m.ExtractFileMetadataAsync(It.Is<string>(path => path.EndsWith("Chapter 02.mp3", StringComparison.OrdinalIgnoreCase))))
                 .ReturnsAsync(new AudioMetadata { Title = "Jack of Shadows", Format = "mp3", TrackNumber = 2 });
 
-            _services.AddSingleton(metadataMock.Object);
+            _services.AddSingleton<IMetadataService>(metadataMock.Object);
             Init();
+            await InitDataAsync();
 
-            var settings = await _applicationSettingsRepository.SaveAsync(new ApplicationSettings
-            {
-                OutputPath = outputRoot,
-                CompletedFileAction = "Copy",
-                EnableMetadataProcessing = false,
-                FolderNamingPattern = "",
-                FileNamingPattern = "{Title}",
-                MultiFileNamingPattern = "{Title}-{DiskNumber:00}"
-            });
+            var settings = await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
+                .WithOutputPath(outputRoot)
+                .WithCopyFileOnCompleted()
+                .WithMetadataProcessing()
+                .WithFolderNamingPattern("")
+                .WithFileNamingPattern("{Title}")
+                .WithMultiFileNamingPattern("{Title}-{DiskNumber:00}")
+                .Build());
 
-            var importService = _provider.GetRequiredService<IImportService>();
-            var results = await importService.ImportFilesFromDirectoryAsync(
-                "foreword-order",
-                audiobookId: null,
-                [foreword, chapter1, chapter2],
-                settings);
+            var audiobook = await CreateAudiobook();
+            audiobook.BasePath = outputRoot;
+            await _audiobookRepository.UpdateAsync(audiobook);
+
+            var download = await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithAudiobook(audiobook)
+                .WithDownloadClientConfiguration(_client)
+                .Build());
+
+            var downloadImportService = _provider.GetRequiredService<IDownloadImportService>();
+            var results = await downloadImportService.ImportDownloadFilesAsync(audiobook, [foreword, chapter1, chapter2]);
 
             var mapped = results
                 .Where(r => r.Success && !string.IsNullOrWhiteSpace(r.SourcePath) && !string.IsNullOrWhiteSpace(r.FinalPath))
@@ -228,20 +202,24 @@ namespace Listenarr.Tests.Features.Api.Services
             var settings = await _applicationSettingsRepository.SaveAsync(new ApplicationSettings
             {
                 OutputPath = outputRoot,
-                CompletedFileAction = "Move",
-                EnableMetadataProcessing = false,
+                CompletedFileAction = FileAction.Move,
+                EnableMetadataProcessing = true,
                 FolderNamingPattern = "",
-                FileNamingPattern = "{Title}",
-                MultiFileNamingPattern = "{Title}-{DiskNumber:00}",
+                FileNamingPattern = "{Title}-{DiskNumber:00}",
                 ImportBlacklistExtensions = []
             });
 
-            var importService = _provider.GetRequiredService<IImportService>();
-            var results = await importService.ImportFilesFromDirectoryAsync(
-                "companion-download",
-                audiobookId: null,
-                [audioFile, coverFile, notesFile],
-                settings);
+            var audiobook = await CreateAudiobook();
+            audiobook.BasePath = outputRoot;
+            await _audiobookRepository.UpdateAsync(audiobook);
+
+            var download = await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithAudiobook(audiobook)
+                .WithDownloadClientConfiguration(_client)
+                .Build());
+
+            var downloadImportService = _provider.GetRequiredService<IDownloadImportService>();
+            var results = await downloadImportService.ImportDownloadFilesAsync(audiobook, [audioFile, coverFile, notesFile]);
 
             Assert.Equal(3, results.Count(r => r.Success));
             Assert.Contains(results, r => string.Equals(Path.GetFileName(r.FinalPath), "Companion Book-01.mp3", StringComparison.OrdinalIgnoreCase));
@@ -270,20 +248,24 @@ namespace Listenarr.Tests.Features.Api.Services
             var settings = await _applicationSettingsRepository.SaveAsync(new ApplicationSettings
             {
                 OutputPath = outputRoot,
-                CompletedFileAction = "Move",
-                EnableMetadataProcessing = false,
+                CompletedFileAction = FileAction.Move,
+                EnableMetadataProcessing = true,
                 FolderNamingPattern = "",
-                FileNamingPattern = "{Title}",
-                MultiFileNamingPattern = "{Title}-{DiskNumber:00}",
+                FileNamingPattern = "{Title}-{DiskNumber:00}",
                 ImportBlacklistExtensions = [".txt"]
             });
 
-            var importService = _provider.GetRequiredService<IImportService>();
-            var results = await importService.ImportFilesFromDirectoryAsync(
-                "companion-download-blacklist",
-                audiobookId: null,
-                [audioFile, coverFile, notesFile],
-                settings);
+            var audiobook = await CreateAudiobook();
+            audiobook.BasePath = outputRoot;
+            await _audiobookRepository.UpdateAsync(audiobook);
+
+            var download = await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithAudiobook(audiobook)
+                .WithDownloadClientConfiguration(_client)
+                .Build());
+
+            var downloadImportService = _provider.GetRequiredService<IDownloadImportService>();
+            var results = await downloadImportService.ImportDownloadFilesAsync(audiobook, [audioFile, coverFile, notesFile]);
 
             Assert.Equal(2, results.Count(r => r.Success));
             Assert.Contains(results, r => string.Equals(Path.GetFileName(r.FinalPath), "Companion Book-01.mp3", StringComparison.OrdinalIgnoreCase));
@@ -302,6 +284,8 @@ namespace Listenarr.Tests.Features.Api.Services
             var author = "John Scalzi";
             var series = "The Dispatcher";
             var sanitizedTitle = SanitizePathComponentForCurrentPlatform(title);
+            var pathSeparator = Path.DirectorySeparatorChar.ToString();
+            var basePath = string.Join(pathSeparator, outputRoot, author, series, sanitizedTitle);
 
             var nestedSourceDir = Path.Join(sourceRoot, series, sanitizedTitle);
             Directory.CreateDirectory(nestedSourceDir);
@@ -325,30 +309,32 @@ namespace Listenarr.Tests.Features.Api.Services
             var settings = await _applicationSettingsRepository.SaveAsync(new ApplicationSettings
             {
                 OutputPath = outputRoot,
-                CompletedFileAction = "Copy",
-                EnableMetadataProcessing = false,
+                CompletedFileAction = FileAction.Copy,
+                EnableMetadataProcessing = true,
                 FolderNamingPattern = "{Author}/{Series}/{Title}",
                 FileNamingPattern = "{Title}",
                 MultiFileNamingPattern = "{Title}-{DiskNumber:00}"
             });
 
-            var importService = _provider.GetRequiredService<IImportService>();
-            var results = await importService.ImportFilesFromDirectoryAsync(
-                "nested-torrent",
-                audiobookId: null,
-                [sourceFile],
-                settings);
+            var audiobook = await CreateAudiobook();
+            audiobook.BasePath = basePath;
+            await _audiobookRepository.UpdateAsync(audiobook);
+
+            var download = await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithAudiobook(audiobook)
+                .WithDownloadClientConfiguration(_client)
+                .Build());
+
+            var downloadImportService = _provider.GetRequiredService<IDownloadImportService>();
+            var results = await downloadImportService.ImportDownloadFilesAsync(audiobook, [sourceFile]);
 
             var success = Assert.Single(results, r => r.Success);
             Assert.NotNull(success.FinalPath);
 
             var actualFullPath = Path.GetFullPath(success.FinalPath!);
-            var actualRelativePath = Path.GetRelativePath(outputRoot, actualFullPath);
-            var actualDirectory = Path.GetDirectoryName(actualRelativePath);
-            var actualFileName = Path.GetFileName(actualRelativePath);
-            var pathSeparator = Path.DirectorySeparatorChar.ToString();
+            var actualFileName = Path.GetFileName(actualFullPath);
 
-            Assert.Equal(string.Join(pathSeparator, author, series, sanitizedTitle), actualDirectory);
+            Assert.Equal(basePath, Path.GetDirectoryName(actualFullPath));
             Assert.StartsWith(sanitizedTitle, actualFileName, StringComparison.OrdinalIgnoreCase);
             Assert.EndsWith(".m4b", actualFileName, StringComparison.OrdinalIgnoreCase);
 
@@ -383,12 +369,12 @@ namespace Listenarr.Tests.Features.Api.Services
             var settings = await _applicationSettingsRepository.SaveAsync(new ApplicationSettings
             {
                 OutputPath = outputRoot,
-                CompletedFileAction = "Move",
+                CompletedFileAction = FileAction.Move,
                 EnableMetadataProcessing = false,
                 FileNamingPattern = "{Title}"
             });
 
-            await _audiobookRepository.AddAsync(new Audiobook
+            var audiobook = await _audiobookRepository.AddAsync(new Audiobook
             {
                 Id = 321,
                 Title = "A Great Book",
@@ -396,9 +382,14 @@ namespace Listenarr.Tests.Features.Api.Services
                 BasePath = shortBasePath
             });
 
-            var importService = _provider.GetRequiredService<IImportService>();
+            _download.AudiobookId = audiobook.Id;
+            await _downloadRepository.UpdateAsync(_download);
 
-            var result = await importService.ImportSingleFileAsync("dl-short-path", 321, sourceFile, settings);
+            var downloadImportService = _provider.GetRequiredService<IDownloadImportService>();
+
+            var results = await downloadImportService.ImportDownloadFilesAsync(audiobook, [sourceFile]);
+            Assert.Single(results);
+            var result = results.First();
 
             Assert.True(result.Success);
             Assert.NotNull(result.FinalPath);
@@ -423,27 +414,34 @@ namespace Listenarr.Tests.Features.Api.Services
 
             _services.AddSingleton(metadataMock.Object);
             Init();
+            await InitDataAsync();
 
             var settings = await _applicationSettingsRepository.SaveAsync(new ApplicationSettings
             {
                 OutputPath = outputRoot,
-                CompletedFileAction = "Copy",
+                CompletedFileAction = FileAction.Copy,
                 EnableMetadataProcessing = false,
                 FolderNamingPattern = "{Author}/{Title}",
                 FileNamingPattern = "{Title} ({Narrator})",
                 MultiFileNamingPattern = "{Title}-{DiskNumber:00}"
             });
 
-            await _audiobookRepository.AddAsync(new Audiobook
+            var audiobook = await _audiobookRepository.AddAsync(new Audiobook
             {
                 Id = 987,
                 Title = "The Gunslinger",
                 Authors = ["Stephen King"],
-                Narrators = ["George Guidall", "Frank Muller"]
+                Narrators = ["George Guidall", "Frank Muller"],
+                BasePath = outputRoot
             });
 
-            var importService = _provider.GetRequiredService<IImportService>();
-            var result = await importService.ImportSingleFileAsync("dl-narrator", 987, sourceFile, settings);
+            _download.AudiobookId = audiobook.Id;
+            await _downloadRepository.UpdateAsync(_download);
+
+            var downloadImportService = _provider.GetRequiredService<IDownloadImportService>();
+            var results = await downloadImportService.ImportDownloadFilesAsync(audiobook, [sourceFile]);
+            Assert.Single(results);
+            var result = results.First();
 
             Assert.True(result.Success);
             Assert.NotNull(result.FinalPath);
@@ -470,31 +468,38 @@ namespace Listenarr.Tests.Features.Api.Services
 
             _services.AddSingleton(metadataMock.Object);
             Init();
+            await InitDataAsync();
 
             var settings = await _applicationSettingsRepository.SaveAsync(new ApplicationSettings
             {
                 OutputPath = outputRoot,
-                CompletedFileAction = "Copy",
-                EnableMetadataProcessing = false,
+                CompletedFileAction = FileAction.Copy,
+                EnableMetadataProcessing = true,
                 FolderNamingPattern = "{Author}/{Title}",
                 FileNamingPattern = "{Title}",
                 MultiFileNamingPattern = "{Title}-{DiskNumber:00}"
             });
 
-            await _audiobookRepository.AddAsync(new Audiobook
+            var audiobook = await _audiobookRepository.AddAsync(new Audiobook
             {
                 Id = 988,
                 Title = "The Gunslinger",
-                Narrators = new System.Collections.Generic.List<string> { "George Guidall" }
+                Narrators = ["George Guidall"],
+                BasePath = Path.Join(outputRoot, "Unknown Author", "The Gunslinger")
             });
 
-            var importService = _provider.GetRequiredService<IImportService>();
-            var result = await importService.ImportSingleFileAsync("dl-author-fallback", 988, sourceFile, settings);
+            _download.AudiobookId = audiobook.Id;
+            await _downloadRepository.UpdateAsync(_download);
+
+            var downloadImportService = _provider.GetRequiredService<IDownloadImportService>();
+            var results = await downloadImportService.ImportDownloadFilesAsync(audiobook, [sourceFile]);
+            Assert.Single(results);
+            var result = results.First();
 
             Assert.True(result.Success);
             Assert.NotNull(result.FinalPath);
-            Assert.Contains($"Unknown Author{Path.DirectorySeparatorChar}The Gunslinger", result.FinalPath!, StringComparison.Ordinal);
-            Assert.DoesNotContain($"George Guidall{Path.DirectorySeparatorChar}The Gunslinger", result.FinalPath!, StringComparison.Ordinal);
+            Assert.Contains(Path.Join("Unknown Author", "The Gunslinger"), result.FinalPath!, StringComparison.Ordinal);
+            Assert.DoesNotContain(Path.Join("George Guidall", "The Gunslinger"), result.FinalPath!, StringComparison.Ordinal);
         }
 
         [Fact]
@@ -510,35 +515,42 @@ namespace Listenarr.Tests.Features.Api.Services
 
             _services.AddSingleton(metadataMock.Object);
             Init();
+            await InitDataAsync();
 
             var settings = await _applicationSettingsRepository.SaveAsync(new ApplicationSettings
             {
                 OutputPath = outputRoot,
-                CompletedFileAction = "Copy",
-                EnableMetadataProcessing = false,
+                CompletedFileAction = FileAction.Copy,
+                EnableMetadataProcessing = true,
                 FolderNamingPattern = "{Publisher}/{Language}/{Asin}",
                 FileNamingPattern = "{Title} - {Edition} - {Subtitle}",
                 MultiFileNamingPattern = "{Title}-{DiskNumber:00}"
             });
 
-            await _audiobookRepository.AddAsync(new Audiobook
+            var audiobook = await _audiobookRepository.AddAsync(new Audiobook
             {
                 Id = 989,
                 Title = "The Gunslinger",
                 Subtitle = "The Dark Tower Begins",
-                Authors = new System.Collections.Generic.List<string> { "Stephen King" },
+                Authors = ["Stephen King"],
                 Publisher = "Penguin Audio",
                 Language = "English",
                 Asin = "B000FC1R84",
-                Edition = "Revised Edition"
+                Edition = "Revised Edition",
+                BasePath = Path.Join(outputRoot, "Penguin Audio", "English", "B000FC1R84")
             });
 
-            var importService = _provider.GetRequiredService<IImportService>();
-            var result = await importService.ImportSingleFileAsync("dl-metadata-vars", 989, sourceFile, settings);
+            _download.AudiobookId = audiobook.Id;
+            await _downloadRepository.UpdateAsync(_download);
+
+            var downloadImportService = _provider.GetRequiredService<IDownloadImportService>();
+            var results = await downloadImportService.ImportDownloadFilesAsync(audiobook, [sourceFile]);
+            Assert.Single(results);
+            var result = results.First();
 
             Assert.True(result.Success);
             Assert.NotNull(result.FinalPath);
-            Assert.Contains($"Penguin Audio{Path.DirectorySeparatorChar}English{Path.DirectorySeparatorChar}B000FC1R84", result.FinalPath!, StringComparison.Ordinal);
+            Assert.Contains(Path.Join("Penguin Audio", "English", "B000FC1R84"), result.FinalPath!, StringComparison.Ordinal);
             Assert.Contains("The Gunslinger - Revised Edition - The Dark Tower Begins.m4b", result.FinalPath!, StringComparison.Ordinal);
         }
 
@@ -558,18 +570,19 @@ namespace Listenarr.Tests.Features.Api.Services
 
             _services.AddSingleton(metadataMock.Object);
             Init();
+            await InitDataAsync();
 
             var settings = await _applicationSettingsRepository.SaveAsync(new ApplicationSettings
             {
                 OutputPath = outputRoot,
-                CompletedFileAction = "Copy",
-                EnableMetadataProcessing = false,
+                CompletedFileAction = FileAction.Copy,
+                EnableMetadataProcessing = true,
                 FolderNamingPattern = "{Publisher}/{Language}/{Asin}",
                 FileNamingPattern = "{Title} - {Edition} - {Subtitle}",
                 MultiFileNamingPattern = "{Title} - {Edition} - {Subtitle} - {DiskNumber:00}"
             });
 
-            await _audiobookRepository.AddAsync(new Audiobook
+            var audiobook = await _audiobookRepository.AddAsync(new Audiobook
             {
                 Id = 990,
                 Title = "The Gunslinger",
@@ -578,22 +591,22 @@ namespace Listenarr.Tests.Features.Api.Services
                 Publisher = "Penguin Audio",
                 Language = "English",
                 Asin = "B000FC1R84",
-                Edition = "Revised Edition"
+                Edition = "Revised Edition",
+                BasePath = Path.Join(outputRoot, "Penguin Audio", "English", "B000FC1R84")
             });
 
-            var importService = _provider.GetRequiredService<IImportService>();
-            var results = await importService.ImportFilesFromDirectoryAsync(
-                "dl-dir-metadata-vars",
-                990,
-                [firstSourceFile, secondSourceFile],
-                settings);
+            _download.AudiobookId = audiobook.Id;
+            await _downloadRepository.UpdateAsync(_download);
+
+            var downloadImportService = _provider.GetRequiredService<IDownloadImportService>();
+            var results = await downloadImportService.ImportDownloadFilesAsync(audiobook, [firstSourceFile, secondSourceFile]);
 
             var successfulResults = results.Where(item => item.Success).ToList();
             Assert.Equal(2, successfulResults.Count);
             Assert.All(successfulResults, result =>
             {
                 Assert.NotNull(result.FinalPath);
-                Assert.Contains($"Penguin Audio{Path.DirectorySeparatorChar}English{Path.DirectorySeparatorChar}B000FC1R84", result.FinalPath!, StringComparison.Ordinal);
+                Assert.Contains(Path.Join("Penguin Audio", "English", "B000FC1R84"), result.FinalPath!, StringComparison.Ordinal);
                 Assert.Contains("The Gunslinger - Revised Edition - The Dark Tower Begins", result.FinalPath!, StringComparison.Ordinal);
             });
         }

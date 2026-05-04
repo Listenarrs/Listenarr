@@ -19,13 +19,13 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
-using Listenarr.Api.Services.Adapters;
 using Listenarr.Domain.Models;
-using Listenarr.Domain.Utils;
+using Listenarr.Domain.Common;
 using Listenarr.Tests.Common;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
+using Listenarr.Infrastructure.Adapters;
 
 namespace Listenarr.Tests.Features.Api.Services.Adapters
 {
@@ -75,8 +75,7 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
 
             using var http = new HttpClient(handler);
             var factory = new TestHttpClientFactory(http);
-            var pathMapMock = new Mock<Listenarr.Api.Services.IRemotePathMappingService>();
-            var adapter = new QbittorrentAdapter(factory, pathMapMock.Object, Mock.Of<ITorrentFileDownloader>(), NullLogger<QbittorrentAdapter>.Instance);
+            var adapter = new QbittorrentAdapter(factory, Mock.Of<ITorrentFileDownloader>(), NullLogger<QbittorrentAdapter>.Instance);
 
             var cfg = new DownloadClientConfiguration
             {
@@ -113,8 +112,7 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
 
             using var http = new HttpClient(handler);
             var factory = new TestHttpClientFactory(http);
-            var pathMapMock = new Mock<Listenarr.Api.Services.IRemotePathMappingService>();
-            var adapter = new QbittorrentAdapter(factory, pathMapMock.Object, Mock.Of<ITorrentFileDownloader>(), NullLogger<QbittorrentAdapter>.Instance);
+            var adapter = new QbittorrentAdapter(factory, Mock.Of<ITorrentFileDownloader>(), NullLogger<QbittorrentAdapter>.Instance);
 
             var cfg = new DownloadClientConfiguration
             {
@@ -147,8 +145,7 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
 
             using var http = new HttpClient(handler);
             var factory = new TestHttpClientFactory(http);
-            var pathMapMock = new Mock<Listenarr.Api.Services.IRemotePathMappingService>();
-            var adapter = new QbittorrentAdapter(factory, pathMapMock.Object, Mock.Of<ITorrentFileDownloader>(), NullLogger<QbittorrentAdapter>.Instance);
+            var adapter = new QbittorrentAdapter(factory, Mock.Of<ITorrentFileDownloader>(), NullLogger<QbittorrentAdapter>.Instance);
 
             var cfg = new DownloadClientConfiguration
             {
@@ -225,7 +222,6 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
 
             var adapter = new QbittorrentAdapter(
                 new TestHttpClientFactory(http),
-                Mock.Of<Listenarr.Api.Services.IRemotePathMappingService>(),
                 downloader.Object,
                 NullLogger<QbittorrentAdapter>.Instance);
 
@@ -260,7 +256,6 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
 
             var adapter = new QbittorrentAdapter(
                 new TestHttpClientFactory(http),
-                Mock.Of<Listenarr.Api.Services.IRemotePathMappingService>(),
                 Mock.Of<ITorrentFileDownloader>(),
                 NullLogger<QbittorrentAdapter>.Instance);
 
@@ -305,66 +300,16 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
 
         [Fact]
         [Trait("Area", "QbittorrentImportPathResolution")]
-        [Trait("Scenario", "DockerAutoImportAppliesRemotePathMapping")]
-        public async Task GetImportItemAsync_PrepopulatedContentPath_AppliesRemoteMapping_ForDockerAutoImport()
-        {
-            string localPath = FileUtils.GetAbsolutePath("media", "downloads", "Stephen King", "It.m4b");
-            var pathMapMock = new Mock<Listenarr.Api.Services.IRemotePathMappingService>(MockBehavior.Strict);
-            pathMapMock
-                .Setup(m => m.TranslatePathAsync("qbit-client", "/qbit-downloads/Stephen King/It.m4b"))
-                .ReturnsAsync(localPath);
-
-            using var http = new HttpClient(new DelegatingHandlerMock((_, _) =>
-                throw new InvalidOperationException("HTTP should not be called when qBittorrent content_path is already available.")));
-
-            var adapter = new QbittorrentAdapter(
-                new TestHttpClientFactory(http),
-                pathMapMock.Object,
-                Mock.Of<ITorrentFileDownloader>(),
-                NullLogger<QbittorrentAdapter>.Instance);
-
-            var client = new DownloadClientConfiguration
-            {
-                Id = "qbit-client",
-                Type = "qbittorrent",
-                Host = "localhost",
-                Port = 8080
-            };
-
-            var queueItem = new QueueItem
-            {
-                Id = "dl-qbit-docker",
-                Title = "It",
-                Status = "completed",
-                ContentPath = "/qbit-downloads/Stephen King/It.m4b",
-                DownloadClientId = client.Id
-            };
-
-            var resolved = await adapter.GetImportItemAsync(client, new Download { Id = queueItem.Id }, queueItem);
-
-            Assert.Equal(localPath, resolved.ContentPath);
-            pathMapMock.Verify(
-                m => m.TranslatePathAsync("qbit-client", "/qbit-downloads/Stephen King/It.m4b"),
-                Times.Once);
-        }
-
-        [Fact]
-        [Trait("Area", "QbittorrentImportPathResolution")]
         [Trait("Scenario", "LocalAutoImportKeepsExistingPath")]
         public async Task GetImportItemAsync_PrepopulatedContentPath_KeepsLocalPath_ForNonDockerAutoImport()
         {
             string localPath = FileUtils.GetAbsolutePath("media", "downloads", "Stephen King", "It.m4b");
-            var pathMapMock = new Mock<Listenarr.Api.Services.IRemotePathMappingService>(MockBehavior.Strict);
-            pathMapMock
-                .Setup(m => m.TranslatePathAsync("qbit-client", localPath))
-                .ReturnsAsync(localPath);
 
             using var http = new HttpClient(new DelegatingHandlerMock((_, _) =>
                 throw new InvalidOperationException("HTTP should not be called when qBittorrent content_path is already available.")));
 
             var adapter = new QbittorrentAdapter(
                 new TestHttpClientFactory(http),
-                pathMapMock.Object,
                 Mock.Of<ITorrentFileDownloader>(),
                 NullLogger<QbittorrentAdapter>.Instance);
 
@@ -388,7 +333,6 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
             var resolved = await adapter.GetImportItemAsync(client, new Download { Id = queueItem.Id }, queueItem);
 
             Assert.Equal(localPath, resolved.ContentPath);
-            pathMapMock.Verify(m => m.TranslatePathAsync("qbit-client", localPath), Times.Once);
         }
 
         private static List<Dictionary<string, JsonElement>> ParseFiles(string json)

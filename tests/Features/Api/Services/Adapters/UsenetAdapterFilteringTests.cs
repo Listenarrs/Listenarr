@@ -17,9 +17,9 @@
  */
 using System.Net;
 using System.Text;
-using Listenarr.Api.Services;
-using Listenarr.Api.Services.Adapters;
+using Listenarr.Application.Interfaces;
 using Listenarr.Domain.Models;
+using Listenarr.Infrastructure.Adapters;
 using Listenarr.Tests.Common;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -114,17 +114,12 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
                 return Task.FromResult(notFoundResponse);
             });
 
-            var pathMapMock = new Mock<IRemotePathMappingService>();
-            pathMapMock
-                .Setup(m => m.TranslatePathAsync(It.IsAny<string>(), It.IsAny<string>()))
-                .ReturnsAsync((string _, string path) => path);
-
             using var httpClient = new HttpClient(handler);
             var adapter = new SabnzbdAdapter(
                 new TestHttpClientFactory(httpClient),
-                pathMapMock.Object,
                 Mock.Of<INzbUrlResolver>(),
-                NullLogger<SabnzbdAdapter>.Instance);
+                NullLogger<SabnzbdAdapter>.Instance,
+                Mock.Of<IAppMetricsService>());
 
             var client = new DownloadClientConfiguration
             {
@@ -171,16 +166,10 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
                 return Task.FromResult(responses.Count > 0 ? responses.Dequeue() : notFoundResponse);
             });
 
-            var pathMapMock = new Mock<IRemotePathMappingService>();
-            pathMapMock
-                .Setup(m => m.TranslatePathAsync(It.IsAny<string>(), It.IsAny<string>()))
-                .ReturnsAsync((string _, string path) => path);
-
             using var httpClient = new HttpClient(handler);
             var adapter = new NzbgetAdapter(
                 new TestHttpClientFactory(httpClient),
                 Mock.Of<INzbUrlResolver>(),
-                pathMapMock.Object,
                 NullLogger<NzbgetAdapter>.Instance);
 
             var client = new DownloadClientConfiguration

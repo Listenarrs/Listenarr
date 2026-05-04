@@ -16,7 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Reflection;
-using Listenarr.Infrastructure.Migrations;
+using Listenarr.Infrastructure.Persistence.Migrations;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Xunit;
 

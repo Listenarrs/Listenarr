@@ -1,3 +1,4 @@
+using Listenarr.Domain.Common;
 using Listenarr.Tests.Common;
 
 namespace Listenarr.Tests.Mocks.Api
@@ -30,7 +31,7 @@ namespace Listenarr.Tests.Mocks.Api
                                             </member>
                                             <member>
                                                 <name>DestDir</name>
-                                                <value><string>/nzbget/completed/Book.m4b</string></value>
+                                                <value><string>{{ARBITRARY_PATH_1}}</string></value>
                                             </member>
                                         </struct>
                                     </value>
@@ -42,7 +43,7 @@ namespace Listenarr.Tests.Mocks.Api
                                             </member>
                                             <member>
                                                 <name>DestDir</name>
-                                                <value><string>/nzbget/completed/Book Folder</string></value>
+                                                <value><string>{{ARBITRARY_PATH_2}}</string></value>
                                             </member>
                                         </struct>
                                     </value>
@@ -55,6 +56,8 @@ namespace Listenarr.Tests.Mocks.Api
             """;
             response = response.Replace("{{SINGLE_FILE_NZBGET}}", SINGLE_FILE_NZBGET);
             response = response.Replace("{{MULTI_FILE_NZBGET}}", MULTI_FILE_NZBGET);
+            response = response.Replace("{{ARBITRARY_PATH_1}}", FileUtils.GetAbsolutePath("nzbget", "completed", "Book.m4b"));
+            response = response.Replace("{{ARBITRARY_PATH_2}}", FileUtils.GetAbsolutePath("nzbget", "completed", "Book Folder"));
             return MockUtils.GetCannedResponse(response, "text/xml");
         }
     }

@@ -16,9 +16,9 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Listenarr.Api.Controllers;
-using Listenarr.Api.Hubs;
-using Listenarr.Api.Services;
-using Listenarr.Domain.Models;
+using Listenarr.Application.Interfaces;
+using Listenarr.Application.Notification;
+using Listenarr.Domain.Models.Configurations;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -49,7 +49,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
                 NullLogger<ConfigurationController>.Instance,
                 Mock.Of<IUserService>(),
                 Mock.Of<IHubContext<SettingsHub>>(),
-                Mock.Of<IDownloadService>(),
+                Mock.Of<IDownloadClientGateway>(),
                 null!);
 
             var result = await controller.GetApplicationSettings();

@@ -17,12 +17,16 @@
  */
 using Listenarr.Api.Controllers;
 using Listenarr.Domain.Models;
-using Listenarr.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 using System.Text.Json;
+using Listenarr.Domain.Models.Configurations;
+using Listenarr.Application.Metadata;
+using Listenarr.Application.Interfaces;
+using Listenarr.Application.Search;
+using Listenarr.Application.Common;
 
 namespace Listenarr.Tests.Features.Api.Controllers
 {
@@ -170,7 +174,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
             controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
 
             // Act
-            var req = new Listenarr.Api.Models.SearchRequest { Mode = Listenarr.Api.Models.SearchMode.Advanced, Title = null, Author = null };
+            var req = new SearchRequest { Mode = SearchMode.Advanced, Title = null, Author = null };
             var reqJson = System.Text.Json.JsonSerializer.SerializeToElement(req);
             var actionResult = await controller.Search(reqJson);
 
@@ -205,18 +209,18 @@ namespace Listenarr.Tests.Features.Api.Controllers
                     DownloadType = "Torrent"
                 }
             }); var logger = Mock.Of<ILogger<SearchController>>();
-            var mockAudibleService = new FakeAudibleService(new Listenarr.Api.Services.AudibleSearchResponse
+            var mockAudibleService = new FakeAudibleService(new AudibleSearchResponse
             {
-                Results = new System.Collections.Generic.List<Listenarr.Api.Services.AudibleSearchResult>
+                Results = new System.Collections.Generic.List<AudibleSearchResult>
                 {
-                    new Listenarr.Api.Services.AudibleSearchResult { Asin = "B123", Title = "Test Book", ImageUrl = "http://example.com/cover.jpg", LengthMinutes = 90 }
+                    new AudibleSearchResult { Asin = "B123", Title = "Test Book", ImageUrl = "http://example.com/cover.jpg", LengthMinutes = 90 }
                 },
                 TotalResults = 1
             });
             // (FakeAudibleService returns the sample response)
 
             var mockMetadataService = new Mock<IAudiobookMetadataService>();
-            mockMetadataService.Setup(m => m.GetAudibleMetadataAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>())).ReturnsAsync(new Listenarr.Api.Services.AudibleBookResponse { Asin = "B123", Title = "Test Book", ImageUrl = "http://example.com/cover.jpg", LengthMinutes = 90 });
+            mockMetadataService.Setup(m => m.GetAudibleMetadataAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>())).ReturnsAsync(new AudibleBookResponse { Asin = "B123", Title = "Test Book", ImageUrl = "http://example.com/cover.jpg", LengthMinutes = 90 });
 
             var mockImageCache = new Mock<IImageCacheService>();
             // Simulate not cached initially, then a successful download
@@ -227,7 +231,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
             controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
 
             // Act
-            var req = new Listenarr.Api.Models.SearchRequest { Mode = Listenarr.Api.Models.SearchMode.Advanced, Title = "Test", Author = "Author", Pagination = new Listenarr.Api.Models.Pagination { Page = 1, Limit = 10 } };
+            var req = new SearchRequest { Mode = SearchMode.Advanced, Title = "Test", Author = "Author", Pagination = new Pagination { Page = 1, Limit = 10 } };
             var reqJson = System.Text.Json.JsonSerializer.SerializeToElement(req);
             var actionResult = await controller.Search(reqJson);
 
@@ -249,7 +253,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
                 IndexerImplementation = "MyAnonamouse",
                 Source = "MyAnonamouse"
             };
-            mockService2.Setup(s => s.SearchIndexerResultsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<Listenarr.Api.Models.SearchRequest?>())).ReturnsAsync(new List<Listenarr.Domain.Models.IndexerSearchResult> { mamResult });
+            mockService2.Setup(s => s.SearchIndexerResultsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<SearchRequest?>())).ReturnsAsync(new List<Listenarr.Domain.Models.IndexerSearchResult> { mamResult });
             var controller2 = new SearchController(mockService2.Object, logger, mockAudibleService, mockMetadataService.Object);
             controller2.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
             var apiResult = await controller2.SearchByApi("1", "Dune Frank Herbert");
@@ -277,24 +281,24 @@ namespace Listenarr.Tests.Features.Api.Controllers
 
             // New test: when caller provides MAM query params, they are passed into SearchIndexerResultsAsync as a SearchRequest
             var mockService3 = new Mock<ISearchService>();
-            mockService3.Setup(s => s.SearchIndexerResultsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<Listenarr.Api.Models.SearchRequest?>())).ReturnsAsync(new List<Listenarr.Domain.Models.IndexerSearchResult>());
+            mockService3.Setup(s => s.SearchIndexerResultsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<SearchRequest?>())).ReturnsAsync(new List<Listenarr.Domain.Models.IndexerSearchResult>());
             var controller3 = new SearchController(mockService3.Object, logger, mockAudibleService, mockMetadataService.Object);
             controller3.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
 
             // Call with mamFilter and mamSearchInFilenames set via query params
             _ = await controller3.SearchByApi("1", "Dune", null, mamFilter: "Freeleech", mamSearchInDescription: true, mamSearchInSeries: false, mamSearchInFilenames: true, mamLanguage: "2", mamFreeleechWedge: "Required");
 
-            mockService3.Verify(s => s.SearchIndexerResultsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.Is<Listenarr.Api.Models.SearchRequest?>(r => r != null && r.MyAnonamouse != null && r.MyAnonamouse.Filter == Listenarr.Api.Models.MamTorrentFilter.Freeleech && r.MyAnonamouse.SearchInDescription == true && r.MyAnonamouse.SearchInSeries == false && r.MyAnonamouse.SearchInFilenames == true && r.MyAnonamouse.SearchLanguage == "2" && r.MyAnonamouse.FreeleechWedge == Listenarr.Api.Models.MamFreeleechWedge.Required)), Times.Once);
+            mockService3.Verify(s => s.SearchIndexerResultsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.Is<SearchRequest?>(r => r != null && r.MyAnonamouse != null && r.MyAnonamouse.Filter == MamTorrentFilter.Freeleech && r.MyAnonamouse.SearchInDescription == true && r.MyAnonamouse.SearchInSeries == false && r.MyAnonamouse.SearchInFilenames == true && r.MyAnonamouse.SearchLanguage == "2" && r.MyAnonamouse.FreeleechWedge == MamFreeleechWedge.Required)), Times.Once);
 
             // Also verify that enrichment flags from query parameters are forwarded into the SearchRequest
             _ = await controller3.SearchByApi("1", "Dune", null, mamEnrichResults: true, mamEnrichTopResults: 2);
-            mockService3.Verify(s => s.SearchIndexerResultsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.Is<Listenarr.Api.Models.SearchRequest?>(r => r != null && r.MyAnonamouse != null && r.MyAnonamouse.EnrichResults == true && r.MyAnonamouse.EnrichTopResults == 2)), Times.Once);
+            mockService3.Verify(s => s.SearchIndexerResultsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.Is<SearchRequest?>(r => r != null && r.MyAnonamouse != null && r.MyAnonamouse.EnrichResults == true && r.MyAnonamouse.EnrichTopResults == 2)), Times.Once);
 
 
             // Assert
-            var audibleReturned = actionResult.Value as Listenarr.Api.Services.AudibleSearchResponse;
+            var audibleReturned = actionResult.Value as AudibleSearchResponse;
             if (audibleReturned == null && actionResult.Result is OkObjectResult ok)
-                audibleReturned = ok.Value as Listenarr.Api.Services.AudibleSearchResponse;
+                audibleReturned = ok.Value as AudibleSearchResponse;
 
             if (audibleReturned != null && audibleReturned.Results != null && audibleReturned.Results.Count > 0)
             {
@@ -392,7 +396,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
             controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
 
             // Act: provide title and empty author, and nonstandard region 'english' to exercise normalization
-            var req = new Listenarr.Api.Models.SearchRequest { Mode = Listenarr.Api.Models.SearchMode.Advanced, Title = "Harry Potter", Author = string.Empty, Pagination = new Listenarr.Api.Models.Pagination { Page = 1, Limit = 50 }, Region = "us", Language = "english" };
+            var req = new SearchRequest { Mode = SearchMode.Advanced, Title = "Harry Potter", Author = string.Empty, Pagination = new Pagination { Page = 1, Limit = 50 }, Region = "us", Language = "english" };
             var reqJson = System.Text.Json.JsonSerializer.SerializeToElement(req);
             var actionResult = await controller.Search(reqJson);
 
@@ -418,12 +422,12 @@ namespace Listenarr.Tests.Features.Api.Controllers
             var mockService = new Mock<ISearchService>();
             var logger = Mock.Of<ILogger<SearchController>>();
             var mockAudibleService = CreateAudibleServiceMock();
-            var sampleResponse = new Listenarr.Api.Services.AudibleSearchResponse
+            var sampleResponse = new AudibleSearchResponse
             {
-                Results = new System.Collections.Generic.List<Listenarr.Api.Services.AudibleSearchResult>
+                Results = new System.Collections.Generic.List<AudibleSearchResult>
                 {
-                    new Listenarr.Api.Services.AudibleSearchResult { Asin = "B1", Title = "One", Language = "english" },
-                    new Listenarr.Api.Services.AudibleSearchResult { Asin = "B2", Title = "Deux", Language = "french" }
+                    new AudibleSearchResult { Asin = "B1", Title = "One", Language = "english" },
+                    new AudibleSearchResult { Asin = "B2", Title = "Deux", Language = "french" }
                 },
                 TotalResults = 2
             };
@@ -436,7 +440,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
             controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
 
             // Act: request only English results
-            var req = new Listenarr.Api.Models.SearchRequest { Mode = Listenarr.Api.Models.SearchMode.Advanced, Title = "Harry Potter", Pagination = new Listenarr.Api.Models.Pagination { Page = 1, Limit = 50 }, Region = "us", Language = "english" };
+            var req = new SearchRequest { Mode = SearchMode.Advanced, Title = "Harry Potter", Pagination = new Pagination { Page = 1, Limit = 50 }, Region = "us", Language = "english" };
             var reqJson = System.Text.Json.JsonSerializer.SerializeToElement(req);
             var actionResult = await controller.Search(reqJson);
 
@@ -460,11 +464,11 @@ namespace Listenarr.Tests.Features.Api.Controllers
             var mockService = new Mock<ISearchService>();
             var logger = Mock.Of<ILogger<SearchController>>();
             var mockAudibleService = CreateAudibleServiceMock();
-            var sampleResponse = new Listenarr.Api.Services.AudibleSearchResponse
+            var sampleResponse = new AudibleSearchResponse
             {
-                Results = new System.Collections.Generic.List<Listenarr.Api.Services.AudibleSearchResult>
+                Results = new System.Collections.Generic.List<AudibleSearchResult>
                 {
-                    new Listenarr.Api.Services.AudibleSearchResult { Asin = "BRT1", Title = "Run Time Test", LengthMinutes = 123 }
+                    new AudibleSearchResult { Asin = "BRT1", Title = "Run Time Test", LengthMinutes = 123 }
                 },
                 TotalResults = 1
             };
@@ -476,7 +480,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
             controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
 
             // Act
-            var req = new Listenarr.Api.Models.SearchRequest { Mode = Listenarr.Api.Models.SearchMode.Advanced, Title = "Run Time Test", Pagination = new Listenarr.Api.Models.Pagination { Page = 1, Limit = 50 }, Region = "us" };
+            var req = new SearchRequest { Mode = SearchMode.Advanced, Title = "Run Time Test", Pagination = new Pagination { Page = 1, Limit = 50 }, Region = "us" };
             var reqJson = System.Text.Json.JsonSerializer.SerializeToElement(req);
             var actionResult = await controller.Search(reqJson);
 
@@ -513,7 +517,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
             controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
 
             // Act
-            var req = new Listenarr.Api.Models.SearchRequest { Mode = Listenarr.Api.Models.SearchMode.Advanced, Title = "Paginated", Author = string.Empty, Pagination = new Listenarr.Api.Models.Pagination { Page = 1, Limit = 50 }, Region = "us" };
+            var req = new SearchRequest { Mode = SearchMode.Advanced, Title = "Paginated", Author = string.Empty, Pagination = new Pagination { Page = 1, Limit = 50 }, Region = "us" };
             var reqJson = System.Text.Json.JsonSerializer.SerializeToElement(req);
             var actionResult = await controller.Search(reqJson);
 
@@ -540,12 +544,12 @@ namespace Listenarr.Tests.Features.Api.Controllers
             var mockService = new Mock<ISearchService>();
             var logger = Mock.Of<ILogger<SearchController>>();
             var mockAudibleService = CreateAudibleServiceMock();
-            var sampleResponse = new Listenarr.Api.Services.AudibleSearchResponse
+            var sampleResponse = new AudibleSearchResponse
             {
-                Results = new System.Collections.Generic.List<Listenarr.Api.Services.AudibleSearchResult>
+                Results = new List<AudibleSearchResult>
                 {
-                    new Listenarr.Api.Services.AudibleSearchResult { Asin = "BX1", Title = "One", Language = "english" },
-                    new Listenarr.Api.Services.AudibleSearchResult { Asin = "BX2", Title = "Deux", Language = "french" }
+                    new AudibleSearchResult { Asin = "BX1", Title = "One", Language = "english" },
+                    new AudibleSearchResult { Asin = "BX2", Title = "Deux", Language = "french" }
                 },
                 TotalResults = 50 // provider indicates 50 results exist across pages
             };
@@ -559,7 +563,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
             controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
 
             // Act: request only English results
-            var req = new Listenarr.Api.Models.SearchRequest { Mode = Listenarr.Api.Models.SearchMode.Advanced, Title = "Harry Potter", Pagination = new Listenarr.Api.Models.Pagination { Page = 1, Limit = 50 }, Region = "us", Language = "english" };
+            var req = new SearchRequest { Mode = SearchMode.Advanced, Title = "Harry Potter", Pagination = new Pagination { Page = 1, Limit = 50 }, Region = "us", Language = "english" };
             var reqJson = System.Text.Json.JsonSerializer.SerializeToElement(req);
             var actionResult = await controller.Search(reqJson);
 
@@ -584,7 +588,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
             mockService.Setup(s => s.IntelligentSearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<double>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<System.Threading.CancellationToken>())).ReturnsAsync(intelligentResult);
 
             var mockMetadataService = new Mock<IAudiobookMetadataService>();
-            mockMetadataService.Setup(m => m.GetAudibleMetadataAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>())).ReturnsAsync(new Listenarr.Api.Services.AudibleBookResponse { Asin = "B999", Title = "Cache Me", ImageUrl = "http://example.com/cacheme.jpg", LengthMinutes = 90 });
+            mockMetadataService.Setup(m => m.GetAudibleMetadataAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>())).ReturnsAsync(new AudibleBookResponse { Asin = "B999", Title = "Cache Me", ImageUrl = "http://example.com/cacheme.jpg", LengthMinutes = 90 });
 
             var mockImageCache = new Mock<IImageCacheService>();
             mockImageCache.Setup(m => m.GetCachedImagePathAsync(It.IsAny<string>())).ReturnsAsync((string?)null);
@@ -596,7 +600,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
             controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
 
             // Act
-            var req = new Listenarr.Api.Models.SearchRequest { Mode = Listenarr.Api.Models.SearchMode.Advanced, Title = "Cache Me", Author = "Nobody" };
+            var req = new SearchRequest { Mode = SearchMode.Advanced, Title = "Cache Me", Author = "Nobody" };
             var reqJson = System.Text.Json.JsonSerializer.SerializeToElement(req);
             var actionResult = await controller.Search(reqJson);
 
@@ -622,17 +626,17 @@ namespace Listenarr.Tests.Features.Api.Controllers
     // Fake audible service that returns a predetermined response for paged title+author searches
     internal class FakeAudibleService : AudibleService
     {
-        private readonly Listenarr.Api.Services.AudibleSearchResponse _response;
+        private readonly AudibleSearchResponse _response;
 
-        public FakeAudibleService(Listenarr.Api.Services.AudibleSearchResponse response)
+        public FakeAudibleService(AudibleSearchResponse response)
             : base(new System.Net.Http.HttpClient(), Mock.Of<ILogger<AudibleService>>())
         {
             _response = response;
         }
 
-        public override Task<Listenarr.Api.Services.AudibleSearchResponse?> SearchByTitleAndAuthorPagedAsync(string title, string author, int page = 1, int limit = 100, string region = "us", string? language = null)
+        public override Task<AudibleSearchResponse?> SearchByTitleAndAuthorPagedAsync(string title, string author, int page = 1, int limit = 100, string region = "us", string? language = null)
         {
-            return Task.FromResult<Listenarr.Api.Services.AudibleSearchResponse?>(_response);
+            return Task.FromResult<AudibleSearchResponse?>(_response);
         }
     }
 
@@ -661,7 +665,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
             return Task.FromResult(new List<SearchResult>());
         }
 
-        public Task<List<IndexerSearchResult>> SearchIndexerResultsAsync(string apiId, string query, string? category = null, Listenarr.Api.Models.SearchRequest? request = null)
+        public Task<List<IndexerSearchResult>> SearchIndexerResultsAsync(string apiId, string query, string? category = null, SearchRequest? request = null)
         {
             return Task.FromResult(new List<IndexerSearchResult>());
         }
@@ -671,7 +675,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
             return Task.FromResult(true);
         }
 
-        public Task<List<IndexerSearchResult>> SearchIndexersAsync(string query, string? category = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false, Listenarr.Api.Models.SearchRequest? request = null)
+        public Task<List<IndexerSearchResult>> SearchIndexersAsync(string query, string? category = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false, SearchRequest? request = null)
         {
             return Task.FromResult(new List<IndexerSearchResult>());
         }

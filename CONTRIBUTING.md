@@ -273,6 +273,22 @@ Listenarr/
 └── README.md            # Main documentation
 ```
 
+The following should be kept in mind while adding or moving files:
+* **listenarr.api**: Organised by contracts
+  * DTOs
+  * Controllers
+* **listenarr.application**: Organised by features
+  * Interfaces
+  * 
+* **listenarr.domain**: Organised by entities
+  * Entities
+  * Exceptions
+* **listenarr.infrastructure**: Organised by technology
+  * Persistence
+  * Logging
+  * SignalR
+
+
 ### Technology Stack
 
 **Backend:**

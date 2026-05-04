@@ -1,5 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
-using Listenarr.Application.Repositories;
+using Listenarr.Application.Interfaces.Repositories;
+using Listenarr.Domain.Models;
+using Listenarr.Domain.Models.Configurations;
 using Listenarr.Tests.Builders;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -22,11 +24,15 @@ namespace Listenarr.Tests.Common
         public IAudiobookFileRepository _audiobookFileRepository;
         public IDownloadProcessingJobRepository _downloadProcessingJobRepository;
         public IIndexerRepository _indexerRepository;
+        public IDownloadHistoryRepository _downloadHistoryRepository;
+        public IQualityProfileRepository _qualityProfileRepository;
+        public IMoveJobRepository _moveJobRepository;
+        public IRootFolderRepository _rootFolderRepository;
 
-        public BaseTests(ServiceCollection? services = null)
+        public BaseTests()
         {
             FileService = new TempFileService();
-            Init(services);
+            Init();
         }
 
         [MemberNotNull(
@@ -40,15 +46,14 @@ namespace Listenarr.Tests.Common
             nameof(_audiobookRepository),
             nameof(_audiobookFileRepository),
             nameof(_downloadProcessingJobRepository),
-            nameof(_indexerRepository)
+            nameof(_indexerRepository),
+            nameof(_downloadHistoryRepository),
+            nameof(_qualityProfileRepository),
+            nameof(_moveJobRepository),
+            nameof(_rootFolderRepository)
         )]
-        public void Init(ServiceCollection? services = null)
+        public void Init()
         {
-            if (services != null)
-            {
-                _services = services;
-            }
-
             _services ??= new ServiceCollectionBuilder().Build();
             _provider = _services.BuildServiceProvider();
 
@@ -61,6 +66,10 @@ namespace Listenarr.Tests.Common
             _audiobookFileRepository = _provider.GetRequiredService<IAudiobookFileRepository>();
             _downloadProcessingJobRepository = _provider.GetRequiredService<IDownloadProcessingJobRepository>();
             _indexerRepository = _provider.GetRequiredService<IIndexerRepository>();
+            _downloadHistoryRepository = _provider.GetRequiredService<IDownloadHistoryRepository>();
+            _qualityProfileRepository = _provider.GetRequiredService<IQualityProfileRepository>();
+            _moveJobRepository = _provider.GetRequiredService<IMoveJobRepository>();
+            _rootFolderRepository = _provider.GetRequiredService<IRootFolderRepository>();
         }
 
         public virtual async Task InitializeAsync()
@@ -69,6 +78,25 @@ namespace Listenarr.Tests.Common
 
         public virtual async Task DisposeAsync()
         {
+        }
+
+        public async Task<ApplicationSettings> CreateApplicationSettings()
+        {
+            return await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
+                .Build());
+        }
+
+        public async Task<DownloadClientConfiguration> CreateDownloadClientConfiguration()
+        {
+            return await _downloadClientConfigurationRepository.SaveAsync(new DownloadClientConfigurationBuilder()
+                .Build());
+        }
+
+        public async Task<Audiobook> CreateAudiobook()
+        {
+            return await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithBasePath(FileService.GetTempPath())
+                .Build());
         }
     }
 }

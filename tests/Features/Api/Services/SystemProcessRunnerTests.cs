@@ -17,7 +17,7 @@
  */
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using Listenarr.Api.Services;
+using Listenarr.Infrastructure.Platform;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 

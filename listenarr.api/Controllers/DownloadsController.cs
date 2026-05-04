@@ -15,6 +15,10 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using Listenarr.Application.Interfaces;
+using Listenarr.Application.Interfaces.Repositories;
+using Listenarr.Application.Security;
+using Listenarr.Domain.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Memory;
 
@@ -26,13 +30,15 @@ namespace Listenarr.Api.Controllers;
 public class DownloadsController : ControllerBase
 {
     private readonly IDownloadRepository _downloadRepository;
+    private readonly IDownloadService _downloadService;
     private readonly ILogger<DownloadsController> _logger;
     private readonly IConfigurationService _configurationService;
     private readonly IMemoryCache? _cache;
 
-    public DownloadsController(IDownloadRepository downloadRepository, ILogger<DownloadsController> logger, IConfigurationService configurationService, IMemoryCache? cache = null)
+    public DownloadsController(IDownloadRepository downloadRepository, IDownloadService downloadService, ILogger<DownloadsController> logger, IConfigurationService configurationService, IMemoryCache? cache = null)
     {
         _downloadRepository = downloadRepository;
+        _downloadService = downloadService;
         _logger = logger;
         _configurationService = configurationService;
         _cache = cache;
@@ -189,12 +195,9 @@ public class DownloadsController : ControllerBase
                 });
             }
 
-            download.Status = DownloadStatus.ImportPending;
-            download.ImportBlockReason = null;
-            download.ImportBlockMessages = null;
-            download.ImportAttempts = 0;
+            download.Unblock();
 
-            await _downloadRepository.UpdateAsync(download);
+            await _downloadService.UpdateAsync(download);
 
             _logger.LogInformation("Reset blocked import {DownloadId} back to ImportPending", LogRedaction.SanitizeText(id));
             return Ok(new

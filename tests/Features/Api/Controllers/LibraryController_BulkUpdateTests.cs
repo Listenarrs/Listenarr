@@ -25,10 +25,12 @@ using Moq;
 using Xunit;
 using Listenarr.Api.Controllers;
 using Listenarr.Domain.Models;
-using Listenarr.Api.Services;
-using Listenarr.Infrastructure.Models;
-using Listenarr.Infrastructure.Repositories;
-using Listenarr.Application.Repositories;
+using Listenarr.Application.Interfaces.Repositories;
+using Listenarr.Application.Interfaces;
+using Listenarr.Infrastructure.Persistence;
+using Listenarr.Domain.Models.Configurations;
+using Listenarr.Application.Common;
+using Listenarr.Infrastructure.Persistence.Repositories;
 
 namespace Listenarr.Tests.Features.Api.Controllers
 {

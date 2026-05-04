@@ -19,10 +19,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
-using Listenarr.Api.Services;
-using Listenarr.Application.Repositories;
-using Listenarr.Infrastructure.Models;
-using Listenarr.Infrastructure.Repositories;
+using Listenarr.Application.Interfaces.Repositories;
+using Listenarr.Infrastructure.Persistence.Repositories;
+using Listenarr.Infrastructure.Persistence;
+using Listenarr.Application.Audiobooks;
 
 namespace Listenarr.Tests.Features.Api.Services
 {

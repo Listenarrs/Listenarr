@@ -1,4 +1,4 @@
-using Listenarr.Api.Services;
+using Listenarr.Application.Interfaces;
 using Listenarr.Domain.Models;
 
 namespace Listenarr.Tests.Mocks

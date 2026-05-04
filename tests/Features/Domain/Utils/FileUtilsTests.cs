@@ -18,7 +18,7 @@
 using Xunit;
 using System.Security.AccessControl;
 using System.Security.Principal;
-using Listenarr.Domain.Utils;
+using Listenarr.Domain.Common;
 
 namespace Listenarr.Tests.Features.Domain.Utils
 {

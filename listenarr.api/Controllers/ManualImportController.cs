@@ -16,9 +16,13 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Microsoft.AspNetCore.Mvc;
-using Listenarr.Domain.Utils;
-using static Listenarr.Api.Services.FileMover;
-using Listenarr.Api.Services.Metadata;
+using Listenarr.Domain.Common;
+using Listenarr.Application.Interfaces;
+using Listenarr.Api.Dtos.ManualImport;
+using Listenarr.Domain.Models.Enumerations;
+using Listenarr.Domain.Models.Configurations;
+using Listenarr.Application.Interfaces.Repositories;
+using Listenarr.Domain.Models;
 
 namespace Listenarr.Api.Controllers;
 
@@ -144,7 +148,7 @@ public class ManualImportController : ControllerBase
         {
             // Fetch root folders once for the whole batch (used for path containment validation)
             var rootFolders = await _rootFolderService.GetAllAsync();
-            var appSettings = await _configService.GetApplicationSettingsAsync() ?? new ApplicationSettings();
+            var appSettings = await _configService.GetApplicationSettingsAsync();
             var importBlacklist = appSettings.ImportBlacklistExtensions;
             var orderedItems = BuildOrderedItems(request.Items);
             var selectedAudioProfiles = request.IncludeCompanionFiles
@@ -270,21 +274,23 @@ public class ManualImportController : ControllerBase
             }
 
             var destinationPath = item.FullPath;
-            if (action != FileAction.None)
+
+            // Generate destination path using appropriate naming pattern
+            destinationPath = await GenerateManualImportPathAsync(audiobook, metadata, item, rootFolders, settings, hasMultipleFile);
+
+            var success = await _fileMover.PerformActionOn(action, item.FullPath, destinationPath);
+            if (success)
             {
-                // Generate destination path using appropriate naming pattern
-                destinationPath = await GenerateManualImportPathAsync(audiobook, metadata, item, rootFolders, settings, hasMultipleFile);
-
-                await _fileMover.PerformActionOn(action, item.FullPath, destinationPath, usedDestinations);
-
-                // Write ASIN to embedded file tags (non-critical — failure is logged, not thrown)
-                if (!string.IsNullOrWhiteSpace(audiobook.Asin))
-                    await _metadataService.WriteAsinTagAsync(destinationPath, audiobook.Asin);
+                usedDestinations.Add(destinationPath);
             }
+
+            // Write ASIN to embedded file tags (non-critical — failure is logged, not thrown)
+            if (!string.IsNullOrWhiteSpace(audiobook.Asin))
+                await _metadataService.WriteAsinTagAsync(destinationPath, audiobook.Asin);
 
             return new ManualImportResultDto
             {
-                Success = true,
+                Success = success,
                 SourcePath = item.FullPath,
                 DestinationPath = destinationPath,
                 Audiobook = audiobook
@@ -747,7 +753,11 @@ public class ManualImportController : ControllerBase
 
                 var destinationPath = CombineWithOptionalBase(destinationRoot, relativePath);
 
-                await _fileMover.PerformActionOn(request.Action, companionFile, destinationPath, unavailableFilenames);
+                var success = await _fileMover.PerformActionOn(request.Action, companionFile, destinationPath);
+                if (success)
+                {
+                    unavailableFilenames.Add(destinationPath);
+                }
 
                 importedCount++;
             }

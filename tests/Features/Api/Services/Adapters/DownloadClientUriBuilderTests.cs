@@ -15,7 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Listenarr.Api.Services.Adapters;
+using Listenarr.Application.Downloads;
 using Listenarr.Domain.Models;
 using Xunit;
 

@@ -23,9 +23,11 @@ using Moq;
 using Xunit;
 using Listenarr.Api.Controllers;
 using Listenarr.Domain.Models;
-using Listenarr.Api.Services;
-using Listenarr.Application.Repositories;
-using Listenarr.Infrastructure.Models;
+using Listenarr.Application.Interfaces.Repositories;
+using Listenarr.Application.Interfaces;
+using Listenarr.Infrastructure.Persistence;
+using Listenarr.Application.Common;
+using Listenarr.Application.Notification;
 
 namespace Listenarr.Tests.Features.Api.Controllers
 {
@@ -50,13 +52,13 @@ namespace Listenarr.Tests.Features.Api.Controllers
             mockConfig.Setup(c => c.GetApplicationSettingsAsync()).ThrowsAsync(new Exception("config failure"));
             services.AddSingleton<IConfigurationService>(mockConfig.Object);
 
-            var mockHub = new Mock<Microsoft.AspNetCore.SignalR.IHubContext<Listenarr.Api.Hubs.DownloadHub>>();
+            var mockHub = new Mock<Microsoft.AspNetCore.SignalR.IHubContext<DownloadHub>>();
             var mockClients = new Mock<Microsoft.AspNetCore.SignalR.IHubClients>();
             var mockClientProxy = new Mock<Microsoft.AspNetCore.SignalR.IClientProxy>();
             mockClientProxy.Setup(m => m.SendCoreAsync(It.IsAny<string>(), It.IsAny<object[]>(), default)).Returns(Task.CompletedTask);
             mockClients.SetupGet(c => c.All).Returns(mockClientProxy.Object);
             mockHub.SetupGet(h => h.Clients).Returns(mockClients.Object);
-            services.AddSingleton(typeof(Microsoft.AspNetCore.SignalR.IHubContext<Listenarr.Api.Hubs.DownloadHub>), mockHub.Object);
+            services.AddSingleton(typeof(Microsoft.AspNetCore.SignalR.IHubContext<DownloadHub>), mockHub.Object);
 
             var provider = services.BuildServiceProvider();
             var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();

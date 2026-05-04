@@ -1,11 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <DefaultItemExcludes>$(DefaultItemExcludes);artifacts\**;.tmp\**;obj2\**</DefaultItemExcludes>
-    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
   </PropertyGroup>
-
-  <ItemGroup>
-    <Compile Include="Models\**\*.cs" />
-    <Compile Include="Utils\**\*.cs" />
-  </ItemGroup>
 </Project>

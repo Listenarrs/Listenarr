@@ -15,6 +15,10 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using Listenarr.Api.Attributes;
+using Listenarr.Application.Interfaces;
+using Listenarr.Application.Notification;
+using Listenarr.Application.Security;
 using Microsoft.AspNetCore.Mvc;
 using System.Text.Json;
 
@@ -22,6 +26,7 @@ namespace Listenarr.Api.Controllers
 {
     [ApiController]
     [Route("api/v{version:apiVersion}/discord")]
+    [LocalOrAdmin]
     [Tags("Discord")]
     public class DiscordController : ControllerBase
     {
@@ -46,9 +51,6 @@ namespace Listenarr.Api.Controllers
         [HttpGet("status")]
         public async Task<IActionResult> GetStatus()
         {
-            var gate = SensitiveEndpointAccessGuard.RequireLocalOrAdmin(HttpContext, _logger, "discord/status");
-            if (gate != null) return gate;
-
             try
             {
                 var settings = await _configurationService.GetApplicationSettingsAsync();
@@ -139,9 +141,6 @@ namespace Listenarr.Api.Controllers
         [HttpPost("register-commands")]
         public async Task<IActionResult> RegisterCommands()
         {
-            var gate = SensitiveEndpointAccessGuard.RequireLocalOrAdmin(HttpContext, _logger, "discord/register-commands");
-            if (gate != null) return gate;
-
             try
             {
                 var settings = await _configurationService.GetApplicationSettingsAsync();
@@ -276,9 +275,6 @@ namespace Listenarr.Api.Controllers
         [HttpPost("start-bot")]
         public async Task<IActionResult> StartBot()
         {
-            var gate = SensitiveEndpointAccessGuard.RequireLocalOrAdmin(HttpContext, _logger, "discord/start-bot");
-            if (gate != null) return gate;
-
             try
             {
                 var isRunning = await _botService.IsBotRunningAsync();
@@ -346,9 +342,6 @@ namespace Listenarr.Api.Controllers
         [HttpPost("stop-bot")]
         public async Task<IActionResult> StopBot()
         {
-            var gate = SensitiveEndpointAccessGuard.RequireLocalOrAdmin(HttpContext, _logger, "discord/stop-bot");
-            if (gate != null) return gate;
-
             try
             {
                 var isRunning = await _botService.IsBotRunningAsync();
@@ -375,9 +368,6 @@ namespace Listenarr.Api.Controllers
         [HttpGet("bot-status")]
         public async Task<IActionResult> GetBotStatus()
         {
-            var gate = SensitiveEndpointAccessGuard.RequireLocalOrAdmin(HttpContext, _logger, "discord/bot-status");
-            if (gate != null) return gate;
-
             try
             {
                 var status = await _botService.GetBotStatusAsync();
@@ -398,9 +388,6 @@ namespace Listenarr.Api.Controllers
         [HttpGet("diagnostics")]
         public async Task<IActionResult> Diagnostics()
         {
-            var gate = SensitiveEndpointAccessGuard.RequireLocalOrAdmin(HttpContext, _logger, "discord/diagnostics");
-            if (gate != null) return gate;
-
             try
             {
                 var contentRoot = System.IO.Path.Join(AppContext.BaseDirectory);

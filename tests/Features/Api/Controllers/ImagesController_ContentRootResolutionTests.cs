@@ -16,7 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Listenarr.Api.Controllers;
-using Listenarr.Api.Services;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -24,7 +23,10 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 using System.Reflection;
-using Listenarr.Application.Repositories;
+using Listenarr.Application.Interfaces.Repositories;
+using Listenarr.Application.Common;
+using Listenarr.Application.Interfaces;
+using Listenarr.Application.Metadata;
 
 namespace Listenarr.Tests.Features.Api.Controllers
 {

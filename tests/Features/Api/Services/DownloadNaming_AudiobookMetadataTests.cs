@@ -18,8 +18,9 @@
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 using Listenarr.Domain.Models;
-using Listenarr.Api.Services;
 using Listenarr.Tests.Common;
+using Listenarr.Tests.Builders;
+using Listenarr.Application.Interfaces;
 
 namespace Listenarr.Tests.Features.Api.Services
 {
@@ -28,52 +29,42 @@ namespace Listenarr.Tests.Features.Api.Services
         [Fact]
         public async Task ProcessCompletedDownload_UsesAudiobookMetadata_ForNaming()
         {
-            // Create audiobook with Authors so naming should pick them
-            var book = new Audiobook { Title = "Pride and Prejudice", Authors = ["Jane Austen"] };
-            await _audiobookRepository.AddAsync(book);
-
-            // Create a temporary source file
-            var testFile = await FileService.GetTempFileAsync("dl-naming.mp3");
-
-            var download = new Download
-            {
-                Id = "dln-1",
-                AudiobookId = book.Id,
-                Title = book.Title,
-                Status = DownloadStatus.Completed,
-                DownloadPath = testFile,
-                FinalPath = testFile,
-                StartedAt = DateTime.UtcNow,
-                CompletedAt = DateTime.UtcNow
-            };
-
-            await _downloadRepository.AddAsync(download);
-
             // Create the output directory that the code will use as fallback
             var outputDir = FileService.GetTempDirectory("completed");
 
             // Create the expected subdirectory structure
             var authorDir = Path.Join(outputDir, "Jane Austen");
             var seriesDir = Path.Join(authorDir, "Pride and Prejudice");
-            Directory.CreateDirectory(seriesDir);
+
+            // Create a temporary source file
+            var testFile = await FileService.GetTempFileAsync("dl-naming.mp3");
+
+            // Create audiobook with Authors so naming should pick them
+            var book = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Pride and Prejudice")
+                .WithAuthor("Jane Austen")
+                .WithBasePath(seriesDir)
+                .Build());
+
+            var download = await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithId("dln-1")
+                .WithAudiobook(book)
+                .WithCompletedStatus(DateTime.UtcNow)
+                .WithPath(testFile)
+                .WithDownloadClientConfiguration(await CreateDownloadClientConfiguration())
+                .Build());
 
             // Act: call ProcessCompletedDownloadAsync which should generate a destination using audiobook metadata
-            var downloadService = _provider.GetRequiredService<IDownloadService>();
-            await downloadService.ProcessCompletedDownloadAsync(download.Id, download.FinalPath);
+            var downloadImportService = _provider.GetRequiredService<IDownloadImportService>();
+            await downloadImportService.ImportDownloadFilesAsync(book, [testFile]);
 
             // Reload the download and audiobook files using a fresh DbContext instance
             var updated = await _downloadRepository.GetByIdAsync(download.Id);
             Assert.True(updated.Status == DownloadStatus.Completed || updated.Status == DownloadStatus.Moved, $"Expected Completed or Moved, got {updated.Status}");
 
             var fileRecord = Assert.Single(await _audiobookFileRepository.GetByAudiobookIdAsync(book.Id));
-            // Import may be deferred (queued) so a DB file record may not exist synchronously; accept either outcome.
-            if (fileRecord != null)
-            {
-                // The stored path should include the audiobook Author (Jane Austen) as part of the generated folder
-                var lowered = (fileRecord.Path ?? string.Empty).ToLowerInvariant();
-                // Expect the author as a single folder name (with space preserved), not nested directories
-                Assert.Contains("jane austen", lowered);
-            }
+            // Expect the author as a single folder name (with space preserved), not nested directories
+            Assert.Contains("Jane Austen", fileRecord.Path);
         }
     }
 }

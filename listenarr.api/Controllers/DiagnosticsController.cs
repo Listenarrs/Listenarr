@@ -15,6 +15,10 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using Listenarr.Api.Attributes;
+using Listenarr.Application.Interfaces;
+using Listenarr.Application.Notification;
+using Listenarr.Domain.Models.Configurations;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Api.Controllers
@@ -49,15 +53,10 @@ namespace Listenarr.Api.Controllers
         /// <param name="req">Optional trigger type, data payload, and target webhook ID or URL.</param>
         /// <remarks>Restricted to local or admin callers. The webhook URL must match a configured target.</remarks>
         [HttpPost("test-notification")]
+        [LocalOrAdmin]
         [IgnoreAntiforgeryToken]
         public async Task<ActionResult<object>> TestNotification([FromBody] TestNotificationRequest req)
         {
-            var gate = SensitiveEndpointAccessGuard.RequireLocalOrAdmin(HttpContext, _logger, "diagnostics/test-notification");
-            if (gate is ObjectResult gateResult)
-            {
-                return StatusCode(gateResult.StatusCode ?? Microsoft.AspNetCore.Http.StatusCodes.Status403Forbidden, gateResult.Value);
-            }
-
             try
             {
                 if (req == null) return BadRequest(new { success = false, message = "Missing request body" });

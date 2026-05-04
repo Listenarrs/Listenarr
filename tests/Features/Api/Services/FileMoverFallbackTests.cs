@@ -17,7 +17,9 @@
  */
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using Listenarr.Api.Services;
+using Listenarr.Application.Interfaces;
+using Listenarr.Domain.Models.Configurations;
+using Listenarr.Infrastructure.FileSystem;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Xunit;

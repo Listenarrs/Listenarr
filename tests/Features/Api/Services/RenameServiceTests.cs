@@ -15,11 +15,14 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Listenarr.Api.Models;
-using Listenarr.Api.Services;
+using Listenarr.Application.Audiobooks;
+using Listenarr.Application.Common;
+using Listenarr.Application.Interfaces;
 using Listenarr.Domain.Models;
-using Listenarr.Infrastructure.Models;
-using Listenarr.Infrastructure.Repositories;
+using Listenarr.Domain.Models.Configurations;
+using Listenarr.Domain.Models.Enumerations;
+using Listenarr.Infrastructure.Persistence;
+using Listenarr.Infrastructure.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -328,7 +331,7 @@ namespace Listenarr.Tests.Features.Api.Services
 
             var (service, db, dbName) = BuildService(settings, fileMover =>
             {
-                fileMover.Setup(mover => mover.MoveFileAsync(It.IsAny<string>(), It.Is<string>(dest => dest.EndsWith("Part 2.m4b", StringComparison.OrdinalIgnoreCase))))
+                fileMover.Setup(mover => mover.PerformActionOn(FileAction.Move, It.IsAny<string>(), It.Is<string>(dest => dest.EndsWith("Part 2.m4b", StringComparison.OrdinalIgnoreCase))))
                     .ReturnsAsync(false);
             });
 
@@ -465,8 +468,8 @@ namespace Listenarr.Tests.Features.Api.Services
             var repo = new AudiobookRepository(db);
             var fileNaming = new FileNamingService(config.Object, NullLogger<FileNamingService>.Instance);
             var fileMover = new Mock<IFileMover>();
-            fileMover.Setup(mover => mover.MoveFileAsync(It.IsAny<string>(), It.IsAny<string>()))
-                .Returns<string, string>((source, dest) =>
+            fileMover.Setup(mover => mover.PerformActionOn(FileAction.Move, It.IsAny<string>(), It.IsAny<string>()))
+                .Returns<FileAction, string, string>((action, source, dest) =>
                 {
                     var dir = Path.GetDirectoryName(dest);
                     if (!string.IsNullOrWhiteSpace(dir))

@@ -16,6 +16,13 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using Listenarr.Api.Attributes;
+using Listenarr.Api.Dtos;
+using Listenarr.Application.Common;
+using Listenarr.Application.Interfaces;
+using Listenarr.Application.Interfaces.Repositories;
+using Listenarr.Application.Security;
+using Listenarr.Domain.Models;
 using Microsoft.AspNetCore.Mvc;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -387,7 +394,7 @@ namespace Listenarr.Api.Controllers
         /// </summary>
         /// <param name="request">Prowlarr server URL and API key.</param>
         [HttpPost("prowlarr/import")]
-        public async Task<IActionResult> ImportFromProwlarr([FromBody] ProwlarrImportRequest request)
+        public async Task<IActionResult> ImportFromProwlarr([FromBody] ProwlarrImportRequestDto request)
         {
             if (request == null)
             {
@@ -939,11 +946,9 @@ namespace Listenarr.Api.Controllers
         /// Debug search against a MyAnonamouse indexer: returns raw response plus parsed results
         /// </summary>
         [HttpPost("{id}/debug-search")]
+        [LocalOrAdmin]
         public async Task<IActionResult> DebugMyAnonamouseSearch(int id, [FromBody] JsonElement body)
         {
-            var gate = SensitiveEndpointAccessGuard.RequireLocalOrAdmin(HttpContext, _logger, "indexers/debug-search");
-            if (gate != null) return gate;
-
             var indexer = await _indexerRepository.GetByIdAsync(id);
             if (indexer == null) return NotFound(new { message = "Indexer not found" });
 

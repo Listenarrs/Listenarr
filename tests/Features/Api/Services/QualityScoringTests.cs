@@ -17,12 +17,12 @@
  */
 using System.Reflection;
 using Listenarr.Domain.Models;
-using Listenarr.Api.Services;
-using Listenarr.Infrastructure.Repositories;
+using Listenarr.Infrastructure.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
-using Listenarr.Infrastructure.Models;
+using Listenarr.Infrastructure.Persistence;
+using Listenarr.Application.Audiobooks;
 
 namespace Listenarr.Tests.Features.Api.Services
 {

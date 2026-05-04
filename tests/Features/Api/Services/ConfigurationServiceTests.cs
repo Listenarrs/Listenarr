@@ -18,30 +18,20 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
-using Moq;
 using Xunit;
-using Listenarr.Api.Services;
 using Listenarr.Domain.Models;
-using Listenarr.Infrastructure.Models;
-using Listenarr.Infrastructure.Repositories;
-using Listenarr.Domain.Utils;
+using Listenarr.Domain.Common;
+using Listenarr.Tests.Common;
+using Listenarr.Application.Interfaces;
+using Listenarr.Tests.Builders;
+using Listenarr.Infrastructure.Persistence;
+using Listenarr.Domain.Models.Configurations;
+using Listenarr.Application.Common;
 
 namespace Listenarr.Tests.Features.Api.Services
 {
-    public class ConfigurationServiceTests
+    public class ConfigurationServiceTests : BaseTests
     {
-        private static ConfigurationService BuildService(ListenArrDbContext db, ILogger<ConfigurationService> logger,
-            IUserService? userService = null, IStartupConfigService? startupConfigService = null)
-        {
-            var settingsRepo = new EfApplicationSettingsRepository(db);
-            var apiConfigRepo = new EfApiConfigurationRepository(db);
-            var downloadClientRepo = new EfDownloadClientConfigurationRepository(db);
-            return new ConfigurationService(
-                settingsRepo, apiConfigRepo, downloadClientRepo, logger,
-                userService ?? new Mock<IUserService>().Object,
-                startupConfigService ?? new Mock<IStartupConfigService>().Object);
-        }
-
         [Fact]
         public async Task SaveApplicationSettings_PersistsChanges()
         {
@@ -58,16 +48,16 @@ namespace Listenarr.Tests.Features.Api.Services
             var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
             var logger = scope.ServiceProvider.GetRequiredService<ILogger<ConfigurationService>>();
 
-            var svc = BuildService(db, logger);
+            var svc = _provider.GetRequiredService<IConfigurationService>();
 
             var settings = await svc.GetApplicationSettingsAsync();
             settings.OutputPath = testOutputPath;
             settings.ShowCompletedExternalDownloads = true;
-            settings.EnabledNotificationTriggers = new System.Collections.Generic.List<string> { "book-added", "book-completed" };
-            settings.Webhooks = new System.Collections.Generic.List<WebhookConfiguration>
-            {
-                new WebhookConfiguration { Name = "UnitWebhook", Url = "https://example.test/webhook", Type = "Zapier" }
-            };
+            settings.EnabledNotificationTriggers = ["book-added", "book-completed"];
+            settings.Webhooks =
+            [
+                new() { Name = "UnitWebhook", Url = "https://example.test/webhook", Type = "Zapier" }
+            ];
 
             await svc.SaveApplicationSettingsAsync(settings);
 
@@ -96,31 +86,16 @@ namespace Listenarr.Tests.Features.Api.Services
         [Fact]
         public async Task InMemoryDb_Persists_Webhooks_Directly()
         {
-            var services = new ServiceCollection();
-            services.AddLogging();
-            services.AddDbContext<ListenArrDbContext>(opts => opts.UseInMemoryDatabase(Guid.NewGuid().ToString()));
+            var settings = new ApplicationSettingsBuilder().Build();
+            await _applicationSettingsRepository.SaveAsync(settings);
 
-            var provider = services.BuildServiceProvider(validateScopes: true);
+            settings.Webhooks =
+            [
+                new() { Name = "DirectWebhook", Url = "https://example.test/direct", Type = "Zapier" }
+            ];
+            await _applicationSettingsRepository.SaveAsync(settings);
 
-            using var scope = provider.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
-
-            var settings = await db.ApplicationSettings.FirstOrDefaultAsync(s => s.Id == 1);
-            if (settings == null)
-            {
-                settings = new ApplicationSettings();
-                db.ApplicationSettings.Add(settings);
-                await db.SaveChangesAsync();
-            }
-
-            settings.Webhooks = new System.Collections.Generic.List<WebhookConfiguration>
-            {
-                new WebhookConfiguration { Name = "DirectWebhook", Url = "https://example.test/direct", Type = "Zapier" }
-            };
-
-            await db.SaveChangesAsync();
-
-            var reloaded = await db.ApplicationSettings.AsNoTracking().FirstOrDefaultAsync(s => s.Id == 1);
+            var reloaded = await _applicationSettingsRepository.GetAsync();
 
             Assert.NotNull(reloaded);
             Assert.NotNull(reloaded!.Webhooks);
@@ -131,17 +106,7 @@ namespace Listenarr.Tests.Features.Api.Services
         [Fact]
         public async Task ProwlarrImportSettings_ApiKey_IsEncryptedAtRest_AndRecoveredForServerUse()
         {
-            var services = new ServiceCollection();
-            services.AddLogging();
-            services.AddDbContext<ListenArrDbContext>(opts => opts.UseInMemoryDatabase(Guid.NewGuid().ToString()));
-
-            var provider = services.BuildServiceProvider(validateScopes: true);
-
-            using var scope = provider.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
-            var logger = scope.ServiceProvider.GetRequiredService<ILogger<ConfigurationService>>();
-
-            var svc = BuildService(db, logger);
+            var svc = _provider.GetRequiredService<IConfigurationService>();
 
             await svc.SaveProwlarrImportSettingsAsync(new ProwlarrImportConnectionSettings
             {
@@ -151,7 +116,7 @@ namespace Listenarr.Tests.Features.Api.Services
                 TagFilter = "audiobooks",
             });
 
-            var stored = await db.ApplicationSettings.AsNoTracking().FirstAsync(s => s.Id == 1);
+            var stored = await _applicationSettingsRepository.GetAsync();
             Assert.Equal("http://localhost", stored.ProwlarrUrl);
             Assert.Equal(9696, stored.ProwlarrPort);
             Assert.Equal("audiobooks", stored.ProwlarrTagFilter);
@@ -172,17 +137,7 @@ namespace Listenarr.Tests.Features.Api.Services
         [Fact]
         public async Task SaveApplicationSettings_PreservesSavedProwlarrImportSettings_WhenPayloadOmitsThem()
         {
-            var services = new ServiceCollection();
-            services.AddLogging();
-            services.AddDbContext<ListenArrDbContext>(opts => opts.UseInMemoryDatabase(Guid.NewGuid().ToString()));
-
-            var provider = services.BuildServiceProvider(validateScopes: true);
-
-            using var scope = provider.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
-            var logger = scope.ServiceProvider.GetRequiredService<ILogger<ConfigurationService>>();
-
-            var svc = BuildService(db, logger);
+            var svc = _provider.GetRequiredService<IConfigurationService>();
 
             await svc.SaveProwlarrImportSettingsAsync(new ProwlarrImportConnectionSettings
             {
@@ -204,7 +159,7 @@ namespace Listenarr.Tests.Features.Api.Services
             Assert.Equal("saved-secret", savedConnection.ApiKey);
             Assert.Equal("audiobooks", savedConnection.TagFilter);
 
-            var stored = await db.ApplicationSettings.AsNoTracking().FirstAsync(s => s.Id == 1);
+            var stored = await _applicationSettingsRepository.GetAsync();
             Assert.False(string.IsNullOrWhiteSpace(stored.ProwlarrApiKeyEncrypted));
         }
     }

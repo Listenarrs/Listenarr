@@ -17,13 +17,14 @@
  */
 using Xunit;
 using Microsoft.Extensions.DependencyInjection;
-using Listenarr.Api.Services;
 using System.Reflection;
 using System.Text;
 using Listenarr.Tests.Common;
 using Listenarr.Domain.Models;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Mocks.Api;
+using Listenarr.Application.Downloads;
+using Listenarr.Application.Common;
 
 namespace Listenarr.Tests.Features.Api.Services.Search.Providers
 {
@@ -280,20 +281,20 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
         public void NormalizeMamId_HandlesVariousEncodings()
         {
             // Test raw mam_id (no encoding)
-            Assert.Equal("abc123", DownloadService.NormalizeMamId("abc123"));
+            Assert.Equal("abc123", MyAnonamouseHelper.NormalizeMamId("abc123"));
 
             // Test single-encoded (e.g., from URL)
-            Assert.Equal("abc%2Bdef%3D%3D", DownloadService.NormalizeMamId("abc%2Bdef%3D%3D"));
+            Assert.Equal("abc%2Bdef%3D%3D", MyAnonamouseHelper.NormalizeMamId("abc%2Bdef%3D%3D"));
 
             // Test double-encoded (problematic case) - should decode to single-encoded
-            Assert.Equal("abc%2Bdef%3D%3D", DownloadService.NormalizeMamId("abc%252Bdef%253D%253D"));
+            Assert.Equal("abc%2Bdef%3D%3D", MyAnonamouseHelper.NormalizeMamId("abc%252Bdef%253D%253D"));
 
             // Test triple-encoded
-            Assert.Equal("abc%2Bdef%3D%3D", DownloadService.NormalizeMamId("abc%25252Bdef%25253D%25253D"));
+            Assert.Equal("abc%2Bdef%3D%3D", MyAnonamouseHelper.NormalizeMamId("abc%25252Bdef%25253D%25253D"));
 
             // Test empty/null
-            Assert.Equal("", DownloadService.NormalizeMamId(""));
-            Assert.Null(DownloadService.NormalizeMamId(null));
+            Assert.Equal("", MyAnonamouseHelper.NormalizeMamId(""));
+            Assert.Null(MyAnonamouseHelper.NormalizeMamId(null));
         }
     }
 }

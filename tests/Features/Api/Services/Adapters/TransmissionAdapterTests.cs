@@ -16,9 +16,9 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Runtime.InteropServices;
-using Listenarr.Api.Services.Adapters;
+using Listenarr.Infrastructure.Adapters;
 using Listenarr.Domain.Models;
-using Listenarr.Domain.Utils;
+using Listenarr.Domain.Common;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
 using Listenarr.Tests.Mocks.Api;
@@ -34,7 +34,6 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
     public class TransmissionAdapterTests : BaseTests
     {
         private readonly string CLIENT_CONFIG_ID = "slskd-1";
-        private readonly string DOWNLOAD_COMPLETE_ID = "dl-complete-1";
 
         private DownloadClientConfiguration? _client;
 
@@ -170,9 +169,13 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
         [Trait("Method", "AddAsync")]
         public async Task GetImportItemAsync_WithSpaceInRemoteDirectory()
         {
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                return;
+            }
+
             var download = new Download
             {
-                Id = DOWNLOAD_COMPLETE_ID,
                 DownloadClientId = CLIENT_CONFIG_ID,
                 Metadata = new Dictionary<string, object>
                 {

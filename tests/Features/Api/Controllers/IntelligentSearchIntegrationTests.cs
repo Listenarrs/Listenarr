@@ -16,10 +16,13 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Listenarr.Domain.Models;
-using Listenarr.Api.Services;
 using Listenarr.Api.Controllers;
 using Moq;
 using Xunit;
+using Listenarr.Application.Interfaces;
+using Listenarr.Application.Metadata;
+using Listenarr.Application.Search;
+using Listenarr.Application.Common;
 
 namespace Listenarr.Tests.Features.Api.Controllers
 {
@@ -134,36 +137,36 @@ namespace Listenarr.Tests.Features.Api.Controllers
         }
     }
 
-    internal class TestEmptyAudibleService : Listenarr.Api.Services.AudibleService
+    internal class TestEmptyAudibleService : AudibleService
     {
-        public TestEmptyAudibleService() : base(new System.Net.Http.HttpClient(), new Microsoft.Extensions.Logging.Abstractions.NullLogger<Listenarr.Api.Services.AudibleService>()) { }
+        public TestEmptyAudibleService() : base(new System.Net.Http.HttpClient(), new Microsoft.Extensions.Logging.Abstractions.NullLogger<AudibleService>()) { }
 
-        public override Task<Listenarr.Api.Services.AudibleBookResponse?> GetBookMetadataAsync(string asin, string region = "us", bool useCache = true, string? language = null)
+        public override Task<AudibleBookResponse?> GetBookMetadataAsync(string asin, string region = "us", bool useCache = true, string? language = null)
         {
-            return Task.FromResult<Listenarr.Api.Services.AudibleBookResponse?>(null);
+            return Task.FromResult<AudibleBookResponse?>(null);
         }
     }
 
-    internal class TestEmptyAudnexusService : Listenarr.Api.Services.IAudnexusService
+    internal class TestEmptyAudnexusService : IAudnexusService
     {
-        public Task<Listenarr.Api.Services.AudnexusBookResponse?> GetBookMetadataAsync(string asin, string region = "us", bool seedAuthors = true, bool update = false)
+        public Task<AudnexusBookResponse?> GetBookMetadataAsync(string asin, string region = "us", bool seedAuthors = true, bool update = false)
         {
-            return Task.FromResult<Listenarr.Api.Services.AudnexusBookResponse?>(null);
+            return Task.FromResult<AudnexusBookResponse?>(null);
         }
 
-        public Task<List<Listenarr.Api.Services.AudnexusAuthorSearchResult>?> SearchAuthorsAsync(string name, string region = "us")
+        public Task<List<AudnexusAuthorSearchResult>?> SearchAuthorsAsync(string name, string region = "us")
         {
-            return Task.FromResult<List<Listenarr.Api.Services.AudnexusAuthorSearchResult>?>(null);
+            return Task.FromResult<List<AudnexusAuthorSearchResult>?>(null);
         }
 
-        public Task<Listenarr.Api.Services.AudnexusAuthorResponse?> GetAuthorAsync(string asin, string region = "us", bool update = false)
+        public Task<AudnexusAuthorResponse?> GetAuthorAsync(string asin, string region = "us", bool update = false)
         {
-            return Task.FromResult<Listenarr.Api.Services.AudnexusAuthorResponse?>(null);
+            return Task.FromResult<AudnexusAuthorResponse?>(null);
         }
 
-        public Task<Listenarr.Api.Services.AudnexusChapterResponse?> GetChaptersAsync(string asin, string region = "us", bool update = false)
+        public Task<AudnexusChapterResponse?> GetChaptersAsync(string asin, string region = "us", bool update = false)
         {
-            return Task.FromResult<Listenarr.Api.Services.AudnexusChapterResponse?>(null);
+            return Task.FromResult<AudnexusChapterResponse?>(null);
         }
     }
 

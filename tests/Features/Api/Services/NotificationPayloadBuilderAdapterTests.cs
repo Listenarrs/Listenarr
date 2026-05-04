@@ -20,8 +20,8 @@ using Microsoft.AspNetCore.Http;
 using Moq;
 using Moq.Protected;
 using Xunit;
-using Listenarr.Api.Services;
 using Microsoft.Extensions.DependencyInjection;
+using Listenarr.Application.Notification;
 
 namespace Listenarr.Tests.Features.Api.Services
 {

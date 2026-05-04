@@ -18,11 +18,15 @@
 using Xunit;
 using Moq;
 using Listenarr.Api.Controllers;
-using Listenarr.Api.Services;
 using Microsoft.Extensions.Logging.Abstractions;
-using Listenarr.Api.Services.Metadata;
-using Listenarr.Application.Repositories;
+using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Domain.Models;
+using Listenarr.Application.Interfaces;
+using Listenarr.Domain.Models.Configurations;
+using Listenarr.Domain.Models.Enumerations;
+using Listenarr.Application.Common;
+using Listenarr.Infrastructure.FileSystem;
+using Listenarr.Api.Dtos.ManualImport;
 
 namespace Listenarr.Tests.Features.Api.Controllers
 {
@@ -146,12 +150,12 @@ namespace Listenarr.Tests.Features.Api.Controllers
             {
                 Path = srcDir,
                 Mode = "interactive",
-                Action = FileMover.FileAction.Copy,
-                Items = new System.Collections.Generic.List<ManualImportItemDto>
-                {
+                Action = FileAction.Copy,
+                Items =
+                [
                     new ManualImportItemDto { FullPath = src1, MatchedAudiobookId = book.Id },
                     new ManualImportItemDto { FullPath = src2, MatchedAudiobookId = book.Id }
-                }
+                ]
             };
 
             var controller = GetController(book, new ApplicationSettings { OutputPath = basePath });
@@ -185,7 +189,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
             {
                 Path = srcDir,
                 Mode = "interactive",
-                Action = FileMover.FileAction.Copy,
+                Action = FileAction.Copy,
                 Items = new System.Collections.Generic.List<ManualImportItemDto>
                 {
                     new ManualImportItemDto { FullPath = part10, MatchedAudiobookId = book.Id },
@@ -236,7 +240,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
             {
                 Path = srcDir,
                 Mode = "interactive",
-                Action = FileMover.FileAction.Copy,
+                Action = FileAction.Copy,
                 Items = new System.Collections.Generic.List<ManualImportItemDto>
                 {
                     new ManualImportItemDto { FullPath = foreword, MatchedAudiobookId = book.Id },
@@ -297,7 +301,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
             {
                 Path = srcDir,
                 Mode = "interactive",
-                Action = FileMover.FileAction.Copy,
+                Action = FileAction.Copy,
                 Items = new System.Collections.Generic.List<ManualImportItemDto>
                 {
                     new ManualImportItemDto { FullPath = disc1, MatchedAudiobookId = book.Id },
@@ -341,7 +345,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
             {
                 Path = sourceDir,
                 Mode = "interactive",
-                Action = FileMover.FileAction.Move,
+                Action = FileAction.Move,
                 IncludeCompanionFiles = true,
                 CleanupEmptySourceFolders = true,
                 Items = new System.Collections.Generic.List<ManualImportItemDto>
@@ -386,7 +390,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
             {
                 Path = sourceDir,
                 Mode = "interactive",
-                Action = FileMover.FileAction.Copy,
+                Action = FileAction.Copy,
                 IncludeCompanionFiles = true,
                 Items = new System.Collections.Generic.List<ManualImportItemDto>
                 {
@@ -422,7 +426,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
             {
                 Path = srcDir,
                 Mode = "interactive",
-                Action = FileMover.FileAction.None,
+                Action = FileAction.None,
                 Items = new System.Collections.Generic.List<ManualImportItemDto>
                 {
                     new ManualImportItemDto { FullPath = foreword, MatchedAudiobookId = book.Id },

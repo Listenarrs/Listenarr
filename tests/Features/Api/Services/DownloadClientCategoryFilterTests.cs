@@ -17,9 +17,9 @@
  */
 using System.Net;
 using System.Text;
-using Listenarr.Api.Services;
-using Listenarr.Api.Services.Adapters;
+using Listenarr.Application.Downloads;
 using Listenarr.Domain.Models;
+using Listenarr.Infrastructure.Adapters;
 using Listenarr.Tests.Common;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -126,12 +126,7 @@ namespace Listenarr.Tests.Features.Api.Services
             var httpFactory = new Mock<IHttpClientFactory>();
             httpFactory.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(httpClient);
 
-            var pathMapping = new Mock<IRemotePathMappingService>();
-            pathMapping
-                .Setup(p => p.TranslatePathAsync(It.IsAny<string>(), It.IsAny<string>()))
-                .ReturnsAsync((string _, string path) => path);
-
-            var adapter = new TransmissionAdapter(httpFactory.Object, pathMapping.Object, Mock.Of<ITorrentFileDownloader>(), NullLogger<TransmissionAdapter>.Instance);
+            var adapter = new TransmissionAdapter(httpFactory.Object, Mock.Of<ITorrentFileDownloader>(), NullLogger<TransmissionAdapter>.Instance);
             var client = new DownloadClientConfiguration
             {
                 Id = "tr-1",
@@ -208,12 +203,7 @@ namespace Listenarr.Tests.Features.Api.Services
             var httpFactory = new Mock<IHttpClientFactory>();
             httpFactory.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(httpClient);
 
-            var pathMapping = new Mock<IRemotePathMappingService>();
-            pathMapping
-                .Setup(p => p.TranslatePathAsync(It.IsAny<string>(), It.IsAny<string>()))
-                .ReturnsAsync((string _, string path) => path);
-
-            var adapter = new TransmissionAdapter(httpFactory.Object, pathMapping.Object, Mock.Of<ITorrentFileDownloader>(), NullLogger<TransmissionAdapter>.Instance);
+            var adapter = new TransmissionAdapter(httpFactory.Object, Mock.Of<ITorrentFileDownloader>(), NullLogger<TransmissionAdapter>.Instance);
             var client = new DownloadClientConfiguration
             {
                 Id = "tr-1",

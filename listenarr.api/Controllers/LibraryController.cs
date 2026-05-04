@@ -23,8 +23,20 @@ using System.Reflection;
 using System.Text.RegularExpressions;
 using System.Security.Cryptography;
 using System.Text;
-using Listenarr.Domain.Utils;
-using Listenarr.Api.Services.Metadata;
+using Listenarr.Domain.Common;
+using Listenarr.Application.Interfaces;
+using Listenarr.Application.Common;
+using Listenarr.Domain.Models.Configurations;
+using Listenarr.Domain.Models;
+using Listenarr.Application.Interfaces.Repositories;
+using Listenarr.Application.Notification;
+using Listenarr.Application.Security;
+using Listenarr.Application.Metadata;
+using Listenarr.Api.Dtos;
+using Listenarr.Application.Search;
+using Microsoft.AspNetCore.SignalR;
+using Listenarr.Application.Audiobooks;
+using Listenarr.Api.Attributes;
 
 namespace Listenarr.Api.Controllers
 {
@@ -1262,11 +1274,9 @@ namespace Listenarr.Api.Controllers
         /// </summary>
         /// <param name="id">Audiobook ID.</param>
         [HttpGet("{id}/files-debug")]
+        [LocalOrAdmin]
         public async Task<IActionResult> GetAudiobookFilesDebug(int id)
         {
-            var gate = SensitiveEndpointAccessGuard.RequireLocalOrAdmin(HttpContext, _logger, "library/files-debug");
-            if (gate != null) return gate;
-
             var files = await _audioFileRepository.GetByAudiobookIdAsync(id);
             return Ok(files);
         }
@@ -2820,8 +2830,8 @@ namespace Listenarr.Api.Controllers
                                 try
                                 {
                                     using var afScope = _scopeFactory.CreateScope();
-                                    var audioFileService = afScope.ServiceProvider.GetRequiredService<IAudioFileService>();
-                                    var migrated = await audioFileService.EnsureAudiobookFileAsync(audiobook.Id, audiobook.FilePath, "scan-legacy");
+                                    var audioFileService = afScope.ServiceProvider.GetRequiredService<IAudiobookFileService>();
+                                    var migrated = await audioFileService.EnsureAudiobookFileAsync(audiobook, audiobook.FilePath, "scan-legacy");
                                     if (migrated)
                                     {
                                         _logger.LogInformation("Migrated legacy filePath to AudiobookFile record for audiobook {AudiobookId}: {Path}", audiobook.Id, audiobook.FilePath);

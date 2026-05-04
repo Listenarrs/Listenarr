@@ -16,8 +16,8 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Text;
+using Listenarr.Application.Common;
 using Xunit;
-using Listenarr.Api.Services;
 
 namespace Listenarr.Tests.Features.Api.Services.Search.Providers
 {
