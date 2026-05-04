@@ -567,7 +567,7 @@ const formatTriggerName = (trigger: string): string => {
 const isValidUrl = (url: string): boolean => {
   try {
     const urlObj = new URL(url)
-    return urlObj.protocol === 'https:'
+    return urlObj.protocol === 'https:' || urlObj.protocol === 'http:'
   } catch {
     return false
   }
@@ -613,7 +613,7 @@ const validateWebhookField = (field: 'name' | 'url' | 'type' | 'triggers') => {
         if (!webhookForm.url || webhookForm.url.trim().length === 0) {
           webhookFormErrors.url = 'Webhook URL is required'
         } else if (!isValidUrl(webhookForm.url)) {
-          webhookFormErrors.url = 'Please enter a valid HTTPS URL'
+          webhookFormErrors.url = 'Please enter a valid URL'
         } else {
           webhookFormErrors.url = ''
         }
