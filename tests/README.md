@@ -33,7 +33,7 @@ tests/                              # Backend tests
 [Trait("Category", "DownloadService")]
 ```
 * You can override `InitializeAsync` to define common setup for all test methods in your test class
-* You can override any service for dependancy injection using:
+* You can override any service for dependency injection using:
 ```
 _services.AddScoped(...)
 _services.AddSingleton(...)
@@ -41,7 +41,8 @@ _services.AddTransient(...)
 
 # Dont forget to call Init() afterwards
 ```
-* If you overide one or more service this way, you should call `Init()`
+* Take note of how the initial class was registered as it might not be obvious how some of them should be replaced to make sure the test actually uses it
+* If you override one or more service this way, you should call `Init()`
     * You should add data to repository only after you have manually called `Init()` 
     * If you did not alter any service, this is done for you in the test constructor already
 
@@ -70,7 +71,7 @@ Tests cases should be defined using the following steps:
 * Data should be initialized using the builder pattern
 * Each data builder should produce actionable and coherent data (meaning, all mandatory field have plausible value, interdependant fields are populated and so on)
 
-### Dependancy Injection (DI)
+### Dependency Injection (DI)
 
 * FIXME: `ServiceCollectionBuilder` should define as few Mock as possible by default. Some mock are still there because updating all the tests is too tedious right now but as we move forward, we should aim to remove them.
 * Each test class is responsible for defining the mock it wants to use
