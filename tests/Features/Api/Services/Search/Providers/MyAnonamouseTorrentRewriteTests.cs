@@ -17,7 +17,7 @@
  */
 using System.Text;
 using Xunit;
-using Listenarr.Api.Services;
+using Listenarr.Application.Common;
 
 namespace Listenarr.Tests.Features.Api.Services.Search.Providers
 {

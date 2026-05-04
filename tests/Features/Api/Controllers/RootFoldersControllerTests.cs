@@ -16,13 +16,14 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Listenarr.Api.Controllers;
-using Listenarr.Api.Services;
 using Listenarr.Domain.Models;
-using Listenarr.Domain.Utils;
-using Listenarr.Infrastructure.Models;
-using Listenarr.Infrastructure.Repositories;
+using Listenarr.Domain.Common;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
+using Listenarr.Infrastructure.Persistence;
+using Listenarr.Application.Audiobooks;
+using Listenarr.Application.Interfaces;
+using Listenarr.Infrastructure.Persistence.Repositories;
 
 namespace Listenarr.Tests.Features.Api.Controllers
 {
@@ -49,6 +50,8 @@ namespace Listenarr.Tests.Features.Api.Controllers
         private class FakeService : IRootFolderService
         {
             public List<RootFolder> Store { get; } = new List<RootFolder>();
+
+            public Task<RootFolder?> GetDefaultAsync() => Task.FromResult(Store.Count > 0 ? Store.First() : null);
 
             public Task<List<RootFolder>> GetAllAsync() => Task.FromResult(new List<RootFolder>(Store));
 

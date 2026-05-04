@@ -1,4 +1,6 @@
 using Asp.Versioning.ApiExplorer;
+using Listenarr.Application.Interfaces.Repositories;
+using Listenarr.Domain.Models;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Listenarr.Tests.Common
@@ -16,6 +18,17 @@ namespace Listenarr.Tests.Common
                 ?? provider?.ApiVersionDescriptions.FirstOrDefault()?.GroupName;
 
             return string.IsNullOrWhiteSpace(groupName) ? "/api/v1" : $"/api/{groupName}";
+        }
+
+        /// <summary>
+        /// Remove the waiting timer on a job
+        /// </summary>
+        /// <param name="downloadProcessingJobRepository"></param>
+        /// <param name="job"></param>
+        public static async Task CancelJobRetryWait(IDownloadProcessingJobRepository downloadProcessingJobRepository, DownloadProcessingJob job)
+        {
+            job.NextRetryAt = null;
+            await downloadProcessingJobRepository.UpdateAsync(job);
         }
     }
 }

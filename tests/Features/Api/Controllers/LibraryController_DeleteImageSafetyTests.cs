@@ -20,10 +20,12 @@ using Moq;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.DependencyInjection;
 using Listenarr.Api.Controllers;
-using Listenarr.Api.Services;
-using Listenarr.Application.Repositories;
+using Listenarr.Application.Interfaces.Repositories;
 using Microsoft.AspNetCore.Mvc;
-using Listenarr.Domain.Models;
+using Listenarr.Application.Interfaces;
+using Listenarr.Domain.Models.Configurations;
+using Listenarr.Application.Common;
+using Listenarr.Application.Notification;
 
 namespace Listenarr.Tests.Features.Api.Controllers
 {
@@ -43,17 +45,17 @@ namespace Listenarr.Tests.Features.Api.Controllers
             services.AddSingleton<IConfigurationService>(mockConfig.Object);
 
             // Provide a mock signalR hub context (with Clients.All mocked) to avoid exceptions during broadcast
-            var mockHub = new Mock<Microsoft.AspNetCore.SignalR.IHubContext<Listenarr.Api.Hubs.DownloadHub>>();
+            var mockHub = new Mock<Microsoft.AspNetCore.SignalR.IHubContext<DownloadHub>>();
             var mockClients = new Mock<Microsoft.AspNetCore.SignalR.IHubClients>();
             var mockClientProxy = new Mock<Microsoft.AspNetCore.SignalR.IClientProxy>();
             mockClientProxy.Setup(m => m.SendCoreAsync(It.IsAny<string>(), It.IsAny<object[]>(), default)).Returns(System.Threading.Tasks.Task.CompletedTask);
             mockClients.SetupGet(c => c.All).Returns(mockClientProxy.Object);
             mockHub.SetupGet(h => h.Clients).Returns(mockClients.Object);
-            services.AddSingleton(typeof(Microsoft.AspNetCore.SignalR.IHubContext<Listenarr.Api.Hubs.DownloadHub>), mockHub.Object);
+            services.AddSingleton(typeof(Microsoft.AspNetCore.SignalR.IHubContext<DownloadHub>), mockHub.Object);
 
             var provider = services.BuildServiceProvider();
             var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
-            var fileNaming = new Mock<Listenarr.Api.Services.IFileNamingService>().Object;
+            var fileNaming = new Mock<IFileNamingService>().Object;
 
             var audiobook = new Listenarr.Domain.Models.Audiobook { Id = 123, Title = "Test", ImageUrl = "/config/cache/images/library/../evil/../../secret.txt" };
             mockRepo.Setup(r => r.GetByIdAsync(It.IsAny<int>())).ReturnsAsync(audiobook);

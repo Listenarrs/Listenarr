@@ -249,8 +249,7 @@ docker-compose.override.yml
 migrate-to-*.ps1
 migrate-to-*.sh
 
-# Media files (downloads)
-downloads/
+# Media files
 *.mp3
 *.m4a
 *.m4b

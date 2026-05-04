@@ -18,8 +18,8 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
-using Listenarr.Api.Services;
-using Listenarr.Api.Extensions;
+using Listenarr.Infrastructure.Extensions;
+using Listenarr.Application.Common;
 
 namespace Listenarr.Tests.Features.Api.Extensions
 {

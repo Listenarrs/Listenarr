@@ -17,8 +17,9 @@
  */
 
 using Listenarr.Api.Controllers;
-using Listenarr.Api.Models;
-using Listenarr.Api.Services;
+using Listenarr.Application.Interfaces;
+using Listenarr.Application.Metadata;
+using Listenarr.Application.Search;
 using Listenarr.Domain.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -154,7 +155,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
             var mockMeta = new Mock<IAudiobookMetadataService>();
 
             // Simulate series search returning SeriesLookupItem list with ASIN
-            stubAudible.SeriesResponseToReturn = new List<Listenarr.Api.Services.SeriesLookupItem>
+            stubAudible.SeriesResponseToReturn = new List<SeriesLookupItem>
             {
                 new() { Asin = "B0SERIES1234", Name = "Some Series", Region = "us" }
             };
@@ -182,7 +183,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
 
             // Simulate series search returning items whose region doesn't match the request —
             // the code should still pick the first item with a valid ASIN as a fallback
-            stubAudible.SeriesResponseToReturn = new List<Listenarr.Api.Services.SeriesLookupItem>
+            stubAudible.SeriesResponseToReturn = new List<SeriesLookupItem>
             {
                 new() { Asin = "B0FALLBACK123", Name = "Some Series", Region = "de" }
             };
@@ -338,7 +339,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
             var mockMeta = new Mock<IAudiobookMetadataService>();
 
             // Simulate series lookup returning a series ASIN
-            stubAudible.SeriesResponseToReturn = new List<Listenarr.Api.Services.SeriesLookupItem>
+            stubAudible.SeriesResponseToReturn = new List<SeriesLookupItem>
             {
                 new() { Asin = "B0DUNE", Name = "Dune", Region = "us" }
             };
@@ -380,7 +381,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
             var mockMeta = new Mock<IAudiobookMetadataService>();
 
             // Simulate series lookup
-            stubAudible.SeriesResponseToReturn = new List<Listenarr.Api.Services.SeriesLookupItem>
+            stubAudible.SeriesResponseToReturn = new List<SeriesLookupItem>
             {
                 new() { Asin = "B0SERIES", Name = "Test Series", Region = "us" }
             };

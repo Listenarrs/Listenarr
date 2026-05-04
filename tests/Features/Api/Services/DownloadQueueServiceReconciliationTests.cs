@@ -16,14 +16,16 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Text.Json;
-using Listenarr.Application.Repositories;
-using Listenarr.Api.Services;
+using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Domain.Models;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
+using Listenarr.Application.Interfaces;
+using Listenarr.Domain.Models.Configurations;
+using Listenarr.Application.Downloads;
 
 namespace Listenarr.Tests.Features.Api.Services
 {
@@ -40,8 +42,7 @@ namespace Listenarr.Tests.Features.Api.Services
             IAppMetricsService metrics,
             IMemoryCache? memoryCache = null,
             TimeSpan? clientQueueTimeout = null,
-            TimeSpan? staleSnapshotMaxAge = null,
-            int maxParallelClientPolls = 4)
+            TimeSpan? staleSnapshotMaxAge = null)
         {
             var resolvedMemoryCache = memoryCache ?? Track(new MemoryCache(new MemoryCacheOptions()));
             var pathMapping = new Mock<IRemotePathMappingService>();
@@ -51,20 +52,19 @@ namespace Listenarr.Tests.Features.Api.Services
             var scopeProvider = Track(new ServiceCollection().BuildServiceProvider());
             var scopeFactory = scopeProvider.GetRequiredService<IServiceScopeFactory>();
 
-            return new DownloadQueueService(
+            var service = new DownloadQueueService(
                 resolvedMemoryCache,
                 configurationService,
                 downloadRepository,
                 processingJobRepository,
                 clientGateway,
-                pathMapping.Object,
-                httpFactory.Object,
-                scopeFactory,
                 metrics,
-                NullLogger<DownloadQueueService>.Instance,
-                clientQueueTimeout,
-                staleSnapshotMaxAge,
-                maxParallelClientPolls);
+                NullLogger<DownloadQueueService>.Instance);
+
+            service._clientQueueTimeout = (TimeSpan)(clientQueueTimeout == null ? service._clientQueueTimeout : clientQueueTimeout);
+            service._staleSnapshotMaxAge = (TimeSpan)(staleSnapshotMaxAge == null ? service._staleSnapshotMaxAge : staleSnapshotMaxAge);
+
+            return service;
         }
 
         private T Track<T>(T disposable) where T : IDisposable

@@ -17,7 +17,7 @@
  */
 
 using Listenarr.Domain.Models;
-using Listenarr.Infrastructure.Models;
+using Listenarr.Infrastructure.Persistence;
 using Listenarr.Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;

@@ -15,22 +15,23 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Listenarr.Api.Services;
-using Listenarr.Application.Repositories;
-using Listenarr.Api.Services.Search;
-using Listenarr.Api.Services.Search.Filters;
-using Listenarr.Api.Services.Search.Strategies;
-using Listenarr.Api.Hubs;
+using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Domain.Models;
 using Xunit;
 using Microsoft.Extensions.Logging.Abstractions;
 using System.Net;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.AspNetCore.SignalR;
 using Moq;
-using Listenarr.Api.Services.Search.Providers;
-using Listenarr.Infrastructure.Models;
-using Listenarr.Infrastructure.Repositories;
+using Listenarr.Application.Interfaces;
+using Listenarr.Infrastructure.Persistence;
+using Listenarr.Application.Metadata;
+using Listenarr.Application.Common;
+using Listenarr.Application.Search;
+using Listenarr.Application.Notification;
+using Listenarr.Application.Search.Filters;
+using Listenarr.Application.Search.Strategies;
+using Listenarr.Infrastructure.Search.Providers;
+using Listenarr.Infrastructure.Persistence.Repositories;
 
 namespace Listenarr.Tests.Features.Api.Services.Search.Providers
 {
@@ -43,35 +44,25 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
             var logger = NullLogger<SearchService>.Instance;
             var openLibraryService = Mock.Of<IOpenLibraryService>();
             var imageCache = Mock.Of<IImageCacheService>();
-            var hubContext = Mock.Of<IHubContext<DownloadHub>>();
             var audible = new AudibleService(new HttpClient(), NullLogger<AudibleService>.Instance);
-            var audnexus = new AudnexusService(new HttpClient(), NullLogger<AudnexusService>.Instance);
             var converters = new MetadataConverters(imageCache, NullLogger<MetadataConverters>.Instance);
-            var merger = new MetadataMerger(NullLogger<MetadataMerger>.Instance);
             var progress = new SearchProgressReporter(null, NullLogger<SearchProgressReporter>.Instance);
             var pipeline = new SearchResultFilterPipeline(Enumerable.Empty<ISearchResultFilter>(), NullLogger<SearchResultFilterPipeline>.Instance);
             var coordinator = new MetadataStrategyCoordinator(Enumerable.Empty<IMetadataStrategy>(), NullLogger<MetadataStrategyCoordinator>.Instance);
             var collector = new AsinCandidateCollector(NullLogger<AsinCandidateCollector>.Instance, openLibraryService, converters, progress);
             var enricher = new AsinEnricher(NullLogger<AsinEnricher>.Instance, coordinator, converters, pipeline, progress);
-            var scorer = new SearchResultScorer(NullLogger<SearchResultScorer>.Instance);
+            var scorer = new SearchResultScorerService(NullLogger<SearchResultScorerService>.Instance);
             var handler = new AsinSearchHandler(NullLogger<AsinSearchHandler>.Instance, configuration, audible, Mock.Of<IAudnexusService>(), converters, progress);
 
             return new SearchService(
               client,
               configuration,
               logger,
-              openLibraryService,
-              imageCache,
               Mock.Of<IIndexerRepository>(),
               Mock.Of<IApiConfigurationRepository>(),
-              hubContext,
               audible,
-              audnexus,
               converters,
-              merger,
               progress,
-              pipeline,
-              coordinator,
               collector,
               enricher,
               scorer,
@@ -291,16 +282,16 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
 
             // Call provider directly to ensure the AdditionalSettings are applied to the generated request -
             // The provider no longer parses indexer.AdditionalSettings for options automatically, callers should pass a SearchRequest.
-            var request = new Listenarr.Api.Models.SearchRequest
+            var request = new SearchRequest
             {
-                MyAnonamouse = new Listenarr.Api.Models.MyAnonamouseOptions
+                MyAnonamouse = new MyAnonamouseOptions
                 {
                     SearchInDescription = false,
                     SearchInSeries = true,
                     SearchInFilenames = true,
                     SearchLanguage = "2",
-                    Filter = Listenarr.Api.Models.MamTorrentFilter.Freeleech,
-                    FreeleechWedge = Listenarr.Api.Models.MamFreeleechWedge.Required,
+                    Filter = MamTorrentFilter.Freeleech,
+                    FreeleechWedge = MamFreeleechWedge.Required,
                     EnrichResults = false
                 }
             };
@@ -711,7 +702,7 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
 
             var method = typeof(SearchService).GetMethod("SearchMyAnonamouseAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             Assert.NotNull(method);
-            var task = (Task<List<IndexerSearchResult>>)method!.Invoke(service, new object[] { indexer, "Enrich Test", null, new Listenarr.Api.Models.SearchRequest { IncludeEnrichment = true, MyAnonamouse = new Listenarr.Api.Models.MyAnonamouseOptions { EnrichResults = true, EnrichTopResults = 1 } } })!;
+            var task = (Task<List<IndexerSearchResult>>)method!.Invoke(service, new object[] { indexer, "Enrich Test", null, new SearchRequest { IncludeEnrichment = true, MyAnonamouse = new MyAnonamouseOptions { EnrichResults = true, EnrichTopResults = 1 } } })!;
 
             var results = await task;
             Assert.Single(results);

@@ -51,7 +51,7 @@ Get-ChildItem -Path .\listenarr.infrastructure\Migrations -Filter *.cs -File -Re
     $p = $_.FullName
     $c = Get-Content -Raw -LiteralPath $p
     if ($c -match 'namespace\s+Listenarr\.Api\.Migrations') {
-        $new = $c -replace 'namespace\s+Listenarr\.Api\.Migrations', 'namespace Listenarr.Infrastructure.Migrations'
+        $new = $c -replace 'namespace\s+Listenarr\.Api\.Migrations', 'namespace Listenarr.Infrastructure.Persistence.Migrations'
         Set-Content -LiteralPath $p -Value $new -Encoding UTF8
         Write-Host "Updated migration namespace in $p"
     }

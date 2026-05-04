@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Listenarr.Domain.Common;
 using Listenarr.Tests.Common;
 
 namespace Listenarr.Tests.Mocks.Api
@@ -44,39 +45,44 @@ namespace Listenarr.Tests.Mocks.Api
                         }
                     }
 
-                    return MockUtils.GetCannedResponse("""
+                    var response = """
                     {
                         "arguments": {
                             "torrents": [
                                 {
                                     "id": 1,
                                     "name": "Book.m4b",
-                                    "downloadDir": "/downloads"
+                                    "downloadDir": "{{DIR}}"
                                 },
                                 {
                                     "id": 2,
                                     "name": "Book Folder",
-                                    "downloadDir": "/downloads",
+                                    "downloadDir": "{{DIR}}",
                                     "files": [
                                         {
-                                            "name": "Book Folder/chapter1.m4b"
+                                            "name": "{{FILE1}}"
                                         },
                                         {
-                                            "name": "Book Folder/book.txt"
+                                            "name": "{{FILE2}}"
                                         }
                                     ]
                                 },
                                 {
                                     "id": 306,
                                     "name": "Isaac Asimov - Le Cycle de Fondation - Tome 3 - Seconde Fondation ",
-                                    "downloadDir": "/downloads/complete/audiobooks"
+                                    "downloadDir": "{{REMOTE_PATH}}"
                                 }
                             ]
                         },
                         "result": "success",
                         "tag": 3
                     }
-                    """);
+                    """;
+                    response = MockUtils.PutPathInResponse(response, "{{REMOTE_PATH}}", FileUtils.GetAbsolutePath("downloads", "complete", "audiobooks"));
+                    response = MockUtils.PutPathInResponse(response, "{{DIR}}", FileUtils.GetAbsolutePath("downloads"));
+                    response = MockUtils.PutPathInResponse(response, "{{FILE1}}", Path.Join("Book Folder", "chapter1.m4b"));
+                    response = MockUtils.PutPathInResponse(response, "{{FILE2}}", Path.Join("Book Folder", "book.txt"));
+                    return MockUtils.GetCannedResponse(response);
                 }
                 else if (string.Equals("torrent-add", method, StringComparison.OrdinalIgnoreCase))
                 {
@@ -110,59 +116,62 @@ namespace Listenarr.Tests.Mocks.Api
 
         private static HttpResponseMessage SingleFileTorrentGet()
         {
-            return MockUtils.GetCannedResponse("""
+            var response = """
             {
                 "arguments": {
                     "torrents": [
                         {
                             "id": 1,
                             "name": "Book.m4b",
-                            "downloadDir": "/downloads"
+                            "downloadDir": "{{DIR}}"
                         }
                     ]
                 },
                 "result": "success",
                 "tag": 3
             }
-            """);
+            """;
+            response = MockUtils.PutPathInResponse(response, "{{DIR}}", FileUtils.GetAbsolutePath("downloads"));
+            return MockUtils.GetCannedResponse(response);
         }
 
         private static HttpResponseMessage AnotherSingleFileTorrentGet()
         {
-
-            return MockUtils.GetCannedResponse("""
+            var response = """
             {
                 "arguments": {
                     "torrents": [
                         {
                             "id": 306,
                             "name": "Isaac Asimov - Le Cycle de Fondation - Tome 3 - Seconde Fondation ",
-                            "downloadDir": "/downloads/complete/audiobooks"
+                            "downloadDir": "{{REMOTE_PATH}}"
                         }
                     ]
                 },
                 "result": "success",
                 "tag": 3
             }
-            """);
+            """;
+            response = MockUtils.PutPathInResponse(response, "{{REMOTE_PATH}}", FileUtils.GetAbsolutePath("downloads", "complete", "audiobooks"));
+            return MockUtils.GetCannedResponse(response);
         }
 
         private static HttpResponseMessage MultiFileTorrentGet()
         {
-            return MockUtils.GetCannedResponse("""
+            var response = """
             {
                 "arguments": {
                     "torrents": [
                         {
                             "id": 2,
                             "name": "Book Folder",
-                            "downloadDir": "/downloads",
+                            "downloadDir": "{{DIR}}",
                             "files": [
                                 {
-                                    "name": "Book Folder/chapter1.m4b"
+                                    "name": "{{FILE1}}"
                                 },
                                 {
-                                    "name": "Book Folder/book.txt"
+                                    "name": "{{FILE2}}"
                                 }
                             ]
                         }
@@ -171,7 +180,11 @@ namespace Listenarr.Tests.Mocks.Api
                 "result": "success",
                 "tag": 3
             }
-            """);
+            """;
+            response = MockUtils.PutPathInResponse(response, "{{DIR}}", FileUtils.GetAbsolutePath("downloads"));
+            response = MockUtils.PutPathInResponse(response, "{{FILE1}}", Path.Join("Book Folder", "chapter1.m4b"));
+            response = MockUtils.PutPathInResponse(response, "{{FILE2}}", Path.Join("Book Folder", "book.txt"));
+            return MockUtils.GetCannedResponse(response);
         }
     }
 }

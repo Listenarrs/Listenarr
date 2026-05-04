@@ -16,9 +16,9 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Net;
-using Listenarr.Api.Services;
-using Listenarr.Api.Services.Adapters;
+using Listenarr.Application.Interfaces;
 using Listenarr.Domain.Models;
+using Listenarr.Infrastructure.Adapters;
 using Listenarr.Tests.Common;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -59,7 +59,6 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
             var adapter = new NzbgetAdapter(
                 new TestHttpClientFactory(http),
                 Mock.Of<INzbUrlResolver>(),
-                Mock.Of<IRemotePathMappingService>(),
                 NullLogger<NzbgetAdapter>.Instance);
 
             var client = new DownloadClientConfiguration
@@ -101,7 +100,6 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
             var adapter = new NzbgetAdapter(
                 new TestHttpClientFactory(http),
                 Mock.Of<INzbUrlResolver>(),
-                Mock.Of<IRemotePathMappingService>(),
                 NullLogger<NzbgetAdapter>.Instance);
 
             var client = new DownloadClientConfiguration
@@ -140,7 +138,6 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
             var adapter = new NzbgetAdapter(
                 new TestHttpClientFactory(http),
                 Mock.Of<INzbUrlResolver>(),
-                Mock.Of<IRemotePathMappingService>(),
                 NullLogger<NzbgetAdapter>.Instance);
 
             var client = new DownloadClientConfiguration

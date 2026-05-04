@@ -18,13 +18,14 @@
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
-using Listenarr.Api.Services;
 using Xunit;
 using System.Net;
 using Moq;
 using Moq.Protected;
 using Microsoft.Extensions.Logging;
 using Listenarr.Domain.Models;
+using Listenarr.Application.Interfaces;
+using Listenarr.Application.Notification;
 
 namespace Listenarr.Api.Tests
 {

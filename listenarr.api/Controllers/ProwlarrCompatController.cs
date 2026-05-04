@@ -19,6 +19,13 @@ using System.Diagnostics;
 using System.Reflection;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
+using Listenarr.Application.Interfaces;
+using Listenarr.Domain.Models;
+using Listenarr.Application.Interfaces.Repositories;
+using Microsoft.AspNetCore.SignalR;
+using Listenarr.Application.Notification;
+using Listenarr.Application.Security;
+using Listenarr.Api.Attributes;
 
 namespace Listenarr.Api.Controllers
 {
@@ -222,12 +229,11 @@ namespace Listenarr.Api.Controllers
         // Debug-only POST to verify POST handling bypasses antiforgery and auth middleware
         [HttpPost("debug/test")]
         [AllowAnonymous]
+        [LocalOrAdmin]
         [IgnoreAntiforgeryToken]
         [Produces("application/json")]
         public IActionResult PostDebugTest()
         {
-            var debugGate = SensitiveEndpointAccessGuard.RequireLocalOrAdmin(HttpContext, _logger, "prowlarr/debug/test");
-            if (debugGate != null) return debugGate;
             var authGuard = RequireAuthenticatedIfEnabled();
             if (authGuard != null) return authGuard;
             Response.ContentType = "application/json";
@@ -1099,12 +1105,10 @@ namespace Listenarr.Api.Controllers
         /// </summary>
         [HttpPost("debug/indexers/publish")]
         [AllowAnonymous]
+        [LocalOrAdmin]
         [ApiExplorerSettings(IgnoreApi = true)]
         public async Task<IActionResult> DebugPublishIndexers([FromBody] System.Text.Json.JsonElement? payload)
         {
-            var gate = SensitiveEndpointAccessGuard.RequireLocalOrAdmin(HttpContext, _logger, "prowlarr/debug/indexers/publish");
-            if (gate != null) return gate;
-
             // Build a small payload from optional incoming body or a default sample
             var created = 0;
             var indexers = new List<object>();
@@ -1166,12 +1170,10 @@ namespace Listenarr.Api.Controllers
         /// </summary>
         [HttpGet("debug/settings/clients")]
         [AllowAnonymous]
+        [LocalOrAdmin]
         [ApiExplorerSettings(IgnoreApi = true)]
         public IActionResult GetSettingsHubClients()
         {
-            var gate = SensitiveEndpointAccessGuard.RequireLocalOrAdmin(HttpContext, _logger, "prowlarr/debug/settings/clients");
-            if (gate != null) return gate;
-
             try
             {
                 var clients = SettingsHub.ConnectedClientIds.ToArray();

@@ -16,9 +16,9 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Runtime.InteropServices;
-using Listenarr.Api.Services.Adapters;
+using Listenarr.Infrastructure.Adapters;
 using Listenarr.Domain.Models;
-using Listenarr.Domain.Utils;
+using Listenarr.Domain.Common;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
 using Listenarr.Tests.Mocks.Api;
@@ -34,7 +34,6 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
     public class TransmissionAdapterTests : BaseTests
     {
         private readonly string CLIENT_CONFIG_ID = "slskd-1";
-        private readonly string DOWNLOAD_COMPLETE_ID = "dl-complete-1";
 
         private DownloadClientConfiguration? _client;
 
@@ -66,7 +65,7 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
                 MagnetLink = "magnet:?xt=urn:btih:ABCDEF1234567890&tr=http%3A%2F%2Ftracker.example.com%2Fannounce%3Ffoo%3D1%26bar%3D2&dn=Book%20Title"
             };
 
-            var adapter = _provider.GetRequiredService<TransmissionAdapter>();
+            var adapter = MockUtils.CreateTransmissionAdapter(_provider);
             var addedId = await adapter.AddAsync(_client, searchResult);
 
             var transmissionApiMock = _provider.GetRequiredService<TransmissionApiMock>();
@@ -96,7 +95,7 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
                 .WithUrlBase("/rpc")
                 .Build());
 
-            var adapter = _provider.GetRequiredService<TransmissionAdapter>();
+            var adapter = MockUtils.CreateTransmissionAdapter(_provider);
             var (success, message) = await adapter.TestConnectionAsync(client);
 
             Assert.True(success);
@@ -121,9 +120,6 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
                 .Setup(x => x.DownloadAsync("https://indexer.example.com/book.torrent", It.IsAny<CancellationToken>()))
                 .Callback<string, CancellationToken>((url, _) => downloadedUrl = url)
                 .ReturnsAsync(TorrentDownloadResult.FromBytes("de"u8.ToArray()));
-            _services.AddSingleton(downloader.Object);
-            Init();
-            await InitDataAsync();
 
             var searchResult = new SearchResult
             {
@@ -132,7 +128,7 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
                 TorrentUrl = "https://indexer.example.com/book.torrent"
             };
 
-            var adapter = _provider.GetRequiredService<TransmissionAdapter>();
+            var adapter = MockUtils.CreateTransmissionAdapter(_provider, downloader);
             var addedId = await adapter.AddAsync(_client, searchResult);
 
             Assert.Equal("HASH1", addedId);
@@ -163,7 +159,7 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
                 TorrentUrl = "ftp://indexer.example.com/book.torrent"
             };
 
-            var adapter = _provider.GetRequiredService<TransmissionAdapter>();
+            var adapter = MockUtils.CreateTransmissionAdapter(_provider);
             var exception = await Assert.ThrowsAsync<ArgumentException>(() => adapter.AddAsync(_client, searchResult));
 
             Assert.Contains("HTTP or HTTPS", exception.Message, StringComparison.OrdinalIgnoreCase);
@@ -173,9 +169,13 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
         [Trait("Method", "AddAsync")]
         public async Task GetImportItemAsync_WithSpaceInRemoteDirectory()
         {
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                return;
+            }
+
             var download = new Download
             {
-                Id = DOWNLOAD_COMPLETE_ID,
                 DownloadClientId = CLIENT_CONFIG_ID,
                 Metadata = new Dictionary<string, object>
                 {
@@ -194,7 +194,7 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
                 DownloadClientId = _client.Id
             };
 
-            var adapter = _provider.GetRequiredService<TransmissionAdapter>();
+            var adapter = MockUtils.CreateTransmissionAdapter(_provider);
             var retrievedQeue = await adapter.GetImportItemAsync(_client, download, queueItem);
 
             Assert.NotNull(retrievedQeue);

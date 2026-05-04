@@ -15,11 +15,16 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using Listenarr.Api.Attributes;
+using Listenarr.Api.Dtos;
+using Listenarr.Application.Interfaces;
+using Listenarr.Application.Security;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Api.Controllers
 {
     [ApiController]
+    [LocalOrAdmin]
     [Route("api/v{version:apiVersion}/ffmpeg")]
     [Tags("System")]
     public class FfmpegController : ControllerBase
@@ -42,9 +47,6 @@ namespace Listenarr.Api.Controllers
         [HttpGet("info")]
         public async Task<IActionResult> GetInfo()
         {
-            var gate = SensitiveEndpointAccessGuard.RequireLocalOrAdmin(HttpContext, _logger, "ffmpeg/info");
-            if (gate != null) return gate;
-
             return Ok(new
             {
                 ffprobePath = await _ffmpegService.GetFfprobePathAsync(),
@@ -63,9 +65,6 @@ namespace Listenarr.Api.Controllers
         [HttpPost("scan")]
         public async Task<IActionResult> RunFfprobe([FromBody] FfprobeScanRequest req)
         {
-            var gate = SensitiveEndpointAccessGuard.RequireLocalOrAdmin(HttpContext, _logger, "ffmpeg/scan");
-            if (gate != null) return gate;
-
             if (req == null || string.IsNullOrEmpty(req.FilePath)) return BadRequest(new { message = "FilePath is required" });
 
             var requestedPath = req.FilePath!;

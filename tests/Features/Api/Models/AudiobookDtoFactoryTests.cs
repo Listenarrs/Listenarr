@@ -18,8 +18,8 @@
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 using Listenarr.Domain.Models;
-using Listenarr.Api.Services;
-using Listenarr.Infrastructure.Models;
+using Listenarr.Infrastructure.Persistence;
+using Listenarr.Application.Mapping;
 
 namespace Listenarr.Tests.Features.Api.Models
 {

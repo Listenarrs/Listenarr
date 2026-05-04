@@ -18,7 +18,7 @@
 
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Listenarr.Domain.Utils;
+using Listenarr.Domain.Common;
 
 namespace Listenarr.Domain.Models
 {
@@ -38,6 +38,8 @@ namespace Listenarr.Domain.Models
 
     public class Download
     {
+        public static int MaxImportAttempts = 3;
+
         public string Id { get; set; } = Guid.NewGuid().ToString();
         public int? AudiobookId { get; set; } // Link to Audiobook record for metadata
         public string Title { get; set; } = string.Empty;
@@ -54,8 +56,19 @@ namespace Listenarr.Domain.Models
         public int? Runtime { get; set; } // Runtime in minutes
         public long? ExpectedFileSize { get; set; } // Expected file size from search result
         public string OriginalUrl { get; set; } = string.Empty;
-        public DownloadStatus Status { get; set; }
-        public decimal Progress { get; set; }
+        public DownloadStatus Status
+        {
+            get;
+            set;
+        } = DownloadStatus.Queued;
+        public decimal Progress
+        {
+            get;
+            set
+            {
+                field = Math.Min(value, 100);
+            }
+        }
         public long TotalSize { get; set; }
         public long DownloadedSize { get; set; }
         // Configured DownloadPath of the client
@@ -119,11 +132,6 @@ namespace Listenarr.Domain.Models
 
         public string? GetClientDownloadItemId()
         {
-            if (Metadata == null)
-            {
-                return null;
-            }
-
             if (Metadata.TryGetValue("ClientDownloadId", out var clientIdObj))
             {
                 var clientId = clientIdObj?.ToString();
@@ -143,6 +151,155 @@ namespace Listenarr.Domain.Models
             }
 
             return null;
+        }
+
+        public void SetClientDownloadId(string value)
+        {
+            Metadata["ClientDownloadId"] = value;
+        }
+
+        public Download SetStatus(DownloadStatus value)
+        {
+            if (IsValidStatusTransition(value))
+            {
+                Status = value;
+            }
+            else
+            {
+                throw new InvalidOperationException($"Download {Id} cannot go from {Status} to {value}");
+            }
+
+            return this;
+        }
+
+        public Download Importing()
+        {
+            SetStatus(DownloadStatus.ImportPending);
+            return this;
+        }
+
+        public Download Imported()
+        {
+            SetStatus(DownloadStatus.Moved);
+            return this;
+        }
+
+        public Download Failed(string message)
+        {
+            SetStatus(DownloadStatus.Failed);
+            ErrorMessage = message;
+            Metadata["ClientFailureReason"] = message;
+            return this;
+        }
+
+        public Download Blocked(string reason, string message)
+        {
+            SetStatus(DownloadStatus.ImportBlocked);
+            AddBlockMessage(message);
+            ImportBlockReason = reason;
+            return this;
+        }
+
+        public Download Unblock()
+        {
+            ImportBlockReason = null;
+            ImportBlockMessages = null;
+            ImportAttempts = 0;
+
+            Importing();
+
+            return this;
+        }
+
+        public Download Processing()
+        {
+            SetStatus(DownloadStatus.Processing);
+            return this;
+        }
+
+        public Download Downloading()
+        {
+            SetStatus(DownloadStatus.Downloading);
+            return this;
+        }
+
+        public Download Completed()
+        {
+            Progress = 100.0M;
+            SetStatus(DownloadStatus.Completed);
+            return this;
+        }
+
+        public bool IsBlocked()
+        {
+            return Status == DownloadStatus.ImportBlocked;
+        }
+
+        public void AddBlockMessage(string message)
+        {
+            if (ImportBlockMessages == null)
+            {
+                ImportBlockMessages = [];
+            }
+            ImportBlockMessages.Add(message);
+        }
+
+        private bool IsValidStatusTransition(DownloadStatus toStatus)
+        {
+            if (Status == toStatus)
+            {
+                return true;
+            }
+
+            return toStatus switch
+            {
+                DownloadStatus.ImportPending => Status is DownloadStatus.Queued
+                    or DownloadStatus.Downloading
+                    or DownloadStatus.Paused
+                    or DownloadStatus.Processing
+                    or DownloadStatus.Completed
+                    or DownloadStatus.ImportBlocked,
+
+                DownloadStatus.ImportBlocked => Status is DownloadStatus.ImportPending
+                    or DownloadStatus.Processing
+                    or DownloadStatus.Completed
+                    or DownloadStatus.Downloading,
+
+                DownloadStatus.Moved => Status is DownloadStatus.ImportPending
+                    or DownloadStatus.Completed
+                    or DownloadStatus.Processing
+                    or DownloadStatus.Downloading,
+
+                _ => true,
+            };
+        }
+
+        public bool AwaitsImportation()
+        {
+            return Status == DownloadStatus.Completed ||
+                Status == DownloadStatus.ImportPending;
+        }
+
+        public Download Clone()
+        {
+            return new Download
+            {
+                Id = Id,
+                Title = Title,
+                Artist = Artist,
+                Album = Album,
+                OriginalUrl = OriginalUrl,
+                Status = Status,
+                Progress = Progress,
+                TotalSize = TotalSize,
+                DownloadedSize = DownloadedSize,
+                DownloadPath = DownloadPath,
+                FinalPath = FinalPath,
+                StartedAt = StartedAt,
+                CompletedAt = CompletedAt,
+                ErrorMessage = ErrorMessage,
+                DownloadClientId = DownloadClientId
+            };
         }
     }
 

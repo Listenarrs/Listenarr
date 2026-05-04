@@ -1,4 +1,4 @@
-using Listenarr.Api.Services;
+using Listenarr.Application.Interfaces;
 using Listenarr.Domain.Models;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;

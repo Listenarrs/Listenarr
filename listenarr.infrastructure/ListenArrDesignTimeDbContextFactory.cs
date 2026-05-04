@@ -17,8 +17,8 @@
  */
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
-using Listenarr.Infrastructure.Models;
-using Listenarr.Infrastructure.Repositories;
+using Listenarr.Infrastructure.Persistence.Repositories;
+using Listenarr.Infrastructure.Persistence;
 
 namespace Listenarr.Infrastructure
 {
@@ -92,7 +92,7 @@ namespace Listenarr.Infrastructure
             }
             catch (Exception caughtEx_1) when (caughtEx_1 is not OperationCanceledException && caughtEx_1 is not OutOfMemoryException && caughtEx_1 is not StackOverflowException)
             { /* ignore and return null */
-                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                global::System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
             }
 
             return null;

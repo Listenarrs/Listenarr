@@ -254,24 +254,76 @@ If you want to explore the API using Swagger:
 
 ```
 Listenarr/
-├── listenarr.api/          # Backend API (.NET Core)
-│   ├── Controllers/        # API endpoints
-│   ├── Models/            # Data models
-│   ├── Services/          # Business logic
-│   └── Program.cs         # Application entry
-├── fe/                    # Frontend (Vue.js)
+├── fe/                       # Frontend (Vue.js)
 │   ├── src/
-│   │   ├── components/   # Reusable Vue components
-│   │   ├── views/        # Page components
-│   │   ├── stores/       # Pinia state management
-│   │   ├── services/     # API client services
-│   │   └── types/        # TypeScript type definitions
-│   └── public/           # Static assets
-├── tests/                # Backend tests
-├── .github/              # GitHub configuration
-├── docker-compose.yml    # Docker setup
-└── README.md            # Main documentation
+│   │   ├── components/       # Reusable Vue components
+│   │   ├── views/            # Page components
+│   │   ├── stores/           # Pinia state management
+│   │   ├── services/         # API client services
+│   │   └── types/            # TypeScript type definitions
+│   └── public/               # Static assets
+├── listenarr.api/            # Backend API (.NET Core)
+|   ├── Attributes/           # Attributes to be used on endpoints
+│   ├── Controllers/          # API endpoints
+│   ├── Dtos/                 # Data transfer objects
+│   ├── Filters/              # Filters for swagger generation 
+│   ├── Middleware/           # Middleware to run on the request pipeline
+│   └── Program.cs            # Application entry
+├── listenarr.application/    # Backend API (.NET Core)
+|   ├── Audiobooks/           # Service revolving around Audiobooks management
+│   ├── Common/             
+│   ├── Downloads/            # Download related services
+│   ├── Extensions/          
+│   ├── Interfaces/           # Defines all application interface for other layers
+│   ├── Mapping/              # Conversion between DTO and domain objects
+│   ├── Metadata/             # Services to handle metadata
+│   ├── Notification/         # Notification related services
+│   ├── Search/               # All searching related services
+│   └── Security/             # Security related services
+├── listenarr.domain/         # Defines domain model
+│   ├── Common/               # Static methods
+│   └── Models/               # Domain objects
+├── listenarr.infrastructure/ # Defines domain model
+│   ├── Adapters/             # External download client implementations
+│   ├── Extensions/           # Dpendancy injection extensions 
+│   ├── Factories/            # External download client implementations
+│   ├── Ffmpeg/               # Ffmpeg interface
+│   ├── Filesystem/           # File system manipulations
+│   ├── OpenLibrary/          # Open library interface
+│   ├── Persistence/          # Data base interface
+│   ├── Platform/             # Interface with the OS
+│   ├── Search/               # Search providers interfaces
+│   ├── Security/             # API security specificity
+│   ├── Services/             
+│   └── SignalR/              # SignalR notification interface
+├── tests/                    # Backend tests
+├── .github/                  # GitHub configuration
+├── docker-compose.yml        # Docker setup
+└── README.md                 # Main documentation
 ```
+
+The following should be kept in mind while adding or moving files:
+* **listenarr.api**: Organised by contracts
+  * DTOs
+  * Controllers
+* **listenarr.application**: Organised by features
+  * Interfaces
+  * Downloads
+  * Audiobooks
+  * ...
+* **listenarr.domain**: Organised by business logic, rules, behaviors
+  * Models/Configurations
+  * Models/Enumerations
+  * Models/Exceptions
+  * ...
+* **listenarr.infrastructure**: Organised by technology
+  * OpenLibrary
+  * Persistence
+  * SignalR
+  * ...
+
+Note: Those are general guidelines we will try to enforce during code review or discussions. The architecture is a WIP, currently, application holds most of the buisness and orchestration logic. The buisness logic should move progressively to the domain layer. Technical specifities should also be ported to the infrastructure when possible.
+
 
 ### Technology Stack
 

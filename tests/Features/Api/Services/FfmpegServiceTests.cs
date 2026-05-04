@@ -1,4 +1,5 @@
-using Listenarr.Api.Services;
+using Listenarr.Application.Interfaces;
+using Listenarr.Infrastructure.Ffmpeg;
 using Listenarr.Tests.Common;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;

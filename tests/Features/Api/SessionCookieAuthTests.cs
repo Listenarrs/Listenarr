@@ -17,7 +17,8 @@
  */
 using System.Net;
 using System.Net.Http.Headers;
-using Listenarr.Api.Services;
+using Listenarr.Application.Interfaces;
+using Listenarr.Application.Security;
 using Listenarr.Domain.Models;
 using Listenarr.Tests.Common;
 using Listenarr.Tests.Mocks;

@@ -15,67 +15,47 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using System.Net;
-using Listenarr.Api.Services;
-using Listenarr.Api.Services.Adapters;
+using Listenarr.Application.Downloads;
+using Listenarr.Application.Interfaces;
 using Listenarr.Domain.Models;
+using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
-using Microsoft.Extensions.Logging.Abstractions;
-using Moq;
+using Listenarr.Tests.Mocks.Api;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Listenarr.Tests.Features.Api.Services.Adapters
 {
-    public class SabnzbdAdapterTests
+    public class SabnzbdAdapterTests : BaseTests
     {
-        private sealed class TestHttpClientFactory : IHttpClientFactory
+        private DownloadClientConfiguration _client = null!;
+        private SabnzbdApiMock sabnzbdApiMock = null!;
+
+        public override async Task InitializeAsync()
         {
-            private readonly HttpClient _client;
+            sabnzbdApiMock = _provider.GetRequiredService<SabnzbdApiMock>();
 
-            public TestHttpClientFactory(HttpClient client)
-            {
-                _client = client;
-            }
-
-            public HttpClient CreateClient(string name) => _client;
+            _client = await _downloadClientConfigurationRepository.SaveAsync(new DownloadClientConfigurationBuilder()
+                .WithHost("http://192.168.50.111/sab")
+                .WithPort(8080)
+                .WithoutSsl()
+                .WithApiKey("secret")
+                .WithType("sabnzbd")
+                .Build());
         }
 
         [Fact]
         public async Task TestConnectionAsync_NormalizesHostWithSchemeAndPath()
         {
-            Uri? capturedUri = null;
-            using var response = new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent("""{"version":"4.4.1"}""")
-            };
-            var handler = new DelegatingHandlerMock((req, ct) =>
-            {
-                capturedUri = req.RequestUri;
-                return Task.FromResult(response);
-            });
+            var apiMock = _provider.GetRequiredService<SabnzbdApiMock>();
 
-            using var http = new HttpClient(handler);
-            var adapter = new SabnzbdAdapter(
-                new TestHttpClientFactory(http),
-                Mock.Of<IRemotePathMappingService>(),
-                Mock.Of<INzbUrlResolver>(),
-                NullLogger<SabnzbdAdapter>.Instance);
-
-            var client = new DownloadClientConfiguration
-            {
-                Host = "http://192.168.50.111/sab",
-                Port = 8080,
-                UseSSL = false,
-                Settings = new Dictionary<string, object>
-                {
-                    ["apiKey"] = "secret"
-                }
-            };
-
-            var (success, message) = await adapter.TestConnectionAsync(client);
+            var downloadClientGateway = _provider.GetRequiredService<IDownloadClientGateway>();
+            var (success, message) = await downloadClientGateway.TestConnectionAsync(_client);
 
             Assert.True(success);
             Assert.Contains("connected", message, StringComparison.OrdinalIgnoreCase);
+
+            var capturedUri = apiMock.GetLastRequest().RequestUri;
             Assert.NotNull(capturedUri);
             Assert.Equal("http", capturedUri!.Scheme);
             Assert.Equal("192.168.50.111", capturedUri.Host);
@@ -83,6 +63,130 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
             Assert.Equal("/api", capturedUri.AbsolutePath);
             Assert.Contains("mode=version", capturedUri.Query, StringComparison.Ordinal);
             Assert.Contains("output=json", capturedUri.Query, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public async Task PollSABnzbd_Queue_StringFields_UpdateProgress()
+        {
+            // Seed download (simulating a SABnzbd download record with DownloadClientId set to the NZO ID)
+            var audiobook = await CreateAudiobook();
+            var download = new Download
+            {
+                Id = "dq1",
+                Title = "William Faulkner - The Sound and the Fury",
+                Status = DownloadStatus.Queued,
+                DownloadPath = string.Empty,
+                DownloadClientId = _client.Id,
+                StartedAt = DateTime.UtcNow,
+                AudiobookId = audiobook.Id,
+                TotalSize = (long)(100 * 1024 * 1024) // 100 MB
+            };
+            download.SetClientDownloadId("SABnzbd_nzo_20f9svw_");
+            await _downloadRepository.AddAsync(download);
+
+            var monitor = _provider.GetRequiredService<DownloadMonitorService>();
+            await monitor.MonitorDownloadsAsync(CancellationToken.None);
+
+            // Verify the DB download was updated with progress ~50.5 (progress is stored as decimal)
+            var updated = await _downloadRepository.GetByIdAsync(download.Id);
+            Assert.NotNull(updated);
+            Assert.True(updated.Progress > 50 && updated.Progress < 51);
+            // downloaded size should reflect ~50.5% of 100 MB -> ~50.5 MB
+            Assert.True(updated.DownloadedSize > 50 * 1024 * 1024 && updated.DownloadedSize < 51 * 1024 * 1024);
+        }
+
+        [Fact]
+        public async Task PollSABnzbd_Mapping_StripsNumericSuffix_AndFinalizesDownload()
+        {
+            // Create a file under a directory WITHOUT the numeric suffix (this is the real local layout)
+            var source = FileService.GetTempDirectory("download");
+            var destination = FileService.GetTempDirectory("destination");
+            var sourceFile = await FileService.GetFileAsync(source, "The Sound and the Fury.m4b");
+            var basePath = Path.Join(destination, "The Sound and the Fury");
+
+            sabnzbdApiMock.contentPath = source;
+
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithBasePath(basePath)
+                .Build());
+
+            var download = await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithPath(source)
+                .WithAudiobook(audiobook)
+                .WithDownloadClientConfiguration(_client)
+                .WithDownloading(0)
+                .WithClientDownloadId(SabnzbdApiMock.COMPLETED_FILE_SABNZBD)
+                .Build());
+
+            var monitor = _provider.GetRequiredService<DownloadMonitorService>();
+            await monitor.MonitorDownloadsAsync(CancellationToken.None);
+
+            var jobs = await _downloadProcessingJobRepository.GetRecentAsync(2);
+            Assert.Single(jobs);
+            var job = jobs.First();
+            Assert.Equal(ProcessingJobStatus.Pending, job.Status);
+
+            var downloadProcessingJobProcessor = _provider.GetRequiredService<DownloadProcessingJobProcessor>();
+            await downloadProcessingJobProcessor.ProcessQueueAsync(CancellationToken.None);
+
+            job = await _downloadProcessingJobRepository.GetByIdAsync(job.Id);
+            Assert.Equal(ProcessingJobStatus.Completed, job.Status);
+
+            download = await _downloadRepository.GetByIdAsync(download.Id);
+            Assert.Equal(DownloadStatus.Moved, download.Status);
+        }
+
+        [Fact]
+        public async Task PollSABnzbd_SchedulesRetry_AndFinalizes_WhenFileArrives()
+        {
+            var sourceDirectory = FileService.GetTempDirectory("listenarr-test");
+            var destinationDirectory = FileService.GetTempDirectory("listenarr-destination");
+            var filePath = Path.Join(sourceDirectory, "The Sound and the Fury.m4b");
+
+            sabnzbdApiMock.contentPath = filePath;
+
+            // Seed download
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithBasePath(destinationDirectory)
+                .Build());
+
+            var download = await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithCompletedStatus(at: DateTime.UtcNow)
+                .WithDownloadClientConfiguration(_client)
+                .WithAudiobook(audiobook)
+                .WithPath(sourceDirectory)
+                .WithClientDownloadId(SabnzbdApiMock.COMPLETED_FILE_SABNZBD)
+                .Build());
+
+            var downloadProcessingJobService = _provider.GetRequiredService<IDownloadProcessingJobService>();
+            var jobId = await downloadProcessingJobService.EnqueueAsync(download);
+            Assert.NotNull(jobId);
+            var job = await _downloadProcessingJobRepository.GetByIdAsync(jobId);
+            Assert.NotNull(job);
+            Assert.Equal(ProcessingJobStatus.Pending, job.Status);
+
+            var downloadProcessingJobProcessor = _provider.GetRequiredService<DownloadProcessingJobProcessor>();
+            await downloadProcessingJobProcessor.ProcessQueueAsync(CancellationToken.None);
+
+            // Check job is still pending
+            job = await _downloadProcessingJobRepository.GetByIdAsync(jobId);
+            Assert.NotNull(job);
+            Assert.Equal(ProcessingJobStatus.Pending, job.Status);
+            Assert.Equal(1, job.RetryCount);
+
+            await TestUtils.CancelJobRetryWait(_downloadProcessingJobRepository, job);
+
+            // Wait a short time then create the file so the scheduled retry will find it
+            await Task.Delay(200);
+
+            var sourceFile = await FileService.GetFileAsync(sourceDirectory, "The Sound and the Fury.m4b");
+
+            await downloadProcessingJobProcessor.ProcessQueueAsync(CancellationToken.None);
+
+            // Check job is completed
+            job = await _downloadProcessingJobRepository.GetByIdAsync(jobId);
+            Assert.NotNull(job);
+            Assert.Equal(ProcessingJobStatus.Completed, job.Status);
         }
     }
 }

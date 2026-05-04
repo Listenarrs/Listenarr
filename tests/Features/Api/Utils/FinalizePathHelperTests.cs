@@ -15,10 +15,11 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Listenarr.Api.Utils;
 using Listenarr.Domain.Models;
-using Listenarr.Domain.Utils;
+using Listenarr.Domain.Common;
 using Xunit;
+using Listenarr.Domain.Models.Configurations;
+using Listenarr.Application.Common;
 
 namespace Listenarr.Tests.Features.Api.Utils
 {

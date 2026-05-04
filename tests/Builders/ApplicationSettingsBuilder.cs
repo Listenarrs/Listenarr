@@ -1,4 +1,5 @@
-using Listenarr.Domain.Models;
+using Listenarr.Domain.Models.Configurations;
+using Listenarr.Domain.Models.Enumerations;
 
 namespace Listenarr.Tests.Builders
 {
@@ -9,19 +10,19 @@ namespace Listenarr.Tests.Builders
 
         public ApplicationSettingsBuilder WithMoveFileOnCompleted()
         {
-            _applicationSettings.CompletedFileAction = "Move";
+            _applicationSettings.CompletedFileAction = FileAction.Move;
             return this;
         }
 
         public ApplicationSettingsBuilder WithCopyFileOnCompleted()
         {
-            _applicationSettings.CompletedFileAction = "Copy";
+            _applicationSettings.CompletedFileAction = FileAction.Copy;
             return this;
         }
 
         public ApplicationSettingsBuilder WithoutFileAction()
         {
-            _applicationSettings.CompletedFileAction = "None";
+            _applicationSettings.CompletedFileAction = FileAction.None;
             return this;
         }
 

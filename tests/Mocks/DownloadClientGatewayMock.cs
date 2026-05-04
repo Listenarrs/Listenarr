@@ -15,7 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using System.Text.Json;
+using Listenarr.Application.Interfaces;
 using Listenarr.Domain.Models;
 
 namespace Listenarr.Tests.Mocks
@@ -26,29 +26,9 @@ namespace Listenarr.Tests.Mocks
     /// queue/history requests so tests that register a DelegatingHandlerMock will work.
     /// For other operations it returns conservative defaults.
     /// </summary>
-    public class TestDownloadClientGateway : Listenarr.Api.Services.IDownloadClientGateway, IDisposable
+    public class DownloadClientGatewayMock : IDownloadClientGateway
     {
-        private readonly IHttpClientFactory? _httpFactory;
-        private readonly HttpClient? _httpClient;
-        private HttpClient? _ownedHttpClient;
-
-        public TestDownloadClientGateway(IHttpClientFactory? httpFactory = null, HttpClient? httpClient = null)
-        {
-            _httpFactory = httpFactory;
-            _httpClient = httpClient;
-        }
-
-        private HttpClient GetHttpClient()
-        {
-            if (_httpClient != null) return _httpClient;
-            if (_httpFactory != null) return _httpFactory.CreateClient();
-            return _ownedHttpClient ??= new HttpClient();
-        }
-
-        public void Dispose()
-        {
-            _ownedHttpClient?.Dispose();
-        }
+        public List<string> SourceFiles { get; set; } = [];
 
         public Task<(bool Success, string Message)> TestConnectionAsync(DownloadClientConfiguration client, CancellationToken ct = default)
         {
@@ -67,77 +47,29 @@ namespace Listenarr.Tests.Mocks
 
         public async Task<List<QueueItem>> GetQueueAsync(DownloadClientConfiguration client, CancellationToken ct = default)
         {
-            try
-            {
-                if (string.Equals(client.Type, "sabnzbd", StringComparison.OrdinalIgnoreCase))
-                {
-                    var http = GetHttpClient();
-                    var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/api";
-                    var url = $"{baseUrl}?mode=queue&output=json&apikey={Uri.EscapeDataString(client.Settings?.TryGetValue("apiKey", out var v) is true ? v?.ToString() ?? string.Empty : string.Empty)}";
-                    var resp = await http.GetAsync(url, ct);
-                    if (!resp.IsSuccessStatusCode) return new List<QueueItem>();
-                    var txt = await resp.Content.ReadAsStringAsync(ct);
-                    using var doc = JsonDocument.Parse(txt);
-                    var root = doc.RootElement;
-                    var items = new List<QueueItem>();
-                    if (root.TryGetProperty("queue", out var q) && q.TryGetProperty("slots", out var slots) && slots.ValueKind == JsonValueKind.Array)
-                    {
-                        foreach (var s in slots.EnumerateArray())
-                        {
-                            var id = s.TryGetProperty("nzo_id", out var idEl) ? idEl.GetString() ?? Guid.NewGuid().ToString() : Guid.NewGuid().ToString();
-                            var title = s.TryGetProperty("name", out var nameEl) ? nameEl.GetString() ?? "Unknown" : "Unknown";
-                            items.Add(new QueueItem { Id = id, Title = title, DownloadClientId = client.Id });
-                        }
-                    }
-                    return items;
-                }
-            }
-            catch (Exception ex) when (ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                // swallow and return conservative default
-            }
-
-            return new List<QueueItem>();
+            return [];
         }
 
         public async Task<List<(string Id, string Name)>> GetRecentHistoryAsync(DownloadClientConfiguration client, int limit = 100, CancellationToken ct = default)
         {
-            var outList = new List<(string Id, string Name)>();
-            try
-            {
-                if (string.Equals(client.Type, "sabnzbd", StringComparison.OrdinalIgnoreCase))
-                {
-                    var http = GetHttpClient();
-                    var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/api";
-                    var apiKey = client.Settings?.TryGetValue("apiKey", out var v) is true ? v?.ToString() ?? string.Empty : string.Empty;
-                    var url = $"{baseUrl}?mode=history&output=json&limit={limit}&apikey={Uri.EscapeDataString(apiKey)}";
-                    var resp = await http.GetAsync(url, ct);
-                    if (!resp.IsSuccessStatusCode) return outList;
-                    var txt = await resp.Content.ReadAsStringAsync(ct);
-                    using var doc = JsonDocument.Parse(txt);
-                    var root = doc.RootElement;
-                    if (root.TryGetProperty("history", out var history) && history.TryGetProperty("slots", out var slots) && slots.ValueKind == JsonValueKind.Array)
-                    {
-                        foreach (var s in slots.EnumerateArray())
-                        {
-                            var nzo = s.TryGetProperty("nzo_id", out var nzoEl) ? nzoEl.GetString() ?? string.Empty : string.Empty;
-                            var name = s.TryGetProperty("name", out var nameEl) ? nameEl.GetString() ?? string.Empty : string.Empty;
-                            outList.Add((nzo, name));
-                        }
-                    }
-                }
-            }
-            catch (Exception ex) when (ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                // ignore and return empty
-            }
-
-            return outList;
+            return [];
         }
 
         public Task<bool> MarkItemAsImportedAsync(DownloadClientConfiguration client, string downloadId, CancellationToken ct = default)
         {
             return Task.FromResult(true);
+        }
+
+        public Task<QueueItem> GetQueueItemAsync(DownloadClientConfiguration client, Download download, QueueItem queueItem, CancellationToken ct = default)
+        {
+            queueItem.SourceFiles = SourceFiles;
+
+            return Task.FromResult(queueItem);
+        }
+
+        public async Task<List<Download>> FetchDownloadsAsync(DownloadClientConfiguration client, List<Download> downloads, CancellationToken cancellationToken = default)
+        {
+            return [];
         }
     }
 }

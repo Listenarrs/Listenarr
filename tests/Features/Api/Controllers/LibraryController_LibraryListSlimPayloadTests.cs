@@ -17,17 +17,18 @@
  */
 using System.Text.Json;
 using Listenarr.Api.Controllers;
-using Listenarr.Api.Services;
-using Listenarr.Application.Repositories;
+using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Domain.Models;
-using Listenarr.Domain.Utils;
-using Listenarr.Infrastructure.Models;
+using Listenarr.Domain.Common;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
+using Listenarr.Application.Interfaces;
+using Listenarr.Infrastructure.Persistence;
+using Listenarr.Application.Common;
 
 namespace Listenarr.Tests.Features.Api.Controllers
 {

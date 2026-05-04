@@ -17,7 +17,9 @@
  */
 using System.Text.Json;
 using Listenarr.Api.Controllers;
-using Listenarr.Api.Services;
+using Listenarr.Application.Interfaces;
+using Listenarr.Application.Metadata;
+using Listenarr.Application.Search;
 using Listenarr.Domain.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -57,9 +59,9 @@ namespace Listenarr.Tests.Features.Api.Controllers
             var controller = new SearchController(mockService.Object, logger, mockAudibleService.Object, mockMetadataService.Object);
             controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
 
-            var req = new Listenarr.Api.Models.SearchRequest
+            var req = new SearchRequest
             {
-                Mode = Listenarr.Api.Models.SearchMode.Advanced,
+                Mode = SearchMode.Advanced,
                 Title = "TITLE:Project Hail Mary",
                 Language = "english"
             };

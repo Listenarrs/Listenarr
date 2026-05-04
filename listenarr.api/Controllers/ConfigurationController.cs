@@ -16,7 +16,13 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using Listenarr.Application.Interfaces;
+using Listenarr.Application.Notification;
+using Listenarr.Application.Security;
+using Listenarr.Domain.Models;
+using Listenarr.Domain.Models.Configurations;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using System.Text.Json;
 
 namespace Listenarr.Api.Controllers
@@ -29,16 +35,22 @@ namespace Listenarr.Api.Controllers
         private readonly ILogger<ConfigurationController> _logger;
         private readonly IUserService _userService;
         private readonly IHubContext<SettingsHub> _settingsHub;
-        private readonly IDownloadService _downloadService;
+        private readonly IDownloadClientGateway _downloadClientGateway;
         private readonly NotificationService _notificationService;
 
-        public ConfigurationController(IConfigurationService configurationService, ILogger<ConfigurationController> logger, IUserService userService, IHubContext<SettingsHub> settingsHub, IDownloadService downloadService, NotificationService notificationService)
+        public ConfigurationController(
+            IConfigurationService configurationService,
+            ILogger<ConfigurationController> logger,
+            IUserService userService,
+            IHubContext<SettingsHub> settingsHub,
+            IDownloadClientGateway downloadClientGateway,
+            NotificationService notificationService)
         {
             _configurationService = configurationService;
             _logger = logger;
             _userService = userService;
             _settingsHub = settingsHub;
-            _downloadService = downloadService;
+            _downloadClientGateway = downloadClientGateway;
             _notificationService = notificationService;
         }
 
@@ -366,8 +378,8 @@ namespace Listenarr.Api.Controllers
                 }
 
                 // Delegate to download service to perform protocol-specific lightweight tests
-                var (Success, Message, Client) = await _downloadService.TestDownloadClientAsync(config);
-                var clientResponse = Client;
+                var (Success, Message) = await _downloadClientGateway.TestConnectionAsync(config);
+                var clientResponse = config;
                 if (clientResponse != null && SecurityRequestUtils.ShouldRedactSecretsForCaller(HttpContext))
                 {
                     clientResponse = ApiResponseRedactor.RedactDownloadClientConfiguration(clientResponse);

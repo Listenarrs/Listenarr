@@ -29,8 +29,20 @@ namespace Listenarr.Domain.Models
         {
             get => string.IsNullOrWhiteSpace(SettingsJson)
                 ? new Dictionary<string, object>()
-                : JsonSerializer.Deserialize<Dictionary<string, object>>(SettingsJson) ?? new Dictionary<string, object>();
+                : JsonSerializer.Deserialize<Dictionary<string, object>>(SettingsJson) ?? [];
             set => SettingsJson = JsonSerializer.Serialize(value);
+        }
+
+        public int GetPollingInterval(int defaultInterval = 30)
+        {
+            if (Settings != null)
+            {
+                bool hasSetting = Settings.TryGetValue("PollingIntervalSeconds", out var interval);
+                if (hasSetting && int.TryParse(interval?.ToString() ?? string.Empty, out var custom) && custom >= 15)
+                    return custom;
+            }
+
+            return defaultInterval;
         }
     }
 }

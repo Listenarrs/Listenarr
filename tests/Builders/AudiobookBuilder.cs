@@ -57,6 +57,12 @@ namespace Listenarr.Tests.Builders
             return this;
         }
 
+        public AudiobookBuilder WithQualityProfile(QualityProfile value)
+        {
+            _audiobook.QualityProfile = value;
+            return this;
+        }
+
         public Audiobook Build()
         {
             return _audiobook;

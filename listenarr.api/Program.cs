@@ -16,10 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using Listenarr.Api.Services.Search.Filters;
-using Listenarr.Api.Services.Search.Strategies;
 using System.Net;
-using Listenarr.Infrastructure.Models;
 using Asp.Versioning;
 using Asp.Versioning.ApiExplorer;
 using Microsoft.EntityFrameworkCore;
@@ -30,8 +27,24 @@ using Serilog;
 using Serilog.Events;
 using Polly;
 using Polly.Extensions.Http;
-using Listenarr.Api.Extensions;
 using Listenarr.Infrastructure.Extensions;
+using Listenarr.Application.Interfaces;
+using Listenarr.Infrastructure.SignalR;
+using Listenarr.Application.Downloads;
+using Listenarr.Infrastructure.Persistence;
+using Listenarr.Application.Common;
+using Listenarr.Application.Search.Filters;
+using Listenarr.Application.Search;
+using Listenarr.Application.Metadata;
+using Listenarr.Application.Notification;
+using Listenarr.Application.Search.Strategies;
+using Listenarr.Infrastructure.Services;
+using Listenarr.Domain.Models.Configurations;
+using Listenarr.Application.Audiobooks;
+using Listenarr.Infrastructure.Persistence.Repositories;
+using Microsoft.AspNetCore.SignalR;
+using Listenarr.Api.Middleware;
+using Listenarr.Api.Filters;
 
 var contentRootPath = AppContext.BaseDirectory;
 var environmentName = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
@@ -320,7 +333,7 @@ builder.Services.AddScoped<AsinEnricher>();
 
 // Add fallback scraper
 // Add search result scorer
-builder.Services.AddScoped<SearchResultScorer>();
+builder.Services.AddScoped<SearchResultScorerService>();
 
 // Add ASIN search handler
 builder.Services.AddScoped<AsinSearchHandler>();
@@ -555,6 +568,9 @@ if (!disableHostedServices)
 {
     builder.Services.AddListenarrHostedServices(builder.Configuration);
 }
+
+// FIXME: Required for ConfigurationService, what was planned with this feature ?
+builder.Services.AddSingleton(new EphemeralDataProtectionProvider().CreateProtector("Listenarr.ConfigurationService.ProwlarrImport"));
 
 // Startup DB normalizer: run once at startup to idempotently normalize legacy JSON columns
 builder.Services.AddHostedService<StartupDbNormalizer>();
@@ -815,16 +831,6 @@ catch (Exception ex) when (ex is not OperationCanceledException && ex is not Out
 
 // Initialize the SignalR sink now that the hub context is available
 signalRSink.Initialize(app.Services.GetRequiredService<IHubContext<LogHub>>());
-
-// Ensure ffprobe is available on first launch (best-effort). Installation runs in background via
-// the registered hosted service so the app can serve requests immediately.
-
-// If the user passed --query-users, run the helper now that the DB is migrated and exit.
-if (args is not null && args.Contains("--query-users"))
-{
-    QueryUsersProgram.Run();
-    return;
-}
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())

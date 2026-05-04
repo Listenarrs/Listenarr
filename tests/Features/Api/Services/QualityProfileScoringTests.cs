@@ -17,13 +17,13 @@
  */
 using Xunit;
 using Moq;
-using Listenarr.Api.Services;
-using Listenarr.Application.Repositories;
+using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Domain.Models;
-using Listenarr.Infrastructure.Repositories;
+using Listenarr.Infrastructure.Persistence.Repositories;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.EntityFrameworkCore;
-using Listenarr.Infrastructure.Models;
+using Listenarr.Infrastructure.Persistence;
+using Listenarr.Application.Audiobooks;
 
 namespace Listenarr.Tests.Features.Api.Services
 {

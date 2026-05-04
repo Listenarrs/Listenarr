@@ -17,21 +17,56 @@
  */
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
-using Listenarr.Api.Services;
-using Listenarr.Domain.Models;
 using Listenarr.Tests.Common;
+using Listenarr.Application.Interfaces;
+using Listenarr.Domain.Models;
+using Listenarr.Tests.Builders;
+using Listenarr.Domain.Models.Configurations;
+using Listenarr.Domain.Models.Enumerations;
 
 namespace Listenarr.Tests.Features.Api.Services
 {
-    public class ImportServiceHardlinkTests : BaseTests
+    public class downloadImportServiceHardlinkTests : BaseTests
     {
         private string _outputRoot = "";
         private string _sourceDir = "";
+
+        private ApplicationSettings _settings = new ApplicationSettingsBuilder()
+            .WithMoveFileOnCompleted()
+            .WithoutMetadataProcessing()
+            .Build();
+
+        private DownloadClientConfiguration _client = new DownloadClientConfigurationBuilder()
+            .Build();
+
+        private Audiobook _audiobook = new AudiobookBuilder()
+            .Build();
+
+        private Download _download = new DownloadBuilder()
+            .Build();
 
         public override async Task InitializeAsync()
         {
             _outputRoot = FileService.GetTempDirectory("import-hardlink-out");
             _sourceDir = FileService.GetTempDirectory("import-hardlink-src");
+
+            _audiobook.BasePath = _outputRoot;
+
+            await InitDataAsync();
+        }
+
+        private async Task InitDataAsync()
+        {
+            _settings.OutputPath = _outputRoot;
+            await _applicationSettingsRepository.SaveAsync(_settings);
+
+            await _downloadClientConfigurationRepository.SaveAsync(_client);
+
+            await _audiobookRepository.AddAsync(_audiobook);
+
+            _download.DownloadClientId = _client.Id;
+            _download.AudiobookId = _audiobook.Id;
+            await _downloadRepository.AddAsync(_download);
         }
 
         [Fact]
@@ -41,17 +76,13 @@ namespace Listenarr.Tests.Features.Api.Services
             var file1 = Path.Join(_sourceDir, "track1.m4b");
             await File.WriteAllTextAsync(file1, "audio data");
 
-            var settings = new ApplicationSettings
-            {
-                OutputPath = _outputRoot,
-                CompletedFileAction = "Hardlink/Copy",
-                EnableMetadataProcessing = false
-            };
+            _settings.CompletedFileAction = FileAction.Copy;
+            await _applicationSettingsRepository.SaveAsync(_settings);
 
-            var importService = _provider.GetRequiredService<IImportService>();
+            var downloadImportService = _provider.GetRequiredService<IDownloadImportService>();
 
             // Act
-            var results = await importService.ImportFilesFromDirectoryAsync("dl-1", null, new[] { file1 }, settings);
+            var results = await downloadImportService.ImportDownloadFilesAsync(_audiobook, [file1]);
 
             // Assert
             Assert.True(results.Any(r => r.Success), "Import should succeed");
@@ -68,17 +99,10 @@ namespace Listenarr.Tests.Features.Api.Services
             var file1 = Path.Join(_sourceDir, "track1.m4b");
             await File.WriteAllTextAsync(file1, "audio data");
 
-            var settings = new ApplicationSettings
-            {
-                OutputPath = _outputRoot,
-                CompletedFileAction = "Move",
-                EnableMetadataProcessing = false
-            };
-
-            var importService = _provider.GetRequiredService<IImportService>();
+            var downloadImportService = _provider.GetRequiredService<IDownloadImportService>();
 
             // Act
-            var results = await importService.ImportFilesFromDirectoryAsync("dl-1", null, new[] { file1 }, settings);
+            var results = await downloadImportService.ImportDownloadFilesAsync(_audiobook, [file1]);
 
             // Assert
             Assert.True(results.Any(r => r.Success), "Import should succeed");
@@ -95,17 +119,13 @@ namespace Listenarr.Tests.Features.Api.Services
             var file1 = Path.Join(_sourceDir, "track1.m4b");
             await File.WriteAllTextAsync(file1, "audio data");
 
-            var settings = new ApplicationSettings
-            {
-                OutputPath = _outputRoot,
-                CompletedFileAction = "Copy",
-                EnableMetadataProcessing = false
-            };
+            _settings.CompletedFileAction = FileAction.Copy;
+            await _applicationSettingsRepository.SaveAsync(_settings);
 
-            var importService = _provider.GetRequiredService<IImportService>();
+            var downloadImportService = _provider.GetRequiredService<IDownloadImportService>();
 
             // Act
-            var results = await importService.ImportFilesFromDirectoryAsync("dl-1", null, new[] { file1 }, settings);
+            var results = await downloadImportService.ImportDownloadFilesAsync(_audiobook, [file1]);
 
             // Assert
             Assert.True(results.Any(r => r.Success), "Import should succeed");
@@ -122,17 +142,15 @@ namespace Listenarr.Tests.Features.Api.Services
             var sourceFile = Path.Join(_sourceDir, "audiobook.m4b");
             await File.WriteAllTextAsync(sourceFile, "single file audio");
 
-            var settings = new ApplicationSettings
-            {
-                OutputPath = _outputRoot,
-                CompletedFileAction = "Hardlink/Copy",
-                EnableMetadataProcessing = false
-            };
+            _settings.CompletedFileAction = FileAction.HardlinkCopy;
+            await _applicationSettingsRepository.SaveAsync(_settings);
 
-            var importService = _provider.GetRequiredService<IImportService>();
+            var downloadImportService = _provider.GetRequiredService<IDownloadImportService>();
 
             // Act
-            var result = await importService.ImportSingleFileAsync("dl-2", null, sourceFile, settings);
+            var results = await downloadImportService.ImportDownloadFilesAsync(_audiobook, [sourceFile]);
+            Assert.Single(results);
+            var result = results.First();
 
             // Assert
             Assert.True(result.Success, "Single file import should succeed");
@@ -147,17 +165,12 @@ namespace Listenarr.Tests.Features.Api.Services
             var sourceFile = Path.Join(_sourceDir, "audiobook.m4b");
             await File.WriteAllTextAsync(sourceFile, "single file audio");
 
-            var settings = new ApplicationSettings
-            {
-                OutputPath = _outputRoot,
-                CompletedFileAction = "Move",
-                EnableMetadataProcessing = false
-            };
-
-            var importService = _provider.GetRequiredService<IImportService>();
+            var downloadImportService = _provider.GetRequiredService<IDownloadImportService>();
 
             // Act
-            var result = await importService.ImportSingleFileAsync("dl-2", null, sourceFile, settings);
+            var results = await downloadImportService.ImportDownloadFilesAsync(_audiobook, [sourceFile]);
+            Assert.Single(results);
+            var result = results.First();
 
             // Assert
             Assert.True(result.Success, "Single file import should succeed");
@@ -176,17 +189,13 @@ namespace Listenarr.Tests.Features.Api.Services
             await File.WriteAllTextAsync(file2, "audio2");
             await File.WriteAllTextAsync(file3, "audio3");
 
-            var settings = new ApplicationSettings
-            {
-                OutputPath = _outputRoot,
-                CompletedFileAction = "Hardlink/Copy",
-                EnableMetadataProcessing = false
-            };
+            _settings.CompletedFileAction = FileAction.HardlinkCopy;
+            await _applicationSettingsRepository.SaveAsync(_settings);
 
-            var importService = _provider.GetRequiredService<IImportService>();
+            var downloadImportService = _provider.GetRequiredService<IDownloadImportService>();
 
             // Act
-            var results = await importService.ImportFilesFromDirectoryAsync("dl-3", null, new[] { file1, file2, file3 }, settings);
+            var results = await downloadImportService.ImportDownloadFilesAsync(_audiobook, [file1, file2, file3]);
 
             // Assert
             var successResults = results.Where(r => r.Success).ToList();
@@ -210,17 +219,13 @@ namespace Listenarr.Tests.Features.Api.Services
             var file1 = Path.Join(_sourceDir, "track1.m4b");
             await File.WriteAllTextAsync(file1, "audio data");
 
-            var settings = new ApplicationSettings
-            {
-                OutputPath = _outputRoot,
-                CompletedFileAction = "Hardlink/Copy",
-                EnableMetadataProcessing = false
-            };
+            _settings.CompletedFileAction = FileAction.HardlinkCopy;
+            await _applicationSettingsRepository.SaveAsync(_settings);
 
-            var importService = _provider.GetRequiredService<IImportService>();
+            var downloadImportService = _provider.GetRequiredService<IDownloadImportService>();
 
             // Act - even if hardlink fails, should fallback to copy
-            var results = await importService.ImportFilesFromDirectoryAsync("dl-4", null, new[] { file1 }, settings);
+            var results = await downloadImportService.ImportDownloadFilesAsync(_audiobook, [file1]);
 
             // Assert
             Assert.True(results.Any(r => r.Success), "Import should succeed via copy fallback");

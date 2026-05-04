@@ -35,10 +35,10 @@ namespace Listenarr.Tests.Builders
             return this;
         }
 
-        public DownloadBuilder WithCompletedStatus(DateTime value)
+        public DownloadBuilder WithCompletedStatus(DateTime at)
         {
             _download.Status = DownloadStatus.Completed;
-            _download.CompletedAt = value;
+            _download.CompletedAt = at;
             return this;
         }
 
@@ -101,6 +101,25 @@ namespace Listenarr.Tests.Builders
         public DownloadBuilder WithImportAttempts(int value)
         {
             _download.ImportAttempts = value;
+            return this;
+        }
+
+        public DownloadBuilder WithProgress(decimal value)
+        {
+            _download.Progress = value;
+            return this;
+        }
+
+        public DownloadBuilder WithDownloading(decimal value)
+        {
+            _download.Status = DownloadStatus.Downloading;
+            WithProgress(value);
+            return this;
+        }
+
+        public DownloadBuilder WithClientDownloadId(string value)
+        {
+            _download.SetClientDownloadId(value);
             return this;
         }
 

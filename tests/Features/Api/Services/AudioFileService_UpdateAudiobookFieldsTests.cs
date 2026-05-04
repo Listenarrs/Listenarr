@@ -18,70 +18,41 @@
 using Xunit;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
-using Listenarr.Api.Services;
 using Listenarr.Domain.Models;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging.Abstractions;
-using Listenarr.Api.Services.Metadata;
-using Listenarr.Infrastructure.Models;
-using Listenarr.Application.Repositories;
-using Listenarr.Infrastructure.Repositories;
+using Listenarr.Application.Interfaces;
+using Listenarr.Tests.Common;
 
 namespace Listenarr.Tests.Features.Api.Services
 {
-    public class AudioFileService_UpdateAudiobookFieldsTests
+    public class AudioFileService_UpdateAudiobookFieldsTests : BaseTests
     {
         [Fact]
         public async Task EnsureAudiobookFileAsync_PopulatesAudiobookFilePathAndSize()
         {
-            // Arrange - create in-memory db
-            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
-                .UseInMemoryDatabase(Guid.NewGuid().ToString())
-                .Options;
-
-            var db = new ListenArrDbContext(options);
-            var audiobook = new Audiobook { Title = "Test Book", Monitored = true };
-            db.Audiobooks.Add(audiobook);
-            await db.SaveChangesAsync();
-
-            // Build service provider with required services (including a mock metadata service)
-            var services = new ServiceCollection();
-            services.AddSingleton<ListenArrDbContext>(db);
-            services.AddSingleton<IAudiobookFileRepository>(_ => new EfAudiobookFileRepository(db));
-            services.AddSingleton<IAudiobookRepository>(_ => new AudiobookRepository(db));
-            services.AddSingleton<IHistoryRepository>(_ => new EfHistoryRepository(db));
-            services.AddSingleton<MetadataExtractionLimiter>();
-            services.AddMemoryCache();
             // Minimal metadata service mock so File metadata lookup doesn't throw
-            var metadataMock = new Moq.Mock<IMetadataService>();
+            var metadataMock = new Mock<IMetadataService>();
             metadataMock.Setup(m => m.ExtractFileMetadataAsync(It.IsAny<string>()))
                 .ReturnsAsync(new AudioMetadata { Title = "Test Book", Duration = TimeSpan.FromSeconds(1), Format = "m4b", BitRate = 64000, SampleRate = 44100, Channels = 2 });
-            services.AddSingleton<IMetadataService>(metadataMock.Object);
-            var provider = services.BuildServiceProvider();
-            var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
+            _services.AddSingleton(metadataMock.Object);
+            Init();
 
-            var logger = new NullLogger<AudioFileService>();
-            var memoryCache = provider.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>();
-            var limiter = provider.GetRequiredService<MetadataExtractionLimiter>();
+            var audiobook = new Audiobook { Title = "Test Book", Monitored = true };
+            await _audiobookRepository.AddAsync(audiobook);
 
-            var svc = new AudioFileService(scopeFactory, logger, memoryCache, limiter);
+            var audiobookFileService = _provider.GetRequiredService<IAudiobookFileService>();
 
             // Use temp file
-            var tempFile = System.IO.Path.Join(System.IO.Path.GetTempPath(), $"afs-test-{Guid.NewGuid()}.m4b");
-            System.IO.File.WriteAllText(tempFile, "dummy");
+            var tempFile = await FileService.GetTempFileAsync($"afs-test-{Guid.NewGuid()}.m4b");
 
             // Act
-            var created = await svc.EnsureAudiobookFileAsync(audiobook.Id, tempFile, "test");
+            var created = await audiobookFileService.EnsureAudiobookFileAsync(audiobook, tempFile, "test");
 
             // Assert
             Assert.True(created);
-            var updated = await db.Audiobooks.FindAsync(audiobook.Id);
-            Assert.NotNull(updated.FilePath);
-            Assert.True(updated.FilePath.Contains(System.IO.Path.GetFileName(tempFile)) || updated.FilePath == tempFile);
-            Assert.True(updated.FileSize > 0);
-
-            // Cleanup
-            System.IO.File.Delete(tempFile);
+            var files = await _audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id);
+            var file = files.First(f => f.Path == tempFile);
+            Assert.NotNull(file);
+            Assert.True(files.Sum(f => f.Size) > 0);
         }
     }
 }

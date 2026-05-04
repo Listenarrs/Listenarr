@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
-using Listenarr.Application.Repositories;
+using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Domain.Models;
+using Listenarr.Domain.Models.Configurations;
 using Listenarr.Tests.Builders;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -26,6 +27,7 @@ namespace Listenarr.Tests.Common
         protected IDownloadHistoryRepository _downloadHistoryRepository;
         protected IQualityProfileRepository _qualityProfileRepository;
         protected IMoveJobRepository _moveJobRepository;
+        protected IRootFolderRepository _rootFolderRepository;
 
         public BaseTests()
         {
@@ -47,7 +49,8 @@ namespace Listenarr.Tests.Common
             nameof(_indexerRepository),
             nameof(_downloadHistoryRepository),
             nameof(_qualityProfileRepository),
-            nameof(_moveJobRepository)
+            nameof(_moveJobRepository),
+            nameof(_rootFolderRepository)
         )]
         public void Init()
         {
@@ -68,6 +71,7 @@ namespace Listenarr.Tests.Common
             _downloadHistoryRepository = _provider.GetRequiredService<IDownloadHistoryRepository>();
             _qualityProfileRepository = _provider.GetRequiredService<IQualityProfileRepository>();
             _moveJobRepository = _provider.GetRequiredService<IMoveJobRepository>();
+            _rootFolderRepository = _provider.GetRequiredService<IRootFolderRepository>();
         }
 
         public virtual async Task InitializeAsync()

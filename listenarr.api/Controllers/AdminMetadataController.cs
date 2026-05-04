@@ -15,7 +15,9 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Listenarr.Api.Services.Metadata;
+using Listenarr.Application.Interfaces;
+using Listenarr.Application.Interfaces.Repositories;
+using Listenarr.Domain.Models;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Api.Controllers
@@ -23,25 +25,11 @@ namespace Listenarr.Api.Controllers
     [ApiController]
     [Route("api/v{version:apiVersion}/admin")]
     [Tags("System")]
-    public class AdminMetadataController : ControllerBase
+    public class AdminMetadataController(
+        IAudiobookFileRepository audioFiles,
+        Microsoft.AspNetCore.Antiforgery.IAntiforgery antiforgery,
+        IMetadataService metadataService) : ControllerBase
     {
-        private readonly IAudiobookFileRepository _audioFiles;
-        private readonly IAudioFileService _audioFileService;
-        private readonly IServiceScopeFactory _scopeFactory;
-        private readonly IStartupConfigService _startupConfigService;
-        private readonly Microsoft.AspNetCore.Antiforgery.IAntiforgery _antiforgery;
-        private readonly IMetadataService _metadataService;
-
-        public AdminMetadataController(IAudiobookFileRepository audioFiles, IAudioFileService audioFileService, IServiceScopeFactory scopeFactory, IStartupConfigService startupConfigService, Microsoft.AspNetCore.Antiforgery.IAntiforgery antiforgery, IMetadataService metadataService)
-        {
-            _audioFiles = audioFiles;
-            _audioFileService = audioFileService;
-            _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
-            _startupConfigService = startupConfigService;
-            _antiforgery = antiforgery;
-            _metadataService = metadataService;
-        }
-
         /// <summary>
         /// Re-extract audio metadata (duration, format, bitrate, etc.) for a single audiobook file.
         /// </summary>
@@ -55,14 +43,14 @@ namespace Listenarr.Api.Controllers
         {
             try
             {
-                await _antiforgery.ValidateRequestAsync(HttpContext);
+                await antiforgery.ValidateRequestAsync(HttpContext);
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
                 return BadRequest(new { message = "Invalid or missing CSRF token", detail = ex.Message });
             }
 
-            var file = await _audioFiles.GetByIdAsync(audiobookFileId);
+            var file = await audioFiles.GetByIdAsync(audiobookFileId);
             if (file == null)
                 return NotFound(new { message = "AudiobookFile not found" });
 
@@ -73,7 +61,7 @@ namespace Listenarr.Api.Controllers
             AudioMetadata? meta = null;
             try
             {
-                meta = await _metadataService.ExtractFileMetadataAsync(path);
+                meta = await metadataService.ExtractFileMetadataAsync(path);
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
@@ -88,7 +76,7 @@ namespace Listenarr.Api.Controllers
             file.SampleRate = meta?.SampleRate ?? file.SampleRate;
             file.Channels = meta?.Channels ?? file.Channels;
 
-            await _audioFiles.UpdateAsync(file);
+            await audioFiles.UpdateAsync(file);
 
             return Ok(new { message = "Re-extraction completed", audiobookFileId = audiobookFileId });
         }
@@ -103,21 +91,21 @@ namespace Listenarr.Api.Controllers
         {
             try
             {
-                await _antiforgery.ValidateRequestAsync(HttpContext);
+                await antiforgery.ValidateRequestAsync(HttpContext);
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
                 return BadRequest(new { message = "Invalid or missing CSRF token", detail = ex.Message });
             }
 
-            var candidates = await _audioFiles.GetMissingMetadataAsync(max);
+            var candidates = await audioFiles.GetMissingMetadataAsync(max);
 
             var updated = 0;
             foreach (var f in candidates)
             {
                 try
                 {
-                    var meta = await _metadataService.ExtractFileMetadataAsync(f.Path ?? string.Empty);
+                    var meta = await metadataService.ExtractFileMetadataAsync(f.Path ?? string.Empty);
                     if (meta != null)
                     {
                         var fi = new System.IO.FileInfo(f.Path ?? string.Empty);
@@ -127,7 +115,7 @@ namespace Listenarr.Api.Controllers
                         f.Bitrate = meta.BitRate != 0 ? meta.BitRate : f.Bitrate;
                         f.SampleRate = meta.SampleRate != 0 ? meta.SampleRate : f.SampleRate;
                         f.Channels = meta.Channels != 0 ? meta.Channels : f.Channels;
-                        await _audioFiles.UpdateAsync(f);
+                        await audioFiles.UpdateAsync(f);
                         updated++;
                     }
                 }

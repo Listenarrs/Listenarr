@@ -73,6 +73,5 @@ Tests cases should be defined using the following steps:
 
 ### Dependency Injection (DI)
 
-* FIXME: `ServiceCollectionBuilder` should define as few Mock as possible by default. Some mock are still there because updating all the tests is too tedious right now but as we move forward, we should aim to remove them.
 * Each test class is responsible for defining the mock it wants to use
 * Mandatory mocks are the ones that interfaces with external interfaces (search providers, download client adapters through, mostly, http clients, ...)

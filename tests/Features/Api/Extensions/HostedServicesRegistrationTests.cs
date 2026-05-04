@@ -19,9 +19,15 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Xunit;
-using Listenarr.Api.Extensions;
-using Listenarr.Api.Services;
-using Listenarr.Api.Services.Metadata;
+using Listenarr.Application.Downloads;
+using Listenarr.Application.Interfaces;
+using Listenarr.Application.Audiobooks;
+using Listenarr.Infrastructure.Extensions;
+using Listenarr.Infrastructure.FileSystem;
+using Listenarr.Application.Common;
+using Listenarr.Infrastructure.Ffmpeg;
+using Listenarr.Application.Metadata;
+using Listenarr.Application.Search;
 
 namespace Listenarr.Tests.Features.Api.Extensions
 {
@@ -39,10 +45,8 @@ namespace Listenarr.Tests.Features.Api.Extensions
 
             // Assert - hosted services registered
             Assert.Contains(services, d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(ScanBackgroundService));
-            Assert.Contains(services, d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(DownloadProcessingChannelConsumer));
             Assert.Contains(services, d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(MoveBackgroundService));
             Assert.Contains(services, d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(ImageCacheCleanupService));
-            Assert.Contains(services, d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(TempFileCleanupService));
             Assert.Contains(services, d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(DownloadMonitorService));
             Assert.Contains(services, d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(QueueMonitorService));
             Assert.Contains(services, d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(AutomaticSearchService));
@@ -50,11 +54,9 @@ namespace Listenarr.Tests.Features.Api.Extensions
             Assert.Contains(services, d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(SeriesMonitoringBackgroundService));
             Assert.Contains(services, d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(FfmpegInstallBackgroundService));
             Assert.Contains(services, d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(MetadataRescanService));
-            Assert.Contains(services, d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(DownloadProcessingBackgroundService));
 
             // Assert - singletons / supporting services registered
             Assert.Contains(services, d => d.ServiceType == typeof(IScanQueueService) && d.Lifetime == ServiceLifetime.Singleton);
-            Assert.Contains(services, d => d.ServiceType == typeof(DownloadProcessingChannel) && d.Lifetime == ServiceLifetime.Singleton);
             Assert.Contains(services, d => d.ServiceType == typeof(IMoveQueueService) && d.Lifetime == ServiceLifetime.Singleton);
         }
     }

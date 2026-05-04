@@ -16,6 +16,8 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Security.Claims;
+using Listenarr.Application.Interfaces;
+using Listenarr.Application.Security;
 
 namespace Listenarr.Api.Middleware
 {
@@ -28,9 +30,9 @@ namespace Listenarr.Api.Middleware
     {
         private readonly RequestDelegate _next;
         private readonly IStartupConfigService _startupConfigService;
-        private readonly Microsoft.Extensions.Logging.ILogger<ApiKeyMiddleware> _logger;
+        private readonly ILogger<ApiKeyMiddleware> _logger;
 
-        public ApiKeyMiddleware(RequestDelegate next, IStartupConfigService startupConfigService, Microsoft.Extensions.Logging.ILogger<ApiKeyMiddleware> logger)
+        public ApiKeyMiddleware(RequestDelegate next, IStartupConfigService startupConfigService, ILogger<ApiKeyMiddleware> logger)
         {
             _next = next;
             _startupConfigService = startupConfigService;

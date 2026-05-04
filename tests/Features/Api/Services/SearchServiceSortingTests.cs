@@ -16,7 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Reflection;
-using Listenarr.Api.Services;
+using Listenarr.Application.Search;
 using Listenarr.Domain.Models;
 using Xunit;
 

@@ -17,7 +17,7 @@
  */
 
 using System.ComponentModel.DataAnnotations;
-using Listenarr.Domain.Utils;
+using Listenarr.Domain.Common;
 
 namespace Listenarr.Domain.Models
 {

@@ -17,10 +17,11 @@
  */
 using System.Text.Json;
 using Listenarr.Api.Controllers;
-using Listenarr.Api.Services;
-using Listenarr.Application.Repositories;
+using Listenarr.Application.Common;
+using Listenarr.Application.Interfaces;
+using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Domain.Models;
-using Listenarr.Infrastructure.Models;
+using Listenarr.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;

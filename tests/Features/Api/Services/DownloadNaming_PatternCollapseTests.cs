@@ -17,7 +17,9 @@
  */
 using Xunit;
 using Moq;
-using Listenarr.Api.Services;
+using Listenarr.Application.Interfaces;
+using Microsoft.Extensions.Logging;
+using Listenarr.Application.Common;
 
 namespace Listenarr.Tests.Features.Api.Services
 {
@@ -27,7 +29,7 @@ namespace Listenarr.Tests.Features.Api.Services
         public void ApplyNamingPattern_CollapsesAdjacentDuplicateComponents()
         {
             // Test the FileNamingService.ApplyNamingPattern method directly
-            var loggerMock = new Mock<Microsoft.Extensions.Logging.ILogger<FileNamingService>>();
+            var loggerMock = new Mock<ILogger<FileNamingService>>();
             var configMock = new Mock<IConfigurationService>();
             var fileNamingService = new FileNamingService(configMock.Object, loggerMock.Object);
 

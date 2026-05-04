@@ -20,55 +20,47 @@ using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 using Moq;
 using Listenarr.Domain.Models;
-using Listenarr.Api.Services;
-using Listenarr.Api.Services.Metadata;
-using Listenarr.Infrastructure.Models;
-using Listenarr.Application.Repositories;
-using Listenarr.Infrastructure.Repositories;
+using Listenarr.Application.Interfaces;
+using Listenarr.Tests.Common;
+using Listenarr.Tests.Builders;
+using Listenarr.Infrastructure.Persistence;
 
 namespace Listenarr.Tests.Features.Api.Services
 {
-    public class AudioFileServiceTests
+    public class AudioFileServiceTests : BaseTests
     {
+        private Audiobook _audiobook = new AudiobookBuilder()
+            .WithTitle("Generic book")
+            .WithAuthor("Random guy")
+            .Build();
+
+        public override async Task InitializeAsync()
+        {
+            var metadataMock = new Mock<IMetadataService>();
+            metadataMock.Setup(m => m.ExtractFileMetadataAsync(It.IsAny<string>()))
+                .ReturnsAsync(new AudioMetadata { Duration = TimeSpan.FromSeconds(1234), Format = "m4b", BitRate = 64000, SampleRate = 32000, Channels = 1 });
+
+            _services.AddSingleton(metadataMock.Object);
+            Init();
+            await InitDataAsync();
+        }
+
+        private async Task InitDataAsync()
+        {
+            await _audiobookRepository.AddAsync(_audiobook);
+        }
+
         [Fact]
         public async Task EnsureAudiobookFileAsync_CreatesFileRecord_HappyPath()
         {
-            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
-                .UseInMemoryDatabase(Guid.NewGuid().ToString())
-                .Options;
-
-            var db = new ListenArrDbContext(options);
-            var book = new Audiobook { Title = "Test" };
-            db.Audiobooks.Add(book);
-            await db.SaveChangesAsync();
-
             var testFile = Path.Join(Path.GetTempPath(), $"afs-test-{Guid.NewGuid()}.m4b");
             await File.WriteAllTextAsync(testFile, "dummy");
 
-            var metadataMock = new Mock<IMetadataService>();
-            metadataMock.Setup(m => m.ExtractFileMetadataAsync(It.IsAny<string>()))
-                .ReturnsAsync(new AudioMetadata { Duration = TimeSpan.FromSeconds(1234), Format = "m4b", BitRate = 64000 });
-
-            // Build service provider with required services
-            var services = new ServiceCollection();
-            services.AddSingleton<IMetadataService>(metadataMock.Object);
-            services.AddSingleton(db);
-            services.AddSingleton<IAudiobookFileRepository>(_ => new EfAudiobookFileRepository(db));
-            services.AddSingleton<IAudiobookRepository>(_ => new AudiobookRepository(db));
-            services.AddSingleton<IHistoryRepository>(_ => new EfHistoryRepository(db));
-            services.AddSingleton<MetadataExtractionLimiter>();
-            services.AddMemoryCache();
-
-            var provider = services.BuildServiceProvider();
-            var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
-
-            var loggerMock = new Mock<Microsoft.Extensions.Logging.ILogger<AudioFileService>>();
-            var svc = new AudioFileService(scopeFactory, loggerMock.Object, provider.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>(), provider.GetRequiredService<MetadataExtractionLimiter>());
-
-            var created = await svc.EnsureAudiobookFileAsync(book.Id, testFile, "test");
+            var svc = _provider.GetRequiredService<IAudiobookFileService>();
+            var created = await svc.EnsureAudiobookFileAsync(_audiobook, testFile, "test");
             Assert.True(created);
 
-            var file = await db.AudiobookFiles.FirstOrDefaultAsync(f => f.AudiobookId == book.Id && f.Path == testFile);
+            var file = (await _audiobookFileRepository.GetByAudiobookIdAsync(_audiobook.Id)).First(f => f.Path == testFile);
             Assert.NotNull(file);
             Assert.Equal("m4b", file.Format);
         }
@@ -84,38 +76,18 @@ namespace Listenarr.Tests.Features.Api.Services
             // subclass ListenArrDbContext to override SaveChangesAsync
             var db = new ThrowingSaveChangesDbContext(options);
 
-            var metadataMock = new Mock<IMetadataService>();
-            metadataMock.Setup(m => m.ExtractFileMetadataAsync(It.IsAny<string>())).ReturnsAsync(new AudioMetadata());
+            var svc = _provider.GetRequiredService<IAudiobookFileService>();
 
-            var services = new ServiceCollection();
-            services.AddSingleton<IMetadataService>(metadataMock.Object);
-            services.AddSingleton<ListenArrDbContext>(db);
-            services.AddSingleton<MetadataExtractionLimiter>();
-            services.AddMemoryCache();
-
-            var provider = services.BuildServiceProvider();
-            var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
-
-            var loggerMock = new Mock<Microsoft.Extensions.Logging.ILogger<AudioFileService>>();
-            var svc = new AudioFileService(scopeFactory, loggerMock.Object, provider.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>(), provider.GetRequiredService<MetadataExtractionLimiter>());
-
-            var result = await svc.EnsureAudiobookFileAsync(1, "C:\\fake\\path.m4b", "test");
+            var result = await svc.EnsureAudiobookFileAsync(_audiobook, "C:\\fake\\path.m4b", "test");
             Assert.False(result);
         }
 
         [Fact]
         public async Task EnsureAudiobookFileAsync_RefusesFileOutsideAudiobookFolder_AndCreatesHistory()
         {
-            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
-                .UseInMemoryDatabase(Guid.NewGuid().ToString())
-                .Options;
-
-            var db = new ListenArrDbContext(options);
-
             // Create audiobook with a legacy FilePath in Author/BookA folder
             var bookA = new Audiobook { Title = "Book A", Authors = new System.Collections.Generic.List<string> { "Author" }, FilePath = Path.Join(Path.GetTempPath(), "Author", "BookA", "track1.m4b") };
-            db.Audiobooks.Add(bookA);
-            await db.SaveChangesAsync();
+            await _audiobookRepository.AddAsync(bookA);
 
             // Ensure the audiobook directory exists on disk for the containment check
             var bookADir = Path.GetDirectoryName(bookA.FilePath);
@@ -127,29 +99,14 @@ namespace Listenarr.Tests.Features.Api.Services
             var rejectedFile = Path.Join(rejectedDir, $"rejected-{Guid.NewGuid()}.m4b");
             await File.WriteAllTextAsync(rejectedFile, "dummy");
 
-            var metadataMock = new Mock<IMetadataService>();
-            metadataMock.Setup(m => m.ExtractFileMetadataAsync(It.IsAny<string>())).ReturnsAsync(new AudioMetadata());
-
-            var services = new ServiceCollection();
-            services.AddSingleton<IMetadataService>(metadataMock.Object);
-            services.AddSingleton<ListenArrDbContext>(db);
-            services.AddSingleton<IAudiobookFileRepository>(_ => new EfAudiobookFileRepository(db));
-            services.AddSingleton<IAudiobookRepository>(_ => new AudiobookRepository(db));
-            services.AddSingleton<IHistoryRepository>(_ => new EfHistoryRepository(db));
-            services.AddSingleton<MetadataExtractionLimiter>();
-            services.AddMemoryCache();
-
-            var provider = services.BuildServiceProvider();
-            var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
-
-            var loggerMock = new Mock<Microsoft.Extensions.Logging.ILogger<AudioFileService>>();
-            var svc = new AudioFileService(scopeFactory, loggerMock.Object, provider.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>(), provider.GetRequiredService<MetadataExtractionLimiter>());
-
-            var result = await svc.EnsureAudiobookFileAsync(bookA.Id, rejectedFile, "test-scan");
+            var svc = _provider.GetRequiredService<IAudiobookFileService>();
+            var result = await svc.EnsureAudiobookFileAsync(bookA, rejectedFile, "test-scan");
             Assert.False(result);
 
             // History entry should be created
-            var history = await db.History.FirstOrDefaultAsync(h => h.AudiobookId == bookA.Id && h.EventType == "File Association Refused");
+            var histories = await _historyRepository.GetByAudiobookIdAsync(bookA.Id);
+            Assert.NotNull(histories);
+            var history = histories.First(h => h.EventType == "File Association Refused");
             Assert.NotNull(history);
             Assert.Contains("Refused to associate file", history.Message);
         }
@@ -157,12 +114,6 @@ namespace Listenarr.Tests.Features.Api.Services
         [Fact]
         public async Task EnsureAudiobookFileAsync_AllowsFileWithinBasePath_WhenBasePathHasTrailingSeparator()
         {
-            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
-                .UseInMemoryDatabase(Guid.NewGuid().ToString())
-                .Options;
-
-            var db = new ListenArrDbContext(options);
-
             var oldDir = Path.Join(Path.GetTempPath(), "listenarr-audiofile-old", Guid.NewGuid().ToString(), "Old Folder");
             Directory.CreateDirectory(oldDir);
             var oldFile = Path.Join(oldDir, "track1.m4b");
@@ -173,128 +124,62 @@ namespace Listenarr.Tests.Features.Api.Services
             var candidateFile = Path.Join(importDir, "Jack of Shadows_ Rediscovered Classics, Book 23-14.mp3");
             await File.WriteAllTextAsync(candidateFile, "new");
 
+            var metadataMock = new Mock<IMetadataService>();
+            metadataMock.Setup(m => m.ExtractFileMetadataAsync(It.IsAny<string>()))
+                .ReturnsAsync(new AudioMetadata { Format = "mp3", BitRate = 128000 });
+            _services.AddSingleton(metadataMock.Object);
+            Init();
+            await InitDataAsync();
+
             var book = new Audiobook
             {
                 Title = "Jack of Shadows",
                 FilePath = oldFile,
                 BasePath = importDir + Path.DirectorySeparatorChar
             };
-            db.Audiobooks.Add(book);
-            await db.SaveChangesAsync();
+            await _audiobookRepository.AddAsync(book);
 
-            var metadataMock = new Mock<IMetadataService>();
-            metadataMock.Setup(m => m.ExtractFileMetadataAsync(It.IsAny<string>()))
-                .ReturnsAsync(new AudioMetadata { Format = "mp3", BitRate = 128000 });
-
-            var services = new ServiceCollection();
-            services.AddSingleton<IMetadataService>(metadataMock.Object);
-            services.AddSingleton(db);
-            services.AddSingleton<IAudiobookFileRepository>(_ => new EfAudiobookFileRepository(db));
-            services.AddSingleton<IAudiobookRepository>(_ => new AudiobookRepository(db));
-            services.AddSingleton<IHistoryRepository>(_ => new EfHistoryRepository(db));
-            services.AddSingleton<MetadataExtractionLimiter>();
-            services.AddMemoryCache();
-
-            var provider = services.BuildServiceProvider();
-            var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
-
-            var loggerMock = new Mock<Microsoft.Extensions.Logging.ILogger<AudioFileService>>();
-            var svc = new AudioFileService(
-                scopeFactory,
-                loggerMock.Object,
-                provider.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>(),
-                provider.GetRequiredService<MetadataExtractionLimiter>());
-
-            var created = await svc.EnsureAudiobookFileAsync(book.Id, candidateFile, "test-scan");
+            var svc = _provider.GetRequiredService<IAudiobookFileService>();
+            var created = await svc.EnsureAudiobookFileAsync(book, candidateFile, "test-scan");
             Assert.True(created);
 
-            var file = await db.AudiobookFiles.FirstOrDefaultAsync(f => f.AudiobookId == book.Id && f.Path == candidateFile);
+            var file = (await _audiobookFileRepository.GetByAudiobookIdAsync(book.Id)).First(f => f.Path == candidateFile);
             Assert.NotNull(file);
-            Assert.DoesNotContain(db.History, h => h.AudiobookId == book.Id && h.EventType == "File Association Refused");
+            await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+                (await _historyRepository.GetByAudiobookIdAsync(book.Id))
+                .First(h => h.EventType == "File Association Refused"));
         }
 
         [Fact]
         public async Task EnsureAudiobookFileAsync_RejectsNonAudioFile()
         {
-            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
-                .UseInMemoryDatabase(Guid.NewGuid().ToString())
-                .Options;
-
-            var db = new ListenArrDbContext(options);
-            var book = new Audiobook { Title = "Test" };
-            db.Audiobooks.Add(book);
-            await db.SaveChangesAsync();
-
-            var testFile = Path.Join(Path.GetTempPath(), $"afs-test-{Guid.NewGuid()}.jpg");
-            await File.WriteAllTextAsync(testFile, "dummy");
-
             var metadataMock = new Mock<IMetadataService>();
             metadataMock.Setup(m => m.ExtractFileMetadataAsync(It.IsAny<string>()))
                 .ReturnsAsync(new AudioMetadata { Format = "jpg" });
+            _services.AddSingleton(metadataMock.Object);
+            Init();
+            await InitDataAsync();
 
-            var services = new ServiceCollection();
-            services.AddSingleton<IMetadataService>(metadataMock.Object);
-            services.AddSingleton(db);
-            services.AddSingleton<MetadataExtractionLimiter>();
-            services.AddMemoryCache();
+            var testFile = await FileService.GetTempFileAsync($"afs-test-{Guid.NewGuid()}.jpg");
 
-            var provider = services.BuildServiceProvider();
-            var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
-
-            var loggerMock = new Mock<Microsoft.Extensions.Logging.ILogger<AudioFileService>>();
-            var svc = new AudioFileService(
-                scopeFactory,
-                loggerMock.Object,
-                provider.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>(),
-                provider.GetRequiredService<MetadataExtractionLimiter>());
-
-            var created = await svc.EnsureAudiobookFileAsync(book.Id, testFile, "test");
+            var svc = _provider.GetRequiredService<IAudiobookFileService>();
+            var created = await svc.EnsureAudiobookFileAsync(_audiobook, testFile, "test");
 
             Assert.False(created);
-            Assert.Null(await db.AudiobookFiles.FirstOrDefaultAsync(f => f.AudiobookId == book.Id && f.Path == testFile));
-
-            File.Delete(testFile);
+            await Assert.ThrowsAsync<InvalidOperationException>(async () => (await _audiobookFileRepository.GetByAudiobookIdAsync(_audiobook.Id)).First(f => f.Path == testFile));
         }
         [Fact]
         public async Task EnsureAudiobookFileAsync_PersistsMetadataFromMetadataService()
         {
-            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
-                .UseInMemoryDatabase(Guid.NewGuid().ToString())
-                .Options;
+            var testFile = await FileService.GetTempFileAsync($"meta-int-{Guid.NewGuid()}.m4b");
 
-            var db = new ListenArrDbContext(options);
-            var book = new Audiobook { Title = "IntegrationTest" };
-            db.Audiobooks.Add(book);
-            await db.SaveChangesAsync();
-
-            var testFile = Path.Join(Path.GetTempPath(), $"meta-int-{Guid.NewGuid()}.m4b");
-            await File.WriteAllTextAsync(testFile, "dummy");
-
-            var metadataMock = new Mock<IMetadataService>();
-            metadataMock.Setup(m => m.ExtractFileMetadataAsync(It.IsAny<string>()))
-                .ReturnsAsync(new AudioMetadata { Duration = TimeSpan.FromSeconds(3210), Format = "m4b", BitRate = 64000, SampleRate = 32000, Channels = 1 });
-
-            var services = new ServiceCollection();
-            services.AddSingleton<IMetadataService>(metadataMock.Object);
-            services.AddSingleton(db);
-            services.AddSingleton<IAudiobookFileRepository>(_ => new EfAudiobookFileRepository(db));
-            services.AddSingleton<IAudiobookRepository>(_ => new AudiobookRepository(db));
-            services.AddSingleton<IHistoryRepository>(_ => new EfHistoryRepository(db));
-            services.AddSingleton<MetadataExtractionLimiter>();
-            services.AddMemoryCache();
-
-            var provider = services.BuildServiceProvider();
-            var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
-
-            var loggerMock = new Mock<Microsoft.Extensions.Logging.ILogger<AudioFileService>>();
-            var svc = new AudioFileService(scopeFactory, loggerMock.Object, provider.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>(), provider.GetRequiredService<MetadataExtractionLimiter>());
-
-            var created = await svc.EnsureAudiobookFileAsync(book.Id, testFile, "test");
+            var svc = _provider.GetRequiredService<IAudiobookFileService>();
+            var created = await svc.EnsureAudiobookFileAsync(_audiobook, testFile, "test");
             Assert.True(created);
 
-            var file = await db.AudiobookFiles.FirstOrDefaultAsync(f => f.AudiobookId == book.Id && f.Path == testFile);
+            var file = (await _audiobookFileRepository.GetByAudiobookIdAsync(_audiobook.Id)).First(f => f.Path == testFile);
             Assert.NotNull(file);
-            Assert.Equal(3210, (int)file.DurationSeconds!.Value);
+            Assert.Equal(1234, (int)file.DurationSeconds!.Value);
             Assert.Equal("m4b", file.Format);
             Assert.Equal(64000, file.Bitrate);
             Assert.Equal(32000, file.SampleRate);

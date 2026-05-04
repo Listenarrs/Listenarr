@@ -9,6 +9,7 @@
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
     <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>  
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <NoWarn>$(NoWarn);1591</NoWarn>
   </PropertyGroup>
   
@@ -22,7 +23,6 @@
     <PackageReference Include="SixLabors.ImageSharp" />
     <PackageReference Include="Microsoft.Extensions.Http.Polly" />
     <PackageReference Include="Polly" />
-    <PackageReference Include="SharpCompress" />
     <PackageReference Include="TagLibSharp" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
@@ -135,8 +135,10 @@
     <ProjectReference Include="..\listenarr.application\Listenarr.Application.csproj" />
     <ProjectReference Include="..\listenarr.infrastructure\Listenarr.Infrastructure.csproj" />
   </ItemGroup>
-
   
+  <ItemGroup>
+    <InternalsVisibleTo Include="Listenarr.Tests" />
+  </ItemGroup>
   
   <Target Name="CopyToolsToPublish" AfterTargets="Publish">
     <Message Importance="high" Text="Copying tools folder from $(ToolsDir) to $(PublishDir)tools" />
