@@ -5,10 +5,15 @@ using Listenarr.Tests.Common;
 
 namespace Listenarr.Tests.Mocks
 {
-    public class FfmpegServiceMock : IFfmpegService
+    public class FfmpegServiceMock : IFfmpegService, IAsyncDisposable
     {
         private TempFileService _fileService = new();
         private string _ffprobePath = "";
+
+        public async ValueTask DisposeAsync()
+        {
+            await _fileService.DisposeAsync();
+        }
 
         public async Task<string?> EnsureFfprobeInstalledAsync()
         {

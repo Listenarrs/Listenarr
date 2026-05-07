@@ -33,11 +33,8 @@ using Polly.Extensions.Http;
 using Listenarr.Api.Extensions;
 using Listenarr.Infrastructure.Extensions;
 
-WebApplicationBuilder builder = WebApplication.CreateBuilder(new WebApplicationOptions
-{
-    Args = args,
-    ContentRootPath = AppContext.BaseDirectory
-});
+var contentRootPath = AppContext.BaseDirectory;
+var environmentName = "Production";
 
 // dotnet test hosts are typically `testhost` and may not always set
 // ASPNETCORE_ENVIRONMENT=Test; detect this explicitly to keep tests isolated.
@@ -47,10 +44,10 @@ if (string.Equals(processName, "testhost", StringComparison.OrdinalIgnoreCase) |
     !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("VSTEST_SESSION_ID")) ||
     !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DOTNET_TEST_RUNNER")))
 {
-    builder.Environment.EnvironmentName = "Test";
+    environmentName = "Test";
 }
 
-if (builder.Environment.IsEnvironment("Test"))
+if (string.Equals("Test", environmentName))
 {
     var testContentRootPath = Path.Combine(Path.GetTempPath(), "ListenarrTests");
     Directory.CreateDirectory(testContentRootPath); // Unchecked exception: Tests must fail if we cannot create that directory
@@ -72,13 +69,20 @@ if (!string.IsNullOrWhiteSpace(contentRootOverride))
             Directory.CreateDirectory(contentRootOverride);
         }
 
-        builder.Environment.ContentRootPath = contentRootOverride;
+        contentRootPath = contentRootOverride;
     }
     catch (Exception)
     {
         Console.WriteLine($"[Listenarr] Error: LISTENARR_CONTENT_ROOT '{contentRootOverride}' cannot be used or created; ignoring override.");
     }
 }
+
+WebApplicationBuilder builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args,
+    ContentRootPath = contentRootPath,
+    EnvironmentName = environmentName
+});
 
 // Configure Serilog for structured logging, file rotation and SignalR broadcasting
 var logFilePath = Path.Join(builder.Environment.ContentRootPath, "config", "logs", "listenarr-.log");
