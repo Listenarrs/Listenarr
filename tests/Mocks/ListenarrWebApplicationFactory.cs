@@ -107,13 +107,14 @@ namespace Listenarr.Tests.Mocks
         {
             if (_disposed) return;
 
+            base.Dispose(disposing);
+
             if (disposing)
             {
                 CleanupInstanceDbFiles();
             }
 
             _disposed = true;
-            base.Dispose(disposing);
         }
 
         private static void EnsureProcessExitCleanupHook()

@@ -76,6 +76,7 @@ namespace Listenarr.Tests.Common
         public virtual async Task DisposeAsync()
         {
             await FileService.DisposeAsync();
+            await _provider.DisposeAsync();
         }
 
         public async Task<ApplicationSettings> CreateApplicationSettings()

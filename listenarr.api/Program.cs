@@ -34,7 +34,17 @@ using Listenarr.Api.Extensions;
 using Listenarr.Infrastructure.Extensions;
 
 var contentRootPath = AppContext.BaseDirectory;
-var environmentName = "Production";
+var environmentName = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+
+if (string.IsNullOrEmpty(environmentName))
+{
+    environmentName = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
+}
+
+if (string.IsNullOrEmpty(environmentName))
+{
+    environmentName = "Production";
+}
 
 // dotnet test hosts are typically `testhost` and may not always set
 // ASPNETCORE_ENVIRONMENT=Test; detect this explicitly to keep tests isolated.
@@ -318,9 +328,8 @@ builder.Services.AddScoped<AsinSearchHandler>();
 // Add default HTTP client for other services
 builder.Services.AddHttpClient();
 
-// Add named HttpClient for sabnzbd
 // Prevents socket exhaustion by reusing connections
-builder.Services.AddHttpClient("sabnzbd")
+builder.Services.AddHttpClient("DownloadClient")
     .ConfigureHttpClient(client =>
     {
         client.Timeout = TimeSpan.FromSeconds(30);

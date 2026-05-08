@@ -72,7 +72,7 @@ namespace Listenarr.Tests.Builders
 
         public DownloadClientConfigurationBuilder WithSettings(string key, string value)
         {
-            _downloadClientConfiguration.Settings[key] = value;
+            _settings[key] = value;
             return this;
         }
 
