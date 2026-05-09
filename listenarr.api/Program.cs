@@ -364,12 +364,6 @@ builder.Services.AddHttpClient("DownloadClient")
             }
         ));
 
-// Bind download client definitions from configuration and expose via IOptions
-builder.Services.Configure<DownloadClientsOptions>(builder.Configuration.GetSection("DownloadClients"));
-
-// Validate download client configuration at startup, surface errors early
-builder.Services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<DownloadClientsOptions>, DownloadClientsOptionsValidator>();
-
 // Register named HttpClients for each adapter type so adapter implementations can request the appropriately-configured client.
 // qbittorrent
 builder.Services.AddHttpClient("qbittorrent")
@@ -457,11 +451,6 @@ builder.Services.AddHttpClient("nzbget")
         .CircuitBreakerAsync(3, TimeSpan.FromSeconds(30)))
     .AddPolicyHandler(HttpPolicyExtensions.HandleTransientHttpError()
         .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
-
-// Adapter factory resolution is provided by `IDownloadClientAdapterFactory`.
-
-// Register import item resolution service for V2 path resolution
-builder.Services.AddScoped<IImportItemResolutionService, ImportItemResolutionService>();
 
 // Add named HttpClient for direct downloads (DDL)
 builder.Services.AddHttpClient("DirectDownload")

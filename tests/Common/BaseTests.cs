@@ -52,6 +52,8 @@ namespace Listenarr.Tests.Common
         public void Init()
         {
             _services ??= new ServiceCollectionBuilder().Build();
+
+            _provider?.Dispose();
             _provider = _services.BuildServiceProvider();
 
             _applicationSettingsRepository = _provider.GetRequiredService<IApplicationSettingsRepository>();
