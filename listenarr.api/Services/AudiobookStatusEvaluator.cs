@@ -34,6 +34,10 @@ namespace Listenarr.Api.Services
         public const string QualityMismatch = "quality-mismatch";
         public const string QualityMatch = "quality-match";
 
+        // Bitrate rungs seeded by QualityProfileService.EnsureProfileHasRequiredQualitiesAsync.
+        // Ordered high → low so BucketBitrate returns the largest rung the file meets.
+        private static readonly int[] BitrateBuckets = { 320, 256, 192, 128, 64 };
+
         public static string ComputeStatus(
             bool isDownloading,
             bool hasAnyFile,
@@ -135,55 +139,153 @@ namespace Listenarr.Api.Services
 
         private static string DeriveQualityLabel(AudiobookFileStatusInfo? file, string? audiobookQuality)
         {
-            var normalizedAudiobookQuality = Normalize(audiobookQuality);
-            if (normalizedAudiobookQuality.Length > 0)
+            // Only trust the audiobookQuality hint if it already matches a production QP key
+            // shape (e.g. "MP3 320kbps", "AAC 64kbps", "FLAC"). Legacy values like "M4B" must
+            // fall through so we re-derive from the file's codec/container/bitrate fields and
+            // produce a label that can actually round-trip with QualityProfile.Qualities keys.
+            var hint = Normalize(audiobookQuality);
+            if (IsCodecPrefixedLabel(hint))
             {
-                return normalizedAudiobookQuality;
+                return hint;
             }
 
-            if (file?.Bitrate is int bitrate)
-            {
-                var bitrateKbps = bitrate >= 1000 ? bitrate / 1000d : bitrate;
+            var codec = DetectCodec(file);
 
-                if (bitrateKbps >= 320)
-                {
-                    return "320kbps";
-                }
-
-                if (bitrateKbps >= 256)
-                {
-                    return "256kbps";
-                }
-
-                if (bitrateKbps >= 192)
-                {
-                    return "192kbps";
-                }
-
-                return $"{Math.Round(bitrateKbps)}kbps";
-            }
-
-            var container = Normalize(file?.Container);
-            var codec = Normalize(file?.Codec);
-            if (container.Contains("flac", StringComparison.Ordinal)
-                || codec.Contains("flac", StringComparison.Ordinal)
-                || container.Contains("alac", StringComparison.Ordinal)
-                || codec.Contains("alac", StringComparison.Ordinal)
-                || container.Contains("aiff", StringComparison.Ordinal)
-                || codec.Contains("aiff", StringComparison.Ordinal)
-                || container.Contains("ape", StringComparison.Ordinal)
-                || codec.Contains("ape", StringComparison.Ordinal)
-                || container.Contains("dsd", StringComparison.Ordinal)
-                || codec.Contains("dsd", StringComparison.Ordinal)
-                || container.Contains("wv", StringComparison.Ordinal)
-                || codec.Contains("wv", StringComparison.Ordinal)
-                || container.Contains("wav", StringComparison.Ordinal)
-                || codec.Contains("wav", StringComparison.Ordinal))
+            if (IsLosslessCodec(codec))
             {
                 return "lossless";
             }
 
+            if (codec.Length > 0 && file?.Bitrate is int bitrate)
+            {
+                var bitrateKbps = bitrate >= 1000 ? bitrate / 1000d : bitrate;
+                var bucket = BucketBitrate(bitrateKbps);
+                if (bucket > 0)
+                {
+                    return $"{codec} {bucket}kbps";
+                }
+            }
+
             return Normalize(file?.Format);
+        }
+
+        private static string DetectCodec(AudiobookFileStatusInfo? file)
+        {
+            var codec = Normalize(file?.Codec);
+            var container = Normalize(file?.Container);
+            var format = Normalize(file?.Format);
+
+            if (codec.Contains("mp3", StringComparison.Ordinal)
+                || container.Contains("mp3", StringComparison.Ordinal)
+                || format == "mp3")
+            {
+                return "mp3";
+            }
+
+            if (codec.Contains("flac", StringComparison.Ordinal)
+                || container.Contains("flac", StringComparison.Ordinal)
+                || format == "flac")
+            {
+                return "flac";
+            }
+
+            if (codec.Contains("alac", StringComparison.Ordinal)
+                || container.Contains("alac", StringComparison.Ordinal))
+            {
+                return "alac";
+            }
+
+            if (codec.Contains("opus", StringComparison.Ordinal)
+                || container.Contains("opus", StringComparison.Ordinal)
+                || format == "opus")
+            {
+                return "opus";
+            }
+
+            if (codec.Contains("vorbis", StringComparison.Ordinal)
+                || container.Contains("ogg", StringComparison.Ordinal)
+                || format == "ogg")
+            {
+                return "vorbis";
+            }
+
+            if (codec.Contains("aac", StringComparison.Ordinal)
+                || codec.Contains("mp4a", StringComparison.Ordinal))
+            {
+                return "aac";
+            }
+
+            if (codec.Contains("aiff", StringComparison.Ordinal)
+                || container.Contains("aiff", StringComparison.Ordinal))
+            {
+                return "aiff";
+            }
+
+            if (codec.Contains("ape", StringComparison.Ordinal)
+                || container.Contains("ape", StringComparison.Ordinal))
+            {
+                return "ape";
+            }
+
+            if (codec.Contains("dsd", StringComparison.Ordinal)
+                || container.Contains("dsd", StringComparison.Ordinal))
+            {
+                return "dsd";
+            }
+
+            if (codec.Contains("wavpack", StringComparison.Ordinal)
+                || container == "wv")
+            {
+                return "wavpack";
+            }
+
+            if (codec.Contains("wav", StringComparison.Ordinal)
+                || container == "wav"
+                || format == "wav")
+            {
+                return "wav";
+            }
+
+            // M4B/M4A/MP4 containers carry AAC for virtually all audiobooks.
+            if (container is "m4b" or "m4a" or "mp4"
+                || format is "m4b" or "m4a" or "mp4")
+            {
+                return "aac";
+            }
+
+            return string.Empty;
+        }
+
+        private static bool IsLosslessCodec(string codec)
+        {
+            return codec is "flac" or "alac" or "wav" or "aiff" or "ape" or "dsd" or "wavpack";
+        }
+
+        private static int BucketBitrate(double bitrateKbps)
+        {
+            foreach (var bucket in BitrateBuckets)
+            {
+                if (bitrateKbps >= bucket)
+                {
+                    return bucket;
+                }
+            }
+            // Below the lowest seeded rung — map to it so we don't trigger
+            // a perpetual re-grab loop for unusually low-bitrate sources.
+            return BitrateBuckets[^1];
+        }
+
+        private static bool IsCodecPrefixedLabel(string normalizedLabel)
+        {
+            if (normalizedLabel.Length == 0)
+            {
+                return false;
+            }
+
+            return normalizedLabel.StartsWith("mp3 ", StringComparison.Ordinal)
+                || normalizedLabel.StartsWith("aac ", StringComparison.Ordinal)
+                || normalizedLabel == "mp3 vbr"
+                || normalizedLabel == "flac";
         }
 
         private static string Normalize(string? value)
