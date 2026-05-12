@@ -168,6 +168,12 @@ namespace Listenarr.Api.Controllers
         public class ScanRequest
         {
             public string? Path { get; set; }
+
+            /// <summary>
+            /// If true, re-extract metadata for already-tracked files and backfill blank
+            /// library-level fields on the audiobook record (cover, ASIN, ISBN, series, narrator, etc.).
+            /// </summary>
+            public bool ForceMetadataRefresh { get; set; }
         }
 
         /// <summary>
@@ -2427,8 +2433,56 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
+        /// Enqueue a force-metadata-refresh scan for every audiobook in the library. The worker
+        /// re-extracts file metadata and backfills blank library-level fields (cover, ASIN, ISBN,
+        /// series, narrator, etc.) without overwriting existing values. Returns the enqueued job IDs.
+        /// </summary>
+        [HttpPost("backfill-metadata")]
+        public async Task<IActionResult> BackfillMetadata()
+        {
+            if (_scanQueueService == null)
+            {
+                return StatusCode(503, new { message = "Scan queue service is unavailable" });
+            }
+
+            List<Audiobook> audiobooks;
+            try
+            {
+                audiobooks = (await _repo.GetAllAsync()).ToList();
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
+                _logger.LogError(ex, "Failed to enumerate audiobooks for metadata backfill");
+                return StatusCode(500, new { message = "Failed to enumerate audiobooks", error = ex.Message });
+            }
+
+            var enqueued = new List<object>();
+            foreach (var ab in audiobooks)
+            {
+                try
+                {
+                    // skipMissingBasePathCleanup=true keeps a single stale path from cascading
+                    // into AudiobookFile deletions during a library-wide sweep.
+                    var jobId = await _scanQueueService.EnqueueScanAsync(
+                        ab,
+                        path: null,
+                        forceMetadataRefresh: true,
+                        skipMissingBasePathCleanup: true);
+                    enqueued.Add(new { audiobookId = ab.Id, jobId });
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                {
+                    _logger.LogWarning(ex, "Failed to enqueue backfill scan for audiobook {AudiobookId}", ab.Id);
+                }
+            }
+
+            _logger.LogInformation("Enqueued {Count} metadata-backfill scan jobs across {Total} audiobooks", enqueued.Count, audiobooks.Count);
+            return Accepted(new { message = $"Enqueued {enqueued.Count} backfill jobs", total = audiobooks.Count, enqueued });
+        }
+
+        /// <summary>
         /// Scan the filesystem for files belonging to this audiobook, extract metadata (ffprobe) and persist AudiobookFile records.
-        /// Optional body: { path: "C:\\some\\folder" } to scan a specific folder instead of the configured output path.
+        /// Optional body: { path: "C:\\some\\folder", forceMetadataRefresh: true } to backfill blank audiobook fields from file tags.
         /// </summary>
         [HttpPost("{id}/scan")]
         public async Task<IActionResult> ScanAudiobookFiles(int id, [FromBody] ScanRequest? request)
@@ -2441,8 +2495,8 @@ namespace Listenarr.Api.Controllers
             {
                 try
                 {
-                    var jobId = await _scanQueueService.EnqueueScanAsync(audiobook, request?.Path);
-                    _logger.LogInformation("Enqueued scan job {JobId} for audiobook {AudiobookId}", jobId, id);
+                    var jobId = await _scanQueueService.EnqueueScanAsync(audiobook, request?.Path, request?.ForceMetadataRefresh ?? false);
+                    _logger.LogInformation("Enqueued scan job {JobId} for audiobook {AudiobookId} (forceMetadataRefresh: {Force})", jobId, id, request?.ForceMetadataRefresh ?? false);
 
                     // Broadcast initial job status via SignalR so clients can show queued state
                     try

@@ -46,13 +46,22 @@
 
       <button
         class="btn btn-primary btn-sm"
-        :disabled="!selectedFolderId || store.scanStatus === 'scanning'"
+        :disabled="!selectedFolderId || store.scanStatus === 'scanning' || isBackfilling"
         @click="startScan"
       >
-        <PhSpinner v-if="store.scanStatus === 'scanning'" class="ph-spin" :size="15" />
+        <PhSpinner v-if="store.scanStatus === 'scanning' || isBackfilling" class="ph-spin" :size="15" />
         <PhMagnifyingGlass v-else :size="15" />
         {{ store.scanStatus === 'scanning' ? 'Scanning...' : 'Scan' }}
       </button>
+
+      <label class="full-rescan-toggle" :title="'Also re-extract metadata for every existing audiobook and fill in any blank fields (cover, ASIN, series, narrator, etc.)'">
+        <input
+          v-model="fullRescanMetadata"
+          type="checkbox"
+          :disabled="store.scanStatus === 'scanning' || isBackfilling"
+        />
+        Full metadata rescan
+      </label>
 
       <span v-if="store.lastScannedAt" class="scan-meta">
         Last scanned {{ timeAgo(store.lastScannedAt) }}
@@ -238,6 +247,8 @@ import {
 } from '@/utils/libraryImportTable'
 import RootFolderFormModal from '@/components/settings/RootFolderFormModal.vue'
 import type { RootFolder } from '@/types'
+import { apiService } from '@/services/api'
+import { useToast } from '@/services/toastService'
 
 const COLUMN_WIDTH_STORAGE_KEY = 'listenarr.libraryImport.columnWidths.v1'
 const MAX_COLUMN_WIDTH = 960
@@ -253,6 +264,8 @@ const sortDirection = ref<LibraryImportSortDirection>('asc')
 const columnWidths = ref<LibraryImportColumnWidths>({ ...DEFAULT_LIBRARY_IMPORT_COLUMN_WIDTHS })
 const resizingColumn = ref<LibraryImportResizableColumnKey | null>(null)
 const addRootFolder = ref<boolean>(false)
+const fullRescanMetadata = ref<boolean>(false)
+const isBackfilling = ref<boolean>(false)
 
 const sortOptions: Array<{ value: LibraryImportSortKey; label: string }> = [
   { value: 'folder', label: 'Book' },
@@ -322,7 +335,26 @@ async function onFolderChange() {
 
 async function startScan() {
   if (!selectedFolderId.value) return
-  await store.triggerScan(selectedFolderId.value)
+
+  const scanPromise = store.triggerScan(selectedFolderId.value)
+
+  if (fullRescanMetadata.value) {
+    const toast = useToast()
+    isBackfilling.value = true
+    try {
+      const result = await apiService.backfillLibraryMetadata()
+      toast.success(
+        'Metadata backfill enqueued',
+        `Queued ${result.enqueued.length} of ${result.total} audiobooks for metadata refresh.`,
+      )
+    } catch (err) {
+      toast.error('Metadata backfill failed', err instanceof Error ? err.message : String(err))
+    } finally {
+      isBackfilling.value = false
+    }
+  }
+
+  await scanPromise
 }
 
 function timeAgo(isoString: string): string {
@@ -491,6 +523,24 @@ async function refreshRootFolders(newFolder: RootFolder) {
   gap: 0.75rem;
   margin-bottom: 1.25rem;
   flex-wrap: wrap;
+}
+
+.full-rescan-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: #ccc;
+  user-select: none;
+  cursor: pointer;
+}
+
+.full-rescan-toggle input[type='checkbox'] {
+  cursor: pointer;
+}
+
+.full-rescan-toggle input[type='checkbox']:disabled {
+  cursor: not-allowed;
 }
 
 .control-label {

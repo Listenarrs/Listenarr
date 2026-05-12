@@ -1226,6 +1226,7 @@ class ApiService {
   async scanAudiobook(
     id: number,
     path?: string,
+    forceMetadataRefresh?: boolean,
   ): Promise<{
     message: string
     scannedPath?: string
@@ -1236,7 +1237,17 @@ class ApiService {
   }> {
     return this.request(`/library/${id}/scan`, {
       method: 'POST',
-      body: JSON.stringify({ path }),
+      body: JSON.stringify({ path, forceMetadataRefresh: forceMetadataRefresh ?? false }),
+    })
+  }
+
+  async backfillLibraryMetadata(): Promise<{
+    message: string
+    total: number
+    enqueued: { audiobookId: number; jobId: string }[]
+  }> {
+    return this.request(`/library/backfill-metadata`, {
+      method: 'POST',
     })
   }
 

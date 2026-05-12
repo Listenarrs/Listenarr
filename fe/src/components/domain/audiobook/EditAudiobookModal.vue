@@ -60,10 +60,23 @@
 
           <!-- Metadata -->
           <div class="form-group">
-            <label class="form-label" for="metadata-title">
-              <PhInfo></PhInfo>
-              Metadata
-            </label>
+            <div class="metadata-header">
+              <label class="form-label" for="metadata-title">
+                <PhInfo></PhInfo>
+                Metadata
+              </label>
+              <button
+                type="button"
+                class="btn btn-secondary btn-sm fill-missing-btn"
+                :disabled="fillingMissingMetadata || !props.audiobook?.id"
+                title="Re-extract metadata from this book's files and fill in any blank fields. Existing values are preserved."
+                @click="fillMissingMetadata"
+              >
+                <PhSpinner v-if="fillingMissingMetadata" class="ph-spin" :size="14" />
+                <PhMagicWand v-else :size="14" />
+                {{ fillingMissingMetadata ? 'Refreshing...' : 'Fill missing from file' }}
+              </button>
+            </div>
             <div class="form-control-card">
               <div class="metadata-grid">
                 <div class="metadata-field metadata-field--wide">
@@ -791,6 +804,7 @@ import {
   PhTag,
   PhLink,
   PhWarning,
+  PhMagicWand,
 } from '@phosphor-icons/vue'
 import { useConfigurationStore } from '@/stores/configuration'
 import RootFolderSelect from '@/components/form/RootFolderSelect.vue'
@@ -898,6 +912,7 @@ const isHydratingForm = ref(false)
 const hasLocalEdits = ref(false)
 const resolvedAudiobook = ref<Audiobook | null>(null)
 const baselineAudiobook = computed(() => resolvedAudiobook.value ?? props.audiobook)
+const fillingMissingMetadata = ref(false)
 
 // Minimal custom path behaviour: extra helpers removed to keep UI streamlined
 
@@ -1064,6 +1079,27 @@ async function resolveAudiobookForEditing(audiobook: Audiobook): Promise<Audiobo
   } catch (error) {
     logger.debug('Failed to load full audiobook details for edit modal', error)
     return audiobook
+  }
+}
+
+async function fillMissingMetadata() {
+  const audiobook = props.audiobook
+  if (!audiobook?.id || fillingMissingMetadata.value) return
+
+  fillingMissingMetadata.value = true
+  try {
+    await apiService.scanAudiobook(audiobook.id, undefined, true)
+    toast.success(
+      'Metadata refresh enqueued',
+      'Scanning files for missing metadata. Reopen this audiobook to see the updated fields.',
+    )
+  } catch (error) {
+    toast.error(
+      'Metadata refresh failed',
+      error instanceof Error ? error.message : String(error),
+    )
+  } finally {
+    fillingMissingMetadata.value = false
   }
 }
 
@@ -2106,6 +2142,21 @@ function close() {
 .form-group {
   display: flex;
   flex-direction: column;
+}
+
+.metadata-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+}
+
+.fill-missing-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
 }
 
 .identifier-list {

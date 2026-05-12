@@ -107,6 +107,25 @@ namespace Listenarr.Api.Services
 
                             if (usedBasePath && (string.IsNullOrEmpty(scanRoot) || !Directory.Exists(scanRoot)))
                             {
+                                if (job.SkipMissingBasePathCleanup)
+                                {
+                                    _logger.LogInformation("Audiobook BasePath missing for job {JobId}: {Path}. Skipping destructive cleanup because SkipMissingBasePathCleanup is set.", job.Id, LogRedaction.SanitizeFilePath(scanRoot));
+                                    try { _queue.UpdateJobStatus(job.Id, "Completed"); }
+                                    catch (Exception swallow) when (swallow is not OperationCanceledException && swallow is not OutOfMemoryException && swallow is not StackOverflowException)
+                                    {
+                                        System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                                    }
+                                    try
+                                    {
+                                        await _hubContext.Clients.All.SendAsync("ScanJobUpdate", new { jobId = job.Id.ToString(), audiobookId = job.AudiobookId, status = "Completed", found = 0, created = 0, completedAt = DateTime.UtcNow, skippedReason = "BasePath missing" });
+                                    }
+                                    catch (Exception swallow) when (swallow is not OperationCanceledException && swallow is not OutOfMemoryException && swallow is not StackOverflowException)
+                                    {
+                                        System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                                    }
+                                    continue;
+                                }
+
                                 _logger.LogWarning("Audiobook BasePath missing for job {JobId}: {Path}. Removing tracked files.", job.Id, LogRedaction.SanitizeFilePath(scanRoot));
 
                                 try
@@ -333,8 +352,10 @@ namespace Listenarr.Api.Services
                                     using var afScope = _scopeFactory.CreateScope();
                                     var audioFileService = afScope.ServiceProvider.GetRequiredService<IAudioFileService>();
 
-                                    // Store absolute path - metadata extraction needs full path
-                                    var created = await audioFileService.EnsureAudiobookFileAsync(audiobook.Id, filePath, "scan");
+                                    // Store absolute path - metadata extraction needs full path.
+                                    // forceMetadataRefresh=true causes already-tracked files to re-run promotion
+                                    // and backfill blank audiobook fields.
+                                    var created = await audioFileService.EnsureAudiobookFileAsync(audiobook.Id, filePath, "scan", job.ForceMetadataRefresh);
                                     if (created) createdFiles++;
                                 }
                                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)

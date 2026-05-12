@@ -31,40 +31,46 @@ namespace Listenarr.Api.Services
             _logger = logger;
         }
 
-        public async Task<Guid> EnqueueScanAsync(Audiobook audiobook, string? path = null)
+        public async Task<Guid> EnqueueScanAsync(Audiobook audiobook, string? path = null, bool forceMetadataRefresh = false, bool skipMissingBasePathCleanup = false)
         {
-            // Deduplicate: if there's already a job for the same audiobook and path that is
-            // queued/processing/completed, return that job id instead of creating a duplicate.
+            // Deduplicate: if there's already a job for the same audiobook, path, and refresh
+            // mode that is queued/processing, return that job id instead of creating a duplicate.
+            // A force-refresh request must NOT dedupe against a normal scan — the caller is
+            // explicitly asking for the deeper behavior.
             try
             {
                 var existing = _jobs.Values.FirstOrDefault(j =>
                 {
                     if (j.AudiobookId != audiobook.Id) return false;
+                    if (j.ForceMetadataRefresh != forceMetadataRefresh) return false;
+                    if (j.SkipMissingBasePathCleanup != skipMissingBasePathCleanup) return false;
                     bool bothNull = j.Path == null && path == null;
                     bool bothMatch = j.Path != null && path != null && string.Equals(j.Path, path, StringComparison.OrdinalIgnoreCase);
                     return bothNull || bothMatch;
                 });
 
-                // Only dedupe when an existing job is actively queued or processing.
-                // If a previous job Completed or Failed, allow a new job to be created so
-                // explicit re-scans can be scheduled.
                 if (existing != null &&
                     (string.Equals(existing.Status, "Queued", StringComparison.OrdinalIgnoreCase) ||
                      string.Equals(existing.Status, "Processing", StringComparison.OrdinalIgnoreCase)))
                 {
-                    _logger.LogInformation("Found active scan job {JobId} for audiobook {AudiobookId} (path: {Path}) with status {Status}; deduping and returning existing job id", existing.Id, audiobook.Id, LogRedaction.SanitizeFilePath(path), existing.Status);
+                    _logger.LogInformation("Found active scan job {JobId} for audiobook {AudiobookId} (path: {Path}, forceMetadataRefresh: {Force}, skipCleanup: {Skip}) with status {Status}; deduping and returning existing job id", existing.Id, audiobook.Id, LogRedaction.SanitizeFilePath(path), forceMetadataRefresh, skipMissingBasePathCleanup, existing.Status);
                     return existing.Id;
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
-                // If dedupe check fails for any reason, fall back to enqueueing a new job
                 _logger.LogWarning(ex, "Failed while checking existing scan jobs for dedupe; will enqueue new job");
             }
 
-            var job = new ScanJob { AudiobookId = audiobook.Id, Path = path };
+            var job = new ScanJob
+            {
+                AudiobookId = audiobook.Id,
+                Path = path,
+                ForceMetadataRefresh = forceMetadataRefresh,
+                SkipMissingBasePathCleanup = skipMissingBasePathCleanup,
+            };
             _jobs[job.Id] = job;
-            _logger.LogInformation("Enqueueing scan job {JobId} for audiobook {AudiobookId} (path: {Path})", job.Id, audiobook.Id, LogRedaction.SanitizeFilePath(path));
+            _logger.LogInformation("Enqueueing scan job {JobId} for audiobook {AudiobookId} (path: {Path}, forceMetadataRefresh: {Force}, skipCleanup: {Skip})", job.Id, audiobook.Id, LogRedaction.SanitizeFilePath(path), forceMetadataRefresh, skipMissingBasePathCleanup);
             await _channel.Writer.WriteAsync(job);
             _logger.LogInformation("Scan job {JobId} written to channel", job.Id);
             return job.Id;
@@ -105,9 +111,15 @@ namespace Listenarr.Api.Services
                 return null;
             }
 
-            var newJob = new ScanJob { AudiobookId = job.AudiobookId, Path = job.Path };
+            var newJob = new ScanJob
+            {
+                AudiobookId = job.AudiobookId,
+                Path = job.Path,
+                ForceMetadataRefresh = job.ForceMetadataRefresh,
+                SkipMissingBasePathCleanup = job.SkipMissingBasePathCleanup,
+            };
             _jobs[newJob.Id] = newJob;
-            _logger.LogInformation("Requeueing scan job {OldJobId} as new job {NewJobId} for audiobook {AudiobookId}", jobId, newJob.Id, job.AudiobookId);
+            _logger.LogInformation("Requeueing scan job {OldJobId} as new job {NewJobId} for audiobook {AudiobookId} (forceMetadataRefresh: {Force})", jobId, newJob.Id, job.AudiobookId, job.ForceMetadataRefresh);
             await _channel.Writer.WriteAsync(newJob);
             return newJob.Id;
         }

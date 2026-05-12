@@ -437,6 +437,117 @@ namespace Listenarr.Tests.Features.Api.Services
             metadataMock.Verify(m => m.ExtractEmbeddedCoverAsync(It.IsAny<string>()), Times.Never);
         }
 
+        [Fact]
+        public async Task EnsureAudiobookFileAsync_ForceMetadataRefresh_PromotesBlankFieldsOnAlreadyTrackedFile()
+        {
+            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+
+            var db = new ListenArrDbContext(options);
+            var book = new Audiobook { Title = "Existing Title" };
+            db.Audiobooks.Add(book);
+            await db.SaveChangesAsync();
+
+            var testFile = Path.Join(Path.GetTempPath(), $"refresh-{Guid.NewGuid()}.m4b");
+            await File.WriteAllTextAsync(testFile, "dummy");
+
+            // Pre-register the file (simulating an already-scanned library entry).
+            db.AudiobookFiles.Add(new AudiobookFile
+            {
+                AudiobookId = book.Id,
+                Path = testFile,
+                Format = "m4b",
+                Bitrate = 64000,
+                Source = "scan",
+            });
+            await db.SaveChangesAsync();
+
+            var refreshedMeta = new AudioMetadata
+            {
+                Title = "From File",
+                AlbumArtist = "Brandon Sanderson",
+                Series = "Mistborn",
+                Asin = "B002UZHDC0",
+                Format = "m4b",
+            };
+
+            var metadataMock = new Mock<IMetadataService>();
+            metadataMock.Setup(m => m.ExtractFileMetadataAsync(It.IsAny<string>())).ReturnsAsync(refreshedMeta);
+
+            var services = new ServiceCollection();
+            services.AddSingleton<IMetadataService>(metadataMock.Object);
+            services.AddSingleton(db);
+            services.AddSingleton<IAudiobookFileRepository>(_ => new EfAudiobookFileRepository(db));
+            services.AddSingleton<IAudiobookRepository>(_ => new AudiobookRepository(db));
+            services.AddSingleton<IHistoryRepository>(_ => new EfHistoryRepository(db));
+            services.AddSingleton<MetadataExtractionLimiter>();
+            services.AddMemoryCache();
+
+            var provider = services.BuildServiceProvider();
+            var loggerMock = new Mock<Microsoft.Extensions.Logging.ILogger<AudioFileService>>();
+            var svc = new AudioFileService(provider.GetRequiredService<IServiceScopeFactory>(), loggerMock.Object,
+                provider.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>(),
+                provider.GetRequiredService<MetadataExtractionLimiter>());
+
+            var created = await svc.EnsureAudiobookFileAsync(book.Id, testFile, "force-refresh", forceMetadataRefresh: true);
+            Assert.False(created); // File already tracked — no new record.
+
+            var after = await db.Audiobooks.Include(a => a.ExternalIdentifiers).AsNoTracking()
+                .FirstAsync(a => a.Id == book.Id);
+
+            // Title was already set; not overwritten.
+            Assert.Equal("Existing Title", after.Title);
+            // Blank fields filled from tags.
+            Assert.NotNull(after.Authors);
+            Assert.Equal("Brandon Sanderson", after.Authors![0]);
+            Assert.Equal("Mistborn", after.Series);
+            Assert.Equal("B002UZHDC0", after.Asin);
+            Assert.NotNull(after.ExternalIdentifiers);
+            Assert.Contains(after.ExternalIdentifiers!, i =>
+                i.Type == AudiobookExternalIdentifierType.Asin && i.ValueNormalized == "B002UZHDC0");
+        }
+
+        [Fact]
+        public async Task EnsureAudiobookFileAsync_WithoutForceRefresh_DoesNotPromoteForExistingFile()
+        {
+            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+
+            var db = new ListenArrDbContext(options);
+            var book = new Audiobook { Title = "Existing Title" };
+            db.Audiobooks.Add(book);
+            await db.SaveChangesAsync();
+
+            var testFile = Path.Join(Path.GetTempPath(), $"norefresh-{Guid.NewGuid()}.m4b");
+            await File.WriteAllTextAsync(testFile, "dummy");
+            db.AudiobookFiles.Add(new AudiobookFile { AudiobookId = book.Id, Path = testFile, Format = "m4b" });
+            await db.SaveChangesAsync();
+
+            var metadataMock = new Mock<IMetadataService>(MockBehavior.Strict); // strict: must not be called
+
+            var services = new ServiceCollection();
+            services.AddSingleton<IMetadataService>(metadataMock.Object);
+            services.AddSingleton(db);
+            services.AddSingleton<IAudiobookFileRepository>(_ => new EfAudiobookFileRepository(db));
+            services.AddSingleton<IAudiobookRepository>(_ => new AudiobookRepository(db));
+            services.AddSingleton<IHistoryRepository>(_ => new EfHistoryRepository(db));
+            services.AddSingleton<MetadataExtractionLimiter>();
+            services.AddMemoryCache();
+
+            var provider = services.BuildServiceProvider();
+            var loggerMock = new Mock<Microsoft.Extensions.Logging.ILogger<AudioFileService>>();
+            var svc = new AudioFileService(provider.GetRequiredService<IServiceScopeFactory>(), loggerMock.Object,
+                provider.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>(),
+                provider.GetRequiredService<MetadataExtractionLimiter>());
+
+            var created = await svc.EnsureAudiobookFileAsync(book.Id, testFile, "scan", forceMetadataRefresh: false);
+
+            Assert.False(created);
+            metadataMock.VerifyNoOtherCalls();
+        }
+
         // Test helper DbContext that throws on SaveChangesAsync
         private class ThrowingSaveChangesDbContext : ListenArrDbContext
         {

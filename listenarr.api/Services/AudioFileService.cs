@@ -38,7 +38,7 @@ namespace Listenarr.Api.Services
             _limiter = limiter;
         }
 
-        public async Task<bool> EnsureAudiobookFileAsync(int audiobookId, string filePath, string? source = "scan")
+        public async Task<bool> EnsureAudiobookFileAsync(int audiobookId, string filePath, string? source = "scan", bool forceMetadataRefresh = false)
         {
             try
             {
@@ -58,7 +58,15 @@ namespace Listenarr.Api.Services
                 var exists = await fileRepository.ExistsAtPathAsync(audiobookId, filePath);
                 if (exists)
                 {
-                    _logger.LogDebug("AudiobookFile already exists for audiobook {AudiobookId} at path {Path}", audiobookId, LogRedaction.SanitizeFilePath(filePath));
+                    if (forceMetadataRefresh)
+                    {
+                        _logger.LogDebug("AudiobookFile already exists for audiobook {AudiobookId} at {Path}; re-extracting metadata for backfill", audiobookId, LogRedaction.SanitizeFilePath(filePath));
+                        await RefreshAudiobookMetadataFromFileAsync(audiobookId, filePath, scope, metadataService, audiobookRepository);
+                    }
+                    else
+                    {
+                        _logger.LogDebug("AudiobookFile already exists for audiobook {AudiobookId} at path {Path}", audiobookId, LogRedaction.SanitizeFilePath(filePath));
+                    }
                     return false;
                 }
 
@@ -300,13 +308,55 @@ namespace Listenarr.Api.Services
         }
 
         /// <summary>
+        /// Re-extracts metadata from an already-tracked file and backfills any blank library-level
+        /// fields on the parent audiobook record. Used by the force-refresh scan flow to enrich
+        /// existing books without touching their AudiobookFile rows.
+        /// </summary>
+        private async Task RefreshAudiobookMetadataFromFileAsync(
+            int audiobookId,
+            string filePath,
+            IServiceScope scope,
+            IMetadataService metadataService,
+            IAudiobookRepository audiobookRepository)
+        {
+            if (!File.Exists(filePath))
+            {
+                _logger.LogDebug("Skipping force-refresh: file missing on disk for audiobook {AudiobookId} at {Path}", audiobookId, LogRedaction.SanitizeFilePath(filePath));
+                return;
+            }
+
+            AudioMetadata? meta = null;
+            try
+            {
+                using var _ = await _limiter.Sem.LockAsync();
+                meta = await metadataService.ExtractFileMetadataAsync(filePath);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
+                _logger.LogDebug(ex, "Force-refresh: metadata extraction failed for {Path}", LogRedaction.SanitizeFilePath(filePath));
+                return;
+            }
+            if (meta == null) return;
+
+            var audiobook = await audiobookRepository.GetByIdAsync(audiobookId);
+            if (audiobook == null) return;
+
+            var mutated = await PromoteLocalMetadataAsync(audiobook, meta, scope, filePath);
+            if (mutated)
+            {
+                await audiobookRepository.UpdateAsync(audiobook);
+            }
+        }
+
+        /// <summary>
         /// Fills blank library-level fields on the audiobook record from extracted file metadata,
         /// and extracts an embedded cover into library storage when the audiobook has no image yet.
         /// Never overwrites existing non-blank fields. Audiobook is mutated in place; caller persists.
+        /// Returns true if any field was changed (caller can use this to skip a no-op UpdateAsync).
         /// </summary>
-        private async Task PromoteLocalMetadataAsync(Audiobook audiobook, AudioMetadata meta, IServiceScope scope, string filePath)
+        private async Task<bool> PromoteLocalMetadataAsync(Audiobook audiobook, AudioMetadata meta, IServiceScope scope, string filePath)
         {
-            var identifiersChanged = PromoteBlankFieldsFromMetadata(audiobook, meta);
+            var anyChange = PromoteBlankFieldsFromMetadata(audiobook, meta, out var identifiersChanged);
 
             // Cover extraction is gated on: (a) audiobook has no image yet, (b) ffprobe reported
             // an embedded picture stream. Both keep us from running TagLib# for every file in a
@@ -330,6 +380,7 @@ namespace Listenarr.Api.Services
                             if (!string.IsNullOrWhiteSpace(stored))
                             {
                                 audiobook.ImageUrl = "/" + stored;
+                                anyChange = true;
                                 _logger.LogInformation("Promoted embedded cover art to audiobook {AudiobookId} from {File}", audiobook.Id, LogRedaction.SanitizeFilePath(filePath));
                             }
                         }
@@ -345,37 +396,42 @@ namespace Listenarr.Api.Services
             {
                 AudiobookIdentifierSync.Sync(audiobook, AudiobookExternalIdentifierSource.Imported);
             }
+
+            return anyChange;
         }
 
         /// <summary>
         /// Pure-function promotion of file-tag values into blank Audiobook fields.
-        /// Returns true if any identifier-bearing field (Asin/Isbn/OpenLibraryId) was filled,
-        /// signalling the caller to re-sync <see cref="Audiobook.ExternalIdentifiers"/>.
+        /// Returns true if any field was mutated. Identifier-bearing fields surface separately
+        /// via <paramref name="identifiersChanged"/> so callers can re-sync ExternalIdentifiers.
         /// </summary>
-        internal static bool PromoteBlankFieldsFromMetadata(Audiobook audiobook, AudioMetadata meta)
+        internal static bool PromoteBlankFieldsFromMetadata(Audiobook audiobook, AudioMetadata meta) =>
+            PromoteBlankFieldsFromMetadata(audiobook, meta, out _);
+
+        internal static bool PromoteBlankFieldsFromMetadata(Audiobook audiobook, AudioMetadata meta, out bool identifiersChanged)
         {
+            identifiersChanged = false;
             if (audiobook == null || meta == null) return false;
 
-            var identifiersChanged = false;
+            var anyChange = false;
 
             if (string.IsNullOrWhiteSpace(audiobook.Title) && !string.IsNullOrWhiteSpace(meta.Title))
-                audiobook.Title = meta.Title;
+            { audiobook.Title = meta.Title; anyChange = true; }
             if (string.IsNullOrWhiteSpace(audiobook.Subtitle) && !string.IsNullOrWhiteSpace(meta.Subtitle))
-                audiobook.Subtitle = meta.Subtitle;
+            { audiobook.Subtitle = meta.Subtitle; anyChange = true; }
             if (string.IsNullOrWhiteSpace(audiobook.Series) && !string.IsNullOrWhiteSpace(meta.Series))
-                audiobook.Series = meta.Series;
+            { audiobook.Series = meta.Series; anyChange = true; }
             if (string.IsNullOrWhiteSpace(audiobook.SeriesNumber) && meta.SeriesPosition.HasValue)
-                audiobook.SeriesNumber = meta.SeriesPosition.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            { audiobook.SeriesNumber = meta.SeriesPosition.Value.ToString(System.Globalization.CultureInfo.InvariantCulture); anyChange = true; }
             if (string.IsNullOrWhiteSpace(audiobook.Publisher) && !string.IsNullOrWhiteSpace(meta.Publisher))
-                audiobook.Publisher = meta.Publisher;
+            { audiobook.Publisher = meta.Publisher; anyChange = true; }
             if (string.IsNullOrWhiteSpace(audiobook.Language) && !string.IsNullOrWhiteSpace(meta.Language))
-                audiobook.Language = meta.Language;
+            { audiobook.Language = meta.Language; anyChange = true; }
             if (string.IsNullOrWhiteSpace(audiobook.Description) && !string.IsNullOrWhiteSpace(meta.Description))
-                audiobook.Description = meta.Description;
+            { audiobook.Description = meta.Description; anyChange = true; }
             if (string.IsNullOrWhiteSpace(audiobook.PublishYear) && meta.Year.HasValue)
-                audiobook.PublishYear = meta.Year.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            { audiobook.PublishYear = meta.Year.Value.ToString(System.Globalization.CultureInfo.InvariantCulture); anyChange = true; }
 
-            // Authors: only fill from tags if currently empty AND the candidate doesn't equal the narrator.
             if ((audiobook.Authors == null || audiobook.Authors.Count == 0))
             {
                 var candidate = FirstNonEmpty(meta.AlbumArtist, meta.Artist);
@@ -383,20 +439,22 @@ namespace Listenarr.Api.Services
                     !(meta.Narrator != null && string.Equals(candidate.Trim(), meta.Narrator.Trim(), StringComparison.OrdinalIgnoreCase)))
                 {
                     audiobook.Authors = SplitListTag(candidate);
+                    anyChange = true;
                 }
             }
 
             if ((audiobook.Narrators == null || audiobook.Narrators.Count == 0) && !string.IsNullOrWhiteSpace(meta.Narrator))
             {
                 audiobook.Narrators = SplitListTag(meta.Narrator);
+                anyChange = true;
             }
 
-            // ASIN: validate via the same normalizer the identifier table uses; assign legacy field too.
             if (string.IsNullOrWhiteSpace(audiobook.Asin) && !string.IsNullOrWhiteSpace(meta.Asin) &&
                 AudiobookIdentifierNormalizer.TryNormalize(AudiobookExternalIdentifierType.Asin, meta.Asin, out var normalizedAsin, out _))
             {
                 audiobook.Asin = normalizedAsin;
                 identifiersChanged = true;
+                anyChange = true;
             }
 
             if ((audiobook.Isbn == null || audiobook.Isbn.Count == 0) && !string.IsNullOrWhiteSpace(meta.Isbn) &&
@@ -404,9 +462,10 @@ namespace Listenarr.Api.Services
             {
                 audiobook.Isbn = new List<string> { normalizedIsbn };
                 identifiersChanged = true;
+                anyChange = true;
             }
 
-            return identifiersChanged;
+            return anyChange;
         }
 
         // Splits only on unambiguous list separators. Commas are excluded because

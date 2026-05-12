@@ -487,13 +487,16 @@ namespace Listenarr.Api.Services
     {
         /// <summary>
         /// Ensure an AudiobookFile record exists for the given audiobook and file path. Extract metadata (ffprobe/taglib) and persist file-level metadata.
+        /// When <paramref name="forceMetadataRefresh"/> is true, metadata is re-extracted and library-level fields on the parent
+        /// audiobook are backfilled even if the file record already exists.
         /// Returns true if a new record was created, false if it already existed.
         /// </summary>
         /// <param name="audiobookId">The audiobook ID</param>
         /// <param name="filePath">Path to the audio file</param>
         /// <param name="source">Optional source identifier (e.g., "scan", "import")</param>
+        /// <param name="forceMetadataRefresh">If true, re-extract metadata and backfill blank audiobook fields even for already-tracked files</param>
         /// <returns>True if a new record was created, false if it already existed</returns>
-        Task<bool> EnsureAudiobookFileAsync(int audiobookId, string filePath, string? source = "scan");
+        Task<bool> EnsureAudiobookFileAsync(int audiobookId, string filePath, string? source = "scan", bool forceMetadataRefresh = false);
     }
 
     /// <summary>
