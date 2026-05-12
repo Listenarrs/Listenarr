@@ -263,6 +263,46 @@ namespace Listenarr.Api.Services.Metadata
             }
         }
 
+        public Task<(byte[]? Bytes, string? Extension)> ExtractEmbeddedCoverAsync(string filePath)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
+                    return Task.FromResult<(byte[]?, string?)>((null, null));
+
+                using var file = TagLib.File.Create(filePath);
+                var picture = file.Tag.Pictures?.FirstOrDefault(p => p.Data?.Count > 0);
+                if (picture == null) return Task.FromResult<(byte[]?, string?)>((null, null));
+
+                var ext = (picture.MimeType ?? string.Empty).ToLowerInvariant() switch
+                {
+                    "image/jpeg" or "image/jpg" => ".jpg",
+                    "image/png" => ".png",
+                    "image/webp" => ".webp",
+                    "image/gif" => ".gif",
+                    _ => InferExtensionFromMagicBytes(picture.Data.Data) ?? ".jpg"
+                };
+
+                return Task.FromResult<(byte[]?, string?)>((picture.Data.Data.ToArray(), ext));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
+                _logger.LogDebug(ex, "Could not extract embedded cover from {File}", LogRedaction.SanitizeFilePath(filePath));
+                return Task.FromResult<(byte[]?, string?)>((null, null));
+            }
+        }
+
+        private static string? InferExtensionFromMagicBytes(byte[]? bytes)
+        {
+            if (bytes == null || bytes.Length < 4) return null;
+            if (bytes[0] == 0xFF && bytes[1] == 0xD8) return ".jpg";
+            if (bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47) return ".png";
+            if (bytes.Length >= 12 && bytes[0] == 0x52 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x46
+                && bytes[8] == 0x57 && bytes[9] == 0x45 && bytes[10] == 0x42 && bytes[11] == 0x50) return ".webp";
+            if (bytes[0] == 0x47 && bytes[1] == 0x49 && bytes[2] == 0x46) return ".gif";
+            return null;
+        }
+
         private AudioMetadata? ParseAudnexusResponse(JsonElement audnexusData)
         {
             // This is a simplified parser - adapt based on actual Audnexus API response structure

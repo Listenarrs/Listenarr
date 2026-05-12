@@ -767,34 +767,58 @@ namespace Listenarr.Api.Services
                 }
             }
 
-            // Streams: look for audio stream for sample rate, channels
+            // Streams: look for audio stream for sample rate, channels; also detect embedded cover art
             if (ffprobeData.TryGetProperty("streams", out var streams) && streams.ValueKind == JsonValueKind.Array)
             {
-                foreach (var s in streams
-                    .EnumerateArray()
-                    .Where(s => s.TryGetProperty("codec_type", out var codecType) && codecType.GetString() == "audio"))
+                var audioStreamFound = false;
+                foreach (var s in streams.EnumerateArray())
                 {
-                    if (s.TryGetProperty("sample_rate", out var sr) && sr.ValueKind == JsonValueKind.String && int.TryParse(sr.GetString(), out var sampleRate))
+                    var codecType = s.TryGetProperty("codec_type", out var ctEl) && ctEl.ValueKind == JsonValueKind.String
+                        ? ctEl.GetString()
+                        : null;
+
+                    if (codecType == "audio" && !audioStreamFound)
                     {
-                        metadata.SampleRate = sampleRate;
+                        audioStreamFound = true;
+                        if (s.TryGetProperty("sample_rate", out var sr) && sr.ValueKind == JsonValueKind.String && int.TryParse(sr.GetString(), out var sampleRate))
+                        {
+                            metadata.SampleRate = sampleRate;
+                        }
+                        if (s.TryGetProperty("channels", out var ch) && ch.ValueKind == JsonValueKind.Number)
+                        {
+                            metadata.Channels = ch.GetInt32();
+                        }
+                        if (s.TryGetProperty("bit_rate", out var sbr) && sbr.ValueKind == JsonValueKind.String && int.TryParse(sbr.GetString(), out var sbit))
+                        {
+                            metadata.BitRate = metadata.BitRate == 0 ? sbit : metadata.BitRate;
+                        }
+                        if (s.TryGetProperty("codec_name", out var codecName) && codecName.ValueKind == JsonValueKind.String)
+                        {
+                            metadata.Codec = codecName.GetString();
+                        }
+                        if (s.TryGetProperty("tags", out var streamTags) && streamTags.ValueKind == JsonValueKind.Object)
+                        {
+                            ApplyTagMetadata(metadata, streamTags);
+                        }
                     }
-                    if (s.TryGetProperty("channels", out var ch) && ch.ValueKind == JsonValueKind.Number)
+                    else if (codecType == "video"
+                             && s.TryGetProperty("disposition", out var disp)
+                             && disp.ValueKind == JsonValueKind.Object
+                             && disp.TryGetProperty("attached_pic", out var ap)
+                             && ap.ValueKind == JsonValueKind.Number
+                             && ap.GetInt32() == 1)
                     {
-                        metadata.Channels = ch.GetInt32();
+                        // Record cover-art presence so callers can decide whether to extract bytes
+                        // without re-probing. Codec tells us the right extension (mjpeg → jpg).
+                        var picCodec = s.TryGetProperty("codec_name", out var pcn) && pcn.ValueKind == JsonValueKind.String
+                            ? pcn.GetString()
+                            : null;
+                        metadata.AdditionalData["AttachedPicCodec"] = picCodec ?? "mjpeg";
+                        if (s.TryGetProperty("index", out var idx) && idx.ValueKind == JsonValueKind.Number)
+                        {
+                            metadata.AdditionalData["AttachedPicStreamIndex"] = idx.GetInt32();
+                        }
                     }
-                    if (s.TryGetProperty("bit_rate", out var sbr) && sbr.ValueKind == JsonValueKind.String && int.TryParse(sbr.GetString(), out var sbit))
-                    {
-                        metadata.BitRate = metadata.BitRate == 0 ? sbit : metadata.BitRate;
-                    }
-                    if (s.TryGetProperty("codec_name", out var codecName) && codecName.ValueKind == JsonValueKind.String)
-                    {
-                        metadata.Codec = codecName.GetString();
-                    }
-                    if (s.TryGetProperty("tags", out var streamTags) && streamTags.ValueKind == JsonValueKind.Object)
-                    {
-                        ApplyTagMetadata(metadata, streamTags);
-                    }
-                    break;
                 }
             }
 
@@ -819,6 +843,112 @@ namespace Listenarr.Api.Services
             metadata.TrackNumber ??= ParseNumericTag(tags, "track", "TRACK", "tracknumber", "TRACKNUMBER");
             metadata.DiscNumber ??= ParseNumericTag(tags, "disc", "DISC", "discnumber", "DISCNUMBER");
             metadata.Year ??= ParseNumericTag(tags, "date", "DATE", "year", "YEAR");
+
+            // Library-level fields used to populate Audiobook records during scan/import.
+            if (string.IsNullOrWhiteSpace(metadata.Subtitle))
+                metadata.Subtitle = NullIfBlank(GetTag(tags, "subtitle", "SUBTITLE"));
+            if (string.IsNullOrWhiteSpace(metadata.Narrator))
+                metadata.Narrator = NullIfBlank(GetTag(tags, "composer", "COMPOSER", "narrator", "NARRATOR"));
+            if (string.IsNullOrWhiteSpace(metadata.Series))
+                metadata.Series = NullIfBlank(GetTag(tags, "SERIES", "series", "show", "SHOW"));
+            if (string.IsNullOrWhiteSpace(metadata.Publisher))
+                metadata.Publisher = NullIfBlank(GetTag(tags, "publisher", "PUBLISHER", "label", "LABEL"));
+            if (string.IsNullOrWhiteSpace(metadata.Language))
+                metadata.Language = NullIfBlank(GetTag(tags, "language", "LANGUAGE"));
+            if (string.IsNullOrWhiteSpace(metadata.Description))
+            {
+                var desc = NullIfBlank(GetTag(tags, "DESCRIPTION", "description", "comment", "COMMENT", "synopsis", "SYNOPSIS"));
+                if (desc != null && desc.Length > 2000) desc = desc[..2000];
+                metadata.Description = desc;
+            }
+
+            if (!metadata.SeriesPosition.HasValue)
+            {
+                var sp = GetTag(tags, "SERIES-PART", "series-part", "PART", "part", "movement", "MOVEMENT");
+                if (!string.IsNullOrWhiteSpace(sp))
+                {
+                    var token = sp.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault() ?? sp;
+                    if (decimal.TryParse(token, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var parsed))
+                    {
+                        metadata.SeriesPosition = parsed;
+                    }
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(metadata.Asin))
+                metadata.Asin = ExtractAsinTag(tags);
+            if (string.IsNullOrWhiteSpace(metadata.Isbn))
+                metadata.Isbn = ExtractIsbnTag(tags);
+        }
+
+        private static string? NullIfBlank(string? value) =>
+            string.IsNullOrWhiteSpace(value) ? null : value!.Trim();
+
+        private static string? ExtractAsinTag(JsonElement tags)
+        {
+            var direct = GetTag(
+                tags,
+                "ASIN", "ASIN:", "asin", "asin:",
+                "TXXX:ASIN", "TXXX:ASIN:", "TXXX/ASIN",
+                "----:com.apple.iTunes:ASIN", "----:com.apple.iTunes:ASIN:",
+                "com.apple.iTunes:ASIN", "com.apple.iTunes:ASIN:",
+                "CDEK", "CDEK:", "cdek", "cdek:",
+                "TXXX:CDEK", "TXXX:CDEK:", "TXXX/cdek",
+                "----:com.apple.iTunes:CDEK", "----:com.apple.iTunes:CDEK:",
+                "com.apple.iTunes:CDEK", "com.apple.iTunes:CDEK:",
+                "AUDIBLE_ASIN", "audible_asin", "AUDIBLE-ASIN", "audible-asin");
+            var normalized = NormalizeAsinValue(direct);
+            if (!string.IsNullOrWhiteSpace(normalized)) return normalized;
+
+            foreach (var property in tags.EnumerateObject()
+                .Where(p => (p.Name.Contains("asin", StringComparison.OrdinalIgnoreCase)
+                              || p.Name.Contains("cdek", StringComparison.OrdinalIgnoreCase))
+                            && p.Value.ValueKind == JsonValueKind.String))
+            {
+                normalized = NormalizeAsinValue(property.Value.GetString());
+                if (!string.IsNullOrWhiteSpace(normalized)) return normalized;
+            }
+            return null;
+        }
+
+        private static string? NormalizeAsinValue(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return null;
+            var match = System.Text.RegularExpressions.Regex.Match(
+                value,
+                @"\b(?:B0[A-Z0-9]{8}|[0-9][A-Z0-9]{9})\b",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            return match.Success ? match.Value.ToUpperInvariant() : null;
+        }
+
+        private static string? ExtractIsbnTag(JsonElement tags)
+        {
+            var direct = GetTag(
+                tags,
+                "ISBN", "isbn", "ISBN:", "isbn:",
+                "TXXX:ISBN", "TXXX:ISBN:", "TXXX/ISBN",
+                "----:com.apple.iTunes:ISBN", "----:com.apple.iTunes:ISBN:",
+                "com.apple.iTunes:ISBN", "com.apple.iTunes:ISBN:",
+                "ISBN13", "ISBN10", "isbn13", "isbn10");
+            var normalized = NormalizeIsbnValue(direct);
+            if (!string.IsNullOrWhiteSpace(normalized)) return normalized;
+
+            foreach (var property in tags.EnumerateObject()
+                .Where(p => p.Name.Contains("isbn", StringComparison.OrdinalIgnoreCase)
+                            && p.Value.ValueKind == JsonValueKind.String))
+            {
+                normalized = NormalizeIsbnValue(property.Value.GetString());
+                if (!string.IsNullOrWhiteSpace(normalized)) return normalized;
+            }
+            return null;
+        }
+
+        private static string? NormalizeIsbnValue(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return null;
+            var stripped = new string(value.Where(c => char.IsLetterOrDigit(c)).ToArray());
+            if (stripped.Length == 10 || stripped.Length == 13) return stripped.ToUpperInvariant();
+            return null;
         }
 
         private static string FirstNonEmpty(params string?[] candidates)

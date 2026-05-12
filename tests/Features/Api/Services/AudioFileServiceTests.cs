@@ -301,6 +301,142 @@ namespace Listenarr.Tests.Features.Api.Services
             Assert.Equal(1, file.Channels);
         }
 
+        [Fact]
+        public async Task EnsureAudiobookFileAsync_PromotesBlankFieldsAndCover_OnFirstFileOnly()
+        {
+            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+
+            var db = new ListenArrDbContext(options);
+            var book = new Audiobook { Title = "Untitled" }; // blank Authors/Series/etc.
+            db.Audiobooks.Add(book);
+            await db.SaveChangesAsync();
+
+            var metaWithCover = new AudioMetadata
+            {
+                Title = "Mistborn",
+                AlbumArtist = "Brandon Sanderson",
+                Series = "Mistborn",
+                Asin = "B002UZHDC0",
+                Format = "m4b",
+            };
+            metaWithCover.AdditionalData["AttachedPicCodec"] = "mjpeg";
+
+            var metadataMock = new Mock<IMetadataService>();
+            metadataMock.Setup(m => m.ExtractFileMetadataAsync(It.IsAny<string>())).ReturnsAsync(metaWithCover);
+            metadataMock.Setup(m => m.ExtractEmbeddedCoverAsync(It.IsAny<string>()))
+                .ReturnsAsync((new byte[] { 0xFF, 0xD8, 0xFF, 0xE0 }, ".jpg"));
+
+            var imageCacheMock = new Mock<IImageCacheService>();
+            imageCacheMock.Setup(s => s.StoreLibraryImageBytesAsync(It.IsAny<string>(), It.IsAny<byte[]>(), It.IsAny<string>()))
+                .ReturnsAsync("config/cache/images/library/B002UZHDC0.jpg");
+
+            var services = new ServiceCollection();
+            services.AddSingleton<IMetadataService>(metadataMock.Object);
+            services.AddSingleton<IImageCacheService>(imageCacheMock.Object);
+            services.AddSingleton(db);
+            services.AddSingleton<IAudiobookFileRepository>(_ => new EfAudiobookFileRepository(db));
+            services.AddSingleton<IAudiobookRepository>(_ => new AudiobookRepository(db));
+            services.AddSingleton<IHistoryRepository>(_ => new EfHistoryRepository(db));
+            services.AddSingleton<MetadataExtractionLimiter>();
+            services.AddMemoryCache();
+
+            var provider = services.BuildServiceProvider();
+            var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
+            var loggerMock = new Mock<Microsoft.Extensions.Logging.ILogger<AudioFileService>>();
+            var svc = new AudioFileService(scopeFactory, loggerMock.Object,
+                provider.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>(),
+                provider.GetRequiredService<MetadataExtractionLimiter>());
+
+            var firstFile = Path.Join(Path.GetTempPath(), $"part1-{Guid.NewGuid()}.m4b");
+            var secondFile = Path.Join(Path.GetTempPath(), $"part2-{Guid.NewGuid()}.m4b");
+            await File.WriteAllTextAsync(firstFile, "dummy");
+            await File.WriteAllTextAsync(secondFile, "dummy");
+
+            var firstCreated = await svc.EnsureAudiobookFileAsync(book.Id, firstFile, "test");
+            Assert.True(firstCreated);
+
+            var afterFirst = await db.Audiobooks.Include(a => a.ExternalIdentifiers).AsNoTracking()
+                .FirstAsync(a => a.Id == book.Id);
+            Assert.Equal("Brandon Sanderson", afterFirst.Authors![0]);
+            Assert.Equal("Mistborn", afterFirst.Series);
+            Assert.Equal("B002UZHDC0", afterFirst.Asin);
+            Assert.Equal("/config/cache/images/library/B002UZHDC0.jpg", afterFirst.ImageUrl);
+            Assert.NotNull(afterFirst.ExternalIdentifiers);
+            Assert.Contains(afterFirst.ExternalIdentifiers!, i =>
+                i.Type == AudiobookExternalIdentifierType.Asin && i.ValueNormalized == "B002UZHDC0");
+
+            // Second file in the same multi-file book: cover already populated → no second extract.
+            var secondCreated = await svc.EnsureAudiobookFileAsync(book.Id, secondFile, "test");
+            Assert.True(secondCreated);
+
+            metadataMock.Verify(m => m.ExtractEmbeddedCoverAsync(It.IsAny<string>()), Times.Once);
+            imageCacheMock.Verify(s => s.StoreLibraryImageBytesAsync(It.IsAny<string>(), It.IsAny<byte[]>(), It.IsAny<string>()), Times.Once);
+        }
+
+        [Fact]
+        public async Task EnsureAudiobookFileAsync_DoesNotOverwriteExistingAudiobookFields()
+        {
+            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+
+            var db = new ListenArrDbContext(options);
+            var book = new Audiobook
+            {
+                Title = "Curated Title",
+                Authors = new List<string> { "Curated Author" },
+                Asin = "B0EXISTING",
+                ImageUrl = "/cache/existing.jpg",
+            };
+            db.Audiobooks.Add(book);
+            await db.SaveChangesAsync();
+
+            var meta = new AudioMetadata
+            {
+                Title = "Tag Title",
+                AlbumArtist = "Tag Author",
+                Asin = "B0FROMTAGX",
+                Format = "m4b",
+            };
+            meta.AdditionalData["AttachedPicCodec"] = "mjpeg";
+
+            var metadataMock = new Mock<IMetadataService>();
+            metadataMock.Setup(m => m.ExtractFileMetadataAsync(It.IsAny<string>())).ReturnsAsync(meta);
+
+            var imageCacheMock = new Mock<IImageCacheService>(MockBehavior.Strict);
+            // No setup: any call to StoreLibraryImageBytesAsync would fail the test.
+
+            var services = new ServiceCollection();
+            services.AddSingleton<IMetadataService>(metadataMock.Object);
+            services.AddSingleton<IImageCacheService>(imageCacheMock.Object);
+            services.AddSingleton(db);
+            services.AddSingleton<IAudiobookFileRepository>(_ => new EfAudiobookFileRepository(db));
+            services.AddSingleton<IAudiobookRepository>(_ => new AudiobookRepository(db));
+            services.AddSingleton<IHistoryRepository>(_ => new EfHistoryRepository(db));
+            services.AddSingleton<MetadataExtractionLimiter>();
+            services.AddMemoryCache();
+
+            var provider = services.BuildServiceProvider();
+            var loggerMock = new Mock<Microsoft.Extensions.Logging.ILogger<AudioFileService>>();
+            var svc = new AudioFileService(provider.GetRequiredService<IServiceScopeFactory>(), loggerMock.Object,
+                provider.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>(),
+                provider.GetRequiredService<MetadataExtractionLimiter>());
+
+            var testFile = Path.Join(Path.GetTempPath(), $"overwrite-{Guid.NewGuid()}.m4b");
+            await File.WriteAllTextAsync(testFile, "dummy");
+
+            await svc.EnsureAudiobookFileAsync(book.Id, testFile, "test");
+
+            var after = await db.Audiobooks.AsNoTracking().FirstAsync(a => a.Id == book.Id);
+            Assert.Equal("Curated Title", after.Title);
+            Assert.Equal("Curated Author", after.Authors![0]);
+            Assert.Equal("B0EXISTING", after.Asin);
+            Assert.Equal("/cache/existing.jpg", after.ImageUrl);
+            metadataMock.Verify(m => m.ExtractEmbeddedCoverAsync(It.IsAny<string>()), Times.Never);
+        }
+
         // Test helper DbContext that throws on SaveChangesAsync
         private class ThrowingSaveChangesDbContext : ListenArrDbContext
         {

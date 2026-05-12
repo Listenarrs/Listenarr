@@ -253,6 +253,12 @@ namespace Listenarr.Api.Services
                                 {
                                     audiobookToUpdate.FilePath = fileRecord.Path;
                                     audiobookToUpdate.FileSize = fileRecord.Size;
+
+                                    if (meta != null)
+                                    {
+                                        await PromoteLocalMetadataAsync(audiobookToUpdate, meta, scope, filePath);
+                                    }
+
                                     await audiobookRepository.UpdateAsync(audiobookToUpdate);
                                 }
                             }
@@ -291,6 +297,129 @@ namespace Listenarr.Api.Services
                 _logger.LogWarning(ex, "Failed to create AudiobookFile record for audiobook {AudiobookId} at {Path}", audiobookId, LogRedaction.SanitizeFilePath(filePath));
                 return false;
             }
+        }
+
+        /// <summary>
+        /// Fills blank library-level fields on the audiobook record from extracted file metadata,
+        /// and extracts an embedded cover into library storage when the audiobook has no image yet.
+        /// Never overwrites existing non-blank fields. Audiobook is mutated in place; caller persists.
+        /// </summary>
+        private async Task PromoteLocalMetadataAsync(Audiobook audiobook, AudioMetadata meta, IServiceScope scope, string filePath)
+        {
+            var identifiersChanged = PromoteBlankFieldsFromMetadata(audiobook, meta);
+
+            // Cover extraction is gated on: (a) audiobook has no image yet, (b) ffprobe reported
+            // an embedded picture stream. Both keep us from running TagLib# for every file in a
+            // multi-file book once the cover has been pulled from the first one.
+            var hasAttachedPic = meta.AdditionalData != null && meta.AdditionalData.ContainsKey("AttachedPicCodec");
+            if (string.IsNullOrWhiteSpace(audiobook.ImageUrl) && hasAttachedPic)
+            {
+                try
+                {
+                    var metadataService = scope.ServiceProvider.GetRequiredService<IMetadataService>();
+                    var imageCache = scope.ServiceProvider.GetService<IImageCacheService>();
+                    if (imageCache != null)
+                    {
+                        var (bytes, ext) = await metadataService.ExtractEmbeddedCoverAsync(filePath);
+                        if (bytes != null && bytes.Length > 0)
+                        {
+                            var identifier = !string.IsNullOrWhiteSpace(audiobook.Asin)
+                                ? audiobook.Asin!
+                                : "audiobook-" + audiobook.Id;
+                            var stored = await imageCache.StoreLibraryImageBytesAsync(identifier, bytes, ext ?? ".jpg");
+                            if (!string.IsNullOrWhiteSpace(stored))
+                            {
+                                audiobook.ImageUrl = "/" + stored;
+                                _logger.LogInformation("Promoted embedded cover art to audiobook {AudiobookId} from {File}", audiobook.Id, LogRedaction.SanitizeFilePath(filePath));
+                            }
+                        }
+                    }
+                }
+                catch (Exception coverEx) when (coverEx is not OperationCanceledException && coverEx is not OutOfMemoryException && coverEx is not StackOverflowException)
+                {
+                    _logger.LogDebug(coverEx, "Embedded cover promotion failed for audiobook {AudiobookId} file {File}", audiobook.Id, LogRedaction.SanitizeFilePath(filePath));
+                }
+            }
+
+            if (identifiersChanged)
+            {
+                AudiobookIdentifierSync.Sync(audiobook, AudiobookExternalIdentifierSource.Imported);
+            }
+        }
+
+        /// <summary>
+        /// Pure-function promotion of file-tag values into blank Audiobook fields.
+        /// Returns true if any identifier-bearing field (Asin/Isbn/OpenLibraryId) was filled,
+        /// signalling the caller to re-sync <see cref="Audiobook.ExternalIdentifiers"/>.
+        /// </summary>
+        internal static bool PromoteBlankFieldsFromMetadata(Audiobook audiobook, AudioMetadata meta)
+        {
+            if (audiobook == null || meta == null) return false;
+
+            var identifiersChanged = false;
+
+            if (string.IsNullOrWhiteSpace(audiobook.Title) && !string.IsNullOrWhiteSpace(meta.Title))
+                audiobook.Title = meta.Title;
+            if (string.IsNullOrWhiteSpace(audiobook.Subtitle) && !string.IsNullOrWhiteSpace(meta.Subtitle))
+                audiobook.Subtitle = meta.Subtitle;
+            if (string.IsNullOrWhiteSpace(audiobook.Series) && !string.IsNullOrWhiteSpace(meta.Series))
+                audiobook.Series = meta.Series;
+            if (string.IsNullOrWhiteSpace(audiobook.SeriesNumber) && meta.SeriesPosition.HasValue)
+                audiobook.SeriesNumber = meta.SeriesPosition.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (string.IsNullOrWhiteSpace(audiobook.Publisher) && !string.IsNullOrWhiteSpace(meta.Publisher))
+                audiobook.Publisher = meta.Publisher;
+            if (string.IsNullOrWhiteSpace(audiobook.Language) && !string.IsNullOrWhiteSpace(meta.Language))
+                audiobook.Language = meta.Language;
+            if (string.IsNullOrWhiteSpace(audiobook.Description) && !string.IsNullOrWhiteSpace(meta.Description))
+                audiobook.Description = meta.Description;
+            if (string.IsNullOrWhiteSpace(audiobook.PublishYear) && meta.Year.HasValue)
+                audiobook.PublishYear = meta.Year.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+            // Authors: only fill from tags if currently empty AND the candidate doesn't equal the narrator.
+            if ((audiobook.Authors == null || audiobook.Authors.Count == 0))
+            {
+                var candidate = FirstNonEmpty(meta.AlbumArtist, meta.Artist);
+                if (!string.IsNullOrWhiteSpace(candidate) &&
+                    !(meta.Narrator != null && string.Equals(candidate.Trim(), meta.Narrator.Trim(), StringComparison.OrdinalIgnoreCase)))
+                {
+                    audiobook.Authors = SplitListTag(candidate);
+                }
+            }
+
+            if ((audiobook.Narrators == null || audiobook.Narrators.Count == 0) && !string.IsNullOrWhiteSpace(meta.Narrator))
+            {
+                audiobook.Narrators = SplitListTag(meta.Narrator);
+            }
+
+            // ASIN: validate via the same normalizer the identifier table uses; assign legacy field too.
+            if (string.IsNullOrWhiteSpace(audiobook.Asin) && !string.IsNullOrWhiteSpace(meta.Asin) &&
+                AudiobookIdentifierNormalizer.TryNormalize(AudiobookExternalIdentifierType.Asin, meta.Asin, out var normalizedAsin, out _))
+            {
+                audiobook.Asin = normalizedAsin;
+                identifiersChanged = true;
+            }
+
+            if ((audiobook.Isbn == null || audiobook.Isbn.Count == 0) && !string.IsNullOrWhiteSpace(meta.Isbn) &&
+                AudiobookIdentifierNormalizer.TryNormalize(AudiobookExternalIdentifierType.Isbn, meta.Isbn, out var normalizedIsbn, out _))
+            {
+                audiobook.Isbn = new List<string> { normalizedIsbn };
+                identifiersChanged = true;
+            }
+
+            return identifiersChanged;
+        }
+
+        // Splits only on unambiguous list separators. Commas are excluded because
+        // "Last, First"-style single-author tags are common and would split into two authors.
+        private static List<string> SplitListTag(string value) =>
+            value.Split(new[] { ';', '/' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .ToList();
+
+        private static string? FirstNonEmpty(params string?[] candidates)
+        {
+            foreach (var c in candidates.Where(static c => !string.IsNullOrWhiteSpace(c))) return c;
+            return null;
         }
 
         private static string? NormalizePath(string? path)

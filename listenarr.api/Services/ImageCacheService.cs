@@ -31,6 +31,15 @@ namespace Listenarr.Api.Services
         Task<string?> MoveToSeriesLibraryStorageAsync(string identifier, string? imageUrl = null, bool forceRefresh = false);
         Task<string?> GetCachedImagePathAsync(string identifier);
         Task ClearTempCacheAsync();
+
+        /// <summary>
+        /// Writes raw image bytes directly into permanent library storage under the given identifier.
+        /// Used for embedded cover art extracted from audio files (no URL download required).
+        /// </summary>
+        /// <param name="identifier">Library storage key (typically the audiobook ASIN).</param>
+        /// <param name="bytes">Raw image payload to persist.</param>
+        /// <param name="extension">File extension including the dot, e.g. ".jpg".</param>
+        Task<string?> StoreLibraryImageBytesAsync(string identifier, byte[] bytes, string extension);
     }
 
     public class ImageCacheService : IImageCacheService, IDisposable
@@ -364,6 +373,41 @@ namespace Listenarr.Api.Services
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
                 _logger.LogError(ex, "Failed to move image to library storage for {Identifier}", LogRedaction.SanitizeText(identifier));
+                return null;
+            }
+        }
+
+        public async Task<string?> StoreLibraryImageBytesAsync(string identifier, byte[] bytes, string extension)
+        {
+            if (string.IsNullOrWhiteSpace(identifier))
+            {
+                _logger.LogWarning("Cannot store image bytes: identifier is empty");
+                return null;
+            }
+            if (bytes == null || bytes.Length == 0)
+            {
+                _logger.LogWarning("Cannot store image bytes for {Identifier}: empty payload", LogRedaction.SanitizeText(identifier));
+                return null;
+            }
+
+            var normalizedExt = string.IsNullOrWhiteSpace(extension) ? ".jpg" : extension;
+            if (!normalizedExt.StartsWith('.')) normalizedExt = "." + normalizedExt;
+
+            try
+            {
+                var sanitized = SanitizeFileName(identifier);
+                Directory.CreateDirectory(_tempCachePath);
+                var tempPath = CombineRelativePath(_tempCachePath, NormalizeRelativeFileName(sanitized + normalizedExt));
+                await File.WriteAllBytesAsync(tempPath, bytes);
+
+                // NOTE: MoveToLibraryStorageAsync short-circuits if a library file already exists
+                // under this identifier (any matching extension). Callers that want to overwrite
+                // an existing cover must delete the existing library file first.
+                return await MoveToLibraryStorageAsync(identifier);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
+                _logger.LogError(ex, "Failed to store image bytes to library for {Identifier}", LogRedaction.SanitizeText(identifier));
                 return null;
             }
         }
