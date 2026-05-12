@@ -78,6 +78,10 @@ RUN groupadd --system listenarr \
 
 COPY --from=build /app/publish .
 
+# Normalize frontend asset permissions so the non-root runtime user can read static files.
+RUN find /app/wwwroot -type d -exec chmod 755 {} \; \
+	&& find /app/wwwroot -type f -exec chmod 644 {} \;
+
 # Ensure config directory exists
 RUN mkdir -p /app/config/database
 
