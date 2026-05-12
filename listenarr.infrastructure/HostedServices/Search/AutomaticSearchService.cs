@@ -141,7 +141,17 @@ namespace Listenarr.Infrastructure.HostedServices.Search
         {
             if (audiobook.QualityProfile == null)
             {
-                _logger.LogWarning("Audiobook '{Title}' has no quality profile assigned", audiobook.Title);
+                // No profile on the book — fall back to the default so a monitored book is still
+                // searchable (assigned in-memory only; the search flow never persists it).
+                audiobook.QualityProfile = await qualityProfileService.GetDefaultAsync();
+                if (audiobook.QualityProfile != null)
+                {
+                    _logger.LogWarning("Audiobook '{Title}' has no quality profile; falling back to default '{Profile}'", audiobook.Title, audiobook.QualityProfile.Name);
+                }
+            }
+            if (audiobook.QualityProfile == null)
+            {
+                _logger.LogWarning("Audiobook '{Title}' has no quality profile and no default is configured", audiobook.Title);
                 return 0;
             }
 
