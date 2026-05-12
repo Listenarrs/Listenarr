@@ -156,7 +156,7 @@ namespace Listenarr.Api.Services
                 return "lossless";
             }
 
-            if (codec.Length > 0 && file?.Bitrate is int bitrate)
+            if (!string.IsNullOrEmpty(codec) && file?.Bitrate is int bitrate)
             {
                 var bitrateKbps = bitrate >= 1000 ? bitrate / 1000d : bitrate;
                 var bucket = BucketBitrate(bitrateKbps);
@@ -277,7 +277,7 @@ namespace Listenarr.Api.Services
 
         private static bool IsCodecPrefixedLabel(string normalizedLabel)
         {
-            if (normalizedLabel.Length == 0)
+            if (string.IsNullOrEmpty(normalizedLabel))
             {
                 return false;
             }
