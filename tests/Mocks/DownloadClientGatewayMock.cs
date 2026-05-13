@@ -63,6 +63,7 @@ namespace Listenarr.Tests.Mocks
         public Task<QueueItem> GetQueueItemAsync(DownloadClientConfiguration client, Download download, QueueItem queueItem, CancellationToken ct = default)
         {
             queueItem.SourceFiles = SourceFiles;
+            queueItem.LocalPath = download.DownloadPath;
 
             return Task.FromResult(queueItem);
         }

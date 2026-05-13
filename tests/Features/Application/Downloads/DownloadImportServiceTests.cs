@@ -427,23 +427,23 @@ namespace Listenarr.Tests.Features.Application.Downloads
         [Fact]
         public async Task DownloadImportService_NoImportedFile_WhenAudioFilesFails()
         {
-            var outputDir = FileService.GetTempDirectory("library");
+            var outputDirectory = FileService.GetTempDirectory("library");
 
-            var sourceDire = FileService.GetTempDirectory("download");
-            var file1 = Path.Join(sourceDire, "file1.mp3");
-            var file2 = Path.Join(sourceDire, "file2.mp3");
-            var file3 = Path.Join(sourceDire, "file3.mp3");
-            var file4 = Path.Join(sourceDire, "file4.m4b");
-            var companion1 = await FileService.GetFileAsync(sourceDire, "companion1.jpg");
-            var companion2 = await FileService.GetFileAsync(sourceDire, "companion2.jpg");
-            var companion3 = await FileService.GetFileAsync(sourceDire, "companion3.jpg");
+            var sourceDirectory = FileService.GetTempDirectory("download");
+            var file1 = Path.Join(sourceDirectory, "file1.mp3");
+            var file2 = Path.Join(sourceDirectory, "file2.mp3");
+            var file3 = Path.Join(sourceDirectory, "file3.mp3");
+            var file4 = Path.Join(sourceDirectory, "file4.m4b");
+            var companion1 = await FileService.GetFileAsync(sourceDirectory, "companion1.jpg");
+            var companion2 = await FileService.GetFileAsync(sourceDirectory, "companion2.jpg");
+            var companion3 = await FileService.GetFileAsync(sourceDirectory, "companion3.jpg");
 
             var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
-                .WithBasePath(outputDir)
+                .WithBasePath(outputDirectory)
                 .Build());
 
             await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
-                .WithOutputPath(outputDir)
+                .WithOutputPath(outputDirectory)
                 .WithMetadataProcessing()
                 .WithMoveFileOnCompleted()
                 .Build());
@@ -453,7 +453,7 @@ namespace Listenarr.Tests.Features.Application.Downloads
             Assert.Equal(7, results.Count);
 
             // Output folder should stay empty
-            var importedFiles = Directory.EnumerateFiles(outputDir, "*.*", SearchOption.AllDirectories)
+            var importedFiles = Directory.EnumerateFiles(outputDirectory, "*.*", SearchOption.AllDirectories)
                 .ToList();
             Assert.Empty(importedFiles);
         }

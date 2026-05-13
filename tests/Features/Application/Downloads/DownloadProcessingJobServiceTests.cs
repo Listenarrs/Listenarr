@@ -15,10 +15,12 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using Listenarr.Application.Downloads;
 using Listenarr.Application.Interfaces;
 using Listenarr.Domain.Models;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
+using Listenarr.Tests.Mocks;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -171,6 +173,168 @@ namespace Listenarr.Tests.Features.Application.Downloads
             // now new queue should create a fresh job id
             var newId = await downloadProcessingJobService.EnqueueAsync(download);
             Assert.NotEqual(jobId, newId);
+        }
+
+        [Fact]
+        [Trait("Scenario", "Job is completed if lower quality are skipped")]
+        public async Task LowerQualitySkip_MarksJobCompleted()
+        {
+            var downloadClientGatewayMock = new DownloadClientGatewayMock();
+            _services.AddSingleton<IDownloadClientGateway>(downloadClientGatewayMock);
+
+            var metadataServiceMock = new MetadataServiceMock();
+            _services.AddSingleton<IMetadataService>(metadataServiceMock);
+            Init();
+
+            var outputDirectory = FileService.GetTempDirectory("library");
+            var existingFile = await FileService.GetFileAsync(outputDirectory, "oldfile1.mp3");
+
+            var sourceDirectory = FileService.GetTempDirectory("download");
+            var downloadedFile = await FileService.GetFileAsync(sourceDirectory, "newfile1.mp3");
+
+            downloadClientGatewayMock.SourceFiles = [downloadedFile];
+
+            // We give the new file arbitrary lower bitrate so the import should skip it and keep the existing 320kbps one
+            metadataServiceMock.AddMetadata("newfile", new AudioMetadata { BitRate = 128000, SampleRate = 128000 });
+
+            var qualityProfile = await _qualityProfileRepository.AddAsync(new QualityProfileBuilder().Build());
+
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithBasePath(outputDirectory)
+                .WithQualityProfile(qualityProfile)
+                .Build());
+
+            var audiobookFile = await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
+                .WithAudiobook(audiobook)
+                .WithPath(existingFile)
+                .WithBitrate(320000)
+                .Build());
+
+            var client = await _downloadClientConfigurationRepository.SaveAsync(new DownloadClientConfigurationBuilder()
+                .WithPath(sourceDirectory)
+                .Build());
+
+            var download = await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithAudiobook(audiobook)
+                .WithDownloadClientConfiguration(client)
+                .WithCompletedStatus(at: DateTime.UtcNow)
+                .WithPath(sourceDirectory)
+                .Build());
+
+            var downloadProcessingJobService = _provider.GetRequiredService<IDownloadProcessingJobService>();
+
+            // Queue Job
+            var jobId = await downloadProcessingJobService.EnqueueAsync(download);
+            Assert.NotEmpty(jobId);
+
+            // Job should be pending
+            var job = await downloadProcessingJobService.GetJobAsync(jobId);
+            Assert.NotNull(job);
+            Assert.Equal(ProcessingJobStatus.Pending, job.Status);
+
+            // Process the job
+            var downloadProcessingJobProcessor = _provider.GetRequiredService<DownloadProcessingJobProcessor>();
+            await downloadProcessingJobProcessor.ProcessQueueAsync(CancellationToken.None);
+
+            // Job should be completed
+            job = await downloadProcessingJobService.GetJobAsync(jobId);
+            Assert.NotNull(job);
+            Assert.Equal(ProcessingJobStatus.Completed, job.Status);
+
+            // There should be only one audiobook file unchanged
+            var files = await _audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id);
+            Assert.Single(files);
+            var file = files.First();
+            Assert.Equal(existingFile, file.Path);
+            Assert.Equal(320000, file.Bitrate);
+
+            // Download should be imported
+            download = await _downloadRepository.GetByIdAsync(download.Id);
+            Assert.Equal(DownloadStatus.Moved, download.Status);
+        }
+
+        [Fact]
+        [Trait("Scenario", "Job is not completed if no audio files are imported")]
+        public async Task FilesNotFound_Retry()
+        {
+            var downloadClientGatewayMock = new DownloadClientGatewayMock();
+            _services.AddSingleton<IDownloadClientGateway>(downloadClientGatewayMock);
+            Init();
+
+            var outputDirectory = FileService.GetTempDirectory("library");
+
+            var sourceDirectory = FileService.GetTempDirectory("download");
+            var file1 = Path.Join(sourceDirectory, "file1.mp3");
+            var file2 = Path.Join(sourceDirectory, "file2.mp3");
+            var companion1 = await FileService.GetFileAsync(sourceDirectory, "companion.nfo");
+
+            downloadClientGatewayMock.SourceFiles = [file1, file2, companion1];
+
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithBasePath(outputDirectory)
+                .Build());
+
+            var download = await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithAudiobook(audiobook)
+                .WithDownloadClientConfiguration(await CreateDownloadClientConfiguration())
+                .WithCompletedStatus(at: DateTime.UtcNow)
+                .WithPath(sourceDirectory)
+                .Build());
+
+            var downloadProcessingJobService = _provider.GetRequiredService<IDownloadProcessingJobService>();
+
+            // Queue Job
+            var jobId = await downloadProcessingJobService.EnqueueAsync(download);
+            Assert.NotEmpty(jobId);
+
+            // Job should be pending
+            var job = await downloadProcessingJobService.GetJobAsync(jobId);
+            Assert.NotNull(job);
+            Assert.Equal(ProcessingJobStatus.Pending, job.Status);
+
+            // Process the job
+            var downloadProcessingJobProcessor = _provider.GetRequiredService<DownloadProcessingJobProcessor>();
+            await downloadProcessingJobProcessor.ProcessQueueAsync(CancellationToken.None);
+
+            // Job should be pending
+            job = await downloadProcessingJobService.GetJobAsync(jobId);
+            Assert.NotNull(job);
+            Assert.Equal(ProcessingJobStatus.Pending, job.Status);
+            Assert.Equal(1, job.RetryCount);
+
+            // One of the files becomes available
+            await FileService.GetFileAsync(sourceDirectory, "file1.mp3");
+
+            // Retry to process the job+
+            await TestUtils.CancelJobRetryWait(_downloadProcessingJobRepository, job);
+            await downloadProcessingJobProcessor.ProcessQueueAsync(CancellationToken.None);
+
+            // Job should be pending
+            job = await downloadProcessingJobService.GetJobAsync(jobId);
+            Assert.NotNull(job);
+            Assert.Equal(ProcessingJobStatus.Pending, job.Status);
+            Assert.Equal(2, job.RetryCount);
+
+            // The last file becomes available
+            await FileService.GetFileAsync(sourceDirectory, "file2.mp3");
+
+            // Retry to process the job
+            await TestUtils.CancelJobRetryWait(_downloadProcessingJobRepository, job);
+            await downloadProcessingJobProcessor.ProcessQueueAsync(CancellationToken.None);
+
+            // Job should be Completed
+            job = await downloadProcessingJobService.GetJobAsync(jobId);
+            Assert.NotNull(job);
+            Assert.Equal(ProcessingJobStatus.Completed, job.Status);
+
+            // Files should be imported
+            var importedFiles = Directory.EnumerateFiles(outputDirectory, "*.*", SearchOption.AllDirectories)
+                .ToList();
+            Assert.Equal(3, importedFiles.Count);
+
+            // Download should be moved
+            download = await _downloadRepository.GetByIdAsync(download.Id);
+            Assert.Equal(DownloadStatus.Moved, download.Status);
         }
     }
 }

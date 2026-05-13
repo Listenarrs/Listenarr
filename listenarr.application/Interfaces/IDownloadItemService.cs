@@ -9,16 +9,12 @@ namespace Listenarr.Application.Interfaces
     {
         /// <summary>
         /// Resolves the import item by querying the download client.
-        /// Called just before import to get the most accurate path.
         /// </summary>
-        Task<QueueItem> ResolveImportItemAsync(Download download, CancellationToken cancellationToken = default);
+        Task<QueueItem> GetImportItemAsync(Download download, CancellationToken cancellationToken = default);
 
         /// <summary>
-        /// List files related to a given download
+        /// Filter the files from the queue item with the files on disk
         /// </summary>
-        /// <param name="download">Download to which we want to match files</param>
-        /// <returns>List of files that are from a given download</returns>
-        /// <exception cref="DownloadProcessingException">Thrown when we are technicaly unable to perform the filtering based on download client retrieved informations</exception>
-        Task<List<string>> GetDownloadedFiles(Download download, CancellationToken cancellationToken = default);
+        Task<List<string>> GetImportableFiles(Download download, QueueItem queueItem, CancellationToken cancellationToken = default);
     }
 }

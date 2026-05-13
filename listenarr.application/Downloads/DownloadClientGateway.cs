@@ -82,7 +82,7 @@ namespace Listenarr.Application.Downloads
 
         public Task<bool> RemoveAsync(DownloadClientConfiguration client, string id, bool deleteFiles = false, CancellationToken ct = default)
         {
-            // TODO: Remove download from DB here
+            // FIXME: Responsability of removing the download from DB should be here
             var adapter = ResolveAdapter(client);
             return adapter.RemoveAsync(client, id, deleteFiles, ct);
         }
@@ -147,15 +147,19 @@ namespace Listenarr.Application.Downloads
             }
             else if (item.ContentPath != null)
             {
+                item.SourceFiles = [item.ContentPath];
+
                 // We will try to scan for source files
                 // Scan content path: Some client only knows about the directory where the download is put
-                if (File.Exists(item.ContentPath))
+                if (!File.Exists(item.ContentPath))
                 {
-                    item.SourceFiles = [item.ContentPath];
-                }
-                else
-                {
-                    item.SourceFiles = [.. Directory.EnumerateFiles(item.ContentPath, "*.*", SearchOption.AllDirectories)];
+                    try
+                    {
+                        item.SourceFiles = [.. Directory.EnumerateFiles(item.ContentPath, "*.*", SearchOption.AllDirectories)];
+                    }
+                    catch (IOException)
+                    {
+                    }
                 }
             }
 

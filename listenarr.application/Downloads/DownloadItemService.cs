@@ -29,7 +29,7 @@ namespace Listenarr.Application.Downloads
         IDownloadClientGateway downloadClientGateway) : IDownloadItemService
     {
 
-        public async Task<QueueItem> ResolveImportItemAsync(Download download, CancellationToken ct = default)
+        public async Task<QueueItem> GetImportItemAsync(Download download, CancellationToken ct = default)
         {
             // Get the download client configuration
             var client = await configurationService.GetDownloadClientConfigurationAsync(download.DownloadClientId);
@@ -38,12 +38,14 @@ namespace Listenarr.Application.Downloads
                 throw new InvalidOperationException($"Download {download.Id} references unknown download client {download.DownloadClientId}");
             }
 
+            // FIXME: Queue item responsability should not be here
             var queueItem = new QueueItem
             {
                 Id = download.GetClientDownloadItemId() ?? download.Id,
                 Title = download.Title ?? "Unknown",
                 Status = "completed",
-                DownloadClientId = client.Id
+                DownloadClientId = client.Id,
+                LocalPath = download.DownloadPath
             };
 
             if (!client.IsEnabled)
@@ -61,32 +63,28 @@ namespace Listenarr.Application.Downloads
                 ct);
         }
 
-        public async Task<List<string>> GetDownloadedFiles(Download download, CancellationToken cancellationToken = default)
+        public async Task<List<string>> GetImportableFiles(Download download, QueueItem queueItem, CancellationToken cancellationToken = default)
         {
-            var localPath = download.DownloadPath;
-            if (File.Exists(localPath))
+            if (queueItem == null || queueItem.SourceFiles == null || queueItem.SourceFiles.Count == 0)
             {
-                localPath = Path.GetDirectoryName(localPath);
+                logger.LogDebug($"Download {download.Id} has no files available in the given queueItem");
+                return [];
             }
 
-            if (string.IsNullOrEmpty(localPath))
+            if (string.IsNullOrEmpty(download.DownloadPath))
             {
-                throw new DownloadProcessingException($"Download {download.Id}: Unable to get the directory where files are supposed to be from: {download.DownloadPath}");
+                logger.LogDebug($"Download {download.Id} has no path configured, unable to locate where the files should be");
+                return [];
             }
 
-            var importableFiles = Directory.EnumerateFiles(localPath, "*.*", SearchOption.AllDirectories)
-                .Select(f => FileUtils.NormalizeStoredPath(f))
-                .ToList();
             try
             {
-                var downloadClientItem = await ResolveImportItemAsync(download, cancellationToken);
-                if (downloadClientItem == null || downloadClientItem.SourceFiles == null || downloadClientItem.SourceFiles.Count == 0)
-                {
-                    throw new DownloadProcessingException($"Unable to get the client item matching download or no files reported by the download client for download {download.Id}");
-                }
+                var importableFiles = Directory.EnumerateFiles(download.DownloadPath, "*.*", SearchOption.AllDirectories)
+                    .Select(f => FileUtils.NormalizeStoredPath(f))
+                    .ToList();
 
                 var allowedFiles = new HashSet<string>(
-                    downloadClientItem.SourceFiles
+                    queueItem.SourceFiles
                         .Where(path => !string.IsNullOrWhiteSpace(path))
                         .Select(path => FileUtils.NormalizeStoredPath(path)),
                     StringComparer.OrdinalIgnoreCase);
@@ -97,17 +95,17 @@ namespace Listenarr.Application.Downloads
 
                 if (filteredFiles.Count == 0)
                 {
-                    logger.LogWarning($"Download client reported {allowedFiles.Count} related file(s) for download {download.Id}, but none matched the local import candidates under {localPath}");
+                    logger.LogWarning($"Download {download.Id}: Queue item reported {allowedFiles.Count} related file(s), but none matched the local import candidates under {download.DownloadPath}");
                 }
                 else
                 {
-                    logger.LogInformation($"Scoped directory import for download {download.Id} from {importableFiles.Count} to {filteredFiles.Count} file(s) using the download client's reported file list");
+                    logger.LogInformation($"Download {download.Id}: Scoped directory import from {allowedFiles.Count} to {filteredFiles.Count} file(s) using the download client's reported file list");
                 }
                 return filteredFiles;
             }
             catch (Exception exception) when (exception is not (DownloadProcessingException or OperationCanceledException or OutOfMemoryException or StackOverflowException))
             {
-                throw new DownloadProcessingException($"Unknown error while matching download client files for download {download.Id}", exception);
+                throw new DownloadProcessingException($"Unknown error while filtering importable files", exception);
             }
         }
     }

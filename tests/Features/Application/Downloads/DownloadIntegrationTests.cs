@@ -150,6 +150,9 @@ namespace Listenarr.Tests.Features.Application.Downloads
             var downloadProcessingJobProcessor = _provider.GetRequiredService<DownloadProcessingJobProcessor>();
             await downloadProcessingJobProcessor.ProcessQueueAsync(CancellationToken.None);
 
+            job = await _downloadProcessingJobRepository.GetByIdAsync(job.Id);
+            Assert.NotNull(job);
+
             // Download should be imported
             download = await _downloadRepository.GetByIdAsync(createdDownloadId);
             Assert.NotNull(download);

@@ -106,6 +106,9 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
 
             sabnzbdApiMock.contentPath = source;
 
+            _client.DownloadPath = source;
+            await _downloadClientConfigurationRepository.SaveAsync(_client);
+
             var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
                 .WithBasePath(basePath)
                 .Build());
@@ -115,6 +118,7 @@ namespace Listenarr.Tests.Features.Api.Services.Adapters
                 .WithAudiobook(audiobook)
                 .WithDownloadClientConfiguration(_client)
                 .WithDownloading(0)
+                .WithPath(source)
                 .WithClientDownloadId(SabnzbdApiMock.COMPLETED_FILE_SABNZBD)
                 .Build());
 

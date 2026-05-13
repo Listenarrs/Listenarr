@@ -199,11 +199,22 @@ namespace Listenarr.Application.Downloads
                 return;
             }
 
+            QueueItem queueItem;
             List<string> files = [];
             try
             {
                 var downloadItemService = scope.ServiceProvider.GetRequiredService<IDownloadItemService>();
-                files = await downloadItemService.GetDownloadedFiles(download, cancellationToken);
+                queueItem = await downloadItemService.GetImportItemAsync(download, cancellationToken);
+                if (queueItem == null || queueItem.SourceFiles == null)
+                {
+                    await downloadProcessingJobService.UpdateJobAsync(job.ScheduleRetry($"Unable to fetch the download from the download client"));
+                    return;
+                }
+
+                job.AddLogEntry($"Download client reported {queueItem.SourceFiles.Count} file(s) downloaded");
+
+                files = await downloadItemService.GetImportableFiles(download, queueItem, cancellationToken);
+                job.AddLogEntry($"{files.Count} file(s) remaining after checking which ones are effectively on disk");
             }
             catch (DownloadProcessingException exception)
             {
@@ -213,11 +224,14 @@ namespace Listenarr.Application.Downloads
 
             if (files.Count == 0)
             {
-                await downloadProcessingJobService.UpdateJobAsync(job.ScheduleRetry("No importable files found in source directory"));
+                await downloadProcessingJobService.UpdateJobAsync(job.ScheduleRetry("No importable files found"));
                 return;
             }
-
-            job.AddLogEntry($"Found {files.Count} importable file(s) to process");
+            else if (files.Count != queueItem.SourceFiles.Count)
+            {
+                await downloadProcessingJobService.UpdateJobAsync(job.ScheduleRetry($"Files reported by the download client and files on disk do not match"));
+                return;
+            }
 
             List<ImportResult> results = [];
             try
@@ -241,11 +255,27 @@ namespace Listenarr.Application.Downloads
             }
 
             // Create the report on the job log
+            bool wasRegisteredToAudiobook = false;
             foreach (var result in results)
             {
                 if (!result.Success)
                 {
                     await downloadProcessingJobService.UpdateJobAsync(job.MarkAsFailed($"Unable to import at least one file for the job (see the log entries)"));
+                    return;
+                }
+
+                wasRegisteredToAudiobook |= result.WasRegisteredToAudiobook;
+            }
+
+            if (!wasRegisteredToAudiobook)
+            {
+                // If the audiobbook already had some audiobook file, this download has probably been skipped
+                // FIXME: We should improve ImportResult to be able to report skipped files so we don't rely on DB check here
+                var audiobookFileRepository = scope.ServiceProvider.GetRequiredService<IAudiobookFileRepository>();
+                var existingAudiobookFiles = await audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id, cancellationToken);
+                if (existingAudiobookFiles.Count <= 0)
+                {
+                    await downloadProcessingJobService.UpdateJobAsync(job.MarkAsFailed($"Unexpected issue: No audio files were registered to the audiobook but files have been imported"));
                     return;
                 }
             }
