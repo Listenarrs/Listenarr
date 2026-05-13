@@ -36,6 +36,8 @@ type AudiobooksVm = {
   setGroupBy?: (value: string) => Promise<void> | void
   groupedCollections?: Array<{ name: string; count: number; coverUrl?: string }>
   showItemDetails?: boolean
+  viewMode?: 'grid' | 'list'
+  toggleViewMode?: () => void
 }
 
 const getVm = (wrapper: ReturnType<typeof mount>) => wrapper.vm as unknown as AudiobooksVm
@@ -732,4 +734,106 @@ describe('AudiobooksView Grouping', () => {
     await wrapper.vm.$nextTick()
     expect(wrapper.find('.series-bottom-placard').exists()).toBe(true)
   })
+
+  it.each([
+    ['authors', 'Author A', 'Author B'],
+    ['series', 'Series 1', 'Series 2'],
+  ] as const)(
+    'renders collection list rows when viewMode is list and groupBy is %s',
+    async (group, firstName, secondName) => {
+      if (
+        typeof (globalThis as unknown as { ResizeObserver?: unknown }).ResizeObserver ===
+        'undefined'
+      ) {
+        ;(globalThis as unknown as Record<string, unknown>).ResizeObserver = class {
+          observe() {}
+          disconnect() {}
+        }
+      }
+      if (typeof (globalThis as unknown as { WebSocket?: unknown }).WebSocket === 'undefined') {
+        ;(globalThis as unknown as Record<string, unknown>).WebSocket = function () {
+          /* noop */
+        }
+      }
+
+      // Persistence only loads viewMode when groupBy='books' (scrollContainer is mounted);
+      // in this test we toggle into list mode explicitly after mount.
+      localStorage.removeItem('listenarr.viewMode')
+
+      const pinia = createPinia()
+      setActivePinia(pinia)
+      const router = createRouter({
+        history: createMemoryHistory(),
+        routes: [
+          { path: '/', name: 'home', component: { template: '<div />' } },
+          { path: '/audiobooks', name: 'audiobooks', component: AudiobooksView },
+          {
+            path: '/collection/:type/:name',
+            name: 'collection',
+            component: { template: '<div />' },
+          },
+        ],
+      })
+      await router.push('/audiobooks')
+      await router.isReady().catch(() => {})
+
+      const store = useLibraryStore()
+      store.audiobooks = [
+        {
+          id: 1,
+          title: 'Book 1',
+          authors: ['Author A'],
+          series: 'Series 1',
+          imageUrl: 'cover1.jpg',
+          files: [],
+        },
+        {
+          id: 2,
+          title: 'Book 2',
+          authors: ['Author A'],
+          series: 'Series 1',
+          imageUrl: 'cover2.jpg',
+          files: [],
+        },
+        {
+          id: 3,
+          title: 'Book 3',
+          authors: ['Author B'],
+          series: 'Series 2',
+          imageUrl: 'cover3.jpg',
+          files: [],
+        },
+      ] as unknown as import('@/types').Audiobook[]
+
+      store.fetchLibrary = vi.fn(async () => undefined)
+      const wrapper = mount(AudiobooksView, {
+        global: {
+          plugins: [pinia, router],
+          stubs: [
+            'BulkEditModal',
+            'EditAudiobookModal',
+            'CustomFilterModal',
+            'FiltersDropdown',
+            'CustomSelect',
+          ],
+        },
+      })
+      await new Promise((r) => setTimeout(r, 0))
+
+      const vm = getVm(wrapper)
+      vm.toggleViewMode?.()
+      await vm.setGroupBy?.(group)
+      await wrapper.vm.$nextTick()
+
+      expect(vm.viewMode).toBe('list')
+      const rows = wrapper.findAll('.collection-list-item')
+      expect(rows).toHaveLength(2)
+      // Grid-mode card markup should NOT be present when list mode is active.
+      expect(wrapper.find('.grouped-grid').exists()).toBe(false)
+
+      const names = rows.map((r) => r.find('.audiobook-title').text())
+      expect(names).toContain(firstName)
+      expect(names).toContain(secondName)
+    },
+  )
 })

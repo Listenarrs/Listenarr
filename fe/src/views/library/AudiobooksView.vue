@@ -211,7 +211,55 @@
 
     <!-- Grouped View -->
     <div v-else-if="groupBy !== 'books'" class="grouped-view">
-      <div class="grouped-grid">
+      <!-- List rendering for grouped collections (authors / series) -->
+      <div v-if="viewMode === 'list'" class="audiobooks-list collections-list">
+        <div
+          v-if="groupedCollections && groupedCollections.length > 0"
+          class="list-header collections-list-header"
+        >
+          <div class="col-cover">Cover</div>
+          <div class="col-title">{{ groupBy === 'authors' ? 'Author' : 'Series' }}</div>
+          <div class="col-count">Books</div>
+        </div>
+        <div
+          v-for="collection in groupedCollections || []"
+          :key="`collection-list-${collection.name}`"
+          class="audiobook-list-item collection-list-item"
+          :class="{
+            'author-collection': groupBy === 'authors',
+            'series-collection': groupBy === 'series',
+          }"
+          tabindex="0"
+          role="button"
+          :aria-label="`Open ${collection.name}`"
+          @click="navigateToCollection(collection)"
+          @keydown.enter.prevent="navigateToCollection(collection)"
+          @keydown.space.prevent="navigateToCollection(collection)"
+        >
+          <img
+            class="list-thumb"
+            :src="
+              getProtectedImageSrc(
+                groupBy === 'authors'
+                  ? getAuthorImageUrl(collection)
+                  : collection.coverUrls && collection.coverUrls[0],
+                `${groupBy}-list:${collection.name}`,
+              ) || getPlaceholderUrl()
+            "
+            :alt="collection.name"
+            loading="lazy"
+            decoding="async"
+            @error="handleImageError"
+          />
+          <div class="list-details">
+            <div class="audiobook-title">{{ collection.name }}</div>
+          </div>
+          <div class="collection-count">
+            {{ collection.count }} book{{ collection.count !== 1 ? 's' : '' }}
+          </div>
+        </div>
+      </div>
+      <div v-else class="grouped-grid">
         <div
           v-for="collection in groupedCollections || []"
           :key="collection.name"
@@ -2310,6 +2358,8 @@ defineExpose({
   setGroupBy,
   groupedCollections,
   showItemDetails,
+  viewMode,
+  toggleViewMode,
 })
 </script>
 
@@ -3763,6 +3813,26 @@ defineExpose({
   opacity: 0.9;
 }
 .list-header .col-actions {
+  text-align: right;
+}
+
+/* Collection list rows (author / series grouping in list view) */
+.collections-list-header {
+  grid-template-columns: 64px 1fr auto;
+}
+
+.collections-list-header .col-count {
+  opacity: 0.9;
+  text-align: right;
+}
+
+.collection-list-item {
+  grid-template-columns: 64px 1fr auto;
+}
+
+.collection-list-item .collection-count {
+  font-size: 12px;
+  color: #ccc;
   text-align: right;
 }
 
