@@ -17,6 +17,7 @@
  */
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Security;
+using Listenarr.Domain.Common;
 using Listenarr.Domain.Models;
 using Microsoft.Extensions.Logging;
 
@@ -33,7 +34,7 @@ namespace Listenarr.Application.Downloads
         IDownloadClientAdapterFactory factory,
         ILogger<DownloadClientGateway> logger) : IDownloadClientGateway
     {
-        private IDownloadClientAdapter ResolveAdapter(DownloadClientConfiguration client)
+        internal IDownloadClientAdapter ResolveAdapter(DownloadClientConfiguration client)
         {
             if (client == null)
             {
@@ -124,6 +125,14 @@ namespace Listenarr.Application.Downloads
             return await TranslateQueueItemPathsAsync(client, item);
         }
 
+        /// <summary>
+        /// Handles path mapping of queue item
+        /// Make sure all path are localy accessible after processing and
+        /// that a proper list of sanitized source files is produced
+        /// </summary>
+        /// <param name="client">Download client configuration to use for path mapping</param>
+        /// <param name="item">Queue item to translate/sanitize</param>
+        /// <returns></returns>
         private async Task<QueueItem> TranslateQueueItemPathsAsync(DownloadClientConfiguration client, QueueItem item)
         {
             if (item.RemotePath != null)
@@ -147,21 +156,37 @@ namespace Listenarr.Application.Downloads
             }
             else if (item.ContentPath != null)
             {
-                item.SourceFiles = [item.ContentPath];
-
-                // We will try to scan for source files
-                // Scan content path: Some client only knows about the directory where the download is put
-                if (!File.Exists(item.ContentPath))
+                // Scan content path: Some clients are not able to tell if they have a file or a directory downloaded
+                // So we make sure it's either one or the other and log if it's not
+                if (File.Exists(item.ContentPath))
                 {
+                    item.SourceFiles = [item.ContentPath];
+                }
+                else
+                {
+                    // We will try to scan for source files
                     try
                     {
-                        item.SourceFiles = [.. Directory.EnumerateFiles(item.ContentPath, "*.*", SearchOption.AllDirectories)];
+                        item.SourceFiles = [.. Directory
+                            .EnumerateFiles(item.ContentPath, "*.*", SearchOption.AllDirectories)
+                            .Select(f => FileUtils.NormalizeStoredPath(f))];
                     }
-                    catch (IOException)
+                    catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
                     {
+                        logger.LogWarning($"Download client {client.Id} reported no source files and content path scanning failed for item {item.Title} with path {item.ContentPath}");
+                        logger.LogDebug($"Reason: {exception.Message}");
+                        item.SourceFiles = [];
                     }
                 }
             }
+            else
+            {
+                logger.LogWarning($"Download client {client.Id} reported no source files and no content path for item {item.Title}");
+                item.SourceFiles = [];
+            }
+
+            // Remove duplicates if any
+            item.SourceFiles = new HashSet<string>(item.SourceFiles, StringComparer.OrdinalIgnoreCase).ToList();
 
             return item;
         }

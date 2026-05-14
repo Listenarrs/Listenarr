@@ -26,6 +26,12 @@ namespace Listenarr.Tests.Builders
             return this;
         }
 
+        public QueueItemBuilder WithContentPath(string value)
+        {
+            _item.ContentPath = value;
+            return this;
+        }
+
         public QueueItem Build()
         {
             return _item;

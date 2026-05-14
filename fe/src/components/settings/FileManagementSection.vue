@@ -151,8 +151,8 @@
               <li><code>{Language}</code> - Metadata language</li>
               <li><code>{Asin}</code> - Audible ASIN</li>
               <li>
-                <code>{SeriesNumber}</code> or <code>{SeriesNumber:00}</code> - Position in series (00 =
-                zero-padded; decimal positions like 4.5 are not padded)
+                <code>{SeriesNumber}</code> or <code>{SeriesNumber:00}</code> - Position in series
+                (00 = zero-padded; decimal positions like 4.5 are not padded)
               </li>
               <li><code>{Year}</code> - Publication year</li>
             </ul>
@@ -174,8 +174,8 @@
               <li><code>{Language}</code> - Metadata language</li>
               <li><code>{Asin}</code> - Audible ASIN</li>
               <li>
-                <code>{SeriesNumber}</code> or <code>{SeriesNumber:00}</code> - Position in series (00 =
-                zero-padded; decimal positions like 4.5 are not padded)
+                <code>{SeriesNumber}</code> or <code>{SeriesNumber:00}</code> - Position in series
+                (00 = zero-padded; decimal positions like 4.5 are not padded)
               </li>
               <li>
                 <code>{DiskNumber}</code> or <code>{DiskNumber:00}</code> - Disk/part number (00 =

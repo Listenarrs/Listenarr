@@ -44,8 +44,7 @@ namespace Listenarr.Application.Interfaces
         Task<bool> RemoveAsync(DownloadClientConfiguration client, string id, bool deleteFiles = false, CancellationToken ct = default);
 
         /// <summary>
-        /// Legacy method - returns QueueItem list (backward compatible)
-        /// Will be deprecated in favor of GetItemsAsync
+        /// Give a list of ongoing download as queue items, each of them should respect the same constraint as for GetImportItemAsync
         /// </summary>
         Task<List<QueueItem>> GetQueueAsync(DownloadClientConfiguration client, CancellationToken ct = default);
 
@@ -74,7 +73,10 @@ namespace Listenarr.Application.Interfaces
             CancellationToken ct = default);
 
         /// <summary>
-        /// Legacy method for backward compatibility
+        /// Retrieves the information about a given download as a queue item
+        /// The adapter should return:
+        /// - Either a list of files under SourceFiles
+        /// - Either a RemotePath that can be a file or a directory if the adapter is unable to tell
         /// </summary>
         Task<QueueItem> GetImportItemAsync(
             DownloadClientConfiguration client,

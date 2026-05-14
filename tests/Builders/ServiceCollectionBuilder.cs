@@ -111,7 +111,7 @@ namespace Listenarr.Tests.Builders
             services.AddHttpClient<IAudnexusService, AudnexusService>()
                 .ConfigurePrimaryHttpMessageHandler<AudnexusServiceApiMock>();
 
-            services.AddScoped<IDownloadClientAdapter, DownloadCLientAdapterMock>();
+            services.AddSingleton<IDownloadClientAdapter, DownloadCLientAdapterMock>();
 
             // Background services
             services.AddSingleton<DownloadMonitorService>(); // FIXME: This should be a processor

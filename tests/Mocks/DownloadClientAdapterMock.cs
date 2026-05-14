@@ -15,6 +15,7 @@ namespace Listenarr.Tests.Mocks
         public string ClientType => "mock";
 
         public DownloadProtocol Protocol => DownloadProtocol.Torrent;
+        public QueueItem QueueItemMock { get; set; } = null;
 
         public async Task<string?> AddAsync(DownloadClientConfiguration client, SearchResult result, CancellationToken ct = default)
         {
@@ -34,6 +35,11 @@ namespace Listenarr.Tests.Mocks
 
         public async Task<QueueItem> GetImportItemAsync(DownloadClientConfiguration client, Download download, QueueItem queueItem, QueueItem? previousAttempt = null, CancellationToken ct = default)
         {
+            if (QueueItemMock != null)
+            {
+                return QueueItemMock;
+            }
+
             var path = FileUtils.GetAbsolutePath(RemotePath, "hello", "world", "running out of ideas", "here");
             return new QueueItemBuilder()
                 .WithRemotePath(path)
