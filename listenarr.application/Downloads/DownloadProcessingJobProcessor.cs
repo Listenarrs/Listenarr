@@ -213,7 +213,8 @@ namespace Listenarr.Application.Downloads
 
                 job.AddLogEntry($"Download client reported {queueItem.SourceFiles.Count} file(s) downloaded");
 
-                files = await downloadItemService.GetImportableFiles(download, queueItem, cancellationToken);
+                files = [.. queueItem.SourceFiles.Where(f => File.Exists(f))];
+
                 job.AddLogEntry($"{files.Count} file(s) remaining after checking which ones are effectively on disk");
             }
             catch (DownloadProcessingException exception)

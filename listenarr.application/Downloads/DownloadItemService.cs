@@ -16,9 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Listenarr.Application.Interfaces;
-using Listenarr.Domain.Common;
 using Listenarr.Domain.Models;
-using Listenarr.Domain.Models.Exceptions;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Downloads
@@ -61,58 +59,6 @@ namespace Listenarr.Application.Downloads
                 download,
                 queueItem,
                 ct);
-        }
-
-        public async Task<List<string>> GetImportableFiles(Download download, QueueItem queueItem, CancellationToken cancellationToken = default)
-        {
-            if (queueItem == null || queueItem.SourceFiles == null || queueItem.SourceFiles.Count == 0)
-            {
-                logger.LogDebug($"Download {download.Id} has no files available in the given queueItem");
-                return [];
-            }
-
-            var localPath = download.DownloadPath;
-            if (string.IsNullOrEmpty(localPath))
-            {
-                logger.LogDebug($"Download {download.Id} has no path configured, unable to locate where the files should be");
-                return [];
-            }
-
-            if (File.Exists(localPath))
-            {
-                localPath = Path.GetDirectoryName(localPath);
-            }
-
-            try
-            {
-                var importableFiles = Directory.EnumerateFiles(localPath!, "*.*", SearchOption.AllDirectories)
-                    .Select(f => FileUtils.NormalizeStoredPath(f))
-                    .ToList();
-
-                var allowedFiles = new HashSet<string>(
-                    queueItem.SourceFiles
-                        .Where(path => !string.IsNullOrWhiteSpace(path))
-                        .Select(path => FileUtils.NormalizeStoredPath(path)),
-                    StringComparer.OrdinalIgnoreCase);
-
-                var filteredFiles = importableFiles
-                    .Where(allowedFiles.Contains)
-                    .ToList();
-
-                if (filteredFiles.Count == 0)
-                {
-                    logger.LogWarning($"Download {download.Id}: Queue item reported {allowedFiles.Count} related file(s), but none matched the local import candidates under {localPath}");
-                }
-                else
-                {
-                    logger.LogInformation($"Download {download.Id}: Scoped directory import from {allowedFiles.Count} to {filteredFiles.Count} file(s) using the download client's reported file list");
-                }
-                return filteredFiles;
-            }
-            catch (Exception exception) when (exception is not (DownloadProcessingException or OperationCanceledException or OutOfMemoryException or StackOverflowException))
-            {
-                throw new DownloadProcessingException($"Unknown error while filtering importable files", exception);
-            }
         }
     }
 }
