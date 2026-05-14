@@ -15,6 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -356,7 +357,7 @@ namespace Listenarr.Application.Common
                 { "Publisher", string.IsNullOrWhiteSpace(metadata.Publisher) ? string.Empty : SanitizePathComponent(metadata.Publisher) },
                 { "Language", string.IsNullOrWhiteSpace(metadata.Language) ? string.Empty : SanitizePathComponent(metadata.Language) },
                 { "Asin", string.IsNullOrWhiteSpace(metadata.Asin) ? string.Empty : SanitizePathComponent(metadata.Asin) },
-                { "SeriesNumber", FirstNonEmpty(metadata.SeriesPosition?.ToString(), metadata.TrackNumber?.ToString()) },
+                { "SeriesNumber", FirstNonEmpty(metadata.SeriesPosition?.ToString(CultureInfo.InvariantCulture), metadata.TrackNumber?.ToString()) },
                 { "Year", FirstNonEmpty(metadata.Year?.ToString()) },
                 { "Quality", FirstNonEmpty(metadata.BitRate.HasValue ? metadata.BitRate + "kbps" : null, metadata.Format) },
                 { "DiskNumber", metadata.DiscNumber?.ToString() ?? string.Empty },
