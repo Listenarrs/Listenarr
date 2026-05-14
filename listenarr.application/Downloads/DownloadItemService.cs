@@ -71,15 +71,21 @@ namespace Listenarr.Application.Downloads
                 return [];
             }
 
-            if (string.IsNullOrEmpty(download.DownloadPath))
+            var localPath = download.DownloadPath;
+            if (string.IsNullOrEmpty(localPath))
             {
                 logger.LogDebug($"Download {download.Id} has no path configured, unable to locate where the files should be");
                 return [];
             }
 
+            if (File.Exists(localPath))
+            {
+                localPath = Path.GetDirectoryName(localPath);
+            }
+
             try
             {
-                var importableFiles = Directory.EnumerateFiles(download.DownloadPath, "*.*", SearchOption.AllDirectories)
+                var importableFiles = Directory.EnumerateFiles(localPath!, "*.*", SearchOption.AllDirectories)
                     .Select(f => FileUtils.NormalizeStoredPath(f))
                     .ToList();
 
@@ -95,7 +101,7 @@ namespace Listenarr.Application.Downloads
 
                 if (filteredFiles.Count == 0)
                 {
-                    logger.LogWarning($"Download {download.Id}: Queue item reported {allowedFiles.Count} related file(s), but none matched the local import candidates under {download.DownloadPath}");
+                    logger.LogWarning($"Download {download.Id}: Queue item reported {allowedFiles.Count} related file(s), but none matched the local import candidates under {localPath}");
                 }
                 else
                 {

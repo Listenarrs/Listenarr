@@ -269,7 +269,7 @@ namespace Listenarr.Application.Downloads
 
             if (!wasRegisteredToAudiobook)
             {
-                // If the audiobbook already had some audiobook file, this download has probably been skipped
+                // If the audiobook already had some audiobook file, this download has probably been skipped
                 // FIXME: We should improve ImportResult to be able to report skipped files so we don't rely on DB check here
                 var audiobookFileRepository = scope.ServiceProvider.GetRequiredService<IAudiobookFileRepository>();
                 var existingAudiobookFiles = await audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id, cancellationToken);
