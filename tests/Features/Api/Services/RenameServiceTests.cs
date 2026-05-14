@@ -97,6 +97,45 @@ namespace Listenarr.Tests.Features.Api.Services
         }
 
         [Fact]
+        public async Task PreviewRename_TitleOnlyPattern_DoesNotAppendSubtitle()
+        {
+            var libraryRoot = Path.Join(_tempRoot, "library");
+            var sourceFolder = Path.Join(libraryRoot, "Wrong", "Folder");
+
+            var settings = new ApplicationSettings
+            {
+                OutputPath = libraryRoot,
+                FolderNamingPattern = "{Author}/{Title}",
+                FileNamingPattern = "{Title}"
+            };
+
+            var (service, db, _) = BuildService(settings);
+            db.Audiobooks.Add(new Audiobook
+            {
+                Id = 9,
+                Title = "Example",
+                Subtitle = "Yup",
+                Authors = new List<string> { "Author" },
+                BasePath = sourceFolder,
+                Files = new List<AudiobookFile>
+                {
+                    new() { Id = 91, AudiobookId = 9, Path = Path.Join(sourceFolder, "old-name.m4b"), Format = "m4b" }
+                }
+            });
+            await db.SaveChangesAsync();
+
+            var previews = await service.PreviewRenameAsync(new[] { 9 });
+
+            var preview = Assert.Single(previews);
+            var fileRename = Assert.Single(preview.FileRenames);
+
+            Assert.Equal(NormalizePath(Path.Join(libraryRoot, "Author", "Example")), preview.NewFolderPath);
+            Assert.Equal(NormalizePath(Path.Join(libraryRoot, "Author", "Example", "Example.m4b")), fileRename.NewPath);
+            Assert.DoesNotContain("Yup", preview.NewFolderPath, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("Yup", fileRename.NewPath, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
         public async Task PreviewRename_PreservesCustomBasePath()
         {
             var outputPath = Path.Join(_tempRoot, "library");

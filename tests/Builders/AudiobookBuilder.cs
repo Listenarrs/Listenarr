@@ -32,6 +32,12 @@ namespace Listenarr.Tests.Builders
             return this;
         }
 
+        public AudiobookBuilder WithSubtitle(string value)
+        {
+            _audiobook.Subtitle = value;
+            return this;
+        }
+
         public AudiobookBuilder WithAuthor(string value)
         {
             _audiobook.Authors.Add(value);

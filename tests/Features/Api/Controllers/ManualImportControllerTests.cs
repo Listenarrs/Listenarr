@@ -23,47 +23,58 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Listenarr.Api.Services.Metadata;
 using Listenarr.Application.Repositories;
 using Listenarr.Domain.Models;
+using Listenarr.Tests.Builders;
+using Listenarr.Tests.Common;
 
 namespace Listenarr.Tests.Features.Api.Controllers
 {
-    public class ManualImport_MultiFileCollisionTests : IDisposable
+    public class ManualImport_MultiFileCollisionTests : BaseTests
     {
+        private string CreateTempDirectory(string name) => FileService.GetTempDirectory(name);
 
-        private List<string> _tempDirectories = [];
-
-        public void Dispose()
+        private static Audiobook CreateAudiobook(int id, string title, string basePath, string? subtitle = null, string? author = null)
         {
-            foreach (var directory in _tempDirectories)
+            var builder = new AudiobookBuilder()
+                .WithId(id)
+                .WithTitle(title)
+                .WithBasePath(basePath);
+
+            if (!string.IsNullOrWhiteSpace(subtitle))
             {
-                TryDeleteDirectory(directory);
+                builder.WithSubtitle(subtitle);
             }
 
-            _tempDirectories.Clear();
-        }
-        private static void TryDeleteDirectory(string path)
-        {
-            try
+            if (!string.IsNullOrWhiteSpace(author))
             {
-                Directory.Delete(path, true);
+                builder.WithAuthor(author);
             }
-            catch (IOException ex)
-            {
-                System.Diagnostics.Debug.WriteLine(ex.Message);
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                System.Diagnostics.Debug.WriteLine(ex.Message);
-            }
+
+            return builder.Build();
         }
 
-        private String CreateTempDirectory(string name)
+        private static ApplicationSettings BuildSettings(
+            string outputPath,
+            string folderNamingPattern = "",
+            string fileNamingPattern = "{Title}",
+            string multiFileNamingPattern = "{Title}-{DiskNumber:00}",
+            IEnumerable<string>? importBlacklistExtensions = null)
         {
-            var directory = Path.Join(Path.GetTempPath(), name, Guid.NewGuid().ToString());
-            Directory.CreateDirectory(directory);
+            var builder = new ApplicationSettingsBuilder()
+                .WithOutputPath(outputPath)
+                .WithFolderNamingPattern(folderNamingPattern)
+                .WithFileNamingPattern(fileNamingPattern)
+                .WithMultiFileNamingPattern(multiFileNamingPattern);
 
-            _tempDirectories.Add(directory);
+            if (importBlacklistExtensions != null)
+            {
+                builder.WithoutImportBlacklistExtensions();
+                foreach (var extension in importBlacklistExtensions)
+                {
+                    builder.WithImportBlacklistExtension(extension);
+                }
+            }
 
-            return directory;
+            return builder.Build();
         }
 
         public static Mock<IAudiobookRepository> GetRepoMock(Audiobook book)
@@ -134,7 +145,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
             var basePath = CreateTempDirectory("listenarr-manual-batch");
             var srcDir = CreateTempDirectory("listenarr-manual-src");
 
-            var book = new Audiobook { Id = 42, Title = "Batch Book", BasePath = basePath };
+            var book = CreateAudiobook(42, "Batch Book", basePath);
 
             // Create two source files
             var src1 = Path.Join(srcDir, "one.mp3");
@@ -154,7 +165,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
                 }
             };
 
-            var controller = GetController(book, new ApplicationSettings { OutputPath = basePath });
+            var controller = GetController(book, BuildSettings(basePath));
 
             await controller.Start(request);
 
@@ -171,7 +182,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
         {
             var basePath = CreateTempDirectory("listenarr-manual-ordered");
 
-            var book = new Audiobook { Id = 84, Title = "Ordered Book", BasePath = basePath };
+            var book = CreateAudiobook(84, "Ordered Book", basePath);
 
             var srcDir = CreateTempDirectory("listenarr-manual-ordered-src");
             var part10 = Path.Join(srcDir, "Part 10.mp3");
@@ -194,13 +205,9 @@ namespace Listenarr.Tests.Features.Api.Controllers
                 }
             };
 
-            var controller = GetController(book, new ApplicationSettings
-            {
-                OutputPath = basePath,
-                FolderNamingPattern = "{Author}",
-                FileNamingPattern = "{Title}",
-                MultiFileNamingPattern = "{Title}-{DiskNumber:00}"
-            });
+            var controller = GetController(
+                book,
+                BuildSettings(basePath, folderNamingPattern: "{Author}"));
 
             var action = await controller.Start(request);
             Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(action.Result);
@@ -218,12 +225,89 @@ namespace Listenarr.Tests.Features.Api.Controllers
         }
 
         [Fact]
+        public async Task InteractiveManualImport_TitleOnlyPattern_DoesNotAppendSubtitle()
+        {
+            var basePath = CreateTempDirectory("listenarr-manual-title-only");
+            var srcDir = CreateTempDirectory("listenarr-manual-title-only-src");
+
+            var book = CreateAudiobook(85, "Example", basePath, subtitle: "Yup");
+
+            var source = Path.Join(srcDir, "source.mp3");
+            await File.WriteAllTextAsync(source, "audio");
+
+            var request = new ManualImportRequestDto
+            {
+                Path = srcDir,
+                Mode = "interactive",
+                Action = FileMover.FileAction.Copy,
+                Items = new System.Collections.Generic.List<ManualImportItemDto>
+                {
+                    new ManualImportItemDto { FullPath = source, MatchedAudiobookId = book.Id }
+                }
+            };
+
+            var controller = GetController(book, BuildSettings(basePath));
+
+            var action = await controller.Start(request);
+            Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(action.Result);
+
+            var diskFiles = Directory.GetFiles(basePath, "*", SearchOption.AllDirectories)
+                .Select(Path.GetFileName)
+                .ToList();
+
+            Assert.Contains("Example.mp3", diskFiles);
+            Assert.DoesNotContain("Example - Yup.mp3", diskFiles, StringComparer.OrdinalIgnoreCase);
+            Assert.DoesNotContain(diskFiles, file => file?.Contains("Yup", StringComparison.OrdinalIgnoreCase) == true);
+        }
+
+        [Fact]
+        public async Task InteractiveManualImport_MultiFileTitleOnlyPattern_DoesNotAppendSubtitle()
+        {
+            var basePath = CreateTempDirectory("listenarr-manual-multi-title-only");
+            var srcDir = CreateTempDirectory("listenarr-manual-multi-title-only-src");
+
+            var book = CreateAudiobook(86, "Example", basePath, subtitle: "Yup");
+
+            var part1 = Path.Join(srcDir, "Part 1.mp3");
+            var part2 = Path.Join(srcDir, "Part 2.mp3");
+            await File.WriteAllTextAsync(part1, "one");
+            await File.WriteAllTextAsync(part2, "two");
+
+            var request = new ManualImportRequestDto
+            {
+                Path = srcDir,
+                Mode = "interactive",
+                Action = FileMover.FileAction.Copy,
+                Items = new System.Collections.Generic.List<ManualImportItemDto>
+                {
+                    new ManualImportItemDto { FullPath = part1, MatchedAudiobookId = book.Id },
+                    new ManualImportItemDto { FullPath = part2, MatchedAudiobookId = book.Id }
+                }
+            };
+
+            var controller = GetController(
+                book,
+                BuildSettings(basePath, multiFileNamingPattern: "{Title}"));
+
+            var action = await controller.Start(request);
+            Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(action.Result);
+
+            var diskFiles = Directory.GetFiles(basePath, "*", SearchOption.AllDirectories)
+                .Select(Path.GetFileName)
+                .ToList();
+
+            Assert.Contains("Example-01.mp3", diskFiles);
+            Assert.Contains("Example-02.mp3", diskFiles);
+            Assert.DoesNotContain(diskFiles, file => file?.Contains("Yup", StringComparison.OrdinalIgnoreCase) == true);
+        }
+
+        [Fact]
         public async Task InteractiveManualImport_ForewordAndChapterOne_AvoidsDuplicateNumberedNames()
         {
             var basePath = CreateTempDirectory("listenarr-manual-foreword");
             var srcDir = CreateTempDirectory("listenarr-manual-foreword-sr");
 
-            var book = new Audiobook { Id = 126, Title = "Jack of Shadows", BasePath = basePath };
+            var book = CreateAudiobook(126, "Jack of Shadows", basePath);
 
             var foreword = Path.Join(srcDir, "(Foreword by Joe Haldeman).mp3");
             var chapter1 = Path.Join(srcDir, "Chapter 01.mp3");
@@ -245,13 +329,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
                 }
             };
 
-            var controller = GetController(book, new ApplicationSettings
-            {
-                OutputPath = basePath,
-                FolderNamingPattern = "",
-                FileNamingPattern = "{Title}",
-                MultiFileNamingPattern = "{Title}-{DiskNumber:00}"
-            });
+            var controller = GetController(book, BuildSettings(basePath));
 
             var action = await controller.Start(request);
             Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(action.Result);
@@ -272,7 +350,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
             var outputRoot = CreateTempDirectory("listenarr-manual-scan-root");
             var srcDir = CreateTempDirectory("listenarr-manual-scan-src");
 
-            var book = new Audiobook { Id = 222, Title = "Jack of Shadows", Authors = new System.Collections.Generic.List<string> { "Roger Zelazny" }, BasePath = outputRoot };
+            var book = CreateAudiobook(222, "Jack of Shadows", outputRoot, author: "Roger Zelazny");
 
             var disc1 = Path.Join(srcDir, "Disc 1.mp3");
             var disc2 = Path.Join(srcDir, "Disc 2.mp3");
@@ -285,13 +363,14 @@ namespace Listenarr.Tests.Features.Api.Controllers
             var scanMock = new Mock<IScanQueueService>();
             scanMock.Setup(s => s.EnqueueScanAsync(book, expectedScanPath)).ReturnsAsync(Guid.NewGuid());
 
-            var controller = GetController(book, new ApplicationSettings
-            {
-                OutputPath = outputRoot,
-                FolderNamingPattern = "{Author}/{Title}",
-                FileNamingPattern = "{Title}",
-                MultiFileNamingPattern = "Disc {DiskNumber:00}/{Title}-{DiskNumber:00}"
-            }, repoMock, scanMock);
+            var controller = GetController(
+                book,
+                BuildSettings(
+                    outputRoot,
+                    folderNamingPattern: "{Author}/{Title}",
+                    multiFileNamingPattern: "Disc {DiskNumber:00}/{Title}-{DiskNumber:00}"),
+                repoMock,
+                scanMock);
 
             var request = new ManualImportRequestDto
             {
@@ -320,7 +399,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
             var destinationRoot = CreateTempDirectory("listenarr-manual-companion-dest");
             var sourceDir = CreateTempDirectory("listenarr-manual-companion-src");
 
-            var book = new Audiobook { Id = 333, Title = "Companion Book", BasePath = destinationRoot };
+            var book = CreateAudiobook(333, "Companion Book", destinationRoot);
 
             var audioFile = Path.Join(sourceDir, "Track 01.mp3");
             var coverFile = Path.Join(sourceDir, "cover.jpg");
@@ -329,13 +408,9 @@ namespace Listenarr.Tests.Features.Api.Controllers
             await File.WriteAllTextAsync(coverFile, "cover");
             await File.WriteAllTextAsync(notesFile, "notes");
 
-            var controller = GetController(book, new ApplicationSettings
-            {
-                OutputPath = destinationRoot,
-                FolderNamingPattern = "",
-                FileNamingPattern = "{Title}",
-                ImportBlacklistExtensions = new System.Collections.Generic.List<string>()
-            });
+            var controller = GetController(
+                book,
+                BuildSettings(destinationRoot, importBlacklistExtensions: []));
 
             var request = new ManualImportRequestDto
             {
@@ -365,7 +440,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
             var destinationRoot = CreateTempDirectory("listenarr-manual-mixed-dest");
             var sourceDir = CreateTempDirectory("listenarr-manual-mixed-src");
 
-            var book = new Audiobook { Id = 334, Title = "Companion Book", BasePath = destinationRoot };
+            var book = CreateAudiobook(334, "Companion Book", destinationRoot);
 
             var selectedAudio = Path.Join(sourceDir, "Companion Book.mp3");
             var foreignAudio = Path.Join(sourceDir, "Different Book.mp3");
@@ -374,13 +449,9 @@ namespace Listenarr.Tests.Features.Api.Controllers
             await File.WriteAllTextAsync(foreignAudio, "foreign");
             await File.WriteAllTextAsync(coverFile, "cover");
 
-            var controller = GetController(book, new ApplicationSettings
-            {
-                OutputPath = destinationRoot,
-                FolderNamingPattern = "",
-                FileNamingPattern = "{Title}",
-                ImportBlacklistExtensions = new System.Collections.Generic.List<string>()
-            });
+            var controller = GetController(
+                book,
+                BuildSettings(destinationRoot, importBlacklistExtensions: []));
 
             var request = new ManualImportRequestDto
             {
@@ -409,7 +480,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
             var basePath = CreateTempDirectory("listenarr-manual-neutral-dst");
             var srcDir = CreateTempDirectory("listenarr-manual-neutral-src");
 
-            var book = new Audiobook { Id = 126, Title = "Jack of Shadows", BasePath = basePath };
+            var book = CreateAudiobook(126, "Jack of Shadows", basePath);
 
             var foreword = Path.Join(srcDir, "(Foreword by Joe Haldeman).mp3");
             var chapter1 = Path.Join(srcDir, "Chapter 01.mp3");
@@ -431,13 +502,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
                 }
             };
 
-            var controller = GetController(book, new ApplicationSettings
-            {
-                OutputPath = basePath,
-                FolderNamingPattern = "",
-                FileNamingPattern = "{Title}",
-                MultiFileNamingPattern = "{Title}-{DiskNumber:00}"
-            });
+            var controller = GetController(book, BuildSettings(basePath));
 
             var action = await controller.Start(request);
             Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(action.Result);
@@ -461,4 +526,3 @@ namespace Listenarr.Tests.Features.Api.Controllers
         }
     }
 }
-

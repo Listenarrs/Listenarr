@@ -16,29 +16,25 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Runtime.InteropServices;
-using System.Text;
-using System.Text.RegularExpressions;
-using SixLabors.ImageSharp;
+using Listenarr.Application.Common;
+using Listenarr.Application.Interfaces;
 
 namespace Listenarr.Api.Services
 {
     public class FileNamingService : IFileNamingService
     {
-        private static readonly HashSet<char> PortableInvalidFileNameChars = BuildPortableInvalidFileNameChars();
-        private static readonly HashSet<string> ReservedWindowsDeviceNames = new(StringComparer.OrdinalIgnoreCase)
-        {
-            "CON", "PRN", "AUX", "NUL",
-            "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
-            "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"
-        };
-
         private readonly IConfigurationService _configService;
         private readonly ILogger<FileNamingService> _logger;
+        private readonly INamingPatternService _namingPatternService;
 
-        public FileNamingService(IConfigurationService configService, ILogger<FileNamingService> logger)
+        public FileNamingService(
+            IConfigurationService configService,
+            ILogger<FileNamingService> logger,
+            INamingPatternService? namingPatternService = null)
         {
             _configService = configService;
             _logger = logger;
+            _namingPatternService = namingPatternService ?? new NamingPatternService();
         }
 
         /// <summary>
@@ -161,174 +157,7 @@ namespace Listenarr.Api.Services
         /// </summary>
         public string ApplyNamingPattern(string pattern, Dictionary<string, object> variables, bool treatAsFilename = false)
         {
-            if (string.IsNullOrWhiteSpace(pattern))
-            {
-                return "Unknown";
-            }
-
-            var result = pattern;
-
-            // Regex to match variables: {VariableName} or {VariableName:Format}
-            var variableRegex = new Regex(@"\{(\w+)(?::([^}]+))?\}", RegexOptions.IgnoreCase);
-
-            // Replace variables. If a variable is empty, emit a sentinel so we can clean up surrounding
-            // punctuation and separators (for example: remove "{Series}/" when Series is empty).
-            const string EmptySentinel = "__EMPTY_VAR__";
-            result = variableRegex.Replace(result, match =>
-            {
-                var variableName = match.Groups[1].Value;
-                var format = match.Groups[2].Success ? match.Groups[2].Value : null;
-
-                if (variables.TryGetValue(variableName, out var value))
-                {
-                    // Handle empty values
-                    if (value == null || string.IsNullOrWhiteSpace(value.ToString()))
-                    {
-                        return EmptySentinel;
-                    }
-
-                    string renderedValue;
-
-                    // Apply formatting if specified
-                    if (!string.IsNullOrEmpty(format))
-                    {
-                        // For numeric values with format (e.g., {DiskNumber:00})
-                        if (value is int intValue)
-                        {
-                            renderedValue = intValue.ToString(format);
-                        }
-                        else if (int.TryParse(value.ToString(), out var parsedInt))
-                        {
-                            renderedValue = parsedInt.ToString(format);
-                        }
-                        else
-                        {
-                            renderedValue = value.ToString() ?? string.Empty;
-                        }
-                    }
-                    else
-                    {
-                        renderedValue = value.ToString() ?? string.Empty;
-                    }
-
-                    return SanitizePathComponent(renderedValue);
-                }
-
-                // Variable not found, return sentinel so we can optionally remove surrounding chars
-                _logger.LogWarning("Variable {VariableName} not found in naming pattern", variableName);
-                return EmptySentinel;
-            });
-
-            // Cleanup: remove empty sentinel inside any brackets (e.g. "(__EMPTY_VAR__)" -> "")
-            result = Regex.Replace(result, @"[\(\[\{]\s*" + EmptySentinel + @"\s*[\)\]\}]", string.Empty);
-
-            // Remove common separators adjacent to the sentinel (e.g. " - __EMPTY_VAR__" or "__EMPTY_VAR__ - ")
-            result = Regex.Replace(result, @"\s*[-–—:_]\s*" + EmptySentinel, string.Empty);
-            result = Regex.Replace(result, EmptySentinel + @"\s*[-–—:_]\s*", string.Empty);
-
-            // Remove sentinel next to slashes
-            result = Regex.Replace(result, @"/?" + EmptySentinel + @"/?", "/");
-
-            // Finally remove any remaining sentinels
-            result = result.Replace(EmptySentinel, string.Empty);
-
-            // Clean up multiple consecutive slashes or spaces
-            result = Regex.Replace(result, @"[\\/]{2,}", "/");
-            result = Regex.Replace(result, @"\s{2,}", " ");
-
-            if (treatAsFilename)
-            {
-                // If we're generating a filename (not a path), ensure no directory separators remain.
-                // Split on any slashes and take the last segment to avoid creating directories from tokens.
-                var partsForFilename = result.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
-                result = partsForFilename.Length > 0 ? partsForFilename.Last().Trim() : result.Trim();
-
-                // Remove any stray separators and sanitize the filename component
-                result = result.Replace("/", string.Empty).Replace("\\", string.Empty);
-                result = SanitizePathComponent(result);
-            }
-            else
-            {
-                // Remove leading/trailing slashes and spaces from each path component
-                var parts = result.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries)
-                    .Select(p => p.Trim())
-                    .Where(p => !string.IsNullOrWhiteSpace(p))
-                    .ToList();
-
-                // Collapse adjacent duplicate components (case-insensitive) to avoid
-                // patterns producing repeated folders like "Title/Title (...)/Title"
-                for (int i = parts.Count - 1; i > 0; i--)
-                {
-                    if (string.Equals(parts[i], parts[i - 1], StringComparison.OrdinalIgnoreCase))
-                    {
-                        parts.RemoveAt(i);
-                    }
-                }
-
-                // Sanitize each path component to remove invalid characters
-                var sanitizedParts = parts.Select(p => SanitizePathComponent(p)).ToList();
-                result = string.Join(Path.DirectorySeparatorChar.ToString(), sanitizedParts);
-            }
-
-            return result;
-        }
-
-        /// <summary>
-        /// Remove invalid characters from path components
-        /// </summary>
-        private string SanitizePathComponent(string pathComponent)
-        {
-            if (string.IsNullOrWhiteSpace(pathComponent))
-            {
-                return "Unknown";
-            }
-
-            var sanitized = new StringBuilder();
-            foreach (var c in pathComponent)
-            {
-                if (char.IsControl(c))
-                {
-                    continue;
-                }
-
-                if (c == ':' || c == '/' || c == '\\')
-                {
-                    sanitized.Append(" - ");
-                }
-                else if (PortableInvalidFileNameChars.Contains(c))
-                {
-                    sanitized.Append('_');
-                }
-                else
-                {
-                    sanitized.Append(c);
-                }
-            }
-
-            var result = sanitized.ToString();
-            result = Regex.Replace(result, @"\s+", " ");
-            result = Regex.Replace(result, @"(?:\s*-\s*){2,}", " - ");
-            result = Regex.Replace(result, @"_+", "_");
-            result = result.Trim();
-            result = result.TrimEnd('.', ' ');
-            result = Regex.Replace(result, @"^\s*[-_]+\s*", string.Empty);
-            result = Regex.Replace(result, @"\s*[-_]+\s*$", string.Empty);
-
-            if (string.IsNullOrWhiteSpace(result))
-            {
-                return "Unknown";
-            }
-
-            var extensionSeparator = result.IndexOf('.');
-            var deviceNameStem = extensionSeparator >= 0 ? result[..extensionSeparator] : result;
-            if (ReservedWindowsDeviceNames.Contains(deviceNameStem))
-            {
-                result = extensionSeparator >= 0
-                    ? deviceNameStem + "_" + result[extensionSeparator..]
-                    : result + "_";
-            }
-
-            return result;
+            return _namingPatternService.ApplyNamingPattern(pattern, variables, treatAsFilename);
         }
 
         private Dictionary<string, object> BuildVariables(AudioMetadata metadata)
@@ -336,17 +165,17 @@ namespace Listenarr.Api.Services
             return new Dictionary<string, object>
             {
                 // Keep multi-word author names as a single folder name (e.g. "Jane Austen")
-                { "Author", SanitizePathComponent(FirstNonEmpty(ChooseAuthor(metadata), "Unknown Author")) },
+                { "Author", FirstNonEmpty(ChooseAuthor(metadata), "Unknown Author") },
                 // For Series we must not fallback to Album or Title - when Series is blank we want
                 // the variable to be empty so ApplyNamingPattern can remove any adjacent separators
-                { "Series", string.IsNullOrWhiteSpace(metadata.Series) ? string.Empty : SanitizePathComponent(metadata.Series) },
-                { "Title", SanitizePathComponent(FirstNonEmpty(metadata.Title, "Unknown Title")) },
-                { "Subtitle", string.IsNullOrWhiteSpace(metadata.Subtitle) ? string.Empty : SanitizePathComponent(metadata.Subtitle) },
-                { "Edition", string.IsNullOrWhiteSpace(metadata.Edition) ? string.Empty : SanitizePathComponent(metadata.Edition) },
-                { "Narrator", string.IsNullOrWhiteSpace(metadata.Narrator) ? string.Empty : SanitizePathComponent(metadata.Narrator) },
-                { "Publisher", string.IsNullOrWhiteSpace(metadata.Publisher) ? string.Empty : SanitizePathComponent(metadata.Publisher) },
-                { "Language", string.IsNullOrWhiteSpace(metadata.Language) ? string.Empty : SanitizePathComponent(metadata.Language) },
-                { "Asin", string.IsNullOrWhiteSpace(metadata.Asin) ? string.Empty : SanitizePathComponent(metadata.Asin) },
+                { "Series", metadata.Series ?? string.Empty },
+                { "Title", FirstNonEmpty(metadata.Title, "Unknown Title") },
+                { "Subtitle", metadata.Subtitle ?? string.Empty },
+                { "Edition", metadata.Edition ?? string.Empty },
+                { "Narrator", metadata.Narrator ?? string.Empty },
+                { "Publisher", metadata.Publisher ?? string.Empty },
+                { "Language", metadata.Language ?? string.Empty },
+                { "Asin", metadata.Asin ?? string.Empty },
                 { "SeriesNumber", FirstNonEmpty(metadata.SeriesPosition?.ToString(), metadata.TrackNumber?.ToString()) },
                 { "Year", FirstNonEmpty(metadata.Year?.ToString()) },
                 { "Quality", FirstNonEmpty(metadata.BitRate.HasValue ? metadata.BitRate + "kbps" : null, metadata.Format) },
@@ -396,23 +225,6 @@ namespace Listenarr.Api.Services
             }
 
             return trimmedCandidate;
-        }
-
-        private static HashSet<char> BuildPortableInvalidFileNameChars()
-        {
-            var invalidChars = new HashSet<char>(Path.GetInvalidFileNameChars());
-
-            foreach (var c in "<>:\"/\\|?*")
-            {
-                invalidChars.Add(c);
-            }
-
-            for (int i = 0; i < 32; i++)
-            {
-                invalidChars.Add((char)i);
-            }
-
-            return invalidChars;
         }
 
         /// <summary>
@@ -549,4 +361,3 @@ namespace Listenarr.Api.Services
         }
     }
 }
-

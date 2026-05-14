@@ -11,6 +11,7 @@ const rootPackagePath = path.join(repoRoot, 'package.json')
 const rootLockPath = path.join(repoRoot, 'package-lock.json')
 const fePackagePath = path.join(repoRoot, 'fe', 'package.json')
 const feLockPath = path.join(repoRoot, 'fe', 'package-lock.json')
+const checkOnly = process.argv.includes('--check') || process.argv.includes('--verify')
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'))
@@ -59,9 +60,13 @@ function syncPackageVersion(packagePath, lockPath, targetVersion, label) {
   }
 
   if (changed) {
-    writeJson(packagePath, pkg)
-    writeJson(lockPath, lock)
-    console.log(`[version-sync] Updated ${label} package versions to ${targetVersion}`)
+    if (checkOnly) {
+      console.error(`[version-sync] ${label} package metadata is not synced to ${targetVersion}`)
+    } else {
+      writeJson(packagePath, pkg)
+      writeJson(lockPath, lock)
+      console.log(`[version-sync] Updated ${label} package versions to ${targetVersion}`)
+    }
   } else {
     console.log(`[version-sync] ${label} package versions already ${targetVersion}`)
   }
@@ -85,4 +90,9 @@ const feChanged = syncPackageVersion(fePackagePath, feLockPath, csprojVersion, '
 
 if (!rootChanged && !feChanged) {
   console.log(`[version-sync] No package metadata changes needed`)
+}
+
+if (checkOnly && (rootChanged || feChanged)) {
+  console.error(`[version-sync] Run npm run version:sync and commit the package metadata updates.`)
+  process.exit(1)
 }

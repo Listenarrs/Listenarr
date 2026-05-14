@@ -1,5 +1,9 @@
 #!/usr/bin/env sh
 set -e
 
-echo "Running staged lint and format checks..."
-npm run lint:staged
+. "$(dirname "$0")/../scripts/resolve-node.sh"
+
+NODE_CMD="$(resolve_node)"
+
+echo "Running pre-commit checks..."
+"$NODE_CMD" scripts/run-hook-check.mjs pre-commit

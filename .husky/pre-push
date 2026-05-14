@@ -1,5 +1,9 @@
 #!/usr/bin/env sh
 set -e
 
-echo "Running test suite..."
-npm test
+. "$(dirname "$0")/../scripts/resolve-node.sh"
+
+NODE_CMD="$(resolve_node)"
+
+echo "Running pre-push checks..."
+"$NODE_CMD" scripts/run-hook-check.mjs pre-push

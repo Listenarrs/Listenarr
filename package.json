@@ -5,6 +5,7 @@
   "description": "Listenarr - Automated audiobook downloading and management",
   "scripts": {
     "version:sync": "node scripts/sync-fe-version-from-csproj.mjs",
+    "version:check": "node scripts/sync-fe-version-from-csproj.mjs --check",
     "predev": "npm run version:sync",
     "prebuild": "npm run version:sync",
     "pretest": "npm run version:sync",
@@ -20,6 +21,7 @@
     "lint:frontend": "cd fe && npm run lint:check",
     "lint:staged": "node scripts/lint-staged.mjs",
     "lint:fix": "cd fe && npm run lint:fix",
+    "type-check:frontend": "cd fe && node node_modules/vue-tsc/bin/vue-tsc.js --build tsconfig.app.json",
     "format": "npm run format:backend && npm run format:frontend",
     "format:backend": "dotnet format listenarr.slnx --no-restore --verbosity minimal",
     "format:backend:check": "dotnet format listenarr.slnx --no-restore --verify-no-changes --verbosity minimal",
@@ -29,6 +31,10 @@
     "test": "npm run test:backend && npm run test:frontend",
     "test:backend": "dotnet test",
     "test:frontend": "cd fe && npm run test:unit",
+    "test:frontend:hook": "cd fe && node node_modules/vitest/vitest.mjs run",
+    "test:arch": "node scripts/check-architecture.mjs",
+    "check:pre-commit": "node scripts/run-hook-check.mjs pre-commit",
+    "check:pre-push": "node scripts/run-hook-check.mjs pre-push",
     "prepare": "husky"
   },
   "dependencies": {

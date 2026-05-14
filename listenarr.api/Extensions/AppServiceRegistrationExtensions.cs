@@ -16,6 +16,9 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 // csharp
+using Listenarr.Application.Audiobooks;
+using Listenarr.Application.Common;
+using Listenarr.Application.Interfaces;
 using Listenarr.Api.Services.Metadata;
 
 namespace Listenarr.Api.Extensions
@@ -74,6 +77,8 @@ namespace Listenarr.Api.Extensions
             services.AddScoped<IDownloadQueueService, DownloadQueueService>();
             services.AddScoped<IFileProcessingHandler, FileProcessingHandler>();
             services.AddScoped<IOpenLibraryService, OpenLibraryService>();
+            services.AddScoped<INamingPatternService, NamingPatternService>();
+            services.AddScoped<IAudiobookPathPreviewService, AudiobookPathPreviewService>();
             services.AddSingleton<IImageCacheService>(sp => new ImageCacheService(
                 sp.GetRequiredService<ILogger<ImageCacheService>>(),
                 sp.GetRequiredService<IHttpClientFactory>(),

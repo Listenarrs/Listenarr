@@ -23,6 +23,7 @@ using System.Reflection;
 using System.Text.RegularExpressions;
 using System.Security.Cryptography;
 using System.Text;
+using Listenarr.Application.Interfaces;
 using Listenarr.Domain.Utils;
 using Listenarr.Api.Services.Metadata;
 
@@ -57,11 +58,11 @@ namespace Listenarr.Api.Controllers
         private readonly IRootFolderRepository _rootFolderRepository;
         private readonly IScanQueueService? _scanQueueService;
         private readonly IMoveQueueService? _moveQueueService;
-        private readonly IFileNamingService _fileNamingService;
         private readonly NotificationService? _notificationService;
         private readonly IRootFolderService? _rootFolderService;
         private readonly ILibraryAddService? _libraryAddService;
         private readonly IRenameService? _renameService;
+        private readonly IAudiobookPathPreviewService? _pathPreviewService;
         /// <summary>Initializes a new instance of <see cref="LibraryController"/>.</summary>
         /// <param name="repo">Repository for audiobook persistence and queries.</param>
         /// <param name="imageCacheService">Service for caching and moving cover images.</param>
@@ -79,6 +80,7 @@ namespace Listenarr.Api.Controllers
         /// <param name="rootFolderService">Optional root folder service for managing and enumerating configured root folders used for validating explicit scan paths.</param>
         /// <param name="libraryAddService">Optional shared add-to-library service used by runtime requests and background syncs.</param>
         /// <param name="renameService">Optional organize/rename service used for previewing and executing library file organization.</param>
+        /// <param name="pathPreviewService">Optional application service used to preview audiobook base paths.</param>
         public LibraryController(
             IAudiobookRepository repo,
             IImageCacheService imageCacheService,
@@ -95,7 +97,8 @@ namespace Listenarr.Api.Controllers
             NotificationService? notificationService = null,
             IRootFolderService? rootFolderService = null,
             ILibraryAddService? libraryAddService = null,
-            IRenameService? renameService = null)
+            IRenameService? renameService = null,
+            IAudiobookPathPreviewService? pathPreviewService = null)
         {
             _repo = repo;
             _imageCacheService = imageCacheService;
@@ -106,14 +109,17 @@ namespace Listenarr.Api.Controllers
             _qualityProfileRepository = qualityProfileRepository;
             _downloadRepository = downloadRepository;
             _rootFolderRepository = rootFolderRepository;
-            _fileNamingService = fileNamingService;
             _scanQueueService = scanQueueService;
             _moveQueueService = moveQueueService;
             _notificationService = notificationService;
             _rootFolderService = rootFolderService;
             _libraryAddService = libraryAddService;
             _renameService = renameService;
+            _pathPreviewService = pathPreviewService;
         }
+
+        private IAudiobookPathPreviewService PathPreviewService =>
+            _pathPreviewService ?? HttpContext.RequestServices.GetRequiredService<IAudiobookPathPreviewService>();
 
         private static bool ComputeWantedFlag(Audiobook audiobook)
         {
@@ -565,33 +571,20 @@ namespace Listenarr.Api.Controllers
         {
             try
             {
-                using var scope = _scopeFactory.CreateScope();
-                var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
-                var settings = await configService.GetApplicationSettingsAsync();
-
-                var root = !string.IsNullOrEmpty(request.DestinationRoot) ? request.DestinationRoot : settings.OutputPath;
-
-                // Build a temporary Audiobook to feed naming pattern logic
-                var temp = request.Metadata.ToAudiobook();
+                var audiobook = request.Metadata.ToAudiobook();
 
                 AudiobookSeriesMembershipHelper.ApplyToAudiobook(
-                    temp,
+                    audiobook,
                     request.Metadata.SeriesMemberships,
                     request.Metadata.Series,
                     request.Metadata.SeriesNumber);
 
-                var namingPattern = !string.IsNullOrWhiteSpace(settings.FolderNamingPattern)
-                    ? settings.FolderNamingPattern
-                    : settings.FileNamingPattern;
-                var full = ComputeAudiobookBaseDirectoryFromPattern(temp, root ?? string.Empty, namingPattern);
+                var preview = await PathPreviewService.PreviewAsync(
+                    audiobook,
+                    request.DestinationRoot,
+                    HttpContext?.RequestAborted ?? CancellationToken.None);
 
-                var relative = full;
-                if (!string.IsNullOrEmpty(root) && full.StartsWith(root, StringComparison.OrdinalIgnoreCase))
-                {
-                    relative = full.Substring(root.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                }
-
-                return Ok(new { fullPath = full, relativePath = relative, root = root });
+                return Ok(new PreviewPathResponse(preview.FullPath, preview.RelativePath, preview.Root));
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
@@ -2258,19 +2251,6 @@ namespace Listenarr.Api.Controllers
 
             var results = new List<object>();
 
-            // Fetch application settings once for naming pattern when processing rootFolder changes
-            ApplicationSettings? settings = null;
-            try
-            {
-                using var scope = _scopeFactory.CreateScope();
-                var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
-                settings = await configService.GetApplicationSettingsAsync();
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogWarning(ex, "Failed to load application settings while performing bulk update");
-            }
-
             foreach (var id in request.Ids.Distinct())
             {
                 var entryErrors = new List<string>();
@@ -2366,11 +2346,11 @@ namespace Listenarr.Api.Controllers
 
                             if (!string.IsNullOrWhiteSpace(rootPath))
                             {
-                                // Use configured naming pattern to compute full base directory for this audiobook
-                                var fileNamingPattern = !string.IsNullOrWhiteSpace(settings?.FolderNamingPattern)
-                                    ? settings!.FolderNamingPattern
-                                    : settings?.FileNamingPattern ?? string.Empty;
-                                var newBase = ComputeAudiobookBaseDirectoryFromPattern(audiobook, rootPath, fileNamingPattern);
+                                var preview = await PathPreviewService.PreviewAsync(
+                                    audiobook,
+                                    rootPath,
+                                    HttpContext?.RequestAborted ?? CancellationToken.None);
+                                var newBase = preview.FullPath;
 
                                 try
                                 {
@@ -3586,90 +3566,6 @@ namespace Listenarr.Api.Controllers
             return value;
         }
 
-        private string ComputeAudiobookBaseDirectoryFromPattern(Audiobook audiobook, string rootPath, string fileNamingPattern)
-        {
-            // Derive directory pattern from the user's file naming pattern
-            // Remove file-specific tokens like DiskNumber and ChapterNumber to create a directory structure
-            string directoryPattern;
-            if (!string.IsNullOrWhiteSpace(fileNamingPattern))
-            {
-                // Remove file-specific patterns and create a directory pattern
-                directoryPattern = fileNamingPattern;
-
-                // Remove file-specific tokens that don't make sense for directories
-                directoryPattern = Regex.Replace(directoryPattern, @"\{DiskNumber[^}]*\}", "", RegexOptions.IgnoreCase);
-                directoryPattern = Regex.Replace(directoryPattern, @"\{ChapterNumber[^}]*\}", "", RegexOptions.IgnoreCase);
-
-                // Clean up any resulting double separators or empty parts
-                directoryPattern = Regex.Replace(directoryPattern, @"[\\/]\s*[\\/]", "/");
-                directoryPattern = Regex.Replace(directoryPattern, @"^\s*[\\/]", "");
-                directoryPattern = Regex.Replace(directoryPattern, @"[\\/]\s*$", "");
-
-                // If the pattern is now empty or doesn't contain directory separators, use a fallback
-                if (string.IsNullOrWhiteSpace(directoryPattern) || !directoryPattern.Contains("/"))
-                {
-                    directoryPattern = "{Author}/{Title}";
-                }
-            }
-            else
-            {
-                // Fallback to default directory pattern
-                directoryPattern = "{Author}/{Title}";
-            }
-
-            // For series books, ensure we include the series in the directory structure
-            if (!string.IsNullOrWhiteSpace(audiobook.Series) && !directoryPattern.Contains("{Series}"))
-            {
-                // Insert series between author and title if not already present
-                if (directoryPattern.Contains("{Author}/{Title}"))
-                {
-                    directoryPattern = directoryPattern.Replace("{Author}/{Title}", "{Author}/{Series}/{Title}");
-                }
-                else if (directoryPattern.Contains("{Author}/"))
-                {
-                    directoryPattern = directoryPattern.Replace("{Author}/", "{Author}/{Series}/");
-                }
-            }
-
-            // If the audiobook has no Series, remove any {Series} tokens from the directory pattern
-            // Tests expect the controller to strip the Series token when series metadata is missing.
-            if (string.IsNullOrWhiteSpace(audiobook.Series))
-            {
-                directoryPattern = Regex.Replace(directoryPattern, @"\{Series[^}]*\}", string.Empty, RegexOptions.IgnoreCase);
-                // Clean up any resulting duplicate separators or empty parts again
-                directoryPattern = Regex.Replace(directoryPattern, @"[\\/]\s*[\\/]", "/");
-                directoryPattern = Regex.Replace(directoryPattern, @"^\s*[\\/]", "");
-                directoryPattern = Regex.Replace(directoryPattern, @"[\\/]\s*$", "");
-            }
-
-            // Build variables for naming pattern using audiobook-level metadata
-            var variables = new Dictionary<string, object>
-            {
-                { "Author", SanitizeDirectoryName(audiobook.Authors?.FirstOrDefault() ?? "Unknown Author") },
-                { "Series", SanitizeDirectoryName(!string.IsNullOrWhiteSpace(audiobook.Series) ? audiobook.Series! : string.Empty) },
-                { "Title", SanitizeDirectoryName(audiobook.Title ?? "Unknown Title") },
-                { "Subtitle", SanitizeDirectoryName(audiobook.Subtitle ?? string.Empty) },
-                { "Edition", SanitizeDirectoryName(audiobook.Edition ?? string.Empty) },
-                { "Narrator", SanitizeDirectoryName((audiobook.Narrators != null && audiobook.Narrators.Any()) ? string.Join(", ", audiobook.Narrators.Where(n => !string.IsNullOrWhiteSpace(n))) : string.Empty) },
-                { "Publisher", SanitizeDirectoryName(audiobook.Publisher ?? string.Empty) },
-                { "Language", SanitizeDirectoryName(audiobook.Language ?? string.Empty) },
-                { "Asin", SanitizeDirectoryName(audiobook.Asin ?? string.Empty) },
-                { "SeriesNumber", audiobook.SeriesNumber ?? string.Empty },
-                { "Year", audiobook.PublishYear ?? string.Empty },
-                { "Quality", string.Empty },
-                { "DiskNumber", string.Empty },
-                { "ChapterNumber", string.Empty }
-            };
-
-            // Apply the directory pattern to get the relative directory path
-            var relative = _fileNamingService.ApplyNamingPattern(directoryPattern, variables, false);
-
-            // Combine with root path
-            var combined = ResolvePathWithOptionalBase(rootPath, relative);
-
-            return combined;
-        }
-
         private string CalculateBasePath(List<string> filePaths)
         {
             if (!filePaths.Any())
@@ -3770,22 +3666,6 @@ namespace Listenarr.Api.Controllers
             }
 
             return commonPath;
-        }
-
-        private string SanitizeDirectoryName(string name)
-        {
-            // Remove or replace characters that are invalid in directory names
-            var invalidChars = Path.GetInvalidFileNameChars();
-            foreach (var c in invalidChars)
-            {
-                name = name.Replace(c, '_');
-            }
-
-            // Also replace some additional characters that might cause issues
-            name = name.Replace(":", "_").Replace("*", "_").Replace("?", "_").Replace("\"", "_").Replace("<", "_").Replace(">", "_").Replace("|", "_");
-
-            // Trim whitespace and return
-            return name.Trim();
         }
 
         private static string ComputeShortHash(string? input)
@@ -4433,12 +4313,6 @@ namespace Listenarr.Api.Controllers
             public SearchResult? SearchResult { get; set; }
         }
 
-        public class PreviewPathRequest
-        {
-            public AudibleBookMetadata Metadata { get; set; } = new();
-            public string? DestinationRoot { get; set; }
-        }
-
         public class MoveRequest
         {
             public string? DestinationPath { get; set; }
@@ -4451,6 +4325,3 @@ namespace Listenarr.Api.Controllers
 
     }
 }
-
-
-

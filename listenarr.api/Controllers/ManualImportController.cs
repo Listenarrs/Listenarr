@@ -480,19 +480,8 @@ public class ManualImportController : ControllerBase
         if (!string.IsNullOrWhiteSpace(audiobook.Edition))
             variables["Edition"] = audiobook.Edition;
 
-        // Preserve the older title+subtitle uniqueness behavior unless the user explicitly uses {Subtitle}.
-        // (e.g. "The Land" + "Founding" → "The Land: Founding")
-        var usesSubtitleToken = (!string.IsNullOrWhiteSpace(folderPattern) && folderPattern.IndexOf("Subtitle", StringComparison.OrdinalIgnoreCase) >= 0)
-            || (!string.IsNullOrWhiteSpace(filePattern) && filePattern.IndexOf("Subtitle", StringComparison.OrdinalIgnoreCase) >= 0);
-
-        var titleFull = !usesSubtitleToken
-            && !string.IsNullOrWhiteSpace(audiobook.Subtitle)
-            && !string.IsNullOrWhiteSpace(audiobook.Title)
-            && !audiobook.Title.Contains(audiobook.Subtitle, StringComparison.OrdinalIgnoreCase)
-            ? $"{audiobook.Title}: {audiobook.Subtitle}"
-            : audiobook.Title;
-        variables["Title"] = !string.IsNullOrWhiteSpace(titleFull)
-            ? titleFull
+        variables["Title"] = !string.IsNullOrWhiteSpace(audiobook.Title)
+            ? audiobook.Title
             : "Unknown Title"; // Title is required as fallback
 
         if (!string.IsNullOrWhiteSpace(audiobook.Series))

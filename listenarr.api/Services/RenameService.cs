@@ -397,7 +397,7 @@ namespace Listenarr.Api.Services
         {
             var folderPattern = settings.FolderNamingPattern;
             var filePattern = isMultiFile ? settings.MultiFileNamingPattern : settings.FileNamingPattern;
-            var variables = BuildNamingVariables(audiobook, folderPattern, filePattern, file.SequenceNumber, isMultiFile);
+            var variables = BuildNamingVariables(audiobook, file.SequenceNumber, isMultiFile);
             var patternHasNumberTokens = !string.IsNullOrWhiteSpace(filePattern)
                 && (filePattern.IndexOf("DiskNumber", StringComparison.OrdinalIgnoreCase) >= 0 || filePattern.IndexOf("ChapterNumber", StringComparison.OrdinalIgnoreCase) >= 0);
 
@@ -428,23 +428,15 @@ namespace Listenarr.Api.Services
             return string.IsNullOrWhiteSpace(basePath) ? NormalizePath(relativePath) : NormalizePath(CombineWithOptionalBase(basePath, relativePath));
         }
 
-        private static Dictionary<string, object> BuildNamingVariables(Audiobook audiobook, string? folderPattern, string? filePattern, int sequenceNumber, bool isMultiFile)
+        private static Dictionary<string, object> BuildNamingVariables(Audiobook audiobook, int sequenceNumber, bool isMultiFile)
         {
-            var usesSubtitleToken = (!string.IsNullOrWhiteSpace(folderPattern) && folderPattern.IndexOf("Subtitle", StringComparison.OrdinalIgnoreCase) >= 0)
-                || (!string.IsNullOrWhiteSpace(filePattern) && filePattern.IndexOf("Subtitle", StringComparison.OrdinalIgnoreCase) >= 0);
-            var combinedTitle = !usesSubtitleToken
-                && !string.IsNullOrWhiteSpace(audiobook.Subtitle)
-                && !string.IsNullOrWhiteSpace(audiobook.Title)
-                && !audiobook.Title.Contains(audiobook.Subtitle, StringComparison.OrdinalIgnoreCase)
-                ? $"{audiobook.Title}: {audiobook.Subtitle}"
-                : audiobook.Title;
             var narrator = audiobook.Narrators != null ? string.Join(", ", audiobook.Narrators.Where(n => !string.IsNullOrWhiteSpace(n))) : string.Empty;
 
             return new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
             {
                 { "Author", audiobook.Authors?.FirstOrDefault(n => !string.IsNullOrWhiteSpace(n)) ?? "Unknown Author" },
                 { "Series", audiobook.Series ?? string.Empty },
-                { "Title", string.IsNullOrWhiteSpace(combinedTitle) ? "Unknown Title" : combinedTitle },
+                { "Title", string.IsNullOrWhiteSpace(audiobook.Title) ? "Unknown Title" : audiobook.Title },
                 { "Subtitle", audiobook.Subtitle ?? string.Empty },
                 { "Edition", audiobook.Edition ?? string.Empty },
                 { "Narrator", narrator },

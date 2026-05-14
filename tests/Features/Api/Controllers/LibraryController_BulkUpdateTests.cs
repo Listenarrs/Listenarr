@@ -16,182 +16,124 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Text.Json;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
-using Moq;
-using Xunit;
 using Listenarr.Api.Controllers;
-using Listenarr.Domain.Models;
-using Listenarr.Api.Services;
-using Listenarr.Infrastructure.Models;
-using Listenarr.Infrastructure.Repositories;
-using Listenarr.Application.Repositories;
+using Listenarr.Tests.Builders;
+using Listenarr.Tests.Common;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
+using Xunit;
 
 namespace Listenarr.Tests.Features.Api.Controllers
 {
-    public class LibraryController_BulkUpdateTests : IDisposable
+    [Trait("Name", "LibraryController_BulkUpdateTests")]
+    [Trait("Category", "LibraryController")]
+    public class LibraryController_BulkUpdateTests : BaseTests
     {
-        private readonly SqliteConnection _connection;
-        private readonly ListenArrDbContext _dbContext;
-
-        public LibraryController_BulkUpdateTests()
-        {
-            _connection = new SqliteConnection("Data Source=:memory:");
-            _connection.Open();
-            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
-                .UseSqlite(_connection)
-                .Options;
-            _dbContext = new ListenArrDbContext(options);
-            _dbContext.Database.EnsureCreated();
-
-            // Seed the quality profile that the bulk update test will reference via QualityProfileId = 42
-            _dbContext.QualityProfiles.Add(new QualityProfile
-            {
-                Id = 42,
-                Name = "Test Profile",
-                Qualities = new List<QualityDefinition>(),
-                PreferredFormats = new List<string>(),
-                PreferredLanguages = new List<string>(),
-                MustContain = new List<string>(),
-                MustNotContain = new List<string>()
-            });
-            _dbContext.SaveChanges();
-        }
-
-        public void Dispose()
-        {
-            _dbContext.Dispose();
-            _connection.Dispose();
-        }
-
         [Fact]
         public async Task BulkUpdate_ApplyRootMonitoredQuality_ReturnsPerIdResultsAndPersistsChanges()
         {
-            // Arrange
-            var dbContext = _dbContext;
-            // Create two audiobooks in DB
-            var a1 = new Audiobook
-            {
-                Title = "Book A",
-                Authors = new List<string> { "Author A" },
-                Monitored = false,
-                QualityProfileId = null
-            };
+            var outputRoot = FileService.GetTempDirectory("listenarr-bulk");
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
+                .WithOutputPath(outputRoot)
+                .WithFolderNamingPattern("{Author}/{Title}")
+                .WithFileNamingPattern("{Title}")
+                .Build());
 
-            var a2 = new Audiobook
-            {
-                Title = "Book B",
-                Authors = new List<string> { "Author B" },
-                Monitored = false,
-                QualityProfileId = null
-            };
+            var qualityProfile = await _qualityProfileRepository.AddAsync(new QualityProfileBuilder()
+                .Build());
 
-            await dbContext.Audiobooks.AddAsync(a1);
-            await dbContext.Audiobooks.AddAsync(a2);
-            await dbContext.SaveChangesAsync();
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Book A")
+                .WithAuthor("Author A")
+                .Build());
 
-            // Mock repository to return our DB entries by id
-            var mockRepo = new Mock<IAudiobookRepository>();
-            mockRepo.Setup(r => r.GetByIdAsync(a1.Id)).ReturnsAsync(a1);
-            mockRepo.Setup(r => r.GetByIdAsync(a2.Id)).ReturnsAsync(a2);
-
-            var mockImageCache = new Mock<IImageCacheService>();
-            var mockLogger = new Mock<ILogger<LibraryController>>();
-
-            var mockFileNaming = new Mock<IFileNamingService>();
-            mockFileNaming
-                .Setup(f => f.ApplyNamingPattern(It.IsAny<string>(), It.IsAny<Dictionary<string, object>>(), false))
-                .Returns((string pattern, Dictionary<string, object> vars, bool sanitize) =>
-                {
-                    vars.TryGetValue("Author", out var authorObj);
-                    vars.TryGetValue("Title", out var titleObj);
-                    var author = authorObj?.ToString() ?? "Unknown";
-                    var title = titleObj?.ToString() ?? "Unknown";
-                    return Path.Join(author, title).Replace("\\", "/");
-                });
-
-            // Configuration service providing a FileNamingPattern (not strictly used by our mock but kept consistent)
-            var tempRoot = Path.Join(Path.GetTempPath(), "listenarr-bulk-" + Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(tempRoot);
-
-            var mockConfigService = new Mock<IConfigurationService>();
-            mockConfigService.Setup(c => c.GetApplicationSettingsAsync())
-                .ReturnsAsync(new ApplicationSettings { OutputPath = tempRoot, FileNamingPattern = "{Author}/{Title}" });
-
-            var services = new ServiceCollection();
-            services.AddSingleton<IConfigurationService>(mockConfigService.Object);
-            var provider = services.BuildServiceProvider();
-            var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
-
-            // Create controller instance
-            var controller = new LibraryController(
-                mockRepo.Object,
-                mockImageCache.Object,
-                mockLogger.Object,
-                scopeFactory,
-                new EfHistoryRepository(dbContext),
-                new Mock<IAudiobookFileRepository>().Object,
-                new Mock<IQualityProfileRepository>().Object,
-                new Mock<IDownloadRepository>().Object,
-                new Mock<IRootFolderRepository>().Object,
-                mockFileNaming.Object);
-
-            // Build request: update monitored + qualityProfileId + rootFolder (include a non-existent id)
+            var missingId = audiobook.Id + 999999;
             var request = new LibraryController.BulkUpdateRequest
             {
-                Ids = new List<int> { a1.Id, 999999 },
+                Ids = [audiobook.Id, missingId],
                 Updates = new Dictionary<string, object>
                 {
                     { "monitored", true },
-                    { "qualityProfileId", 42 },
-                    { "rootFolder", tempRoot }
+                    { "qualityProfileId", qualityProfile.Id },
+                    { "rootFolder", outputRoot }
                 }
             };
 
-            // Act
+            var controller = _provider.GetRequiredService<LibraryController>();
             var actionResult = await controller.BulkUpdateAudiobooks(request);
 
-            // Assert
             var ok = Assert.IsType<OkObjectResult>(actionResult);
-
-            // Inspect returned JSON for per-id results
             var json = JsonSerializer.Serialize(ok.Value);
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
             Assert.True(root.TryGetProperty("results", out var resultsElem));
             Assert.Equal(2, resultsElem.GetArrayLength());
 
-            // First result should be success for existing audiobook
             var first = resultsElem[0];
-            Assert.Equal(a1.Id, first.GetProperty("id").GetInt32());
+            Assert.Equal(audiobook.Id, first.GetProperty("id").GetInt32());
             Assert.True(first.GetProperty("success").GetBoolean());
-            Assert.True(first.GetProperty("errors").GetArrayLength() == 0);
+            Assert.True(first.GetProperty("errors").GetArrayLength() == 0, json);
 
-            // Second result should indicate not found
             var second = resultsElem[1];
-            Assert.Equal(999999, second.GetProperty("id").GetInt32());
+            Assert.Equal(missingId, second.GetProperty("id").GetInt32());
             Assert.False(second.GetProperty("success").GetBoolean());
             Assert.True(second.GetProperty("errors").GetArrayLength() >= 1);
 
-            // Verify DB changes persisted for a1
-            var storedA1 = await dbContext.Audiobooks.FindAsync(a1.Id);
-            Assert.NotNull(storedA1);
-            Assert.True(storedA1.Monitored);
-            Assert.Equal(42, storedA1.QualityProfileId);
-            Assert.False(string.IsNullOrWhiteSpace(storedA1.BasePath));
-            Assert.StartsWith(tempRoot, storedA1.BasePath);
-            Assert.Contains("Author A", storedA1.BasePath);
-            Assert.Contains("Book A", storedA1.BasePath);
+            var stored = await _audiobookRepository.GetByIdAsync(audiobook.Id);
+            Assert.NotNull(stored);
+            Assert.True(stored.Monitored);
+            Assert.Equal(qualityProfile.Id, stored.QualityProfileId);
+            Assert.False(string.IsNullOrWhiteSpace(stored.BasePath));
+            Assert.StartsWith(outputRoot, stored.BasePath);
+            Assert.Contains("Author A", stored.BasePath);
+            Assert.Contains("Book A", stored.BasePath);
 
-            // Verify history entry exists for the change
-            var histories = dbContext.History.Where(h => h.AudiobookId == a1.Id).ToList();
-            Assert.True(histories.Count >= 1);
+            var histories = await _historyRepository.GetByAudiobookIdAsync(audiobook.Id);
+            Assert.NotEmpty(histories);
+        }
 
-            // Cleanup
-            try { Directory.Delete(tempRoot, true); } catch (IOException ex) { _ = ex; } catch (UnauthorizedAccessException ex) { _ = ex; }
+        /// <summary>
+        /// Bulk root changes should persist the same base path that preview reports for empty folder patterns.
+        /// </summary>
+        [Fact]
+        public async Task BulkUpdate_EmptyFolderPattern_SetsBasePathToRootFolder()
+        {
+            var outputRoot = FileService.GetTempDirectory("listenarr-bulk-empty-folder-pattern");
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
+                .WithOutputPath(outputRoot)
+                .WithFolderNamingPattern(string.Empty)
+                .WithFileNamingPattern("{Title}")
+                .Build());
+
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Book A")
+                .WithAuthor("Author A")
+                .Build());
+
+            var request = new LibraryController.BulkUpdateRequest
+            {
+                Ids = [audiobook.Id],
+                Updates = new Dictionary<string, object>
+                {
+                    { "rootFolder", outputRoot }
+                }
+            };
+
+            var controller = _provider.GetRequiredService<LibraryController>();
+            var actionResult = await controller.BulkUpdateAudiobooks(request);
+
+            var ok = Assert.IsType<OkObjectResult>(actionResult);
+            var json = JsonSerializer.Serialize(ok.Value);
+            using var doc = JsonDocument.Parse(json);
+            var result = Assert.Single(doc.RootElement.GetProperty("results").EnumerateArray());
+            Assert.True(result.GetProperty("success").GetBoolean(), json);
+
+            var stored = await _audiobookRepository.GetByIdAsync(audiobook.Id);
+            Assert.NotNull(stored);
+            Assert.Equal(outputRoot, stored.BasePath);
+            Assert.DoesNotContain("Unknown", stored.BasePath, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("Book A", stored.BasePath, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("Author A", stored.BasePath, StringComparison.OrdinalIgnoreCase);
         }
     }
 }
