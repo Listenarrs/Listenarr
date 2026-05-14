@@ -255,7 +255,17 @@
             <div class="audiobook-title">{{ collection.name }}</div>
           </div>
           <div class="collection-count">
-            {{ collection.count }} book{{ collection.count !== 1 ? 's' : '' }}
+            <span
+              class="collection-have-count"
+              :class="{
+                'count-all-good':
+                  collection.readyCount > 0 && collection.qualityMismatchCount === 0,
+                'count-has-mismatch':
+                  collection.readyCount > 0 && collection.qualityMismatchCount > 0,
+              }"
+              >{{ collection.readyCount }}</span
+            >
+            / {{ collection.count }} book{{ collection.count !== 1 ? 's' : '' }}
           </div>
         </div>
       </div>
@@ -408,7 +418,17 @@
             <div v-if="showItemDetails" class="grid-bottom-details">
               <div class="detail-line title">{{ collection.name }}</div>
               <div class="detail-line small">
-                {{ collection.count }} book{{ collection.count !== 1 ? 's' : '' }}
+                <span
+                  class="collection-have-count"
+                  :class="{
+                    'count-all-good':
+                      collection.readyCount > 0 && collection.qualityMismatchCount === 0,
+                    'count-has-mismatch':
+                      collection.readyCount > 0 && collection.qualityMismatchCount > 0,
+                  }"
+                  >{{ collection.readyCount }}</span
+                >
+                / {{ collection.count }} book{{ collection.count !== 1 ? 's' : '' }}
               </div>
             </div>
           </div>
@@ -417,7 +437,17 @@
             <div class="series-bottom-content">
               <p class="series-bottom-title">{{ collection.name }}</p>
               <p class="series-bottom-count">
-                {{ collection.count }} book{{ collection.count !== 1 ? 's' : '' }}
+                <span
+                  class="collection-have-count"
+                  :class="{
+                    'count-all-good':
+                      collection.readyCount > 0 && collection.qualityMismatchCount === 0,
+                    'count-has-mismatch':
+                      collection.readyCount > 0 && collection.qualityMismatchCount > 0,
+                  }"
+                  >{{ collection.readyCount }}</span
+                >
+                / {{ collection.count }} book{{ collection.count !== 1 ? 's' : '' }}
               </p>
             </div>
           </div>
@@ -1309,6 +1339,22 @@ async function ensureAuthorCover(authorName: string) {
   }
 }
 
+// Quality profiles + active downloads are referenced from groupedCollections
+// below to count per-collection ready / quality-mismatch books, so they need
+// to be declared before groupedCollections (the original declarations live
+// further down the file).
+const qualityProfiles = ref<QualityProfile[]>([])
+
+const activeDownloadAudiobookIds = computed(() => {
+  const ids = new Set<number>()
+  for (const download of downloadsStore.activeDownloads || []) {
+    if (typeof download?.audiobookId === 'number') {
+      ids.add(download.audiobookId)
+    }
+  }
+  return ids
+})
+
 // Grouping mode
 const GROUP_BY_KEY = 'listenarr.groupBy'
 const groupBy = ref<'books' | 'authors' | 'series'>('books')
@@ -1355,8 +1401,17 @@ const groupedCollections = computed(() => {
   const books = filteredAndSortedAudiobooks.value
   const groups = new Map<
     string,
-    { name: string; count: number; coverUrl?: string; coverUrls?: string[] }
+    {
+      name: string
+      count: number
+      readyCount: number
+      qualityMismatchCount: number
+      coverUrl?: string
+      coverUrls?: string[]
+    }
   >()
+  const activeIds = activeDownloadAudiobookIds.value
+  const profiles = qualityProfiles.value
 
   books.forEach((book) => {
     const key = groupBy.value === 'authors' ? book.authors?.[0] : book.series
@@ -1386,13 +1441,30 @@ const groupedCollections = computed(() => {
             } catch {}
           }
 
-          groups.set(key, { name: key, count: 0, coverUrl: cover })
+          groups.set(key, {
+            name: key,
+            count: 0,
+            readyCount: 0,
+            qualityMismatchCount: 0,
+            coverUrl: cover,
+          })
         } else {
-          groups.set(key, { name: key, count: 0, coverUrls: [] })
+          groups.set(key, {
+            name: key,
+            count: 0,
+            readyCount: 0,
+            qualityMismatchCount: 0,
+            coverUrls: [],
+          })
         }
       }
       const group = groups.get(key)!
       group.count++
+      const status = computeAudiobookStatus(book, activeIds, profiles)
+      if (status === 'quality-match' || status === 'quality-mismatch') {
+        group.readyCount++
+        if (status === 'quality-mismatch') group.qualityMismatchCount++
+      }
       const bookCover = getBookImageUrl(book)
       if (groupBy.value === 'authors') {
         try {
@@ -1754,23 +1826,12 @@ const showDeleteDialog = ref(false)
 const deleteTarget = ref<Audiobook | null>(null)
 const deleteFilesOnDisk = ref(false)
 const deleteFolderOnDisk = ref(false)
-const qualityProfiles = ref<QualityProfile[]>([])
 const showBulkEditModal = ref(false)
 const showOrganizeModal = ref(false)
 const organizeAudiobookIds = ref<number[]>([])
 const showEditModal = ref(false)
 const editAudiobook = ref<Audiobook | null>(null)
 const lastClickedIndex = ref<number | null>(null)
-
-const activeDownloadAudiobookIds = computed(() => {
-  const ids = new Set<number>()
-  for (const download of downloadsStore.activeDownloads || []) {
-    if (typeof download?.audiobookId === 'number') {
-      ids.add(download.audiobookId)
-    }
-  }
-  return ids
-})
 
 function computeAudiobookStatusRaw(audiobook: Audiobook): AudiobookStatus {
   return computeAudiobookStatus(audiobook, activeDownloadAudiobookIds.value, qualityProfiles.value)
@@ -3834,6 +3895,18 @@ defineExpose({
   font-size: 12px;
   color: #ccc;
   text-align: right;
+}
+
+.collection-have-count {
+  font-weight: 600;
+}
+
+.collection-have-count.count-all-good {
+  color: #2ecc71;
+}
+
+.collection-have-count.count-has-mismatch {
+  color: #f39c12;
 }
 
 /* Position badges between details and actions */

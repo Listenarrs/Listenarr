@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **List view for grouped authors and series:** Switching to list view (`viewMode === 'list'`) while grouping the audiobooks library by author or series now renders a row-per-collection list instead of silently falling back to the grid. Each row shows the collection cover, name, and book count, and clicking it navigates to the collection page — matching how the list-mode toggle already works for the Books grouping.
+- **Ready / total book counts on grouped collections:** Author and series collections in the audiobooks library now show how many of their books actually have a playable file present (e.g. `8 / 12 books`) instead of just the library total. The ready-count is colored green when every file in the collection meets the quality profile, orange when at least one file is below the profile but still playable, and neutral when no files are present yet. Applies to the new list-view rows and the grid-card bottom placard (the small corner badge stays as the library total to keep that uncluttered).
 
 ## [0.2.71] - 2026-04-17
 

@@ -34,7 +34,14 @@ vi.mock('@/services/api', () => ({
 
 type AudiobooksVm = {
   setGroupBy?: (value: string) => Promise<void> | void
-  groupedCollections?: Array<{ name: string; count: number; coverUrl?: string }>
+  groupedCollections?: Array<{
+    name: string
+    count: number
+    readyCount: number
+    qualityMismatchCount: number
+    coverUrl?: string
+    coverUrls?: string[]
+  }>
   showItemDetails?: boolean
   viewMode?: 'grid' | 'list'
   toggleViewMode?: () => void
@@ -205,11 +212,15 @@ describe('AudiobooksView Grouping', () => {
     expect(groupedCollections.find((g) => g.name === 'Author A')).toEqual({
       name: 'Author A',
       count: 2,
+      readyCount: 0,
+      qualityMismatchCount: 0,
       coverUrl: undefined,
     })
     expect(groupedCollections.find((g) => g.name === 'Author B')).toEqual({
       name: 'Author B',
       count: 1,
+      readyCount: 0,
+      qualityMismatchCount: 0,
       coverUrl: undefined,
     })
 
@@ -298,11 +309,15 @@ describe('AudiobooksView Grouping', () => {
     expect(groupedCollections.find((g) => g.name === 'Series 1')).toEqual({
       name: 'Series 1',
       count: 2,
+      readyCount: 0,
+      qualityMismatchCount: 0,
       coverUrls: ['cover1.jpg', 'cover2.jpg'],
     })
     expect(groupedCollections.find((g) => g.name === 'Series 2')).toEqual({
       name: 'Series 2',
       count: 1,
+      readyCount: 0,
+      qualityMismatchCount: 0,
       coverUrls: ['cover3.jpg'],
     })
   })
@@ -733,6 +748,93 @@ describe('AudiobooksView Grouping', () => {
     }
     await wrapper.vm.$nextTick()
     expect(wrapper.find('.series-bottom-placard').exists()).toBe(true)
+  })
+
+  it('tracks readyCount per collection (books with playable files count as ready)', async () => {
+    if (
+      typeof (globalThis as unknown as { ResizeObserver?: unknown }).ResizeObserver === 'undefined'
+    ) {
+      ;(globalThis as unknown as Record<string, unknown>).ResizeObserver = class {
+        observe() {}
+        disconnect() {}
+      }
+    }
+    if (typeof (globalThis as unknown as { WebSocket?: unknown }).WebSocket === 'undefined') {
+      ;(globalThis as unknown as Record<string, unknown>).WebSocket = function () {
+        /* noop */
+      }
+    }
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', name: 'home', component: { template: '<div />' } },
+        { path: '/audiobooks', name: 'audiobooks', component: AudiobooksView },
+      ],
+    })
+    await router.push('/audiobooks')
+    await router.isReady().catch(() => {})
+
+    const store = useLibraryStore()
+    // Author A has 2 books, both with files (ready). Author B has 1 book with no files (not ready).
+    store.audiobooks = [
+      {
+        id: 1,
+        title: 'Book 1',
+        authors: ['Author A'],
+        imageUrl: 'cover1.jpg',
+        filePath: '/audiobooks/book1.m4b',
+        fileSize: 12345,
+        files: [{ format: 'm4b' }],
+      },
+      {
+        id: 2,
+        title: 'Book 2',
+        authors: ['Author A'],
+        imageUrl: 'cover2.jpg',
+        filePath: '/audiobooks/book2.m4b',
+        fileSize: 23456,
+        files: [{ format: 'm4b' }],
+      },
+      {
+        id: 3,
+        title: 'Book 3',
+        authors: ['Author B'],
+        imageUrl: 'cover3.jpg',
+        files: [],
+      },
+    ] as unknown as import('@/types').Audiobook[]
+
+    store.fetchLibrary = vi.fn(async () => undefined)
+    const wrapper = mount(AudiobooksView, {
+      global: {
+        plugins: [pinia, router],
+        stubs: [
+          'BulkEditModal',
+          'EditAudiobookModal',
+          'CustomFilterModal',
+          'FiltersDropdown',
+          'CustomSelect',
+        ],
+      },
+    })
+    await new Promise((r) => setTimeout(r, 0))
+
+    const vm = getVm(wrapper)
+    await vm.setGroupBy?.('authors')
+    await wrapper.vm.$nextTick()
+
+    const groups = vm.groupedCollections ?? []
+    const a = groups.find((g) => g.name === 'Author A')!
+    const b = groups.find((g) => g.name === 'Author B')!
+    expect(a.count).toBe(2)
+    expect(a.readyCount).toBe(2)
+    expect(a.qualityMismatchCount).toBe(0)
+    expect(b.count).toBe(1)
+    expect(b.readyCount).toBe(0)
+    expect(b.qualityMismatchCount).toBe(0)
   })
 
   it.each([
