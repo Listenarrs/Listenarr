@@ -756,9 +756,11 @@ describe('AudiobooksView Grouping', () => {
         }
       }
 
-      // Persistence only loads viewMode when groupBy='books' (scrollContainer is mounted);
-      // in this test we toggle into list mode explicitly after mount.
+      // Clear persistence keys so this test isn't affected by other tests.
       localStorage.removeItem('listenarr.viewMode')
+      localStorage.removeItem('listenarr.viewMode.books')
+      localStorage.removeItem('listenarr.viewMode.authors')
+      localStorage.removeItem('listenarr.viewMode.series')
 
       const pinia = createPinia()
       setActivePinia(pinia)
@@ -836,4 +838,145 @@ describe('AudiobooksView Grouping', () => {
       expect(names).toContain(secondName)
     },
   )
+
+  it('persists viewMode per grouping and restores it when grouping changes', async () => {
+    if (
+      typeof (globalThis as unknown as { ResizeObserver?: unknown }).ResizeObserver === 'undefined'
+    ) {
+      ;(globalThis as unknown as Record<string, unknown>).ResizeObserver = class {
+        observe() {}
+        disconnect() {}
+      }
+    }
+    if (typeof (globalThis as unknown as { WebSocket?: unknown }).WebSocket === 'undefined') {
+      ;(globalThis as unknown as Record<string, unknown>).WebSocket = function () {
+        /* noop */
+      }
+    }
+
+    // Per-grouping prefs: list mode for authors, grid for books.
+    localStorage.removeItem('listenarr.viewMode')
+    localStorage.setItem('listenarr.viewMode.books', 'grid')
+    localStorage.setItem('listenarr.viewMode.authors', 'list')
+    localStorage.setItem('listenarr.viewMode.series', 'grid')
+    localStorage.setItem('listenarr.groupBy', 'books')
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', name: 'home', component: { template: '<div />' } },
+        { path: '/audiobooks', name: 'audiobooks', component: AudiobooksView },
+      ],
+    })
+    await router.push('/audiobooks')
+    await router.isReady().catch(() => {})
+
+    const store = useLibraryStore()
+    store.audiobooks = [
+      {
+        id: 1,
+        title: 'Book 1',
+        authors: ['Author A'],
+        series: 'Series 1',
+        imageUrl: 'cover1.jpg',
+        files: [],
+      },
+    ] as unknown as import('@/types').Audiobook[]
+
+    store.fetchLibrary = vi.fn(async () => undefined)
+    const wrapper = mount(AudiobooksView, {
+      global: {
+        plugins: [pinia, router],
+        stubs: [
+          'BulkEditModal',
+          'EditAudiobookModal',
+          'CustomFilterModal',
+          'FiltersDropdown',
+          'CustomSelect',
+        ],
+      },
+    })
+    await new Promise((r) => setTimeout(r, 0))
+
+    const vm = getVm(wrapper)
+    // Initial grouping is books → grid (the stored books pref)
+    expect(vm.viewMode).toBe('grid')
+
+    // Switch to authors → should pick up the stored 'list' pref
+    await vm.setGroupBy?.('authors')
+    await wrapper.vm.$nextTick()
+    expect(vm.viewMode).toBe('list')
+
+    // Switch to series → stored as 'grid'
+    await vm.setGroupBy?.('series')
+    await wrapper.vm.$nextTick()
+    expect(vm.viewMode).toBe('grid')
+
+    // Switch back to authors → still 'list'
+    await vm.setGroupBy?.('authors')
+    await wrapper.vm.$nextTick()
+    expect(vm.viewMode).toBe('list')
+  })
+
+  it('migrates the legacy viewMode key to per-grouping keys on first load', async () => {
+    if (
+      typeof (globalThis as unknown as { ResizeObserver?: unknown }).ResizeObserver === 'undefined'
+    ) {
+      ;(globalThis as unknown as Record<string, unknown>).ResizeObserver = class {
+        observe() {}
+        disconnect() {}
+      }
+    }
+    if (typeof (globalThis as unknown as { WebSocket?: unknown }).WebSocket === 'undefined') {
+      ;(globalThis as unknown as Record<string, unknown>).WebSocket = function () {
+        /* noop */
+      }
+    }
+
+    // No per-grouping keys yet; legacy key says 'list'.
+    localStorage.removeItem('listenarr.viewMode.books')
+    localStorage.removeItem('listenarr.viewMode.authors')
+    localStorage.removeItem('listenarr.viewMode.series')
+    localStorage.setItem('listenarr.viewMode', 'list')
+    localStorage.setItem('listenarr.groupBy', 'books')
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', name: 'home', component: { template: '<div />' } },
+        { path: '/audiobooks', name: 'audiobooks', component: AudiobooksView },
+      ],
+    })
+    await router.push('/audiobooks')
+    await router.isReady().catch(() => {})
+
+    const store = useLibraryStore()
+    store.audiobooks = [] as unknown as import('@/types').Audiobook[]
+    store.fetchLibrary = vi.fn(async () => undefined)
+
+    const wrapper = mount(AudiobooksView, {
+      global: {
+        plugins: [pinia, router],
+        stubs: [
+          'BulkEditModal',
+          'EditAudiobookModal',
+          'CustomFilterModal',
+          'FiltersDropdown',
+          'CustomSelect',
+        ],
+      },
+    })
+    await new Promise((r) => setTimeout(r, 0))
+
+    const vm = getVm(wrapper)
+    expect(vm.viewMode).toBe('list')
+    // All three per-grouping keys should have been seeded from the legacy value.
+    expect(localStorage.getItem('listenarr.viewMode.books')).toBe('list')
+    expect(localStorage.getItem('listenarr.viewMode.authors')).toBe('list')
+    expect(localStorage.getItem('listenarr.viewMode.series')).toBe('list')
+  })
 })
