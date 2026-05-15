@@ -145,7 +145,12 @@ namespace Listenarr.Application.Downloads
                 item.ContentPath = await remotePathMappingService.TranslatePathAsync(client, item.ContentPath);
             }
 
-            if (item.SourceFiles != null)
+            // FIXME: https://github.com/Listenarrs/Listenarr/issues/592
+            // We havent yet decided of the responsibility of download client adapter
+            // As a result, we cannot assume an empty sourceFiles means there are no source files downloaded
+            // and so, we try to populate it as if it was null
+            // When the issue is tackled, we might want to keep the empty list when the adapter gives an empty list
+            if (item.SourceFiles != null && item.SourceFiles.Count > 0)
             {
                 List<string> sourceFiles = [];
                 foreach (string file in item.SourceFiles)
