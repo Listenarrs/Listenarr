@@ -15,6 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using Listenarr.Domain.Common;
 
 namespace Listenarr.Domain.Models
 {
@@ -50,6 +51,54 @@ namespace Listenarr.Domain.Models
         // Legacy fields for compatibility
         public string? Author { get; set; }
         public string? Narrator { get; set; }
+
+        public Audiobook ToAudiobook()
+        {
+            var audiobook = new Audiobook
+            {
+                Title = Title ?? string.Empty,
+                Subtitle = Subtitle,
+                Authors = (Authors != null && Authors.Count != 0) ? Authors :
+                    (!string.IsNullOrWhiteSpace(Author) ? [Author!] : new List<string>()),
+                PublishYear = PublishYear,
+                PublishedDate = PublishedDate,
+                Series = Series ?? string.Empty,
+                // Persist OpenLibrary ID when present (enables OL-only matching in the UI)
+                OpenLibraryId = OpenLibraryId,
+                SeriesNumber = ToStringOrFirst(SeriesNumber),
+                Description = ToStringOrFirst(Description),
+                Publisher = ToStringOrFirst(Publisher),
+                Genres = (Genres != null && Genres.Count != 0) ? Genres : null,
+                Tags = Tags,
+                Narrators = (Narrators != null && Narrators.Count != 0) ? Narrators :
+                            (!string.IsNullOrWhiteSpace(Narrator) ? new List<string> { Narrator! } : []),
+                Isbn = Isbn ?? [],
+                Asin = Asin,
+                ExternalIdentifiers = [],
+                // Removed duplicate Publisher assignment
+                Language = Language,
+                Runtime = Runtime,
+                Edition = Edition,
+                Version = Version,
+                Explicit = Explicit,
+                Abridged = Abridged
+            };
+
+            AudiobookSeriesMembershipHelper.ApplyToAudiobook(
+                audiobook,
+                SeriesMemberships,
+                Series,
+                SeriesNumber);
+
+            return audiobook;
+        }
+
+        public static string? ToStringOrFirst(object? value)
+        {
+            if (value is List<string> list)
+                return list.FirstOrDefault();
+            return value as string;
+        }
     }
 }
 

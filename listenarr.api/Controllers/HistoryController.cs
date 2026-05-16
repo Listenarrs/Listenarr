@@ -16,11 +16,8 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using Listenarr.Application.Interfaces.Repositories;
 using Microsoft.AspNetCore.Mvc;
-using System.Threading.Tasks;
-using System.Collections.Generic;
-using Listenarr.Application.Repositories;
-using Listenarr.Domain.Models;
 
 namespace Listenarr.Api.Controllers
 {

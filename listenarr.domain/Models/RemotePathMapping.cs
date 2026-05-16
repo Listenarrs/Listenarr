@@ -17,7 +17,7 @@
  */
 
 using System.ComponentModel.DataAnnotations;
-using Listenarr.Domain.Utils;
+using Listenarr.Domain.Common;
 
 namespace Listenarr.Domain.Models
 {
@@ -88,6 +88,23 @@ namespace Listenarr.Domain.Models
         /// When this mapping was last updated
         /// </summary>
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+        // FIXME: Not OOP, remove me
+        public RemotePathMapping()
+        {
+        }
+
+        public RemotePathMapping(
+            string downloadClientId,
+            string remotePath,
+            string localPath,
+            string name)
+        {
+            DownloadClientId = downloadClientId;
+            LocalPath = localPath;
+            RemotePath = remotePath;
+            Name = name;
+        }
 
         /// <summary>
         /// Normalize path separators for consistency

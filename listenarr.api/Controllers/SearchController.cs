@@ -16,16 +16,16 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using System;
 using System.Text.RegularExpressions;
-using System.Collections.Generic;
-using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Listenarr.Domain.Models;
-using Listenarr.Api.Services;
-using Listenarr.Api.Services.Search;
 using Microsoft.AspNetCore.Mvc;
+using Listenarr.Application.Common;
+using Listenarr.Application.Interfaces;
+using Listenarr.Application.Metadata;
+using Listenarr.Application.Search;
+using Listenarr.Domain.Models;
+using Listenarr.Application.Security;
 
 namespace Listenarr.Api.Controllers
 {

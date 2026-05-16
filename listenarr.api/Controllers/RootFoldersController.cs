@@ -15,14 +15,11 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Microsoft.AspNetCore.Mvc;
-using System.Threading.Tasks;
-using Listenarr.Api.Services;
+using Listenarr.Application.Audiobooks;
+using Listenarr.Application.Interfaces;
+using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Domain.Models;
-using System.Collections.Generic;
-using System;
-using System.Linq;
-using Listenarr.Application.Repositories;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Api.Controllers
 {

@@ -132,49 +132,83 @@ namespace Listenarr.Domain.Models
         /// </summary>
         public void AddLogEntry(string message)
         {
-            ProcessingLog.Add($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] {message}");
+            if (!string.IsNullOrEmpty(message))
+            {
+                ProcessingLog.Add($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] {message}");
+            }
+        }
+
+        /// <summary>
+        /// Indicates a job as Pending, effectively setting it for queue processing
+        /// </summary>
+        public DownloadProcessingJob UnStuck(string message = "")
+        {
+            Status = ProcessingJobStatus.Pending;
+            StartedAt = DateTime.UtcNow;
+            AddLogEntry(message);
+            return this;
+        }
+
+        /// <summary>
+        /// Indicates a job has started
+        /// </summary>
+        public DownloadProcessingJob MarkAsProcessing()
+        {
+            Status = ProcessingJobStatus.Processing;
+            StartedAt = DateTime.UtcNow;
+            AddLogEntry("Started processing");
+            return this;
         }
 
         /// <summary>
         /// Mark job as failed with error message
         /// </summary>
-        public void MarkAsFailed(string errorMessage)
+        public DownloadProcessingJob MarkAsFailed(string errorMessage)
         {
             Status = ProcessingJobStatus.Failed;
             ErrorMessage = errorMessage;
             CompletedAt = DateTime.UtcNow;
             AddLogEntry($"Job failed: {errorMessage}");
+            return this;
         }
 
         /// <summary>
         /// Mark job as completed successfully
         /// </summary>
-        public void MarkAsCompleted()
+        public DownloadProcessingJob MarkAsCompleted()
         {
             Status = ProcessingJobStatus.Completed;
             CompletedAt = DateTime.UtcNow;
             AddLogEntry("Job completed successfully");
+            return this;
         }
 
         /// <summary>
         /// Schedule job for retry with exponential backoff
         /// </summary>
-        public void ScheduleRetry()
+        public DownloadProcessingJob ScheduleRetry(string errorMessage = "")
         {
+            if (!string.IsNullOrEmpty(errorMessage))
+            {
+                AddLogEntry(errorMessage);
+                ErrorMessage = errorMessage;
+            }
+
             if (RetryCount >= MaxRetries)
             {
                 MarkAsFailed($"Max retries ({MaxRetries}) exceeded");
-                return;
+                return this;
             }
 
             RetryCount++;
-            Status = ProcessingJobStatus.Retry;
+            Status = ProcessingJobStatus.Pending;
 
             // Exponential backoff: 30s, 2m, 8m, etc.
             var backoffMinutes = Math.Pow(2, RetryCount) * 0.5; // 0.5, 1, 2, 4, 8 minutes
             NextRetryAt = DateTime.UtcNow.AddMinutes(backoffMinutes);
 
             AddLogEntry($"Scheduled for retry #{RetryCount} at {NextRetryAt}");
+            return this;
         }
     }
 }
