@@ -1,0 +1,9 @@
+.git/
+**/bin/
+**/obj/
+**/node_modules/
+artifacts/
+listenarr.api/publish/
+publish/
+publish_local_test/
+publish_test*/

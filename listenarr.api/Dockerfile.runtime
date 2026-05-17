@@ -48,9 +48,10 @@ RUN chmod +x /usr/local/bin/gosu
 RUN groupadd --system listenarr \
 	&& useradd --system --gid listenarr --home-dir /nonexistent --shell /usr/sbin/nologin --no-create-home listenarr
 
-# Copy publish output produced by the CI pipeline or local `dotnet publish`.
-# The workflows publish into listenarr.api/publish, so copy that directory into the image root.
-COPY listenarr.api/publish/ /app/
+# Copy the Docker-specific publish output produced by the CI pipeline.
+# Release ZIP artifacts are published under listenarr.api/publish and must not
+# be copied into the runtime image.
+COPY listenarr.api/docker-publish/ /app/
 
 # Normalize frontend asset permissions so the non-root runtime user can read static files.
 RUN find /app/wwwroot -type d -exec chmod 755 {} \; \

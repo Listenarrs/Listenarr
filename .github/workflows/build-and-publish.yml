@@ -98,6 +98,7 @@ jobs:
     env:
       API_PROJECT: listenarr.api/Listenarr.Api.csproj
       API_OUTPUT: listenarr.api/publish
+      DOCKER_OUTPUT: listenarr.api/docker-publish
 
     steps:
       # ── Checkout ─────────────────────────────────────────────────────────────
@@ -256,44 +257,56 @@ jobs:
         uses: docker/setup-buildx-action@v2
 
       - name: Publish API for runtime image
-        run: dotnet publish ${{ env.API_PROJECT }} -c Release -o ${{ env.API_OUTPUT }}
+        run: |
+          rm -rf "${{ env.DOCKER_OUTPUT }}"
+          dotnet publish ${{ env.API_PROJECT }} -c Release -o "${{ env.DOCKER_OUTPUT }}"
 
       - name: Show publish contents (sanity check)
         run: |
-          echo "Listing publish folder contents"
-          ls -la listenarr.api/publish || true
-          echo "Listing publish/tools contents"
-          ls -la listenarr.api/publish/tools || echo "publish/tools missing"
+          echo "Listing Docker publish folder contents"
+          ls -la "${{ env.DOCKER_OUTPUT }}" || true
+          echo "Listing Docker publish/tools contents"
+          ls -la "${{ env.DOCKER_OUTPUT }}/tools" || echo "docker-publish/tools missing"
 
       - name: Copy tools into publish and verify
         run: |
-          echo "Ensuring tools are present in listenarr.api/publish"
-          if [ ! -d "listenarr.api/publish/tools" ]; then
-            echo "publish/tools missing — copying from tools"
-            cp -r tools listenarr.api/publish/ || true
+          echo "Ensuring tools are present in ${{ env.DOCKER_OUTPUT }}"
+          if [ ! -d "${{ env.DOCKER_OUTPUT }}/tools" ]; then
+            echo "docker-publish/tools missing; copying from tools"
+            cp -r tools "${{ env.DOCKER_OUTPUT }}/" || true
           else
-            echo "publish/tools already present"
+            echo "docker-publish/tools already present"
           fi
-          if [ ! -d "listenarr.api/publish/tools" ]; then
+          if [ ! -d "${{ env.DOCKER_OUTPUT }}/tools" ]; then
             echo "ERROR: publish/tools missing after copy"
-            ls -la listenarr.api/publish || true
+            ls -la "${{ env.DOCKER_OUTPUT }}" || true
             exit 1
           fi
-          ls -la listenarr.api/publish/tools
+          ls -la "${{ env.DOCKER_OUTPUT }}/tools"
 
       - name: Fail if tools missing (quick fail)
         run: |
-          if [ ! -d "listenarr.api/publish/tools" ]; then
-            echo "ERROR: listenarr.api/publish/tools is missing. Aborting to avoid pushing a broken image."
+          if [ ! -d "${{ env.DOCKER_OUTPUT }}/tools" ]; then
+            echo "ERROR: ${{ env.DOCKER_OUTPUT }}/tools is missing. Aborting to avoid pushing a broken image."
             exit 1
           fi
-          echo "publish/tools present"
+          echo "docker-publish/tools present"
 
-      - name: Upload publish folder (debug artifact)
+      - name: Fail if release artifacts are in Docker publish output
+        run: |
+          for artifact_dir in linux-x64 win-x64 osx-x64 publish; do
+            if [ -e "${{ env.DOCKER_OUTPUT }}/${artifact_dir}" ]; then
+              echo "ERROR: ${{ env.DOCKER_OUTPUT }}/${artifact_dir} must not be copied into the Docker image."
+              exit 1
+            fi
+          done
+          echo "Docker publish output does not contain release artifact directories."
+
+      - name: Upload Docker publish folder (debug artifact)
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.channel }}-listenarr-publish-folder
-          path: listenarr.api/publish
+          name: ${{ inputs.channel }}-listenarr-docker-publish-folder
+          path: ${{ env.DOCKER_OUTPUT }}
 
       - name: Split Docker tags by registry
         id: docker_tags
