@@ -554,29 +554,8 @@ builder.Services.AddListenarrInfrastructure(options =>
     builder.Environment.ContentRootPath);
 // Register application-level services (moved from Program.cs to keep startup focused)
 builder.Services.AddListenarrAppServices(builder.Configuration);
-// Register hosted/background services (moved from Program.cs). Allow tests to disable these.
-// Hosted services are ENABLED by default in local development because download monitoring
-// and import processing rely on these background workers.
-// Use explicit config/env override only when intentionally disabling them.
-var disableHostedServices =
-    builder.Configuration.GetValue<bool>("Listenarr:DisableHostedServices") ||
-    string.Equals(Environment.GetEnvironmentVariable("LISTENARR_DISABLE_HOSTED_SERVICES"), "true", StringComparison.OrdinalIgnoreCase);
 
-if (disableHostedServices)
-{
-    Log.Logger.Warning("[Startup] Hosted/background services are disabled by configuration override");
-}
-else
-{
-    Log.Logger.Information("[Startup] Hosted/background services are enabled");
-}
-// Register the queue singleton outside the hosted-services guard so controllers
-// (e.g. RootFoldersController) can resolve it even when hosted services are disabled (tests).
-builder.Services.AddSingleton<IUnmatchedScanQueueService, UnmatchedScanQueueService>();
-if (!disableHostedServices)
-{
-    builder.Services.AddListenarrHostedServices(builder.Configuration);
-}
+builder.Services.AddListenarrHostedServices(builder.Configuration);
 
 // FIXME: Required for ConfigurationService, what was planned with this feature ?
 builder.Services.AddSingleton(new EphemeralDataProtectionProvider().CreateProtector("Listenarr.ConfigurationService.ProwlarrImport"));

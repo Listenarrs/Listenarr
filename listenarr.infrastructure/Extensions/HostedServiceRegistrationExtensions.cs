@@ -82,6 +82,8 @@ namespace Listenarr.Infrastructure.Extensions
             // Background worker that processes unmatched-file scan jobs
             services.AddHostedService<UnmatchedScanBackgroundService>();
 
+            services.AddSingleton<IUnmatchedScanQueueService, UnmatchedScanQueueService>();
+
             return services;
         }
     }
