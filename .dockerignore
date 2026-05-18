@@ -2,6 +2,11 @@
 **/bin/
 **/obj/
 **/node_modules/
+fe/dist/
+listenarr.api/tools/
+listenarr.api/wwwroot/assets/
+listenarr.api/wwwroot/index.html
+listenarr.api/wwwroot/*.map
 artifacts/
 listenarr.api/publish/
 publish/

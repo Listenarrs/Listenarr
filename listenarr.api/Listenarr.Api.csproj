@@ -5,7 +5,7 @@
     <Version>1.0.5</Version>
     <AssemblyVersion>1.0.5</AssemblyVersion>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <DefaultItemExcludes>$(DefaultItemExcludes);bin\**;bin/**;artifacts\**;artifacts/**</DefaultItemExcludes>
+    <DefaultItemExcludes>$(DefaultItemExcludes);bin\**;bin/**;artifacts\**;artifacts/**;docker-publish\**;docker-publish/**;publish\**;publish/**</DefaultItemExcludes>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
     <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>  
@@ -46,6 +46,8 @@
     
     <Compile Remove="publish\**\*.cs" />
     <Compile Remove="publish/**/*.cs" />
+    <Compile Remove="docker-publish\**\*.cs" />
+    <Compile Remove="docker-publish/**/*.cs" />
   </ItemGroup>
 
   
@@ -57,7 +59,9 @@
     <FrontendDist>$(FrontendDir)\dist</FrontendDist>
     
     
-    <ToolsDir>$(MSBuildProjectDirectory)\tools</ToolsDir>
+    <ToolsDir>$(MSBuildProjectDirectory)\..\tools</ToolsDir>
+    <DiscordBotDir>$(ToolsDir)\discord-bot</DiscordBotDir>
+    <ToolsExclude>$(DiscordBotDir)\**\node_modules\**;$(DiscordBotDir)\**\.env;$(DiscordBotDir)\**\.env.*</ToolsExclude>
   </PropertyGroup>
 
   <Target Name="BuildFrontend" BeforeTargets="Publish" Condition="'$(SkipFrontendBuild)'!='true'">
@@ -69,11 +73,14 @@
 
     
     <MakeDir Directories="$(MSBuildProjectDirectory)\wwwroot" Condition="!Exists('$(MSBuildProjectDirectory)\wwwroot')" />
+    <RemoveDir Directories="$(MSBuildProjectDirectory)\wwwroot\assets" Condition="Exists('$(MSBuildProjectDirectory)\wwwroot\assets')" />
 
     <ItemGroup>
+      <StaleFrontendDebugFiles Include="$(MSBuildProjectDirectory)\wwwroot\*.map;$(MSBuildProjectDirectory)\wwwroot\stats.html" />
       <FrontendDistFiles Include="$(FrontendDist)\**\*.*" />
     </ItemGroup>
 
+    <Delete Files="@(StaleFrontendDebugFiles)" />
     <Copy SourceFiles="@(FrontendDistFiles)" DestinationFiles="@(FrontendDistFiles-&gt;'$(MSBuildProjectDirectory)\\wwwroot\\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
   </Target>
 
@@ -116,10 +123,6 @@
     
     <Content Remove="tools\**" />
     <None Remove="tools\**" />
-    <Content Include="tools\**\*" Link="tools\%(RecursiveDir)%(Filename)%(Extension)">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>Never</CopyToPublishDirectory>
-    </Content>
   </ItemGroup>
   
   
@@ -134,44 +137,44 @@
   </ItemGroup>
   
   <Target Name="CopyToolsToPublish" AfterTargets="Publish">
-    <Message Importance="high" Text="Copying tools folder from $(ToolsDir) to $(PublishDir)tools" />
+    <Message Importance="high" Text="Copying Discord bot from $(DiscordBotDir) to $(PublishDir)tools\discord-bot" />
     
     <ItemGroup>
-      <ToolFiles Include="$(ToolsDir)\**\*.*" />
+      <ToolFiles Include="$(DiscordBotDir)\**\*.*" Exclude="$(ToolsExclude)" />
     </ItemGroup>
     
     
-    <MakeDir Directories="$(PublishDir)tools" Condition="!Exists('$(PublishDir)tools')" />
+    <MakeDir Directories="$(PublishDir)tools\discord-bot" Condition="!Exists('$(PublishDir)tools\discord-bot')" />
     
     
-    <Copy SourceFiles="@(ToolFiles)" DestinationFiles="@(ToolFiles-&gt;'$(PublishDir)tools\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="false" />
+    <Copy SourceFiles="@(ToolFiles)" DestinationFiles="@(ToolFiles-&gt;'$(PublishDir)tools\discord-bot\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="false" />
     
-    <Message Importance="high" Text="Tools copied to $(PublishDir)tools" />
+    <Message Importance="high" Text="Discord bot copied to $(PublishDir)tools\discord-bot" />
   </Target>
   
   
   <Target Name="CopyToolsToProjectPublishFolder" AfterTargets="CopyToolsToPublish">
-    <Message Importance="high" Text="Also copying tools to $(MSBuildProjectDirectory)\publish\tools (fallback)" />
+    <Message Importance="high" Text="Also copying Discord bot to $(MSBuildProjectDirectory)\publish\tools\discord-bot (fallback)" />
     
     <ItemGroup>
-      <ToolFilesForFallback Include="$(ToolsDir)\**\*.*" />
+      <ToolFilesForFallback Include="$(DiscordBotDir)\**\*.*" Exclude="$(ToolsExclude)" />
     </ItemGroup>
     
-    <MakeDir Directories="$(MSBuildProjectDirectory)\publish\tools" Condition="!Exists('$(MSBuildProjectDirectory)\publish\tools')" />
+    <MakeDir Directories="$(MSBuildProjectDirectory)\publish\tools\discord-bot" Condition="!Exists('$(MSBuildProjectDirectory)\publish\tools\discord-bot')" />
     
-    <Copy SourceFiles="@(ToolFilesForFallback)" DestinationFiles="@(ToolFilesForFallback-&gt;'$(MSBuildProjectDirectory)\publish\tools\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="false" />
+    <Copy SourceFiles="@(ToolFilesForFallback)" DestinationFiles="@(ToolFilesForFallback-&gt;'$(MSBuildProjectDirectory)\publish\tools\discord-bot\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="false" />
   </Target>
   
   <Target Name="CopyToolsToNestedPublishFolder" AfterTargets="CopyToolsToProjectPublishFolder">
-    <Message Importance="high" Text="Copying tools to $(MSBuildProjectDirectory)\publish\publish\tools (nested publish)" />
+    <Message Importance="high" Text="Copying Discord bot to $(MSBuildProjectDirectory)\publish\publish\tools\discord-bot (nested publish)" />
     
     <ItemGroup>
-      <ToolFilesForNested Include="$(ToolsDir)\**\*.*" />
+      <ToolFilesForNested Include="$(DiscordBotDir)\**\*.*" Exclude="$(ToolsExclude)" />
     </ItemGroup>
     
-    <MakeDir Directories="$(MSBuildProjectDirectory)\publish\publish\tools" Condition="!Exists('$(MSBuildProjectDirectory)\publish\publish\tools')" />
+    <MakeDir Directories="$(MSBuildProjectDirectory)\publish\publish\tools\discord-bot" Condition="!Exists('$(MSBuildProjectDirectory)\publish\publish\tools\discord-bot')" />
     
-    <Copy SourceFiles="@(ToolFilesForNested)" DestinationFiles="@(ToolFilesForNested-&gt;'$(MSBuildProjectDirectory)\publish\publish\tools\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="false" />
+    <Copy SourceFiles="@(ToolFilesForNested)" DestinationFiles="@(ToolFilesForNested-&gt;'$(MSBuildProjectDirectory)\publish\publish\tools\discord-bot\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="false" />
   </Target>
 
 </Project>

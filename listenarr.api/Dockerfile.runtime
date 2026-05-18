@@ -13,34 +13,6 @@ ENV ASPNETCORE_URLS=http://*:4545
 
 ENV DOCKER_ENV=true
 
-# Install Node.js; upgrade npm and remove the apt-installed npm tree so
-# scanners no longer find stale bundled packages inside it.
-# Patch picomatch (CVE-2026-33671) and brace-expansion 2.x + 5.x (CVE-2026-33750):
-# npm 11 bundles node-gyp → tinyglobby → picomatch@4.0.3 and brace-expansion 2.x/5.x.
-# Use `npm pack` to download the fixed tarballs and extract them over every vulnerable
-# copy in npm's node_modules tree, then clean the download cache so no stale tarballs
-# remain for scanners to find.
-# libcap2 (CVE-2026-4878): upgraded via apt to pull the patched Ubuntu security release.
-RUN apt-get update \
-	&& apt-get install -y curl ca-certificates gnupg libcap2 --no-install-recommends \
-	&& curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
-	&& apt-get install -y nodejs --no-install-recommends \
-	&& npm install -g npm@11.12.1 --prefix /usr/local \
-	&& rm -rf /usr/lib/node_modules/npm \
-	&& rm -f /usr/bin/npm /usr/bin/npx \
-	&& /usr/local/bin/npm pack picomatch@4.0.4 --pack-destination /tmp \
-	&& find /usr/local/lib/node_modules/npm/node_modules -type d -name "picomatch" \
-	       -exec sh -c 'tar xzf /tmp/picomatch-4.0.4.tgz -C "$1" --strip-components=1' _ {} \; \
-	&& /usr/local/bin/npm pack brace-expansion@2.0.3 --pack-destination /tmp \
-	&& find /usr/local/lib/node_modules/npm/node_modules -type d -name "brace-expansion" \
-	       -exec sh -c 'ver=$(node -e "process.stdout.write(require('"'"'$1/package.json'"'"').version)" 2>/dev/null); [ "${ver%%.*}" = "2" ] && tar xzf /tmp/brace-expansion-2.0.3.tgz -C "$1" --strip-components=1 || true' _ {} \; \
-	&& /usr/local/bin/npm pack brace-expansion@5.0.5 --pack-destination /tmp \
-	&& find /usr/local/lib/node_modules/npm/node_modules -type d -name "brace-expansion" \
-	       -exec sh -c 'ver=$(node -e "process.stdout.write(require('"'"'$1/package.json'"'"').version)" 2>/dev/null); [ "${ver%%.*}" = "5" ] && tar xzf /tmp/brace-expansion-5.0.5.tgz -C "$1" --strip-components=1 || true' _ {} \; \
-	&& rm -f /tmp/picomatch-4.0.4.tgz /tmp/brace-expansion-2.0.3.tgz /tmp/brace-expansion-5.0.5.tgz \
-	&& rm -rf /root/.npm \
-	&& rm -rf /var/lib/apt/lists/*
-
 # Use the gosu binary built above instead of the apt package.
 COPY --from=gosu-builder /go/bin/gosu /usr/local/bin/gosu
 RUN chmod +x /usr/local/bin/gosu
@@ -51,21 +23,41 @@ RUN groupadd --system listenarr \
 # Copy the Docker-specific publish output produced by the CI pipeline.
 # Release ZIP artifacts are published under listenarr.api/publish and must not
 # be copied into the runtime image.
-COPY listenarr.api/docker-publish/ /app/
+ARG TARGETARCH
+COPY listenarr.api/docker-publish/${TARGETARCH}/ /app/
 
 # Normalize frontend asset permissions so the non-root runtime user can read static files.
 RUN find /app/wwwroot -type d -exec chmod 755 {} \; \
 	&& find /app/wwwroot -type f -exec chmod 644 {} \;
 
-# Explicitly copy tools directory from source if not already in publish output
-# This ensures the Discord bot and any other tools are available at runtime
-# Tools were moved into the listenarr.api directory; prefer that path
-COPY tools/ /app/tools/
+# Explicitly copy the Discord bot source so it is available even if a local
+# publish skipped optional tool copying.
+COPY tools/discord-bot/ /app/tools/discord-bot/
 
-# Install Discord bot dependencies
-# We do this in the runtime image to ensure npm packages are available when the bot runs
-WORKDIR /app/tools/discord-bot
-RUN npm ci --omit=dev
+# Install Node.js only for the Discord bot runtime. npm is used for the install
+# and then removed from the final filesystem; the bot only needs node.
+# Install libcap2 in the same apt transaction so patched security releases are
+# pulled into the final image.
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends ca-certificates curl gnupg libcap2 \
+	&& curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
+	&& apt-get install -y --no-install-recommends nodejs \
+	&& cd /app/tools/discord-bot \
+	&& npm ci --omit=dev --no-audit --no-fund \
+	&& npm cache clean --force \
+	&& node --version \
+	&& apt-get purge -y --auto-remove curl gnupg \
+	&& rm -rf /usr/lib/node_modules/npm \
+	          /usr/bin/npm \
+	          /usr/bin/npx \
+	          /usr/bin/corepack \
+	          /usr/include/node \
+	          /root/.npm \
+	          /tmp/* \
+	          /usr/share/doc \
+	          /usr/share/man \
+	          /usr/share/info \
+	          /var/lib/apt/lists/*
 
 # Return to app root
 WORKDIR /app
