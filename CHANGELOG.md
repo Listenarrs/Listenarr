@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **`Modal` accepts an optional `overlayZIndex` prop:** The shared `Modal` component's overlay defaults to `z-index: 3000`. When one Modal is opened from inside another whose overlay has bumped its z-index (a pattern used by some consumers to ensure the inner modal sits above its parent), opening a default-z-index Modal from inside it renders the new modal *behind* the parent overlay — the screen darkens (both overlays compound) but the new modal's content is invisible/uninteractive. The new `overlayZIndex` prop lets a nested-modal caller pass a value higher than the parent's overlay so the nested Modal stacks on top. The prop is omitted by default; behaviour for every existing caller is unchanged.
+
 ## [0.2.71] - 2026-04-17
 
 ### Added
