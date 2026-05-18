@@ -32,7 +32,6 @@ using Polly.Extensions.Http;
 using Listenarr.Infrastructure.Extensions;
 using Listenarr.Application.Interfaces;
 using Listenarr.Infrastructure.SignalR;
-using Listenarr.Application.Downloads;
 using Listenarr.Infrastructure.Persistence;
 using Listenarr.Application.Common;
 using Listenarr.Application.Search.Filters;

@@ -33,11 +33,13 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
-        public async Task AddAsync(RootFolder root)
+        public async Task<RootFolder> AddAsync(RootFolder root)
         {
             await using var ctx = await _dbFactory.CreateDbContextAsync();
             ctx.RootFolders.Add(root);
             await ctx.SaveChangesAsync();
+
+            return root;
         }
 
         public async Task<List<RootFolder>> GetAllAsync()
@@ -88,62 +90,6 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
                 .ToListAsync(ct);
             foreach (var o in others) o.IsDefault = false;
             if (others.Count > 0) await ctx.SaveChangesAsync(ct);
-        }
-
-        public async Task<bool> HasAudiobooksUnderPathAsync(string rootPath, CancellationToken ct = default)
-        {
-            await using var ctx = await _dbFactory.CreateDbContextAsync();
-            return await ctx.Audiobooks.AnyAsync(a =>
-                a.BasePath != null && (a.BasePath == rootPath || a.BasePath.StartsWith(rootPath + Path.DirectorySeparatorChar)),
-                ct);
-        }
-
-        public async Task<List<Audiobook>> GetAudiobooksUnderPathAsync(string rootPath, CancellationToken ct = default)
-        {
-            await using var ctx = await _dbFactory.CreateDbContextAsync();
-            return await ctx.Audiobooks
-                .Where(a => a.BasePath != null && (a.BasePath == rootPath || a.BasePath.StartsWith(rootPath + Path.DirectorySeparatorChar)))
-                .ToListAsync(ct);
-        }
-
-        public async Task<List<(int audiobookId, string original, string target)>> MigrateAudiobookPathsAsync(string oldRootPath, string newRootPath, CancellationToken ct = default)
-        {
-            await using var ctx = await _dbFactory.CreateDbContextAsync();
-            var all = await ctx.Audiobooks.Where(a => a.BasePath != null).ToListAsync(ct);
-
-            const char backslash = '\\';
-            const char slash = '/';
-            string NormalizeForCompare(string s) => (s ?? string.Empty).Replace(slash, backslash).TrimEnd(backslash).ToLowerInvariant();
-            var oldNorm = NormalizeForCompare(oldRootPath);
-
-            var affected = all.Where(a =>
-            {
-                var bpNorm = NormalizeForCompare(a.BasePath!);
-                return bpNorm == oldNorm || bpNorm.StartsWith(oldNorm + backslash);
-            }).ToList();
-
-            var moves = new List<(int audiobookId, string original, string target)>();
-            foreach (var a in affected)
-            {
-                var original = a.BasePath!;
-                char sepToUse = original.Contains(backslash) ? backslash : slash;
-                var suffix = original.Length > oldRootPath.Length
-                    ? original.Substring(oldRootPath.Length).TrimStart(backslash, slash)
-                    : string.Empty;
-                var target = string.IsNullOrEmpty(suffix)
-                    ? newRootPath
-                    : newRootPath + sepToUse + suffix.Replace(backslash, sepToUse).Replace(slash, sepToUse);
-                moves.Add((a.Id, original, target));
-                a.BasePath = target;
-            }
-
-            if (affected.Count > 0)
-            {
-                ctx.Audiobooks.UpdateRange(affected);
-                await ctx.SaveChangesAsync(ct);
-            }
-
-            return moves;
         }
 
         public async Task SaveChangesAsync(CancellationToken ct = default)

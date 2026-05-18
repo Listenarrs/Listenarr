@@ -27,6 +27,14 @@ namespace Listenarr.Application.Interfaces
         Task<RootFolder> CreateAsync(RootFolder root);
         // moveFiles: when true, enqueue move jobs for affected audiobooks; when false, perform DB-only reassign
         Task<RootFolder> UpdateAsync(RootFolder root, bool moveFiles = false, bool deleteEmptySource = true);
+
+        /// <summary>
+        /// Removes an unused root folder
+        /// </summary>
+        /// <param name="id">ID of the root folder to remove</param>
+        /// <param name="reassignRootId"></param>
+        /// <returns></returns>
+        /// <exception cref="InvalidOperationException">When other audiobooks still use this root folder</exception>
         Task DeleteAsync(int id, int? reassignRootId = null);
     }
 }
