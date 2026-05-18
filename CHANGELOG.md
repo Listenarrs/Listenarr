@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **Cover-image lookup no longer 500s when one upstream metadata source returns a partial envelope:** `ImagesController.GetImage`'s fallback metadata-driven cover path accesses `env.metadata` on `GetMetadataAsync`'s `object?` return via the C# `dynamic` binder. When the returned envelope shape lacks a `metadata` property — which happens when one of the upstream sources (e.g., Audnexus) 500s and the service still returns a partial envelope — the binder throws `RuntimeBinderException`. That exception wasn't in `IsRecoverableImageLookupException`'s whitelist, so it bypassed the inner catch and the entire image endpoint returned 500. Adding `RuntimeBinderException` to the recoverable list lets the inner catch swallow the bad envelope and the lookup falls through to the next candidate URL or a placeholder, matching how the other recoverable failures behave.
+
 ## [0.2.71] - 2026-04-17
 
 ### Added

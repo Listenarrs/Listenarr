@@ -1040,7 +1040,16 @@ namespace Listenarr.Api.Controllers
                 or FormatException
                 or UriFormatException
                 or System.Net.Http.HttpRequestException
-                or System.Text.Json.JsonException;
+                or System.Text.Json.JsonException
+                // GetMetadataAsync returns object?, and the fallback metadata path
+                // accesses fields via dynamic. When the returned envelope shape
+                // lacks the expected `metadata` property (e.g., when one of the
+                // upstream sources like Audnexus 500s and the service still
+                // returns a partial envelope), the C# dynamic binder throws
+                // RuntimeBinderException. Without this in the recoverable filter,
+                // a single bad envelope shape bubbles up to the outer catch and
+                // turns the whole image lookup into a 500.
+                or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException;
         }
 
         private static string ResolvePathWithOptionalBase(string? basePath, string candidatePath)
