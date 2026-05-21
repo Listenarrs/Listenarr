@@ -199,6 +199,7 @@ namespace Listenarr.Tests.Builders
             services.AddSingleton<TransmissionApiMock>();
             services.AddSingleton<SabnzbdApiMock>();
             services.AddSingleton<NzbgetApiMock>();
+            services.AddSingleton<QbittorrentApiMock>();
             services.AddSingleton<MyAnonamouseApiMock>();
 
             services.AddHttpClient<AudibleService>()
@@ -213,6 +214,9 @@ namespace Listenarr.Tests.Builders
 
             services.AddHttpClient("nzbget")
                 .ConfigurePrimaryHttpMessageHandler<NzbgetApiMock>();
+
+            services.AddHttpClient("qbittorrent")
+                .ConfigurePrimaryHttpMessageHandler<QbittorrentApiMock>();
 
             services.AddHttpClient<IAudnexusService, AudnexusService>()
                 .ConfigurePrimaryHttpMessageHandler<AudnexusServiceApiMock>();

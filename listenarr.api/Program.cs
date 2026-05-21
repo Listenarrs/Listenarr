@@ -390,10 +390,18 @@ builder.Services.AddHttpClient("DownloadClient")
 // Register named HttpClients for each adapter type so adapter implementations can request the appropriately-configured client.
 // qbittorrent
 builder.Services.AddHttpClient("qbittorrent")
-    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler()
+    .ConfigureHttpClient(client =>
     {
-        AutomaticDecompression = System.Net.DecompressionMethods.All,
-        UseCookies = false
+        client.Timeout = TimeSpan.FromSeconds(30);
+    })
+    .ConfigurePrimaryHttpMessageHandler(sp =>
+    {
+        return new HttpClientHandler
+        {
+            AutomaticDecompression = DecompressionMethods.All,
+            CookieContainer = new CookieContainer(),
+            UseCookies = true
+        };
     })
     .SetHandlerLifetime(TimeSpan.FromMinutes(5))
     .AddPolicyHandler(HttpPolicyExtensions

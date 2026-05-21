@@ -19,6 +19,7 @@ using Listenarr.Api.Attributes;
 using Listenarr.Api.Dtos;
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Security;
+using Listenarr.Domain.Models.Exceptions;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Api.Controllers

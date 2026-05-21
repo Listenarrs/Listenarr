@@ -10,6 +10,7 @@ using Listenarr.Domain.Models.Configurations;
 using Listenarr.Domain.Models.Enumerations;
 using Listenarr.Infrastructure.Adapters;
 using Listenarr.Infrastructure.Search.Providers;
+using Listenarr.Infrastructure.Torrents;
 using Listenarr.Tests.Builders;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Caching.Memory;

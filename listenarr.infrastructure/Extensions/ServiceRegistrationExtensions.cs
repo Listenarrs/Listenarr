@@ -31,6 +31,7 @@ using Polly.Extensions.Http;
 using Microsoft.Extensions.Configuration;
 using Polly;
 using Microsoft.Extensions.Options;
+using Listenarr.Infrastructure.Torrents;
 
 namespace Listenarr.Infrastructure.Extensions
 {

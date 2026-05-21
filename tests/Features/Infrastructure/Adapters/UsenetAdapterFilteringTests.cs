@@ -25,7 +25,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
-namespace Listenarr.Tests.Features.Api.Services.Adapters
+namespace Listenarr.Tests.Features.Infrastructure.Adapters
 {
     [Trait("Area", "UsenetAdapterFiltering")]
     public class UsenetAdapterFilteringTests

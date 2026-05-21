@@ -153,7 +153,6 @@ playwright-report/
 **/config/database/
 **/wwwroot/cache/
 **/wwwroot/downloads/
-**/Data/
 **/Logs/
 
 ##########################

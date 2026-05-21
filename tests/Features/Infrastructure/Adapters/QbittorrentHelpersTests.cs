@@ -15,10 +15,10 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Listenarr.Application.Downloads;
+using Listenarr.Infrastructure.Adapters;
 using Xunit;
 
-namespace Listenarr.Tests.Features.Api.Services.Adapters
+namespace Listenarr.Tests.Features.Infrastructure.Adapters
 {
     /// <summary>
     /// Tests for qBittorrent category filtering functionality

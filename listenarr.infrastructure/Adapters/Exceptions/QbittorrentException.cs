@@ -15,11 +15,11 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-namespace Listenarr.Domain.Models.Exceptions
+namespace Listenarr.Infrastructure.Adapters.Exceptions
 {
-    public class FfmpegException : Exception
+    public class QbittorrentException : Exception
     {
-        public FfmpegException(string message, Exception? innerException = null)
+        public QbittorrentException(string message, Exception? innerException = null)
             : base(message, innerException)
         { }
     }

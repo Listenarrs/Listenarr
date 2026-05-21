@@ -24,7 +24,7 @@ using Listenarr.Tests.Mocks.Api;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
-namespace Listenarr.Tests.Features.Api.Services.Adapters
+namespace Listenarr.Tests.Features.Infrastructure.Adapters
 {
     public class SabnzbdAdapterTests : BaseTests
     {

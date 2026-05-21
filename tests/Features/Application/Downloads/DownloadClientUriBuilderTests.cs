@@ -19,7 +19,7 @@ using Listenarr.Application.Downloads;
 using Listenarr.Domain.Models;
 using Xunit;
 
-namespace Listenarr.Tests.Features.Api.Services.Adapters
+namespace Listenarr.Tests.Features.Application.Downloads
 {
     public class DownloadClientUriBuilderTests
     {

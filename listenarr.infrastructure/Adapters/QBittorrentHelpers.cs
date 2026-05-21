@@ -17,7 +17,7 @@
  */
 using Microsoft.Extensions.Logging;
 
-namespace Listenarr.Application.Downloads
+namespace Listenarr.Infrastructure.Adapters
 {
     /// <summary>
     /// Shared helper utilities for qBittorrent operations.
