@@ -27,6 +27,8 @@ using Listenarr.Domain.Models.Enumerations;
 using Listenarr.Application.Common;
 using Listenarr.Infrastructure.FileSystem;
 using Listenarr.Api.Dtos.ManualImport;
+using Listenarr.Infrastructure.Platform;
+using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Tests.Features.Api.Controllers
 {
@@ -118,17 +120,25 @@ namespace Listenarr.Tests.Features.Api.Controllers
             configMock.Setup(c => c.GetApplicationSettingsAsync()).ReturnsAsync(settings);
 
             var rootFolderMock = new Mock<IRootFolderService>();
-            rootFolderMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new System.Collections.Generic.List<Listenarr.Domain.Models.RootFolder>());
+            rootFolderMock.Setup(r => r.GetAllAsync()).ReturnsAsync([]);
+
+            var runner = new SystemProcessRunner(Mock.Of<ILogger<SystemProcessRunner>>());
+            var options = new FileMoverOptions
+            {
+                EnableRobocopy = true,
+                MaxRetries = 1,
+                RobocopyTimeoutMs = 1000,
+            };
 
             return new ManualImportController(
-                Mock.Of<Microsoft.Extensions.Logging.ILogger<ManualImportController>>(),
+                Mock.Of<ILogger<ManualImportController>>(),
                 repoMock.Object,
                 metadataMock.Object,
                 new FileNamingService(configMock.Object, NullLogger<FileNamingService>.Instance),
                 configMock.Object,
                 scanMock.Object,
                 rootFolderMock.Object,
-                new FileMover(Mock.Of<Microsoft.Extensions.Logging.ILogger<FileMover>>())
+                new FileMover(Mock.Of<ILogger<FileMover>>(), runner, options)
             );
         }
 

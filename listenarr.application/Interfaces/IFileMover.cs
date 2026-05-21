@@ -26,8 +26,6 @@ namespace Listenarr.Application.Interfaces
     {
         Task<bool> MoveDirectoryAsync(string source, string destination);
 
-        Task<bool> CopyDirectoryAsync(string source, string destination);
-
         /// <summary>
         /// Perform the given action on the given file
         /// </summary>

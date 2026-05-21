@@ -36,6 +36,7 @@ using Listenarr.Infrastructure.Services;
 using Listenarr.Infrastructure.SignalR;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace Listenarr.Infrastructure.Extensions
 {
@@ -102,6 +103,8 @@ namespace Listenarr.Infrastructure.Extensions
             services.AddScoped<IArchiveExtractor, ArchiveExtractor>();
             // Bind FileMover options from configuration (optional)
             services.Configure<FileMoverOptions>(config.GetSection("FileMover"));
+            services.AddSingleton(resolver =>
+                resolver.GetRequiredService<IOptions<FileMoverOptions>>().Value);
             // Gateway that wraps adapters for higher-level orchestration
             services.AddScoped<IDownloadClientGateway, DownloadClientGateway>();
             // Process runner for external process execution (robocopy, ffprobe, playwright installer)

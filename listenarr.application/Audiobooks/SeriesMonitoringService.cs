@@ -20,6 +20,7 @@ using System.Text;
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Application.Metadata;
+using Listenarr.Domain.Common;
 using Listenarr.Domain.Models;
 using Microsoft.Extensions.Logging;
 
@@ -233,7 +234,7 @@ namespace Listenarr.Application.Audiobooks
                 {
                     result.Succeeded = false;
                     result.ErrorMessage = "Series catalog could not be loaded.";
-                    monitoredSeries.LastError = TruncateError(result.ErrorMessage);
+                    monitoredSeries.LastError = StringUtils.Truncate(result.ErrorMessage, 2048);
                     monitoredSeries.LastCheckedAt = DateTime.UtcNow;
                     monitoredSeries.UpdatedAt = DateTime.UtcNow;
                     await _series.UpsertAsync(monitoredSeries, cancellationToken);
@@ -317,7 +318,7 @@ namespace Listenarr.Application.Audiobooks
                 result.ErrorMessage = ex.Message;
                 result.FailedCount++;
                 monitoredSeries.LastCheckedAt = DateTime.UtcNow;
-                monitoredSeries.LastError = TruncateError(ex.Message);
+                monitoredSeries.LastError = StringUtils.Truncate(ex.Message, 2048);
                 monitoredSeries.UpdatedAt = DateTime.UtcNow;
                 await _series.UpsertAsync(monitoredSeries, cancellationToken);
                 return result;
@@ -512,16 +513,6 @@ namespace Listenarr.Application.Audiobooks
 
             var match = System.Text.RegularExpressions.Regex.Match(value, "\\d{4}");
             return match.Success ? match.Value : null;
-        }
-
-        private static string? TruncateError(string? value)
-        {
-            if (string.IsNullOrWhiteSpace(value))
-            {
-                return value;
-            }
-
-            return value.Length <= 2048 ? value : value[..2048];
         }
     }
 }

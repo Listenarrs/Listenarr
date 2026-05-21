@@ -44,5 +44,12 @@ namespace Listenarr.Domain.Common
             }
             return d[n, m];
         }
+
+        public static string Truncate(string? s, int max)
+        {
+            if (string.IsNullOrEmpty(s)) return string.Empty;
+            if (s.Length <= max) return s;
+            return s.Substring(0, max - 3) + "...";
+        }
     }
 }

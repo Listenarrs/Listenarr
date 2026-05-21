@@ -19,6 +19,7 @@ using System.Net;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Listenarr.Application.Common;
+using Listenarr.Domain.Common;
 using Microsoft.AspNetCore.Http;
 
 namespace Listenarr.Application.Notification
@@ -95,16 +96,8 @@ namespace Listenarr.Application.Notification
             narrators = DecodeHtml(narrators);
             description = DecodeHtml(description);
 
-            // Use centralized constants declared at class scope
-
-            static string Truncate(string? value, int max)
-            {
-                if (string.IsNullOrEmpty(value)) return string.Empty;
-                return value.Length <= max ? value : value.Substring(0, max);
-            }
-
             var embed = new JsonObject();
-            if (!string.IsNullOrWhiteSpace(title)) embed["title"] = Truncate(title, MAX_TITLE);
+            if (!string.IsNullOrWhiteSpace(title)) embed["title"] = StringUtils.Truncate(title, MAX_TITLE);
 
             string? absoluteImageUrl = null;
             string? thumbnailUrl = null;
@@ -131,7 +124,7 @@ namespace Listenarr.Application.Notification
             }
             else if (!string.IsNullOrWhiteSpace(absoluteImageUrl))
             {
-                embed["thumbnail"] = new JsonObject { ["url"] = Truncate(absoluteImageUrl, 2000) };
+                embed["thumbnail"] = new JsonObject { ["url"] = StringUtils.Truncate(absoluteImageUrl, 2000) };
             }
 
             var embeds = new JsonArray();
@@ -140,8 +133,8 @@ namespace Listenarr.Application.Notification
             if (!string.IsNullOrWhiteSpace(author))
             {
                 var fa = new JsonObject();
-                fa["name"] = Truncate("Author", MAX_FIELD_NAME);
-                fa["value"] = Truncate(author, MAX_FIELD_VALUE);
+                fa["name"] = StringUtils.Truncate("Author", MAX_FIELD_NAME);
+                fa["value"] = StringUtils.Truncate(author, MAX_FIELD_VALUE);
                 fa["inline"] = false;
                 fields.Add(fa);
             }
@@ -149,33 +142,33 @@ namespace Listenarr.Application.Notification
             if (!string.IsNullOrWhiteSpace(publisher))
             {
                 var f = new JsonObject();
-                f["name"] = Truncate("Publisher", MAX_FIELD_NAME);
-                f["value"] = Truncate(publisher, MAX_FIELD_VALUE);
+                f["name"] = StringUtils.Truncate("Publisher", MAX_FIELD_NAME);
+                f["value"] = StringUtils.Truncate(publisher, MAX_FIELD_VALUE);
                 f["inline"] = true;
                 fields.Add(f);
             }
             if (!string.IsNullOrWhiteSpace(year))
             {
                 var f = new JsonObject();
-                f["name"] = Truncate("Year", MAX_FIELD_NAME);
-                f["value"] = Truncate(year, MAX_FIELD_VALUE);
+                f["name"] = StringUtils.Truncate("Year", MAX_FIELD_NAME);
+                f["value"] = StringUtils.Truncate(year, MAX_FIELD_VALUE);
                 f["inline"] = true;
                 fields.Add(f);
             }
             if (!string.IsNullOrWhiteSpace(narrators))
             {
                 var f = new JsonObject();
-                f["name"] = Truncate("Narrated by", MAX_FIELD_NAME);
-                f["value"] = Truncate(narrators, MAX_FIELD_VALUE);
+                f["name"] = StringUtils.Truncate("Narrated by", MAX_FIELD_NAME);
+                f["value"] = StringUtils.Truncate(narrators, MAX_FIELD_VALUE);
                 f["inline"] = false;
                 fields.Add(f);
             }
             if (!string.IsNullOrWhiteSpace(description))
             {
                 var cleanedDescription = CleanHtml(description);
-                var truncatedDesc = Truncate(cleanedDescription, Math.Min(MAX_FIELD_VALUE, 500));
+                var truncatedDesc = StringUtils.Truncate(cleanedDescription, Math.Min(MAX_FIELD_VALUE, 500));
                 var f = new JsonObject();
-                f["name"] = Truncate("Description", MAX_FIELD_NAME);
+                f["name"] = StringUtils.Truncate("Description", MAX_FIELD_NAME);
                 f["value"] = truncatedDesc;
                 f["inline"] = false;
                 fields.Add(f);
@@ -226,7 +219,7 @@ namespace Listenarr.Application.Notification
                     {
                         int reduce = Math.Min(excess, descriptionText.Length);
                         descriptionText = descriptionText.Substring(0, Math.Max(0, descriptionText.Length - reduce));
-                        e["description"] = Truncate(descriptionText, MAX_DESCRIPTION);
+                        e["description"] = StringUtils.Truncate(descriptionText, MAX_DESCRIPTION);
                         excess = excess - reduce;
                     }
 
@@ -241,7 +234,7 @@ namespace Listenarr.Application.Notification
                             {
                                 int reduce = Math.Min(excess, v.Length);
                                 var newVal = v.Substring(0, Math.Max(0, v.Length - reduce));
-                                fo["value"] = Truncate(newVal, MAX_FIELD_VALUE);
+                                fo["value"] = StringUtils.Truncate(newVal, MAX_FIELD_VALUE);
                                 excess -= reduce;
                             }
                         }
@@ -312,14 +305,8 @@ namespace Listenarr.Application.Notification
 
             // Use centralized constants declared at class scope
 
-            static string Truncate(string? value, int max)
-            {
-                if (string.IsNullOrEmpty(value)) return string.Empty;
-                return value.Length <= max ? value : value.Substring(0, max);
-            }
-
             var embed = new JsonObject();
-            if (!string.IsNullOrWhiteSpace(title)) embed["title"] = Truncate(title, MAX_TITLE);
+            if (!string.IsNullOrWhiteSpace(title)) embed["title"] = StringUtils.Truncate(title, MAX_TITLE);
 
             string? absoluteImageUrl = null;
             string? thumbnailUrl = null;
@@ -404,7 +391,7 @@ namespace Listenarr.Application.Notification
             }
             else if (!string.IsNullOrWhiteSpace(absoluteImageUrl))
             {
-                embed["thumbnail"] = new JsonObject { ["url"] = Truncate(absoluteImageUrl, 2000) };
+                embed["thumbnail"] = new JsonObject { ["url"] = StringUtils.Truncate(absoluteImageUrl, 2000) };
                 thumbnailSet = true;
             }
             else if (!string.IsNullOrWhiteSpace(thumbnailUrl))
@@ -424,8 +411,8 @@ namespace Listenarr.Application.Notification
             if (!string.IsNullOrWhiteSpace(author))
             {
                 var fa = new JsonObject();
-                fa["name"] = Truncate("Author", MAX_FIELD_NAME);
-                fa["value"] = Truncate(author, MAX_FIELD_VALUE);
+                fa["name"] = StringUtils.Truncate("Author", MAX_FIELD_NAME);
+                fa["value"] = StringUtils.Truncate(author, MAX_FIELD_VALUE);
                 fa["inline"] = false;
                 fields.Add(fa);
             }
@@ -433,33 +420,33 @@ namespace Listenarr.Application.Notification
             if (!string.IsNullOrWhiteSpace(publisher))
             {
                 var f = new JsonObject();
-                f["name"] = Truncate("Publisher", MAX_FIELD_NAME);
-                f["value"] = Truncate(publisher, MAX_FIELD_VALUE);
+                f["name"] = StringUtils.Truncate("Publisher", MAX_FIELD_NAME);
+                f["value"] = StringUtils.Truncate(publisher, MAX_FIELD_VALUE);
                 f["inline"] = true;
                 fields.Add(f);
             }
             if (!string.IsNullOrWhiteSpace(year))
             {
                 var f = new JsonObject();
-                f["name"] = Truncate("Year", MAX_FIELD_NAME);
-                f["value"] = Truncate(year, MAX_FIELD_VALUE);
+                f["name"] = StringUtils.Truncate("Year", MAX_FIELD_NAME);
+                f["value"] = StringUtils.Truncate(year, MAX_FIELD_VALUE);
                 f["inline"] = true;
                 fields.Add(f);
             }
             if (!string.IsNullOrWhiteSpace(narrators))
             {
                 var f = new JsonObject();
-                f["name"] = Truncate("Narrated by", MAX_FIELD_NAME);
-                f["value"] = Truncate(narrators, MAX_FIELD_VALUE);
+                f["name"] = StringUtils.Truncate("Narrated by", MAX_FIELD_NAME);
+                f["value"] = StringUtils.Truncate(narrators, MAX_FIELD_VALUE);
                 f["inline"] = false;
                 fields.Add(f);
             }
             if (!string.IsNullOrWhiteSpace(description))
             {
                 var cleanedDescription = CleanHtml(description);
-                var truncatedDesc = Truncate(cleanedDescription, Math.Min(MAX_FIELD_VALUE, 500));
+                var truncatedDesc = StringUtils.Truncate(cleanedDescription, Math.Min(MAX_FIELD_VALUE, 500));
                 var f = new JsonObject();
-                f["name"] = Truncate("Description", MAX_FIELD_NAME);
+                f["name"] = StringUtils.Truncate("Description", MAX_FIELD_NAME);
                 f["value"] = truncatedDesc;
                 f["inline"] = false;
                 fields.Add(f);

@@ -467,7 +467,7 @@ namespace Listenarr.Application.Common
         /// <summary>
         /// Ensure the generated path does not exceed platform limits.
         /// On Windows: total path ≤ 259 chars, each component ≤ 255 chars.
-        /// Truncates the longest non-root components first while preserving the file extension.
+        /// StringUtils.Truncates the longest non-root components first while preserving the file extension.
         /// </summary>
         public string EnsurePathWithinLimits(string fullPath)
         {
@@ -553,7 +553,7 @@ namespace Listenarr.Application.Common
 
             if (result != originalPath)
             {
-                _logger.LogWarning("Path truncated to fit Windows MAX_PATH limit ({Limit} chars). Original length: {OriginalLength}, New length: {NewLength}. Truncated path: {Path}",
+                _logger.LogWarning("Path truncated to fit Windows MAX_PATH limit ({Limit} chars). Original length: {OriginalLength}, New length: {NewLength}. StringUtils.Truncated path: {Path}",
                     WindowsMaxPath, originalPath.Length, result.Length, result);
             }
 
