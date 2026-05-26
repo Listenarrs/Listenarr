@@ -11,6 +11,7 @@ RUN CGO_ENABLED=0 go install github.com/tianon/gosu@${GOSU_VERSION}
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS base
 WORKDIR /app
 EXPOSE 4545
+ENV ASPNETCORE_URLS=http://*:4545
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
@@ -82,6 +83,7 @@ RUN mkdir -p /app/config/database
 
 # Copy entrypoint script for PUID/PGID/UMASK support
 COPY docker-entrypoint.sh /docker-entrypoint.sh
-RUN chmod +x /docker-entrypoint.sh
+RUN sed -i 's/\r$//' /docker-entrypoint.sh \
+	&& chmod +x /docker-entrypoint.sh
 
 ENTRYPOINT ["/docker-entrypoint.sh"]

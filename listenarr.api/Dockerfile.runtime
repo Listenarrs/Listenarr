@@ -6,10 +6,10 @@ RUN CGO_ENABLED=0 go install github.com/tianon/gosu@${GOSU_VERSION}
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS base
 WORKDIR /app
-EXPOSE 5656
+EXPOSE 4545
 
-# Set the URL to listen on port 5656
-ENV ASPNETCORE_URLS=http://*:5656
+# Set the URL to Listenarr's default port.
+ENV ASPNETCORE_URLS=http://*:4545
 
 ENV DOCKER_ENV=true
 
@@ -70,6 +70,7 @@ RUN mkdir -p /app/config/database
 
 # Copy entrypoint script for PUID/PGID/UMASK support
 COPY docker-entrypoint.sh /docker-entrypoint.sh
-RUN chmod +x /docker-entrypoint.sh
+RUN sed -i 's/\r$//' /docker-entrypoint.sh \
+	&& chmod +x /docker-entrypoint.sh
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
