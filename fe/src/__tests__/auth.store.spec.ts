@@ -47,7 +47,9 @@ vi.mock('@/services/startupConfigCache', () => ({
 }))
 
 import { useAuthStore } from '@/stores/auth'
-import router from '@/router'
+import { createAppRouter } from '@/router'
+
+const router = createAppRouter()
 
 describe('auth store cross-tab sync', () => {
   beforeEach(async () => {

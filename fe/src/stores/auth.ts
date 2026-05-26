@@ -67,7 +67,7 @@ export const useAuthStore = defineStore('auth', () => {
 
     try {
       const routerModule = await import('@/router')
-      const router = routerModule.default
+      const router = routerModule.getRouter()
       const route = router.currentRoute.value
       const redirect = route.fullPath || current
 

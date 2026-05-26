@@ -112,11 +112,6 @@ const routes = [
   },
 ]
 
-const router = createRouter({
-  history: createWebHistory(import.meta.env.BASE_URL),
-  routes,
-})
-
 const redactStartupConfigForLog = (
   config: StartupConfig | null,
 ): StartupConfig | Record<string, unknown> | null => {
@@ -155,87 +150,153 @@ export function preloadRoute(nameOrPath: string) {
   return Promise.resolve()
 }
 
-// Navigation guard: protect routes requiring auth and preserve redirectTo
-
-router.beforeEach(async (to, from) => {
-  if (import.meta.env.CYPRESS) return true
-  const auth = useAuthStore()
-  const forceLogin =
-    to.name === 'login' &&
-    ((to.query.force as string | undefined) === '1' ||
-      (to.query.force as string | undefined) === 'true')
-
-  logger.log('router', 'Navigation:', {
-    from: from.fullPath,
-    to: to.fullPath,
-    authenticated: auth.user.authenticated,
-    loaded: auth.loaded,
+// Factory function to create and configure the router.
+// Deferred to avoid calling createWebHistory/createRouter at module top-level,
+// which triggers a Rolldown (Vite 8) circular-dependency crash where vue-router
+// symbols are not yet initialised when this module is first evaluated.
+export function createAppRouter() {
+  const router = createRouter({
+    history: createWebHistory(import.meta.env.BASE_URL),
+    routes,
   })
 
-  // Load current user only once per app lifetime
-  if (!auth.loaded) {
-    try {
-      await auth.loadCurrentUser()
-    } catch {}
-  }
+  // Navigation guard: protect routes requiring auth and preserve redirectTo
+  router.beforeEach(async (to, from) => {
+    if (import.meta.env.CYPRESS) return true
+    const auth = useAuthStore()
+    const forceLogin =
+      to.name === 'login' &&
+      ((to.query.force as string | undefined) === '1' ||
+        (to.query.force as string | undefined) === 'true')
 
-  // Fetch startup config with a short cache window so rapid navigations do not each
-  // block on a network round-trip. Auth settings rarely change mid-session; 30 s is
-  // conservative enough to stay in sync while avoiding per-navigation latency.
-  const startupConfig = await getStartupConfigCached(30_000)
-  const startupConfigMissing = !startupConfig
-  logger.debug('[router] startupConfigMissing', startupConfigMissing)
-  logger.debug('[router] startupConfig', redactStartupConfigForLog(startupConfig))
-  const authRequiredConfig = (() => {
-    if (startupConfigMissing) {
-      logger.debug('[router] startupConfig missing, defaulting authRequiredConfig to false')
-      // If the backend is temporarily unreachable or the config fetch fails,
-      // do not force the login screen. Treat missing config as "no auth"
-      // to avoid blocking the SPA from loading.
-      return false
-    }
-    const raw =
-      startupConfig?.authenticationRequired ??
-      (startupConfig as StartupConfig & { AuthenticationRequired?: string | boolean })
-        ?.AuthenticationRequired
-    logger.debug('[router] startupConfig raw authRequired:', raw)
-    const v = raw
-    if (v === undefined || v === null) {
-      logger.debug('[router] authRequiredConfig: value undefined/null, returning false')
-      return false
-    }
-    if (typeof v === 'boolean') {
-      logger.debug('[router] authRequiredConfig: boolean value', v)
-      return v
-    }
-    if (typeof v === 'string') {
-      const parsed = v.toLowerCase() === 'enabled' || v.toLowerCase() === 'true'
-      logger.debug('[router] authRequiredConfig: string value', v, 'parsed as', parsed)
-      return parsed
-    }
-    logger.debug('[router] authRequiredConfig: unknown type, returning false')
-    return false
-  })()
-  logger.debug('[router] FINAL authRequiredConfig:', authRequiredConfig)
+    logger.log('router', 'Navigation:', {
+      from: from.fullPath,
+      to: to.fullPath,
+      authenticated: auth.user.authenticated,
+      loaded: auth.loaded,
+    })
 
-  // If authentication is disabled in startup config, prevent access to login page
-  if (!authRequiredConfig) {
-    // Authentication globally disabled: don't enforce requiresAuth.
-    // Still prevent navigating to the login page when auth is disabled.
-    if (to.name === 'login') {
-      // Allow explicitly forced login navigation (used right after enabling auth)
-      // to avoid race conditions where startup config propagation briefly reports
-      // authentication as disabled.
-      if (forceLogin && !auth.user.authenticated) {
-        logger.debug('[router] force login requested; allowing login route despite auth config')
-        return true
+    // Load current user only once per app lifetime
+    if (!auth.loaded) {
+      try {
+        await auth.loadCurrentUser()
+      } catch {}
+    }
+
+    // Fetch startup config with a short cache window so rapid navigations do not each
+    // block on a network round-trip. Auth settings rarely change mid-session; 30 s is
+    // conservative enough to stay in sync while avoiding per-navigation latency.
+    const startupConfig = await getStartupConfigCached(30_000)
+    const startupConfigMissing = !startupConfig
+    logger.debug('[router] startupConfigMissing', startupConfigMissing)
+    logger.debug('[router] startupConfig', redactStartupConfigForLog(startupConfig))
+    const authRequiredConfig = (() => {
+      if (startupConfigMissing) {
+        logger.debug('[router] startupConfig missing, defaulting authRequiredConfig to false')
+        // If the backend is temporarily unreachable or the config fetch fails,
+        // do not force the login screen. Treat missing config as "no auth"
+        // to avoid blocking the SPA from loading.
+        return false
       }
-      // Check if there's a redirect parameter - if so, honor it instead of going to home
-      // Also check auth.redirectTo store as fallback (set during initial navigation attempts)
+      const raw =
+        startupConfig?.authenticationRequired ??
+        (startupConfig as StartupConfig & { AuthenticationRequired?: string | boolean })
+          ?.AuthenticationRequired
+      logger.debug('[router] startupConfig raw authRequired:', raw)
+      const v = raw
+      if (v === undefined || v === null) {
+        logger.debug('[router] authRequiredConfig: value undefined/null, returning false')
+        return false
+      }
+      if (typeof v === 'boolean') {
+        logger.debug('[router] authRequiredConfig: boolean value', v)
+        return v
+      }
+      if (typeof v === 'string') {
+        const parsed = v.toLowerCase() === 'enabled' || v.toLowerCase() === 'true'
+        logger.debug('[router] authRequiredConfig: string value', v, 'parsed as', parsed)
+        return parsed
+      }
+      logger.debug('[router] authRequiredConfig: unknown type, returning false')
+      return false
+    })()
+    logger.debug('[router] FINAL authRequiredConfig:', authRequiredConfig)
+
+    // If authentication is disabled in startup config, prevent access to login page
+    if (!authRequiredConfig) {
+      // Authentication globally disabled: don't enforce requiresAuth.
+      // Still prevent navigating to the login page when auth is disabled.
+      if (to.name === 'login') {
+        // Allow explicitly forced login navigation (used right after enabling auth)
+        // to avoid race conditions where startup config propagation briefly reports
+        // authentication as disabled.
+        if (forceLogin && !auth.user.authenticated) {
+          logger.debug('[router] force login requested; allowing login route despite auth config')
+          return true
+        }
+        // Check if there's a redirect parameter - if so, honor it instead of going to home
+        // Also check auth.redirectTo store as fallback (set during initial navigation attempts)
+        const redirectPath = (to.query.redirect as string | undefined) || auth.redirectTo
+
+        if (redirectPath) {
+          // Parse and navigate to the intended destination
+          try {
+            const url = new URL(redirectPath, window.location.origin)
+            const dest = {
+              path: url.pathname,
+              query: Object.fromEntries(url.searchParams),
+              hash: url.hash, // Preserve the hash/anchor (e.g., #indexers)
+            }
+            auth.redirectTo = null
+            logger.debug(
+              '[router] auth disabled, but redirect found in store/query, going to:',
+              dest,
+            )
+            return dest
+          } catch {
+            // Fallback to string path
+            auth.redirectTo = null
+            logger.debug(
+              '[router] auth disabled, but redirect found in store/query (fallback), going to:',
+              redirectPath,
+            )
+            return redirectPath
+          }
+        }
+
+        // No redirect - go to home
+        logger.debug('[router] auth disabled, no redirect found, going to home')
+        return { name: 'home' }
+      }
+
+      // Auth disabled: allow all other routes through without checking authentication
+      // But still preserve the intended destination if user tried to access login somehow
+      if (!auth.loaded && to.meta.requiresAuth) {
+        // First time loading a protected route - save it before auth finishes loading
+        auth.redirectTo = to.fullPath
+        logger.debug('[router] auth disabled, saving redirect for initial load:', to.fullPath)
+      }
+    } else {
+      // Authentication enabled: enforce protection on routes marked as requiresAuth
+      if ((to.meta as Record<string, unknown>)?.requiresAuth && !auth.user.authenticated) {
+        // Preserve the intended route and redirect to login
+        // Use a query param so the redirect survives page reloads; also keep store as fallback
+        auth.redirectTo = to.fullPath
+        logger.debug('[router] requiresAuth and not authenticated, redirecting to login', {
+          redirect: to.fullPath,
+        })
+        return { name: 'login', query: { redirect: to.fullPath } }
+      }
+    }
+
+    // If already authenticated and going to login, redirect to saved destination
+    if (to.name === 'login' && auth.user.authenticated) {
+      // Check for redirect in query params first (survives page reloads), then fall back to store
       const redirectPath = (to.query.redirect as string | undefined) || auth.redirectTo
 
       if (redirectPath) {
-        // Parse and navigate to the intended destination
+        // Parse the redirect path to extract path, query, and hash components
+        // This ensures we properly handle anchors like /settings#indexers
         try {
           const url = new URL(redirectPath, window.location.origin)
           const dest = {
@@ -244,80 +305,45 @@ router.beforeEach(async (to, from) => {
             hash: url.hash, // Preserve the hash/anchor (e.g., #indexers)
           }
           auth.redirectTo = null
-          logger.debug('[router] auth disabled, but redirect found in store/query, going to:', dest)
+          logger.debug('[router] authenticated user on login page, redirecting to:', dest)
           return dest
         } catch {
-          // Fallback to string path
+          // Fallback: if URL parsing fails, use the path string directly
+          // Vue Router should still handle it correctly
           auth.redirectTo = null
           logger.debug(
-            '[router] auth disabled, but redirect found in store/query (fallback), going to:',
+            '[router] authenticated user on login page, redirecting to (fallback):',
             redirectPath,
           )
           return redirectPath
         }
       }
 
-      // No redirect - go to home
-      logger.debug('[router] auth disabled, no redirect found, going to home')
+      // No redirect path - go to home
+      auth.redirectTo = null
       return { name: 'home' }
     }
 
-    // Auth disabled: allow all other routes through without checking authentication
-    // But still preserve the intended destination if user tried to access login somehow
-    if (!auth.loaded && to.meta.requiresAuth) {
-      // First time loading a protected route - save it before auth finishes loading
-      auth.redirectTo = to.fullPath
-      logger.debug('[router] auth disabled, saving redirect for initial load:', to.fullPath)
-    }
-  } else {
-    // Authentication enabled: enforce protection on routes marked as requiresAuth
-    if ((to.meta as Record<string, unknown>)?.requiresAuth && !auth.user.authenticated) {
-      // Preserve the intended route and redirect to login
-      // Use a query param so the redirect survives page reloads; also keep store as fallback
-      auth.redirectTo = to.fullPath
-      logger.debug('[router] requiresAuth and not authenticated, redirecting to login', {
-        redirect: to.fullPath,
-      })
-      return { name: 'login', query: { redirect: to.fullPath } }
-    }
+    return true
+  })
+
+  _routerInstance = router
+  return router
+}
+
+/**
+ * Module-level reference set by createAppRouter().
+ * Used by code that lazily imports the router (e.g. auth store).
+ */
+let _routerInstance: ReturnType<typeof createAppRouter> | null = null
+
+/**
+ * Returns the router instance previously created by createAppRouter().
+ * Throws if called before createAppRouter().
+ */
+export function getRouter() {
+  if (!_routerInstance) {
+    throw new Error('Router not initialised – call createAppRouter() first')
   }
-
-  // If already authenticated and going to login, redirect to saved destination
-  if (to.name === 'login' && auth.user.authenticated) {
-    // Check for redirect in query params first (survives page reloads), then fall back to store
-    const redirectPath = (to.query.redirect as string | undefined) || auth.redirectTo
-
-    if (redirectPath) {
-      // Parse the redirect path to extract path, query, and hash components
-      // This ensures we properly handle anchors like /settings#indexers
-      try {
-        const url = new URL(redirectPath, window.location.origin)
-        const dest = {
-          path: url.pathname,
-          query: Object.fromEntries(url.searchParams),
-          hash: url.hash, // Preserve the hash/anchor (e.g., #indexers)
-        }
-        auth.redirectTo = null
-        logger.debug('[router] authenticated user on login page, redirecting to:', dest)
-        return dest
-      } catch {
-        // Fallback: if URL parsing fails, use the path string directly
-        // Vue Router should still handle it correctly
-        auth.redirectTo = null
-        logger.debug(
-          '[router] authenticated user on login page, redirecting to (fallback):',
-          redirectPath,
-        )
-        return redirectPath
-      }
-    }
-
-    // No redirect path - go to home
-    auth.redirectTo = null
-    return { name: 'home' }
-  }
-
-  return true
-})
-
-export default router
+  return _routerInstance
+}

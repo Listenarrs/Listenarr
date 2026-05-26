@@ -32,8 +32,7 @@ import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 
 import App from './App.vue'
-import router from './router'
-import { preloadRoute } from './router'
+import { createAppRouter, preloadRoute } from './router'
 import { useToast } from './services/toastService'
 import { errorTracking } from './services/errorTracking'
 import { apiService } from '@/services/api'
@@ -80,6 +79,7 @@ window.addEventListener('unhandledrejection', (event) => {
 })
 
 app.use(createPinia())
+const router = createAppRouter()
 app.use(router)
 
 // Prefetch lazy route chunks when a user hovers or presses a link.
