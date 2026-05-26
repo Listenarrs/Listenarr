@@ -150,10 +150,16 @@ export function preloadRoute(nameOrPath: string) {
   return Promise.resolve()
 }
 
+/**
+ * Module-level reference set by createAppRouter().
+ * Used by code that lazily imports the router (e.g. auth store).
+ */
+let _routerInstance: ReturnType<typeof createRouter> | null = null
+
 // Factory function to create and configure the router.
 // Deferred to avoid calling createWebHistory/createRouter at module top-level,
 // which triggers a Rolldown (Vite 8) circular-dependency crash where vue-router
-// symbols are not yet initialised when this module is first evaluated.
+// symbols are not yet initialized when this module is first evaluated.
 export function createAppRouter() {
   const router = createRouter({
     history: createWebHistory(import.meta.env.BASE_URL),
@@ -332,18 +338,12 @@ export function createAppRouter() {
 }
 
 /**
- * Module-level reference set by createAppRouter().
- * Used by code that lazily imports the router (e.g. auth store).
- */
-let _routerInstance: ReturnType<typeof createAppRouter> | null = null
-
-/**
  * Returns the router instance previously created by createAppRouter().
  * Throws if called before createAppRouter().
  */
 export function getRouter() {
   if (!_routerInstance) {
-    throw new Error('Router not initialised – call createAppRouter() first')
+    throw new Error('Router not initialized – call createAppRouter() first')
   }
   return _routerInstance
 }
