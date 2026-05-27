@@ -36,9 +36,8 @@
       </div>
 
       <FormRow
-        v-if="authEnabledComputed"
         label="Admin Account Management"
-        help="To set or change the admin password, enter a new password and save settings. The username and password are configured in config/config.json."
+        help="Set or change the admin username and password used for sign-in. Available whether or not the login screen is currently enabled so you can configure credentials before turning auth on. Leave the password blank to keep the existing one; provide both fields to create or update the admin user when you save."
       >
         <div class="admin-credentials">
           <input
@@ -51,7 +50,7 @@
           <PasswordInput
             :modelValue="settings.adminPassword"
             @update:modelValue="(v) => updateField('adminPassword', v)"
-            placeholder="New admin password (to update)"
+            placeholder="Admin password (leave blank to keep existing)"
           />
         </div>
       </FormRow>

@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **Authentication settings: admin credential fields are always visible.** Previously the *Admin Account Management* row was gated by `v-if="authEnabledComputed"` in `AuthenticationSection.vue`, which meant the only way to surface the username/password inputs was to first toggle on the login screen. If a user enabled `AuthenticationRequired` via `config.json` on the host (e.g., for the very first time) and then opened settings, the toggle reflected the server state (on), but if they instead opened settings *with auth still off*, the fields were hidden — and once they ticked the toggle and saved, the login screen activated immediately on the next page load, locking them out before they could create a user. The fields now render unconditionally so credentials can be configured before or after enabling auth. Help text and the password placeholder were updated to reflect the create-or-update semantics (blank password = keep existing).
+
 ## [0.2.71] - 2026-04-17
 
 ### Added
