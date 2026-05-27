@@ -23,7 +23,7 @@
         <CheckboxCard
           v-model="authEnabledComputed"
           title="Enable login screen"
-          description="Toggle to enable the login screen. This setting reflects the server's AuthenticationRequired value from config.json. Changes here are local and will not modify server files — edit config/config.json on the host to persist."
+          description="Toggle the login screen on or off. This setting is persisted to the server's AuthenticationRequired value in config.json when you save. When enabled, the admin credentials below are required for sign-in — set or update them in the same save."
         />
       </div>
 
