@@ -39,6 +39,7 @@ import type {
   SearchSortBy,
   SearchSortDirection,
   AudibleSearchResponse,
+  AudibleSearchResult,
   AudibleBookMetadata,
   AuthorCatalogResponse,
   AuthorLookupResponse,
@@ -388,13 +389,25 @@ class ApiService {
     region: string = 'us',
     language?: string,
   ): Promise<AudibleSearchResponse> {
-    // Use unified POST /search in Advanced mode to route author/title flows to Audible
+    // Use unified POST /search in Advanced mode to route author/title flows
+    // through IntelligentSearch (Audible + Audnexus + OpenLibrary).
+    //
+    // The endpoint returns a *flat* array of Audible-shaped result objects
+    // (see SearchController.cs: `return Ok(flatMapped)`), not the wrapped
+    // `{ totalResults, results }` envelope this method's return type
+    // implies. Normalize both shapes so a successful search isn't silently
+    // discarded by treating the array as an object without `.results`.
     const body: Record<string, unknown> = { mode: 'Advanced', title, author, page, limit, region }
     if (language) (body as Record<string, unknown>).language = language
-    const resp = await this.request<AudibleSearchResponse | null>('/search', {
+    const resp = await this.request<
+      AudibleSearchResult[] | AudibleSearchResponse | null
+    >('/search', {
       method: 'POST',
       body: JSON.stringify(body),
     })
+    if (Array.isArray(resp)) {
+      return { totalResults: resp.length, results: resp }
+    }
     return resp ?? { totalResults: 0, results: [] }
   }
 
