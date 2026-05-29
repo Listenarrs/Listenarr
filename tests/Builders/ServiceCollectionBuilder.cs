@@ -207,6 +207,7 @@ namespace Listenarr.Tests.Builders
                 .ConfigurePrimaryHttpMessageHandler<AudibleApiMock>();
 
             // FIXME: All classes should rely on typed HttpClient instead of named ones
+            // TODO: Find a way to test real http client configurations (cookies, retry, security, ...)
             services.AddHttpClient("transmission")
                 .ConfigurePrimaryHttpMessageHandler<TransmissionApiMock>();
 
