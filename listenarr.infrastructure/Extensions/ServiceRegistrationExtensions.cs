@@ -88,7 +88,8 @@ namespace Listenarr.Infrastructure.Extensions
                 .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
                 {
                     AutomaticDecompression = DecompressionMethods.All,
-                    UseCookies = false
+                    CookieContainer = new CookieContainer(),
+                    UseCookies = true
                 })
                 .SetHandlerLifetime(TimeSpan.FromMinutes(5))
                 .AddPolicyHandler(circuitBreakerPolicy)

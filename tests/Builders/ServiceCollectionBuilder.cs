@@ -149,6 +149,7 @@ namespace Listenarr.Tests.Builders
             services.AddMemoryCache();
             services.AddListenarrAppServices(configuration);
             services.AddListenarrAdapters(configuration);
+            services.AddListenarrHttpClients(configuration);
             services.AddListenarrInfrastructure(
                 options => options.UseInMemoryDatabase(databaseName: Guid.NewGuid().ToString()),
                 contentRootPath: _contentRootPath);

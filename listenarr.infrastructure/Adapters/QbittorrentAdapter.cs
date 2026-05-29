@@ -58,7 +58,7 @@ namespace Listenarr.Infrastructure.Adapters
             {
                 var baseUrl = DownloadClientUriBuilder.BuildAuthority(client);
 
-                using var http = _httpClientFactory.CreateClient(client.Type);
+                using var http = _httpClientFactory.CreateClient(ClientType);
                 using var resp = await http.GetAsync($"{baseUrl}/api/v2/app/version", ct);
                 if (resp.IsSuccessStatusCode)
                     return (true, "Successfully connected to qBittorrent.");
