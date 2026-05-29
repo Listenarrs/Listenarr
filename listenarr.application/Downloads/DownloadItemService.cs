@@ -43,7 +43,8 @@ namespace Listenarr.Application.Downloads
                 Title = download.Title ?? "Unknown",
                 Status = "completed",
                 DownloadClientId = client.Id,
-                LocalPath = download.DownloadPath
+                LocalPath = download.DownloadPath,
+                ContentPath = GetClientContentPath(download)
             };
 
             if (!client.IsEnabled)
@@ -59,6 +60,11 @@ namespace Listenarr.Application.Downloads
                 download,
                 queueItem,
                 ct);
+        }
+
+        private static string? GetClientContentPath(Download download)
+        {
+            return download.GetMetadataString("ClientContentPath");
         }
     }
 }
