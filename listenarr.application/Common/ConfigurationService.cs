@@ -267,7 +267,17 @@ namespace Listenarr.Application.Common
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                 {
-                    logger.LogError(ex, "Failed to create or update admin user '{Username}' from application settings. Settings will still be saved.", settings.AdminUsername);
+                    // Admin provisioning failed after credentials were supplied. Surface
+                    // the failure to the caller — SettingsView relies on this throwing
+                    // before it persists AuthenticationRequired=true on its second
+                    // request, otherwise the user can be locked out of an instance
+                    // that has no working admin (password-policy rejection, repo I/O
+                    // error, race against a concurrent admin write, etc.). The
+                    // settings row above was already saved, which is intentional:
+                    // non-admin changes (notification triggers, webhooks, etc.) are
+                    // worth preserving even when credential provisioning fails.
+                    logger.LogError(ex, "Failed to create or update admin user '{Username}' from application settings; surfacing failure to caller", settings.AdminUsername);
+                    throw;
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)

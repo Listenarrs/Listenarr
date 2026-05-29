@@ -18,6 +18,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
+using Moq;
 using Xunit;
 using Listenarr.Domain.Models;
 using Listenarr.Domain.Common;
@@ -161,6 +162,77 @@ namespace Listenarr.Tests.Features.Api.Services
 
             var stored = await _applicationSettingsRepository.GetAsync();
             Assert.False(string.IsNullOrWhiteSpace(stored.ProwlarrApiKeyEncrypted));
+        }
+
+        [Fact]
+        public async Task SaveApplicationSettings_AdminProvisioningFailure_PropagatesToCaller()
+        {
+            // When the caller supplies admin credentials but the user-service
+            // can't honour the request (password policy violation, repo I/O
+            // error, race with a concurrent admin write), the failure must
+            // reach the caller. SettingsView.saveSettings() persists
+            // AuthenticationRequired=true *after* the call to
+            // SaveApplicationSettingsAsync; if the admin failure is swallowed
+            // here, the operator ends up with an instance that requires
+            // login and has no working admin — a hard lockout.
+            //
+            // Regression coverage for the `kevinheneveld:fix/auth-admin-credentials-always-visible`
+            // upstream PR review feedback.
+            var failingUserService = new Mock<IUserService>(MockBehavior.Strict);
+            failingUserService.Setup(u => u.GetByUsernameAsync(It.IsAny<string>()))
+                .ReturnsAsync((User?)null);
+            failingUserService.Setup(u => u.CreateUserAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<string?>(),
+                    It.IsAny<bool>()))
+                .ThrowsAsync(new InvalidOperationException("password rejected by policy"));
+
+            Init(b => b.WithScoped<IUserService>(_ => failingUserService.Object));
+
+            var svc = _provider.GetRequiredService<IConfigurationService>();
+            var settings = await svc.GetApplicationSettingsAsync();
+            settings.AdminUsername = "admin";
+            settings.AdminPassword = "weakpass";
+            // Bundle a non-admin change in the same payload so we can verify
+            // it still lands — non-admin settings are saved before the admin
+            // block, and that ordering is intentional.
+            settings.OutputPath = FileUtils.GetAbsolutePath("admin-fail-output");
+
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => svc.SaveApplicationSettingsAsync(settings));
+            Assert.Equal("password rejected by policy", ex.Message);
+
+            // Non-admin changes saved before the admin block remain — the
+            // settings row write is intentionally outside the admin try/catch.
+            var afterFail = await svc.GetApplicationSettingsAsync();
+            Assert.Equal(FileUtils.GetAbsolutePath("admin-fail-output"), afterFail.OutputPath);
+
+            failingUserService.Verify(
+                u => u.CreateUserAsync("admin", "weakpass", null, true),
+                Times.Once);
+        }
+
+        [Fact]
+        public async Task SaveApplicationSettings_NoAdminCredentials_DoesNotInvokeUserService()
+        {
+            // Carveout check: when no credentials are supplied (the common
+            // "I'm just updating notification triggers" path), the admin
+            // block must remain a silent skip — neither invoking the user
+            // service nor throwing.
+            var userService = new Mock<IUserService>(MockBehavior.Strict);
+
+            Init(b => b.WithScoped<IUserService>(_ => userService.Object));
+
+            var svc = _provider.GetRequiredService<IConfigurationService>();
+            var settings = await svc.GetApplicationSettingsAsync();
+            settings.AdminUsername = null;
+            settings.AdminPassword = null;
+            settings.OutputPath = FileUtils.GetAbsolutePath("no-creds-output");
+
+            await svc.SaveApplicationSettingsAsync(settings);
+
+            userService.VerifyNoOtherCalls();
         }
     }
 }
