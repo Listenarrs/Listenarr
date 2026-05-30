@@ -2,6 +2,10 @@
 **/bin/
 **/obj/
 **/node_modules/
+tools/discord-bot/.env
+tools/discord-bot/.env.*
+tools/discord-bot/**/.env
+tools/discord-bot/**/.env.*
 fe/dist/
 listenarr.api/tools/
 listenarr.api/wwwroot/assets/
