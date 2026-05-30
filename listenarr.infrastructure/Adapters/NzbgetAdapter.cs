@@ -78,6 +78,14 @@ namespace Listenarr.Infrastructure.Adapters
 
                 return (true, "NZBGet: connected");
             }
+            catch (NzbgetSafeRedirectException redirectEx)
+            {
+                // Surface the handler's descriptive message verbatim — it tells the user exactly
+                // which redirect was refused and why, so they can fix their reverse-proxy config
+                // instead of staring at a generic "Unauthorized" or "network error".
+                _logger.LogWarning(redirectEx, "NZBGet safe-redirect refused for client {ClientId}", LogRedaction.SanitizeText(client.Id ?? client.Name ?? client.Type));
+                return (false, redirectEx.Message);
+            }
             catch (HttpRequestException httpEx) when (httpEx.StatusCode == HttpStatusCode.Unauthorized || httpEx.StatusCode == HttpStatusCode.Forbidden)
             {
                 _logger.LogDebug(httpEx, "NZBGet authentication failed for client {ClientId}", LogRedaction.SanitizeText(client.Id ?? client.Name ?? client.Type));
@@ -861,10 +869,15 @@ namespace Listenarr.Infrastructure.Adapters
 
         private async Task<XElement> CallXmlRpcAsync(DownloadClientConfiguration client, string methodName, params object[] parameters)
         {
+            // Authenticate via the HTTP Basic Authorization header set below. The named "nzbget"
+            // HttpClient runs with AllowAutoRedirect=false and our own NzbgetSafeRedirectHandler,
+            // which validates that any 30x redirect stays on the same host and does not downgrade
+            // HTTPS to HTTP before re-applying the Authorization header. This lets reverse-proxy
+            // setups (HTTPS upgrade, trailing-slash normalization) keep working without leaking
+            // credentials to unexpected hosts the way URL-embedded user:pass would.
             var baseUrl = DownloadClientUriBuilder.BuildUri(client, "/xmlrpc").ToString();
             var httpClient = _httpClientFactory.CreateClient(ClientType);
 
-            // Build XML-RPC request
             var methodCall = new XElement("methodCall",
                 new XElement("methodName", methodName),
                 new XElement("params",

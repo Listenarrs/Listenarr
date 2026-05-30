@@ -123,6 +123,10 @@ namespace Listenarr.Infrastructure.Extensions
                 .AddPolicyHandler(circuitBreakerPolicy)
                 .AddPolicyHandler(retryPolicy);
 
+            // See NzbgetSafeRedirectHandler — AllowAutoRedirect=false + a custom safe-redirect handler
+            // so the Authorization header is re-applied on same-host non-downgrade 30x responses
+            // (typical for reverse-proxy setups in front of NZBGet).
+            services.AddTransient<NzbgetSafeRedirectHandler>();
             services.AddHttpClient("nzbget")
                 .ConfigureHttpClient(client =>
                 {
@@ -131,8 +135,10 @@ namespace Listenarr.Infrastructure.Extensions
                 .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
                 {
                     AutomaticDecompression = DecompressionMethods.All,
-                    UseCookies = false
+                    UseCookies = false,
+                    AllowAutoRedirect = false
                 })
+                .AddHttpMessageHandler<NzbgetSafeRedirectHandler>()
                 .SetHandlerLifetime(TimeSpan.FromMinutes(5))
                 .AddPolicyHandler(circuitBreakerPolicy)
                 .AddPolicyHandler(retryPolicy);
