@@ -52,6 +52,10 @@ RUN groupadd --system listenarr \
 # The workflows publish into listenarr.api/publish, so copy that directory into the image root.
 COPY listenarr.api/publish/ /app/
 
+# Normalize frontend asset permissions so the non-root runtime user can read static files.
+RUN find /app/wwwroot -type d -exec chmod 755 {} \; \
+	&& find /app/wwwroot -type f -exec chmod 644 {} \;
+
 # Explicitly copy tools directory from source if not already in publish output
 # This ensures the Discord bot and any other tools are available at runtime
 # Tools were moved into the listenarr.api directory; prefer that path
