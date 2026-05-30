@@ -1245,6 +1245,14 @@ namespace Listenarr.Infrastructure.Adapters
                         {
                             AdapterUtils.MapDownloadProgress(dl, 100.0, 0, "success");
 
+                            // Populate DownloadPath from SABnzbd's storage field so the import
+                            // processor knows where the completed files are located.
+                            // Without this, DownloadProcessingJobProcessor throws "has no path set" (#631).
+                            if (!string.IsNullOrEmpty(matchingItem.Path))
+                            {
+                                dl.DownloadPath = matchingItem.Path;
+                            }
+
                             // Record match type metrics
                             try
                             {

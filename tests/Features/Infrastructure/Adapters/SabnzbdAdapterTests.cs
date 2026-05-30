@@ -140,6 +140,47 @@ namespace Listenarr.Tests.Features.Infrastructure.Adapters
             Assert.Equal(DownloadStatus.Moved, download.Status);
         }
 
+        /// <summary>
+        /// Regression test for https://github.com/Listenarrs/Listenarr/issues/631
+        /// SABnzbd downloads were getting "Import Blocked" with "has no path set" because
+        /// FetchDownloadsAsync marked downloads as Completed but never set DownloadPath
+        /// from the SABnzbd history storage field.
+        /// </summary>
+        [Fact]
+        public async Task PollSABnzbd_SetsDownloadPath_FromHistoryStorage_WhenPathWasEmpty()
+        {
+            var source = FileService.GetTempDirectory("sabnzbd-path-test");
+            var destination = FileService.GetTempDirectory("sabnzbd-path-destination");
+            await FileService.GetFileAsync(source, "hello.m4b");
+
+            sabnzbdApiMock.contentPath = source;
+
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithBasePath(destination)
+                .Build());
+
+            // Simulate a download created with no DownloadPath (empty), as would happen
+            // if SABnzbd hadn't yet reported the storage location when the download was added.
+            var download = await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithPath(string.Empty)
+                .WithAudiobook(audiobook)
+                .WithDownloadClientConfiguration(_client)
+                .WithDownloading(0)
+                .WithTitle("hello")
+                .WithClientDownloadId(SabnzbdApiMock.COMPLETED_FILE_SABNZBD)
+                .Build());
+
+            var monitor = _provider.GetRequiredService<DownloadMonitorService>();
+            await monitor.MonitorDownloadsAsync(CancellationToken.None);
+
+            var updated = await _downloadRepository.GetByIdAsync(download.Id);
+            Assert.NotNull(updated);
+            Assert.Equal(DownloadStatus.Completed, updated.Status);
+            Assert.False(string.IsNullOrEmpty(updated.DownloadPath),
+                "DownloadPath must be populated from SABnzbd history storage so the import processor can find the files");
+            Assert.Equal(source, updated.DownloadPath);
+        }
+
         [Fact]
         public async Task PollSABnzbd_SchedulesRetry_AndFinalizes_WhenFileArrives()
         {
