@@ -234,5 +234,128 @@ namespace Listenarr.Tests.Features.Api.Services
 
             userService.VerifyNoOtherCalls();
         }
+
+        [Fact]
+        public async Task SaveStartupConfig_RefusesAuthEnableTransition_WhenNoAdminExists()
+        {
+            // Defense-in-depth backstop for the auth-enable lockout. The
+            // SaveApplicationSettings throw-on-failure only covers the case
+            // where credentials were *supplied* and rejected; the FE strips
+            // blank fields before save, so a user can tick "Enable login
+            // screen" with empty (or username-only) credentials, the admin
+            // block silently no-ops, and without this check the startup
+            // config would still be persisted with AuthenticationRequired=true
+            // — locking the operator out of an admin-less instance.
+            //
+            // Regression coverage for the upstream #623 review follow-up.
+            var emptyAdminUserService = new Mock<IUserService>();
+            emptyAdminUserService.Setup(u => u.GetAdminUsersAsync())
+                .ReturnsAsync(new List<User>());
+
+            // Current startup config must be present and have auth *off* so
+            // the new save constitutes a transition from disabled to enabled.
+            var currentConfigDisabled = new Mock<IStartupConfigService>();
+            currentConfigDisabled.Setup(s => s.GetConfig())
+                .Returns(new StartupConfig { AuthenticationRequired = "false" });
+
+            Init(b => b
+                .WithScoped<IUserService>(_ => emptyAdminUserService.Object)
+                .WithSingleton(currentConfigDisabled.Object));
+
+            var svc = _provider.GetRequiredService<IConfigurationService>();
+            var startup = new StartupConfig { AuthenticationRequired = "true" };
+
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => svc.SaveStartupConfigAsync(startup));
+            Assert.Contains("Cannot enable the login screen", ex.Message);
+
+            emptyAdminUserService.Verify(u => u.GetAdminUsersAsync(), Times.Once);
+            // The file write must NOT have been reached.
+            currentConfigDisabled.Verify(s => s.SaveAsync(It.IsAny<StartupConfig>()), Times.Never);
+        }
+
+        [Fact]
+        public async Task SaveStartupConfig_AllowsAuthEnableTransition_WhenAdminExists()
+        {
+            // The typical "supply credentials + enable login in the same save"
+            // flow runs SaveApplicationSettings (which creates the admin user)
+            // before SaveStartupConfig. By the time this check fires the
+            // admin row exists, so the backstop passes through.
+            var withAdminUserService = new Mock<IUserService>();
+            withAdminUserService.Setup(u => u.GetAdminUsersAsync())
+                .ReturnsAsync(new List<User>
+                {
+                    new() { Username = "admin", IsAdmin = true },
+                });
+
+            var currentConfigDisabled = new Mock<IStartupConfigService>();
+            currentConfigDisabled.Setup(s => s.GetConfig())
+                .Returns(new StartupConfig { AuthenticationRequired = "false" });
+
+            Init(b => b
+                .WithScoped<IUserService>(_ => withAdminUserService.Object)
+                .WithSingleton(currentConfigDisabled.Object));
+
+            var svc = _provider.GetRequiredService<IConfigurationService>();
+            var startup = new StartupConfig { AuthenticationRequired = "true" };
+
+            await svc.SaveStartupConfigAsync(startup);
+
+            withAdminUserService.Verify(u => u.GetAdminUsersAsync(), Times.Once);
+            currentConfigDisabled.Verify(s => s.SaveAsync(startup), Times.Once);
+        }
+
+        [Fact]
+        public async Task SaveStartupConfig_SkipsAdminCheck_WhenAuthAlreadyEnabled()
+        {
+            // Once auth is already on, the admin must already exist (or the
+            // transition check above wouldn't have let it land), so every
+            // subsequent unrelated save — API key regenerations, port
+            // changes, log-level tweaks — must NOT re-query the admin list.
+            // This keeps the backstop scoped to the lockout vector Robbie
+            // identified during first-time setup, and avoids breaking the
+            // session-cookie integration tests that stub auth-on factories
+            // without populating IUserService.
+            var userService = new Mock<IUserService>(MockBehavior.Strict);
+            var currentConfigEnabled = new Mock<IStartupConfigService>();
+            currentConfigEnabled.Setup(s => s.GetConfig())
+                .Returns(new StartupConfig { AuthenticationRequired = "true" });
+
+            Init(b => b
+                .WithScoped<IUserService>(_ => userService.Object)
+                .WithSingleton(currentConfigEnabled.Object));
+
+            var svc = _provider.GetRequiredService<IConfigurationService>();
+
+            await svc.SaveStartupConfigAsync(new StartupConfig
+            {
+                AuthenticationRequired = "true",
+                ApiKey = "regenerated-key",
+            });
+
+            userService.VerifyNoOtherCalls();
+            currentConfigEnabled.Verify(s => s.SaveAsync(It.IsAny<StartupConfig>()), Times.Once);
+        }
+
+        [Fact]
+        public async Task SaveStartupConfig_SkipsAdminCheck_WhenAuthDisabled()
+        {
+            // Carveout check: the admin-count query only fires when auth is
+            // actually being enabled. Persisting any startup config with
+            // AuthenticationRequired=false (or blank, or any non-truthy
+            // value) doesn't need an admin and must not block on one — the
+            // common path is "just updating other startup fields."
+            var userService = new Mock<IUserService>(MockBehavior.Strict);
+
+            Init(b => b.WithScoped<IUserService>(_ => userService.Object));
+
+            var svc = _provider.GetRequiredService<IConfigurationService>();
+
+            await svc.SaveStartupConfigAsync(new StartupConfig { AuthenticationRequired = "false" });
+            await svc.SaveStartupConfigAsync(new StartupConfig { AuthenticationRequired = null });
+            await svc.SaveStartupConfigAsync(new StartupConfig { AuthenticationRequired = "" });
+
+            userService.VerifyNoOtherCalls();
+        }
     }
 }
