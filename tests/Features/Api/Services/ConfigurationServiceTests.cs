@@ -31,6 +31,8 @@ using Listenarr.Application.Common;
 
 namespace Listenarr.Tests.Features.Api.Services
 {
+    [Trait("Name", "ConfigurationServiceTests")]
+    [Trait("Category", "ConfigurationService")]
     public class ConfigurationServiceTests : BaseTests
     {
         [Fact]
