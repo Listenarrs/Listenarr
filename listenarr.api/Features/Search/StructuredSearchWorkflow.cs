@@ -214,7 +214,7 @@ namespace Listenarr.Api.Features.Search
                 {
                     var metadata = _metadataConverters.ConvertAudibleToMetadata(audible, req.Asin, source: "Audible");
                     var sr = await _metadataConverters.ConvertMetadataToSearchResultAsync(metadata, req.Asin, req.Title, req.Author, fallbackImageUrl: null, fallbackLanguage: language);
-                    _responseMapper.SanitizeResultForPublicApi(sr);
+                    _responseMapper.SanitizeResultForPublicApi(sr, region);
                     var md = SearchResultConverters.ToMetadata(sr);
                     await SearchResultImageNormalizer.NormalizeMetadataResultAsync(
                         md,

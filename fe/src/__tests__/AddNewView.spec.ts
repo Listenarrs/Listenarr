@@ -239,7 +239,7 @@ describe('AddNewView pagination', () => {
     expect((advRegion.element as HTMLSelectElement).value).toBe('us')
   })
 
-  it('shows the configured region and defaults language to the region primary language', async () => {
+  it('shows the configured region and preserves the configured default language', async () => {
     const apiModule = await import('@/services/api')
     const apiService = apiModule.apiService as unknown as { getApplicationSettings?: Mock }
     apiService.getApplicationSettings?.mockResolvedValue({
@@ -258,8 +258,28 @@ describe('AddNewView pagination', () => {
     }
 
     expect(vm.searchLanguage).toBe('de')
-    expect(vm.preferredSearchLanguage).toBe('german')
+    expect(vm.preferredSearchLanguage).toBe('polish')
     expect((wrapper.find('select#region-select').element as HTMLSelectElement).value).toBe('de')
+  })
+
+  it('defaults language to the region primary language when no language is configured', async () => {
+    const apiModule = await import('@/services/api')
+    const apiService = apiModule.apiService as unknown as { getApplicationSettings?: Mock }
+    apiService.getApplicationSettings?.mockResolvedValue({
+      defaultSearchRegion: 'de',
+    })
+
+    const router = createTestRouter()
+    const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      searchLanguage?: string
+      preferredSearchLanguage?: string
+    }
+
+    expect(vm.searchLanguage).toBe('de')
+    expect(vm.preferredSearchLanguage).toBe('german')
   })
 
   it('allows ad-hoc region changes without overwriting saved settings and updates language', async () => {
@@ -300,7 +320,7 @@ describe('AddNewView pagination', () => {
     advancedSearchSpy.mockRestore()
   })
 
-  it('uses the selected region primary language even when the saved language is all', async () => {
+  it('preserves a saved all-language preference for the configured region', async () => {
     const apiModule = await import('@/services/api')
     const apiService = apiModule.apiService as unknown as { getApplicationSettings?: Mock }
     apiService.getApplicationSettings?.mockResolvedValue({
@@ -319,7 +339,7 @@ describe('AddNewView pagination', () => {
       performSearch?: () => Promise<void>
     }
 
-    expect(vm.preferredSearchLanguage).toBe('german')
+    expect(vm.preferredSearchLanguage).toBe('all')
 
     vm.searchQuery = 'Dune'
     await vm.performSearch?.()
@@ -328,11 +348,11 @@ describe('AddNewView pagination', () => {
     expect(advancedSearchSpy).toHaveBeenCalled()
     const lastCall = advancedSearchSpy.mock.calls.at(-1)?.[0] as Record<string, unknown> | undefined
     expect(lastCall?.region).toBe('de')
-    expect(lastCall?.language).toBe('german')
+    expect(lastCall?.language).toBeUndefined()
     advancedSearchSpy.mockRestore()
   })
 
-  it('filters mixed-language audible results using the selected language while keeping the default region', async () => {
+  it('filters mixed-language audible results using the saved language while keeping the default region', async () => {
     const apiModule = await import('@/services/api')
     const apiService = apiModule.apiService as unknown as { getApplicationSettings?: Mock }
     apiService.getApplicationSettings?.mockResolvedValue({
@@ -374,9 +394,9 @@ describe('AddNewView pagination', () => {
     expect(advancedSearchSpy).toHaveBeenCalled()
     const lastCall = advancedSearchSpy.mock.calls.at(-1)?.[0] as Record<string, unknown> | undefined
     expect(lastCall?.region).toBe('de')
-    expect(lastCall?.language).toBe('german')
+    expect(lastCall?.language).toBe('english')
     expect(vm.titleResults?.length).toBe(1)
-    expect(vm.titleResults?.[0]?.title).toBe('German Result')
+    expect(vm.titleResults?.[0]?.title).toBe('English Result')
     advancedSearchSpy.mockRestore()
   })
 

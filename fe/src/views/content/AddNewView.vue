@@ -999,6 +999,7 @@ import { useProtectedImages, isLikelyBackendImageUrl } from '@/composables/usePr
 import {
   getPrimaryPreferredSearchLanguageForRegion,
   getPreferredSearchLanguageFilter,
+  normalizePreferredSearchLanguage,
   normalizeSearchResultLanguage,
   normalizeSearchRegion,
   preferredSearchLanguageOptions,
@@ -3119,8 +3120,12 @@ onMounted(async () => {
   await configStore.loadApiConfigurations()
 
   const defaultRegion = normalizeSearchRegion(configStore.applicationSettings?.defaultSearchRegion)
+  const defaultLanguage = configStore.applicationSettings?.defaultSearchLanguage
   searchLanguage.value = defaultRegion
-  preferredSearchLanguage.value = getPrimaryPreferredSearchLanguageForRegion(defaultRegion)
+  preferredSearchLanguage.value =
+    typeof defaultLanguage === 'string' && defaultLanguage.trim()
+      ? normalizePreferredSearchLanguage(defaultLanguage)
+      : getPrimaryPreferredSearchLanguageForRegion(defaultRegion)
 
   // Audible integration removed: no auth status to check
 
