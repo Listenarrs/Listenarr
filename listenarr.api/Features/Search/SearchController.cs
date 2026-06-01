@@ -35,6 +35,7 @@ namespace Listenarr.Api.Features.Search
         private readonly StructuredSearchWorkflow _structuredSearchWorkflow;
         private readonly SearchByTitleWorkflow _searchByTitleWorkflow;
         private readonly IDownloadReferenceService? _downloadReferenceService;
+        private readonly IConfigurationService? _configurationService;
 
         public SearchController(
             ISearchService searchService,
@@ -46,7 +47,8 @@ namespace Listenarr.Api.Features.Search
             SearchResponseMapper? responseMapper = null,
             StructuredSearchWorkflow? structuredSearchWorkflow = null,
             SearchByTitleWorkflow? searchByTitleWorkflow = null,
-            IDownloadReferenceService? downloadReferenceService = null)
+            IDownloadReferenceService? downloadReferenceService = null,
+            IConfigurationService? configurationService = null)
         {
             _searchService = searchService;
             _logger = logger;
@@ -58,6 +60,7 @@ namespace Listenarr.Api.Features.Search
                 metadataService,
                 Microsoft.Extensions.Logging.Abstractions.NullLogger<SearchResponseMapper>.Instance,
                 imageCacheService);
+            _configurationService = configurationService;
             _structuredSearchWorkflow = structuredSearchWorkflow ?? new StructuredSearchWorkflow(
                 searchService,
                 Microsoft.Extensions.Logging.Abstractions.NullLogger<StructuredSearchWorkflow>.Instance,
@@ -65,7 +68,8 @@ namespace Listenarr.Api.Features.Search
                 metadataService,
                 imageCacheService,
                 metadataConvertersInstance,
-                _responseMapper);
+                _responseMapper,
+                configurationService);
             _searchByTitleWorkflow = searchByTitleWorkflow ?? new SearchByTitleWorkflow(
                 searchService,
                 audibleService,
@@ -203,7 +207,9 @@ namespace Listenarr.Api.Features.Search
                 }
 
                 _logger.LogInformation("IntelligentSearch called for query: {Query}", LogRedaction.SanitizeText(query));
-                var region = Request.Query.TryGetValue("region", out var regionValue) ? regionValue.ToString() ?? "us" : "us";
+                var region = Request.Query.TryGetValue("region", out var regionValue)
+                    ? regionValue.ToString() ?? "us"
+                    : await ResolveSearchRegionAsync(null);
                 var language = Request.Query.TryGetValue("language", out var languageValue) ? languageValue.ToString() : null;
                 var results = await _searchService.IntelligentSearchAsync(query, candidateLimit, returnLimit, containmentMode, requireAuthorAndPublisher, fuzzyThreshold, region, language, HttpContext.RequestAborted);
                 await _responseMapper.NormalizeMetadataResultImagesAsync(results, HttpContext, "metadata result");
@@ -215,6 +221,32 @@ namespace Listenarr.Api.Features.Search
                 _logger.LogError(ex, "Error performing intelligent search for query: {Query}", LogRedaction.SanitizeText(query));
                 return StatusCode(500, "Internal server error");
             }
+        }
+
+        private async Task<string> ResolveSearchRegionAsync(string? requestedRegion)
+        {
+            if (!string.IsNullOrWhiteSpace(requestedRegion))
+            {
+                return requestedRegion.Trim();
+            }
+
+            if (_configurationService != null)
+            {
+                try
+                {
+                    var settings = await _configurationService.GetApplicationSettingsAsync().ConfigureAwait(false);
+                    if (!string.IsNullOrWhiteSpace(settings?.DefaultSearchRegion))
+                    {
+                        return settings.DefaultSearchRegion.Trim();
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                {
+                    _logger.LogWarning(ex, "Failed to resolve configured default search region; falling back to us");
+                }
+            }
+
+            return "us";
         }
 
         /// <summary>

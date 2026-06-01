@@ -21,6 +21,7 @@ namespace Listenarr.Api.Features.Search
         private readonly MetadataConverters _metadataConverters;
         private readonly SearchResponseMapper _responseMapper;
         private readonly SearchRequestReader _requestReader;
+        private readonly IConfigurationService? _configurationService;
 
         public StructuredSearchWorkflow(
             ISearchService searchService,
@@ -29,12 +30,14 @@ namespace Listenarr.Api.Features.Search
             IAudiobookMetadataService metadataService,
             IImageCacheService? imageCacheService = null,
             MetadataConverters? metadataConverters = null,
-            SearchResponseMapper? responseMapper = null)
+            SearchResponseMapper? responseMapper = null,
+            IConfigurationService? configurationService = null)
         {
             _searchService = searchService;
             _logger = logger;
             _audibleService = audibleService;
             _imageCacheService = imageCacheService;
+            _configurationService = configurationService;
             _metadataConverters = metadataConverters ?? new MetadataConverters(imageCacheService, Microsoft.Extensions.Logging.Abstractions.NullLogger<MetadataConverters>.Instance);
             _responseMapper = responseMapper ?? new SearchResponseMapper(
                 metadataService,
@@ -60,10 +63,10 @@ namespace Listenarr.Api.Features.Search
 
                 if (req.Mode == SearchMode.Simple)
                 {
-                    return await ExecuteSimpleSearchAsync(req, httpContext);
+                    return await ExecuteSimpleSearchAsync(req, JsonObjectHasProperty(reqJson, "region"), httpContext);
                 }
 
-                return await ExecuteAdvancedSearchAsync(req, useSimplified, httpContext);
+                return await ExecuteAdvancedSearchAsync(req, useSimplified, JsonObjectHasProperty(reqJson, "region"), httpContext);
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
@@ -72,10 +75,10 @@ namespace Listenarr.Api.Features.Search
             }
         }
 
-        private async Task<StructuredSearchWorkflowResult> ExecuteSimpleSearchAsync(SearchRequest req, HttpContext httpContext)
+        private async Task<StructuredSearchWorkflowResult> ExecuteSimpleSearchAsync(SearchRequest req, bool hasRequestedRegion, HttpContext httpContext)
         {
             var q = req.Query ?? string.Empty;
-            var region = string.IsNullOrWhiteSpace(req.Region) ? "us" : req.Region;
+            var region = await ResolveSearchRegionAsync(hasRequestedRegion ? req.Region : null);
             var language = string.IsNullOrWhiteSpace(req.Language) ? null : req.Language;
             var results = await _searchService.IntelligentSearchAsync(q, region: region, language: language, ct: httpContext.RequestAborted) ?? new List<MetadataSearchResult>();
 
@@ -92,7 +95,7 @@ namespace Listenarr.Api.Features.Search
             return StructuredSearchWorkflowResult.Ok(mapped);
         }
 
-        private async Task<StructuredSearchWorkflowResult> ExecuteAdvancedSearchAsync(SearchRequest req, bool useSimplified, HttpContext httpContext)
+        private async Task<StructuredSearchWorkflowResult> ExecuteAdvancedSearchAsync(SearchRequest req, bool useSimplified, bool hasRequestedRegion, HttpContext httpContext)
         {
             var advancedValidationError = _requestReader.NormalizeAdvancedRequest(req);
             if (!string.IsNullOrWhiteSpace(advancedValidationError))
@@ -100,7 +103,7 @@ namespace Listenarr.Api.Features.Search
                 return StructuredSearchWorkflowResult.BadRequest(advancedValidationError);
             }
 
-            var region = string.IsNullOrWhiteSpace(req.Region) ? "us" : req.Region;
+            var region = await ResolveSearchRegionAsync(hasRequestedRegion ? req.Region : null);
             var language = string.IsNullOrWhiteSpace(req.Language) ? null : req.Language;
 
             if (string.IsNullOrWhiteSpace(req.Title)
@@ -151,6 +154,50 @@ namespace Listenarr.Api.Features.Search
             {
                 System.Diagnostics.Debug.WriteLine($"SearchController advanced-search debug logging failed: {ex.Message}");
             }
+        }
+
+        private static bool JsonObjectHasProperty(JsonElement element, string propertyName)
+        {
+            if (element.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            foreach (var property in element.EnumerateObject())
+            {
+                if (string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private async Task<string> ResolveSearchRegionAsync(string? requestedRegion)
+        {
+            if (!string.IsNullOrWhiteSpace(requestedRegion))
+            {
+                return requestedRegion.Trim();
+            }
+
+            if (_configurationService != null)
+            {
+                try
+                {
+                    var settings = await _configurationService.GetApplicationSettingsAsync().ConfigureAwait(false);
+                    if (!string.IsNullOrWhiteSpace(settings?.DefaultSearchRegion))
+                    {
+                        return settings.DefaultSearchRegion.Trim();
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                {
+                    _logger.LogWarning(ex, "Failed to resolve configured default search region; falling back to us");
+                }
+            }
+
+            return "us";
         }
 
         private async Task<StructuredSearchWorkflowResult?> TryExecuteAsinSearchAsync(SearchRequest req, bool useSimplified, string region, string? language, HttpContext httpContext)
