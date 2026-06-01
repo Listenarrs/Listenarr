@@ -16,13 +16,54 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using Listenarr.Tests.Builders;
+using Listenarr.Tests.Common;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Listenarr.Tests.Features.Api.Features.Search
 {
-    public class SearchControllerUnifiedTests
+    [Trait("Area", "SearchApi")]
+    [Trait("Name", "SearchControllerUnifiedTests")]
+    [Trait("Category", "SearchController")]
+    public class SearchControllerUnifiedTests : BaseTests
     {
+        private SearchController CreateController(
+            Mock<ISearchService>? searchService = null,
+            StubAudibleService? audibleService = null,
+            Mock<IAudiobookMetadataService>? metadataService = null,
+            Mock<IConfigurationService>? configurationService = null,
+            Action<ServiceCollectionBuilder>? configureServices = null)
+        {
+            searchService ??= new Mock<ISearchService>();
+            audibleService ??= new StubAudibleService();
+            metadataService ??= new Mock<IAudiobookMetadataService>();
+
+            Init(services =>
+            {
+                services
+                    .Without<IImageCacheService>()
+                    .Without<MetadataConverters>()
+                    .WithSingleton<ISearchService>(searchService.Object)
+                    .WithSingleton<AudibleService>(audibleService)
+                    .WithSingleton<IAudiobookMetadataService>(metadataService.Object)
+                    .WithTransient<SearchController, SearchController>();
+
+                if (configurationService != null)
+                {
+                    services.WithSingleton<IConfigurationService>(configurationService.Object);
+                }
+
+                configureServices?.Invoke(services);
+            });
+
+            var controller = _provider.GetRequiredService<SearchController>();
+            controller.ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() };
+            return controller;
+        }
+
         [Fact]
         public async Task AdvancedSearch_TitleOnly_Uses_Audible_SearchByTitleAsync()
         {
@@ -42,9 +83,7 @@ namespace Listenarr.Tests.Features.Api.Features.Search
             stubAudible.ResponseToReturn = sample;
             mockMeta.Setup(m => m.GetAudibleMetadataAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>())).ReturnsAsync(new AudibleBookResponse { Asin = "BTEST1", Title = "T" });
 
-            var logger = new NullLogger<SearchController>();
-            var controller = new SearchController(mockSearch.Object, logger, stubAudible, mockMeta.Object, null);
-            controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
+            var controller = CreateController(mockSearch, stubAudible, mockMeta);
 
             var req = new SearchRequest { Mode = SearchMode.Advanced, Title = "T", Pagination = new Pagination { Page = 1, Limit = 10 } };
             var reqJson = System.Text.Json.JsonSerializer.SerializeToElement(req);
@@ -74,9 +113,7 @@ namespace Listenarr.Tests.Features.Api.Features.Search
             stubAudible2.ResponseToReturn = sample;
             mockMeta.Setup(m => m.GetAudibleMetadataAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>())).ReturnsAsync(new AudibleBookResponse { Asin = "BAUTH1", Title = "Title" });
 
-            var logger = new NullLogger<SearchController>();
-            var controller = new SearchController(mockSearch.Object, logger, stubAudible2, mockMeta.Object, null);
-            controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
+            var controller = CreateController(mockSearch, stubAudible2, mockMeta);
 
             var req = new SearchRequest { Mode = SearchMode.Advanced, Title = "Title", Author = "Author", Pagination = new Pagination { Page = 1, Limit = 20 } };
             var reqJson = System.Text.Json.JsonSerializer.SerializeToElement(req);
@@ -105,9 +142,7 @@ namespace Listenarr.Tests.Features.Api.Features.Search
 
             stubAudible3.ResponseToReturn = sample;
 
-            var logger = new NullLogger<SearchController>();
-            var controller = new SearchController(mockSearch.Object, logger, stubAudible3, mockMeta.Object, null);
-            controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
+            var controller = CreateController(mockSearch, stubAudible3, mockMeta);
 
             var req = new SearchRequest { Mode = SearchMode.Advanced, Isbn = "9780000000", Pagination = new Pagination { Page = 1, Limit = 10 } };
             var reqJson = System.Text.Json.JsonSerializer.SerializeToElement(req);
@@ -127,9 +162,7 @@ namespace Listenarr.Tests.Features.Api.Features.Search
 
             stubAudible4.BookResponseToReturn = new AudibleBookResponse { Asin = "BASIN", Title = "ASIN Title" };
 
-            var logger = new NullLogger<SearchController>();
-            var controller = new SearchController(mockSearch.Object, logger, stubAudible4, mockMeta.Object, null);
-            controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
+            var controller = CreateController(mockSearch, stubAudible4, mockMeta);
 
             var req = new SearchRequest { Mode = SearchMode.Advanced, Asin = "BASIN", Region = "de", Language = "german" };
             var reqJson = System.Text.Json.JsonSerializer.SerializeToElement(req);
@@ -153,14 +186,7 @@ namespace Listenarr.Tests.Features.Api.Features.Search
             mockConfig.Setup(c => c.GetApplicationSettingsAsync())
                       .ReturnsAsync(new ApplicationSettings { DefaultSearchRegion = "de" });
 
-            var logger = new NullLogger<SearchController>();
-            var controller = new SearchController(
-                mockSearch.Object,
-                logger,
-                new StubAudibleService(),
-                mockMeta.Object,
-                configurationService: mockConfig.Object);
-            controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
+            var controller = CreateController(mockSearch, metadataService: mockMeta, configurationService: mockConfig);
 
             var reqJson = System.Text.Json.JsonSerializer.SerializeToElement(new { mode = "simple", query = "Dune" });
 
@@ -180,14 +206,7 @@ namespace Listenarr.Tests.Features.Api.Features.Search
             mockConfig.Setup(c => c.GetApplicationSettingsAsync())
                       .ReturnsAsync(new ApplicationSettings { DefaultSearchRegion = "fr" });
 
-            var logger = new NullLogger<SearchController>();
-            var controller = new SearchController(
-                mockSearch.Object,
-                logger,
-                new StubAudibleService(),
-                mockMeta.Object,
-                configurationService: mockConfig.Object);
-            controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
+            var controller = CreateController(mockSearch, metadataService: mockMeta, configurationService: mockConfig);
 
             var reqJson = System.Text.Json.JsonSerializer.SerializeToElement(new { mode = "advanced", title = "Dune" });
 
@@ -209,14 +228,7 @@ namespace Listenarr.Tests.Features.Api.Features.Search
             mockConfig.Setup(c => c.GetApplicationSettingsAsync())
                       .ReturnsAsync(new ApplicationSettings { DefaultSearchRegion = "de" });
 
-            var logger = new NullLogger<SearchController>();
-            var controller = new SearchController(
-                mockSearch.Object,
-                logger,
-                stubAudible,
-                mockMeta.Object,
-                configurationService: mockConfig.Object);
-            controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
+            var controller = CreateController(mockSearch, stubAudible, mockMeta, mockConfig);
 
             var reqJson = System.Text.Json.JsonSerializer.SerializeToElement(new { mode = "advanced", asin = "BASIN" });
 
@@ -237,18 +249,79 @@ namespace Listenarr.Tests.Features.Api.Features.Search
             mockConfig.Setup(c => c.GetApplicationSettingsAsync())
                       .ReturnsAsync(new ApplicationSettings { DefaultSearchRegion = "jp" });
 
-            var logger = new NullLogger<SearchController>();
-            var controller = new SearchController(
-                mockSearch.Object,
-                logger,
-                new StubAudibleService(),
-                mockMeta.Object,
-                configurationService: mockConfig.Object);
-            controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
+            var controller = CreateController(mockSearch, metadataService: mockMeta, configurationService: mockConfig);
 
             await controller.IntelligentSearch("Dune");
 
             mockSearch.Verify(s => s.IntelligentSearchAsync("Dune", 50, 50, "Relaxed", false, 0.7, "jp", null, It.IsAny<System.Threading.CancellationToken>()), Times.Once);
+        }
+
+        [Fact]
+        [Trait("Method", "SearchByTitle")]
+        [Trait("Scenario", "UsesConfiguredDefaultRegionForTitleFallback")]
+        public async Task SearchByTitle_WithoutRegion_Uses_ConfiguredDefaultRegion_And_RegionalSourceUrl()
+        {
+            // Given
+            var mockSearch = new Mock<ISearchService>();
+            mockSearch.Setup(s => s.IntelligentSearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<double>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<System.Threading.CancellationToken>()))
+                      .ReturnsAsync(new List<MetadataSearchResult>
+                      {
+                          new MetadataSearchResultBuilder()
+                              .WithAsin("B0DUNE1234")
+                              .WithTitle("Dune")
+                              .WithArtist("Frank Herbert")
+                              .Build()
+                      });
+            var mockMeta = new Mock<IAudiobookMetadataService>();
+            mockMeta.Setup(m => m.GetAudibleMetadataAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>()))
+                    .ReturnsAsync((AudibleBookResponse?)null);
+            var mockConfig = new Mock<IConfigurationService>();
+            mockConfig.Setup(c => c.GetApplicationSettingsAsync())
+                      .ReturnsAsync(new ApplicationSettings { DefaultSearchRegion = "de" });
+
+            var controller = CreateController(mockSearch, metadataService: mockMeta, configurationService: mockConfig);
+
+            // When
+            var response = await controller.SearchByTitle("TITLE:Dune");
+
+            // Then
+            var ok = Assert.IsType<OkObjectResult>(response.Result);
+            var serialized = System.Text.Json.JsonSerializer.Serialize(ok.Value);
+            using var doc = System.Text.Json.JsonDocument.Parse(serialized);
+            var result = Assert.Single(doc.RootElement.EnumerateArray());
+            Assert.Equal("https://www.audible.de", result.GetProperty("sourceUrl").GetString());
+            mockSearch.Verify(s => s.IntelligentSearchAsync("TITLE:Dune", It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<double>(), "de", null, It.IsAny<System.Threading.CancellationToken>()), Times.Once);
+        }
+
+        [Fact]
+        [Trait("Method", "SearchByTitle")]
+        [Trait("Scenario", "UsesConfiguredDefaultRegionForAsinShortCircuit")]
+        public async Task SearchByTitle_AsinWithoutRegion_Uses_ConfiguredDefaultRegion_And_RegionalSourceUrl()
+        {
+            // Given
+            var mockSearch = new Mock<ISearchService>();
+            var stubAudible = new StubAudibleService
+            {
+                BookResponseToReturn = new AudibleBookResponse { Asin = "B0TEST1234", Title = "Localized Result" }
+            };
+            var mockMeta = new Mock<IAudiobookMetadataService>();
+            var mockConfig = new Mock<IConfigurationService>();
+            mockConfig.Setup(c => c.GetApplicationSettingsAsync())
+                      .ReturnsAsync(new ApplicationSettings { DefaultSearchRegion = "br" });
+
+            var controller = CreateController(mockSearch, stubAudible, mockMeta, mockConfig);
+
+            // When
+            var response = await controller.SearchByTitle("B0TEST1234");
+
+            // Then
+            var ok = Assert.IsType<OkObjectResult>(response.Result);
+            var serialized = System.Text.Json.JsonSerializer.Serialize(ok.Value);
+            using var doc = System.Text.Json.JsonDocument.Parse(serialized);
+            var result = Assert.Single(doc.RootElement.EnumerateArray());
+            Assert.Equal("https://www.audible.com.br", result.GetProperty("sourceUrl").GetString());
+            Assert.Equal("br", stubAudible.LastRegion);
+            mockSearch.Verify(s => s.IntelligentSearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<double>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<System.Threading.CancellationToken>()), Times.Never);
         }
 
         [Fact]
@@ -264,9 +337,7 @@ namespace Listenarr.Tests.Features.Api.Features.Search
                 new() { Asin = "B0SERIES1234", Name = "Some Series", Region = "us" }
             };
 
-            var logger = new NullLogger<SearchController>();
-            var controller = new SearchController(mockSearch.Object, logger, stubAudible, mockMeta.Object, null);
-            controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
+            var controller = CreateController(mockSearch, stubAudible, mockMeta);
 
             var req = new SearchRequest { Mode = SearchMode.Advanced, Title = "Title", Series = "Some Series" };
             var reqJson = System.Text.Json.JsonSerializer.SerializeToElement(req);
@@ -292,9 +363,7 @@ namespace Listenarr.Tests.Features.Api.Features.Search
                 new() { Asin = "B0FALLBACK123", Name = "Some Series", Region = "de" }
             };
 
-            var logger = new NullLogger<SearchController>();
-            var controller = new SearchController(mockSearch.Object, logger, stubAudible, mockMeta.Object, null);
-            controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
+            var controller = CreateController(mockSearch, stubAudible, mockMeta);
 
             var req = new SearchRequest { Mode = SearchMode.Advanced, Title = "Title", Series = "Some Series" };
             var reqJson = System.Text.Json.JsonSerializer.SerializeToElement(req);
@@ -314,14 +383,20 @@ namespace Listenarr.Tests.Features.Api.Features.Search
             var mockMeta = new Mock<IAudiobookMetadataService>();
 
             // Simulate IntelligentSearch returning two metadata records, only one in the requested series
-            var md1 = new MetadataSearchResult { Asin = "B1", Title = "Book One", Series = "Target Series" };
-            var md2 = new MetadataSearchResult { Asin = "B2", Title = "Book Two", Series = "Other Series" };
+            var md1 = new MetadataSearchResultBuilder()
+                .WithAsin("B1")
+                .WithTitle("Book One")
+                .WithSeries("Target Series")
+                .Build();
+            var md2 = new MetadataSearchResultBuilder()
+                .WithAsin("B2")
+                .WithTitle("Book Two")
+                .WithSeries("Other Series")
+                .Build();
             mockSearch.Setup(s => s.IntelligentSearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<double>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<System.Threading.CancellationToken>()))
                       .ReturnsAsync(new List<MetadataSearchResult> { md1, md2 });
 
-            var logger = new NullLogger<SearchController>();
-            var controller = new SearchController(mockSearch.Object, logger, stubAudible, mockMeta.Object, null);
-            controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
+            var controller = CreateController(mockSearch, stubAudible, mockMeta);
 
             var req = new SearchRequest { Mode = SearchMode.Advanced, Author = "Some Author", Series = "Target Series" };
             var reqJson = System.Text.Json.JsonSerializer.SerializeToElement(req);
@@ -350,13 +425,12 @@ namespace Listenarr.Tests.Features.Api.Features.Search
             var mockSearch = new Mock<ISearchService>();
             var mockMeta = new Mock<IAudiobookMetadataService>();
 
-            var md = new MetadataSearchResult
-            {
-                Asin = "BAUD1",
-                Title = "Title",
-                IsEnriched = true,
-                ProductUrl = "https://www.amazon.com/dp/BAUD1"
-            };
+            var md = new MetadataSearchResultBuilder()
+                .WithAsin("BAUD1")
+                .WithTitle("Title")
+                .WithProductUrl("https://www.amazon.com/dp/BAUD1")
+                .WithEnriched()
+                .Build();
             mockSearch.Setup(s => s.IntelligentSearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<double>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<System.Threading.CancellationToken>()))
                       .ReturnsAsync(new List<MetadataSearchResult> { md });
 
@@ -377,9 +451,7 @@ namespace Listenarr.Tests.Features.Api.Features.Search
 
             mockMeta.Setup(m => m.GetAudibleMetadataAsync("BAUD1", It.IsAny<string>(), It.IsAny<bool>())).ReturnsAsync(audResp);
 
-            var logger = new NullLogger<SearchController>();
-            var controller = new SearchController(mockSearch.Object, logger, new StubAudibleService(), mockMeta.Object, null);
-            controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
+            var controller = CreateController(mockSearch, metadataService: mockMeta);
 
             var req = new SearchRequest { Mode = SearchMode.Simple, Query = "q", Region = "de" };
             var reqJson = System.Text.Json.JsonSerializer.SerializeToElement(req);
@@ -419,14 +491,20 @@ namespace Listenarr.Tests.Features.Api.Features.Search
             var mockMeta = new Mock<IAudiobookMetadataService>();
 
             // IntelligentSearch returns results whose Series does NOT match the requested series
-            var md1 = new MetadataSearchResult { Asin = "B1", Title = "Unrelated Book", Series = "Wrong Series" };
-            var md2 = new MetadataSearchResult { Asin = "B2", Title = "Another Unrelated", Series = "Also Wrong" };
+            var md1 = new MetadataSearchResultBuilder()
+                .WithAsin("B1")
+                .WithTitle("Unrelated Book")
+                .WithSeries("Wrong Series")
+                .Build();
+            var md2 = new MetadataSearchResultBuilder()
+                .WithAsin("B2")
+                .WithTitle("Another Unrelated")
+                .WithSeries("Also Wrong")
+                .Build();
             mockSearch.Setup(s => s.IntelligentSearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<double>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<System.Threading.CancellationToken>()))
                       .ReturnsAsync(new List<MetadataSearchResult> { md1, md2 });
 
-            var logger = new NullLogger<SearchController>();
-            var controller = new SearchController(mockSearch.Object, logger, stubAudible, mockMeta.Object, null);
-            controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
+            var controller = CreateController(mockSearch, stubAudible, mockMeta);
 
             var req = new SearchRequest { Mode = SearchMode.Advanced, Author = "Some Author", Series = "Dune" };
             var reqJson = System.Text.Json.JsonSerializer.SerializeToElement(req);
@@ -466,9 +544,7 @@ namespace Listenarr.Tests.Features.Api.Features.Search
             mockMeta.Setup(m => m.GetAudibleMetadataAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>()))
                     .ReturnsAsync((string asin, string region, bool force) => new AudibleBookResponse { Asin = asin, Title = "Test" });
 
-            var logger = new NullLogger<SearchController>();
-            var controller = new SearchController(mockSearch.Object, logger, stubAudible, mockMeta.Object, null);
-            controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
+            var controller = CreateController(mockSearch, stubAudible, mockMeta);
 
             // Search with language=english — books with null Language should still be included
             var req = new SearchRequest { Mode = SearchMode.Advanced, Series = "Dune", Region = "us", Language = "english" };
@@ -501,9 +577,7 @@ namespace Listenarr.Tests.Features.Api.Features.Search
             mockMeta.Setup(m => m.GetAudibleMetadataAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>()))
                     .ReturnsAsync((string asin, string region, bool force) => new AudibleBookResponse { Asin = asin, Title = "Book in series" });
 
-            var logger = new NullLogger<SearchController>();
-            var controller = new SearchController(mockSearch.Object, logger, stubAudible, mockMeta.Object, null);
-            controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
+            var controller = CreateController(mockSearch, stubAudible, mockMeta);
 
             var req = new SearchRequest { Mode = SearchMode.Advanced, Series = "Test Series", Region = "us" };
             var reqJson = System.Text.Json.JsonSerializer.SerializeToElement(req);

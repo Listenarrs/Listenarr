@@ -303,6 +303,10 @@ describe('AddNewView pagination', () => {
       performSearch?: () => Promise<void>
     }
 
+    await wrapper.find('select.language-select').setValue('english')
+    await wrapper.vm.$nextTick()
+    expect(vm.preferredSearchLanguage).toBe('english')
+
     await wrapper.find('select#region-select').setValue('fr')
     await wrapper.vm.$nextTick()
 

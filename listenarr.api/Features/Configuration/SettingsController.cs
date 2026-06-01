@@ -18,6 +18,7 @@
 
 using Listenarr.Api.Attributes;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Caching.Memory;
 using System.Text.Json;
 
 namespace Listenarr.Api.Features.Configuration
@@ -30,15 +31,18 @@ namespace Listenarr.Api.Features.Configuration
         private readonly IConfigurationService _configurationService;
         private readonly ILogger<SettingsController> _logger;
         private readonly IHubBroadcaster _hubBroadcaster;
+        private readonly IMemoryCache? _cache;
 
         public SettingsController(
             IConfigurationService configurationService,
             ILogger<SettingsController> logger,
-            IHubBroadcaster hubBroadcaster)
+            IHubBroadcaster hubBroadcaster,
+            IMemoryCache? cache = null)
         {
             _configurationService = configurationService;
             _logger = logger;
             _hubBroadcaster = hubBroadcaster;
+            _cache = cache;
         }
 
         /// <summary>
@@ -77,6 +81,7 @@ namespace Listenarr.Api.Features.Configuration
             {
                 _logger.LogDebug("Saving application settings");
                 await _configurationService.SaveApplicationSettingsAsync(settings);
+                _cache?.Remove("default-search-region");
 
                 var savedSettings = PrepareApplicationSettingsResponse(await _configurationService.GetApplicationSettingsAsync());
                 savedSettings.AdminUsername = null;

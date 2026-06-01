@@ -55,7 +55,7 @@ public class AsinSearchHandler
     public async Task<List<SearchResult>> SearchByAsinAsync(
         string asin,
         List<ApiConfiguration> metadataSources,
-        string region = "us",
+        string? region = null,
         string? language = null,
         CancellationToken ct = default)
     {

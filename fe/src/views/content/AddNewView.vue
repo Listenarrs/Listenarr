@@ -1036,6 +1036,7 @@ type TitleSearchResult = Omit<OpenLibraryBook, 'isbn'> & {
   imageUrl?: string // For results that have direct image URLs
   metadataSource?: string // Store which metadata source was used
   isbn?: string | string[] // Normalized ISBN (string or array for OpenLibrary compatibility)
+  region?: string // Audible/Amazon market region from the search result
 }
 
 // Loose result type used for normalization of diverse backend shapes
@@ -1618,25 +1619,7 @@ const handleAdvancedSearchResults = async (results: Array<Partial<SearchResult> 
       tr['description'] = rrRes['description'] ?? rrRes['Description'] ?? undefined
       tr['asin'] = rrRes['asin'] ?? rrRes['Asin'] ?? undefined
       tr['id'] = rrRes['asin'] ?? rrRes['sku'] ?? rrRes['id'] ?? rrRes['title']
-      tr['region'] = rrRes['region'] ?? rrRes['Region'] ?? undefined
-      if (tr['region']) {
-        ;(tr['searchResult'] as Record<string, unknown>)['region'] = tr['region']
-      }
-      const rawProductUrl = rrRes['productUrl'] ?? rrRes['link'] ?? rrRes['Link'] ?? undefined
-      const asin = typeof tr['asin'] === 'string' ? tr['asin'] : undefined
-      const resultRegion = typeof tr['region'] === 'string' ? tr['region'] : searchLanguage.value
-      const sourceIsAudible =
-        String(titleResult.metadataSource ?? '')
-          .toLowerCase()
-          .includes('audible') ||
-        String(rrRes['source'] ?? rrRes['Source'] ?? '')
-          .toLowerCase()
-          .includes('audible')
-      tr['productUrl'] =
-        asin &&
-        (sourceIsAudible || (typeof rawProductUrl === 'string' && isAudibleHost(rawProductUrl)))
-          ? buildAudibleProductUrl(asin, resultRegion)
-          : rawProductUrl
+      normalizeResultRegionAndProductUrl(tr, rrRes, titleResult)
       if (tr['subtitle']) {
         ;(tr['searchResult'] as Record<string, unknown>)['subtitle'] = tr['subtitle']
       }
@@ -2244,17 +2227,45 @@ const formatAuthors = (book: TitleSearchResult): string => {
   return book.searchResult?.artist || 'Unknown Author'
 }
 
+/**
+ * Normalises the region and productUrl fields on a raw title result record.
+ * Propagates the resolved region into the nested searchResult, then determines
+ * whether the product link should be an Audible canonical URL or the raw value.
+ * Extracted to avoid duplication between handleAdvancedSearchResults and
+ * handleSimpleSearchResults.
+ */
+const normalizeResultRegionAndProductUrl = (
+  tr: Record<string, unknown>,
+  rrRes: Record<string, unknown>,
+  titleResult: TitleSearchResult,
+): void => {
+  tr['region'] = rrRes['region'] ?? rrRes['Region'] ?? undefined
+  if (tr['region']) {
+    ;(tr['searchResult'] as Record<string, unknown>)['region'] = tr['region']
+  }
+  const rawProductUrl = rrRes['productUrl'] ?? rrRes['link'] ?? rrRes['Link'] ?? undefined
+  const asin = typeof tr['asin'] === 'string' ? tr['asin'] : undefined
+  const resultRegion = typeof tr['region'] === 'string' ? tr['region'] : searchLanguage.value
+  const sourceIsAudible =
+    String(titleResult.metadataSource ?? '')
+      .toLowerCase()
+      .includes('audible') ||
+    String(rrRes['source'] ?? rrRes['Source'] ?? '')
+      .toLowerCase()
+      .includes('audible')
+  tr['productUrl'] =
+    asin && (sourceIsAudible || (typeof rawProductUrl === 'string' && isAudibleHost(rawProductUrl)))
+      ? buildAudibleProductUrl(asin, resultRegion)
+      : rawProductUrl
+}
+
 const getAsin = (book: TitleSearchResult): string | null => {
   return book.searchResult?.asin || resolvedAsins.value[book.key] || null
 }
 
 const getResultRegion = (book: TitleSearchResult): string => {
   const rawRegion =
-    (book as unknown as Record<string, unknown>)['region'] ??
-    ((book.searchResult as unknown as Record<string, unknown> | undefined)?.['region'] as
-      | string
-      | undefined)
-
+    book.region ?? (book.searchResult as Record<string, unknown> | undefined)?.['region']
   return typeof rawRegion === 'string' && rawRegion.trim() ? rawRegion : searchLanguage.value
 }
 
@@ -2993,25 +3004,7 @@ const handleSimpleSearchResults = async (results: SearchResult[]) => {
       tr['description'] = rrRes['description'] ?? rrRes['Description'] ?? undefined
       tr['asin'] = rrRes['asin'] ?? rrRes['Asin'] ?? undefined
       tr['id'] = rrRes['asin'] ?? rrRes['sku'] ?? rrRes['id'] ?? rrRes['title']
-      tr['region'] = rrRes['region'] ?? rrRes['Region'] ?? undefined
-      if (tr['region']) {
-        ;(tr['searchResult'] as Record<string, unknown>)['region'] = tr['region']
-      }
-      const rawProductUrl = rrRes['productUrl'] ?? rrRes['link'] ?? rrRes['Link'] ?? undefined
-      const asin = typeof tr['asin'] === 'string' ? tr['asin'] : undefined
-      const resultRegion = typeof tr['region'] === 'string' ? tr['region'] : searchLanguage.value
-      const sourceIsAudible =
-        String(titleResult.metadataSource ?? '')
-          .toLowerCase()
-          .includes('audible') ||
-        String(rrRes['source'] ?? rrRes['Source'] ?? '')
-          .toLowerCase()
-          .includes('audible')
-      tr['productUrl'] =
-        asin &&
-        (sourceIsAudible || (typeof rawProductUrl === 'string' && isAudibleHost(rawProductUrl)))
-          ? buildAudibleProductUrl(asin, resultRegion)
-          : rawProductUrl
+      normalizeResultRegionAndProductUrl(tr, rrRes, titleResult)
       // preserve seriesList for tooltip display when provided as an array
       try {
         const rawSeries = rr['series'] ?? rr['Series']

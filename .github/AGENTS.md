@@ -63,4 +63,56 @@ Adhere strictly to best practices from OWASP, with particular consideration for 
 - Use watchers for side effects
 - Use provide/inject for deep component communication
 - Use async components for code-splitting
+
+
+## Code Formatting Rules (enforced by pre-commit hook)
+
+The pre-commit hook runs `node scripts/lint-staged.mjs`. **All staged files must pass before a commit is accepted.**
+
+### C# (`dotnet-format`)
+- **No alignment/column-padding spaces.** Do not add extra spaces to align dictionary values, tuple elements, or assignment operators into columns. The formatter treats this as a WHITESPACE error.
+  ```csharp
+  // ❌ WRONG
+  ["ca"] = ("www.audible.ca",     "www.amazon.ca"),
+
+  // ✅ CORRECT
+  ["ca"] = ("www.audible.ca", "www.amazon.ca"),
+  ```
+- Run `dotnet format` from the repo root to auto-fix.
+
+### Vue / TypeScript (`prettier`)
+- All `.vue`, `.ts`, and `.tsx` files must satisfy Prettier's style.
+- Run `cd fe && npm run format:prettier` to auto-fix (the script is `format:prettier`, not `format`).
+
+### Quick fix
+```bash
+dotnet format
+cd fe && npm run format:prettier && cd ..
+```
+
+### Layering Rules (enforced by pre-commit hook)
+
+- `listenarr.api` **must not** reference `listenarr.infrastructure` (except `listenarr.api/Program.cs`)
+- `listenarr.application` **must not** reference `listenarr.infrastructure`
+- Data flows inward only: `infrastructure` → `application` → `api`
+
+Violations cause commit rejection with a "Layering violation" error.
+
+### No `async void` (enforced by pre-commit hook)
+
+Never use `async void` in production code. Always use `async Task` — `async void` causes unobservable exceptions and the pre-commit hook will reject it.
+
+### Backend Test Fixtures
+
+- Use builders from `tests/Builders` for backend test data, with fluent `.With...()` methods followed by `.Build()`.
+- If a test needs a coherent domain/model fixture and no builder exists, add a focused builder instead of using multi-property inline object initializers.
+- Keep inline object initializers only for trivial throwaway values; repeated or behavior-significant fixtures should use builders.
+
+### Pre-Push Checks
+
+The pre-push hook runs additional checks on `git push`:
+1. **Version sync** — `node scripts/sync-fe-version-from-csproj.mjs`
+2. **Full solution format** — `dotnet format listenarr.slnx --no-restore --verify-no-changes`
+3. **Frontend TypeScript check** — `cd fe && vue-tsc --build tsconfig.app.json`
+4. **Frontend unit tests** — `cd fe && vitest run`
 ````
