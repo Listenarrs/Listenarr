@@ -197,5 +197,51 @@ namespace Listenarr.Tests.Features.Application.Audiobooks
             await rootFolderService.DeleteAsync(r1.Id);
             Assert.Null(await _rootFolderRepository.GetByIdAsync(r1.Id));
         }
+
+        [Fact]
+        public async Task Delete_EvenIfThereIsAlreadyOrphanedAudiobooks()
+        {
+            var r1 = await _rootFolderRepository.AddAsync(new RootFolderBuilder()
+                .WithName("R")
+                .WithPath(FileUtils.GetAbsolutePath("data", "media", "books"))
+                .Build());
+
+            var a1 = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("A1")
+                .Build());
+
+            var rootFolderService = _provider.GetRequiredService<IRootFolderService>();
+            await rootFolderService.DeleteAsync(r1.Id);
+            Assert.Null(await _rootFolderRepository.GetByIdAsync(r1.Id));
+        }
+
+        [Fact]
+        public async Task Delete_WithSiblingsPath()
+        {
+            var r1 = await _rootFolderRepository.AddAsync(new RootFolderBuilder()
+                .WithName("R1")
+                .WithPath(FileUtils.GetAbsolutePath("data", "media", "books"))
+                .Build());
+
+            var r2 = await _rootFolderRepository.AddAsync(new RootFolderBuilder()
+                .WithName("R2")
+                .WithPath(FileUtils.GetAbsolutePath("data", "media", "book"))
+                .Build());
+
+            var a1 = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("A1")
+                .WithBasePath(FileUtils.GetAbsolutePath(r1.Path, "a1"))
+                .Build());
+
+            var a2 = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("A2")
+                .WithBasePath(FileUtils.GetAbsolutePath(r2.Path, "a2"))
+                .Build());
+
+            var rootFolderService = _provider.GetRequiredService<IRootFolderService>();
+
+            // Should throw as R2 /book should not be detected as root path for A1 (/books)
+            await Assert.ThrowsAsync<InvalidOperationException>(() => rootFolderService.DeleteAsync(r1.Id));
+        }
     }
 }

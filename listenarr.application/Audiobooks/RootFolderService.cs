@@ -17,6 +17,7 @@
  */
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Interfaces.Repositories;
+using Listenarr.Domain.Common;
 using Listenarr.Domain.Models;
 using Microsoft.Extensions.Logging;
 
@@ -63,19 +64,30 @@ namespace Listenarr.Application.Audiobooks
                 return;
             }
 
-            rootFolders = [.. rootFolders.Where(r => r.Id != id)];
-
-            var audiobooks = await audiobookRepository.GetAllAsync();
-            var rootedAudiobooks = audiobooks.Where(a => !string.IsNullOrEmpty(a.BasePath) && !rootFolders.Any(r => a.BasePath.StartsWith(r.Path)));
-            if (rootedAudiobooks.Any())
-            {
-                throw new InvalidOperationException($"Root folder is in use by {rootedAudiobooks.Count()} audiobooks, we cannot remove it");
-            }
+            var rootFolderPathsAfterDelete = rootFolders.Where(r => r.Id != id).Select(r => FileUtils.EnsureTrailingSeparator(r.Path)).ToList();
 
             if (reassignRootId != null)
             {
                 var newRoot = await rootFolderRepository.GetByIdAsync(reassignRootId!.Value) ?? throw new KeyNotFoundException("Reassign root not found");
                 await MigrateAudiobookPathsAsync(rootFolder.Path, newRoot.Path);
+            }
+
+            var audiobooks = await audiobookRepository.GetAllAsync();
+
+            var orphanedAudiobooks = audiobooks.Where(a => !string.IsNullOrEmpty(a.BasePath) && !rootFolders.Any(r => a.BasePath.StartsWith(r.Path)));
+            if (orphanedAudiobooks.Any())
+            {
+                var formattedList = string.Join(", ", orphanedAudiobooks.Select(a => a.BasePath));
+
+                logger.LogWarning($"The following audiobooks are orphaned: {formattedList}");
+            }
+
+            var rootedAudiobooks = audiobooks
+                .Where(a => !orphanedAudiobooks.Any(o => o.Id != a.Id)) // Check only audiobooks that are not orphaned
+                .Where(a => !string.IsNullOrEmpty(a.BasePath) && !rootFolderPathsAfterDelete.Any(r => a.BasePath.StartsWith(r)));
+            if (rootedAudiobooks.Any())
+            {
+                throw new InvalidOperationException($"Root folder is in use by {rootedAudiobooks.Count()} audiobooks, we cannot remove it");
             }
 
             await rootFolderRepository.RemoveAsync(id);
