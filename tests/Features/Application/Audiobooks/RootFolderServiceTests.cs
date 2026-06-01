@@ -113,7 +113,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks
             Init();
 
             var root = await _rootFolderRepository.AddAsync(new RootFolderBuilder()
-                .WithName("R")
+                .WithName("R1")
                 .WithPath(rootPath)
                 .Build());
 
