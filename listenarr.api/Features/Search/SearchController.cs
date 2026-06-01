@@ -74,7 +74,8 @@ namespace Listenarr.Api.Features.Search
                 searchService,
                 audibleService,
                 metadataService,
-                Microsoft.Extensions.Logging.Abstractions.NullLogger<SearchByTitleWorkflow>.Instance);
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<SearchByTitleWorkflow>.Instance,
+                configurationService);
             _downloadReferenceService = downloadReferenceService;
         }
 
@@ -427,7 +428,7 @@ namespace Listenarr.Api.Features.Search
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
         public async Task<ActionResult<List<object>>> SearchByTitle(
             [FromQuery] string query,
-            [FromQuery] string region = "us",
+            [FromQuery] string? region = null,
             [FromQuery] int limit = 10)
         {
             var result = await _searchByTitleWorkflow.ExecuteAsync(query, region, limit, HttpContext.RequestAborted);

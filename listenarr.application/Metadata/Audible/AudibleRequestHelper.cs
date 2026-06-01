@@ -117,18 +117,6 @@ public static class AudibleRequestHelper
 
     public static string GetBaseUrl(string region)
     {
-        return region?.Trim().ToLowerInvariant() switch
-        {
-            "au" => "https://www.audible.com.au",
-            "ca" => "https://www.audible.ca",
-            "de" => "https://www.audible.de",
-            "es" => "https://www.audible.es",
-            "fr" => "https://www.audible.fr",
-            "in" => "https://www.audible.in",
-            "it" => "https://www.audible.it",
-            "jp" => "https://www.audible.co.jp",
-            "uk" => "https://www.audible.co.uk",
-            _ => "https://www.audible.com"
-        };
+        return $"https://{MarketDomainResolver.GetAudibleDomain(region)}";
     }
 }
