@@ -55,9 +55,16 @@ export default defineConfig(({ mode }) => {
         },
       },
     },
+    ...(mode === 'production'
+      ? {
+          esbuild: {
+            drop: ['console', 'debugger'],
+          },
+        }
+      : {}),
     resolve: {
       alias: {
-        '@': fileURLToPath(new URL('./src', import.meta.url))
+        '@': fileURLToPath(new URL('./src', import.meta.url)),
       },
     },
     server: {
@@ -89,20 +96,25 @@ export default defineConfig(({ mode }) => {
                         httpRes.end(JSON.stringify({ message: 'API is starting, please retry.' }))
                       }
                     }
-                  } catch { /* ignore */ }
+                  } catch {
+                    /* ignore */
+                  }
                   return
                 }
               })
               proxy.on('proxyReq', (proxyReq, req) => {
                 try {
-                  const origCookie = req && req.headers && (req.headers['cookie'] || req.headers.cookie)
+                  const origCookie =
+                    req && req.headers && (req.headers['cookie'] || req.headers.cookie)
                   if (origCookie) {
                     proxyReq.setHeader('cookie', origCookie)
                   }
-                } catch {}
+                } catch {
+                  /* ignore */
+                }
               })
             }
-          }
+          },
         },
         '/hubs': {
           target: 'http://localhost:4545',
@@ -117,9 +129,9 @@ export default defineConfig(({ mode }) => {
                 // ECONNREFUSED during startup - ignore silently
               })
             }
-          }
-        }
-      }
-    }
+          },
+        },
+      },
+    },
   }
 })

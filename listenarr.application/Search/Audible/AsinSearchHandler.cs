@@ -55,11 +55,14 @@ public class AsinSearchHandler
     public async Task<List<SearchResult>> SearchByAsinAsync(
         string asin,
         List<ApiConfiguration> metadataSources,
+        string region = "us",
+        string? language = null,
         CancellationToken ct = default)
     {
         _logger.LogInformation("Processing direct ASIN query: {Asin}", asin);
         await _searchProgressReporter.BroadcastAsync($"Extracting ASIN: {asin}", null);
 
+        var safeRegion = AudiobookIdentifierNormalizer.NormalizeRegion(region) ?? "us";
 
         // Initialize metadata variables
         AudibleBookMetadata? metadata = null;
@@ -71,7 +74,7 @@ public class AsinSearchHandler
 
         try
         {
-            var audibleData = await _audibleService.GetBookMetadataAsync(asin, "us", true);
+            var audibleData = await _audibleService.GetBookMetadataAsync(asin, safeRegion, true, language);
             if (audibleData != null)
             {
                 metadata = _metadataConverters.ConvertAudibleToMetadata(audibleData, asin, "Audible");
@@ -102,7 +105,7 @@ public class AsinSearchHandler
                     {
                         _logger.LogInformation("Attempting Audnexus for ASIN {Asin}", asin);
                         await _searchProgressReporter.BroadcastAsync($"Searching Audnexus for {asin}", null);
-                        var audnexusData = await _audnexusService.GetBookMetadataAsync(asin, "us", true, false);
+                        var audnexusData = await _audnexusService.GetBookMetadataAsync(asin, safeRegion, true, false);
                         if (audnexusData != null)
                         {
                             metadata = _metadataConverters.ConvertAudnexusToMetadata(audnexusData, asin, "Audible");
@@ -134,18 +137,18 @@ public class AsinSearchHandler
             if (metadataSourceName == "Amazon")
             {
                 result.Source = "Amazon";
-                result.SourceLink = $"https://www.amazon.com/dp/{asin}";
+                result.SourceLink = result.ProductUrl ?? BuildAmazonProductUrl(asin, metadata.Region ?? safeRegion);
             }
             else if (metadataSourceName == "Audible")
             {
                 result.Source = "Audible";
-                result.SourceLink = $"https://www.audible.com/pd/{asin}";
+                result.SourceLink = result.ProductUrl ?? BuildAudibleProductUrl(asin, metadata.Region ?? safeRegion);
             }
             else
             {
                 // Metadata API source - default to Audible for product link
                 result.Source = "Audible";
-                result.SourceLink = $"https://www.audible.com/pd/{asin}";
+                result.SourceLink = result.ProductUrl ?? BuildAudibleProductUrl(asin, metadata.Region ?? safeRegion);
             }
 
             // Validate result before returning
@@ -169,5 +172,50 @@ public class AsinSearchHandler
         // If we reach here, ASIN query failed - return empty list
         return new List<SearchResult>();
     }
-}
 
+    private static string BuildAmazonProductUrl(string asin, string? region)
+    {
+        return $"https://{GetAmazonDomain(region)}/dp/{Uri.EscapeDataString(asin)}";
+    }
+
+    private static string BuildAudibleProductUrl(string asin, string? region)
+    {
+        return $"https://{GetAudibleDomain(region)}/pd/{Uri.EscapeDataString(asin)}";
+    }
+
+    private static string GetAmazonDomain(string? region)
+    {
+        return region?.Trim().ToLowerInvariant() switch
+        {
+            "au" => "www.amazon.com.au",
+            "br" => "www.amazon.com.br",
+            "ca" => "www.amazon.ca",
+            "de" => "www.amazon.de",
+            "es" => "www.amazon.es",
+            "fr" => "www.amazon.fr",
+            "in" => "www.amazon.in",
+            "it" => "www.amazon.it",
+            "jp" => "www.amazon.co.jp",
+            "uk" or "gb" => "www.amazon.co.uk",
+            _ => "www.amazon.com"
+        };
+    }
+
+    private static string GetAudibleDomain(string? region)
+    {
+        return region?.Trim().ToLowerInvariant() switch
+        {
+            "au" => "www.audible.com.au",
+            "br" => "www.audible.com.br",
+            "ca" => "www.audible.ca",
+            "de" => "www.audible.de",
+            "es" => "www.audible.es",
+            "fr" => "www.audible.fr",
+            "in" => "www.audible.in",
+            "it" => "www.audible.it",
+            "jp" => "www.audible.co.jp",
+            "uk" or "gb" => "www.audible.co.uk",
+            _ => "www.audible.com"
+        };
+    }
+}

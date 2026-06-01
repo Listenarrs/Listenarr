@@ -294,40 +294,48 @@ try {
   }
 } catch {}
 
-// Provide a simple localStorage polyfill for tests that rely on it
-// Ensure a working localStorage implementation exists for tests. Some test
-// runners may set a placeholder object; normalize it so .setItem/.getItem exist.
-if (
-  typeof (globalThis as unknown as { localStorage?: { setItem?: unknown } }).localStorage ===
-    'undefined' ||
-  typeof (globalThis as unknown as { localStorage?: { setItem?: unknown } }).localStorage
-    ?.setItem !== 'function'
-) {
-  ;(
-    globalThis as unknown as {
-      localStorage?: {
-        _store?: Record<string, string>
-        getItem?: (k: string) => string | null
-        setItem?: (k: string, v: string) => void
-        removeItem?: (k: string) => void
-        clear?: () => void
-      }
-    }
-  ).localStorage = {
-    _store: {} as Record<string, string>,
-    getItem(key: string) {
-      return this._store[key] ?? null
-    },
-    setItem(key: string, value: string) {
-      this._store[key] = value + ''
-    },
-    removeItem(key: string) {
-      delete this._store[key]
-    },
-    clear() {
-      this._store = {}
-    },
-  }
+// Ensure a working localStorage implementation exists for tests. Node 24 exposes
+// a native global localStorage getter that warns unless --localstorage-file is
+// configured, so install test storage without reading the getter.
+type TestStorage = {
+  _store?: Record<string, string>
+  getItem?: (k: string) => string | null
+  setItem?: (k: string, v: string) => void
+  removeItem?: (k: string) => void
+  clear?: () => void
+}
+
+const createMemoryStorage = (): TestStorage => ({
+  _store: {},
+  getItem(key: string) {
+    return this._store?.[key] ?? null
+  },
+  setItem(key: string, value: string) {
+    this._store = this._store ?? {}
+    this._store[key] = value + ''
+  },
+  removeItem(key: string) {
+    delete this._store?.[key]
+  },
+  clear() {
+    this._store = {}
+  },
+})
+
+const testLocalStorage = createMemoryStorage()
+
+Object.defineProperty(globalThis, 'localStorage', {
+  configurable: true,
+  value: testLocalStorage,
+  writable: true,
+})
+
+if (typeof window !== 'undefined') {
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    value: testLocalStorage,
+    writable: true,
+  })
 }
 
 // Defensive: JSDOM / Vitest may encounter `file://` asset URLs (e.g. transformed

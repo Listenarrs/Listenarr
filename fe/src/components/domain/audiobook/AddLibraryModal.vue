@@ -464,6 +464,7 @@ import RootFolderSelect from '@/components/form/RootFolderSelect.vue'
 import Checkbox from '@/components/form/Checkbox.vue'
 import FormRow from '@/components/settings/FormRow.vue'
 import { useRootFoldersStore } from '@/stores/rootFolders'
+import { buildAudibleProductUrl } from '@/utils/marketDomains'
 import {
   PhX,
   PhSpinner,
@@ -623,6 +624,7 @@ function cloneMetadata(source: AudibleBookMetadata): AudibleBookMetadata {
     abridged: Boolean(source.abridged),
     source: trimToUndefined(source.source),
     sourceLink: trimToUndefined(source.sourceLink),
+    region: trimToUndefined(source.region),
     openLibraryId: trimToUndefined(source.openLibraryId),
     metadataSource: trimToUndefined(source.metadataSource),
   }
@@ -672,6 +674,7 @@ function buildMetadataPayload(): AudibleBookMetadata {
     imageUrl: trimToUndefined(source?.imageUrl),
     explicit: Boolean(source?.explicit),
     abridged: Boolean(source?.abridged),
+    region: trimToUndefined(source?.region),
     openLibraryId: trimToUndefined(source?.openLibraryId),
   }
 }
@@ -723,12 +726,12 @@ const audibleSourceUrl = computed(() => {
   const source = (metadataSource.value || currentMetadata.value?.source || '').toLowerCase()
   const asin = currentMetadata.value?.asin
   if (!source.includes('audible') || !asin) return null
-  return `https://www.audible.com/pd/${encodeURIComponent(asin)}`
+  return buildAudibleProductUrl(asin, currentMetadata.value?.region)
 })
 
 const audibleProductUrl = computed(() => {
   const asin = currentMetadata.value?.asin
-  return asin ? `https://www.audible.com/pd/${asin}` : '#'
+  return asin ? buildAudibleProductUrl(asin, currentMetadata.value?.region) : '#'
 })
 
 const openLibraryUrl = computed(() => {
@@ -844,6 +847,7 @@ interface Audible {
   imageUrl?: string
   lengthMinutes?: number
   language?: string
+  region?: string
   genres?: AudibleGenre[]
   series?: AudibleSeries[]
   bookFormat?: string
@@ -907,6 +911,7 @@ const mapAudibleToAudible = (
     edition: props.book?.edition,
     version: audible?.version || props.book?.version,
     genres: genres.length ? genres : props.book?.genres || [],
+    region: audible?.region || props.book?.region,
     series: primaryMembership?.seriesName || props.book?.series,
     seriesNumber:
       primaryMembership?.seriesNumber ||
@@ -979,7 +984,7 @@ const seedPreview = async () => {
       try {
         const resp = await apiService.getAudibleMetadata<
           AudibleMetadataResponse | Partial<Audible>
-        >(props.book.asin)
+        >(props.book.asin, props.book.region)
         const payload = (resp && typeof resp === 'object' ? resp : {}) as
           | AudibleMetadataResponse
           | Partial<Audible>

@@ -248,6 +248,12 @@ export function getLanguageFromRegion(region: string): string {
   return regionToLanguage[region.toLowerCase()] || 'english'
 }
 
+export function getPrimaryPreferredSearchLanguageForRegion(
+  region: string | undefined | null,
+): string {
+  return normalizePreferredSearchLanguage(getLanguageFromRegion(normalizeSearchRegion(region)))
+}
+
 export function normalizeSearchRegion(region: string | undefined | null): string {
   const normalized = (region || '').trim().toLowerCase()
   if (!normalized) return 'us'

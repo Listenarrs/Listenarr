@@ -17,6 +17,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
+  getPrimaryPreferredSearchLanguageForRegion,
   normalizePreferredSearchLanguage,
   normalizeSearchResultLanguage,
 } from '@/utils/languageMapping'
@@ -40,6 +41,13 @@ describe('languageMapping', () => {
     // Region codes that don't directly map to a supported language
     expect(normalizePreferredSearchLanguage('br')).toBe('portuguese')
     expect(normalizePreferredSearchLanguage('jp')).toBe('japanese')
+  })
+
+  it('maps search regions to their primary supported language filters', () => {
+    expect(getPrimaryPreferredSearchLanguageForRegion('de')).toBe('german')
+    expect(getPrimaryPreferredSearchLanguageForRegion('fr')).toBe('french')
+    expect(getPrimaryPreferredSearchLanguageForRegion('uk')).toBe('english')
+    expect(getPrimaryPreferredSearchLanguageForRegion('unknown')).toBe('english')
   })
 
   it('maps result languages to supported filter values', () => {

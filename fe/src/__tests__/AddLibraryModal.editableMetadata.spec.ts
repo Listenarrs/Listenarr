@@ -57,6 +57,7 @@ const fakeBook = {
   explicit: false,
   abridged: false,
   source: 'Audible',
+  region: 'de',
 }
 
 describe('AddLibraryModal editable metadata', () => {
@@ -94,6 +95,7 @@ describe('AddLibraryModal editable metadata', () => {
     })
 
     await flushPromises()
+    expect(apiMocks.getAudibleMetadata).toHaveBeenCalledWith('B001234567', 'de')
     apiMocks.previewLibraryPath.mockClear()
 
     expect(wrapper.find('.metadata-edit-grid').exists()).toBe(false)
@@ -127,6 +129,7 @@ describe('AddLibraryModal editable metadata', () => {
       edition: 'Library Edition',
       publisher: 'Edited Publisher',
       authors: ['Edited Author'],
+      region: 'de',
     })
 
     const relativeInput = wrapper.get('input.relative-input')
@@ -141,6 +144,7 @@ describe('AddLibraryModal editable metadata', () => {
         edition: 'Library Edition',
         publisher: 'Edited Publisher',
         authors: ['Edited Author'],
+        region: 'de',
       }),
       expect.any(Object),
     )

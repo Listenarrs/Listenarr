@@ -131,6 +131,36 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         }
 
         [Fact]
+        public async Task AddToLibrary_WithAsinRegion_PersistsIdentifierRegion()
+        {
+            var controller = _provider.GetRequiredService<LibraryController>();
+
+            var request = new LibraryController.AddToLibraryRequest
+            {
+                Metadata = new AudibleBookMetadata
+                {
+                    Title = "Region Title",
+                    Authors = new List<string> { "Region Author" },
+                    Asin = "B00REGION1",
+                    Region = "de"
+                },
+                Monitored = true
+            };
+
+            var actionResult = await controller.AddToLibrary(request);
+
+            Assert.IsType<OkObjectResult>(actionResult);
+
+            var stored = await _audiobookRepository.GetByAsinAsync("B00REGION1");
+            Assert.NotNull(stored);
+            var asinIdentifier = Assert.Single(
+                stored.ExternalIdentifiers ?? new List<AudiobookExternalIdentifier>(),
+                identifier => identifier.Type == AudiobookExternalIdentifierType.Asin);
+            Assert.Equal("de", asinIdentifier.Region);
+            Assert.True(asinIdentifier.IsPrimary);
+        }
+
+        [Fact]
         public async Task AddToLibrary_WithAsin_MovesImageToLibraryStorage()
         {
             var asin = "B000TEST01";

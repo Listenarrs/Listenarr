@@ -66,6 +66,24 @@
                 @keydown.enter.prevent="onUnifiedSearchSubmit"
               />
 
+              <div class="region-select-wrapper" data-testid="search-region-indicator">
+                <label for="region-select" class="region-label">Region:</label>
+                <select
+                  v-model="selectedSearchRegion"
+                  id="region-select"
+                  class="region-select form-select"
+                  aria-label="Select Audible search region"
+                >
+                  <option
+                    v-for="option in searchRegionOptions"
+                    :key="option.value"
+                    :value="option.value"
+                  >
+                    {{ option.label }}
+                  </option>
+                </select>
+              </div>
+
               <div class="language-select-wrapper">
                 <label for="language-select" class="language-label">Language:</label>
                 <select
@@ -221,6 +239,25 @@
                   >
                     <option
                       v-for="option in preferredSearchLanguageOptions"
+                      :key="option.value"
+                      :value="option.value"
+                    >
+                      {{ option.label }}
+                    </option>
+                  </select>
+                </div>
+
+                <div class="form-group region-display-group">
+                  <label for="adv-region">Region</label>
+                  <select
+                    id="adv-region"
+                    aria-label="Select Audible search region"
+                    v-model="selectedSearchRegion"
+                    class="form-input"
+                    data-testid="advanced-search-region"
+                  >
+                    <option
+                      v-for="option in searchRegionOptions"
                       :key="option.value"
                       :value="option.value"
                     >
@@ -446,7 +483,7 @@
                           .toLowerCase()
                           .includes('audible')))
                   "
-                  :href="`https://www.audible.com/pd/${audibleResult.asin}`"
+                  :href="audibleResultProductUrl"
                   target="_blank"
                   rel="noopener noreferrer"
                   class="metadata-source-link"
@@ -468,15 +505,15 @@
                 </span>
 
                 <a
-                  v-if="audibleResult.sourceLink"
-                  :href="audibleResult.sourceLink"
+                  v-if="audibleResultSourceUrl"
+                  :href="audibleResultSourceUrl"
                   target="_blank"
                   rel="noopener noreferrer"
                   class="source-link"
                 >
                   <PhCloud />
                   {{
-                    isAudibleHost(audibleResult.sourceLink)
+                    isAudibleHost(audibleResultSourceUrl)
                       ? 'Audible'
                       : `Source: ${audibleResult.source}`
                   }}
@@ -960,11 +997,12 @@ import {
 } from '@/utils/searchResultHelpers'
 import { useProtectedImages, isLikelyBackendImageUrl } from '@/composables/useProtectedImages'
 import {
+  getPrimaryPreferredSearchLanguageForRegion,
   getPreferredSearchLanguageFilter,
-  normalizePreferredSearchLanguage,
   normalizeSearchResultLanguage,
   normalizeSearchRegion,
   preferredSearchLanguageOptions,
+  searchRegionOptions,
 } from '@/utils/languageMapping'
 
 // Helper to normalize ISBN (strip hyphens/spaces, prefer ISBN-13 if present)
@@ -1009,6 +1047,7 @@ interface AudibleSeriesEntry {
 
 interface AudibleMetadataPayload {
   asin?: string
+  region?: string
   title?: string
   subtitle?: string
   authors?: AudibleAuthor[]
@@ -1114,6 +1153,33 @@ const isbnResult = ref<ISBNBook | null>(null) // retained for potential enrichme
 const isbnLookupMessage = ref('')
 const isbnLookupWarning = ref(false)
 const totalTitleResultsCount = ref<number>(0)
+
+const selectedSearchRegion = computed({
+  get: () => normalizeSearchRegion(searchLanguage.value),
+  set: (value: string) => {
+    const normalizedRegion = normalizeSearchRegion(value)
+    searchLanguage.value = normalizedRegion
+    preferredSearchLanguage.value = getPrimaryPreferredSearchLanguageForRegion(normalizedRegion)
+  },
+})
+
+const audibleResultRegion = computed(() => audibleResult.value?.region || searchLanguage.value)
+
+const audibleResultProductUrl = computed(() =>
+  audibleResult.value?.asin
+    ? buildAudibleProductUrl(audibleResult.value.asin, audibleResultRegion.value)
+    : undefined,
+)
+
+const audibleResultSourceUrl = computed(() => {
+  const result = audibleResult.value
+  if (!result?.sourceLink) return undefined
+  if (result.asin && isAudibleHost(result.sourceLink)) {
+    return buildAudibleProductUrl(result.asin, audibleResultRegion.value)
+  }
+
+  return result.sourceLink
+})
 
 // Parsed search query components (for error messages)
 const asinQuery = ref('')
@@ -1551,7 +1617,25 @@ const handleAdvancedSearchResults = async (results: Array<Partial<SearchResult> 
       tr['description'] = rrRes['description'] ?? rrRes['Description'] ?? undefined
       tr['asin'] = rrRes['asin'] ?? rrRes['Asin'] ?? undefined
       tr['id'] = rrRes['asin'] ?? rrRes['sku'] ?? rrRes['id'] ?? rrRes['title']
-      tr['productUrl'] = rrRes['productUrl'] ?? rrRes['link'] ?? rrRes['Link'] ?? undefined
+      tr['region'] = rrRes['region'] ?? rrRes['Region'] ?? undefined
+      if (tr['region']) {
+        ;(tr['searchResult'] as Record<string, unknown>)['region'] = tr['region']
+      }
+      const rawProductUrl = rrRes['productUrl'] ?? rrRes['link'] ?? rrRes['Link'] ?? undefined
+      const asin = typeof tr['asin'] === 'string' ? tr['asin'] : undefined
+      const resultRegion = typeof tr['region'] === 'string' ? tr['region'] : searchLanguage.value
+      const sourceIsAudible =
+        String(titleResult.metadataSource ?? '')
+          .toLowerCase()
+          .includes('audible') ||
+        String(rrRes['source'] ?? rrRes['Source'] ?? '')
+          .toLowerCase()
+          .includes('audible')
+      tr['productUrl'] =
+        asin &&
+        (sourceIsAudible || (typeof rawProductUrl === 'string' && isAudibleHost(rawProductUrl)))
+          ? buildAudibleProductUrl(asin, resultRegion)
+          : rawProductUrl
       if (tr['subtitle']) {
         ;(tr['searchResult'] as Record<string, unknown>)['subtitle'] = tr['subtitle']
       }
@@ -1873,9 +1957,7 @@ const performAdvancedSearch = async () => {
 const clearAdvancedSearch = () => {
   // Reset form state via composable
   resetAdvancedSearch()
-  preferredSearchLanguage.value = normalizePreferredSearchLanguage(
-    configStore.applicationSettings?.defaultSearchLanguage,
-  )
+  preferredSearchLanguage.value = getPrimaryPreferredSearchLanguageForRegion(searchLanguage.value)
   advancedSearchError.value = ''
   // Reset audible paging state
   audiblePage.value = 1
@@ -2165,6 +2247,16 @@ const getAsin = (book: TitleSearchResult): string | null => {
   return book.searchResult?.asin || resolvedAsins.value[book.key] || null
 }
 
+const getResultRegion = (book: TitleSearchResult): string => {
+  const rawRegion =
+    (book as unknown as Record<string, unknown>)['region'] ??
+    ((book.searchResult as unknown as Record<string, unknown> | undefined)?.['region'] as
+      | string
+      | undefined)
+
+  return typeof rawRegion === 'string' && rawRegion.trim() ? rawRegion : searchLanguage.value
+}
+
 const getMetadataSourceUrl = (book: TitleSearchResult): string | undefined => {
   const source =
     book.metadataSource ??
@@ -2227,14 +2319,14 @@ const getMetadataSourceUrl = (book: TitleSearchResult): string | undefined => {
 
   // Map metadata source to URL for ASIN-based providers
   if (source.toLowerCase().includes('audible')) {
-    return buildAudibleProductUrl(asin)
+    return buildAudibleProductUrl(asin, getResultRegion(book))
   } else if (source.toLowerCase().includes('audnex')) {
     // Audnexus API format
     return `https://api.audnex.us/books/${asin}`
   } else if (source === 'Amazon') {
     return buildAmazonProductUrl(asin)
   } else if (source === 'Audible') {
-    return buildAudibleProductUrl(asin)
+    return buildAudibleProductUrl(asin, getResultRegion(book))
   }
 
   return undefined
@@ -2242,10 +2334,6 @@ const getMetadataSourceUrl = (book: TitleSearchResult): string | undefined => {
 
 // Get a sensible 'source' URL for the book (indexer/product or OpenLibrary work page)
 const getSourceUrl = (book: TitleSearchResult): string | undefined => {
-  // Prefer explicit productUrl from the enriched SearchResult
-  if (book.searchResult?.productUrl) return book.searchResult.productUrl
-
-  // If metadata indicates Audible-backed metadata, link to the Audible product page when possible.
   const asin = getAsin(book)
   const metaSource = (
     book.metadataSource ??
@@ -2256,8 +2344,19 @@ const getSourceUrl = (book: TitleSearchResult): string | undefined => {
   )
     .toString()
     .toLowerCase()
+
+  // Prefer explicit productUrl from the enriched SearchResult
+  if (book.searchResult?.productUrl) {
+    if ((metaSource.includes('audible') || isAudibleHost(book.searchResult.productUrl)) && asin) {
+      return buildAudibleProductUrl(asin, getResultRegion(book))
+    }
+
+    return book.searchResult.productUrl
+  }
+
+  // If metadata indicates Audible-backed metadata, link to the Audible product page when possible.
   if (metaSource.includes('audible') && asin) {
-    return buildAudibleProductUrl(asin)
+    return buildAudibleProductUrl(asin, getResultRegion(book))
   }
 
   // If provider/source is OpenLibrary or we have an OL key, link to the OL work page
@@ -2291,7 +2390,7 @@ const isAudibleHost = (url?: string): boolean => {
     // Use a base origin so relative URLs can be parsed too
     const parsed = new URL(url, window.location.origin)
     const host = parsed.hostname.toLowerCase()
-    return host === 'audible.com' || host.endsWith('.audible.com')
+    return host.startsWith('audible.') || host.startsWith('www.audible.')
   } catch {
     // If parsing fails, treat as not audible
     return false
@@ -2392,6 +2491,7 @@ const selectTitleResult = async (book: TitleSearchResult) => {
 
       const metadata: AudibleBookMetadata = {
         asin: result.asin || '',
+        region: getResultRegion(book),
         title: result.title || 'Unknown Title',
         subtitle: undefined,
         authors: result.artist ? [result.artist] : [],
@@ -2459,6 +2559,7 @@ const selectTitleResult = async (book: TitleSearchResult) => {
         const result = book.searchResult
         const fallbackMetadata: AudibleBookMetadata = {
           asin: asin || '',
+          region: getResultRegion(book),
           title: result?.title || book.title || 'Unknown Title',
           subtitle: result?.subtitle,
           authors: result?.artist
@@ -2497,6 +2598,7 @@ const selectTitleResult = async (book: TitleSearchResult) => {
 
       const metadata: AudibleBookMetadata = {
         asin: audibleData.asin || asin || '',
+        region: audibleData.region || getResultRegion(book),
         title: audibleData.title || 'Unknown Title',
         subtitle: audibleData.subtitle,
         authors:
@@ -2890,7 +2992,25 @@ const handleSimpleSearchResults = async (results: SearchResult[]) => {
       tr['description'] = rrRes['description'] ?? rrRes['Description'] ?? undefined
       tr['asin'] = rrRes['asin'] ?? rrRes['Asin'] ?? undefined
       tr['id'] = rrRes['asin'] ?? rrRes['sku'] ?? rrRes['id'] ?? rrRes['title']
-      tr['productUrl'] = rrRes['productUrl'] ?? rrRes['link'] ?? rrRes['Link'] ?? undefined
+      tr['region'] = rrRes['region'] ?? rrRes['Region'] ?? undefined
+      if (tr['region']) {
+        ;(tr['searchResult'] as Record<string, unknown>)['region'] = tr['region']
+      }
+      const rawProductUrl = rrRes['productUrl'] ?? rrRes['link'] ?? rrRes['Link'] ?? undefined
+      const asin = typeof tr['asin'] === 'string' ? tr['asin'] : undefined
+      const resultRegion = typeof tr['region'] === 'string' ? tr['region'] : searchLanguage.value
+      const sourceIsAudible =
+        String(titleResult.metadataSource ?? '')
+          .toLowerCase()
+          .includes('audible') ||
+        String(rrRes['source'] ?? rrRes['Source'] ?? '')
+          .toLowerCase()
+          .includes('audible')
+      tr['productUrl'] =
+        asin &&
+        (sourceIsAudible || (typeof rawProductUrl === 'string' && isAudibleHost(rawProductUrl)))
+          ? buildAudibleProductUrl(asin, resultRegion)
+          : rawProductUrl
       // preserve seriesList for tooltip display when provided as an array
       try {
         const rawSeries = rr['series'] ?? rr['Series']
@@ -2999,11 +3119,8 @@ onMounted(async () => {
   await configStore.loadApiConfigurations()
 
   const defaultRegion = normalizeSearchRegion(configStore.applicationSettings?.defaultSearchRegion)
-  const defaultLanguage = normalizePreferredSearchLanguage(
-    configStore.applicationSettings?.defaultSearchLanguage,
-  )
   searchLanguage.value = defaultRegion
-  preferredSearchLanguage.value = defaultLanguage
+  preferredSearchLanguage.value = getPrimaryPreferredSearchLanguageForRegion(defaultRegion)
 
   // Audible integration removed: no auth status to check
 
@@ -3266,7 +3383,8 @@ onUnmounted(() => {
   font-weight: 400;
 }
 
-.unified-search-bar .language-select {
+.unified-search-bar .language-select,
+.unified-search-bar .region-select {
   padding: 6px 8px;
   border: 1px solid #444;
   border-radius: 6px;
@@ -3293,36 +3411,42 @@ onUnmounted(() => {
   background-size: 1.125rem !important;
 }
 
-.unified-search-bar .language-select:focus-visible {
+.unified-search-bar .language-select:focus-visible,
+.unified-search-bar .region-select:focus-visible {
   outline: none;
   border-color: #2196f3;
   box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.2);
 }
 
-.unified-search-bar .language-select:hover {
+.unified-search-bar .language-select:hover,
+.unified-search-bar .region-select:hover {
   border-color: #555;
 }
 
-.unified-search-bar .language-select:focus {
+.unified-search-bar .language-select:focus,
+.unified-search-bar .region-select:focus {
   outline: none;
   border-color: #2196f3;
   box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.2);
 }
 
-.unified-search-bar .language-select option {
+.unified-search-bar .language-select option,
+.unified-search-bar .region-select option {
   background-color: #1a1a1a !important;
   color: white !important;
   padding: 0.5rem !important;
 }
 
-.language-select-wrapper {
+.language-select-wrapper,
+.region-select-wrapper {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   white-space: nowrap;
 }
 
-.language-label {
+.language-label,
+.region-label {
   color: #b0bec5;
   font-size: 0.85rem;
   font-weight: 500;
@@ -3524,18 +3648,21 @@ select.form-input:focus {
     flex-basis: auto;
   }
 
-  .language-select-wrapper {
+  .language-select-wrapper,
+  .region-select-wrapper {
     width: 100%;
     flex-direction: row;
     align-items: center;
   }
 
-  .language-label {
+  .language-label,
+  .region-label {
     min-width: 60px;
     flex-shrink: 0;
   }
 
-  .unified-search-bar .language-select {
+  .unified-search-bar .language-select,
+  .unified-search-bar .region-select {
     flex: 1;
     min-width: auto;
     width: auto;
@@ -3616,16 +3743,19 @@ select.form-input:focus {
     font-size: 0.95rem;
   }
 
-  .language-select-wrapper {
+  .language-select-wrapper,
+  .region-select-wrapper {
     gap: 0.375rem;
   }
 
-  .language-label {
+  .language-label,
+  .region-label {
     min-width: 50px;
     font-size: 0.8rem;
   }
 
-  .unified-search-bar .language-select {
+  .unified-search-bar .language-select,
+  .unified-search-bar .region-select {
     font-size: 0.85rem;
     padding: 0.5rem 0.75rem;
   }

@@ -58,6 +58,7 @@ public class MetadataConverters
         {
             Asin = audibleData.Asin ?? asin,
             Source = source, // Use the original search source (Amazon or Audible)
+            Region = audibleData.Region,
             Title = audibleData.Title,
             Subtitle = audibleData.Subtitle,
             Authors = audibleData.Authors?.Where(a => !string.IsNullOrEmpty(a.Name)).Select(a => a.Name!).ToList(),
@@ -122,6 +123,7 @@ public class MetadataConverters
         {
             Asin = audnexusData.Asin ?? asin,
             Source = source, // Use the original search source (Amazon or Audible)
+            Region = audnexusData.Region,
             Title = audnexusData.Title,
             Subtitle = audnexusData.Subtitle,
             Authors = audnexusData.Authors?.Where(a => !string.IsNullOrEmpty(a.Name)).Select(a => a.Name!).ToList(),
@@ -280,8 +282,8 @@ public class MetadataConverters
         if (!string.IsNullOrEmpty(asin))
         {
             productUrl = metadata.Source == "Amazon"
-                ? $"https://www.amazon.com/dp/{asin}"
-                : $"https://www.audible.com/pd/{asin}";
+                ? BuildAmazonProductUrl(asin, metadata.Region)
+                : BuildAudibleProductUrl(asin, metadata.Region);
         }
 
         // If metadata provided a non-http product link, prefer synthesized productUrl and
@@ -427,8 +429,8 @@ public class MetadataConverters
         if (!string.IsNullOrEmpty(asin))
         {
             productUrl = metadata.Source == "Amazon"
-                ? $"https://www.amazon.com/dp/{asin}"
-                : $"https://www.audible.com/pd/{asin}";
+                ? BuildAmazonProductUrl(asin, metadata.Region)
+                : BuildAudibleProductUrl(asin, metadata.Region);
         }
 
         var categoryText = string.Join(", ", metadata.Genres ?? new List<string> { "Audiobook" });
@@ -481,5 +483,51 @@ public class MetadataConverters
             asin, metadata.PublishYear);
 
         return result;
+    }
+
+    private static string BuildAmazonProductUrl(string asin, string? region)
+    {
+        return $"https://{GetAmazonDomain(region)}/dp/{Uri.EscapeDataString(asin)}";
+    }
+
+    private static string BuildAudibleProductUrl(string asin, string? region)
+    {
+        return $"https://{GetAudibleDomain(region)}/pd/{Uri.EscapeDataString(asin)}";
+    }
+
+    private static string GetAmazonDomain(string? region)
+    {
+        return region?.Trim().ToLowerInvariant() switch
+        {
+            "au" => "www.amazon.com.au",
+            "br" => "www.amazon.com.br",
+            "ca" => "www.amazon.ca",
+            "de" => "www.amazon.de",
+            "es" => "www.amazon.es",
+            "fr" => "www.amazon.fr",
+            "in" => "www.amazon.in",
+            "it" => "www.amazon.it",
+            "jp" => "www.amazon.co.jp",
+            "uk" or "gb" => "www.amazon.co.uk",
+            _ => "www.amazon.com"
+        };
+    }
+
+    private static string GetAudibleDomain(string? region)
+    {
+        return region?.Trim().ToLowerInvariant() switch
+        {
+            "au" => "www.audible.com.au",
+            "br" => "www.audible.com.br",
+            "ca" => "www.audible.ca",
+            "de" => "www.audible.de",
+            "es" => "www.audible.es",
+            "fr" => "www.audible.fr",
+            "in" => "www.audible.in",
+            "it" => "www.audible.it",
+            "jp" => "www.audible.co.jp",
+            "uk" or "gb" => "www.audible.co.uk",
+            _ => "www.audible.com"
+        };
     }
 }

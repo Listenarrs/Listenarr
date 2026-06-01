@@ -126,7 +126,7 @@ namespace Listenarr.Application.Audiobooks.Catalog
             audiobook.ImageUrl = imageUrl;
             audiobook.Monitored = request.Monitored;
 
-            AudiobookIdentifierMapper.SyncImportedIdentifiersFromLegacyFields(audiobook);
+            AudiobookIdentifierMapper.SyncImportedIdentifiersFromLegacyFields(audiobook, metadata.Region);
 
             if (request.QualityProfileId.HasValue)
             {

@@ -436,6 +436,7 @@ export interface AudibleBookMetadata {
   abridged?: boolean
   source?: string
   sourceLink?: string
+  region?: string
   openLibraryId?: string
   metadataSource?: string
   // Optional local mapping to a quality profile ID when viewing in the UI

@@ -16,6 +16,8 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
+using Listenarr.Domain.Models.Configurations;
 
 namespace Listenarr.Tests.Features.Application.Search.Core
 {
@@ -103,6 +105,44 @@ namespace Listenarr.Tests.Features.Application.Search.Core
 
             var sr = Listenarr.Domain.Search.SearchResultConverters.ToSearchResult(idx);
             Assert.Null(sr.Quality);
+        }
+
+        [Fact]
+        public async Task SearchByAsinAsync_Uses_Requested_Region_For_Audible_Source_Links()
+        {
+            var configuration = Mock.Of<IConfigurationService>();
+            var audible = new Mock<AudibleService>(new HttpClient(), NullLogger<AudibleService>.Instance);
+            audible
+                .Setup(s => s.GetBookMetadataAsync("B0TEST1234", "de", true, "german"))
+                .ReturnsAsync(new AudibleBookResponse
+                {
+                    Asin = "B0TEST1234",
+                    Region = "de",
+                    Title = "Region Test",
+                    Authors = new List<AudibleAuthor> { new() { Name = "Test Author", Region = "de" } },
+                    Language = "german"
+                });
+
+            var converters = new MetadataConverters(Mock.Of<IImageCacheService>(), NullLogger<MetadataConverters>.Instance);
+            var progress = new SearchProgressReporter(null, NullLogger<SearchProgressReporter>.Instance);
+            var handler = new AsinSearchHandler(
+                NullLogger<AsinSearchHandler>.Instance,
+                configuration,
+                audible.Object,
+                Mock.Of<IAudnexusService>(),
+                converters,
+                progress);
+
+            var results = await handler.SearchByAsinAsync(
+                "B0TEST1234",
+                new List<ApiConfiguration>(),
+                region: "de",
+                language: "german");
+
+            var result = Assert.Single(results);
+            Assert.Equal("https://www.audible.de/pd/B0TEST1234", result.SourceLink);
+            Assert.Equal("https://www.audible.de/pd/B0TEST1234", result.ProductUrl);
+            audible.Verify(s => s.GetBookMetadataAsync("B0TEST1234", "de", true, "german"), Times.Once);
         }
     }
 }

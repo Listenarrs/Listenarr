@@ -49,10 +49,12 @@ public static class AudiobookIdentifierMapper
 
     public static List<AudiobookExternalIdentifier> BuildLegacyBackfillIdentifiers(
         Audiobook audiobook,
-        AudiobookExternalIdentifierSource source)
+        AudiobookExternalIdentifierSource source,
+        string? asinRegion = null)
     {
         var now = DateTime.UtcNow;
         var result = new List<AudiobookExternalIdentifier>();
+        var normalizedAsinRegion = AudiobookIdentifierNormalizer.NormalizeRegion(asinRegion);
 
         if (!string.IsNullOrWhiteSpace(audiobook.Asin) &&
             AudiobookIdentifierNormalizer.TryNormalize(AudiobookExternalIdentifierType.Asin, audiobook.Asin, out var normalizedAsin, out _))
@@ -62,7 +64,7 @@ public static class AudiobookIdentifierMapper
                 Type = AudiobookExternalIdentifierType.Asin,
                 ValueRaw = AudiobookIdentifierNormalizer.NormalizeRawValueForStorage(audiobook.Asin),
                 ValueNormalized = normalizedAsin,
-                Region = null,
+                Region = normalizedAsinRegion,
                 IsPrimary = true,
                 Source = source,
                 CreatedAt = now,
@@ -202,7 +204,7 @@ public static class AudiobookIdentifierMapper
         audiobook.OpenLibraryId = primaryOlid?.ValueNormalized;
     }
 
-    public static void SyncImportedIdentifiersFromLegacyFields(Audiobook audiobook)
+    public static void SyncImportedIdentifiersFromLegacyFields(Audiobook audiobook, string? asinRegion = null)
     {
         audiobook.ExternalIdentifiers ??= new List<AudiobookExternalIdentifier>();
 
@@ -217,7 +219,7 @@ public static class AudiobookIdentifierMapper
             StringComparer.OrdinalIgnoreCase);
         var seenImportedFullKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        var imported = BuildLegacyBackfillIdentifiers(audiobook, AudiobookExternalIdentifierSource.Imported);
+        var imported = BuildLegacyBackfillIdentifiers(audiobook, AudiobookExternalIdentifierSource.Imported, asinRegion);
         foreach (var item in imported.Where(item =>
                      !string.IsNullOrWhiteSpace(item.ValueNormalized) &&
                      !existingTypeValueKeys.Contains(TypeValueKey(item)) &&

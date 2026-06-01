@@ -669,6 +669,7 @@ import { safeText, stripHtmlAndNormalize } from '@/utils/textUtils'
 import { logger } from '@/utils/logger'
 import { errorTracking } from '@/services/errorTracking'
 import { useProtectedImages } from '@/composables/useProtectedImages'
+import { buildAudibleProductUrl } from '@/utils/marketDomains'
 import EditAudiobookModal from '@/components/domain/audiobook/EditAudiobookModal.vue'
 import ManualSearchModal from '@/components/domain/search/ManualSearchModal.vue'
 import RenamePreviewModal from '@/components/domain/organize/RenamePreviewModal.vue'
@@ -899,13 +900,20 @@ const assignedProfileName = computed(() => {
   return p ? p.name : null
 })
 
-const primaryAsin = computed(() => {
+const primaryAsinIdentifier = computed(() => {
   const ids = audiobook.value?.identifiers || []
   const explicitPrimary = ids.find((id) => id.type === 'Asin' && id.isPrimary && id.value?.trim())
-  if (explicitPrimary) return explicitPrimary.value.trim()
+  if (explicitPrimary) return explicitPrimary
 
   const firstAsin = ids.find((id) => id.type === 'Asin' && id.value?.trim())
-  if (firstAsin) return firstAsin.value.trim()
+  if (firstAsin) return firstAsin
+
+  return null
+})
+
+const primaryAsin = computed(() => {
+  const identifier = primaryAsinIdentifier.value
+  if (identifier?.value?.trim()) return identifier.value.trim()
 
   const legacy = (audiobook.value?.asin || '').trim()
   return legacy || null
@@ -914,7 +922,7 @@ const primaryAsin = computed(() => {
 const audibleSourceUrl = computed(() => {
   const asin = primaryAsin.value
   if (!asin) return null
-  return `https://www.audible.com/pd/${encodeURIComponent(asin)}`
+  return buildAudibleProductUrl(asin, primaryAsinIdentifier.value?.region ?? undefined)
 })
 
 const displayIdentifiers = computed<DetailIdentifierItem[]>(() => {
@@ -929,6 +937,7 @@ const displayIdentifiers = computed<DetailIdentifierItem[]>(() => {
     type: AudiobookExternalIdentifier['type'],
     rawValue: unknown,
     isPrimary = false,
+    rawRegion?: string | null,
   ) => {
     const value = typeof rawValue === 'string' ? rawValue.trim() : ''
     if (!value) return
@@ -944,13 +953,18 @@ const displayIdentifiers = computed<DetailIdentifierItem[]>(() => {
       type,
       typeLabel: formatIdentifierType(type),
       value,
-      href: getIdentifierHref(type, value),
+      href: getIdentifierHref(type, value, rawRegion),
       isPrimary,
     })
   }
 
   for (const identifier of book.identifiers || []) {
-    addIdentifier(identifier.type, identifier.value, Boolean(identifier.isPrimary))
+    addIdentifier(
+      identifier.type,
+      identifier.value,
+      Boolean(identifier.isPrimary),
+      identifier.region,
+    )
   }
 
   if (book.asin) {
@@ -1109,9 +1123,10 @@ function normalizeIdentifierKey(type: AudiobookExternalIdentifier['type'], value
 function getIdentifierHref(
   type: AudiobookExternalIdentifier['type'],
   value: string,
+  region?: string | null,
 ): string | null {
   if (type === 'Asin') {
-    return `https://www.audible.com/pd/${encodeURIComponent(value)}`
+    return buildAudibleProductUrl(value, region ?? undefined)
   }
 
   if (type === 'OpenLibraryId') {
