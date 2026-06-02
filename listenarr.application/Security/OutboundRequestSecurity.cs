@@ -206,5 +206,22 @@ public static class OutboundRequestSecurity
                || statusCode == HttpStatusCode.TemporaryRedirect
                || (int)statusCode == 308;
     }
+
+    /// <summary>
+    /// True when both URIs target the same host (case-insensitive) and port. Used to decide
+    /// whether credentials may be safely re-applied across a redirect without leaking them to
+    /// a different origin.
+    /// </summary>
+    public static bool IsSameHostAndPort(Uri from, Uri to) =>
+        string.Equals(from.Host, to.Host, StringComparison.OrdinalIgnoreCase)
+        && from.Port == to.Port;
+
+    /// <summary>
+    /// True when a redirect moves from an HTTPS origin to a plaintext HTTP one — a downgrade
+    /// that would expose any forwarded credentials in the clear.
+    /// </summary>
+    public static bool IsHttpsToHttpDowngrade(Uri from, Uri to) =>
+        string.Equals(from.Scheme, "https", StringComparison.OrdinalIgnoreCase)
+        && string.Equals(to.Scheme, "http", StringComparison.OrdinalIgnoreCase);
 }
 

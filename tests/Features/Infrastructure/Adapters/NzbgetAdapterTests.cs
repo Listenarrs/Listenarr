@@ -53,17 +53,15 @@ namespace Listenarr.Tests.Features.Infrastructure.Adapters
         // in Program.cs / ServiceRegistrationExtensions.
         private static HttpClient BuildNzbgetClient(DelegatingHandlerMock leaf)
         {
-            var redirectHandler = new NzbgetSafeRedirectHandler { InnerHandler = leaf };
+            var redirectHandler = new NzbgetSafeRedirectHandler(NullLogger<NzbgetSafeRedirectHandler>.Instance)
+            {
+                InnerHandler = leaf
+            };
             return new HttpClient(redirectHandler);
         }
 
         private static NzbgetAdapter BuildAdapter(HttpClient http) =>
             new(new TestHttpClientFactory(http), Mock.Of<INzbUrlResolver>(), NullLogger<NzbgetAdapter>.Instance);
-
-        private static HttpResponseMessage OkXml(string body) => new(HttpStatusCode.OK)
-        {
-            Content = new StringContent(body)
-        };
 
         private static HttpResponseMessage Redirect(HttpStatusCode status, string location)
         {
@@ -79,7 +77,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Adapters
             var leaf = new DelegatingHandlerMock((req, _) =>
             {
                 capturedUri = req.RequestUri;
-                return Task.FromResult(OkXml(VersionResponseXml));
+                return Task.FromResult(MockUtils.GetCannedResponse(VersionResponseXml, "text/xml"));
             });
 
             using var http = BuildNzbgetClient(leaf);
@@ -112,7 +110,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Adapters
             var leaf = new DelegatingHandlerMock((req, _) =>
             {
                 capturedUri = req.RequestUri;
-                return Task.FromResult(OkXml(VersionResponseXml));
+                return Task.FromResult(MockUtils.GetCannedResponse(VersionResponseXml, "text/xml"));
             });
 
             using var http = BuildNzbgetClient(leaf);
@@ -142,7 +140,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Adapters
             var leaf = new DelegatingHandlerMock((req, _) =>
             {
                 capturedUri = req.RequestUri;
-                return Task.FromResult(OkXml(EmptyArrayResponseXml));
+                return Task.FromResult(MockUtils.GetCannedResponse(EmptyArrayResponseXml, "text/xml"));
             });
 
             using var http = BuildNzbgetClient(leaf);
@@ -179,7 +177,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Adapters
             var leaf = new DelegatingHandlerMock((req, _) =>
             {
                 capturedRequest = req;
-                return Task.FromResult(OkXml(VersionResponseXml));
+                return Task.FromResult(MockUtils.GetCannedResponse(VersionResponseXml, "text/xml"));
             });
 
             using var http = BuildNzbgetClient(leaf);
@@ -215,7 +213,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Adapters
                 {
                     capturedBody = await req.Content.ReadAsStringAsync(ct);
                 }
-                return OkXml(VersionResponseXml);
+                return MockUtils.GetCannedResponse(VersionResponseXml, "text/xml");
             });
 
             using var http = BuildNzbgetClient(leaf);
@@ -271,7 +269,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Adapters
                 {
                     return Task.FromResult(Redirect(redirectStatus, "http://192.168.50.111:6789/xmlrpc/"));
                 }
-                return Task.FromResult(OkXml(VersionResponseXml));
+                return Task.FromResult(MockUtils.GetCannedResponse(VersionResponseXml, "text/xml"));
             });
 
             using var http = BuildNzbgetClient(leaf);
@@ -362,8 +360,10 @@ namespace Listenarr.Tests.Features.Infrastructure.Adapters
         [Fact]
         public async Task TestConnectionAsync_BailsOutOnRedirectLoopWithClearError()
         {
+            var requestCount = 0;
             var leaf = new DelegatingHandlerMock((req, _) =>
             {
+                requestCount++;
                 return Task.FromResult(Redirect(HttpStatusCode.Found, "http://192.168.50.111:6789/xmlrpc"));
             });
 
@@ -383,6 +383,10 @@ namespace Listenarr.Tests.Features.Infrastructure.Adapters
 
             Assert.False(success);
             Assert.Contains("redirect", message, StringComparison.OrdinalIgnoreCase);
+            // The original request plus MaxRedirects (5) follows are sent before bailing — i.e.
+            // the handler follows the 5th redirect rather than stopping a hop short. Pins the
+            // loop-guard bound so a <-vs-<= regression is caught.
+            Assert.Equal(6, requestCount);
         }
     }
 }

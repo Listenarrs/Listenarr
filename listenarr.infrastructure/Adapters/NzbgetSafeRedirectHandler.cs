@@ -16,20 +16,11 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Net;
+using Listenarr.Application.Security;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.Adapters
 {
-    /// <summary>
-    /// Thrown by <see cref="NzbgetSafeRedirectHandler"/> when a redirect is refused (cross-host,
-    /// HTTPS->HTTP downgrade, missing Location, or loop). Carries a descriptive message that
-    /// the adapter surfaces to the user instead of the generic "network error" fallback.
-    /// </summary>
-    public sealed class NzbgetSafeRedirectException : HttpRequestException
-    {
-        public NzbgetSafeRedirectException(string message) : base(message) { }
-    }
-
     /// <summary>
     /// Manual redirect handler for the NZBGet HttpClient.
     ///
@@ -45,24 +36,13 @@ namespace Listenarr.Infrastructure.Adapters
     ///   1. The redirect target is the same host:port as the original request.
     ///   2. The redirect does not downgrade from HTTPS to HTTP.
     ///
-    /// On any rule violation the handler throws a descriptive <see cref="HttpRequestException"/>
+    /// On any rule violation the handler throws a descriptive <see cref="NzbgetSafeRedirectException"/>
     /// instead of silently dropping auth, so misconfigured proxies surface as actionable errors
     /// rather than mysterious "Unauthorized" failures.
     /// </summary>
-    public sealed class NzbgetSafeRedirectHandler : DelegatingHandler
+    public sealed class NzbgetSafeRedirectHandler(ILogger<NzbgetSafeRedirectHandler> logger) : DelegatingHandler
     {
         internal const int MaxRedirects = 5;
-
-        private readonly ILogger<NzbgetSafeRedirectHandler>? _logger;
-
-        public NzbgetSafeRedirectHandler()
-        {
-        }
-
-        public NzbgetSafeRedirectHandler(ILogger<NzbgetSafeRedirectHandler> logger)
-        {
-            _logger = logger;
-        }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -74,83 +54,77 @@ namespace Listenarr.Infrastructure.Adapters
 
             var currentRequest = request;
             HttpRequestMessage? clonedRequest = null;
-            var hops = 0;
 
             try
             {
-                while (true)
+                // hops in [0, MaxRedirects] => up to MaxRedirects + 1 requests sent. The original
+                // request plus MaxRedirects follows; falling out of the loop means every allowed
+                // hop was still a redirect, i.e. a loop or misconfiguration.
+                for (var hops = 0; hops <= MaxRedirects; hops++)
                 {
                     var response = await base.SendAsync(currentRequest, cancellationToken).ConfigureAwait(false);
 
-                    if (!IsRedirectStatus(response.StatusCode))
+                    if (!OutboundRequestSecurity.IsRedirectStatusCode(response.StatusCode))
                     {
+                        // Terminal response — hand it back to the caller, who owns its disposal.
                         return response;
                     }
 
-                    if (hops >= MaxRedirects)
+                    // A redirect we won't return: scope its disposal to this iteration.
+                    using (response)
                     {
-                        var sanitized = SanitizeUri(currentRequest.RequestUri);
-                        response.Dispose();
-                        throw new NzbgetSafeRedirectException(
-                            $"NZBGet request to {sanitized} hit the redirect cap of {MaxRedirects} hops. " +
-                            "This likely indicates a redirect loop in your reverse-proxy or NZBGet base-URL configuration.");
+                        var location = response.Headers.Location;
+                        if (location == null)
+                        {
+                            var sanitized = LogRedaction.SanitizeUrl(currentRequest.RequestUri?.ToString());
+                            throw new NzbgetSafeRedirectException(
+                                $"NZBGet responded {(int)response.StatusCode} {response.StatusCode} to {sanitized} but did not include a Location header. " +
+                                "Cannot follow the redirect; check the NZBGet (or proxy) server logs.");
+                        }
+
+                        var nextUri = location.IsAbsoluteUri
+                            ? location
+                            : new Uri(currentRequest.RequestUri!, location);
+
+                        if (!OutboundRequestSecurity.IsSameHostAndPort(currentRequest.RequestUri!, nextUri))
+                        {
+                            var fromUri = LogRedaction.SanitizeUrl(currentRequest.RequestUri?.ToString());
+                            var toUri = LogRedaction.SanitizeUrl(nextUri.ToString());
+                            throw new NzbgetSafeRedirectException(
+                                $"NZBGet redirected from {fromUri} to a different host ({toUri}). " +
+                                "Authorization credentials would be forwarded to an unexpected host, so the redirect was blocked. " +
+                                "Fix the NZBGet base URL or reverse-proxy rewrite so the response is returned directly.");
+                        }
+
+                        if (OutboundRequestSecurity.IsHttpsToHttpDowngrade(currentRequest.RequestUri!, nextUri))
+                        {
+                            var fromUri = LogRedaction.SanitizeUrl(currentRequest.RequestUri?.ToString());
+                            var toUri = LogRedaction.SanitizeUrl(nextUri.ToString());
+                            throw new NzbgetSafeRedirectException(
+                                $"NZBGet redirected from HTTPS ({fromUri}) to HTTP ({toUri}). " +
+                                "Credentials would be sent in clear, so the redirect was blocked. " +
+                                "Configure NZBGet (or its reverse proxy) to serve only HTTPS.");
+                        }
+
+                        var nextRequest = BuildRedirectedRequest(currentRequest, response.StatusCode, nextUri);
+                        logger.LogDebug(
+                            "NZBGet redirect {Status} {From} -> {To} (hop {Hop}/{Cap})",
+                            (int)response.StatusCode,
+                            LogRedaction.SanitizeUrl(currentRequest.RequestUri?.ToString()),
+                            LogRedaction.SanitizeUrl(nextUri.ToString()),
+                            hops + 1,
+                            MaxRedirects);
+
+                        clonedRequest?.Dispose();
+                        clonedRequest = nextRequest;
+                        currentRequest = nextRequest;
                     }
-
-                    var location = response.Headers.Location;
-                    if (location == null)
-                    {
-                        var sanitized = SanitizeUri(currentRequest.RequestUri);
-                        var status = response.StatusCode;
-                        response.Dispose();
-                        throw new NzbgetSafeRedirectException(
-                            $"NZBGet responded {(int)status} {status} to {sanitized} but did not include a Location header. " +
-                            "Cannot follow the redirect; check the NZBGet (or proxy) server logs.");
-                    }
-
-                    var nextUri = location.IsAbsoluteUri
-                        ? location
-                        : new Uri(currentRequest.RequestUri!, location);
-
-                    if (!IsSameOriginHost(currentRequest.RequestUri!, nextUri))
-                    {
-                        var fromUri = SanitizeUri(currentRequest.RequestUri);
-                        var toUri = SanitizeUri(nextUri);
-                        response.Dispose();
-                        throw new NzbgetSafeRedirectException(
-                            $"NZBGet redirected from {fromUri} to a different host ({toUri}). " +
-                            "Authorization credentials would be forwarded to an unexpected host, so the redirect was blocked. " +
-                            "Fix the NZBGet base URL or reverse-proxy rewrite so the response is returned directly.");
-                    }
-
-                    if (IsSchemeDowngrade(currentRequest.RequestUri!, nextUri))
-                    {
-                        var fromUri = SanitizeUri(currentRequest.RequestUri);
-                        var toUri = SanitizeUri(nextUri);
-                        response.Dispose();
-                        throw new NzbgetSafeRedirectException(
-                            $"NZBGet redirected from HTTPS ({fromUri}) to HTTP ({toUri}). " +
-                            "Credentials would be sent in clear, so the redirect was blocked. " +
-                            "Configure NZBGet (or its reverse proxy) to serve only HTTPS.");
-                    }
-
-                    var nextRequest = BuildRedirectedRequest(currentRequest, response.StatusCode, nextUri);
-                    _logger?.LogDebug(
-                        "NZBGet redirect {Status} {From} -> {To} (hop {Hop}/{Cap})",
-                        (int)response.StatusCode,
-                        SanitizeUri(currentRequest.RequestUri),
-                        SanitizeUri(nextUri),
-                        hops + 1,
-                        MaxRedirects);
-
-                    response.Dispose();
-                    if (clonedRequest != null)
-                    {
-                        clonedRequest.Dispose();
-                    }
-                    clonedRequest = nextRequest;
-                    currentRequest = nextRequest;
-                    hops++;
                 }
+
+                var sanitizedLast = LogRedaction.SanitizeUrl(currentRequest.RequestUri?.ToString());
+                throw new NzbgetSafeRedirectException(
+                    $"NZBGet request to {sanitizedLast} hit the redirect cap of {MaxRedirects} hops. " +
+                    "This likely indicates a redirect loop in your reverse-proxy or NZBGet base-URL configuration.");
             }
             catch
             {
@@ -200,32 +174,6 @@ namespace Listenarr.Infrastructure.Adapters
             }
 
             return next;
-        }
-
-        private static bool IsRedirectStatus(HttpStatusCode code) => code switch
-        {
-            HttpStatusCode.MovedPermanently => true,   // 301
-            HttpStatusCode.Found => true,              // 302
-            HttpStatusCode.SeeOther => true,           // 303
-            HttpStatusCode.TemporaryRedirect => true,  // 307
-            HttpStatusCode.PermanentRedirect => true,  // 308
-            _ => false
-        };
-
-        private static bool IsSameOriginHost(Uri from, Uri to) =>
-            string.Equals(from.Host, to.Host, StringComparison.OrdinalIgnoreCase) &&
-            from.Port == to.Port;
-
-        private static bool IsSchemeDowngrade(Uri from, Uri to) =>
-            string.Equals(from.Scheme, "https", StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(to.Scheme, "http", StringComparison.OrdinalIgnoreCase);
-
-        private static string SanitizeUri(Uri? uri)
-        {
-            if (uri == null) return "(null)";
-            if (string.IsNullOrEmpty(uri.UserInfo)) return uri.ToString();
-            var builder = new UriBuilder(uri) { UserName = string.Empty, Password = string.Empty };
-            return builder.Uri.ToString();
         }
     }
 }
