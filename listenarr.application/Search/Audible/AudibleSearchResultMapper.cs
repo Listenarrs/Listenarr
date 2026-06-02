@@ -25,6 +25,7 @@ namespace Listenarr.Application.Search.Audible
         public static async Task<List<SearchResult>> ConvertToSearchResultsAsync(
             IEnumerable<AudibleSearchResult> books,
             MetadataConverters metadataConverters,
+            string region,
             IReadOnlyDictionary<string, AudibleBookResponse>? detailedMetadataByAsin = null,
             ILogger? logger = null,
             bool continueOnConversionError = false)
@@ -38,7 +39,7 @@ namespace Listenarr.Application.Search.Audible
                     var bookResponse = detailedMetadataByAsin != null &&
                                        detailedMetadataByAsin.TryGetValue(book.Asin!, out var detailed)
                         ? detailed
-                        : ToBookResponse(book);
+                        : ToBookResponse(book, region);
 
                     var metadata = metadataConverters.ConvertAudibleToMetadata(bookResponse, book.Asin!, "Audible");
                     var result = await metadataConverters.ConvertMetadataToSearchResultAsync(metadata, book.Asin!);
@@ -59,7 +60,7 @@ namespace Listenarr.Application.Search.Audible
             return converted;
         }
 
-        private static AudibleBookResponse ToBookResponse(AudibleSearchResult book)
+        private static AudibleBookResponse ToBookResponse(AudibleSearchResult book, string region)
         {
             return new AudibleBookResponse
             {
@@ -74,7 +75,8 @@ namespace Listenarr.Application.Search.Audible
                 Series = book.Series,
                 Publisher = book.Publisher,
                 Narrators = book.Narrators,
-                ReleaseDate = book.ReleaseDate
+                ReleaseDate = book.ReleaseDate,
+                Region = region
             };
         }
     }

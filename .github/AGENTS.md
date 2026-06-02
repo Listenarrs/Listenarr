@@ -102,11 +102,20 @@ Violations cause commit rejection with a "Layering violation" error.
 
 Never use `async void` in production code. Always use `async Task` — `async void` causes unobservable exceptions and the pre-commit hook will reject it.
 
-### Backend Test Fixtures
+### Backend Test Conventions
 
-- Use builders from `tests/Builders` for backend test data, with fluent `.With...()` methods followed by `.Build()`.
-- If a test needs a coherent domain/model fixture and no builder exists, add a focused builder instead of using multi-property inline object initializers.
-- Keep inline object initializers only for trivial throwaway values; repeated or behavior-significant fixtures should use builders.
+- Test classes are named `{TestedClassName}Tests` and mirror the source project path under `tests/`.
+- Every test class inherits `BaseTests`.
+- Annotate with `[Trait("Name", "...Tests")]` and `[Trait("Category", "...")]`.
+- Call `Init()` (optionally with DI overrides) before adding test data:
+  ```csharp
+  Init(services => services.WithSingleton(myMock.Object));
+  Init(services => services.Without<IServiceToRemove>());
+  ```
+- Only add repository data *after* calling `Init()`.
+- Use builder classes under `tests/Builders/` with fluent `.With...().Build()` chains for coherent test entities. Add a focused builder rather than repeating multi-property inline object initializers.
+- Structure tests as Given / When / Then.
+- API mocks inherit `BaseMock`; use `GetCallCount()`, `GetLastRequest()`, `GetLastContent()`.
 
 ### Pre-Push Checks
 

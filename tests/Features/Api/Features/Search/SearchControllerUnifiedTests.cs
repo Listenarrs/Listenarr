@@ -71,17 +71,19 @@ namespace Listenarr.Tests.Features.Api.Features.Search
             var stubAudible = new StubAudibleService();
             var mockMeta = new Mock<IAudiobookMetadataService>();
 
-            var sample = new AudibleSearchResponse
-            {
-                Results = new List<AudibleSearchResult>
-                {
-                    new AudibleSearchResult { Asin = "BTEST1", Title = "T" }
-                },
-                TotalResults = 1
-            };
+            var sample = new AudibleSearchResponseBuilder()
+                .WithResult(new AudibleSearchResultBuilder()
+                    .WithAsin("BTEST1")
+                    .WithTitle("T")
+                    .Build())
+                .Build();
 
             stubAudible.ResponseToReturn = sample;
-            mockMeta.Setup(m => m.GetAudibleMetadataAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>())).ReturnsAsync(new AudibleBookResponse { Asin = "BTEST1", Title = "T" });
+            mockMeta.Setup(m => m.GetAudibleMetadataAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>()))
+                    .ReturnsAsync(new AudibleBookResponseBuilder()
+                        .WithAsin("BTEST1")
+                        .WithTitle("T")
+                        .Build());
 
             var controller = CreateController(mockSearch, stubAudible, mockMeta);
 
@@ -101,17 +103,19 @@ namespace Listenarr.Tests.Features.Api.Features.Search
             var stubAudible2 = new StubAudibleService();
             var mockMeta = new Mock<IAudiobookMetadataService>();
 
-            var sample = new AudibleSearchResponse
-            {
-                Results = new List<AudibleSearchResult>
-                {
-                    new AudibleSearchResult { Asin = "BAUTH1", Title = "Title" }
-                },
-                TotalResults = 1
-            };
+            var sample = new AudibleSearchResponseBuilder()
+                .WithResult(new AudibleSearchResultBuilder()
+                    .WithAsin("BAUTH1")
+                    .WithTitle("Title")
+                    .Build())
+                .Build();
 
             stubAudible2.ResponseToReturn = sample;
-            mockMeta.Setup(m => m.GetAudibleMetadataAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>())).ReturnsAsync(new AudibleBookResponse { Asin = "BAUTH1", Title = "Title" });
+            mockMeta.Setup(m => m.GetAudibleMetadataAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>()))
+                    .ReturnsAsync(new AudibleBookResponseBuilder()
+                        .WithAsin("BAUTH1")
+                        .WithTitle("Title")
+                        .Build());
 
             var controller = CreateController(mockSearch, stubAudible2, mockMeta);
 
@@ -131,14 +135,12 @@ namespace Listenarr.Tests.Features.Api.Features.Search
             var stubAudible3 = new StubAudibleService();
             var mockMeta = new Mock<IAudiobookMetadataService>();
 
-            var sample = new AudibleSearchResponse
-            {
-                Results = new List<AudibleSearchResult>
-                {
-                    new AudibleSearchResult { Asin = "BISBN1", Title = "ISBNTitle" }
-                },
-                TotalResults = 1
-            };
+            var sample = new AudibleSearchResponseBuilder()
+                .WithResult(new AudibleSearchResultBuilder()
+                    .WithAsin("BISBN1")
+                    .WithTitle("ISBNTitle")
+                    .Build())
+                .Build();
 
             stubAudible3.ResponseToReturn = sample;
 
@@ -160,7 +162,10 @@ namespace Listenarr.Tests.Features.Api.Features.Search
             var stubAudible4 = new StubAudibleService();
             var mockMeta = new Mock<IAudiobookMetadataService>();
 
-            stubAudible4.BookResponseToReturn = new AudibleBookResponse { Asin = "BASIN", Title = "ASIN Title" };
+            stubAudible4.BookResponseToReturn = new AudibleBookResponseBuilder()
+                .WithAsin("BASIN")
+                .WithTitle("ASIN Title")
+                .Build();
 
             var controller = CreateController(mockSearch, stubAudible4, mockMeta);
 
@@ -184,7 +189,9 @@ namespace Listenarr.Tests.Features.Api.Features.Search
             var mockMeta = new Mock<IAudiobookMetadataService>();
             var mockConfig = new Mock<IConfigurationService>();
             mockConfig.Setup(c => c.GetApplicationSettingsAsync())
-                      .ReturnsAsync(new ApplicationSettings { DefaultSearchRegion = "de" });
+                      .ReturnsAsync(new ApplicationSettingsBuilder()
+                          .WithDefaultSearchRegion("de")
+                          .Build());
 
             var controller = CreateController(mockSearch, metadataService: mockMeta, configurationService: mockConfig);
 
@@ -204,7 +211,9 @@ namespace Listenarr.Tests.Features.Api.Features.Search
             var mockMeta = new Mock<IAudiobookMetadataService>();
             var mockConfig = new Mock<IConfigurationService>();
             mockConfig.Setup(c => c.GetApplicationSettingsAsync())
-                      .ReturnsAsync(new ApplicationSettings { DefaultSearchRegion = "fr" });
+                      .ReturnsAsync(new ApplicationSettingsBuilder()
+                          .WithDefaultSearchRegion("fr")
+                          .Build());
 
             var controller = CreateController(mockSearch, metadataService: mockMeta, configurationService: mockConfig);
 
@@ -221,12 +230,17 @@ namespace Listenarr.Tests.Features.Api.Features.Search
             var mockSearch = new Mock<ISearchService>();
             var stubAudible = new StubAudibleService
             {
-                BookResponseToReturn = new AudibleBookResponse { Asin = "BASIN", Title = "ASIN Title" }
+                BookResponseToReturn = new AudibleBookResponseBuilder()
+                    .WithAsin("BASIN")
+                    .WithTitle("ASIN Title")
+                    .Build()
             };
             var mockMeta = new Mock<IAudiobookMetadataService>();
             var mockConfig = new Mock<IConfigurationService>();
             mockConfig.Setup(c => c.GetApplicationSettingsAsync())
-                      .ReturnsAsync(new ApplicationSettings { DefaultSearchRegion = "de" });
+                      .ReturnsAsync(new ApplicationSettingsBuilder()
+                          .WithDefaultSearchRegion("de")
+                          .Build());
 
             var controller = CreateController(mockSearch, stubAudible, mockMeta, mockConfig);
 
@@ -247,7 +261,9 @@ namespace Listenarr.Tests.Features.Api.Features.Search
             var mockMeta = new Mock<IAudiobookMetadataService>();
             var mockConfig = new Mock<IConfigurationService>();
             mockConfig.Setup(c => c.GetApplicationSettingsAsync())
-                      .ReturnsAsync(new ApplicationSettings { DefaultSearchRegion = "jp" });
+                      .ReturnsAsync(new ApplicationSettingsBuilder()
+                          .WithDefaultSearchRegion("jp")
+                          .Build());
 
             var controller = CreateController(mockSearch, metadataService: mockMeta, configurationService: mockConfig);
 
@@ -277,7 +293,9 @@ namespace Listenarr.Tests.Features.Api.Features.Search
                     .ReturnsAsync((AudibleBookResponse?)null);
             var mockConfig = new Mock<IConfigurationService>();
             mockConfig.Setup(c => c.GetApplicationSettingsAsync())
-                      .ReturnsAsync(new ApplicationSettings { DefaultSearchRegion = "de" });
+                      .ReturnsAsync(new ApplicationSettingsBuilder()
+                          .WithDefaultSearchRegion("de")
+                          .Build());
 
             var controller = CreateController(mockSearch, metadataService: mockMeta, configurationService: mockConfig);
 
@@ -295,6 +313,46 @@ namespace Listenarr.Tests.Features.Api.Features.Search
 
         [Fact]
         [Trait("Method", "SearchByTitle")]
+        [Trait("Scenario", "UsesConfiguredDefaultRegionForAmazonFallback")]
+        public async Task SearchByTitle_AmazonFallback_Uses_ConfiguredDefaultRegion_And_AmazonSourceUrl()
+        {
+            // Given
+            var mockSearch = new Mock<ISearchService>();
+            mockSearch.Setup(s => s.IntelligentSearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<double>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<System.Threading.CancellationToken>()))
+                      .ReturnsAsync(new List<MetadataSearchResult>
+                      {
+                          new MetadataSearchResultBuilder()
+                              .WithAsin("B0AMZN1234")
+                              .WithTitle("Dune")
+                              .WithArtist("Frank Herbert")
+                              .WithSource("Amazon")
+                              .WithMetadataSource("Amazon")
+                              .Build()
+                      });
+            var mockMeta = new Mock<IAudiobookMetadataService>();
+            var mockConfig = new Mock<IConfigurationService>();
+            mockConfig.Setup(c => c.GetApplicationSettingsAsync())
+                      .ReturnsAsync(new ApplicationSettingsBuilder()
+                          .WithDefaultSearchRegion("de")
+                          .Build());
+
+            var controller = CreateController(mockSearch, metadataService: mockMeta, configurationService: mockConfig);
+
+            // When
+            var response = await controller.SearchByTitle("TITLE:Dune");
+
+            // Then
+            var ok = Assert.IsType<OkObjectResult>(response.Result);
+            var serialized = System.Text.Json.JsonSerializer.Serialize(ok.Value);
+            using var doc = System.Text.Json.JsonDocument.Parse(serialized);
+            var result = Assert.Single(doc.RootElement.EnumerateArray());
+            Assert.Equal("Amazon", result.GetProperty("source").GetString());
+            Assert.Equal("https://www.amazon.de", result.GetProperty("sourceUrl").GetString());
+            mockSearch.Verify(s => s.IntelligentSearchAsync("TITLE:Dune", It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<double>(), "de", null, It.IsAny<System.Threading.CancellationToken>()), Times.Once);
+        }
+
+        [Fact]
+        [Trait("Method", "SearchByTitle")]
         [Trait("Scenario", "UsesConfiguredDefaultRegionForAsinShortCircuit")]
         public async Task SearchByTitle_AsinWithoutRegion_Uses_ConfiguredDefaultRegion_And_RegionalSourceUrl()
         {
@@ -302,12 +360,17 @@ namespace Listenarr.Tests.Features.Api.Features.Search
             var mockSearch = new Mock<ISearchService>();
             var stubAudible = new StubAudibleService
             {
-                BookResponseToReturn = new AudibleBookResponse { Asin = "B0TEST1234", Title = "Localized Result" }
+                BookResponseToReturn = new AudibleBookResponseBuilder()
+                    .WithAsin("B0TEST1234")
+                    .WithTitle("Localized Result")
+                    .Build()
             };
             var mockMeta = new Mock<IAudiobookMetadataService>();
             var mockConfig = new Mock<IConfigurationService>();
             mockConfig.Setup(c => c.GetApplicationSettingsAsync())
-                      .ReturnsAsync(new ApplicationSettings { DefaultSearchRegion = "br" });
+                      .ReturnsAsync(new ApplicationSettingsBuilder()
+                          .WithDefaultSearchRegion("br")
+                          .Build());
 
             var controller = CreateController(mockSearch, stubAudible, mockMeta, mockConfig);
 
@@ -334,7 +397,10 @@ namespace Listenarr.Tests.Features.Api.Features.Search
             // Simulate series search returning SeriesLookupItem list with ASIN
             stubAudible.SeriesResponseToReturn = new List<SeriesLookupItem>
             {
-                new() { Asin = "B0SERIES1234", Name = "Some Series", Region = "us" }
+                new SeriesLookupItemBuilder()
+                    .WithAsin("B0SERIES1234")
+                    .WithName("Some Series")
+                    .Build()
             };
 
             var controller = CreateController(mockSearch, stubAudible, mockMeta);
@@ -360,7 +426,11 @@ namespace Listenarr.Tests.Features.Api.Features.Search
             // the code should still pick the first item with a valid ASIN as a fallback
             stubAudible.SeriesResponseToReturn = new List<SeriesLookupItem>
             {
-                new() { Asin = "B0FALLBACK123", Name = "Some Series", Region = "de" }
+                new SeriesLookupItemBuilder()
+                    .WithAsin("B0FALLBACK123")
+                    .WithName("Some Series")
+                    .WithRegion("de")
+                    .Build()
             };
 
             var controller = CreateController(mockSearch, stubAudible, mockMeta);
@@ -434,20 +504,18 @@ namespace Listenarr.Tests.Features.Api.Features.Search
             mockSearch.Setup(s => s.IntelligentSearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<double>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<System.Threading.CancellationToken>()))
                       .ReturnsAsync(new List<MetadataSearchResult> { md });
 
-            var audResp = new AudibleBookResponse
-            {
-                Asin = "BAUD1",
-                Title = "Title",
-                Authors = new List<AudibleAuthor> { new AudibleAuthor { Asin = "A1", Name = "Author Name", Region = "us" } },
-                Narrators = new List<AudibleNarrator> { new AudibleNarrator { Name = "Narrator Name" } },
-                Genres = new List<AudibleGenre> { new AudibleGenre { Asin = "G1", Name = "Fiction", Type = "Fiction" } },
-                Series = new List<AudibleSeries> { new AudibleSeries { Asin = "S1", Name = "Series Name", Position = "1" } },
-                Region = "de",
-                ImageUrl = "http://example.com/cover.jpg",
-                LengthMinutes = 600,
-                ReleaseDate = "2021-05-04T00:00:00.000Z",
-                Explicit = false
-            };
+            var audResp = new AudibleBookResponseBuilder()
+                .WithAsin("BAUD1")
+                .WithTitle("Title")
+                .WithAuthor("Author Name", "A1", "us")
+                .WithNarrator("Narrator Name")
+                .WithGenre("G1", "Fiction", "Fiction")
+                .WithSeries("S1", "Series Name", "1")
+                .WithRegion("de")
+                .WithLengthMinutes(600)
+                .WithReleaseDate("2021-05-04T00:00:00.000Z")
+                .WithExplicit(false)
+                .Build();
 
             mockMeta.Setup(m => m.GetAudibleMetadataAsync("BAUD1", It.IsAny<string>(), It.IsAny<bool>())).ReturnsAsync(audResp);
 
@@ -531,18 +599,32 @@ namespace Listenarr.Tests.Features.Api.Features.Search
             // Simulate series lookup returning a series ASIN
             stubAudible.SeriesResponseToReturn = new List<SeriesLookupItem>
             {
-                new() { Asin = "B0DUNE", Name = "Dune", Region = "us" }
+                new SeriesLookupItemBuilder()
+                    .WithAsin("B0DUNE")
+                    .WithName("Dune")
+                    .Build()
             };
 
             // Override GetBooksBySeriesAsinAsync to return books with null Language
             stubAudible.SeriesBooksOverride = new List<AudibleSearchResult>
             {
-                new AudibleSearchResult { Asin = "BDUNE1", Title = "Dune", Language = null },
-                new AudibleSearchResult { Asin = "BDUNE2", Title = "Dune Messiah", Language = "English" }
+                new AudibleSearchResultBuilder()
+                    .WithAsin("BDUNE1")
+                    .WithTitle("Dune")
+                    .WithLanguage(null)
+                    .Build(),
+                new AudibleSearchResultBuilder()
+                    .WithAsin("BDUNE2")
+                    .WithTitle("Dune Messiah")
+                    .WithLanguage("English")
+                    .Build()
             };
 
             mockMeta.Setup(m => m.GetAudibleMetadataAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>()))
-                    .ReturnsAsync((string asin, string region, bool force) => new AudibleBookResponse { Asin = asin, Title = "Test" });
+                    .ReturnsAsync((string asin, string region, bool force) => new AudibleBookResponseBuilder()
+                        .WithAsin(asin)
+                        .WithTitle("Test")
+                        .Build());
 
             var controller = CreateController(mockSearch, stubAudible, mockMeta);
 
@@ -571,11 +653,17 @@ namespace Listenarr.Tests.Features.Api.Features.Search
             // Simulate series lookup
             stubAudible.SeriesResponseToReturn = new List<SeriesLookupItem>
             {
-                new() { Asin = "B0SERIES", Name = "Test Series", Region = "us" }
+                new SeriesLookupItemBuilder()
+                    .WithAsin("B0SERIES")
+                    .WithName("Test Series")
+                    .Build()
             };
 
             mockMeta.Setup(m => m.GetAudibleMetadataAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>()))
-                    .ReturnsAsync((string asin, string region, bool force) => new AudibleBookResponse { Asin = asin, Title = "Book in series" });
+                    .ReturnsAsync((string asin, string region, bool force) => new AudibleBookResponseBuilder()
+                        .WithAsin(asin)
+                        .WithTitle("Book in series")
+                        .Build());
 
             var controller = CreateController(mockSearch, stubAudible, mockMeta);
 
@@ -638,7 +726,10 @@ namespace Listenarr.Tests.Features.Api.Features.Search
             // Return List<AudibleSearchResult> directly — controller casts with "as List<AudibleSearchResult>"
             var books = SeriesBooksOverride ?? new List<AudibleSearchResult>
             {
-                new AudibleSearchResult { Asin = seriesAsin, Title = "Book in series" }
+                new AudibleSearchResultBuilder()
+                    .WithAsin(seriesAsin)
+                    .WithTitle("Book in series")
+                    .Build()
             };
             return Task.FromResult<object?>(books);
         }

@@ -195,13 +195,6 @@ namespace Listenarr.Api.Features.Search
                     System.Diagnostics.Debug.WriteLine($"SearchController IntelligentSearch debug logging failed: {ex.Message}");
                 }
 
-                // Also emit a warning-level log so test output captures the value
-                try { _logger.LogWarning("[DBG] IntelligentSearch called with query='{Query}'", LogRedaction.SanitizeText(query ?? "<null>")); }
-                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                {
-                    System.Diagnostics.Debug.WriteLine($"SearchController IntelligentSearch warning logging failed: {ex.Message}");
-                }
-
                 if (string.IsNullOrEmpty(query))
                 {
                     return BadRequest("Query parameter is required");

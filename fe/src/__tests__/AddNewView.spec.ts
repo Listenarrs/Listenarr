@@ -756,6 +756,35 @@ describe('AddNewView pagination', () => {
     expect(sourceLink.text()).toContain('Audible')
   })
 
+  it('shows Amazon metadata badge links for the selected result region', async () => {
+    const router = createTestRouter()
+    const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    const vm = wrapper.vm as unknown as { searchType?: string; titleResults?: unknown[] }
+
+    vm.searchType = 'title'
+    vm.titleResults = [
+      {
+        key: 'BAMZ1',
+        title: 'Amazon Result',
+        author_name: ['Author Name'],
+        metadataSource: 'Amazon',
+        searchResult: {
+          asin: 'BAMZ1',
+          region: 'de',
+          artist: 'Author Name',
+          metadataSource: 'Amazon',
+        },
+      },
+    ]
+
+    await wrapper.vm.$nextTick()
+
+    const metaLink = wrapper.find('.title-results .metadata-source-link')
+    expect(metaLink.exists()).toBe(true)
+    expect(metaLink.attributes('href')).toBe('https://www.amazon.de/dp/BAMZ1')
+    expect(metaLink.text()).toContain('Metadata: Amazon')
+  })
+
   it('does not label non-Audible URLs containing audible.com as Audible', async () => {
     const router = createTestRouter()
     const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })

@@ -144,7 +144,7 @@ namespace Listenarr.Api.Features.Search
                     {
                         metadata,
                         source = searchResult.MetadataSource ?? searchResult.Source ?? "Amazon/Audible",
-                        sourceUrl = GetAudibleBaseUrl(region)
+                        sourceUrl = GetMetadataSourceBaseUrl(searchResult.MetadataSource ?? searchResult.Source, region)
                     });
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
@@ -193,6 +193,21 @@ namespace Listenarr.Api.Features.Search
         private static string GetAudibleBaseUrl(string region)
         {
             return $"https://{MarketDomainResolver.GetAudibleDomain(region)}";
+        }
+
+        private static string GetAmazonBaseUrl(string region)
+        {
+            return $"https://{MarketDomainResolver.GetAmazonDomain(region)}";
+        }
+
+        private static string GetMetadataSourceBaseUrl(string? source, string region)
+        {
+            var isAmazon = source?.Contains("amazon", StringComparison.OrdinalIgnoreCase) == true;
+            var isAudible = source?.Contains("audible", StringComparison.OrdinalIgnoreCase) == true;
+
+            return isAmazon && !isAudible
+                ? GetAmazonBaseUrl(region)
+                : GetAudibleBaseUrl(region);
         }
     }
 

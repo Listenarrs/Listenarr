@@ -90,6 +90,12 @@ namespace Listenarr.Tests.Builders
             return this;
         }
 
+        public ApplicationSettingsBuilder WithDefaultSearchRegion(string value)
+        {
+            _applicationSettings.DefaultSearchRegion = value;
+            return this;
+        }
+
         public ApplicationSettings Build()
         {
             _applicationSettings.ImportBlacklistExtensions = _importBlacklistExtensions;

@@ -2336,7 +2336,7 @@ const getMetadataSourceUrl = (book: TitleSearchResult): string | undefined => {
     // Audnexus API format
     return `https://api.audnex.us/books/${asin}`
   } else if (source === 'Amazon') {
-    return buildAmazonProductUrl(asin)
+    return buildAmazonProductUrl(asin, getResultRegion(book))
   } else if (source === 'Audible') {
     return buildAudibleProductUrl(asin, getResultRegion(book))
   }

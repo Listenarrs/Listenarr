@@ -79,7 +79,8 @@ namespace Listenarr.Application.Search.Audible
                     Publisher = book.Publisher,
                     Narrators = book.Narrators,
                     ReleaseDate = book.ReleaseDate,
-                    Isbn = book.Isbn
+                    Isbn = book.Isbn,
+                    Region = region
                 };
                 var metadata = _metadataConverters.ConvertAudibleToMetadata(bookResponse, book.Asin!, "Audible");
                 var searchResult = await _metadataConverters.ConvertMetadataToSearchResultAsync(metadata, book.Asin!);
@@ -105,7 +106,7 @@ namespace Listenarr.Application.Search.Audible
                 filtered = filtered.Where(b => string.IsNullOrWhiteSpace(b.Language) || string.Equals(b.Language, language, StringComparison.OrdinalIgnoreCase));
             }
 
-            var converted = await AudibleSearchResultMapper.ConvertToSearchResultsAsync(filtered, _metadataConverters);
+            var converted = await AudibleSearchResultMapper.ConvertToSearchResultsAsync(filtered, _metadataConverters, region);
             return converted.Any() ? SearchResultConverters.ToMetadataList(converted) : null;
         }
 
@@ -123,7 +124,7 @@ namespace Listenarr.Application.Search.Audible
                 filtered = filtered.Where(b => string.IsNullOrWhiteSpace(b.Language) || string.Equals(b.Language, language, StringComparison.OrdinalIgnoreCase));
             }
 
-            var converted = await AudibleSearchResultMapper.ConvertToSearchResultsAsync(filtered, _metadataConverters);
+            var converted = await AudibleSearchResultMapper.ConvertToSearchResultsAsync(filtered, _metadataConverters, region);
             return converted.Any() ? SearchResultConverters.ToMetadataList(converted) : null;
         }
     }

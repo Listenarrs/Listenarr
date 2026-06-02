@@ -95,7 +95,8 @@ namespace Listenarr.Application.Search.Audible
                     Series = book.Series,
                     Publisher = book.Publisher,
                     Narrators = book.Narrators,
-                    ReleaseDate = book.ReleaseDate
+                    ReleaseDate = book.ReleaseDate,
+                    Region = region
                 };
                 var metadata = _metadataConverters.ConvertAudibleToMetadata(bookResponse, book.Asin!, "Audible");
                 var searchResult = await _metadataConverters.ConvertMetadataToSearchResultAsync(metadata, book.Asin!);
@@ -170,6 +171,7 @@ namespace Listenarr.Application.Search.Audible
             var converted = await AudibleSearchResultMapper.ConvertToSearchResultsAsync(
                 authorFiltered,
                 _metadataConverters,
+                region,
                 detailedMetaByAsin,
                 _logger,
                 continueOnConversionError: true);

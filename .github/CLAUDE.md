@@ -70,26 +70,51 @@ As a security-aware developer, generate secure .NET code using ASP.NET Core that
 
 ---
 
-## Changelog maintenance
+## Code Formatting Rules (enforced by pre-commit hook)
 
-After completing any meaningful change (bug fix, new feature, improvement, or notable refactor), update `CHANGELOG.md` at the repo root.
+The pre-commit hook runs `node scripts/lint-staged.mjs`. **All staged files must pass before a commit is accepted.**
 
-**Determine where to add the entry:**
+### C# (`dotnet-format`)
+- **No alignment/column-padding spaces.** Do not add extra spaces to align dictionary values, tuple elements, or assignment operators into columns. The formatter treats this as a WHITESPACE error.
+  ```csharp
+  // ❌ WRONG
+  ["ca"] = ("www.audible.ca",     "www.amazon.ca"),
 
-- **Unpublished branch** (not yet merged/released — e.g. a feature or bugfix branch): add to a next-version section at the very top of the changelog, directly below the header block. Determine the next version by incrementing the patch number of the topmost released version (e.g. if the latest is `[0.2.61]`, use `[0.2.62]`). Create that section if it does not already exist. Do not include a date — the release pipeline adds it on publish.
-- **Published branch** (changes are already in a released version tag or on the main/canary branch): add to the latest version block (the topmost `## [x.y.z]` entry).
+  // ✅ CORRECT
+  ["ca"] = ("www.audible.ca", "www.amazon.ca"),
+  ```
+- Run `dotnet format` from the repo root to auto-fix.
 
-To check: run `git log --oneline origin/canary..HEAD` — if it returns commits, the branch is unpublished. If empty, the changes are already on canary/main (published).
+### Vue / TypeScript (`prettier`)
+- All `.vue`, `.ts`, and `.tsx` files must satisfy Prettier's style.
+- Run `cd fe && npm run format:prettier` to auto-fix (the script is `format:prettier`, not `format`).
 
-**Entry format** — match the existing style exactly:
+### Layering Rules (enforced by pre-commit hook)
+- `listenarr.api` **must not** reference `listenarr.infrastructure` (except `listenarr.api/Program.cs`)
+- `listenarr.application` **must not** reference `listenarr.infrastructure`
+- Data flows inward only: `infrastructure` → `application` → `api`. Violations cause commit rejection.
 
+### No `async void` (enforced by pre-commit hook)
+Never use `async void` in production code. Always use `async Task` — `async void` causes unobservable exceptions and is rejected by the pre-commit hook.
+
+### Backend Test Conventions
+- Test classes are named `{TestedClassName}Tests` and inherit `BaseTests`.
+- Annotate with `[Trait("Name", "...Tests")]` and `[Trait("Category", "...")]`.
+- Call `Init()` (optionally with DI overrides) before adding test data. Only add repository data *after* `Init()`.
+- Use builder classes under `tests/Builders/` with fluent `.With...().Build()` chains for coherent test entities.
+- Structure tests as Given / When / Then. API mocks inherit `BaseMock`.
+
+### Pre-Push Checks
+The pre-push hook runs on `git push`:
+1. **Version sync** — `node scripts/sync-fe-version-from-csproj.mjs`
+2. **Full solution format** — `dotnet format listenarr.slnx --no-restore --verify-no-changes`
+3. **Frontend TypeScript check** — `cd fe && vue-tsc --build tsconfig.app.json`
+4. **Frontend unit tests** — `cd fe && vitest run`
+
+### Quick fix
+```bash
+dotnet format
+cd fe && npm run format:prettier && cd ..
 ```
-### Fixed          ← or Added / Changed / Removed / Security / Deprecated
-- **Short descriptive title:** One-sentence explanation of what changed and why it matters to users or developers.
-```
 
-**Rules:**
-- One bullet per logical change; group related sub-changes under a single bullet rather than listing each file touched.
-- Use plain language — write for someone reading the changelog without code context.
-- Do not add a changelog entry for purely mechanical changes (e.g. bumping a lock file, fixing a typo in a comment, updating test fixtures with no behavior change).
 ````

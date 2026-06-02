@@ -1,9 +1,15 @@
+using Listenarr.Application.Metadata;
 
 namespace Listenarr.Tests.Builders
 {
     public class SeriesLookupItemBuilder
     {
-        private readonly SeriesLookupItem _series = new();
+        private readonly SeriesLookupItem _series = new()
+        {
+            Asin = "B0SERIES",
+            Name = "Test Series",
+            Region = "us"
+        };
 
         public SeriesLookupItemBuilder WithAsin(string? value)
         {

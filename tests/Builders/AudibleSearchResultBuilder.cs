@@ -1,3 +1,4 @@
+using Listenarr.Application.Metadata;
 
 namespace Listenarr.Tests.Builders
 {
@@ -5,8 +6,12 @@ namespace Listenarr.Tests.Builders
     {
         private readonly AudibleSearchResult _result = new()
         {
-            Authors = [],
-            Series = []
+            Asin = "B0TESTASIN",
+            Title = "Test Audiobook",
+            Authors = [new AudibleAuthor { Name = "Test Author" }],
+            Series = [],
+            Language = "english",
+            BookFormat = "unabridged"
         };
 
         public AudibleSearchResultBuilder WithAsin(string value)
@@ -28,7 +33,7 @@ namespace Listenarr.Tests.Builders
             return this;
         }
 
-        public AudibleSearchResultBuilder WithLanguage(string value)
+        public AudibleSearchResultBuilder WithLanguage(string? value)
         {
             _result.Language = value;
             return this;
