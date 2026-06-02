@@ -42,8 +42,9 @@ namespace Listenarr.Tests.Common
             return _tempFolder;
         }
 
-        public string GetTempDirectory(string directory)
+        public string GetTempDirectory(params string[] segments)
         {
+            var directory = Path.Combine(segments);
             if (!directory.StartsWith(GetTempPath()))
             {
                 directory = Path.Join(GetTempPath(), directory);

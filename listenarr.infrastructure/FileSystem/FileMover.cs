@@ -47,6 +47,12 @@ namespace Listenarr.Infrastructure.FileSystem
 
         public async Task<bool> MoveDirectoryAsync(string sourceDir, string destDir)
         {
+            if (FileUtils.IsPathInsideOf(destDir, sourceDir))
+            {
+                logger.LogError($"Cannot move a directory inside itslef from {sourceDir} to {destDir}");
+                return false;
+            }
+
             // Try move with retries
             var attempt = 0;
             var delay = 1000;
@@ -108,7 +114,7 @@ namespace Listenarr.Infrastructure.FileSystem
             {
                 logger.LogError(ex, "Copy+delete fallback failed for directory {Source} -> {Dest}", sourceDir, destDir);
 
-                return await MoveWithRobocopy(sourceDir, destDir);
+                return await MoveWithRobocopy(sourceDir, destDir, "*.*");
             }
         }
 
@@ -164,17 +170,20 @@ namespace Listenarr.Infrastructure.FileSystem
             {
                 File.Copy(sourceFile, destFile, true);
                 try { File.Delete(sourceFile); }
-                catch (Exception deleteEx) when (deleteEx is not OperationCanceledException && deleteEx is not OutOfMemoryException && deleteEx is not StackOverflowException)
+                catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
                 {
-                    logger.LogDebug(deleteEx, "Failed deleting source file after copy fallback for {Source}", sourceFile);
+                    logger.LogDebug(exception, "Failed deleting source file after copy fallback for {Source}", sourceFile);
                 }
                 return true;
             }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
             {
-                logger.LogError(ex, "Copy+delete fallback failed for file {Source} -> {Dest}", sourceFile, destFile);
+                logger.LogError(exception, "Copy+delete fallback failed for file {Source} -> {Dest}", sourceFile, destFile);
 
-                return await MoveWithRobocopy(sourceFile, destFile);
+                var sourceDirectory = Path.GetDirectoryName(sourceFile) ?? string.Empty;
+                var destinationDirectory = Path.GetDirectoryName(destFile) ?? string.Empty;
+
+                return await MoveWithRobocopy(sourceDirectory, destinationDirectory, Path.GetFileName(sourceFile));
             }
         }
 
@@ -277,9 +286,25 @@ namespace Listenarr.Infrastructure.FileSystem
         internal void CopyDirRecursive(string src, string dst)
         {
             src = FileUtils.NormalizeStoredPath(src);
+            src = FileUtils.EnsureTrailingSeparator(src);
+
             dst = FileUtils.NormalizeStoredPath(dst);
+            dst = FileUtils.EnsureTrailingSeparator(dst);
 
             if (dst.Equals(src, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            CopyDirRecursiveIteration(src, dst, dst);
+        }
+
+        private void CopyDirRecursiveIteration(string src, string dst, string originalDst)
+        {
+            src = FileUtils.NormalizeStoredPath(src);
+            src = FileUtils.EnsureTrailingSeparator(src);
+
+            if (src.Equals(originalDst, StringComparison.OrdinalIgnoreCase))
             {
                 return;
             }
@@ -288,12 +313,7 @@ namespace Listenarr.Infrastructure.FileSystem
             foreach (var sourceSubdirectory in Directory.GetDirectories(src, "*", SearchOption.TopDirectoryOnly))
             {
                 var destinationSubdirectory = Path.Join(dst, Path.GetFileName(sourceSubdirectory));
-                if (destinationSubdirectory.StartsWith(src, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                CopyDirRecursive(sourceSubdirectory, destinationSubdirectory);
+                CopyDirRecursiveIteration(sourceSubdirectory, destinationSubdirectory, originalDst);
             }
 
             foreach (var sourceFile in Directory.GetFiles(src, "*.*", SearchOption.TopDirectoryOnly))
@@ -363,7 +383,7 @@ namespace Listenarr.Infrastructure.FileSystem
             }
         }
 
-        private async Task<bool> MoveWithRobocopy(string source, string destination)
+        private async Task<bool> MoveWithRobocopy(string sourceDirectory, string desintationDirectory, string filename)
         {
             if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows) || !options.EnableRobocopy)
             {
@@ -372,14 +392,11 @@ namespace Listenarr.Infrastructure.FileSystem
 
             try
             {
-                logger.LogInformation($"Attempting robocopy fallback for file move: {source} -> {destination}");
-                var srcDir = Path.GetDirectoryName(source) ?? string.Empty;
-                var dstDir = Path.GetDirectoryName(destination) ?? string.Empty;
-                var fileName = Path.GetFileName(source);
+                logger.LogInformation($"Attempting robocopy for move: {sourceDirectory} -> {desintationDirectory}");
                 var startInfo = CreateRobocopyStartInfo(
-                    srcDir,
-                    dstDir,
-                    fileName,
+                    sourceDirectory,
+                    desintationDirectory,
+                    filename,
                     "/MOV",
                     "/E",
                     "/NFL",

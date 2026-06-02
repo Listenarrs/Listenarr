@@ -18,7 +18,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Listenarr.Application.Interfaces;
-using Listenarr.Domain.Common;
 using Listenarr.Domain.Models.Configurations;
 using Listenarr.Domain.Models.Enumerations;
 using Listenarr.Infrastructure.FileSystem;
@@ -105,7 +104,7 @@ namespace Listenarr.Tests.Features.Infrastructure.FileSystem
             Assert.True(string.IsNullOrEmpty(runner.LastStartInfo.Arguments));
             Assert.Equal(source, runner.LastStartInfo.ArgumentList[0]);
             Assert.Equal(dest, runner.LastStartInfo.ArgumentList[1]);
-            Assert.Contains("/MOVE", runner.LastStartInfo.ArgumentList);
+            Assert.Contains("/MOV", runner.LastStartInfo.ArgumentList);
             Assert.All(runner.LastStartInfo.ArgumentList, argument =>
             {
                 Assert.False(argument.StartsWith("\"", StringComparison.Ordinal));
@@ -331,12 +330,12 @@ namespace Listenarr.Tests.Features.Infrastructure.FileSystem
         {
             // Arrange
             var sourceDirectory = FileService.GetTempDirectory("source");
-            var sourceSubDirectory = FileService.GetTempDirectory(FileUtils.GetAbsolutePath("source", "test"));
+            var sourceSubDirectory = FileService.GetTempDirectory("source", "test");
 
             await FileService.GetFileAsync(sourceDirectory, "source.mp3");
             await FileService.GetFileAsync(sourceSubDirectory, "subsource.mp3");
 
-            var destinationDirectory = FileService.GetTempDirectory(FileUtils.GetAbsolutePath("source", "test", "destination"));
+            var destinationDirectory = FileService.GetTempDirectory("source", "test", "destination");
 
             // Act
             try
@@ -350,7 +349,34 @@ namespace Listenarr.Tests.Features.Infrastructure.FileSystem
 
             // Assert
             var files = Directory.GetFiles(sourceDirectory, "*.*", SearchOption.AllDirectories);
-            Assert.Equal(3, files.Length);
+            Assert.Equal(4, files.Length);
+        }
+
+        [Fact]
+        public async Task CopyDir_WorksWith_SimilarDirectory()
+        {
+            // Arrange
+            var sourceDirectory = FileService.GetTempDirectory("source");
+            var sourceSubDirectory = FileService.GetTempDirectory("source", "test");
+
+            await FileService.GetFileAsync(sourceDirectory, "source.mp3");
+            await FileService.GetFileAsync(sourceSubDirectory, "subsource.mp3");
+
+            var destinationDirectory = FileService.GetTempDirectory("source-copy", "test", "destination");
+
+            // Act
+            try
+            {
+                ((FileMover)_mover).CopyDirRecursive(sourceDirectory, destinationDirectory);
+            }
+            catch (Exception exception)
+            {
+                Assert.Fail(exception.Message);
+            }
+
+            // Assert
+            var files = Directory.GetFiles(destinationDirectory, "*.*", SearchOption.AllDirectories);
+            Assert.Equal(2, files.Length);
         }
     }
 }
