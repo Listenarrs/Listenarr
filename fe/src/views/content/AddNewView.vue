@@ -1941,7 +1941,13 @@ const performAdvancedSearch = async () => {
 const clearAdvancedSearch = () => {
   // Reset form state via composable
   resetAdvancedSearch()
-  preferredSearchLanguage.value = getPrimaryPreferredSearchLanguageForRegion(searchLanguage.value)
+  // Mirror onMounted: respect the user's saved defaultSearchLanguage; only fall back
+  // to the region's primary language when no default language is configured.
+  const savedLanguage = configStore.applicationSettings?.defaultSearchLanguage
+  preferredSearchLanguage.value =
+    typeof savedLanguage === 'string' && savedLanguage.trim()
+      ? normalizePreferredSearchLanguage(savedLanguage)
+      : getPrimaryPreferredSearchLanguageForRegion(searchLanguage.value)
   advancedSearchError.value = ''
   // Reset audible paging state
   audiblePage.value = 1
