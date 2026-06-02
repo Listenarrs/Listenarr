@@ -194,9 +194,9 @@ namespace Listenarr.Application.Audiobooks
                     : newRootPath + sepToUse + suffix.Replace(backslash, sepToUse).Replace(slash, sepToUse);
                 moves.Add((a.Id, original, target));
                 a.BasePath = target;
-            }
 
-            await audiobookRepository.SaveChangesAsync(ct);
+                await audiobookRepository.UpdateAsync(a);
+            }
 
             return moves;
         }
