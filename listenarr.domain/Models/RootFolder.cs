@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.ComponentModel.DataAnnotations;
+using Listenarr.Domain.Common;
 
 namespace Listenarr.Domain.Models
 {
@@ -30,7 +31,14 @@ namespace Listenarr.Domain.Models
 
         [Required]
         [MaxLength(1000)]
-        public string Path { get; set; } = string.Empty;
+        public string Path
+        {
+            get
+            {
+                return FileUtils.EnsureTrailingSeparator(field);
+            }
+            set;
+        } = string.Empty;
 
         public bool IsDefault { get; set; } = false;
 

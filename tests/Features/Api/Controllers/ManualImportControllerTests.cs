@@ -27,6 +27,7 @@ using Listenarr.Domain.Models.Enumerations;
 using Listenarr.Application.Common;
 using Listenarr.Infrastructure.FileSystem;
 using Listenarr.Api.Dtos.ManualImport;
+using Listenarr.Domain.Common;
 
 namespace Listenarr.Tests.Features.Api.Controllers
 {
@@ -276,7 +277,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
             var outputRoot = CreateTempDirectory("listenarr-manual-scan-root");
             var srcDir = CreateTempDirectory("listenarr-manual-scan-src");
 
-            var book = new Audiobook { Id = 222, Title = "Jack of Shadows", Authors = new System.Collections.Generic.List<string> { "Roger Zelazny" }, BasePath = outputRoot };
+            var book = new Audiobook { Id = 222, Title = "Jack of Shadows", Authors = ["Roger Zelazny"], BasePath = outputRoot };
 
             var disc1 = Path.Join(srcDir, "Disc 1.mp3");
             var disc2 = Path.Join(srcDir, "Disc 2.mp3");
@@ -312,10 +313,10 @@ namespace Listenarr.Tests.Features.Api.Controllers
             var action = await controller.Start(request);
             Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(action.Result);
 
-            Assert.Equal(expectedScanPath, book.BasePath);
+            Assert.Equal(FileUtils.EnsureTrailingSeparator(expectedScanPath), book.BasePath);
             scanMock.Verify(s => s.EnqueueScanAsync(book, expectedScanPath), Times.Once);
             scanMock.Verify(s => s.EnqueueScanAsync(book, It.IsAny<string>()), Times.Once);
-            repoMock.Verify(r => r.UpdateAsync(It.Is<Audiobook>(a => a.Id == book.Id && a.BasePath == expectedScanPath)), Times.AtLeastOnce);
+            repoMock.Verify(r => r.UpdateAsync(It.Is<Audiobook>(a => a.Id == book.Id && a.BasePath == FileUtils.EnsureTrailingSeparator(expectedScanPath))), Times.AtLeastOnce);
         }
 
         [Fact]

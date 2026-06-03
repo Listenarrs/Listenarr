@@ -17,7 +17,6 @@
  */
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Interfaces.Repositories;
-using Listenarr.Domain.Common;
 using Listenarr.Domain.Models;
 using Microsoft.Extensions.Logging;
 
@@ -34,6 +33,12 @@ namespace Listenarr.Application.Audiobooks
             return await rootFolderRepository.GetDefaultAsync();
         }
 
+        private async Task<bool> HasDuplicate(RootFolder root)
+        {
+            var rootFolders = await rootFolderRepository.GetAllAsync();
+            return rootFolders.Any(r => r.Path == root.Path && r.Id != root.Id);
+        }
+
         public async Task<RootFolder> CreateAsync(RootFolder root)
         {
             root.Path ??= string.Empty;
@@ -42,8 +47,7 @@ namespace Listenarr.Application.Audiobooks
             if (string.IsNullOrWhiteSpace(root.Path)) throw new ArgumentException("Path is required");
             if (string.IsNullOrWhiteSpace(root.Name)) throw new ArgumentException("Name is required");
 
-            var existingByPath = await rootFolderRepository.GetByPathAsync(root.Path);
-            if (existingByPath != null) throw new InvalidOperationException("A root folder with that path already exists.");
+            if (await HasDuplicate(root)) throw new InvalidOperationException("A root folder with that path already exists.");
 
             if (root.IsDefault)
             {
@@ -64,7 +68,9 @@ namespace Listenarr.Application.Audiobooks
                 return;
             }
 
-            var rootFolderPathsAfterDelete = rootFolders.Where(r => r.Id != id).Select(r => FileUtils.EnsureTrailingSeparator(r.Path)).ToList();
+            var rootFoldersAfterDelete = rootFolders
+                .Where(r => r.Id != id)
+                .ToList();
 
             if (reassignRootId != null)
             {
@@ -74,17 +80,20 @@ namespace Listenarr.Application.Audiobooks
 
             var audiobooks = await audiobookRepository.GetAllAsync();
 
-            var orphanedAudiobooks = audiobooks.Where(a => !string.IsNullOrEmpty(a.BasePath) && !rootFolders.Any(r => a.BasePath.StartsWith(r.Path)));
+            // Audiobooks are considered orphaned if base path is empty or no root folder can be linked to it
+            var orphanedAudiobooks = audiobooks
+                .Where(a => string.IsNullOrEmpty(a.BasePath) || !rootFolders.Any(r => a.BasePath!.StartsWith(r.Path)));
+
             if (orphanedAudiobooks.Any())
             {
-                var formattedList = string.Join(", ", orphanedAudiobooks.Select(a => a.BasePath));
+                var formattedList = string.Join(", ", orphanedAudiobooks.Select(a => a.Title));
 
                 logger.LogWarning($"The following audiobooks are orphaned: {formattedList}");
             }
 
             var rootedAudiobooks = audiobooks
-                .Where(a => !orphanedAudiobooks.Any(o => o.Id != a.Id)) // Check only audiobooks that are not orphaned
-                .Where(a => !string.IsNullOrEmpty(a.BasePath) && !rootFolderPathsAfterDelete.Any(r => a.BasePath.StartsWith(r)));
+                .Where(a => !orphanedAudiobooks.Any(o => o.Id == a.Id)) // Check only audiobooks that are not orphaned
+                .Where(a => !rootFoldersAfterDelete.Any(r => a.BasePath!.StartsWith(r.Path)));
             if (rootedAudiobooks.Any())
             {
                 throw new InvalidOperationException($"Root folder is in use by {rootedAudiobooks.Count()} audiobooks, we cannot remove it");
@@ -106,11 +115,7 @@ namespace Listenarr.Application.Audiobooks
 
             var existing = await rootFolderRepository.GetByIdAsync(root.Id) ?? throw new KeyNotFoundException("Root folder not found");
 
-            var duplicate = await rootFolderRepository.GetByPathAsync(root.Path);
-            if (duplicate != null && duplicate.Id != root.Id)
-            {
-                throw new InvalidOperationException("Another root folder with that path already exists.");
-            }
+            if (await HasDuplicate(root)) throw new InvalidOperationException("A root folder with that path already exists.");
 
             if (root.IsDefault)
             {
@@ -185,13 +190,12 @@ namespace Listenarr.Application.Audiobooks
             foreach (var a in affected)
             {
                 var original = a.BasePath!;
-                char sepToUse = original.Contains(backslash) ? backslash : slash;
                 var suffix = original.Length > oldRootPath.Length
                     ? original.Substring(oldRootPath.Length).TrimStart(backslash, slash)
                     : string.Empty;
                 var target = string.IsNullOrEmpty(suffix)
                     ? newRootPath
-                    : newRootPath + sepToUse + suffix.Replace(backslash, sepToUse).Replace(slash, sepToUse);
+                    : Path.Combine(newRootPath, suffix);
                 moves.Add((a.Id, original, target));
                 a.BasePath = target;
 

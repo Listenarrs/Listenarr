@@ -18,6 +18,7 @@
 using Listenarr.Application.Audiobooks;
 using Listenarr.Application.Common;
 using Listenarr.Application.Interfaces;
+using Listenarr.Domain.Common;
 using Listenarr.Domain.Models;
 using Listenarr.Domain.Models.Configurations;
 using Listenarr.Domain.Models.Enumerations;
@@ -127,11 +128,11 @@ namespace Listenarr.Tests.Features.Api.Services
             });
             await db.SaveChangesAsync();
 
-            var previews = await service.PreviewRenameAsync(new[] { 2 });
+            var previews = await service.PreviewRenameAsync([2]);
 
             var preview = Assert.Single(previews);
             Assert.False(preview.FolderChanged);
-            Assert.Equal(NormalizePath(customBase), preview.NewFolderPath);
+            Assert.Equal(FileUtils.EnsureTrailingSeparator(NormalizePath(customBase)), preview.NewFolderPath);
             Assert.All(preview.FileRenames, file => Assert.StartsWith(NormalizePath(customBase), file.NewPath!, StringComparison.OrdinalIgnoreCase));
         }
 
@@ -383,7 +384,7 @@ namespace Listenarr.Tests.Features.Api.Services
             await using var verifyDb = CreateContext(dbName);
             var saved = await verifyDb.Audiobooks.Include(a => a.Files).SingleAsync(a => a.Id == 7);
 
-            Assert.Equal(NormalizePath(libraryRoot), NormalizePath(saved.BasePath));
+            Assert.Equal(FileUtils.EnsureTrailingSeparator(NormalizePath(libraryRoot)), NormalizePath(saved.BasePath));
             Assert.NotEqual(NormalizePath(targetFolder), NormalizePath(saved.BasePath));
             Assert.Contains(saved.Files!, file => file.Id == 71 && NormalizePath(file.Path) == NormalizePath(firstTargetPath));
             Assert.Contains(saved.Files!, file => file.Id == 72 && NormalizePath(file.Path) == NormalizePath(secondSourcePath));
@@ -397,7 +398,7 @@ namespace Listenarr.Tests.Features.Api.Services
         {
             var libraryRoot = Path.Join(_tempRoot, "library");
             var sourceFolder = Path.Join(libraryRoot, "Old");
-            var targetFolder = Path.Join(libraryRoot, "Author", "Book");
+            var targetFolder = FileUtils.GetAbsoluteDirectoryPath(libraryRoot, "Author", "Book");
             Directory.CreateDirectory(sourceFolder);
             var sourcePath = Path.Join(sourceFolder, "old-name.m4b");
             var targetPath = Path.Join(targetFolder, "Book.m4b");

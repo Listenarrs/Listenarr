@@ -23,7 +23,6 @@ namespace Listenarr.Application.Interfaces.Repositories
     {
         Task<List<RootFolder>> GetAllAsync();
         Task<RootFolder?> GetByIdAsync(int id);
-        Task<RootFolder?> GetByPathAsync(string path);
         Task<RootFolder> AddAsync(RootFolder root);
         Task UpdateAsync(RootFolder root);
         Task RemoveAsync(int id);

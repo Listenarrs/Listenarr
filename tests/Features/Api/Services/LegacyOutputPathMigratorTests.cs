@@ -28,8 +28,8 @@ namespace Listenarr.Tests.Features.Api.Services
 {
     public class LegacyOutputPathMigratorTests
     {
-        private string booksPath = FileUtils.GetAbsolutePath("books");
-        private string otherPath = FileUtils.GetAbsolutePath("other");
+        private string booksPath = FileUtils.GetAbsoluteDirectoryPath("books");
+        private string otherPath = FileUtils.GetAbsoluteDirectoryPath("other");
 
         [Fact]
         public async Task Migrate_CreatesRoot_WhenNoExistingAndOutputPathPresent()

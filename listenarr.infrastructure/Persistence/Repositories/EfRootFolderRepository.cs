@@ -54,12 +54,6 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
             return await ctx.RootFolders.FindAsync(id);
         }
 
-        public async Task<RootFolder?> GetByPathAsync(string path)
-        {
-            await using var ctx = await _dbFactory.CreateDbContextAsync();
-            return await ctx.RootFolders.FirstOrDefaultAsync(r => r.Path == path);
-        }
-
         public async Task RemoveAsync(int id)
         {
             await using var ctx = await _dbFactory.CreateDbContextAsync();

@@ -65,10 +65,14 @@ namespace Listenarr.Domain.Models
         {
             get
             {
-                // TODO: Should be put on the set operation with appropriate DB migration to normalize existing data
-                return FileUtils.NormalizeStoredPath(field);
+                field = FileUtils.NormalizeStoredPath(field);
+                return FileUtils.EnsureTrailingSeparator(field);
             }
-            set;
+            set
+            {
+                var normalized = FileUtils.NormalizeStoredPath(value);
+                field = Path.TrimEndingDirectorySeparator(normalized);
+            }
         }
 
         // Multi-file support: store zero or more file records for this audiobook

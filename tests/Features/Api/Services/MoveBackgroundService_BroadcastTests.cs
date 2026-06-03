@@ -24,6 +24,7 @@ using System.Text.Json;
 using Listenarr.Application.Notification;
 using Listenarr.Application.Interfaces;
 using Listenarr.Infrastructure.FileSystem;
+using Listenarr.Domain.Common;
 
 namespace Listenarr.Tests.Features.Api.Services
 {
@@ -138,7 +139,7 @@ namespace Listenarr.Tests.Features.Api.Services
                 var basePathProp = dtoObj.GetType().GetProperty("BasePath") ?? dtoObj.GetType().GetProperty("basePath");
                 Assert.NotNull(basePathProp);
                 var val = basePathProp.GetValue(dtoObj)?.ToString();
-                Assert.Equal(Path.GetFullPath(dst), val);
+                Assert.Equal(FileUtils.EnsureTrailingSeparator(Path.GetFullPath(dst)), val);
             }
         }
     }

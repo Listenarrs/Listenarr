@@ -676,6 +676,15 @@ namespace Listenarr.Domain.Common
         }
 
         /// <summary>
+        /// Same as <see cref="GetAbsolutePath"/> but adds a trailing directory separator
+        /// </summary>
+        public static string GetAbsoluteDirectoryPath(params string[] segments)
+        {
+            string path = GetAbsolutePath(segments);
+            return EnsureTrailingSeparator(path);
+        }
+
+        /// <summary>
         /// Joins relative path segments onto a base path without allowing rooted child segments.
         /// Leading separators on child segments are treated as relative separators.
         /// </summary>

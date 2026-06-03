@@ -116,7 +116,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
 
             // Ensure DB was updated
             var updated = await _audiobookRepository.GetByIdAsync(ab.Id);
-            Assert.Equal(FileUtils.NormalizeStoredPath(target), updated!.BasePath);
+            Assert.Equal(FileUtils.EnsureTrailingSeparator(target), updated!.BasePath);
 
             // Ensure move queue was NOT enqueued
             mockMoveQueue.Verify(m => m.EnqueueMoveAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
@@ -151,9 +151,8 @@ namespace Listenarr.Tests.Features.Api.Controllers
             Assert.Equal(200, okObj.StatusCode);
 
             var updated = await _audiobookRepository.GetByIdAsync(audiobook.Id);
-            Assert.NotNull(updated);
-            Assert.Equal(FileUtils.NormalizeStoredPath(Path.Join(outputPath, relativeTarget)), updated.BasePath);
-            Assert.StartsWith("  listenarr-move-dst-", Path.GetFileName(updated.BasePath), StringComparison.Ordinal);
+            Assert.Equal(FileUtils.GetAbsoluteDirectoryPath(outputPath, relativeTarget), updated.BasePath);
+            Assert.Contains(relativeTarget, updated.BasePath, StringComparison.Ordinal);
         }
     }
 }

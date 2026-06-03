@@ -28,11 +28,11 @@ namespace Listenarr.Tests.Features.Application.Audiobooks
 {
     public class RootFolderServiceTests : BaseTests
     {
-        private readonly string booksPath = FileUtils.GetAbsolutePath("books");
-        private readonly string rootPath = FileUtils.GetAbsolutePath("root");
-        private readonly string newRootPath = FileUtils.GetAbsolutePath("newroot");
-        private readonly string rootAuthorTitlePath = FileUtils.GetAbsolutePath("root", "Author", "Title");
-        private readonly string newRootAuthorTitlePath = FileUtils.GetAbsolutePath("newroot", "Author", "Title");
+        private readonly string booksPath = FileUtils.GetAbsoluteDirectoryPath("books");
+        private readonly string rootPath = FileUtils.GetAbsoluteDirectoryPath("root");
+        private readonly string newRootPath = FileUtils.GetAbsoluteDirectoryPath("newroot");
+        private readonly string rootAuthorTitlePath = FileUtils.GetAbsoluteDirectoryPath("root", "Author", "Title");
+        private readonly string newRootAuthorTitlePath = FileUtils.GetAbsoluteDirectoryPath("newroot", "Author", "Title");
 
         private readonly ITestOutputHelper _output;
         public RootFolderServiceTests(ITestOutputHelper output) { _output = output; }
