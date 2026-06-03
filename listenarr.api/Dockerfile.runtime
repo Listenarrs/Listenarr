@@ -12,13 +12,13 @@ EXPOSE 4545
 ENV ASPNETCORE_URLS=http://*:4545
 
 ENV DOCKER_ENV=true
+COPY docker/runtime/ /tmp/listenarr-runtime/
 
 # Use the gosu binary built above instead of the apt package.
 COPY --from=gosu-builder /go/bin/gosu /usr/local/bin/gosu
 RUN chmod +x /usr/local/bin/gosu
 
-RUN groupadd --system listenarr \
-	&& useradd --system --gid listenarr --home-dir /nonexistent --shell /usr/sbin/nologin --no-create-home listenarr
+RUN sh /tmp/listenarr-runtime/create-listenarr-user.sh
 
 # Copy the Docker-specific publish output produced by the CI pipeline.
 # Release ZIP artifacts are published under listenarr.api/publish and must not
@@ -26,9 +26,7 @@ RUN groupadd --system listenarr \
 ARG TARGETARCH
 COPY listenarr.api/docker-publish/${TARGETARCH}/ /app/
 
-# Normalize frontend asset permissions so the non-root runtime user can read static files.
-RUN find /app/wwwroot -type d -exec chmod 755 {} \; \
-	&& find /app/wwwroot -type f -exec chmod 644 {} \;
+RUN sh /tmp/listenarr-runtime/finalize-app.sh
 
 # Explicitly copy the Discord bot source so it is available even if a local
 # publish skipped optional tool copying.
@@ -36,38 +34,14 @@ COPY tools/discord-bot/ /app/tools/discord-bot/
 
 # Install Node.js only for the Discord bot runtime. npm is used for the install
 # and then removed from the final filesystem; the bot only needs node.
-# Install libcap2 in the same apt transaction so patched security releases are
-# pulled into the final image.
-RUN apt-get update \
-	&& apt-get install -y --no-install-recommends ca-certificates curl gnupg libcap2 \
-	&& curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
-	&& apt-get install -y --no-install-recommends nodejs \
-	&& cd /app/tools/discord-bot \
-	&& npm ci --omit=dev --no-audit --no-fund \
-	&& npm cache clean --force \
-	&& node --version \
-	&& apt-get purge -y --auto-remove curl gnupg \
-	&& rm -rf /usr/lib/node_modules/npm \
-	          /usr/bin/npm \
-	          /usr/bin/npx \
-	          /usr/bin/corepack \
-	          /usr/include/node \
-	          /root/.npm \
-	          /tmp/* \
-	          /usr/share/doc \
-	          /usr/share/man \
-	          /usr/share/info \
-	          /var/lib/apt/lists/*
+RUN sh /tmp/listenarr-runtime/install-discord-bot-runtime.sh
 
 # Return to app root
 WORKDIR /app
 
-# Ensure database directory exists
-RUN mkdir -p /app/config/database
-
 # Copy entrypoint script for PUID/PGID/UMASK support
 COPY docker-entrypoint.sh /docker-entrypoint.sh
-RUN sed -i 's/\r$//' /docker-entrypoint.sh \
-	&& chmod +x /docker-entrypoint.sh
+RUN sh /tmp/listenarr-runtime/prepare-entrypoint.sh \
+	&& rm -rf /tmp/listenarr-runtime
 
 ENTRYPOINT ["/docker-entrypoint.sh"]

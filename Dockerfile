@@ -12,6 +12,7 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS base
 WORKDIR /app
 EXPOSE 4545
 ENV ASPNETCORE_URLS=http://*:4545
+ENV DOCKER_ENV=true
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
@@ -40,54 +41,25 @@ RUN dotnet build "Listenarr.Api.csproj" -c Release -o /app/build \
 
 FROM base AS final
 WORKDIR /app
-# Install Node.js in the runtime image for Discord bot support.
-# Upgrade npm, remove the apt-installed npm tree, then patch vulnerable
-# transitive deps bundled inside npm 11: node-gyp → tinyglobby → picomatch@4.0.3
-# (CVE-2026-33671), brace-expansion 2.x and 5.x (CVE-2026-33750).
-# npm pack downloads the fixed tarball; we extract it over each vulnerable copy
-# in npm's node_modules tree and clean the download cache afterwards.
-# libcap2 (CVE-2026-4878): upgraded via apt to pull the patched Ubuntu security release.
-RUN apt-get update \
-	&& apt-get install -y --no-install-recommends curl ca-certificates gnupg libcap2 \
-	&& curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
-	&& apt-get install -y --no-install-recommends nodejs \
-	&& npm install -g npm@11.12.1 --prefix /usr/local \
-	&& rm -rf /usr/lib/node_modules/npm \
-	&& rm -f /usr/bin/npm /usr/bin/npx \
-	&& /usr/local/bin/npm pack picomatch@4.0.4 --pack-destination /tmp \
-	&& find /usr/local/lib/node_modules/npm/node_modules -type d -name "picomatch" \
-	       -exec sh -c 'tar xzf /tmp/picomatch-4.0.4.tgz -C "$1" --strip-components=1' _ {} \; \
-	&& /usr/local/bin/npm pack brace-expansion@2.0.3 --pack-destination /tmp \
-	&& find /usr/local/lib/node_modules/npm/node_modules -type d -name "brace-expansion" \
-	       -exec sh -c 'ver=$(node -e "process.stdout.write(require('"'"'$1/package.json'"'"').version)" 2>/dev/null); [ "${ver%%.*}" = "2" ] && tar xzf /tmp/brace-expansion-2.0.3.tgz -C "$1" --strip-components=1 || true' _ {} \; \
-	&& /usr/local/bin/npm pack brace-expansion@5.0.5 --pack-destination /tmp \
-	&& find /usr/local/lib/node_modules/npm/node_modules -type d -name "brace-expansion" \
-	       -exec sh -c 'ver=$(node -e "process.stdout.write(require('"'"'$1/package.json'"'"').version)" 2>/dev/null); [ "${ver%%.*}" = "5" ] && tar xzf /tmp/brace-expansion-5.0.5.tgz -C "$1" --strip-components=1 || true' _ {} \; \
-	&& rm -f /tmp/picomatch-4.0.4.tgz /tmp/brace-expansion-2.0.3.tgz /tmp/brace-expansion-5.0.5.tgz \
-	&& rm -rf /root/.npm \
-	&& node --version \
-	&& /usr/local/bin/npm --version \
-	&& rm -rf /var/lib/apt/lists/*
+COPY docker/runtime/ /tmp/listenarr-runtime/
 
 # Use the gosu binary built above instead of the apt package.
 COPY --from=gosu-builder /go/bin/gosu /usr/local/bin/gosu
 RUN chmod +x /usr/local/bin/gosu
 
-RUN groupadd --system listenarr \
-	&& useradd --system --gid listenarr --home-dir /nonexistent --shell /usr/sbin/nologin --no-create-home listenarr
+RUN sh /tmp/listenarr-runtime/create-listenarr-user.sh
 
 COPY --from=build /app/publish .
 
-# Normalize frontend asset permissions so the non-root runtime user can read static files.
-RUN find /app/wwwroot -type d -exec chmod 755 {} \; \
-	&& find /app/wwwroot -type f -exec chmod 644 {} \;
+# Install Node.js only for the Discord bot runtime. npm is used for the install
+# and then removed from the final filesystem; the bot only needs node.
+RUN sh /tmp/listenarr-runtime/install-discord-bot-runtime.sh
 
-# Ensure config directory exists
-RUN mkdir -p /app/config/database
+RUN sh /tmp/listenarr-runtime/finalize-app.sh
 
 # Copy entrypoint script for PUID/PGID/UMASK support
 COPY docker-entrypoint.sh /docker-entrypoint.sh
-RUN sed -i 's/\r$//' /docker-entrypoint.sh \
-	&& chmod +x /docker-entrypoint.sh
+RUN sh /tmp/listenarr-runtime/prepare-entrypoint.sh \
+	&& rm -rf /tmp/listenarr-runtime
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
