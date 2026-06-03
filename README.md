@@ -468,6 +468,7 @@ To build a runtime Docker image from the publish output (CI-first):
 
 ```bash
 # from repo root
+# Optional: clean generated Docker publish output first.
 rm -rf listenarr.api/docker-publish
 dotnet publish listenarr.api/Listenarr.Api.csproj -c Release -r linux-x64 --self-contained false /p:UseAppHost=false -o listenarr.api/docker-publish/amd64
 docker build -f listenarr.api/Dockerfile.runtime --build-arg TARGETARCH=amd64 -t <your-image> .

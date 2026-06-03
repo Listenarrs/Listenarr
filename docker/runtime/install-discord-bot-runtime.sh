@@ -13,6 +13,7 @@ apt-get install -y --no-install-recommends nodejs
 
 cd /app/tools/discord-bot
 npm ci --omit=dev --no-audit --no-fund
+find node_modules -type f -name "*.map" -delete
 npm cache clean --force
 node --version
 
