@@ -22,11 +22,11 @@ using Listenarr.Tests.Common;
 using Listenarr.Tests.Mocks.Api;
 using Xunit;
 
-namespace Listenarr.Tests.Features.Api.Services.Adapters
+namespace Listenarr.Tests.Features.Infrastructure.Adapters
 {
-    [Trait("Name", "AdapterImportPathResolutionTests")]
+    [Trait("Name", "DownloadClientAdapterTests")]
     [Trait("Category", "DownloadClientAdapter")]
-    public class AdapterImportPathResolutionTests : BaseTests
+    public class DownloadClientAdapterTests : BaseTests
     {
         private DownloadClientConfiguration? _transmissionClient;
         private DownloadClientConfiguration? _sabnzbdClient;

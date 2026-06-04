@@ -106,6 +106,18 @@ namespace Listenarr.Tests.Builders
             return this;
         }
 
+        public DownloadClientConfigurationBuilder WithUsername(string value)
+        {
+            _downloadClientConfiguration.Username = value;
+            return this;
+        }
+
+        public DownloadClientConfigurationBuilder WithPassword(string value)
+        {
+            _downloadClientConfiguration.Password = value;
+            return this;
+        }
+
         public DownloadClientConfiguration Build()
         {
             _downloadClientConfiguration.Settings = _settings;

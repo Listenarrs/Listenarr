@@ -79,6 +79,8 @@ namespace Listenarr.Application.Downloads
         {
             var adapter = ResolveAdapter(client);
             return await adapter.AddAsync(client, result, ct);
+
+            // TODO: Handle download persistence here instead of DownloadService
         }
 
         public Task<bool> RemoveAsync(DownloadClientConfiguration client, string id, bool deleteFiles = false, CancellationToken ct = default)

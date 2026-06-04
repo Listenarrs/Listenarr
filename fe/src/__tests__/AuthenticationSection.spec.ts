@@ -27,6 +27,23 @@ describe('AuthenticationSection', () => {
     vi.restoreAllMocks()
   })
 
+  it('renders the admin credential inputs even when authEnabled is false', async () => {
+    // Regression guard: the admin form must be visible while auth is disabled
+    // so a user can configure credentials before turning the login screen on.
+    // Previously this was gated by `v-if="authEnabledComputed"`, which made
+    // first-time setup require enabling auth (and the login screen) before
+    // any UI affordance for credentials existed — a lockout.
+    const { default: AuthenticationSection } =
+      await import('@/components/settings/AuthenticationSection.vue')
+    const wrapper = mount(AuthenticationSection, {
+      props: { settings: { adminUsername: '', adminPassword: '' }, authEnabled: false },
+      global: { components: { PasswordInput } },
+    })
+
+    expect(wrapper.find('input[type="text"][placeholder="Admin username"]').exists()).toBe(true)
+    expect(wrapper.findComponent(PasswordInput).exists()).toBe(true)
+  })
+
   it('emits update:authEnabled when checkbox toggled', async () => {
     const { default: AuthenticationSection } =
       await import('@/components/settings/AuthenticationSection.vue')

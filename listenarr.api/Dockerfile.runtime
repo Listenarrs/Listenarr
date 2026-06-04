@@ -12,65 +12,36 @@ EXPOSE 4545
 ENV ASPNETCORE_URLS=http://*:4545
 
 ENV DOCKER_ENV=true
-
-# Install Node.js; upgrade npm and remove the apt-installed npm tree so
-# scanners no longer find stale bundled packages inside it.
-# Patch picomatch (CVE-2026-33671) and brace-expansion 2.x + 5.x (CVE-2026-33750):
-# npm 11 bundles node-gyp → tinyglobby → picomatch@4.0.3 and brace-expansion 2.x/5.x.
-# Use `npm pack` to download the fixed tarballs and extract them over every vulnerable
-# copy in npm's node_modules tree, then clean the download cache so no stale tarballs
-# remain for scanners to find.
-# libcap2 (CVE-2026-4878): upgraded via apt to pull the patched Ubuntu security release.
-RUN apt-get update \
-	&& apt-get install -y curl ca-certificates gnupg libcap2 --no-install-recommends \
-	&& curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
-	&& apt-get install -y nodejs --no-install-recommends \
-	&& npm install -g npm@11.12.1 --prefix /usr/local \
-	&& rm -rf /usr/lib/node_modules/npm \
-	&& rm -f /usr/bin/npm /usr/bin/npx \
-	&& /usr/local/bin/npm pack picomatch@4.0.4 --pack-destination /tmp \
-	&& find /usr/local/lib/node_modules/npm/node_modules -type d -name "picomatch" \
-	       -exec sh -c 'tar xzf /tmp/picomatch-4.0.4.tgz -C "$1" --strip-components=1' _ {} \; \
-	&& /usr/local/bin/npm pack brace-expansion@2.0.3 --pack-destination /tmp \
-	&& find /usr/local/lib/node_modules/npm/node_modules -type d -name "brace-expansion" \
-	       -exec sh -c 'ver=$(node -e "process.stdout.write(require('"'"'$1/package.json'"'"').version)" 2>/dev/null); [ "${ver%%.*}" = "2" ] && tar xzf /tmp/brace-expansion-2.0.3.tgz -C "$1" --strip-components=1 || true' _ {} \; \
-	&& /usr/local/bin/npm pack brace-expansion@5.0.5 --pack-destination /tmp \
-	&& find /usr/local/lib/node_modules/npm/node_modules -type d -name "brace-expansion" \
-	       -exec sh -c 'ver=$(node -e "process.stdout.write(require('"'"'$1/package.json'"'"').version)" 2>/dev/null); [ "${ver%%.*}" = "5" ] && tar xzf /tmp/brace-expansion-5.0.5.tgz -C "$1" --strip-components=1 || true' _ {} \; \
-	&& rm -f /tmp/picomatch-4.0.4.tgz /tmp/brace-expansion-2.0.3.tgz /tmp/brace-expansion-5.0.5.tgz \
-	&& rm -rf /root/.npm \
-	&& rm -rf /var/lib/apt/lists/*
+COPY docker/runtime/ /tmp/listenarr-runtime/
 
 # Use the gosu binary built above instead of the apt package.
 COPY --from=gosu-builder /go/bin/gosu /usr/local/bin/gosu
 RUN chmod +x /usr/local/bin/gosu
 
-RUN groupadd --system listenarr \
-	&& useradd --system --gid listenarr --home-dir /nonexistent --shell /usr/sbin/nologin --no-create-home listenarr
+RUN sh /tmp/listenarr-runtime/create-listenarr-user.sh
 
-# Copy publish output produced by the CI pipeline or local `dotnet publish`.
-# The workflows publish into listenarr.api/publish, so copy that directory into the image root.
-COPY listenarr.api/publish/ /app/
+# Copy the Docker-specific publish output produced by the CI pipeline.
+# Release ZIP artifacts are published under listenarr.api/publish and must not
+# be copied into the runtime image.
+ARG TARGETARCH
+COPY listenarr.api/docker-publish/${TARGETARCH}/ /app/
 
-# Explicitly copy tools directory from source if not already in publish output
-# This ensures the Discord bot and any other tools are available at runtime
-# Tools were moved into the listenarr.api directory; prefer that path
-COPY tools/ /app/tools/
+RUN sh /tmp/listenarr-runtime/finalize-app.sh
 
-# Install Discord bot dependencies
-# We do this in the runtime image to ensure npm packages are available when the bot runs
-WORKDIR /app/tools/discord-bot
-RUN npm ci --omit=dev
+# Explicitly copy the Discord bot source so it is available even if a local
+# publish skipped optional tool copying.
+COPY tools/discord-bot/ /app/tools/discord-bot/
+
+# Install Node.js only for the Discord bot runtime. npm is used for the install
+# and then removed from the final filesystem; the bot only needs node.
+RUN sh /tmp/listenarr-runtime/install-discord-bot-runtime.sh
 
 # Return to app root
 WORKDIR /app
 
-# Ensure database directory exists
-RUN mkdir -p /app/config/database
-
 # Copy entrypoint script for PUID/PGID/UMASK support
 COPY docker-entrypoint.sh /docker-entrypoint.sh
-RUN sed -i 's/\r$//' /docker-entrypoint.sh \
-	&& chmod +x /docker-entrypoint.sh
+RUN sh /tmp/listenarr-runtime/prepare-entrypoint.sh \
+	&& rm -rf /tmp/listenarr-runtime
 
 ENTRYPOINT ["/docker-entrypoint.sh"]

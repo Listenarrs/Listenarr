@@ -149,6 +149,7 @@ namespace Listenarr.Tests.Builders
             services.AddMemoryCache();
             services.AddListenarrAppServices(configuration);
             services.AddListenarrAdapters(configuration);
+            services.AddListenarrHttpClients(configuration);
             services.AddListenarrInfrastructure(
                 options => options.UseInMemoryDatabase(databaseName: Guid.NewGuid().ToString()),
                 contentRootPath: _contentRootPath);
@@ -199,12 +200,14 @@ namespace Listenarr.Tests.Builders
             services.AddSingleton<TransmissionApiMock>();
             services.AddSingleton<SabnzbdApiMock>();
             services.AddSingleton<NzbgetApiMock>();
+            services.AddSingleton<QbittorrentApiMock>();
             services.AddSingleton<MyAnonamouseApiMock>();
 
             services.AddHttpClient<AudibleService>()
                 .ConfigurePrimaryHttpMessageHandler<AudibleApiMock>();
 
             // FIXME: All classes should rely on typed HttpClient instead of named ones
+            // TODO: Find a way to test real http client configurations (cookies, retry, security, ...)
             services.AddHttpClient("transmission")
                 .ConfigurePrimaryHttpMessageHandler<TransmissionApiMock>();
 
@@ -213,6 +216,9 @@ namespace Listenarr.Tests.Builders
 
             services.AddHttpClient("nzbget")
                 .ConfigurePrimaryHttpMessageHandler<NzbgetApiMock>();
+
+            services.AddHttpClient("qbittorrent")
+                .ConfigurePrimaryHttpMessageHandler<QbittorrentApiMock>();
 
             services.AddHttpClient<IAudnexusService, AudnexusService>()
                 .ConfigurePrimaryHttpMessageHandler<AudnexusServiceApiMock>();

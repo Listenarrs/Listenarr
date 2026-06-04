@@ -27,6 +27,7 @@ using Listenarr.Application.Security;
 using Listenarr.Domain.Common;
 using Listenarr.Domain.Models;
 using Listenarr.Domain.Models.Exceptions;
+using Listenarr.Infrastructure.Torrents;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.Adapters

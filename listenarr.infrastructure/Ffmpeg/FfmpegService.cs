@@ -26,6 +26,7 @@ using Listenarr.Application.Interfaces;
 using Microsoft.Extensions.Logging;
 using Listenarr.Domain.Models;
 using Listenarr.Application.Security;
+using Listenarr.Domain.Models.Exceptions;
 
 namespace Listenarr.Infrastructure.Ffmpeg
 {

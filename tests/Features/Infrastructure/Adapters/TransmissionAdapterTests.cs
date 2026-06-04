@@ -16,7 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Runtime.InteropServices;
-using Listenarr.Infrastructure.Adapters;
 using Listenarr.Domain.Models;
 using Listenarr.Domain.Common;
 using Listenarr.Tests.Builders;
@@ -25,8 +24,9 @@ using Listenarr.Tests.Mocks.Api;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Xunit;
+using Listenarr.Infrastructure.Torrents;
 
-namespace Listenarr.Tests.Features.Api.Services.Adapters
+namespace Listenarr.Tests.Features.Infrastructure.Adapters
 {
     [Trait("Name", "TransmissionAdapterTests")]
     [Trait("Category", "DownloadClientAdapter")]

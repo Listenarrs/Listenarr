@@ -17,6 +17,8 @@
  */
 using System.Net;
 using System.Text.Json;
+using BencodeNET.Parsing;
+using BencodeNET.Torrents;
 using Listenarr.Application.Common;
 using Listenarr.Application.Downloads;
 using Listenarr.Application.Interfaces;
@@ -24,6 +26,8 @@ using Listenarr.Application.Security;
 using Listenarr.Domain.Common;
 using Listenarr.Domain.Models;
 using Listenarr.Domain.Models.Exceptions;
+using Listenarr.Infrastructure.Adapters.Exceptions;
+using Listenarr.Infrastructure.Torrents;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.Adapters
@@ -37,13 +41,13 @@ namespace Listenarr.Infrastructure.Adapters
         public string ClientType => "qbittorrent";
         public DownloadProtocol Protocol => DownloadProtocol.Torrent;
 
-        private readonly IHttpClientFactory _httpFactory;
+        private readonly IHttpClientFactory _httpClientFactory;
         private readonly ILogger<QbittorrentAdapter> _logger;
         private readonly ITorrentFileDownloader _torrentFileDownloader;
 
         public QbittorrentAdapter(IHttpClientFactory httpFactory, ITorrentFileDownloader torrentFileDownloader, ILogger<QbittorrentAdapter> logger)
         {
-            _httpFactory = httpFactory ?? throw new ArgumentNullException(nameof(httpFactory));
+            _httpClientFactory = httpFactory ?? throw new ArgumentNullException(nameof(httpFactory));
             _torrentFileDownloader = torrentFileDownloader ?? throw new ArgumentNullException(nameof(torrentFileDownloader));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
@@ -54,190 +58,192 @@ namespace Listenarr.Infrastructure.Adapters
             {
                 var baseUrl = DownloadClientUriBuilder.BuildAuthority(client);
 
-                // Prefer the IHttpClientFactory-created client so unit tests can inject
-                // a DelegatingHandler mock. Fall back to a local cookie-enabled client
-                // only when required for real-world qBittorrent auth flows.
-                HttpClient? http = null;
-                bool disposeHttp = false;
-                try
+                using var http = _httpClientFactory.CreateClient(ClientType);
+                using var resp = await http.GetAsync($"{baseUrl}/api/v2/app/version", ct);
+                if (resp.IsSuccessStatusCode)
+                    return (true, "Successfully connected to qBittorrent.");
+
+                // If we get Forbidden and credentials are provided, try to authenticate and retry
+                if (resp.StatusCode == HttpStatusCode.Forbidden && !string.IsNullOrEmpty(client.Username))
                 {
-                    http = _httpFactory?.CreateClient(client.Id ?? "qbittorrent");
-                    if (http == null)
+                    try
                     {
-                        var cookieJar = new CookieContainer();
-                        var handler = new HttpClientHandler
+                        // Helper to POST login with optional User-Agent header
+                        async Task<HttpResponseMessage> PostLoginWithAgent(string userAgent)
                         {
-                            CookieContainer = cookieJar,
-                            UseCookies = true,
-                            AutomaticDecompression = DecompressionMethods.All
-                        };
-                        http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
-                        disposeHttp = true;
-                    }
-                    else
-                    {
-                        // ensure a reasonable timeout for factory clients
-                        http.Timeout = TimeSpan.FromSeconds(30);
-                    }
+                            var content = new FormUrlEncodedContent(new[]
+                            {
+                                new KeyValuePair<string, string>("username", client.Username ?? string.Empty),
+                                new KeyValuePair<string, string>("password", client.Password ?? string.Empty)
+                            });
 
-                    using var resp = await http.GetAsync($"{baseUrl}/api/v2/app/version", ct);
-                    if (resp.IsSuccessStatusCode)
-                        return (true, "Successfully connected to qBittorrent.");
+                            using var req = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/api/v2/auth/login") { Content = content };
+                            if (!string.IsNullOrEmpty(userAgent)) req.Headers.UserAgent.ParseAdd(userAgent);
+                            req.Headers.Referrer = new Uri(baseUrl + "/");
+                            return await http.SendAsync(req, ct);
+                        }
 
-                    // If we get Forbidden and credentials are provided, try to authenticate and retry
-                    if (resp.StatusCode == HttpStatusCode.Forbidden && !string.IsNullOrEmpty(client.Username))
-                    {
-                        try
+                        // Try a minimal UA first, then a browser-like UA if Forbidden
+                        var loginResp = await PostLoginWithAgent("Listenarr/1.0");
+                        if (!loginResp.IsSuccessStatusCode && loginResp.StatusCode == HttpStatusCode.Forbidden)
                         {
-                            // Helper to POST login with optional User-Agent header
-                            async Task<HttpResponseMessage> PostLoginWithAgent(string userAgent)
+                            _logger.LogDebug("qBittorrent TestConnection: initial login returned Forbidden, retrying with browser UA for client {ClientId}", LogRedaction.SanitizeText(client.Id));
+                            loginResp.Dispose();
+                            loginResp = await PostLoginWithAgent("Mozilla/5.0 (compatible; Listenarr)");
+                        }
+                        using (loginResp)
+                        {
+                            if (loginResp.IsSuccessStatusCode)
                             {
-                                var content = new FormUrlEncodedContent(new[]
+                                // Try to detect cookies via Set-Cookie header when using factory clients
+                                try
                                 {
-                                    new KeyValuePair<string, string>("username", client.Username ?? string.Empty),
-                                    new KeyValuePair<string, string>("password", client.Password ?? string.Empty)
-                                });
-
-                                using var req = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/api/v2/auth/login") { Content = content };
-                                if (!string.IsNullOrEmpty(userAgent)) req.Headers.UserAgent.ParseAdd(userAgent);
-                                req.Headers.Referrer = new Uri(baseUrl + "/");
-                                return await http.SendAsync(req, ct);
-                            }
-
-                            // Try a minimal UA first, then a browser-like UA if Forbidden
-                            var loginResp = await PostLoginWithAgent("Listenarr/1.0");
-                            if (!loginResp.IsSuccessStatusCode && loginResp.StatusCode == HttpStatusCode.Forbidden)
-                            {
-                                _logger.LogDebug("qBittorrent TestConnection: initial login returned Forbidden, retrying with browser UA for client {ClientId}", LogRedaction.SanitizeText(client.Id));
-                                loginResp.Dispose();
-                                loginResp = await PostLoginWithAgent("Mozilla/5.0 (compatible; Listenarr)");
-                            }
-                            using (loginResp)
-                            {
-                                if (loginResp.IsSuccessStatusCode)
-                                {
-                                    // Try to detect cookies via Set-Cookie header when using factory clients
-                                    try
+                                    if (loginResp.Headers.TryGetValues("Set-Cookie", out var cookieHeaders))
                                     {
-                                        if (loginResp.Headers.TryGetValues("Set-Cookie", out var cookieHeaders))
-                                        {
-                                            _logger.LogDebug("qBittorrent TestConnection: login returned Set-Cookie header for client {ClientId}", LogRedaction.SanitizeText(client.Id));
-                                        }
-                                        else
-                                        {
-                                            _logger.LogDebug("qBittorrent TestConnection: login succeeded but no Set-Cookie header present for client {ClientId}", LogRedaction.SanitizeText(client.Id));
-                                        }
+                                        _logger.LogDebug("qBittorrent TestConnection: login returned Set-Cookie header for client {ClientId}", LogRedaction.SanitizeText(client.Id));
                                     }
-                                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                                    else
                                     {
-                                        _logger.LogDebug(ex, "qBittorrent TestConnection: unable to inspect login response headers for client {ClientId}", LogRedaction.SanitizeText(client.Id));
+                                        _logger.LogDebug("qBittorrent TestConnection: login succeeded but no Set-Cookie header present for client {ClientId}", LogRedaction.SanitizeText(client.Id));
                                     }
-
-                                    // Retry using the same client first (this covers unit tests which
-                                    // simulate stateful behavior on the mocked handler). If the retry
-                                    // fails and we created a factory client that doesn't handle cookies,
-                                    // fall back to a local cookie-enabled client attempt.
-                                    using var retry = await http.GetAsync($"{baseUrl}/api/v2/app/version", ct);
-                                    if (retry.IsSuccessStatusCode)
-                                        return (true, "Successfully connected to qBittorrent.");
-
-                                    _logger.LogWarning("qBittorrent TestConnection: authenticated but subsequent request returned {Status} for client {ClientId}", retry.StatusCode, LogRedaction.SanitizeText(client.Id));
-
-                                    // If we used a factory client, try a cookie-enabled HttpClient as a last resort
-                                    if (!disposeHttp)
-                                    {
-                                        try
-                                        {
-                                            var cookieJar2 = new CookieContainer();
-                                            var handler2 = new HttpClientHandler
-                                            {
-                                                CookieContainer = cookieJar2,
-                                                UseCookies = true,
-                                                AutomaticDecompression = DecompressionMethods.All
-                                            };
-
-                                            using var local = new HttpClient(handler2) { Timeout = TimeSpan.FromSeconds(30) };
-                                            using var localLoginContent = new FormUrlEncodedContent(new[]
-                                            {
-                                            new KeyValuePair<string, string>("username", client.Username),
-                                            new KeyValuePair<string, string>("password", client.Password)
-                                        });
-
-                                            using var localLogin = await local.PostAsync($"{baseUrl}/api/v2/auth/login", localLoginContent, ct);
-                                            if (localLogin.IsSuccessStatusCode)
-                                            {
-                                                using var final = await local.GetAsync($"{baseUrl}/api/v2/app/version", ct);
-                                                if (final.IsSuccessStatusCode)
-                                                    return (true, "Successfully connected to qBittorrent.");
-                                            }
-                                        }
-                                        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                                        {
-                                            _logger.LogDebug(ex, "qBittorrent TestConnection: fallback local login attempt failed for client {ClientId}", LogRedaction.SanitizeText(client.Id));
-                                        }
-                                    }
-
-                                    return (false, "qBittorrent: Connection to download client successful but could not authenticate. Please check username/password.");
                                 }
-                                else
+                                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                                 {
-                                    var body = string.Empty;
-                                    try { body = await loginResp.Content.ReadAsStringAsync(ct); }
-                                    catch (Exception caughtEx_1) when (caughtEx_1 is not OperationCanceledException && caughtEx_1 is not OutOfMemoryException && caughtEx_1 is not StackOverflowException)
+                                    _logger.LogDebug(ex, "qBittorrent TestConnection: unable to inspect login response headers for client {ClientId}", LogRedaction.SanitizeText(client.Id));
+                                }
+
+                                // Retry using the same client first (this covers unit tests which
+                                // simulate stateful behavior on the mocked handler). If the retry
+                                // fails and we created a factory client that doesn't handle cookies,
+                                // fall back to a local cookie-enabled client attempt.
+                                using var retry = await http.GetAsync($"{baseUrl}/api/v2/app/version", ct);
+                                if (retry.IsSuccessStatusCode)
+                                    return (true, "Successfully connected to qBittorrent.");
+
+                                _logger.LogWarning("qBittorrent TestConnection: authenticated but subsequent request returned {Status} for client {ClientId}", retry.StatusCode, LogRedaction.SanitizeText(client.Id));
+
+                                // Try a cookie-enabled HttpClient as a last resort
+                                try
+                                {
+                                    var cookieJar2 = new CookieContainer();
+                                    var handler2 = new HttpClientHandler
                                     {
-                                        System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                                        CookieContainer = cookieJar2,
+                                        UseCookies = true,
+                                        AutomaticDecompression = DecompressionMethods.All
+                                    };
+
+                                    using var local = new HttpClient(handler2) { Timeout = TimeSpan.FromSeconds(30) };
+                                    using var localLoginContent = new FormUrlEncodedContent(
+                                    [
+                                        new KeyValuePair<string, string>("username", client.Username),
+                                        new KeyValuePair<string, string>("password", client.Password)
+                                    ]);
+
+                                    using var localLogin = await local.PostAsync($"{baseUrl}/api/v2/auth/login", localLoginContent, ct);
+                                    if (localLogin.IsSuccessStatusCode)
+                                    {
+                                        using var final = await local.GetAsync($"{baseUrl}/api/v2/app/version", ct);
+                                        if (final.IsSuccessStatusCode)
+                                            return (true, "Successfully connected to qBittorrent.");
                                     }
-                                    var redacted = LogRedaction.RedactText(body, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { client.Password ?? string.Empty }));
-                                    _logger.LogWarning("qBittorrent TestConnection: login failed with status {Status} for client {ClientId} - {Body}", loginResp.StatusCode, LogRedaction.SanitizeText(client.Id), redacted);
-                                    return (false, "qBittorrent: Connection to download client successful but could not authenticate. Please check username/password.");
+                                }
+                                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                                {
+                                    _logger.LogDebug(ex, "qBittorrent TestConnection: fallback local login attempt failed for client {ClientId}", LogRedaction.SanitizeText(client.Id));
                                 }
                             }
+                            else
+                            {
+                                var body = string.Empty;
+                                try { body = await loginResp.Content.ReadAsStringAsync(ct); }
+                                catch (Exception caughtEx_1) when (caughtEx_1 is not OperationCanceledException && caughtEx_1 is not OutOfMemoryException && caughtEx_1 is not StackOverflowException)
+                                {
+                                    _logger.LogDebug("Suppressed non-fatal exception in catch block.");
+                                }
+                                var redacted = LogRedaction.RedactText(body, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { client.Password ?? string.Empty }));
+                                _logger.LogWarning("qBittorrent TestConnection: login failed with status {Status} for client {ClientId} - {Body}", loginResp.StatusCode, LogRedaction.SanitizeText(client.Id), redacted);
+                                return (false, "qBittorrent: Connection to download client successful but could not authenticate. Please check username/password.");
+                            }
                         }
-                        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                        {
-                            _logger.LogDebug(ex, "qBittorrent TestConnection login attempt failed");
-                            return (false, "Connection failed.");
-                        }
                     }
-
-                    // Provide clearer, user-friendly messages for common HTTP statuses
-                    if (resp.StatusCode == HttpStatusCode.Forbidden || resp.StatusCode == HttpStatusCode.Unauthorized)
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                     {
-                        if (string.IsNullOrEmpty(client.Username))
-                            return (false, "Forbidden: Authentication required.");
-
-                        return (false, "Authentication Failed. Check your username and/or password.");
+                        _logger.LogDebug(ex, "qBittorrent TestConnection login attempt failed");
+                        return (false, "Connection failed: login attempt failed.");
                     }
-
-                    if (resp.StatusCode == HttpStatusCode.NotFound)
-                    {
-                        return (false, "Could not connect to the host and/or port.");
-                    }
-
-                    return (false, $"qBittorrent: network error ({resp.StatusCode})");
                 }
-                finally
+
+                // Provide clearer, user-friendly messages for common HTTP statuses
+                if (resp.StatusCode == HttpStatusCode.Forbidden || resp.StatusCode == HttpStatusCode.Unauthorized)
                 {
-                    if (disposeHttp)
-                    {
-                        try { http?.Dispose(); }
-                        catch (Exception caughtEx_2) when (caughtEx_2 is not OperationCanceledException && caughtEx_2 is not OutOfMemoryException && caughtEx_2 is not StackOverflowException)
-                        {
-                            System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
-                        }
-                    }
+                    if (string.IsNullOrEmpty(client.Username))
+                        return (false, "Forbidden: Authentication required.");
+
+                    return (false, "Authentication Failed. Check your username and/or password.");
                 }
+
+                if (resp.StatusCode == HttpStatusCode.NotFound)
+                {
+                    return (false, "Could not connect to the host and/or port.");
+                }
+
+                return (false, $"qBittorrent: network error ({resp.StatusCode})");
             }
-            catch (TaskCanceledException tce)
+            catch (TaskCanceledException)
             {
-                _logger.LogDebug(tce, "qBittorrent TestConnection timed out");
                 return (false, "Connection timed out.");
             }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
             {
-                _logger.LogDebug(ex, "qBittorrent TestConnection failed");
                 return (false, "Connection failed.");
             }
+        }
+
+        /// <summary>
+        /// Perform the login operation with qBittorrent API
+        /// </summary>
+        /// <param name="httpClient"></param>
+        /// <param name="client"></param>
+        /// <param name="cancellationToken"></param>
+        /// <returns></returns>
+        /// <exception cref="QbittorrentException"></exception>
+        private async Task<bool> LoginAsync(HttpClient httpClient, DownloadClientConfiguration client, CancellationToken cancellationToken = default)
+        {
+            var baseUrl = DownloadClientUriBuilder.BuildAuthority(client);
+
+            using var loginData = new FormUrlEncodedContent(
+            [
+                new KeyValuePair<string, string>("username", client.Username ?? string.Empty),
+                new KeyValuePair<string, string>("password", client.Password ?? string.Empty)
+            ]);
+
+            using var loginResponse = await httpClient.PostAsync($"{baseUrl}/api/v2/auth/login", loginData, cancellationToken);
+            if (!loginResponse.IsSuccessStatusCode)
+            {
+                var body = await loginResponse.Content.ReadAsStringAsync(cancellationToken);
+
+                if (loginResponse.StatusCode == HttpStatusCode.Forbidden)
+                {
+                    using var testResp = await httpClient.GetAsync($"{baseUrl}/api/v2/app/version", cancellationToken);
+                    if (!testResp.IsSuccessStatusCode)
+                    {
+                        throw new QbittorrentException($"qBittorrent authentication enabled but credentials are incorrect for {client.Id}");
+                    }
+
+                    _logger.LogDebug($"qBittorrent authentication disabled; proceeding without credentials for client {client.Id}");
+                }
+                else
+                {
+                    throw new QbittorrentException($"qBittorrent login failed with status {loginResponse.StatusCode}");
+                }
+            }
+            else
+            {
+                _logger.LogDebug("Authenticated to qBittorrent for client {ClientId}", LogRedaction.SanitizeText(client.Id));
+            }
+
+            return true;
         }
 
         public async Task<string?> AddAsync(DownloadClientConfiguration client, SearchResult result, CancellationToken ct = default)
@@ -249,250 +255,162 @@ namespace Listenarr.Infrastructure.Adapters
             var httpTorrentUrl = NormalizeTorrentUrl(result.TorrentUrl);
 
             var baseUrl = DownloadClientUriBuilder.BuildAuthority(client);
+            using var httpClient = _httpClientFactory.CreateClient(ClientType);
 
             try
             {
-                var cookieJar = new CookieContainer();
-                var handler = new HttpClientHandler
+                await LoginAsync(httpClient, client, ct);
+            }
+            catch (QbittorrentException exception)
+            {
+                _logger.LogError(exception.Message);
+                return null;
+            }
+
+            var savePath = client.DownloadPath ?? string.Empty;
+            string? category = null;
+            string? tags = null;
+
+            if (client.Settings != null)
+            {
+                if (client.Settings.TryGetValue("category", out var categoryObj))
+                    category = categoryObj?.ToString();
+                if (client.Settings.TryGetValue("tags", out var tagsObj))
+                    tags = tagsObj?.ToString();
+            }
+
+            var hash = string.Empty;
+
+            byte[]? torrentFileData = result.TorrentFileContent;
+            if (torrentFileData == null && !string.IsNullOrEmpty(httpTorrentUrl))
+            {
+                // Try to get torrent file with the torrent URL
+                var downloadResult = await _torrentFileDownloader.DownloadAsync(httpTorrentUrl, ct);
+                if (downloadResult.TorrentBytes != null)
                 {
-                    CookieContainer = cookieJar,
-                    UseCookies = true,
-                    AutomaticDecompression = DecompressionMethods.All
-                };
-
-                using var httpClient = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
-
-                using var loginData = new FormUrlEncodedContent(new[]
-                {
-                    new KeyValuePair<string, string>("username", client.Username ?? string.Empty),
-                    new KeyValuePair<string, string>("password", client.Password ?? string.Empty)
-                });
-
-                using var loginResponse = await httpClient.PostAsync($"{baseUrl}/api/v2/auth/login", loginData, ct);
-                if (!loginResponse.IsSuccessStatusCode)
-                {
-                    var body = await loginResponse.Content.ReadAsStringAsync(ct);
-                    var redacted = LogRedaction.RedactText(body, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { client.Password ?? string.Empty }));
-
-                    if (loginResponse.StatusCode == HttpStatusCode.Forbidden)
-                    {
-                        using var testResp = await httpClient.GetAsync($"{baseUrl}/api/v2/app/version", ct);
-                        if (!testResp.IsSuccessStatusCode)
-                        {
-                            _logger.LogWarning("qBittorrent auth appears enabled and credentials are invalid for client {ClientId}", client.Id);
-                            throw new Exception("qBittorrent authentication enabled but credentials are incorrect");
-                        }
-                        else
-                        {
-                            _logger.LogInformation("qBittorrent authentication disabled; proceeding without credentials for client {ClientId}", LogRedaction.SanitizeText(client.Id));
-                        }
-                    }
-                    else
-                    {
-                        _logger.LogWarning("qBittorrent login failed: {Status} - {Body}", loginResponse.StatusCode, redacted);
-                        throw new Exception($"qBittorrent login failed with status {loginResponse.StatusCode}");
-                    }
+                    torrentFileData = downloadResult.TorrentBytes;
+                    _logger.LogInformation($"Pre-downloaded torrent file ({torrentFileData!.Length} bytes) for '{LogRedaction.SanitizeText(result.Title)}'");
                 }
-                else
+                else if (downloadResult.HasMagnet && string.IsNullOrEmpty(magnetLink))
                 {
-                    _logger.LogDebug("Authenticated to qBittorrent for client {ClientId}", LogRedaction.SanitizeText(client.Id));
+                    magnetLink = DownloadClientUriBuilder.NormalizeMagnetLink(downloadResult.MagnetUri);
+                    _logger.LogInformation($"Indexer redirected to magnet link for '{LogRedaction.SanitizeText(result.Title)}'");
                 }
+            }
 
-                // Request only the hash field before adding to minimize memory usage
-                using var beforeResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/info?fields=hash", ct);
-                var existingHashes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                if (beforeResp.IsSuccessStatusCode)
+            if (torrentFileData == null && string.IsNullOrEmpty(httpTorrentUrl) && string.IsNullOrEmpty(magnetLink))
+            {
+                _logger.LogError($"No torrent URL, no magnet link and no torrent file given, nothing can be added for search result {result.Title}");
+                return null;
+            }
+
+            // Compute hash from torrent file
+            if (torrentFileData != null)
+            {
+                using (var stream = new MemoryStream(torrentFileData))
                 {
-                    var beforeJson = await beforeResp.Content.ReadAsStringAsync(ct);
-                    if (!string.IsNullOrWhiteSpace(beforeJson))
-                    {
-                        try
-                        {
-                            var beforeList = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(beforeJson);
-                            if (beforeList != null)
-                            {
-                                foreach (var t in beforeList.Where(t => t.TryGetValue("hash", out _)))
-                                {
-                                    existingHashes.Add(t["hash"].GetString() ?? string.Empty);
-                                }
-                            }
-                        }
-                        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                        {
-                            _logger.LogDebug(ex, "Failed to parse qBittorrent 'before' torrents list (non-fatal)");
-                        }
-                    }
+                    var parser = new BencodeParser();
+                    Torrent torrent = parser.Parse<Torrent>(stream);
+                    hash = torrent.GetInfoHash();
                 }
+            }
+            // Get hash in magnet link
+            else if (!string.IsNullOrEmpty(magnetLink))
+            {
+                hash = TryExtractMagnetHash(magnetLink);
+            }
 
-                var savePath = client.DownloadPath ?? string.Empty;
-                string? category = null;
-                string? tags = null;
+            if (string.IsNullOrEmpty(hash))
+            {
+                _logger.LogError($"Unable to compute hash for the given torrent: {result.Title} with torrent URL: {result.TorrentUrl} and magnet link: {result.MagnetLink}");
+                return null;
+            }
 
-                if (client.Settings != null)
-                {
-                    if (client.Settings.TryGetValue("category", out var categoryObj))
-                        category = categoryObj?.ToString();
-                    if (client.Settings.TryGetValue("tags", out var tagsObj))
-                        tags = tagsObj?.ToString();
-                }
+            // Add download using torrent file
+            HttpResponseMessage addResponse;
+            if (torrentFileData != null)
+            {
+                using var multipart = new MultipartFormDataContent();
+                multipart.Add(new StringContent(savePath), "savepath");
+                if (!string.IsNullOrEmpty(category))
+                    multipart.Add(new StringContent(category), "category");
+                if (!string.IsNullOrEmpty(tags))
+                    multipart.Add(new StringContent(tags), "tags");
 
-                HttpResponseMessage addResponse;
-                // Prefer a validated HTTP(S) torrent URL when one exists so we can add
-                // authenticated/private-tracker content via bytes and only fall back to
-                // a magnet when no file data can be obtained.
-                byte[]? torrentFileData = result.TorrentFileContent;
-                if (torrentFileData == null || torrentFileData.Length == 0)
-                {
-                    var downloadResult = await TryPredownloadTorrentFileAsync(httpTorrentUrl, result.Title, ct);
-                    if (downloadResult.HasBytes)
-                    {
-                        torrentFileData = downloadResult.TorrentBytes;
-                        _logger.LogInformation("Pre-downloaded torrent file ({Bytes} bytes) for '{Title}'",
-                            torrentFileData!.Length, LogRedaction.SanitizeText(result.Title));
-                    }
-                    else if (downloadResult.HasMagnet)
-                    {
-                        // Indexer redirected to a magnet link — use it as the torrent URL instead
-                        magnetLink = DownloadClientUriBuilder.NormalizeMagnetLink(downloadResult.MagnetUri);
-                        _logger.LogInformation("Indexer redirected to magnet link for '{Title}'", LogRedaction.SanitizeText(result.Title));
-                    }
-                }
+                var torrentFileName = string.IsNullOrEmpty(result.TorrentFileName) ? "download.torrent" : result.TorrentFileName;
+                var torrentContent = new ByteArrayContent(torrentFileData);
+                torrentContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/x-bittorrent");
+                multipart.Add(torrentContent, "torrents", torrentFileName);
 
-                var torrentUrl = new[] { magnetLink, httpTorrentUrl }
+                addResponse = await httpClient.PostAsync($"{baseUrl}/api/v2/torrents/add", multipart, ct);
+            }
+            // Add using magnet link or torrent url
+            else
+            {
+                var url = new[] { magnetLink, httpTorrentUrl }
                     .FirstOrDefault(static url => !string.IsNullOrEmpty(url)) ?? string.Empty;
 
-                if ((torrentFileData == null || torrentFileData.Length == 0) && string.IsNullOrEmpty(torrentUrl))
-                    throw new ArgumentException("No magnet link or torrent URL provided", nameof(result));
-
-                var extractedHash = TryExtractMagnetHash(torrentUrl);
-
-                if (torrentFileData != null && torrentFileData.Length > 0)
+                var formData = new List<KeyValuePair<string, string>>
                 {
-                    using var multipart = new MultipartFormDataContent();
-                    multipart.Add(new StringContent(savePath), "savepath");
-                    if (!string.IsNullOrEmpty(category))
-                        multipart.Add(new StringContent(category), "category");
-                    if (!string.IsNullOrEmpty(tags))
-                        multipart.Add(new StringContent(tags), "tags");
+                    new("urls", url),
+                    new("savepath", savePath)
+                };
 
-                    var torrentFileName = string.IsNullOrEmpty(result.TorrentFileName) ? "download.torrent" : result.TorrentFileName;
-                    var torrentContent = new ByteArrayContent(torrentFileData);
-                    torrentContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/x-bittorrent");
-                    multipart.Add(torrentContent, "torrents", torrentFileName);
+                if (!string.IsNullOrEmpty(category))
+                    formData.Add(new("category", category));
+                if (!string.IsNullOrEmpty(tags))
+                    formData.Add(new("tags", tags));
 
-                    addResponse = await httpClient.PostAsync($"{baseUrl}/api/v2/torrents/add", multipart, ct);
-                }
-                else
-                {
-                    var formData = new List<KeyValuePair<string, string>>
-                    {
-                        new("urls", torrentUrl),
-                        new("savepath", savePath)
-                    };
-
-                    if (!string.IsNullOrEmpty(category))
-                        formData.Add(new("category", category));
-                    if (!string.IsNullOrEmpty(tags))
-                        formData.Add(new("tags", tags));
-
-                    using var addData = new FormUrlEncodedContent(formData);
-                    addResponse = await httpClient.PostAsync($"{baseUrl}/api/v2/torrents/add", addData, ct);
-                }
-
-                using (addResponse)
-                {
-                    if (!addResponse.IsSuccessStatusCode)
-                    {
-                        var responseContent = await addResponse.Content.ReadAsStringAsync(ct);
-                        var redacted = LogRedaction.RedactText(responseContent, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { client.Password ?? string.Empty }));
-                        _logger.LogError("Failed to add torrent to qBittorrent. Status: {Status}, Response: {Response}", addResponse.StatusCode, redacted);
-                        throw new Exception($"Failed to add torrent to qBittorrent: {addResponse.StatusCode} - {redacted}");
-                    }
-                }
-                _logger.LogInformation("Successfully sent torrent to qBittorrent");
-
-                await Task.Delay(1000, ct);
-
-                string? detectedHash = null;
-
-                // Request only necessary fields (hash and name) to reduce response size
-                using var afterResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/info?fields=hash,name", ct);
-                if (afterResp.IsSuccessStatusCode)
-                {
-                    var afterJson = await afterResp.Content.ReadAsStringAsync(ct);
-                    if (!string.IsNullOrWhiteSpace(afterJson))
-                    {
-                        try
-                        {
-                            var afterList = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(afterJson);
-                            if (afterList != null)
-                            {
-                                foreach (var hash in afterList
-                                    .Where(t => t.TryGetValue("hash", out _))
-                                    .Select(t => t["hash"].GetString() ?? string.Empty)
-                                    .Where(h => !existingHashes.Contains(h)))
-                                {
-                                    _logger.LogInformation("Detected new qBittorrent torrent: hash={Hash}", hash);
-                                    detectedHash = hash;
-                                    break;
-                                }
-                            }
-                        }
-                        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                        {
-                            _logger.LogDebug(ex, "Failed to parse qBittorrent 'after' torrents list (non-fatal)");
-                        }
-                    }
-                }
-
-                if (string.IsNullOrEmpty(detectedHash) && !string.IsNullOrEmpty(extractedHash))
-                {
-                    _logger.LogInformation("Using extracted magnet hash as fallback: {Hash}", extractedHash);
-                    detectedHash = extractedHash;
-                }
-
-                // Inject tracker URLs via addTrackers API as a fallback to ensure the tracker
-                // is registered even if qBittorrent didn't parse it from the torrent file.
-                if (!string.IsNullOrEmpty(detectedHash) && torrentFileData != null && torrentFileData.Length > 0)
-                {
-                    try
-                    {
-                        var announces = MyAnonamouseHelper.ExtractAnnounceUrls(torrentFileData);
-                        // Filter to only actual tracker announce URLs — exclude file/web-seed URLs
-                        var trackerAnnounces = announces?.Where(a =>
-                            a.Contains("/announce", StringComparison.OrdinalIgnoreCase) ||
-                            a.Contains("/tracker", StringComparison.OrdinalIgnoreCase)).ToList();
-                        if (trackerAnnounces != null && trackerAnnounces.Count > 0)
-                        {
-                            var trackerUrls = string.Join("\n", trackerAnnounces.Distinct());
-                            using var addTrackersData = new FormUrlEncodedContent(new[]
-                            {
-                                new KeyValuePair<string, string>("hash", detectedHash),
-                                new KeyValuePair<string, string>("urls", trackerUrls)
-                            });
-                            using var trackersResp = await httpClient.PostAsync($"{baseUrl}/api/v2/torrents/addTrackers", addTrackersData, ct);
-                            if (trackersResp.IsSuccessStatusCode)
-                                _logger.LogInformation("Injected {Count} tracker(s) for torrent {Hash} via addTrackers API", trackerAnnounces.Count, detectedHash);
-                            else
-                                _logger.LogDebug("addTrackers API returned {Status} for torrent {Hash} (non-fatal)", trackersResp.StatusCode, detectedHash);
-                        }
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                    {
-                        _logger.LogDebug(ex, "Non-fatal failure injecting trackers via addTrackers API");
-                    }
-                }
-
-                if (string.IsNullOrEmpty(detectedHash))
-                    _logger.LogWarning("Unable to determine torrent hash after adding to qBittorrent for client {ClientId}", LogRedaction.SanitizeText(client.Id));
-
-                return detectedHash;
+                using var addData = new FormUrlEncodedContent(formData);
+                addResponse = await httpClient.PostAsync($"{baseUrl}/api/v2/torrents/add", addData, ct);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+
+            if (!addResponse.IsSuccessStatusCode)
             {
-                _logger.LogError(ex, "qBittorrent AddAsync failed for client {ClientId}", LogRedaction.SanitizeText(client.Id));
-                throw;
+                var responseContent = await addResponse.Content.ReadAsStringAsync(ct);
+                var redacted = LogRedaction.RedactText(responseContent, LogRedaction.GetSensitiveValuesFromEnvironment().Concat([client.Password ?? string.Empty]));
+
+                _logger.LogError($"Failed to add torrent to qBittorrent. Status: {addResponse.StatusCode}, Response: {redacted}");
+                return null;
             }
+
+            _logger.LogInformation("Successfully sent torrent to qBittorrent");
+
+            await Task.Delay(1000, ct);
+
+            // Inject tracker URLs via addTrackers API as a fallback to ensure the tracker
+            // is registered even if qBittorrent didn't parse it from the torrent file.
+            if (torrentFileData != null)
+            {
+                try
+                {
+                    var announces = MyAnonamouseHelper.ExtractAnnounceUrls(torrentFileData);
+                    // Filter to only actual tracker announce URLs — exclude file/web-seed URLs
+                    var trackerAnnounces = announces?.Where(a =>
+                        a.Contains("/announce", StringComparison.OrdinalIgnoreCase) ||
+                        a.Contains("/tracker", StringComparison.OrdinalIgnoreCase)).ToList();
+                    if (trackerAnnounces != null && trackerAnnounces.Count > 0)
+                    {
+                        var trackerUrls = string.Join("\n", trackerAnnounces.Distinct());
+                        using var addTrackersData = new FormUrlEncodedContent(new[]
+                        {
+                            new KeyValuePair<string, string>("hash", hash),
+                            new KeyValuePair<string, string>("urls", trackerUrls)
+                        });
+                        using var trackersResp = await httpClient.PostAsync($"{baseUrl}/api/v2/torrents/addTrackers", addTrackersData, ct);
+                        if (trackersResp.IsSuccessStatusCode)
+                            _logger.LogInformation($"Injected {trackerAnnounces.Count} tracker(s) for torrent {hash} via addTrackers API");
+                        else
+                            _logger.LogDebug($"addTrackers API returned {trackersResp.StatusCode} for torrent {hash} (non-fatal)");
+                    }
+                }
+                catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
+                {
+                    _logger.LogDebug(exception, "Non-fatal failure injecting trackers via addTrackers API");
+                }
+            }
+
+            return hash;
         }
 
         private static string? TryExtractMagnetHash(string? torrentUrl)
@@ -523,24 +441,6 @@ namespace Listenarr.Infrastructure.Adapters
             }
 
             return torrentUri!.ToString();
-        }
-
-        private async Task<TorrentDownloadResult> TryPredownloadTorrentFileAsync(string? torrentUrl, string? title, CancellationToken ct)
-        {
-            if (string.IsNullOrEmpty(torrentUrl))
-            {
-                return TorrentDownloadResult.Empty;
-            }
-
-            try
-            {
-                return await _torrentFileDownloader.DownloadAsync(torrentUrl, ct);
-            }
-            catch (Exception ex) when (ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogWarning(ex, "Failed to pre-download torrent file for '{Title}', falling back to URL", LogRedaction.SanitizeText(title));
-                return TorrentDownloadResult.Empty;
-            }
         }
 
         /// <summary>
@@ -979,7 +879,7 @@ namespace Listenarr.Infrastructure.Adapters
 
                     items.Add(new DownloadClientItem
                     {
-                        DownloadId = hash.ToUpperInvariant(), // ✅ Uppercase SHA1 hash (standard format)
+                        DownloadId = hash,
                         Title = name,
                         Category = category,
                         Status = status,

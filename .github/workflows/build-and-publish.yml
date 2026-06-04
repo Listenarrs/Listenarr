@@ -98,6 +98,7 @@ jobs:
     env:
       API_PROJECT: listenarr.api/Listenarr.Api.csproj
       API_OUTPUT: listenarr.api/publish
+      DOCKER_OUTPUT: listenarr.api/docker-publish
 
     steps:
       # ── Checkout ─────────────────────────────────────────────────────────────
@@ -255,45 +256,120 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
 
-      - name: Publish API for runtime image
-        run: dotnet publish ${{ env.API_PROJECT }} -c Release -o ${{ env.API_OUTPUT }}
+      - name: Publish API for runtime images
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "${{ env.DOCKER_OUTPUT }}"
+          dotnet publish ${{ env.API_PROJECT }} -c Release -r linux-x64 --self-contained false /p:UseAppHost=false -o "${{ env.DOCKER_OUTPUT }}/amd64"
+          dotnet publish ${{ env.API_PROJECT }} -c Release -r linux-arm64 --self-contained false /p:UseAppHost=false -o "${{ env.DOCKER_OUTPUT }}/arm64"
 
       - name: Show publish contents (sanity check)
+        shell: bash
         run: |
-          echo "Listing publish folder contents"
-          ls -la listenarr.api/publish || true
-          echo "Listing publish/tools contents"
-          ls -la listenarr.api/publish/tools || echo "publish/tools missing"
+          set -euo pipefail
+          for arch in amd64 arm64; do
+            echo "Listing Docker publish folder contents for ${arch}"
+            ls -la "${{ env.DOCKER_OUTPUT }}/${arch}"
+            echo "Listing Docker publish/tools contents for ${arch}"
+            ls -la "${{ env.DOCKER_OUTPUT }}/${arch}/tools" || echo "docker-publish/${arch}/tools missing"
+          done
 
       - name: Copy tools into publish and verify
+        shell: bash
         run: |
-          echo "Ensuring tools are present in listenarr.api/publish"
-          if [ ! -d "listenarr.api/publish/tools" ]; then
-            echo "publish/tools missing — copying from tools"
-            cp -r tools listenarr.api/publish/ || true
-          else
-            echo "publish/tools already present"
-          fi
-          if [ ! -d "listenarr.api/publish/tools" ]; then
-            echo "ERROR: publish/tools missing after copy"
-            ls -la listenarr.api/publish || true
-            exit 1
-          fi
-          ls -la listenarr.api/publish/tools
+          set -euo pipefail
+          for arch in amd64 arm64; do
+            echo "Ensuring tools are present in ${{ env.DOCKER_OUTPUT }}/${arch}"
+            if [ ! -d "${{ env.DOCKER_OUTPUT }}/${arch}/tools/discord-bot" ]; then
+              echo "docker-publish/${arch}/tools missing; copying from tools"
+              mkdir -p "${{ env.DOCKER_OUTPUT }}/${arch}/tools"
+              cp -r tools/discord-bot "${{ env.DOCKER_OUTPUT }}/${arch}/tools/"
+            else
+              echo "docker-publish/${arch}/tools/discord-bot already present"
+            fi
+            rm -rf "${{ env.DOCKER_OUTPUT }}/${arch}/tools/discord-bot/node_modules"
+            if [ ! -f "${{ env.DOCKER_OUTPUT }}/${arch}/tools/discord-bot/package-lock.json" ]; then
+              echo "ERROR: publish/tools/discord-bot/package-lock.json missing for ${arch}"
+              ls -la "${{ env.DOCKER_OUTPUT }}/${arch}/tools" || true
+              exit 1
+            fi
+            if [ -d "${{ env.DOCKER_OUTPUT }}/${arch}/tools/discord-bot/node_modules" ]; then
+              echo "ERROR: publish/tools/discord-bot/node_modules should not be in Docker publish output for ${arch}"
+              exit 1
+            fi
+            ls -la "${{ env.DOCKER_OUTPUT }}/${arch}/tools"
+          done
 
       - name: Fail if tools missing (quick fail)
+        shell: bash
         run: |
-          if [ ! -d "listenarr.api/publish/tools" ]; then
-            echo "ERROR: listenarr.api/publish/tools is missing. Aborting to avoid pushing a broken image."
-            exit 1
-          fi
-          echo "publish/tools present"
+          set -euo pipefail
+          for arch in amd64 arm64; do
+            if [ ! -d "${{ env.DOCKER_OUTPUT }}/${arch}/tools/discord-bot" ]; then
+              echo "ERROR: ${{ env.DOCKER_OUTPUT }}/${arch}/tools/discord-bot is missing. Aborting to avoid pushing a broken image."
+              exit 1
+            fi
+            echo "docker-publish/${arch}/tools/discord-bot present"
+          done
 
-      - name: Upload publish folder (debug artifact)
+      - name: Fail if release artifacts are in Docker publish output
+        shell: bash
+        run: |
+          set -euo pipefail
+          for artifact_dir in linux-x64 win-x64 osx-x64 publish; do
+            if [ -e "${{ env.DOCKER_OUTPUT }}/${artifact_dir}" ]; then
+              echo "ERROR: ${{ env.DOCKER_OUTPUT }}/${artifact_dir} must not be copied into the Docker image."
+              exit 1
+            fi
+          done
+          for arch in amd64 arm64; do
+            for artifact_dir in linux-x64 win-x64 osx-x64 publish; do
+              if [ -e "${{ env.DOCKER_OUTPUT }}/${arch}/${artifact_dir}" ]; then
+                echo "ERROR: ${{ env.DOCKER_OUTPUT }}/${arch}/${artifact_dir} must not be copied into the Docker image."
+                exit 1
+              fi
+            done
+          done
+          echo "Docker publish output does not contain release artifact directories."
+
+      - name: Fail if frontend debug output is in Docker publish output
+        shell: bash
+        run: |
+          set -euo pipefail
+          for arch in amd64 arm64; do
+            wwwroot="${{ env.DOCKER_OUTPUT }}/${arch}/wwwroot"
+            if [ ! -d "$wwwroot" ]; then
+              echo "ERROR: ${wwwroot} is missing."
+              exit 1
+            fi
+            if find "$wwwroot" -type f \( -name "*.map" -o -name "stats.html" \) | grep -q .; then
+              echo "ERROR: frontend sourcemaps or stats.html were published for ${arch}."
+              find "$wwwroot" -type f \( -name "*.map" -o -name "stats.html" \)
+              exit 1
+            fi
+            if [ -e "$wwwroot/large-logo.png" ]; then
+              echo "ERROR: large-logo.png should not be included in the runtime image."
+              exit 1
+            fi
+            placeholder="$wwwroot/placeholder.svg"
+            if [ ! -f "$placeholder" ]; then
+              echo "ERROR: placeholder.svg is missing for ${arch}."
+              exit 1
+            fi
+            placeholder_size="$(wc -c < "$placeholder" | tr -d '[:space:]')"
+            if [ "$placeholder_size" -gt 100000 ]; then
+              echo "ERROR: placeholder.svg is ${placeholder_size} bytes for ${arch}; expected a compact placeholder."
+              exit 1
+            fi
+          done
+          echo "Docker publish output is free of frontend debug files and bulky duplicate assets."
+
+      - name: Upload Docker publish folder (debug artifact)
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.channel }}-listenarr-publish-folder
-          path: listenarr.api/publish
+          name: ${{ inputs.channel }}-listenarr-docker-publish-folder
+          path: ${{ env.DOCKER_OUTPUT }}
 
       - name: Split Docker tags by registry
         id: docker_tags

@@ -860,31 +860,49 @@ const saveSettings = async () => {
         startupConfig.value = newCfg
         startupConfigSaved = true
         toast.success('Startup config', 'Startup configuration saved (config.json)')
-      } catch {
-        // If server can't persist startup config (e.g., permission denied), offer a fallback download of the config JSON
-        toast.info(
-          'Startup config',
-          'Could not persist startup config to disk. Preparing downloadable startup config so you can save it manually.',
-        )
-        try {
-          const blob = new Blob([JSON.stringify(newCfg, null, 2)], { type: 'application/json' })
-          const url = URL.createObjectURL(blob)
-          const a = document.createElement('a')
-          a.href = url
-          a.download = 'config.json'
-          document.body.appendChild(a)
-          a.click()
-          a.remove()
-          URL.revokeObjectURL(url)
+      } catch (err) {
+        // Distinguish a server *validation refusal* (e.g. attempting to enable
+        // the login screen when no admin user exists — backend returns 400
+        // with an actionable message) from a *disk-persistence failure* (e.g.
+        // permission denied writing config.json — backend wants to save but
+        // can't). For validation refusals we must NOT offer the download
+        // fallback: letting the user manually save a server-rejected config
+        // would defeat the backend guard entirely (see PR #623). For genuine
+        // persistence failures, the download fallback is still the right
+        // escape hatch so the operator can save the file by hand.
+        const status = (err as { status?: number } | null)?.status
+        const isValidationRefusal = typeof status === 'number' && status >= 400 && status < 500
+        if (isValidationRefusal) {
+          const message =
+            err instanceof Error && err.message
+              ? err.message
+              : 'Startup configuration refused by the server.'
+          toast.error('Startup config refused', message)
+        } else {
           toast.info(
             'Startup config',
-            'Download started. Save the file to the server config directory to persist the change.',
+            'Could not persist startup config to disk. Preparing downloadable startup config so you can save it manually.',
           )
-        } catch {
-          toast.info(
-            'Startup config',
-            'Also failed to prepare a download. Edit config/config.json on the host to make the change persistent.',
-          )
+          try {
+            const blob = new Blob([JSON.stringify(newCfg, null, 2)], { type: 'application/json' })
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            a.href = url
+            a.download = 'config.json'
+            document.body.appendChild(a)
+            a.click()
+            a.remove()
+            URL.revokeObjectURL(url)
+            toast.info(
+              'Startup config',
+              'Download started. Save the file to the server config directory to persist the change.',
+            )
+          } catch {
+            toast.info(
+              'Startup config',
+              'Also failed to prepare a download. Edit config/config.json on the host to make the change persistent.',
+            )
+          }
         }
       }
       // If authentication has just been enabled and persistence succeeded, ensure we

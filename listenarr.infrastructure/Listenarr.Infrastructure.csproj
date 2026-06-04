@@ -23,6 +23,7 @@
     <PackageReference Include="Serilog.Sinks.File" />
     <PackageReference Include="Microsoft.Extensions.Http.Polly" />
     <PackageReference Include="Polly" />
+    <PackageReference Include="BencodeNET" />
   </ItemGroup>
 
   <ItemGroup>

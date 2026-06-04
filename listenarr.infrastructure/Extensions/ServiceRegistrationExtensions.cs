@@ -31,6 +31,7 @@ using Polly.Extensions.Http;
 using Microsoft.Extensions.Configuration;
 using Polly;
 using Microsoft.Extensions.Options;
+using Listenarr.Infrastructure.Torrents;
 
 namespace Listenarr.Infrastructure.Extensions
 {
@@ -87,7 +88,8 @@ namespace Listenarr.Infrastructure.Extensions
                 .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
                 {
                     AutomaticDecompression = DecompressionMethods.All,
-                    UseCookies = false
+                    CookieContainer = new CookieContainer(),
+                    UseCookies = true
                 })
                 .SetHandlerLifetime(TimeSpan.FromMinutes(5))
                 .AddPolicyHandler(circuitBreakerPolicy)

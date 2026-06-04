@@ -267,7 +267,17 @@ namespace Listenarr.Application.Common
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                 {
-                    logger.LogError(ex, "Failed to create or update admin user '{Username}' from application settings. Settings will still be saved.", settings.AdminUsername);
+                    // Admin provisioning failed after credentials were supplied. Surface
+                    // the failure to the caller — SettingsView relies on this throwing
+                    // before it persists AuthenticationRequired=true on its second
+                    // request, otherwise the user can be locked out of an instance
+                    // that has no working admin (password-policy rejection, repo I/O
+                    // error, race against a concurrent admin write, etc.). The
+                    // settings row above was already saved, which is intentional:
+                    // non-admin changes (notification triggers, webhooks, etc.) are
+                    // worth preserving even when credential provisioning fails.
+                    logger.LogError(ex, "Failed to create or update admin user '{Username}' from application settings; surfacing failure to caller", settings.AdminUsername);
+                    throw;
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
@@ -404,7 +414,43 @@ namespace Listenarr.Application.Common
         {
             try
             {
-                await startupConfigService.SaveAsync(config);
+                // Defense-in-depth backstop against the auth-enable lockout.
+                // SaveApplicationSettingsAsync's throw-on-failure (above) only
+                // covers the case where admin credentials were *supplied* but
+                // provisioning failed. The settings DTO clears blank fields
+                // before save, so a user who flips the login-screen toggle
+                // with empty (or username-only) credentials silently skips
+                // provisioning entirely — and without this check would still
+                // reach the startup-config write below, locking themselves
+                // out of an instance that has no working admin to log in as.
+                //
+                // Only enforced on the *transition* from auth-disabled to
+                // auth-enabled. Once auth is already on, the admin must
+                // already exist (or no one could have toggled it on through
+                // this same check), and every subsequent unrelated save
+                // — API key regenerations, port changes, log-level tweaks —
+                // shouldn't have to re-prove the admin row is still there.
+                // Demotion or deletion of the last admin row while auth is
+                // enabled is a separate concern and belongs in the user
+                // management path, not here.
+                if (config != null && config.IsAuthenticationEnabled())
+                {
+                    var currentConfig = startupConfigService.GetConfig();
+                    var wasAuthEnabled = currentConfig?.IsAuthenticationEnabled() == true;
+                    if (!wasAuthEnabled)
+                    {
+                        var admins = await userService.GetAdminUsersAsync();
+                        if (admins == null || admins.Count == 0)
+                        {
+                            throw new InvalidOperationException(
+                                "Cannot enable the login screen: no admin user exists. " +
+                                "Set an admin username and password in the same save to " +
+                                "create one, or leave the login screen disabled.");
+                        }
+                    }
+                }
+
+                await startupConfigService.SaveAsync(config!);
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
