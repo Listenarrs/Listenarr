@@ -223,7 +223,9 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
 
             return await _db.AuthorCacheEntries
                 .AsNoTracking()
-                .OrderByDescending(entry => entry.LastFetchedAt.GetValueOrDefault(entry.UpdatedAt))
+                // COALESCE form — SQLite EF can't translate Nullable.GetValueOrDefault (it throws,
+                // and the caller's best-effort catch then silently disables this cache).
+                .OrderByDescending(entry => entry.LastFetchedAt ?? entry.UpdatedAt)
                 .FirstOrDefaultAsync(entry =>
                     entry.AuthorNameNormalized == normalizedName &&
                     entry.Region == normalizedRegion);
@@ -241,7 +243,9 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
 
             return await _db.AuthorCacheEntries
                 .AsNoTracking()
-                .OrderByDescending(entry => entry.LastFetchedAt.GetValueOrDefault(entry.UpdatedAt))
+                // COALESCE form — SQLite EF can't translate Nullable.GetValueOrDefault (it throws,
+                // and the caller's best-effort catch then silently disables this cache).
+                .OrderByDescending(entry => entry.LastFetchedAt ?? entry.UpdatedAt)
                 .FirstOrDefaultAsync(entry =>
                     entry.AuthorAsin != null &&
                     entry.AuthorAsin.ToUpper() == normalizedAsin &&
@@ -326,7 +330,9 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
 
             return await _db.SeriesCacheEntries
                 .AsNoTracking()
-                .OrderByDescending(entry => entry.LastFetchedAt.GetValueOrDefault(entry.UpdatedAt))
+                // COALESCE form — SQLite EF can't translate Nullable.GetValueOrDefault (it throws,
+                // and the caller's best-effort catch then silently disables this cache).
+                .OrderByDescending(entry => entry.LastFetchedAt ?? entry.UpdatedAt)
                 .FirstOrDefaultAsync(entry =>
                     entry.SeriesNameNormalized == normalizedName &&
                     entry.Region == normalizedRegion);
@@ -344,7 +350,9 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
 
             return await _db.SeriesCacheEntries
                 .AsNoTracking()
-                .OrderByDescending(entry => entry.LastFetchedAt.GetValueOrDefault(entry.UpdatedAt))
+                // COALESCE form — SQLite EF can't translate Nullable.GetValueOrDefault (it throws,
+                // and the caller's best-effort catch then silently disables this cache).
+                .OrderByDescending(entry => entry.LastFetchedAt ?? entry.UpdatedAt)
                 .FirstOrDefaultAsync(entry =>
                     entry.SeriesAsin != null &&
                     entry.SeriesAsin.ToUpper() == normalizedAsin &&
