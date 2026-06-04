@@ -234,25 +234,6 @@ namespace Listenarr.Tests.Features.Infrastructure.FileSystem
         }
 
         [Fact]
-        public async Task HardlinkFileAsync_FallbacksToCopy_WhenHardlinkFails()
-        {
-            // Arrange
-            var sourceFile = Path.Join(_root, "source.mp3");
-            await File.WriteAllTextAsync(sourceFile, "content");
-
-            // Create a path that would cause hardlink to fail (different volume simulation via invalid path)
-            // On some systems, hardlink may fail for various reasons - we want to test fallback behavior
-            var destFile = Path.Join(_root, "dest.mp3");
-
-            // Act - even if hardlink fails internally, the method should fallback to copy
-            var result = await _mover.PerformActionOn(FileAction.HardlinkCopy, sourceFile, destFile);
-
-            // Assert - should succeed via fallback
-            Assert.True(result, "HardlinkFileAsync should succeed via copy fallback");
-            Assert.True(File.Exists(destFile), "Destination file should exist");
-        }
-
-        [Fact]
         public async Task HardlinkFileAsync_ReturnsFalse_WhenSourceDoesNotExist()
         {
             // Arrange

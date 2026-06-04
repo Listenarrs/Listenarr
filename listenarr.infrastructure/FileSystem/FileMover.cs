@@ -47,6 +47,11 @@ namespace Listenarr.Infrastructure.FileSystem
 
         public async Task<bool> MoveDirectoryAsync(string sourceDir, string destDir)
         {
+            if (FileUtils.IsSameDirectory(destDir, sourceDir))
+            {
+                return true;
+            }
+
             if (FileUtils.IsPathInsideOf(destDir, sourceDir))
             {
                 logger.LogError($"Cannot move a directory inside itslef from {sourceDir} to {destDir}");

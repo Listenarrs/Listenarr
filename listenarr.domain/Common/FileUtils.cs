@@ -377,25 +377,33 @@ namespace Listenarr.Domain.Common
         /// </summary>
         /// <param name="childPath">Path to test</param>
         /// <param name="parentPath">Supposed parent path</param>
-        /// <returns>True when childPath is inside parentPath</returns>
+        /// <returns>True when childPath is inside parentPath or equal to it</returns>
         public static bool IsPathInsideOf(string childPath, string parentPath)
         {
-            try
-            {
-                if (string.IsNullOrWhiteSpace(childPath) || string.IsNullOrWhiteSpace(parentPath))
-                    return false;
+            parentPath = NormalizeStoredPath(parentPath);
+            childPath = NormalizeStoredPath(childPath);
 
-                var normalizedChild = NormalizeStoredPath(childPath);
-                var normalizedRoot = NormalizeStoredPath(parentPath)
-                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-                    + Path.DirectorySeparatorChar;
+            var relative = Path.GetRelativePath(parentPath, childPath);
 
-                return normalizedChild.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase);
-            }
-            catch (Exception caughtEx_3) when (caughtEx_3 is not OperationCanceledException && caughtEx_3 is not OutOfMemoryException && caughtEx_3 is not StackOverflowException)
-            {
-                return false;
-            }
+            return !relative.Equals(".") && !relative.StartsWith("..");
+        }
+
+        /// <summary>
+        /// Checks given directories are the same or not
+        /// </summary>
+        /// <param name="a"></param>
+        /// <param name="b"></param>
+        /// <returns>true when they are the same directory</returns>
+        public static bool IsSameDirectory(string a, string b)
+        {
+            a = EnsureTrailingSeparator(NormalizeStoredPath(a));
+            b = EnsureTrailingSeparator(NormalizeStoredPath(b));
+
+            StringComparison comparison = OperatingSystem.IsLinux()
+                ? StringComparison.Ordinal
+                : StringComparison.OrdinalIgnoreCase;
+
+            return string.Equals(a, b, comparison);
         }
 
         public static string? GetCommonDirectory(IEnumerable<string> paths)
