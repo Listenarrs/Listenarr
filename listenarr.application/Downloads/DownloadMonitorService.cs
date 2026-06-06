@@ -92,21 +92,53 @@ namespace Listenarr.Application.Downloads
             }
             logger.LogInformation($"DownloadMonitorService polling interval set to {_pollingInterval}s");
 
+            await RunMonitorLoopAsync(cancellationToken);
+
+            logger.LogInformation("Download Monitor Service stopping");
+        }
+
+        /// <summary>
+        /// The poll loop. Each cycle is isolated: a non-cancellation failure (e.g. a transient
+        /// SQLite "database is locked") is logged and the loop continues, matching the sibling
+        /// background services (QueueMonitorService, MovedDownloadProcessor, AutomaticSearchService).
+        /// This must not let an exception escape - an unhandled exception out of a BackgroundService's
+        /// ExecuteAsync trips BackgroundServiceExceptionBehavior.StopHost and restarts the whole app
+        /// (previously this loop caught only OperationCanceledException, so a transient DB lock
+        /// crash-looped the container every poll cycle).
+        /// </summary>
+        internal async Task RunMonitorLoopAsync(CancellationToken cancellationToken)
+        {
             while (!cancellationToken.IsCancellationRequested)
             {
                 try
                 {
                     await MonitorDownloadsAsync(cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    // Cancellation requested - exit gracefully
+                    break;
+                }
+                catch (OperationCanceledException ex)
+                {
+                    // A transient timeout/cancellation within a cycle - log and keep monitoring
+                    logger.LogWarning(ex, "Download monitor cycle canceled/timed out; continuing");
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                {
+                    logger.LogError(ex, "Error in Download Monitor Service");
+                }
 
+                // Wait before next poll
+                try
+                {
                     await Task.Delay(TimeSpan.FromSeconds(_pollingInterval), cancellationToken);
                 }
                 catch (OperationCanceledException)
                 {
-                    // Those exceptions are expected, service should stop gracefully
+                    break;
                 }
             }
-
-            logger.LogInformation("Download Monitor Service stopping");
         }
 
         internal async Task MonitorDownloadsAsync(CancellationToken cancellationToken)
