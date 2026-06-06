@@ -15,8 +15,8 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { mount, type VueWrapper } from '@vue/test-utils'
 import { computed, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 
@@ -63,13 +63,25 @@ vi.mock('@/services/api', () => ({
   },
 }))
 
+vi.mock('@/router', () => ({
+  preloadRoute: vi.fn(),
+}))
+
 import { createRouter, createMemoryHistory } from 'vue-router'
 
 describe('App.vue activity badge', () => {
+  let wrapper: VueWrapper | undefined
+
   beforeEach(() => {
     // reset mocks between tests
     vi.resetModules()
     setActivePinia(createPinia())
+  })
+
+  afterEach(() => {
+    wrapper?.unmount()
+    wrapper = undefined
+    vi.clearAllMocks()
   })
 
   // Ensure localStorage APIs exist in the test environment for App.vue session debug helpers
@@ -131,7 +143,7 @@ describe('App.vue activity badge', () => {
     await router.push('/')
     await router.isReady().catch(() => {})
 
-    const wrapper = mount(AppComponent, {
+    wrapper = mount(AppComponent, {
       global: { stubs: ['RouterLink', 'RouterView'], plugins: [createPinia(), router] },
     })
 
@@ -181,7 +193,7 @@ describe('App.vue activity badge', () => {
     await router.push('/')
     await router.isReady().catch(() => {})
 
-    const wrapper = mount(AppComponent, {
+    wrapper = mount(AppComponent, {
       global: { stubs: ['RouterLink', 'RouterView'], plugins: [createPinia(), router] },
     })
 
@@ -245,7 +257,7 @@ describe('App.vue activity badge', () => {
     await router.push('/')
     await router.isReady().catch(() => {})
 
-    const wrapper = mount(AppComponent, {
+    wrapper = mount(AppComponent, {
       global: { stubs: ['RouterLink', 'RouterView'], plugins: [createPinia(), router] },
     })
 
@@ -282,7 +294,7 @@ describe('App.vue activity badge', () => {
     await router.push('/')
     await router.isReady().catch(() => {})
 
-    const wrapper = mount(AppComponent, {
+    wrapper = mount(AppComponent, {
       global: { stubs: ['RouterLink', 'RouterView'], plugins: [createPinia(), router] },
     })
 
@@ -337,7 +349,7 @@ describe('App.vue activity badge', () => {
     await router.push('/')
     await router.isReady().catch(() => {})
 
-    const wrapper = mount(AppComponent, {
+    wrapper = mount(AppComponent, {
       global: { stubs: ['RouterLink', 'RouterView'], plugins: [createPinia(), router] },
     })
 
