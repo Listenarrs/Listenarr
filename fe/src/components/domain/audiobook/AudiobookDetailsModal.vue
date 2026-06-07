@@ -129,15 +129,12 @@
               </div>
             </div>
 
-            <div v-if="book.series || book.genres?.length" class="detail-section">
+            <div v-if="formatSeriesMemberships(book) || book.genres?.length" class="detail-section">
               <h4>Series & Genre Information</h4>
               <div class="detail-grid">
-                <div v-if="book.series" class="detail-item">
+                <div v-if="formatSeriesMemberships(book)" class="detail-item">
                   <span class="label">Series:</span>
-                  <span class="value"
-                    >{{ book.series
-                    }}<span v-if="book.seriesNumber"> #{{ book.seriesNumber }}</span></span
-                  >
+                  <span class="value">{{ formatSeriesMemberships(book) }}</span>
                 </div>
                 <div v-if="book.genres?.length" class="detail-item">
                   <span class="label">Genres:</span>
@@ -193,6 +190,7 @@ import { stripHtmlAndNormalize } from '@/utils/textUtils'
 import { useProtectedImages } from '@/composables/useProtectedImages'
 import { Modal, ModalBody, ModalHeader } from '@/components/feedback'
 import { formatDate, formatRuntime, capitalizeFirst } from '@/utils/searchResultFormatting'
+import { formatSeriesMemberships } from '@/utils/seriesUtils'
 
 interface Props {
   visible: boolean

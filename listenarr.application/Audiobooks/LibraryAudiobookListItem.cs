@@ -28,6 +28,7 @@ namespace Listenarr.Application.Audiobooks
         public string? PublishedDate { get; set; }
         public string? Series { get; set; }
         public string? SeriesNumber { get; set; }
+        public AudiobookSeriesMembershipDto[]? SeriesMemberships { get; set; }
         public string[]? Genres { get; set; }
         public string? Asin { get; set; }
         public string? OpenLibraryId { get; set; }

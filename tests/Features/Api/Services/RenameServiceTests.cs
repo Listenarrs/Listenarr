@@ -18,6 +18,7 @@
 using Listenarr.Application.Audiobooks;
 using Listenarr.Application.Common;
 using Listenarr.Application.Interfaces;
+using Listenarr.Domain.Common;
 using Listenarr.Domain.Models;
 using Listenarr.Domain.Models.Configurations;
 using Listenarr.Domain.Models.Enumerations;
@@ -453,6 +454,48 @@ namespace Listenarr.Tests.Features.Api.Services
             Assert.Equal(NormalizePath(targetFolder), NormalizePath(saved.BasePath));
             Assert.Equal(NormalizePath(targetPath), NormalizePath(saved.FilePath));
             Assert.Equal(NormalizePath(targetPath), NormalizePath(saved.Files!.Single().Path));
+        }
+
+        [Fact]
+        public async Task PreviewRename_SeriesToken_UsesChosenPrimarySeries()
+        {
+            // Regression for #658: {Series} must fold under the user-chosen primary series,
+            // even when it is not the metadata provider's default (first) series.
+            var settings = new ApplicationSettings
+            {
+                OutputPath = _tempRoot,
+                FolderNamingPattern = "{Author}/{Series}/{Title}",
+                FileNamingPattern = "{Title}"
+            };
+
+            var (service, db, _) = BuildService(settings);
+            var audiobook = new Audiobook
+            {
+                Id = 5,
+                Title = "Patriot Games",
+                Authors = new List<string> { "Tom Clancy" },
+                BasePath = Path.Join(_tempRoot, "Wrong", "Folder"),
+                SeriesMemberships = new List<AudiobookSeriesMembership>
+                {
+                    new() { SeriesName = "Publication Order", SeriesNumber = "1", IsPrimary = false, SortOrder = 0 },
+                    new() { SeriesName = "Chronological Order", SeriesNumber = "3", IsPrimary = true, SortOrder = 1 },
+                },
+                Files = new List<AudiobookFile>
+                {
+                    new() { Id = 51, AudiobookId = 5, Path = Path.Join(_tempRoot, "Wrong", "Folder", "old.m4b"), Format = "m4b" }
+                }
+            };
+            // Denormalize Series/SeriesNumber from the chosen primary membership, as the app does on save.
+            AudiobookSeriesMembershipHelper.ApplyPrimarySeriesFields(audiobook);
+            db.Audiobooks.Add(audiobook);
+            await db.SaveChangesAsync();
+
+            var previews = await service.PreviewRenameAsync(new[] { 5 });
+
+            var preview = Assert.Single(previews);
+            Assert.True(preview.HasChanges);
+            Assert.Contains("Chronological Order", preview.NewFolderPath);
+            Assert.DoesNotContain("Publication Order", preview.NewFolderPath);
         }
 
         private (RenameService Service, ListenArrDbContext Db, string DbName) BuildService(

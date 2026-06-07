@@ -23,6 +23,7 @@ namespace Listenarr.Application.Interfaces.Repositories
     {
         Task<List<Audiobook>> GetAllAsync();
         Task<List<Audiobook>> GetLibraryAsync();
+        Task<Dictionary<int, List<AudiobookSeriesMembership>>> GetSeriesMembershipsByAudiobookIdsAsync(CancellationToken ct = default);
         Task<List<Audiobook>> GetByIdsWithFilesAsync(IEnumerable<int> ids, CancellationToken ct = default);
         Task<List<Audiobook>> GetMonitoredAudiobooksForSearchAsync(DateTime cutoff, CancellationToken ct = default);
         Task NormalizeJsonColumnsAsync(CancellationToken ct = default);

@@ -104,6 +104,51 @@ namespace Listenarr.Domain.Common
             ApplyPrimarySeriesFields(audiobook);
         }
 
+        /// <summary>
+        /// Applies <paramref name="memberships"/> to the audiobook while preserving the user's
+        /// previously-chosen primary series. Used by metadata rescan so a refresh does not silently
+        /// revert the active series back to the metadata provider's default. If the incoming data no
+        /// longer contains the previously-primary series, the provider's default primary is kept.
+        /// </summary>
+        public static void ApplyToAudiobookPreservingPrimary(
+            Audiobook audiobook,
+            IEnumerable<AudiobookSeriesMembership>? memberships,
+            string? legacySeries = null,
+            string? legacySeriesNumber = null,
+            string? legacySeriesAsin = null)
+        {
+            // Capture the existing primary BEFORE replacing memberships.
+            var existingPrimary = GetPrimaryMembership(audiobook.SeriesMemberships);
+            var existingPrimaryName = NormalizeText(existingPrimary?.SeriesName);
+            var existingPrimaryAsin = NormalizeText(existingPrimary?.SeriesAsin);
+
+            var normalized = Normalize(memberships, legacySeries, legacySeriesNumber, legacySeriesAsin);
+
+            if (normalized.Count > 0 && (existingPrimaryName != null || existingPrimaryAsin != null))
+            {
+                // Re-locate the previously-chosen primary in the refreshed list (ASIN first, then name).
+                var preserved = existingPrimaryAsin != null
+                    ? normalized.FirstOrDefault(m => string.Equals(
+                        NormalizeText(m.SeriesAsin), existingPrimaryAsin, StringComparison.OrdinalIgnoreCase))
+                    : null;
+                preserved ??= existingPrimaryName != null
+                    ? normalized.FirstOrDefault(m => string.Equals(
+                        NormalizeText(m.SeriesName), existingPrimaryName, StringComparison.OrdinalIgnoreCase))
+                    : null;
+
+                if (preserved != null)
+                {
+                    foreach (var membership in normalized)
+                    {
+                        membership.IsPrimary = ReferenceEquals(membership, preserved);
+                    }
+                }
+            }
+
+            audiobook.SeriesMemberships = normalized.Count == 0 ? null : normalized;
+            ApplyPrimarySeriesFields(audiobook);
+        }
+
         public static void ApplyPrimarySeriesFields(Audiobook audiobook)
         {
             var primary = GetPrimaryMembership(audiobook.SeriesMemberships);

@@ -97,5 +97,46 @@ namespace Listenarr.Tests.Features.Api.Controllers
             Assert.False(item.TryGetProperty("description", out _));
             Assert.False(item.TryGetProperty("subtitle", out _));
         }
+
+        [Fact]
+        [Trait("Method", "GetAll")]
+        [Trait("Scenario", "IncludesAllSeriesMemberships")]
+        public async Task GetAll_IncludesSeriesMemberships_ForMultiSeriesBook()
+        {
+            // Given a book that belongs to two series (e.g. publication + chronological order)
+            var book = new AudiobookBuilder()
+                .WithTitle("Multi Series Book")
+                .WithAuthor("Tom Clancy")
+                .WithSeries("Publication Order")
+                .WithSeriesNumber("1")
+                .Build();
+            book.SeriesMemberships = new List<AudiobookSeriesMembership>
+            {
+                new() { SeriesName = "Publication Order", SeriesNumber = "1", IsPrimary = true, SortOrder = 0 },
+                new() { SeriesName = "Chronological Order", SeriesNumber = "3", IsPrimary = false, SortOrder = 1 },
+            };
+            book = await _audiobookRepository.AddAsync(book);
+
+            var controller = _provider.GetRequiredService<LibraryController>();
+
+            // When
+            var actionResult = await controller.GetAll();
+
+            // Then both memberships are present in the slim list payload
+            var ok = Assert.IsType<OkObjectResult>(actionResult);
+            var json = JsonSerializer.Serialize(ok.Value, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            using var doc = JsonDocument.Parse(json);
+            var item = doc.RootElement
+                .EnumerateArray()
+                .Single(element => element.GetProperty("id").GetInt32() == book.Id);
+
+            Assert.True(item.TryGetProperty("seriesMemberships", out var memberships));
+            Assert.Equal(2, memberships.GetArrayLength());
+            var names = memberships.EnumerateArray()
+                .Select(m => m.GetProperty("seriesName").GetString())
+                .ToList();
+            Assert.Contains("Publication Order", names);
+            Assert.Contains("Chronological Order", names);
+        }
     }
 }

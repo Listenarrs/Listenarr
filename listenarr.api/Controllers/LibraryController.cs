@@ -3998,7 +3998,9 @@ namespace Listenarr.Api.Controllers
                 !string.IsNullOrWhiteSpace(metadata.Series) ||
                 !string.IsNullOrWhiteSpace(metadata.SeriesNumber))
             {
-                AudiobookSeriesMembershipHelper.ApplyToAudiobook(
+                // Preserve the user's manually-chosen primary series across a rescan rather than
+                // reverting to the metadata provider's default (see issue #658).
+                AudiobookSeriesMembershipHelper.ApplyToAudiobookPreservingPrimary(
                     audiobook,
                     metadata.SeriesMemberships,
                     metadata.Series,

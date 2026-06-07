@@ -66,7 +66,9 @@ namespace Listenarr.Application.Audiobooks
             var fileSummaryTask = _audiobookFileRepository.GetFormatSummariesAsync();
             var fileCountTask = _audiobookFileRepository.GetCountsByAudiobookIdAsync();
             var activeDownloadTask = _downloadRepository.GetActiveAudiobookIdsAsync(ActiveLibraryDownloadStatuses);
+            var seriesMembershipTask = _audiobookRepository.GetSeriesMembershipsByAudiobookIdsAsync();
 
+            var membershipsByAudiobookId = await seriesMembershipTask;
             var fileSummaryRows = await fileSummaryTask;
             var fileCountById = await fileCountTask;
             var filesByAudiobookId = fileSummaryRows
@@ -112,6 +114,17 @@ namespace Listenarr.Application.Audiobooks
                     PublishedDate = a.PublishedDate,
                     Series = a.Series,
                     SeriesNumber = a.SeriesNumber,
+                    SeriesMemberships = membershipsByAudiobookId.TryGetValue(a.Id, out var memberships) && memberships.Count > 0
+                        ? memberships.Select(m => new AudiobookSeriesMembershipDto
+                        {
+                            Id = m.Id,
+                            SeriesName = m.SeriesName,
+                            SeriesNumber = m.SeriesNumber,
+                            SeriesAsin = m.SeriesAsin,
+                            IsPrimary = m.IsPrimary,
+                            SortOrder = m.SortOrder,
+                        }).ToArray()
+                        : null,
                     Genres = a.Genres?.ToArray(),
                     Asin = a.Asin,
                     OpenLibraryId = a.OpenLibraryId,

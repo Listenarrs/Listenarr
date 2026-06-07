@@ -962,7 +962,14 @@ function matchesCurrentCollection(book: Audiobook): boolean {
   }
 
   if (type.value === 'series') {
-    return normalizeCollectionText(book.series) === normalizeCollectionText(name.value)
+    const target = normalizeCollectionText(name.value)
+    const memberships = book.seriesMemberships
+    if (memberships && memberships.length > 0) {
+      return memberships.some(
+        (membership) => normalizeCollectionText(membership.seriesName) === target,
+      )
+    }
+    return normalizeCollectionText(book.series) === target
   }
 
   if (isGenreCollection.value) {
@@ -985,12 +992,34 @@ function matchesCurrentCollection(book: Audiobook): boolean {
 }
 
 function mapLibraryItem(book: Audiobook): CollectionDisplayItem {
+  // In a series collection a book may be matched via a non-primary membership, so show the
+  // series name/number for THIS collection rather than the book's primary series.
+  const seriesContext = type.value === 'series' ? resolveSeriesForCollection(book) : null
   return {
     ...book,
+    ...(seriesContext
+      ? { series: seriesContext.seriesName, seriesNumber: seriesContext.seriesNumber }
+      : {}),
     key: `library-${book.id}`,
     inLibrary: true,
     addMetadata: null,
   }
+}
+
+function resolveSeriesForCollection(
+  book: Audiobook,
+): { seriesName: string; seriesNumber?: string } | null {
+  const target = normalizeCollectionText(name.value)
+  const memberships = book.seriesMemberships
+  if (memberships && memberships.length > 0) {
+    const match = memberships.find(
+      (membership) => normalizeCollectionText(membership.seriesName) === target,
+    )
+    if (match) {
+      return { seriesName: match.seriesName, seriesNumber: match.seriesNumber }
+    }
+  }
+  return null
 }
 
 function buildCatalogMetadata(book: RemoteCatalogBook): AudibleBookMetadata {

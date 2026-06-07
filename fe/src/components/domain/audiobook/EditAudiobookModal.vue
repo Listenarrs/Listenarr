@@ -1001,7 +1001,7 @@ function serializeSeriesMembershipRows(
     seriesName: membership.seriesName,
     seriesNumber: membership.seriesNumber,
     seriesAsin: normalizeOptionalText(membership.seriesAsin),
-    isPrimary: Boolean(membership.isPrimary || index === 0),
+    isPrimary: Boolean(membership.isPrimary),
     sortOrder: index,
   }))
 
@@ -1678,7 +1678,7 @@ async function handleSave() {
         seriesName: membership.seriesName,
         seriesNumber: membership.seriesNumber || undefined,
         seriesAsin: membership.seriesAsin || undefined,
-        isPrimary: Boolean(membership.isPrimary || index === 0),
+        isPrimary: Boolean(membership.isPrimary),
         sortOrder: index,
       })),
       genres: normalizeStringList(formData.value.genres),

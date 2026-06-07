@@ -46,6 +46,22 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
                 .ToListAsync();
         }
 
+        public async Task<Dictionary<int, List<AudiobookSeriesMembership>>> GetSeriesMembershipsByAudiobookIdsAsync(CancellationToken ct = default)
+        {
+            // Batch-load all memberships in one query (mirrors the file-summary batching in
+            // LibraryListService) so the library list can show a book under every series it
+            // belongs to without a per-row Include.
+            var memberships = await _db.AudiobookSeriesMemberships
+                .AsNoTracking()
+                .OrderByDescending(m => m.IsPrimary)
+                .ThenBy(m => m.SortOrder)
+                .ToListAsync(ct);
+
+            return memberships
+                .GroupBy(m => m.AudiobookId)
+                .ToDictionary(g => g.Key, g => g.ToList());
+        }
+
         public async Task<Audiobook?> GetByAsinAsync(string asin)
         {
             var normalizedAsin = NormalizeAsin(asin);

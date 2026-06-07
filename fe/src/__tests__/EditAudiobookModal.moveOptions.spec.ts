@@ -256,6 +256,54 @@ describe('EditAudiobookModal move options', () => {
     )
   })
 
+  it('persists a non-first primary series selection (regression for #658)', async () => {
+    const wrapper = mount(EditAudiobookModal, {
+      props: { isOpen: true, audiobook },
+      attachTo: document.body,
+      global: { plugins: [(await import('pinia')).createPinia()] },
+    })
+
+    await new Promise((r) => setTimeout(r, 200))
+
+    const vm = wrapper.vm as unknown as {
+      formData: {
+        seriesMemberships: Array<{ seriesName: string; seriesNumber: string; isPrimary: boolean }>
+      }
+      handleSave: () => Promise<void>
+    }
+
+    // User marks the SECOND series as primary; the bug previously reverted this to the first.
+    vm.formData.seriesMemberships = [
+      { seriesName: 'Publication Order', seriesNumber: '1', isPrimary: false },
+      { seriesName: 'Chronological Order', seriesNumber: '3', isPrimary: true },
+    ]
+    await wrapper.vm.$nextTick()
+
+    await vm.handleSave()
+    await new Promise((r) => setTimeout(r, 50))
+
+    const { apiService } = await import('@/services/api')
+    expect(apiService.updateAudiobook).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        series: 'Chronological Order',
+        seriesNumber: '3',
+        seriesMemberships: [
+          expect.objectContaining({
+            seriesName: 'Publication Order',
+            isPrimary: false,
+            sortOrder: 0,
+          }),
+          expect.objectContaining({
+            seriesName: 'Chronological Order',
+            isPrimary: true,
+            sortOrder: 1,
+          }),
+        ],
+      }),
+    )
+  })
+
   it('hydrates current metadata immediately and renders person fields as tags', async () => {
     const { apiService } = await import('@/services/api')
     vi.mocked(apiService.getQualityProfiles).mockImplementation(() => new Promise(() => {}))
