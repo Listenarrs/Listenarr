@@ -171,6 +171,48 @@ namespace Listenarr.Tests.Features.Api.Controllers
         }
 
         [Fact]
+        public async Task InteractiveManualImport_PatternWithoutSubtitle_DoesNotCombineSubtitleIntoFilename()
+        {
+            // Given a book with a subtitle and a file pattern that deliberately omits {Subtitle}
+            var basePath = CreateTempDirectory("listenarr-manual-subtitle");
+            var srcDir = CreateTempDirectory("listenarr-manual-subtitle-src");
+
+            var book = new Audiobook { Id = 99, Title = "The Land", Subtitle = "Founding", BasePath = basePath };
+
+            var src = Path.Join(srcDir, "one.mp3");
+            await File.WriteAllTextAsync(src, "one");
+
+            var request = new ManualImportRequestDto
+            {
+                Path = srcDir,
+                Mode = "interactive",
+                Action = FileAction.Copy,
+                Items =
+                [
+                    new ManualImportItemDto { FullPath = src, MatchedAudiobookId = book.Id }
+                ]
+            };
+
+            var controller = GetController(book, new ApplicationSettings
+            {
+                OutputPath = basePath,
+                FolderNamingPattern = "{Author}",
+                FileNamingPattern = "{Title}"
+            });
+
+            // When
+            await controller.Start(request);
+
+            // Then the configured pattern is applied exactly — the subtitle is not folded into the filename
+            var diskFiles = Directory.GetFiles(basePath, "*", SearchOption.AllDirectories)
+                .Select(Path.GetFileName)
+                .ToList();
+
+            Assert.Contains("The Land.mp3", diskFiles);
+            Assert.DoesNotContain(diskFiles, f => f!.Contains("Founding", StringComparison.OrdinalIgnoreCase));
+        }
+
+        [Fact]
         public async Task InteractiveManualImport_MultipartFiles_UsesStableNaturalOrderAndNumbering()
         {
             var basePath = CreateTempDirectory("listenarr-manual-ordered");

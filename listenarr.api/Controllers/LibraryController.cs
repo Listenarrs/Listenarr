@@ -3491,20 +3491,6 @@ namespace Listenarr.Api.Controllers
                 directoryPattern = "{Author}/{Title}";
             }
 
-            // For series books, ensure we include the series in the directory structure
-            if (!string.IsNullOrWhiteSpace(audiobook.Series) && !directoryPattern.Contains("{Series}"))
-            {
-                // Insert series between author and title if not already present
-                if (directoryPattern.Contains("{Author}/{Title}"))
-                {
-                    directoryPattern = directoryPattern.Replace("{Author}/{Title}", "{Author}/{Series}/{Title}");
-                }
-                else if (directoryPattern.Contains("{Author}/"))
-                {
-                    directoryPattern = directoryPattern.Replace("{Author}/", "{Author}/{Series}/");
-                }
-            }
-
             // If the audiobook has no Series, remove any {Series} tokens from the directory pattern
             // Tests expect the controller to strip the Series token when series metadata is missing.
             if (string.IsNullOrWhiteSpace(audiobook.Series))

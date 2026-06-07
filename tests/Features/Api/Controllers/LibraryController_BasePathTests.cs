@@ -79,5 +79,54 @@ namespace Listenarr.Tests.Features.Api.Controllers
             // Then
             Assert.Equal(Path.Join(RootPath, "Stephen King", "The Dark Tower", "The Gunslinger"), result);
         }
+
+        [Fact]
+        [Trait("Method", "ComputeAudiobookBaseDirectoryFromPattern")]
+        [Trait("Scenario", "SeriesBook_PatternWithoutSeries_OmitsSeriesFolder")]
+        public void ComputeAudiobookBaseDirectoryFromPattern_SeriesBook_PatternWithoutSeries_OmitsSeriesFolder()
+        {
+            // Given a series book and a configured pattern that deliberately omits {Series}
+            var audiobook = new AudiobookBuilder()
+                .WithTitle("The Gunslinger")
+                .WithAuthor("Stephen King")
+                .WithYear("1982")
+                .WithSeries("The Dark Tower")
+                .WithSeriesNumber("1")
+                .Build();
+
+            var controller = _provider.GetRequiredService<LibraryController>();
+
+            // When
+            var result = (string)ComputeBaseDirectoryMethod.Invoke(controller, new object[] { audiobook, RootPath, "{Author}/{Title}" });
+
+            // Then the pattern is applied exactly — no series folder is injected
+            Assert.Equal(Path.Join(RootPath, "Stephen King", "The Gunslinger"), result);
+            Assert.DoesNotContain("The Dark Tower", result);
+        }
+
+        [Fact]
+        [Trait("Method", "ComputeAudiobookBaseDirectoryFromPattern")]
+        [Trait("Scenario", "SeriesBook_PatternWithYearAndAsin_OmitsSeriesFolder")]
+        public void ComputeAudiobookBaseDirectoryFromPattern_SeriesBook_PatternWithYearAndAsin_OmitsSeriesFolder()
+        {
+            // Given a series book and a pattern with extra tokens but no {Series}
+            var audiobook = new AudiobookBuilder()
+                .WithTitle("Executive Orders")
+                .WithAuthor("Tom Clancy")
+                .WithYear("2010")
+                .WithSeries("A Jack Ryan Novel (chronological order)")
+                .WithSeriesNumber("8")
+                .WithAsin("B004ESTSSO")
+                .Build();
+
+            var controller = _provider.GetRequiredService<LibraryController>();
+
+            // When
+            var result = (string)ComputeBaseDirectoryMethod.Invoke(controller, new object[] { audiobook, RootPath, "{Author}/{Title} ({Year}) [{Asin}]" });
+
+            // Then the remaining tokens still render and no series folder is injected
+            Assert.Equal(Path.Join(RootPath, "Tom Clancy", "Executive Orders (2010) [B004ESTSSO]"), result);
+            Assert.DoesNotContain("Jack Ryan", result);
+        }
     }
 }
