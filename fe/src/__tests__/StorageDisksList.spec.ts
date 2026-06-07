@@ -36,24 +36,48 @@ const makeDisk = (overrides: Partial<DiskStorageInfo> = {}): DiskStorageInfo => 
 })
 
 describe('StorageDisksList', () => {
-  it('renders one entry per disk with label, path and a full-width usage bar', () => {
-    const disks = [makeDisk({ label: 'App Data', path: '/app/config' }), makeDisk()]
+  it('renders one entry per disk with label, path and free-of-total capacity', () => {
+    const disks = [
+      makeDisk({
+        label: 'App Data',
+        path: '/app/config',
+        freeFormatted: '0.9 GB',
+        totalFormatted: '4.06 GB',
+      }),
+      makeDisk(),
+    ]
     const wrapper = mount(StorageDisksList, { props: { disks } })
 
     const entries = wrapper.findAll('.disk-entry')
     expect(entries).toHaveLength(2)
     expect(entries[0].text()).toContain('App Data')
     expect(entries[0].text()).toContain('/app/config')
+    // #508 is about available space — show free of total per row, not used/total
+    expect(entries[0].text()).toContain('0.9 GB free of 4.06 GB')
     expect(entries[1].text()).toContain('Audiobooks')
     expect(entries[1].text()).toContain('/audiobooks')
+    expect(entries[1].text()).toContain('6.18 TB free of 7.28 TB')
+  })
+
+  it('renders a full-width usage bar without the used/total size line', () => {
+    const wrapper = mount(StorageDisksList, { props: { disks: [makeDisk()] } })
 
     const bars = wrapper.findAllComponents(ProgressBar)
-    expect(bars).toHaveLength(2)
-    expect(bars[1].props('value')).toBe(15)
-    expect(bars[1].props('downloaded')).toBe(1_200_000_000_000)
-    expect(bars[1].props('total')).toBe(8_000_000_000_000)
-    expect(bars[1].props('showPercentage')).toBe(true)
-    expect(bars[1].props('showSize')).toBe(true)
+    expect(bars).toHaveLength(1)
+    expect(bars[0].props('value')).toBe(15)
+    expect(bars[0].props('showPercentage')).toBe(true)
+    // free-of-total replaces the bar's own used/total readout
+    expect(bars[0].props('showSize')).toBeFalsy()
+    expect(bars[0].props('downloaded')).toBeUndefined()
+    expect(bars[0].props('total')).toBeUndefined()
+  })
+
+  it('renders distinct entries when two disks share a path (no duplicate keys)', () => {
+    // e.g. a user configures "/" as a root folder alongside the System "/" entry
+    const disks = [makeDisk({ label: 'System', path: '/' }), makeDisk({ label: 'Root', path: '/' })]
+    const wrapper = mount(StorageDisksList, { props: { disks } })
+
+    expect(wrapper.findAll('.disk-entry')).toHaveLength(2)
   })
 
   it('marks unavailable disks instead of showing a bar', () => {

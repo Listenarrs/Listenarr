@@ -26,20 +26,24 @@ defineProps<{
 
 <template>
   <div class="storage-disks">
-    <div v-for="disk in disks" :key="disk.path" class="disk-entry">
+    <div
+      v-for="(disk, index) in disks"
+      :key="`${disk.label}:${disk.path}:${index}`"
+      class="disk-entry"
+    >
       <div class="disk-header">
         <span class="disk-label">{{ disk.label }}</span>
         <span class="disk-path">{{ disk.path }}</span>
+        <span v-if="disk.status === 'available'" class="disk-free">
+          {{ disk.freeFormatted }} free of {{ disk.totalFormatted }}
+        </span>
       </div>
       <ProgressBar
         v-if="disk.status === 'available'"
         :value="disk.usedPercentage"
-        :downloaded="disk.usedBytes"
-        :total="disk.totalBytes"
         variant="storage"
         height="large"
         show-percentage
-        show-size
       />
       <span v-else class="unavailable-tag">unavailable</span>
     </div>
@@ -80,6 +84,14 @@ defineProps<{
   font-size: 0.8rem;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.disk-free {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: #ccc;
+  font-size: 0.8rem;
   white-space: nowrap;
 }
 
