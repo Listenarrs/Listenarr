@@ -739,6 +739,20 @@ export interface StorageInfo {
   freeFormatted: string
   driveName: string
   status: string
+  disks: DiskStorageInfo[]
+}
+
+export interface DiskStorageInfo {
+  label: string
+  path: string
+  usedBytes: number
+  totalBytes: number
+  freeBytes: number
+  usedPercentage: number
+  usedFormatted: string
+  totalFormatted: string
+  freeFormatted: string
+  status: string
 }
 
 export interface ServiceHealth {

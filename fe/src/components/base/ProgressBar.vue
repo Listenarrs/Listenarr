@@ -71,7 +71,7 @@ const props = withDefaults(defineProps<Props>(), {
 // Format bytes to human readable size
 const formatSize = (bytes: number): string => {
   if (bytes === 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB']
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
   const size = Math.abs(bytes)
   let unitIndex = 0
   let value = size

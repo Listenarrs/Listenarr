@@ -91,26 +91,7 @@
               <PhSpinner class="ph-spin" />
             </span>
           </template>
-          <ProgressBar
-            v-if="storageInfo"
-            :value="storageInfo.usedPercentage"
-            :downloaded="storageInfo.usedBytes"
-            :total="storageInfo.totalBytes"
-            variant="storage"
-            height="large"
-            show-percentage
-            show-size
-          />
-          <div v-if="storageInfo" class="detail-row">
-            <PhFolderOpen />
-            <span class="label">Free:</span>
-            <span class="value">{{ storageInfo.freeFormatted }}</span>
-          </div>
-          <div v-if="storageInfo" class="detail-row">
-            <PhChartBar />
-            <span class="label">Used:</span>
-            <span class="value">{{ storageInfo.usedPercentage.toFixed(1) }}%</span>
-          </div>
+          <StorageDisksList v-if="storageInfo" :disks="storageInfo.disks" />
         </StatusCard>
 
         <StatusCard title="External APIs" :icon="PhCloud">
@@ -247,8 +228,6 @@ import {
   PhDownload,
   PhInfo,
   PhHardDrives,
-  PhFolderOpen,
-  PhChartBar,
   PhCloud,
   PhWifiX,
   PhBroadcast,
@@ -263,7 +242,8 @@ import {
 import { useSignalR } from '@/composables/useSignalR'
 import { useSystemLogs } from '@/composables/useSystemLogs'
 import { useRouter } from 'vue-router'
-import { LoadingState, StatusCard, InfoCard, ProgressBar } from '@/components/base'
+import { LoadingState, StatusCard, InfoCard } from '@/components/base'
+import StorageDisksList from '@/components/system/StorageDisksList.vue'
 import {
   getSystemInfo,
   getStorageInfo,
