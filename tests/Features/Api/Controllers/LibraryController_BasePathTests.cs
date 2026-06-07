@@ -128,5 +128,27 @@ namespace Listenarr.Tests.Features.Api.Controllers
             Assert.Equal(Path.Join(RootPath, "Tom Clancy", "Executive Orders (2010) [B004ESTSSO]"), result);
             Assert.DoesNotContain("Jack Ryan", result);
         }
+
+        [Fact]
+        [Trait("Method", "ComputeAudiobookBaseDirectoryFromPattern")]
+        [Trait("Scenario", "SlashlessPattern_AppliedExactly")]
+        public void ComputeAudiobookBaseDirectoryFromPattern_SlashlessPattern_AppliedExactly()
+        {
+            // Given a deliberately flat folder pattern without directory separators
+            var audiobook = new AudiobookBuilder()
+                .WithTitle("The Buffalo Hunter Hunter")
+                .WithAuthor("Stephen Graham Jones")
+                .WithYear("2025")
+                .Build();
+
+            var controller = _provider.GetRequiredService<LibraryController>();
+
+            // When
+            var result = (string)ComputeBaseDirectoryMethod.Invoke(controller, new object[] { audiobook, RootPath, "{Title}" });
+
+            // Then the pattern is applied exactly — no implicit {Author} folder is prepended
+            Assert.Equal(Path.Join(RootPath, "The Buffalo Hunter Hunter"), result);
+            Assert.DoesNotContain("Stephen Graham Jones", result);
+        }
     }
 }

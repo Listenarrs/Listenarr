@@ -3479,8 +3479,9 @@ namespace Listenarr.Api.Controllers
                 directoryPattern = Regex.Replace(directoryPattern, @"^\s*[\\/]", "");
                 directoryPattern = Regex.Replace(directoryPattern, @"[\\/]\s*$", "");
 
-                // If the pattern is now empty or doesn't contain directory separators, use a fallback
-                if (string.IsNullOrWhiteSpace(directoryPattern) || !directoryPattern.Contains("/"))
+                // If the pattern is now empty, use a fallback; deliberately flat (slash-less)
+                // patterns are applied exactly as configured
+                if (string.IsNullOrWhiteSpace(directoryPattern))
                 {
                     directoryPattern = "{Author}/{Title}";
                 }
