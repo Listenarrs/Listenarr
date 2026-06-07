@@ -28,9 +28,9 @@ namespace Listenarr.Application.Interfaces
         SystemInfo GetSystemInfo();
 
         /// <summary>
-        /// Get storage information for the application's data directory
+        /// Get storage information for the application's data directory and all configured root folders
         /// </summary>
-        StorageInfo GetStorageInfo();
+        Task<StorageInfo> GetStorageInfoAsync();
 
         /// <summary>
         /// Get health status of all services including download clients and external APIs

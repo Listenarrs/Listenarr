@@ -31,6 +31,7 @@ namespace Listenarr.Infrastructure.Platform
         private readonly ILogger<SystemService> _logger;
         private readonly IApplicationPathService _applicationPathService;
         private readonly IApplicationVersionService _applicationVersionService;
+        private readonly IRootFolderService _rootFolderService;
         private readonly DateTime _startTime;
         private static readonly Process _currentProcess = Process.GetCurrentProcess();
 
@@ -38,12 +39,14 @@ namespace Listenarr.Infrastructure.Platform
             IConfigurationService configurationService,
             ILogger<SystemService> logger,
             IApplicationPathService applicationPathService,
-            IApplicationVersionService applicationVersionService)
+            IApplicationVersionService applicationVersionService,
+            IRootFolderService rootFolderService)
         {
             _configurationService = configurationService;
             _logger = logger;
             _applicationPathService = applicationPathService;
             _applicationVersionService = applicationVersionService;
+            _rootFolderService = rootFolderService;
             _startTime = DateTime.UtcNow;
         }
 
@@ -90,30 +93,99 @@ namespace Listenarr.Infrastructure.Platform
             }
         }
 
-        public StorageInfo GetStorageInfo()
+        public async Task<StorageInfo> GetStorageInfoAsync()
         {
             try
             {
-                // Get the drive where the application is running
-                var appPath = _applicationPathService.ContentRootPath;
-                var driveInfo = new DriveInfo(Path.GetPathRoot(appPath) ?? "C:\\");
+                // App-data disk first; legacy top-level fields mirror it so existing
+                // consumers of /system/storage keep working unchanged. Prefer the config
+                // root (database/logs/cache — the mounted volume in Docker) over the
+                // install dir, falling back when it has not been created yet.
+                var appDataPath = Directory.Exists(_applicationPathService.ConfigRootPath)
+                    ? _applicationPathService.ConfigRootPath
+                    : _applicationPathService.ContentRootPath;
+                var appDisk = MeasureDisk("App Data", appDataPath);
 
+                var storageInfo = new StorageInfo
+                {
+                    UsedBytes = appDisk.UsedBytes,
+                    TotalBytes = appDisk.TotalBytes,
+                    FreeBytes = appDisk.FreeBytes,
+                    UsedPercentage = appDisk.UsedPercentage,
+                    UsedFormatted = appDisk.UsedFormatted,
+                    TotalFormatted = appDisk.TotalFormatted,
+                    FreeFormatted = appDisk.FreeFormatted,
+                    DriveName = appDisk.Path,
+                    Status = appDisk.Status
+                };
+                // System disk first: the filesystem hosting the application install itself —
+                // in Docker this is the container root (e.g. docker.img on Unraid),
+                // which is worth watching independently of the config volume.
+                var systemRoot = Path.GetPathRoot(_applicationPathService.ContentRootPath);
+                if (!string.IsNullOrEmpty(systemRoot))
+                {
+                    storageInfo.Disks.Add(MeasureDisk("System", systemRoot));
+                }
+
+                storageInfo.Disks.Add(appDisk);
+
+                List<RootFolder> rootFolders;
+                try
+                {
+                    rootFolders = await _rootFolderService.GetAllAsync();
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                {
+                    _logger.LogWarning(ex, "Could not load root folders for storage info");
+                    rootFolders = new List<RootFolder>();
+                }
+
+                foreach (var folder in rootFolders)
+                {
+                    var label = string.IsNullOrWhiteSpace(folder.Name) ? folder.Path : folder.Name;
+                    storageInfo.Disks.Add(MeasureDisk(label, folder.Path));
+                }
+
+                return storageInfo;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
+                _logger.LogError(ex, "Error getting storage info");
+                throw;
+            }
+        }
+
+        private DiskStorageInfo MeasureDisk(string label, string path)
+        {
+            try
+            {
+                // Missing directories report the same on every platform; without this
+                // check Windows would silently fall back to drive-root stats because
+                // the DriveInfo constructor normalizes "C:\missing\dir" to "C:\".
+                if (!Directory.Exists(path))
+                {
+                    return new DiskStorageInfo { Label = label, Path = path, Status = "unavailable" };
+                }
+
+                // DriveInfo on the path itself (not Path.GetPathRoot): on Linux this
+                // stats the filesystem containing the path, which is what makes Docker
+                // volume mounts like /audiobooks report their own free space instead
+                // of the container root's. Windows UNC paths throw -> unavailable.
+                var driveInfo = new DriveInfo(path);
                 if (!driveInfo.IsReady)
                 {
-                    return new StorageInfo
-                    {
-                        Status = "unavailable",
-                        DriveName = driveInfo.Name
-                    };
+                    return new DiskStorageInfo { Label = label, Path = path, Status = "unavailable" };
                 }
 
                 var totalBytes = driveInfo.TotalSize;
                 var freeBytes = driveInfo.AvailableFreeSpace;
                 var usedBytes = totalBytes - freeBytes;
-                var usedPercentage = (double)usedBytes / totalBytes * 100;
+                var usedPercentage = totalBytes > 0 ? (double)usedBytes / totalBytes * 100 : 0;
 
-                return new StorageInfo
+                return new DiskStorageInfo
                 {
+                    Label = label,
+                    Path = path,
                     UsedBytes = usedBytes,
                     TotalBytes = totalBytes,
                     FreeBytes = freeBytes,
@@ -121,13 +193,13 @@ namespace Listenarr.Infrastructure.Platform
                     UsedFormatted = FormatBytes(usedBytes),
                     TotalFormatted = FormatBytes(totalBytes),
                     FreeFormatted = FormatBytes(freeBytes),
-                    DriveName = driveInfo.Name
+                    Status = "available"
                 };
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
-                _logger.LogError(ex, "Error getting storage info");
-                throw;
+                _logger.LogWarning(ex, "Could not read disk info for {Label} at {Path}", label, path);
+                return new DiskStorageInfo { Label = label, Path = path, Status = "unavailable" };
             }
         }
 

@@ -57,6 +57,21 @@ namespace Listenarr.Domain.Models
         public string FreeFormatted { get; set; } = string.Empty;
         public string DriveName { get; set; } = string.Empty;
         public string Status { get; set; } = "available";
+        public List<DiskStorageInfo> Disks { get; set; } = new();
+    }
+
+    public class DiskStorageInfo
+    {
+        public string Label { get; set; } = string.Empty;
+        public string Path { get; set; } = string.Empty;
+        public long UsedBytes { get; set; }
+        public long TotalBytes { get; set; }
+        public long FreeBytes { get; set; }
+        public double UsedPercentage { get; set; }
+        public string UsedFormatted { get; set; } = string.Empty;
+        public string TotalFormatted { get; set; } = string.Empty;
+        public string FreeFormatted { get; set; } = string.Empty;
+        public string Status { get; set; } = "available";
     }
 
     public class ServiceHealth

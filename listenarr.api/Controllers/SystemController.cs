@@ -76,10 +76,10 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Get storage information for the application's data directory.
+        /// Get storage information for the application's data directory and all configured root folders.
         /// </summary>
         [HttpGet("storage")]
-        public ActionResult<StorageInfo> GetStorageInfo()
+        public async Task<ActionResult<StorageInfo>> GetStorageInfo()
         {
             try
             {
@@ -89,7 +89,7 @@ namespace Listenarr.Api.Controllers
                 {
                     return Unauthorized();
                 }
-                var storageInfo = _systemService.GetStorageInfo();
+                var storageInfo = await _systemService.GetStorageInfoAsync();
                 return Ok(storageInfo);
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)

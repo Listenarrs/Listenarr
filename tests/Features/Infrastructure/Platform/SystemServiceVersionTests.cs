@@ -75,11 +75,17 @@ namespace Listenarr.Tests.Features.Infrastructure.Platform
                 .Setup(service => service.Resolve())
                 .Returns(ApplicationVersionTestUtils.GetExpectedApiVersion());
 
+            var rootFolderService = new Mock<IRootFolderService>();
+            rootFolderService
+                .Setup(service => service.GetAllAsync())
+                .ReturnsAsync(new List<RootFolder>());
+
             return new SystemService(
                 configurationService.Object,
                 NullLogger<SystemService>.Instance,
                 applicationPathService.Object,
-                applicationVersionService.Object);
+                applicationVersionService.Object,
+                rootFolderService.Object);
         }
     }
 }
