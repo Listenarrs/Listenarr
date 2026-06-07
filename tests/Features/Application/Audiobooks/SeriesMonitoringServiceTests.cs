@@ -17,7 +17,6 @@
  */
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Interfaces.Repositories;
-using Listenarr.Application.Metadata;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
 using Microsoft.Extensions.DependencyInjection;
@@ -57,40 +56,29 @@ namespace Listenarr.Tests.Features.Application.Audiobooks
                     null,
                     true,
                     It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new SeriesCatalogFetchResult
-                {
-                    Series = new SeriesLookupItem
-                    {
-                        Asin = "SERIES123",
-                        Name = "Mistborn"
-                    },
-                    Books =
-                    [
-                        new AudibleSearchResult
-                        {
-                            Title = "The Final Empire",
-                            Authors = [new AudibleAuthor { Name = "Brandon Sanderson" }],
-                            Language = "en-us",
-                            Series = [new AudibleSeries { Name = "Mistborn", Position = "1" }]
-                        },
-                        new AudibleSearchResult
-                        {
-                            Asin = "BOOK2",
-                            Title = "The Well of Ascension",
-                            Authors = [new AudibleAuthor { Name = "Brandon Sanderson" }],
-                            Language = "english",
-                            Series = [new AudibleSeries { Name = "Mistborn", Position = "2" }]
-                        },
-                        new AudibleSearchResult
-                        {
-                            Asin = "BOOK3",
-                            Title = "Held der Zeiten",
-                            Authors = [new AudibleAuthor { Name = "Brandon Sanderson" }],
-                            Language = "de",
-                            Series = [new AudibleSeries { Name = "Mistborn", Position = "3" }]
-                        }
-                    ]
-                });
+                .ReturnsAsync(new SeriesCatalogFetchResultBuilder()
+                    .WithSeries("Mistborn", "SERIES123")
+                    .WithBook(new AudibleSearchResultBuilder()
+                        .WithTitle("The Final Empire")
+                        .WithAuthor("Brandon Sanderson")
+                        .WithLanguage("en-us")
+                        .WithSeries("Mistborn", "1")
+                        .Build())
+                    .WithBook(new AudibleSearchResultBuilder()
+                        .WithAsin("BOOK2")
+                        .WithTitle("The Well of Ascension")
+                        .WithAuthor("Brandon Sanderson")
+                        .WithLanguage("english")
+                        .WithSeries("Mistborn", "2")
+                        .Build())
+                    .WithBook(new AudibleSearchResultBuilder()
+                        .WithAsin("BOOK3")
+                        .WithTitle("Held der Zeiten")
+                        .WithAuthor("Brandon Sanderson")
+                        .WithLanguage("de")
+                        .WithSeries("Mistborn", "3")
+                        .Build())
+                    .Build());
 
             _libraryAddService
                 .Setup(service => service.AddToLibraryAsync(
@@ -171,33 +159,16 @@ namespace Listenarr.Tests.Features.Application.Audiobooks
                     null,
                     true,
                     It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new SeriesCatalogFetchResult
-                {
-                    Series = new SeriesLookupItem
-                    {
-                        Asin = "SERIES123",
-                        Name = "Dungeon Crawler Carl"
-                    },
-                    Books =
-                    [
-                        new AudibleSearchResult
-                        {
-                            Asin = "BOOK123",
-                            Title = "This Inevitable Ruin",
-                            Authors = [new AudibleAuthor { Name = "Matt Dinniman" }],
-                            Language = "english",
-                            Series =
-                            [
-                                new AudibleSeries
-                                {
-                                    Asin = "SERIES123",
-                                    Name = "Dungeon Crawler Carl",
-                                    Position = "7"
-                                }
-                            ]
-                        }
-                    ]
-                });
+                .ReturnsAsync(new SeriesCatalogFetchResultBuilder()
+                    .WithSeries("Dungeon Crawler Carl", "SERIES123")
+                    .WithBook(new AudibleSearchResultBuilder()
+                        .WithAsin("BOOK123")
+                        .WithTitle("This Inevitable Ruin")
+                        .WithAuthor("Matt Dinniman")
+                        .WithLanguage("english")
+                        .WithSeries("Dungeon Crawler Carl", "7", "SERIES123")
+                        .Build())
+                    .Build());
 
             var service = _provider.GetRequiredService<ISeriesMonitoringService>();
 
