@@ -668,6 +668,121 @@ describe('CollectionView', () => {
     expect(mockGetSeriesLookup).toHaveBeenCalledWith('Mistborn', 'us', 'SERIES123', false)
   })
 
+  it('sorts a series collection by position within owned, then within not-added (#626)', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    mockGetApplicationSettings.mockResolvedValue({
+      defaultSearchRegion: 'us',
+      defaultSearchLanguage: 'english',
+    })
+    mockGetSeriesLookup.mockResolvedValue({
+      asin: 'SERIES123',
+      name: 'Mistborn',
+      totalBooks: 4,
+    })
+    mockGetSeriesCatalog.mockResolvedValue({
+      series: { asin: 'SERIES123', name: 'Mistborn' },
+      totalBooks: 4,
+      books: [
+        {
+          asin: 'BOOK1',
+          title: 'The Final Empire',
+          authors: ['Brandon Sanderson'],
+          language: 'english',
+          metadataSource: 'Audible',
+          series: 'Mistborn',
+          seriesNumber: '1',
+        },
+        {
+          asin: 'BOOK2',
+          title: 'The Well of Ascension',
+          authors: ['Brandon Sanderson'],
+          language: 'english',
+          metadataSource: 'Audible',
+          series: 'Mistborn',
+          seriesNumber: '2',
+        },
+        {
+          asin: 'BOOK3',
+          title: 'Hero of Ages',
+          authors: ['Brandon Sanderson'],
+          language: 'english',
+          metadataSource: 'Audible',
+          series: 'Mistborn',
+          seriesNumber: '3',
+        },
+        {
+          asin: 'BOOK4',
+          title: 'The Alloy of Law',
+          authors: ['Brandon Sanderson'],
+          language: 'english',
+          metadataSource: 'Audible',
+          series: 'Mistborn',
+          seriesNumber: '4',
+        },
+      ],
+    })
+
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', name: 'home', component: { template: '<div />' } },
+        { path: '/collection/:type/:name', name: 'collection', component: CollectionView },
+      ],
+    })
+    await router.push('/collection/series/Mistborn')
+    await router.isReady().catch(() => {})
+
+    const store = useLibraryStore()
+    // Owns #1 and #3; expected order is owned-by-position (#1, #3) then not-added (#2, #4).
+    const localLibrary = [
+      {
+        id: 3,
+        title: 'Hero of Ages',
+        authors: ['Brandon Sanderson'],
+        series: 'Mistborn',
+        seriesNumber: '3',
+        asin: 'BOOK3',
+        files: [],
+      },
+      {
+        id: 1,
+        title: 'The Final Empire',
+        authors: ['Brandon Sanderson'],
+        series: 'Mistborn',
+        seriesNumber: '1',
+        asin: 'BOOK1',
+        files: [],
+      },
+    ] as unknown as import('@/types').Audiobook[]
+    store.audiobooks = localLibrary
+    mockGetLibrary.mockResolvedValue(localLibrary)
+    store.fetchLibrary = vi.fn(async () => undefined)
+
+    const wrapper = mount(CollectionView, {
+      global: {
+        plugins: [pinia, router],
+        stubs: ['EditAudiobookModal', 'CustomSelect', 'AddLibraryModal'],
+      },
+    })
+    await flushPromises()
+
+    const sorted = (
+      wrapper.vm as unknown as {
+        audiobooks: Array<{ title: string; seriesNumber?: string; inLibrary?: boolean }>
+      }
+    ).audiobooks
+
+    expect(sorted.map((book) => book.title)).toEqual([
+      'The Final Empire', // #1, owned
+      'Hero of Ages', // #3, owned
+      'The Well of Ascension', // #2, not added
+      'The Alloy of Law', // #4, not added
+    ])
+    expect(sorted.map((book) => Boolean(book.inLibrary))).toEqual([true, true, false, false])
+  })
+
   it('shows a loading state immediately when navigating to a similar author', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)

@@ -1131,6 +1131,8 @@ function shouldIncludeRemoteCatalogBook(
 
 function getSortValue(book: CollectionDisplayItem): string {
   switch (sortKey.value) {
+    case 'series-position':
+      return seriesPositionSortKey(book.seriesNumber)
     case 'author':
       return book.authors?.[0] || ''
     case 'series':
@@ -1140,6 +1142,18 @@ function getSortValue(book: CollectionDisplayItem): string {
     default:
       return book.title || ''
   }
+}
+
+// Build a lexicographically-comparable key from a series position number ("1", "2.5", "10")
+// so a string sort yields reading order. Non-numeric positions sort by their text; books
+// with no position sort last.
+function seriesPositionSortKey(value: string | null | undefined): string {
+  const raw = (value || '').trim()
+  if (!raw) return '~~~~~~~~'
+  const parsed = Number.parseFloat(raw)
+  if (Number.isNaN(parsed)) return raw.toLowerCase()
+  const [intPart, fracPart = ''] = Math.abs(parsed).toString().split('.')
+  return fracPart ? `${intPart.padStart(8, '0')}.${fracPart}` : intPart.padStart(8, '0')
 }
 
 const libraryCollectionAudiobooks = computed(() =>
@@ -1221,6 +1235,9 @@ const audiobooks = computed<CollectionDisplayItem[]>(() => {
   )
 
   return searched.sort((a, b) => {
+    // Metadata collections group owned books ahead of not-added ones (the view also renders
+    // these as separate "In Library" / "Not Added" sections); the active sort — series
+    // position by default — then orders books within each group.
     if (isMetadataCollection.value && a.inLibrary !== b.inLibrary) {
       return a.inLibrary ? -1 : 1
     }
@@ -1232,6 +1249,7 @@ const audiobooks = computed<CollectionDisplayItem[]>(() => {
 })
 
 const baseSortOptions = [
+  { value: 'series-position', label: 'Series Position' },
   { value: 'title', label: 'Title' },
   { value: 'author', label: 'Author' },
   { value: 'series', label: 'Series' },
@@ -1240,17 +1258,33 @@ const baseSortOptions = [
 
 const sortOptions = computed(() => {
   return baseSortOptions.filter((o) => {
+    // Reading-order sort only makes sense inside a single series.
+    if (o.value === 'series-position') return type.value === 'series'
     if (type.value === 'author' && o.value === 'author') return false
+    // Sorting by series name is meaningless when every book shares the series.
     if (type.value === 'series' && o.value === 'series') return false
     return true
   })
 })
 
-// Ensure current sortKey is valid for the current view; reset to title if not
+// A series collection defaults to reading order (#626); everything else to title.
+function defaultSortForType(collectionType: string): string {
+  return collectionType === 'series' ? 'series-position' : 'title'
+}
+
+watch(
+  type,
+  (newType) => {
+    sortKey.value = defaultSortForType(newType)
+  },
+  { immediate: true },
+)
+
+// Ensure current sortKey is valid for the current view; reset to the type default if not
 watch(sortOptions, (newOpts) => {
   const vals = newOpts.map((o) => o.value)
   if (!vals.includes(sortKey.value)) {
-    sortKey.value = 'title'
+    sortKey.value = defaultSortForType(type.value)
   }
 })
 
