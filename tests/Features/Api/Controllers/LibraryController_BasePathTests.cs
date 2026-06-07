@@ -150,5 +150,26 @@ namespace Listenarr.Tests.Features.Api.Controllers
             Assert.Equal(Path.Join(RootPath, "The Buffalo Hunter Hunter"), result);
             Assert.DoesNotContain("Stephen Graham Jones", result);
         }
+
+        [Fact]
+        [Trait("Method", "ComputeAudiobookBaseDirectoryFromPattern")]
+        [Trait("Scenario", "NonSeriesBook_KeepsSeriesNumberToken")]
+        public void ComputeAudiobookBaseDirectoryFromPattern_NonSeriesBook_KeepsSeriesNumberToken()
+        {
+            // Given a book with no series title but a series number, and a pattern using {SeriesNumber}
+            var audiobook = new AudiobookBuilder()
+                .WithTitle("The Gunslinger")
+                .WithAuthor("Stephen King")
+                .WithSeriesNumber("3")
+                .Build();
+
+            var controller = _provider.GetRequiredService<LibraryController>();
+
+            // When
+            var result = (string)ComputeBaseDirectoryMethod.Invoke(controller, new object[] { audiobook, RootPath, "{Author}/{SeriesNumber}/{Title}" });
+
+            // Then {SeriesNumber} is preserved — it must not be stripped along with an empty {Series}
+            Assert.Equal(Path.Join(RootPath, "Stephen King", "3", "The Gunslinger"), result);
+        }
     }
 }

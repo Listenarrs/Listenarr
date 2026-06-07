@@ -3492,16 +3492,12 @@ namespace Listenarr.Api.Controllers
                 directoryPattern = "{Author}/{Title}";
             }
 
-            // If the audiobook has no Series, remove any {Series} tokens from the directory pattern
-            // Tests expect the controller to strip the Series token when series metadata is missing.
-            if (string.IsNullOrWhiteSpace(audiobook.Series))
-            {
-                directoryPattern = Regex.Replace(directoryPattern, @"\{Series[^}]*\}", string.Empty, RegexOptions.IgnoreCase);
-                // Clean up any resulting duplicate separators or empty parts again
-                directoryPattern = Regex.Replace(directoryPattern, @"[\\/]\s*[\\/]", "/");
-                directoryPattern = Regex.Replace(directoryPattern, @"^\s*[\\/]", "");
-                directoryPattern = Regex.Replace(directoryPattern, @"[\\/]\s*$", "");
-            }
+            // An empty {Series} (no series metadata) is handled by ApplyNamingPattern below, which
+            // substitutes empty tokens and collapses the surrounding separators. We deliberately do
+            // not strip {Series} textually here: a regex like \{Series[^}]*\} also matches
+            // {SeriesNumber}/{SeriesNumber:00}, which would drop those tokens from patterns that use
+            // them. Applying the pattern exactly and letting the sentinel cleanup remove empties keeps
+            // {SeriesNumber} intact.
 
             // Build variables for naming pattern using audiobook-level metadata
             var variables = new Dictionary<string, object>
