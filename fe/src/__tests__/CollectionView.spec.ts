@@ -783,6 +783,76 @@ describe('CollectionView', () => {
     expect(sorted.map((book) => Boolean(book.inLibrary))).toEqual([true, true, false, false])
   })
 
+  // Mounts a series collection of owned books (one group → pure position order) and returns
+  // the rendered order of titles from the component's sorted `audiobooks` list.
+  async function seriesPositionOrder(
+    collection: string,
+    books: Array<{ id: number; title: string; seriesNumber?: string }>,
+  ): Promise<string[]> {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', name: 'home', component: { template: '<div />' } },
+        { path: '/collection/:type/:name', name: 'collection', component: CollectionView },
+      ],
+    })
+    await router.push(`/collection/series/${encodeURIComponent(collection)}`)
+    await router.isReady().catch(() => {})
+
+    const store = useLibraryStore()
+    const localLibrary = books.map((book) => ({
+      ...book,
+      authors: ['Brandon Sanderson'],
+      series: collection,
+      files: [],
+    })) as unknown as import('@/types').Audiobook[]
+    store.audiobooks = localLibrary
+    mockGetLibrary.mockResolvedValue(localLibrary)
+    store.fetchLibrary = vi.fn(async () => undefined)
+
+    const wrapper = mount(CollectionView, {
+      global: {
+        plugins: [pinia, router],
+        stubs: ['EditAudiobookModal', 'CustomSelect', 'AddLibraryModal'],
+      },
+    })
+    await flushPromises()
+
+    return (wrapper.vm as unknown as { audiobooks: Array<{ title: string }> }).audiobooks.map(
+      (book) => book.title,
+    )
+  }
+
+  it('sorts books with no series position last (#660)', async () => {
+    const order = await seriesPositionOrder('Mistborn', [
+      { id: 1, title: 'Second', seriesNumber: '2' },
+      { id: 2, title: 'First', seriesNumber: '1' },
+      { id: 3, title: 'Unplaced' }, // no seriesNumber → must sort last, not first
+    ])
+    expect(order).toEqual(['First', 'Second', 'Unplaced'])
+  })
+
+  it('orders multi-digit series positions numerically, not lexically (#660)', async () => {
+    const order = await seriesPositionOrder('Mistborn', [
+      { id: 1, title: 'Tenth', seriesNumber: '10' },
+      { id: 2, title: 'Second', seriesNumber: '2' },
+    ])
+    expect(order).toEqual(['Second', 'Tenth'])
+  })
+
+  it('does not treat a non-numeric position like "1-2" as #1 (#660)', async () => {
+    const order = await seriesPositionOrder('Mistborn', [
+      { id: 1, title: 'Second', seriesNumber: '2' },
+      { id: 2, title: 'Combined', seriesNumber: '1-2' },
+      { id: 3, title: 'First', seriesNumber: '1' },
+    ])
+    // "1-2" must not collapse onto #1's key; it sorts after the numeric positions.
+    expect(order).toEqual(['First', 'Second', 'Combined'])
+  })
+
   it('shows a loading state immediately when navigating to a similar author', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)

@@ -1144,16 +1144,21 @@ function getSortValue(book: CollectionDisplayItem): string {
   }
 }
 
-// Build a lexicographically-comparable key from a series position number ("1", "2.5", "10")
-// so a string sort yields reading order. Non-numeric positions sort by their text; books
-// with no position sort last.
+// Build a lexicographically-comparable key from a series position number so a plain string
+// sort (localeCompare) yields reading order. Each tier is led by a digit so the tiers sort
+// deterministically across locales (a leading symbol like "~" does NOT reliably sort after
+// digits — that was the original bug for missing positions):
+//   tier 1 = fully-numeric positions ("1", "2.5", "10"), ordered numerically via zero-padding;
+//   tier 2 = other non-empty positions ("1-2", "1a"), ordered by their text, after the numbers;
+//   tier 3 = missing positions, always sorted last.
 function seriesPositionSortKey(value: string | null | undefined): string {
   const raw = (value || '').trim()
-  if (!raw) return '~~~~~~~~'
-  const parsed = Number.parseFloat(raw)
-  if (Number.isNaN(parsed)) return raw.toLowerCase()
-  const [intPart, fracPart = ''] = Math.abs(parsed).toString().split('.')
-  return fracPart ? `${intPart.padStart(8, '0')}.${fracPart}` : intPart.padStart(8, '0')
+  if (!raw) return '3'
+  if (/^\d+(\.\d+)?$/.test(raw)) {
+    const [intPart, fracPart = ''] = raw.split('.')
+    return `1${intPart.padStart(8, '0')}${fracPart ? `.${fracPart}` : ''}`
+  }
+  return `2${raw.toLowerCase()}`
 }
 
 const libraryCollectionAudiobooks = computed(() =>
