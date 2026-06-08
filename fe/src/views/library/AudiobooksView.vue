@@ -1929,6 +1929,7 @@ async function initializeVirtualScroller() {
 
 onMounted(async () => {
   document.addEventListener('click', handleClickOutside)
+  if (rootFoldersStore.folders.length === 0) await rootFoldersStore.load()
   await Promise.all([
     libraryStore.fetchLibrary(),
     configStore.loadApplicationSettings(),
