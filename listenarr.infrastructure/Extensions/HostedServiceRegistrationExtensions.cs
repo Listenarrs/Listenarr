@@ -76,12 +76,10 @@ namespace Listenarr.Infrastructure.Extensions
             // Background service to rescan files missing metadata
             services.AddHostedService<MetadataRescanService>();
 
-            // Register background service for download processing queue
+            // Register background service for download processing queue. This worker also
+            // periodically purges old completed/failed processing jobs so the table doesn't
+            // grow unbounded (CleanupOldJobsAsync previously had no caller).
             services.AddHostedService<DownloadProcessingJobProcessor>();
-
-            // Periodically purge old completed/failed processing jobs so the table
-            // doesn't grow unbounded (CleanupOldJobsAsync previously had no caller)
-            services.AddHostedService<DownloadProcessingJobCleanupService>();
 
             // Background worker that processes unmatched-file scan jobs
             services.AddHostedService<UnmatchedScanBackgroundService>();

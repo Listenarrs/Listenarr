@@ -158,21 +158,21 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
             return result;
         }
 
-        public async Task CleanupOldJobsAsync(int retentionDays)
+        public async Task<int> DeleteCompletedBeforeAsync(IReadOnlyCollection<ProcessingJobStatus> statuses, DateTime cutoffUtc)
         {
-            var cutoffDate = DateTime.UtcNow.AddDays(-retentionDays);
             await using var ctx = await _dbFactory.CreateDbContextAsync();
             var oldJobs = await ctx.DownloadProcessingJobs
-                .Where(j => (j.Status == ProcessingJobStatus.Completed || j.Status == ProcessingJobStatus.Failed) &&
-                           j.CompletedAt.HasValue && j.CompletedAt < cutoffDate)
+                .Where(j => statuses.Contains(j.Status) && j.CompletedAt.HasValue && j.CompletedAt < cutoffUtc)
                 .ToListAsync();
 
-            if (oldJobs.Any())
+            if (oldJobs.Count == 0)
             {
-                ctx.DownloadProcessingJobs.RemoveRange(oldJobs);
-                await ctx.SaveChangesAsync();
-                _logger.LogInformation("Cleaned up {Count} old processing jobs older than {Days} days", oldJobs.Count, retentionDays);
+                return 0;
             }
+
+            ctx.DownloadProcessingJobs.RemoveRange(oldJobs);
+            await ctx.SaveChangesAsync();
+            return oldJobs.Count;
         }
 
         public async Task<List<DownloadProcessingJob>> GetRecentAsync(int count)

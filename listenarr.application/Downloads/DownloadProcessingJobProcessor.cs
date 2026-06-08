@@ -36,6 +36,15 @@ namespace Listenarr.Application.Downloads
     {
         private readonly TimeSpan _processingInterval = TimeSpan.FromSeconds(10); // Check every 10 seconds
 
+        // Retention cleanup is folded into this worker (rather than a separate hosted service)
+        // since the processor already owns job-table maintenance — see the stuck-job reset below.
+        // Terminal jobs older than the retention window are purged shortly after startup and daily
+        // thereafter so DownloadProcessingJobs doesn't grow unbounded and inflate every
+        // queue-snapshot reconciliation that queries it.
+        private readonly TimeSpan _cleanupInterval = TimeSpan.FromHours(24);
+        internal const int JobRetentionDays = 7;
+        private DateTime _nextCleanupAtUtc = DateTime.MinValue; // due on the first loop iteration
+
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             logger.LogInformation("Download Processing Background Service started");
@@ -79,6 +88,12 @@ namespace Listenarr.Application.Downloads
                     logger.LogError(ex, "Error processing download queue");
                 }
 
+                if (DateTime.UtcNow >= _nextCleanupAtUtc)
+                {
+                    await RunCleanupAsync(stoppingToken);
+                    _nextCleanupAtUtc = DateTime.UtcNow.Add(_cleanupInterval);
+                }
+
                 try
                 {
                     await Task.Delay(_processingInterval, stoppingToken);
@@ -90,6 +105,29 @@ namespace Listenarr.Application.Downloads
             }
 
             logger.LogInformation("Download Processing Background Service stopped");
+        }
+
+        /// <summary>
+        /// Runs a single retention-cleanup pass, delegating the policy to the application layer.
+        /// Internal so it can be exercised directly in tests without driving the background loop.
+        /// Failures are swallowed (logged) so a cleanup error never tears down the processor loop.
+        /// </summary>
+        internal async Task RunCleanupAsync(CancellationToken cancellationToken)
+        {
+            try
+            {
+                using var scope = scopeFactory.CreateScope();
+                var downloadProcessingJobService = scope.ServiceProvider.GetRequiredService<IDownloadProcessingJobService>();
+                await downloadProcessingJobService.CleanupOldJobsAsync(JobRetentionDays);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
+                logger.LogError(ex, "Error during DownloadProcessingJob cleanup pass");
+            }
         }
 
         internal async Task ProcessQueueAsync(CancellationToken cancellationToken)

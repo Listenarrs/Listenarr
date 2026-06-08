@@ -101,8 +101,20 @@ namespace Listenarr.Application.Downloads
         public async Task<QueueStats> GetStatsAsync()
             => await jobRepository.GetStatsAsync();
 
+        // Jobs in a terminal state are eligible for retention cleanup; in-flight states
+        // (Pending/Processing/Retry) are never purged regardless of age.
+        private static readonly ProcessingJobStatus[] TerminalStatuses =
+            [ProcessingJobStatus.Completed, ProcessingJobStatus.Failed];
+
         public async Task CleanupOldJobsAsync(int retentionDays = 7)
-            => await jobRepository.CleanupOldJobsAsync(retentionDays);
+        {
+            var cutoffUtc = DateTime.UtcNow.AddDays(-retentionDays);
+            var removed = await jobRepository.DeleteCompletedBeforeAsync(TerminalStatuses, cutoffUtc);
+            if (removed > 0)
+            {
+                logger.LogInformation("Cleaned up {Count} old processing jobs older than {Days} days", removed, retentionDays);
+            }
+        }
 
         public async Task<List<DownloadProcessingJob>> GetRecentActivityAsync(int count = 50)
             => await jobRepository.GetRecentAsync(count);

@@ -23,15 +23,20 @@ using Xunit;
 
 namespace Listenarr.Tests.Features.Application.Downloads
 {
-    [Trait("Name", "DownloadProcessingJobCleanupServiceTests")]
+    /// <summary>
+    /// Retention cleanup is folded into the <see cref="DownloadProcessingJobProcessor"/> rather than
+    /// living in a separate hosted service. These tests drive its cleanup entry point end-to-end so
+    /// the retention policy (now owned by the application layer) is exercised through to the repository.
+    /// </summary>
+    [Trait("Name", "DownloadProcessingJobCleanupTests")]
     [Trait("Category", "DownloadProcessingJob")]
-    public class DownloadProcessingJobCleanupServiceTests : BaseTests
+    public class DownloadProcessingJobCleanupTests : BaseTests
     {
         [Fact]
         [Trait("Scenario", "Cleanup removes terminal jobs past the retention window")]
         public async Task RunCleanupAsync_RemovesOldTerminalJobs_KeepsRecentAndActive()
         {
-            var beyondRetention = DateTime.UtcNow.AddDays(-(DownloadProcessingJobCleanupService.RetentionDays + 1));
+            var beyondRetention = DateTime.UtcNow.AddDays(-(DownloadProcessingJobProcessor.JobRetentionDays + 1));
             var withinRetention = DateTime.UtcNow.AddDays(-1);
 
             // Old completed job -> should be purged
@@ -52,8 +57,8 @@ namespace Listenarr.Tests.Features.Application.Downloads
                 .WithPending(at: beyondRetention)
                 .Build());
 
-            var service = _provider.GetRequiredService<DownloadProcessingJobCleanupService>();
-            await service.RunCleanupAsync(CancellationToken.None);
+            var processor = _provider.GetRequiredService<DownloadProcessingJobProcessor>();
+            await processor.RunCleanupAsync(CancellationToken.None);
 
             Assert.Null(await _downloadProcessingJobRepository.GetByIdAsync("job-old-completed"));
             Assert.NotNull(await _downloadProcessingJobRepository.GetByIdAsync("job-recent-completed"));
@@ -69,8 +74,8 @@ namespace Listenarr.Tests.Features.Application.Downloads
                 .WithCompleted(at: DateTime.UtcNow.AddHours(-1))
                 .Build());
 
-            var service = _provider.GetRequiredService<DownloadProcessingJobCleanupService>();
-            await service.RunCleanupAsync(CancellationToken.None);
+            var processor = _provider.GetRequiredService<DownloadProcessingJobProcessor>();
+            await processor.RunCleanupAsync(CancellationToken.None);
 
             Assert.NotNull(await _downloadProcessingJobRepository.GetByIdAsync("job-recent-completed"));
         }

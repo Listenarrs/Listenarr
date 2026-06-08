@@ -37,7 +37,14 @@ namespace Listenarr.Application.Interfaces.Repositories
         Task<DownloadProcessingJob?> GetByIdAsync(string jobId);
         Task<List<DownloadProcessingJob>> GetByDownloadIdAsync(string downloadId);
         Task<QueueStats> GetStatsAsync();
-        Task CleanupOldJobsAsync(int retentionDays);
+
+        /// <summary>
+        /// Deletes jobs in the given <paramref name="statuses"/> whose <c>CompletedAt</c> is before
+        /// <paramref name="cutoffUtc"/>, returning the number of rows removed. Pure data access: the
+        /// retention policy (which statuses are terminal, how the cutoff is derived) is owned by the
+        /// application layer and passed in.
+        /// </summary>
+        Task<int> DeleteCompletedBeforeAsync(IReadOnlyCollection<ProcessingJobStatus> statuses, DateTime cutoffUtc);
         Task<List<DownloadProcessingJob>> GetRecentAsync(int count);
         Task<List<DownloadProcessingJob>> GetStuckProcessingJobsAsync(CancellationToken cancellationToken = default);
     }
