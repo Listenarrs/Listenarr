@@ -46,7 +46,7 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
                 .ToListAsync();
         }
 
-        public async Task<Dictionary<int, List<AudiobookSeriesMembership>>> GetSeriesMembershipsByAudiobookIdsAsync(CancellationToken ct = default)
+        public async Task<Dictionary<int, List<AudiobookSeriesMembership>>> GetAllSeriesMembershipsGroupedByAudiobookIdAsync(CancellationToken ct = default)
         {
             // Batch-load all memberships in one query (mirrors the file-summary batching in
             // LibraryListService) so the library list can show a book under every series it

@@ -73,7 +73,7 @@ namespace Listenarr.Application.Audiobooks
             // was started on this context instance" under real database latency.
             var fileSummaryRows = await _audiobookFileRepository.GetFormatSummariesAsync();
             var fileCountById = await _audiobookFileRepository.GetCountsByAudiobookIdAsync();
-            var membershipsByAudiobookId = await _audiobookRepository.GetSeriesMembershipsByAudiobookIdsAsync();
+            var membershipsByAudiobookId = await _audiobookRepository.GetAllSeriesMembershipsGroupedByAudiobookIdAsync();
             var filesByAudiobookId = fileSummaryRows
                 .GroupBy(f => f.AudiobookId)
                 .ToDictionary(g => g.Key, g => (IReadOnlyList<AudiobookFormatSummary>)g.ToList());
