@@ -50,6 +50,13 @@ namespace Listenarr.Domain.Common
             ".wv", ".wma", ".ape", ".alac", ".aif", ".aiff"
         };
 
+        private static StringComparison GetStringComparison()
+        {
+            return OperatingSystem.IsLinux()
+                ? StringComparison.Ordinal
+                : StringComparison.OrdinalIgnoreCase;
+        }
+
         /// <summary>
         /// Returns true when the file path has a recognized audio extension.
         /// </summary>
@@ -375,17 +382,15 @@ namespace Listenarr.Domain.Common
         /// <summary>
         /// Returns true if the given childPath (either file or directory) is inside of the parentPath
         /// </summary>
-        /// <param name="childPath">Path to test</param>
-        /// <param name="parentPath">Supposed parent path</param>
+        /// <param name="a">Path to test</param>
+        /// <param name="b">Supposed parent path</param>
         /// <returns>True when childPath is inside parentPath or equal to it</returns>
-        public static bool IsPathInsideOf(string childPath, string parentPath)
+        public static bool IsPathInsideOf(string a, string b)
         {
-            parentPath = NormalizeStoredPath(parentPath);
-            childPath = NormalizeStoredPath(childPath);
+            a = EnsureTrailingSeparator(NormalizeStoredPath(a));
+            b = EnsureTrailingSeparator(NormalizeStoredPath(b));
 
-            var relative = Path.GetRelativePath(parentPath, childPath);
-
-            return !relative.Equals(".") && !relative.StartsWith("..");
+            return !IsSameDirectory(a, b) && a.StartsWith(b, GetStringComparison());
         }
 
         /// <summary>
@@ -399,11 +404,7 @@ namespace Listenarr.Domain.Common
             a = EnsureTrailingSeparator(NormalizeStoredPath(a));
             b = EnsureTrailingSeparator(NormalizeStoredPath(b));
 
-            StringComparison comparison = OperatingSystem.IsLinux()
-                ? StringComparison.Ordinal
-                : StringComparison.OrdinalIgnoreCase;
-
-            return string.Equals(a, b, comparison);
+            return string.Equals(a, b, GetStringComparison());
         }
 
         public static string? GetCommonDirectory(IEnumerable<string> paths)

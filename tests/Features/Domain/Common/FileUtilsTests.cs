@@ -24,6 +24,12 @@ namespace Listenarr.Tests.Features.Domain.Common
                 // Path sharing part of filenames should fail
                 Add(false, FileUtils.GetAbsolutePath("datatest", "test", "audio.mp3"), FileUtils.GetAbsolutePath("data"));
 
+                // Relative path on different volumes
+                if (OperatingSystem.IsWindows())
+                {
+                    Add(false, "C:\\Test\\Data", "D:\\Data\\Test");
+                }
+
             }
         }
 

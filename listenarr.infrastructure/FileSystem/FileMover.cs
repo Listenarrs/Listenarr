@@ -109,15 +109,15 @@ namespace Listenarr.Infrastructure.FileSystem
             {
                 CopyDirRecursive(sourceDir, destDir);
                 try { Directory.Delete(sourceDir, true); }
-                catch (Exception deleteEx) when (deleteEx is not OperationCanceledException && deleteEx is not OutOfMemoryException && deleteEx is not StackOverflowException)
+                catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
                 {
-                    logger.LogDebug(deleteEx, "Failed deleting source directory after copy fallback for {Source}", sourceDir);
+                    logger.LogDebug(exception, "Failed deleting source directory after copy fallback for {Source}", sourceDir);
                 }
                 return true;
             }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
             {
-                logger.LogError(ex, "Copy+delete fallback failed for directory {Source} -> {Dest}", sourceDir, destDir);
+                logger.LogError(exception, "Copy+delete fallback failed for directory {Source} -> {Dest}", sourceDir, destDir);
 
                 return await MoveWithRobocopy(sourceDir, destDir, "*.*");
             }
