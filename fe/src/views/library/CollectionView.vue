@@ -413,7 +413,13 @@
             />
 
             <div class="list-details">
-              <div class="audiobook-title">{{ safeText(audiobook.title) }}</div>
+              <div class="audiobook-title">
+                <span
+                  v-if="type === 'series' && audiobook.seriesNumber"
+                  class="list-series-position"
+                  >#{{ audiobook.seriesNumber }}</span
+                >{{ safeText(audiobook.title) }}
+              </div>
               <div class="audiobook-author">
                 {{
                   audiobook.authors
@@ -549,6 +555,12 @@
                 />
               </div>
               <div class="collection-cover">
+                <div
+                  v-if="type === 'series' && audiobook.seriesNumber"
+                  class="series-position-badge"
+                >
+                  #{{ audiobook.seriesNumber }}
+                </div>
                 <img
                   v-if="audiobook.imageUrl"
                   :src="getProtectedImageSrc(audiobook.imageUrl, getPlaceholderUrl())"
@@ -4246,6 +4258,33 @@ defineExpose({
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+/* Series position indicator (only shown inside a single-series collection) */
+.list-series-position {
+  display: inline-block;
+  margin-right: 0.4rem;
+  padding: 0 0.35rem;
+  border-radius: 4px;
+  font-size: 0.8em;
+  font-weight: 700;
+  color: var(--brand-500);
+  background-color: rgba(var(--brand-rgb), 0.16);
+}
+
+.series-position-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+  padding: 0.15rem 0.45rem;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #fff;
+  background-color: rgba(var(--brand-rgb), 0.92);
+  pointer-events: none;
 }
 
 .list-details .audiobook-title {

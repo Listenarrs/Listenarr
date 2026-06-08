@@ -1284,4 +1284,53 @@ describe('CollectionView', () => {
       'Updated the author image, description, related authors, and catalog.',
     )
   })
+
+  it('renders the per-collection series position for a book matched via a non-primary membership', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', name: 'home', component: { template: '<div />' } },
+        { path: '/collection/:type/:name', name: 'collection', component: CollectionView },
+      ],
+    })
+    await router.push('/collection/series/Mistborn')
+    await router.isReady().catch(() => {})
+
+    const store = useLibraryStore()
+    store.audiobooks = [
+      {
+        id: 1,
+        title: 'Shadows of Self',
+        authors: ['Brandon Sanderson'],
+        // Primary series (and number) point at a DIFFERENT series...
+        series: 'Other Series',
+        seriesNumber: '5',
+        // ...but the book also belongs to Mistborn at position 2.
+        seriesMemberships: [
+          { seriesName: 'Other Series', seriesNumber: '5', isPrimary: true },
+          { seriesName: 'Mistborn', seriesNumber: '2', isPrimary: false },
+        ],
+        imageUrl: 'c1.jpg',
+        files: [],
+      },
+    ] as unknown as import('@/types').Audiobook[]
+
+    store.fetchLibrary = vi.fn(async () => undefined)
+    const wrapper = mount(CollectionView, {
+      global: {
+        plugins: [pinia, router],
+        stubs: ['EditAudiobookModal', 'CustomSelect', 'AddLibraryModal'],
+      },
+    })
+    await flushPromises()
+
+    const card = wrapper.find('.collection-card')
+    expect(card.exists()).toBe(true)
+    // Shows the Mistborn position (#2 from the membership), not the primary 'Other Series' #5.
+    expect(card.text()).toContain('#2')
+    expect(card.text()).not.toContain('#5')
+  })
 })

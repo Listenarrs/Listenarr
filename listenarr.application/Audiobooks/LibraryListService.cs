@@ -63,14 +63,17 @@ namespace Listenarr.Application.Audiobooks
                 return Array.Empty<LibraryAudiobookListItem>();
             }
 
-            var fileSummaryTask = _audiobookFileRepository.GetFormatSummariesAsync();
-            var fileCountTask = _audiobookFileRepository.GetCountsByAudiobookIdAsync();
+            // The download repository resolves its own DbContext from IDbContextFactory, so this
+            // read can safely run concurrently with the shared-context reads below.
             var activeDownloadTask = _downloadRepository.GetActiveAudiobookIdsAsync(ActiveLibraryDownloadStatuses);
-            var seriesMembershipTask = _audiobookRepository.GetSeriesMembershipsByAudiobookIdsAsync();
 
-            var membershipsByAudiobookId = await seriesMembershipTask;
-            var fileSummaryRows = await fileSummaryTask;
-            var fileCountById = await fileCountTask;
+            // File summaries, file counts, and series memberships all execute against the shared
+            // scoped ListenArrDbContext, so they must be awaited sequentially: starting a second
+            // query on a single DbContext before the first completes throws "a second operation
+            // was started on this context instance" under real database latency.
+            var fileSummaryRows = await _audiobookFileRepository.GetFormatSummariesAsync();
+            var fileCountById = await _audiobookFileRepository.GetCountsByAudiobookIdAsync();
+            var membershipsByAudiobookId = await _audiobookRepository.GetSeriesMembershipsByAudiobookIdsAsync();
             var filesByAudiobookId = fileSummaryRows
                 .GroupBy(f => f.AudiobookId)
                 .ToDictionary(g => g.Key, g => (IReadOnlyList<AudiobookFormatSummary>)g.ToList());
