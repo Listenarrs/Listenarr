@@ -1291,6 +1291,8 @@ onMounted(async () => {
   syncActiveTabFromRoute()
   document.addEventListener('click', handleClickOutside)
 
+  if (rootFoldersStore.folders.length === 0) await rootFoldersStore.load()
+
   await loadAudiobook()
   await loadWeakStorageMissingFiles()
 
