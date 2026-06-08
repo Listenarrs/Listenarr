@@ -85,7 +85,8 @@ namespace Listenarr.Tests.Features.Infrastructure.Platform
                 NullLogger<SystemService>.Instance,
                 applicationPathService.Object,
                 applicationVersionService.Object,
-                rootFolderService.Object);
+                rootFolderService.Object,
+                new DiskSpaceProbe(NullLogger<DiskSpaceProbe>.Instance));
         }
     }
 }

@@ -109,6 +109,8 @@ namespace Listenarr.Infrastructure.Extensions
             // Store for persisting external process execution outputs (stdout/stderr) - best-effort
             services.AddScoped<IProcessExecutionStore, ProcessExecutionStore>();
             services.AddScoped<IRemotePathMappingService, RemotePathMappingService>();
+            // Cross-platform disk-space measurement (Windows native call vs. DriveInfo)
+            services.AddSingleton<IDiskSpaceProbe, DiskSpaceProbe>();
             services.AddScoped<ISystemService, SystemService>();
             services.AddScoped<IQualityProfileService, QualityProfileService>();
             services.AddScoped<IUserService, UserService>();

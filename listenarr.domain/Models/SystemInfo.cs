@@ -46,17 +46,33 @@ namespace Listenarr.Domain.Models
         public int ProcessorCount { get; set; }
     }
 
+    /// <summary>
+    /// Storage information returned by <c>GET /system/storage</c>.
+    /// </summary>
+    /// <remarks>
+    /// The top-level <c>UsedBytes</c>/<c>TotalBytes</c>/<c>FreeBytes</c>/<c>UsedPercentage</c>/
+    /// <c>*Formatted</c>/<c>DriveName</c>/<c>Status</c> fields are retained for backwards
+    /// compatibility and describe the <b>App Data disk</b> (the config volume holding the
+    /// database, logs, and cache). Per-disk detail — the System disk (container root), the
+    /// App Data disk, and one entry per configured root folder — is in <see cref="Disks"/>.
+    /// </remarks>
     public class StorageInfo
     {
+        /// <summary>Used bytes on the App Data disk (legacy; see <see cref="Disks"/> for per-disk detail).</summary>
         public long UsedBytes { get; set; }
+        /// <summary>Total bytes on the App Data disk (legacy; see <see cref="Disks"/> for per-disk detail).</summary>
         public long TotalBytes { get; set; }
+        /// <summary>Free bytes on the App Data disk (legacy; see <see cref="Disks"/> for per-disk detail).</summary>
         public long FreeBytes { get; set; }
+        /// <summary>Used percentage of the App Data disk (legacy; see <see cref="Disks"/> for per-disk detail).</summary>
         public double UsedPercentage { get; set; }
         public string UsedFormatted { get; set; } = string.Empty;
         public string TotalFormatted { get; set; } = string.Empty;
         public string FreeFormatted { get; set; } = string.Empty;
+        /// <summary>Path of the App Data disk that the legacy fields describe (legacy; see <see cref="Disks"/>).</summary>
         public string DriveName { get; set; } = string.Empty;
         public string Status { get; set; } = "available";
+        /// <summary>Per-disk storage: System (container root), App Data, then one entry per configured root folder.</summary>
         public List<DiskStorageInfo> Disks { get; set; } = new();
     }
 

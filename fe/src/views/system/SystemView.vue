@@ -83,14 +83,6 @@
         </StatusCard>
 
         <StatusCard title="Storage" :icon="PhHardDrives">
-          <template #header-badge>
-            <span v-if="storageInfo" class="status-badge">
-              {{ storageInfo.usedFormatted }}/{{ storageInfo.totalFormatted }}
-            </span>
-            <span v-else class="status-badge">
-              <PhSpinner class="ph-spin" />
-            </span>
-          </template>
           <StorageDisksList v-if="storageInfo" :disks="storageInfo.disks" />
         </StatusCard>
 

@@ -134,7 +134,90 @@ namespace Listenarr.Tests.Features.Infrastructure.Platform
             Assert.Equal("available", storageInfo.Disks[0].Status);
         }
 
+        [Fact]
+        [Trait("Method", "GetStorageInfoAsync")]
+        [Trait("Scenario", "UncRootFolder")]
+        public async Task GetStorageInfoAsync_UncRootFolder_MeasuredViaProbe()
+        {
+            // Given: a root folder on a Windows UNC/NAS share. DriveInfo throws on such
+            // paths, so the probe seam is what keeps NAS support working. A fake probe
+            // lets us drive a UNC string through the measurement pipeline on Linux CI.
+            await _rootFolderRepository.AddAsync(
+                new RootFolderBuilder().WithName("Nas").WithPath(@"\\nas\media").Build());
+
+            long total = 8_000_000_000_000L;
+            long free = 6_800_000_000_000L;
+            var probe = new Mock<IDiskSpaceProbe>();
+            probe.Setup(p => p.TryGetDiskSpace(It.IsAny<string>(), out total, out free)).Returns(true);
+            var systemService = CreateSystemService(probe.Object);
+
+            // When
+            var storageInfo = await systemService.GetStorageInfoAsync();
+
+            // Then: the UNC entry is available with the probe's bytes mapped through
+            var entry = Assert.Single(storageInfo.Disks, d => d.Path == @"\\nas\media");
+            Assert.Equal("Nas", entry.Label);
+            Assert.Equal("available", entry.Status);
+            Assert.Equal(total, entry.TotalBytes);
+            Assert.Equal(free, entry.FreeBytes);
+            Assert.Equal(total - free, entry.UsedBytes);
+            Assert.False(string.IsNullOrEmpty(entry.FreeFormatted));
+        }
+
+        [Fact]
+        [Trait("Method", "GetStorageInfoAsync")]
+        [Trait("Scenario", "ProbeCannotMeasure")]
+        public async Task GetStorageInfoAsync_ProbeCannotMeasure_MarksEntryUnavailable()
+        {
+            // Given: a root folder the probe reports it cannot read (e.g. an offline share)
+            await _rootFolderRepository.AddAsync(
+                new RootFolderBuilder().WithName("Offline").WithPath(@"\\offline\share").Build());
+
+            long total = 0L;
+            long free = 0L;
+            var probe = new Mock<IDiskSpaceProbe>();
+            probe.Setup(p => p.TryGetDiskSpace(It.IsAny<string>(), out total, out free)).Returns(false);
+            var systemService = CreateSystemService(probe.Object);
+
+            // When: the call must not throw
+            var storageInfo = await systemService.GetStorageInfoAsync();
+
+            // Then: the unreadable folder is reported unavailable
+            var entry = Assert.Single(storageInfo.Disks, d => d.Path == @"\\offline\share");
+            Assert.Equal("unavailable", entry.Status);
+            Assert.Equal(0, entry.TotalBytes);
+        }
+
+        [Fact]
+        [Trait("Method", "GetStorageInfoAsync")]
+        [Trait("Scenario", "OverProvisionedDisk")]
+        public async Task GetStorageInfoAsync_OverProvisionedDisk_ClampsUsage()
+        {
+            // Given: a filesystem reporting more free space than total (over-provisioned /
+            // compressed / network share). Used bytes and percentage must not go negative.
+            await _rootFolderRepository.AddAsync(
+                new RootFolderBuilder().WithName("Pool").WithPath("/pool").Build());
+
+            long total = 100L;
+            long free = 150L;
+            var probe = new Mock<IDiskSpaceProbe>();
+            probe.Setup(p => p.TryGetDiskSpace(It.IsAny<string>(), out total, out free)).Returns(true);
+            var systemService = CreateSystemService(probe.Object);
+
+            // When
+            var storageInfo = await systemService.GetStorageInfoAsync();
+
+            // Then: the entry is available but usage is clamped to zero, not negative
+            var entry = Assert.Single(storageInfo.Disks, d => d.Path == "/pool");
+            Assert.Equal("available", entry.Status);
+            Assert.Equal(0, entry.UsedBytes);
+            Assert.Equal(0, entry.UsedPercentage);
+        }
+
         private SystemService CreateSystemService()
+            => CreateSystemService(new DiskSpaceProbe(NullLogger<DiskSpaceProbe>.Instance));
+
+        private SystemService CreateSystemService(IDiskSpaceProbe diskSpaceProbe)
         {
             // IConfigurationService and IApplicationVersionService are not used by
             // the storage path — bare mocks, mirroring SystemServiceVersionTests.
@@ -146,7 +229,8 @@ namespace Listenarr.Tests.Features.Infrastructure.Platform
                 NullLogger<SystemService>.Instance,
                 _applicationPathService,
                 applicationVersionService.Object,
-                _provider.GetRequiredService<IRootFolderService>());
+                _provider.GetRequiredService<IRootFolderService>(),
+                diskSpaceProbe);
         }
     }
 }

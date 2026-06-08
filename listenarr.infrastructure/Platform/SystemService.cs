@@ -32,6 +32,7 @@ namespace Listenarr.Infrastructure.Platform
         private readonly IApplicationPathService _applicationPathService;
         private readonly IApplicationVersionService _applicationVersionService;
         private readonly IRootFolderService _rootFolderService;
+        private readonly IDiskSpaceProbe _diskSpaceProbe;
         private readonly DateTime _startTime;
         private static readonly Process _currentProcess = Process.GetCurrentProcess();
 
@@ -40,13 +41,15 @@ namespace Listenarr.Infrastructure.Platform
             ILogger<SystemService> logger,
             IApplicationPathService applicationPathService,
             IApplicationVersionService applicationVersionService,
-            IRootFolderService rootFolderService)
+            IRootFolderService rootFolderService,
+            IDiskSpaceProbe diskSpaceProbe)
         {
             _configurationService = configurationService;
             _logger = logger;
             _applicationPathService = applicationPathService;
             _applicationVersionService = applicationVersionService;
             _rootFolderService = rootFolderService;
+            _diskSpaceProbe = diskSpaceProbe;
             _startTime = DateTime.UtcNow;
         }
 
@@ -97,10 +100,11 @@ namespace Listenarr.Infrastructure.Platform
         {
             try
             {
-                // App-data disk first; legacy top-level fields mirror it so existing
-                // consumers of /system/storage keep working unchanged. Prefer the config
-                // root (database/logs/cache — the mounted volume in Docker) over the
-                // install dir, falling back when it has not been created yet.
+                // Compute the App Data disk first so the legacy top-level fields can mirror
+                // it (existing consumers of /system/storage keep working unchanged); the
+                // Disks list itself is ordered System -> App Data -> root folders below.
+                // Prefer the config root (database/logs/cache — the mounted volume in
+                // Docker) over the install dir, falling back when it has not been created yet.
                 var appDataPath = Directory.Exists(_applicationPathService.ConfigRootPath)
                     ? _applicationPathService.ConfigRootPath
                     : _applicationPathService.ContentRootPath;
@@ -157,55 +161,24 @@ namespace Listenarr.Infrastructure.Platform
 
         private DiskStorageInfo MeasureDisk(string label, string path)
         {
-            try
+            // The probe owns the platform-specific measurement (Windows native call vs.
+            // DriveInfo) and returns false for anything it cannot read; here we only map
+            // its result into the labelled, formatted DiskStorageInfo.
+            if (_diskSpaceProbe.TryGetDiskSpace(path, out var totalBytes, out var freeBytes))
             {
-                // Missing directories report the same on every platform; without this
-                // check Windows would silently fall back to drive-root stats because
-                // the DriveInfo constructor normalizes "C:\missing\dir" to "C:\".
-                if (!Directory.Exists(path))
-                {
-                    return new DiskStorageInfo { Label = label, Path = path, Status = "unavailable" };
-                }
-
-                if (OperatingSystem.IsWindows())
-                {
-                    // DriveInfo throws on UNC/NAS roots (\\server\share). GetDiskFreeSpaceEx
-                    // accepts any directory — drive paths, mounted-folder junctions and UNC
-                    // shares alike — and reports quota-aware free space for the caller.
-                    if (!NativeMethods.GetDiskFreeSpaceEx(path, out var freeForCaller, out var total, out _))
-                    {
-                        _logger.LogWarning(
-                            "GetDiskFreeSpaceEx failed for {Label} at {Path} (error {Error})",
-                            label, path, Marshal.GetLastWin32Error());
-                        return new DiskStorageInfo { Label = label, Path = path, Status = "unavailable" };
-                    }
-
-                    return BuildDiskInfo(label, path, (long)total, (long)freeForCaller);
-                }
-
-                // DriveInfo on the path itself (not Path.GetPathRoot): on Linux this
-                // stats the filesystem containing the path, which is what makes Docker
-                // volume mounts like /audiobooks report their own free space instead
-                // of the container root's.
-                var driveInfo = new DriveInfo(path);
-                if (!driveInfo.IsReady)
-                {
-                    return new DiskStorageInfo { Label = label, Path = path, Status = "unavailable" };
-                }
-
-                return BuildDiskInfo(label, path, driveInfo.TotalSize, driveInfo.AvailableFreeSpace);
+                return BuildDiskInfo(label, path, totalBytes, freeBytes);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogWarning(ex, "Could not read disk info for {Label} at {Path}", label, path);
-                return new DiskStorageInfo { Label = label, Path = path, Status = "unavailable" };
-            }
+
+            return new DiskStorageInfo { Label = label, Path = path, Status = "unavailable" };
         }
 
         private DiskStorageInfo BuildDiskInfo(string label, string path, long totalBytes, long freeBytes)
         {
-            var usedBytes = totalBytes - freeBytes;
-            var usedPercentage = totalBytes > 0 ? (double)usedBytes / totalBytes * 100 : 0;
+            // Clamp defensively: some filesystems report free space that exceeds the
+            // total (reserved blocks, over-provisioning, compression/dedup on ZFS/Btrfs,
+            // or network shares), which would otherwise drive used bytes/percentage negative.
+            var usedBytes = Math.Clamp(totalBytes - freeBytes, 0, totalBytes);
+            var usedPercentage = totalBytes > 0 ? Math.Clamp((double)usedBytes / totalBytes * 100, 0, 100) : 0;
 
             return new DiskStorageInfo
             {
@@ -220,20 +193,6 @@ namespace Listenarr.Infrastructure.Platform
                 FreeFormatted = FormatBytes(freeBytes),
                 Status = "available"
             };
-        }
-
-        private static class NativeMethods
-        {
-            // GetDiskFreeSpaceExW accepts a directory or UNC path and returns the free
-            // bytes available to the caller plus the volume total. Used on Windows where
-            // DriveInfo cannot handle UNC/NAS roots.
-            [DllImport("kernel32.dll", EntryPoint = "GetDiskFreeSpaceExW", SetLastError = true, CharSet = CharSet.Unicode)]
-            [return: MarshalAs(UnmanagedType.Bool)]
-            internal static extern bool GetDiskFreeSpaceEx(
-                string lpDirectoryName,
-                out ulong lpFreeBytesAvailableToCaller,
-                out ulong lpTotalNumberOfBytes,
-                out ulong lpTotalNumberOfFreeBytes);
         }
 
         public async Task<ServiceHealth> GetServiceHealthAsync()
