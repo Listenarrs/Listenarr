@@ -38,7 +38,9 @@ export const useRootFoldersStore = defineStore('rootFolders', () => {
       }
     } catch (err) {
       logger.debug('Failed to load root folders:', err)
-      folders.value = []
+      // Preserve any previously-loaded folders on transient failure: a failed
+      // reload must not masquerade as "no root folders configured" (folders
+      // starts as [], so a first-ever failure still yields an empty list).
     } finally {
       loading.value = false
     }

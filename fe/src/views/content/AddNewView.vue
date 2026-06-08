@@ -2998,6 +2998,11 @@ onMounted(async () => {
   await configStore.loadApplicationSettings()
   await configStore.loadApiConfigurations()
 
+  // Ensure root folders are loaded before addToLibrary()'s guard reads them.
+  // Without this, the first add after a cold page load sees an empty store and
+  // falsely reports "Root folder not configured" until a redirect populates it.
+  if (rootFoldersStore.folders.length === 0) await rootFoldersStore.load()
+
   const defaultRegion = normalizeSearchRegion(configStore.applicationSettings?.defaultSearchRegion)
   const defaultLanguage = normalizePreferredSearchLanguage(
     configStore.applicationSettings?.defaultSearchLanguage,

@@ -1171,6 +1171,10 @@ onMounted(async () => {
   syncActiveTabFromRoute()
   document.addEventListener('click', handleClickOutside)
 
+  // The path preview falls back to rootFoldersStore.defaultFolder; load it so a
+  // cold page load shows the correct destination rather than the legacy outputPath.
+  if (rootFoldersStore.folders.length === 0) await rootFoldersStore.load()
+
   await loadAudiobook()
 
   // subscribe to scan job updates

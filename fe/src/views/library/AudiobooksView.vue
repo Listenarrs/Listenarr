@@ -1911,6 +1911,9 @@ onMounted(async () => {
     libraryStore.fetchLibrary(),
     configStore.loadApplicationSettings(),
     loadQualityProfiles(),
+    // hasRootFolderConfigured gates the empty-state CTA on this store; load it
+    // so an empty library doesn't falsely show "Root Folder Not Configured".
+    rootFoldersStore.folders.length === 0 ? rootFoldersStore.load() : Promise.resolve(),
   ])
 
   // Load persisted view mode (if available) before layout calc
