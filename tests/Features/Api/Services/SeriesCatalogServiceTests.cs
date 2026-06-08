@@ -150,5 +150,77 @@ namespace Listenarr.Tests.Features.Api.Services
                     entry.CatalogBooks[0].Title == "The Final Empire")),
                 Times.Once);
         }
+
+        [Fact]
+        public async Task GetCatalogAsync_UsesPositionForRequestedSeries_NotThePrimary()
+        {
+            using var httpClientForAudible = new HttpClient();
+            var audible = new Mock<AudibleService>(httpClientForAudible, Mock.Of<ILogger<AudibleService>>()) { CallBase = false };
+            var audiobookRepository = new Mock<IAudiobookRepository>();
+            var logger = new Mock<ILogger<SeriesCatalogService>>();
+
+            // Resolve the requested series ("Mistborn" = SERIES123) via the persisted cache entry.
+            audiobookRepository
+                .Setup(repository => repository.GetCachedSeriesByNameAsync("Mistborn", "us"))
+                .ReturnsAsync(new SeriesCacheEntry
+                {
+                    SeriesName = "Mistborn",
+                    SeriesNameNormalized = "mistborn",
+                    SeriesAsin = "SERIES123",
+                    Region = "us",
+                    CatalogBooks = new List<CachedSeriesCatalogBook>
+                    {
+                        new() { Title = "stale", Authors = new List<string> { "Brandon Sanderson" } }
+                    }
+                });
+
+            audiobookRepository
+                .Setup(repository => repository.UpsertCachedSeriesAsync(It.IsAny<SeriesCacheEntry>()))
+                .ReturnsAsync((SeriesCacheEntry entry) => entry);
+
+            // The fetched book belongs to two series; its PRIMARY (first) entry is a different
+            // series, and the series being viewed ("Mistborn") is second, at position 3.
+            audible
+                .Setup(service => service.GetTypedBooksBySeriesAsinAsync("SERIES123", "us"))
+                .ReturnsAsync(new List<AudibleSearchResult>
+                {
+                    new()
+                    {
+                        Asin = "BOOK1",
+                        Title = "The Alloy of Law",
+                        Authors = new List<AudibleAuthor> { new() { Name = "Brandon Sanderson" } },
+                        Language = "english",
+                        Series = new List<AudibleSeries>
+                        {
+                            new() { Asin = "OTHER999", Name = "Wax and Wayne", Position = "5" },
+                            new() { Asin = "SERIES123", Name = "Mistborn", Position = "3" }
+                        }
+                    }
+                });
+
+            var service = new SeriesCatalogService(
+                audible.Object,
+                audiobookRepository.Object,
+                logger.Object);
+
+            var result = await service.GetCatalogAsync("Mistborn", "us", 10, forceRefresh: true);
+
+            Assert.NotNull(result);
+            var book = Assert.Single(result!.Books);
+
+            // The catalog reflects the book's position in the requested series (Mistborn #3),
+            // not its primary series (Wax and Wayne #5).
+            Assert.Equal("Mistborn", book.Series!.First().Name);
+            Assert.Equal("3", book.Series!.First().Position);
+
+            // The persisted cache stores the requested-series position too, so cache hits stay correct.
+            audiobookRepository.Verify(
+                repository => repository.UpsertCachedSeriesAsync(It.Is<SeriesCacheEntry>(entry =>
+                    entry.CatalogBooks != null &&
+                    entry.CatalogBooks.Count == 1 &&
+                    entry.CatalogBooks[0].Series == "Mistborn" &&
+                    entry.CatalogBooks[0].SeriesNumber == "3")),
+                Times.Once);
+        }
     }
 }

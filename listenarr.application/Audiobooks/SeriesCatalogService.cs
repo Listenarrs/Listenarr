@@ -124,6 +124,15 @@ namespace Listenarr.Application.Audiobooks
                 .Take(Math.Clamp(limit, 1, 500))
                 .ToList();
 
+            // Each fetched book lists every series it belongs to; for THIS series catalog we
+            // want each book's position within the series being viewed, not its primary series.
+            // Promote the matching series entry to the front so the (FirstOrDefault-based)
+            // response and cache mappings reflect the requested series.
+            foreach (var book in limitedBooks)
+            {
+                book.Series = PrioritizeCatalogSeries(book.Series, series.Asin, series.Name);
+            }
+
             if (limitedBooks.Count == 0 &&
                 cachedEntry?.CatalogBooks != null &&
                 cachedEntry.CatalogBooks.Count > 0)
@@ -159,6 +168,61 @@ namespace Listenarr.Application.Audiobooks
                 Series = series,
                 Books = FilterCatalogByLanguage(limitedBooks, normalizedLanguage)
             };
+        }
+
+        // Returns the book's series list reordered so the entry for the catalogued series comes
+        // first (matched by ASIN, else by name). The full list is preserved; only the ordering
+        // changes, so the existing FirstOrDefault-based mappings pick the right series number.
+        private static List<AudibleSeries>? PrioritizeCatalogSeries(
+            List<AudibleSeries>? seriesList,
+            string? catalogAsin,
+            string? catalogName)
+        {
+            if (seriesList == null || seriesList.Count < 2)
+            {
+                return seriesList;
+            }
+
+            var match = FindCatalogSeries(seriesList, catalogAsin, catalogName);
+            if (match == null || ReferenceEquals(match, seriesList[0]))
+            {
+                return seriesList;
+            }
+
+            var reordered = new List<AudibleSeries>(seriesList.Count) { match };
+            reordered.AddRange(seriesList.Where(entry => !ReferenceEquals(entry, match)));
+            return reordered;
+        }
+
+        private static AudibleSeries? FindCatalogSeries(
+            List<AudibleSeries> seriesList,
+            string? catalogAsin,
+            string? catalogName)
+        {
+            if (!string.IsNullOrWhiteSpace(catalogAsin))
+            {
+                var byAsin = seriesList.FirstOrDefault(entry =>
+                    !string.IsNullOrWhiteSpace(entry?.Asin) &&
+                    string.Equals(entry!.Asin, catalogAsin, StringComparison.OrdinalIgnoreCase));
+                if (byAsin != null)
+                {
+                    return byAsin;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(catalogName))
+            {
+                var target = catalogName.Trim();
+                var byName = seriesList.FirstOrDefault(entry =>
+                    !string.IsNullOrWhiteSpace(entry?.Name) &&
+                    string.Equals(entry!.Name!.Trim(), target, StringComparison.OrdinalIgnoreCase));
+                if (byName != null)
+                {
+                    return byName;
+                }
+            }
+
+            return null;
         }
 
         private async Task<SeriesLookupItem?> ResolveSeriesAsync(
