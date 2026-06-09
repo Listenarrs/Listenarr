@@ -21,6 +21,7 @@ using Listenarr.Application.Interfaces;
 using Listenarr.Api.Dtos.ManualImport;
 using Listenarr.Domain.Models.Enumerations;
 using Listenarr.Domain.Models.Configurations;
+using Listenarr.Domain.Models.Naming;
 using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Domain.Models;
 
@@ -408,9 +409,6 @@ public class ManualImportController : ControllerBase
     private async Task<string> GenerateManualImportPathAsync(Audiobook audiobook, AudioMetadata metadata, ManualImportItemDto item, List<RootFolder> rootFolders, ApplicationSettings settings, bool isMultiFile = false)
     {
         var sourceFilePath = item.FullPath ?? string.Empty;
-        // Get the configured folder/file naming patterns from settings
-        var folderPattern = settings.FolderNamingPattern;
-        var filePattern = isMultiFile ? settings.MultiFileNamingPattern : settings.FileNamingPattern;
 
         // If a custom BasePath is set (different from configured OutputPath AND not a known
         // root folder), store directly under that path using file-only naming.
@@ -457,45 +455,6 @@ public class ManualImportController : ControllerBase
             extension = ".m4b"; // Fallback if no extension
         }
 
-        // Build variables for the pattern - only include non-empty values
-        var variables = new Dictionary<string, object>();
-
-        // Get first author from Authors list
-        var author = audiobook.Authors?.FirstOrDefault();
-        if (!string.IsNullOrWhiteSpace(author))
-            variables["Author"] = author;
-
-        var narrator = audiobook.Narrators != null
-            ? string.Join(", ", audiobook.Narrators.Where(n => !string.IsNullOrWhiteSpace(n)))
-            : string.Empty;
-        if (!string.IsNullOrWhiteSpace(narrator))
-            variables["Narrator"] = narrator;
-
-        if (!string.IsNullOrWhiteSpace(audiobook.Publisher))
-            variables["Publisher"] = audiobook.Publisher;
-
-        if (!string.IsNullOrWhiteSpace(audiobook.Language))
-            variables["Language"] = audiobook.Language;
-
-        if (!string.IsNullOrWhiteSpace(audiobook.Asin))
-            variables["Asin"] = audiobook.Asin;
-
-        if (!string.IsNullOrWhiteSpace(audiobook.Subtitle))
-            variables["Subtitle"] = audiobook.Subtitle;
-
-        if (!string.IsNullOrWhiteSpace(audiobook.Edition))
-            variables["Edition"] = audiobook.Edition;
-
-        variables["Title"] = !string.IsNullOrWhiteSpace(audiobook.Title)
-            ? audiobook.Title
-            : "Unknown Title"; // Title is required as fallback
-
-        if (!string.IsNullOrWhiteSpace(audiobook.Series))
-            variables["Series"] = audiobook.Series;
-
-        if (!string.IsNullOrWhiteSpace(audiobook.PublishYear))
-            variables["Year"] = audiobook.PublishYear;
-
         var effectiveDiskNumber = item.DiskNumberHint
             ?? (metadata.DiscNumber.HasValue && metadata.DiscNumber.Value > 0 ? metadata.DiscNumber.Value : null);
         var effectiveChapterNumber = item.ChapterNumberHint
@@ -507,76 +466,24 @@ public class ManualImportController : ControllerBase
             effectiveChapterNumber ??= effectiveDiskNumber;
         }
 
-        if (effectiveDiskNumber.HasValue && effectiveDiskNumber.Value > 0)
-            variables["DiskNumber"] = effectiveDiskNumber.Value;
-
-        if (effectiveChapterNumber.HasValue && effectiveChapterNumber.Value > 0)
-            variables["ChapterNumber"] = effectiveChapterNumber.Value;
-
         var stableSuffixNumber = effectiveChapterNumber ?? effectiveDiskNumber ?? item.SequenceNumberHint;
 
-        string relativePath;
-        var patternHasNumberTokens = !string.IsNullOrWhiteSpace(filePattern)
-            && (filePattern.IndexOf("DiskNumber", StringComparison.OrdinalIgnoreCase) >= 0
-                || filePattern.IndexOf("ChapterNumber", StringComparison.OrdinalIgnoreCase) >= 0);
-
-        if (string.IsNullOrWhiteSpace(folderPattern))
+        var context = NamingContext.From(audiobook) with
         {
-            // Legacy behavior: use FileNamingPattern as the full relative path pattern
-            var legacyPattern = string.IsNullOrWhiteSpace(filePattern)
-                ? "{Author}/{Title}/{Title}"
-                : filePattern;
+            DiskNumber = effectiveDiskNumber.HasValue && effectiveDiskNumber.Value > 0 ? effectiveDiskNumber : null,
+            ChapterNumber = effectiveChapterNumber.HasValue && effectiveChapterNumber.Value > 0 ? effectiveChapterNumber : null,
+        };
 
-            relativePath = _fileNamingService.ApplyNamingPattern(legacyPattern, variables, treatAsFilename: false);
-        }
-        else if (isCustomBasePath)
+        // OutputRoot is empty so the relative path is combined with the resolved basePath below.
+        var result = _fileNamingService.BuildPath(context, settings, new NamingOptions
         {
-            // Custom base path: only apply file naming pattern, not folder pattern
-            // (the BasePath already represents the folder location)
-            var effectiveFilePattern = string.IsNullOrWhiteSpace(filePattern) ? "{Title}" : filePattern;
-
-            var patternAllowsSubfolders = effectiveFilePattern.IndexOf("DiskNumber", StringComparison.OrdinalIgnoreCase) >= 0
-                || effectiveFilePattern.IndexOf("ChapterNumber", StringComparison.OrdinalIgnoreCase) >= 0
-                || effectiveFilePattern.IndexOf('/') >= 0
-                || effectiveFilePattern.IndexOf('\\') >= 0;
-
-            relativePath = _fileNamingService.ApplyNamingPattern(effectiveFilePattern, variables, treatAsFilename: !patternAllowsSubfolders);
-        }
-        else
-        {
-            // New behavior: separate folder and file patterns
-            var effectiveFilePattern = string.IsNullOrWhiteSpace(filePattern) ? "{Title}" : filePattern;
-
-            var folderRelative = _fileNamingService.ApplyNamingPattern(folderPattern, variables, treatAsFilename: false);
-
-            var patternAllowsSubfolders = effectiveFilePattern.IndexOf("DiskNumber", StringComparison.OrdinalIgnoreCase) >= 0
-                || effectiveFilePattern.IndexOf("ChapterNumber", StringComparison.OrdinalIgnoreCase) >= 0
-                || effectiveFilePattern.IndexOf('/') >= 0
-                || effectiveFilePattern.IndexOf('\\') >= 0;
-
-            var fileRelative = _fileNamingService.ApplyNamingPattern(effectiveFilePattern, variables, treatAsFilename: !patternAllowsSubfolders);
-
-            if (isMultiFile && !patternHasNumberTokens && stableSuffixNumber.HasValue)
-                fileRelative = FileUtils.AppendSequenceSuffix(fileRelative, stableSuffixNumber.Value);
-
-            relativePath = string.IsNullOrWhiteSpace(folderRelative)
-                ? fileRelative
-                : CombineWithOptionalBase(folderRelative, fileRelative);
-        }
-
-        if ((string.IsNullOrWhiteSpace(folderPattern) || isCustomBasePath)
-            && isMultiFile
-            && !patternHasNumberTokens
-            && stableSuffixNumber.HasValue)
-        {
-            relativePath = FileUtils.AppendSequenceSuffix(relativePath, stableSuffixNumber.Value);
-        }
-
-        // Ensure it has the correct extension
-        if (!relativePath.EndsWith(extension, StringComparison.OrdinalIgnoreCase))
-        {
-            relativePath += extension;
-        }
+            OutputRoot = string.Empty,
+            IsCustomBasePath = isCustomBasePath,
+            IsMultiFile = isMultiFile,
+            SequenceNumber = stableSuffixNumber,
+            Extension = extension,
+        });
+        var relativePath = result.RelativePath;
 
         return string.IsNullOrWhiteSpace(basePath)
             ? relativePath

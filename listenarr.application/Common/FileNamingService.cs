@@ -15,7 +15,6 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -289,15 +288,9 @@ namespace Listenarr.Application.Common
             return result;
         }
 
-        public string ApplyNamingPattern(string pattern, AudioMetadata metadata, bool treatAsFilename = false)
+        public string ApplyNamingPattern(string pattern, NamingContext context, bool treatAsFilename = false)
         {
-            var variables = BuildVariables(metadata);
-            return ApplyNamingPattern(pattern, variables, treatAsFilename);
-        }
-
-        public string ApplyNamingPattern(string pattern, AudibleBookMetadata metadata, bool treatAsFilename = false)
-        {
-            var variables = BuildVariables(metadata);
+            var variables = BuildVariables(context);
             return ApplyNamingPattern(pattern, variables, treatAsFilename);
         }
 
@@ -359,58 +352,6 @@ namespace Listenarr.Application.Common
             return result;
         }
 
-        private Dictionary<string, object> BuildVariables(AudioMetadata metadata)
-        {
-            return new Dictionary<string, object>
-            {
-                // Keep multi-word author names as a single folder name (e.g. "Jane Austen")
-                { "Author", SanitizePathComponent(FirstNonEmpty(ChooseAuthor(metadata), "Unknown Author")) },
-                // For Series we must not fallback to Album or Title - when Series is blank we want
-                // the variable to be empty so ApplyNamingPattern can remove any adjacent separators
-                { "Series", string.IsNullOrWhiteSpace(metadata.Series) ? string.Empty : SanitizePathComponent(metadata.Series) },
-                { "Title", SanitizePathComponent(FirstNonEmpty(metadata.Title, "Unknown Title")) },
-                { "Subtitle", string.IsNullOrWhiteSpace(metadata.Subtitle) ? string.Empty : SanitizePathComponent(metadata.Subtitle) },
-                { "Edition", string.IsNullOrWhiteSpace(metadata.Edition) ? string.Empty : SanitizePathComponent(metadata.Edition) },
-                { "Narrator", string.IsNullOrWhiteSpace(metadata.Narrator) ? string.Empty : SanitizePathComponent(metadata.Narrator) },
-                { "Publisher", string.IsNullOrWhiteSpace(metadata.Publisher) ? string.Empty : SanitizePathComponent(metadata.Publisher) },
-                { "Language", string.IsNullOrWhiteSpace(metadata.Language) ? string.Empty : SanitizePathComponent(metadata.Language) },
-                { "Asin", string.IsNullOrWhiteSpace(metadata.Asin) ? string.Empty : SanitizePathComponent(metadata.Asin) },
-                { "SeriesNumber", FirstNonEmpty(metadata.SeriesPosition?.ToString(CultureInfo.InvariantCulture), metadata.TrackNumber?.ToString()) },
-                { "Year", FirstNonEmpty(metadata.Year?.ToString()) },
-                { "Quality", FirstNonEmpty(metadata.BitRate.HasValue ? metadata.BitRate + "kbps" : null, metadata.Format) },
-                { "DiskNumber", metadata.DiscNumber?.ToString() ?? string.Empty },
-                { "ChapterNumber", metadata.TrackNumber?.ToString() ?? string.Empty }
-            };
-        }
-
-        private Dictionary<string, object> BuildVariables(AudibleBookMetadata metadata)
-        {
-            var author = metadata.Author ?? "Unknown Author";
-            if (metadata.Authors != null && metadata.Authors.Count > 0)
-            {
-                // Assume first one is the main author
-                author = metadata.Authors.First();
-            }
-
-            return new Dictionary<string, object>
-            {
-                { "Author", SanitizePathComponent(author) },
-                { "Series", string.IsNullOrWhiteSpace(metadata.Series) ? string.Empty : SanitizePathComponent(metadata.Series) },
-                { "Title", SanitizePathComponent(FirstNonEmpty(metadata.Title, "Unknown Title")) },
-                { "Subtitle", string.IsNullOrWhiteSpace(metadata.Subtitle) ? string.Empty : SanitizePathComponent(metadata.Subtitle) },
-                { "Edition", string.IsNullOrWhiteSpace(metadata.Edition) ? string.Empty : SanitizePathComponent(metadata.Edition) },
-                { "Narrator", string.IsNullOrWhiteSpace(metadata.Narrator) ? string.Empty : SanitizePathComponent(metadata.Narrator) },
-                { "Publisher", string.IsNullOrWhiteSpace(metadata.Publisher) ? string.Empty : SanitizePathComponent(metadata.Publisher) },
-                { "Language", string.IsNullOrWhiteSpace(metadata.Language) ? string.Empty : SanitizePathComponent(metadata.Language) },
-                { "Asin", string.IsNullOrWhiteSpace(metadata.Asin) ? string.Empty : SanitizePathComponent(metadata.Asin) },
-                { "SeriesNumber", metadata.SeriesNumber?.ToString() ?? string.Empty },
-                { "Year", metadata.PublishYear?.ToString() ?? string.Empty },
-                { "Quality", string.Empty },
-                { "DiskNumber", string.Empty },
-                { "ChapterNumber", string.Empty }
-            };
-        }
-
         // Unified variable builder used by the orchestrator (BuildDirectory/BuildPath). All flows map their
         // source type into a NamingContext, so token sanitization and empty-handling live in one place.
         // The dictionary is case-insensitive so patterns like {author} resolve as well as {Author}.
@@ -443,44 +384,6 @@ namespace Listenarr.Application.Common
         private static string FirstNonEmpty(params string?[] candidates)
         {
             return candidates.FirstOrDefault(c => !string.IsNullOrWhiteSpace(c)) ?? string.Empty;
-        }
-
-        // Heuristic: sometimes metadata.Artist can contain the title/series (noisy tags).
-        // Prefer an AlbumArtist or alternate artist value if the primary artist looks like the title/series.
-        private static string ChooseAuthor(AudioMetadata metadata)
-        {
-            var primary = NonNarratorAuthorCandidate(metadata.Artist, metadata.Narrator);
-            var alternate = NonNarratorAuthorCandidate(metadata.AlbumArtist, metadata.Narrator);
-
-            if (string.IsNullOrWhiteSpace(primary))
-            {
-                return alternate;
-            }
-
-            if (!string.IsNullOrWhiteSpace(metadata.Title) &&
-                (primary.IndexOf(metadata.Title, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                 (!string.IsNullOrWhiteSpace(metadata.Series) && string.Equals(primary, metadata.Series, StringComparison.OrdinalIgnoreCase)) ||
-                 string.Equals(primary, metadata.Title, StringComparison.OrdinalIgnoreCase)))
-                return !string.IsNullOrWhiteSpace(alternate) ? alternate : primary;
-
-            return string.IsNullOrWhiteSpace(primary) ? alternate : primary;
-        }
-
-        private static string NonNarratorAuthorCandidate(string? candidate, string? narrator)
-        {
-            if (string.IsNullOrWhiteSpace(candidate))
-            {
-                return string.Empty;
-            }
-
-            var trimmedCandidate = candidate.Trim();
-            if (!string.IsNullOrWhiteSpace(narrator) &&
-                string.Equals(trimmedCandidate, narrator.Trim(), StringComparison.OrdinalIgnoreCase))
-            {
-                return string.Empty;
-            }
-
-            return trimmedCandidate;
         }
 
         private static HashSet<char> BuildPortableInvalidFileNameChars()

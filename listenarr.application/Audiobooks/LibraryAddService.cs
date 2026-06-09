@@ -21,6 +21,7 @@ using Listenarr.Application.Interfaces;
 using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Application.Metadata;
 using Listenarr.Domain.Models;
+using Listenarr.Domain.Models.Naming;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Audiobooks
@@ -172,7 +173,7 @@ namespace Listenarr.Application.Audiobooks
                 var rootFolder = await _rootFolderService.GetDefaultAsync();
                 baseDirectory = rootFolder != null ? rootFolder.Path : settings.OutputPath;
 
-                audiobook.BasePath = Path.Join(baseDirectory, _fileNamingService.ApplyNamingPattern(settings.FolderNamingPattern, metadata));
+                audiobook.BasePath = Path.Join(baseDirectory, _fileNamingService.BuildDirectory(NamingContext.From(audiobook), settings));
             }
             else
             {

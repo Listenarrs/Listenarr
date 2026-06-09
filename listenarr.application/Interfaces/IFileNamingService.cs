@@ -73,7 +73,6 @@ namespace Listenarr.Application.Interfaces
         /// <param name="treatAsFilename">Whether to treat as filename (sanitize invalid chars)</param>
         /// <returns>Final path with variables replaced</returns>
         string ApplyNamingPattern(string pattern, Dictionary<string, object> variables, bool treatAsFilename = false); // FIXME: Should be private
-        string ApplyNamingPattern(string pattern, AudioMetadata metadata, bool treatAsFilename = false);
-        string ApplyNamingPattern(string pattern, AudibleBookMetadata metadata, bool treatAsFilename = false);
+        string ApplyNamingPattern(string pattern, NamingContext context, bool treatAsFilename = false);
     }
 }

@@ -255,12 +255,16 @@ namespace Listenarr.Tests.Features.Api.Controllers
                 .Select(Path.GetFileName)
                 .ToList();
 
+            // The book has no author, so the unified naming applies the "{Author}" folder pattern as
+            // "Unknown Author" (the convention shared by every flow). Manual import previously omitted the
+            // empty author folder; it now matches the other flows.
+            var authorDir = Path.Join(basePath, "Unknown Author");
             Assert.Contains("Ordered Book-01.mp3", diskFiles);
             Assert.Contains("Ordered Book-02.mp3", diskFiles);
             Assert.Contains("Ordered Book-10.mp3", diskFiles);
-            Assert.Equal("one", await File.ReadAllTextAsync(Path.Join(basePath, "Ordered Book-01.mp3")));
-            Assert.Equal("two", await File.ReadAllTextAsync(Path.Join(basePath, "Ordered Book-02.mp3")));
-            Assert.Equal("ten", await File.ReadAllTextAsync(Path.Join(basePath, "Ordered Book-10.mp3")));
+            Assert.Equal("one", await File.ReadAllTextAsync(Path.Join(authorDir, "Ordered Book-01.mp3")));
+            Assert.Equal("two", await File.ReadAllTextAsync(Path.Join(authorDir, "Ordered Book-02.mp3")));
+            Assert.Equal("ten", await File.ReadAllTextAsync(Path.Join(authorDir, "Ordered Book-10.mp3")));
         }
 
         [Fact]

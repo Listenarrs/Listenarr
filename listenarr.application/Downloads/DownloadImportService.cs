@@ -20,6 +20,7 @@ using Listenarr.Application.Interfaces;
 using Listenarr.Domain.Common;
 using Listenarr.Domain.Models;
 using Listenarr.Domain.Models.Enumerations;
+using Listenarr.Domain.Models.Naming;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Downloads
@@ -207,28 +208,19 @@ namespace Listenarr.Application.Downloads
                                 effectiveDiskNumber ??= effectiveChapterNumber;
                                 effectiveChapterNumber ??= effectiveDiskNumber;
                             }
-                            var stableSuffixNumber = effectiveChapterNumber ?? effectiveDiskNumber ?? plan?.SequenceNumber;
 
-                            // Build variables for naming patterns (used for both folder and file patterns)
-                            var variablesForFile = new Dictionary<string, object>
+                            // Map the file's naming metadata into the unified NamingContext. The Title
+                            // falls back to the source filename, and disk/chapter use the effective values
+                            // derived from hints above.
+                            var context = NamingContext.From(namingMetadata) with
                             {
-                                { "Author", namingMetadata.Artist ?? "Unknown Author" },
-                                { "Series", string.IsNullOrWhiteSpace(namingMetadata.Series) ? string.Empty : namingMetadata.Series },
-                                { "Title", namingMetadata.Title ?? Path.GetFileNameWithoutExtension(file) },
-                                { "Subtitle", string.IsNullOrWhiteSpace(namingMetadata.Subtitle) ? string.Empty : namingMetadata.Subtitle },
-                                { "Edition", string.IsNullOrWhiteSpace(namingMetadata.Edition) ? string.Empty : namingMetadata.Edition },
-                                { "Narrator", string.IsNullOrWhiteSpace(namingMetadata.Narrator) ? string.Empty : namingMetadata.Narrator },
-                                { "Publisher", string.IsNullOrWhiteSpace(namingMetadata.Publisher) ? string.Empty : namingMetadata.Publisher },
-                                { "Language", string.IsNullOrWhiteSpace(namingMetadata.Language) ? string.Empty : namingMetadata.Language },
-                                { "Asin", string.IsNullOrWhiteSpace(namingMetadata.Asin) ? string.Empty : namingMetadata.Asin },
-                                { "SeriesNumber", namingMetadata.SeriesPosition?.ToString() ?? effectiveChapterNumber?.ToString() ?? string.Empty },
-                                { "Year", namingMetadata.Year?.ToString() ?? string.Empty },
-                                { "Quality", (namingMetadata.BitRate.HasValue ? $"{namingMetadata.BitRate}kbps" : null) ?? namingMetadata.Format ?? string.Empty },
-                                { "DiskNumber", effectiveDiskNumber?.ToString() ?? string.Empty },
-                                { "ChapterNumber", effectiveChapterNumber?.ToString() ?? string.Empty }
+                                Title = !string.IsNullOrWhiteSpace(namingMetadata.Title) ? namingMetadata.Title : Path.GetFileNameWithoutExtension(file),
+                                SeriesNumber = namingMetadata.SeriesPosition?.ToString() ?? effectiveChapterNumber?.ToString(),
+                                DiskNumber = effectiveDiskNumber,
+                                ChapterNumber = effectiveChapterNumber,
                             };
 
-                            var folderRelative = fileNamingService.ApplyNamingPattern(folderPattern, variablesForFile, treatAsFilename: false);
+                            var folderRelative = fileNamingService.ApplyNamingPattern(folderPattern, context, treatAsFilename: false);
                             if (string.IsNullOrEmpty(audiobook.BasePath) && !string.IsNullOrWhiteSpace(folderRelative))
                             {
                                 destDirForFile = CombineWithOptionalBase(destDirForFile, folderRelative);
@@ -237,9 +229,6 @@ namespace Listenarr.Application.Downloads
                             var baseFilePattern = isMultiFileBatch ? settings.MultiFileNamingPattern : settings.FileNamingPattern;
 
                             var ext = Path.GetExtension(file);
-                            var patternHasNumberTokens = !string.IsNullOrWhiteSpace(baseFilePattern)
-                                && (baseFilePattern.IndexOf("DiskNumber", StringComparison.OrdinalIgnoreCase) >= 0
-                                    || baseFilePattern.IndexOf("ChapterNumber", StringComparison.OrdinalIgnoreCase) >= 0);
 
                             var patternAllowsSubfolders = baseFilePattern.IndexOf("DiskNumber", StringComparison.OrdinalIgnoreCase) >= 0
                                 || baseFilePattern.Contains("ChapterNumber", StringComparison.OrdinalIgnoreCase)
@@ -247,27 +236,10 @@ namespace Listenarr.Application.Downloads
                                 || baseFilePattern.Contains('\\');
                             var treatAsFilename = !patternAllowsSubfolders;
 
-                            var filename = fileNamingService.ApplyNamingPattern(baseFilePattern, variablesForFile, treatAsFilename);
-                            if (!filename.EndsWith(ext, StringComparison.OrdinalIgnoreCase)) filename += ext; // FIXME: Should be in ApplyNamingPattern
-
-                            if (!patternAllowsSubfolders)
-                            {
-                                try
-                                {
-                                    var forced = Path.GetFileName(filename);
-                                    var invalid = Path.GetInvalidFileNameChars();
-                                    var sb = new System.Text.StringBuilder();
-                                    foreach (var c in forced)
-                                    {
-                                        sb.Append(invalid.Contains(c) ? '_' : c);
-                                    }
-                                    filename = sb.ToString();
-                                }
-                                catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
-                                {
-                                    filename = Path.GetFileName(filename);
-                                }
-                            }
+                            // ApplyNamingPattern already sanitizes (and, for filename mode, strips any
+                            // directory separators) via the shared SanitizePathComponent path.
+                            var filename = fileNamingService.ApplyNamingPattern(baseFilePattern, context, treatAsFilename);
+                            if (!filename.EndsWith(ext, StringComparison.OrdinalIgnoreCase)) filename += ext;
 
                             var destination = CombineWithOptionalBase(destDirForFile, filename);
 

@@ -27,6 +27,7 @@ using System.Text;
 using Listenarr.Domain.Common;
 using Listenarr.Application.Interfaces;
 using Listenarr.Domain.Models.Configurations;
+using Listenarr.Domain.Models.Naming;
 using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Application.Notification;
 using Listenarr.Application.Security;
@@ -3499,27 +3500,8 @@ namespace Listenarr.Api.Controllers
             // them. Applying the pattern exactly and letting the sentinel cleanup remove empties keeps
             // {SeriesNumber} intact.
 
-            // Build variables for naming pattern using audiobook-level metadata
-            var variables = new Dictionary<string, object>
-            {
-                { "Author", SanitizeDirectoryName(audiobook.Authors?.FirstOrDefault() ?? "Unknown Author") },
-                { "Series", SanitizeDirectoryName(!string.IsNullOrWhiteSpace(audiobook.Series) ? audiobook.Series! : string.Empty) },
-                { "Title", SanitizeDirectoryName(audiobook.Title ?? "Unknown Title") },
-                { "Subtitle", SanitizeDirectoryName(audiobook.Subtitle ?? string.Empty) },
-                { "Edition", SanitizeDirectoryName(audiobook.Edition ?? string.Empty) },
-                { "Narrator", SanitizeDirectoryName((audiobook.Narrators != null && audiobook.Narrators.Any()) ? string.Join(", ", audiobook.Narrators.Where(n => !string.IsNullOrWhiteSpace(n))) : string.Empty) },
-                { "Publisher", SanitizeDirectoryName(audiobook.Publisher ?? string.Empty) },
-                { "Language", SanitizeDirectoryName(audiobook.Language ?? string.Empty) },
-                { "Asin", SanitizeDirectoryName(audiobook.Asin ?? string.Empty) },
-                { "SeriesNumber", audiobook.SeriesNumber ?? string.Empty },
-                { "Year", audiobook.PublishYear ?? string.Empty },
-                { "Quality", string.Empty },
-                { "DiskNumber", string.Empty },
-                { "ChapterNumber", string.Empty }
-            };
-
-            // Apply the directory pattern to get the relative directory path
-            var relative = _fileNamingService.ApplyNamingPattern(directoryPattern, variables, false);
+            // Apply the directory pattern using the unified naming variables (single sanitizer + token engine).
+            var relative = _fileNamingService.ApplyNamingPattern(directoryPattern, NamingContext.From(audiobook), false);
 
             // Combine with root path
             var combined = ResolvePathWithOptionalBase(rootPath, relative);
@@ -3627,22 +3609,6 @@ namespace Listenarr.Api.Controllers
             }
 
             return commonPath;
-        }
-
-        private string SanitizeDirectoryName(string name)
-        {
-            // Remove or replace characters that are invalid in directory names
-            var invalidChars = Path.GetInvalidFileNameChars();
-            foreach (var c in invalidChars)
-            {
-                name = name.Replace(c, '_');
-            }
-
-            // Also replace some additional characters that might cause issues
-            name = name.Replace(":", "_").Replace("*", "_").Replace("?", "_").Replace("\"", "_").Replace("<", "_").Replace(">", "_").Replace("|", "_");
-
-            // Trim whitespace and return
-            return name.Trim();
         }
 
         private static string ComputeShortHash(string? input)
