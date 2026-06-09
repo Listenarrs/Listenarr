@@ -66,15 +66,15 @@ namespace Listenarr.Domain.Models.Naming
 
         /// <summary>
         /// Build from file-extracted <see cref="AudioMetadata"/> (import after download, manual import).
-        /// Resolves the author from potentially-noisy tags here (an artist/album-artist tag may actually
-        /// be the narrator or the title), so the naming service can treat <see cref="Authors"/> as clean.
+        /// The author is taken straight from the Artist tag — matching the historical import behavior —
+        /// so a book whose author also narrates it (Artist == Narrator) keeps the author rather than
+        /// collapsing to "Unknown Author".
         /// </summary>
         public static NamingContext From(AudioMetadata metadata)
         {
-            var author = ChooseAuthorFromTags(metadata);
             return new NamingContext
             {
-                Authors = string.IsNullOrWhiteSpace(author) ? [] : [author],
+                Authors = string.IsNullOrWhiteSpace(metadata.Artist) ? [] : [metadata.Artist],
                 Narrators = string.IsNullOrWhiteSpace(metadata.Narrator) ? [] : [metadata.Narrator!],
                 Series = metadata.Series,
                 // Match the historical AudioMetadata behavior: fall back to the track number when no
@@ -100,38 +100,5 @@ namespace Listenarr.Domain.Models.Naming
 
         private static string? FirstNonEmpty(params string?[] candidates)
             => candidates.FirstOrDefault(c => !string.IsNullOrWhiteSpace(c));
-
-        // Sometimes a file's Artist tag is noisy and actually holds the narrator, the title or the
-        // series. Prefer the album-artist in that case, otherwise leave it empty so the naming service
-        // falls back to "Unknown Author".
-        private static string ChooseAuthorFromTags(AudioMetadata metadata)
-        {
-            var primary = NonNarratorCandidate(metadata.Artist, metadata.Narrator);
-            var alternate = NonNarratorCandidate(metadata.AlbumArtist, metadata.Narrator);
-
-            if (string.IsNullOrWhiteSpace(primary))
-                return alternate;
-
-            if (!string.IsNullOrWhiteSpace(metadata.Title) &&
-                (primary.IndexOf(metadata.Title, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                 (!string.IsNullOrWhiteSpace(metadata.Series) && string.Equals(primary, metadata.Series, StringComparison.OrdinalIgnoreCase)) ||
-                 string.Equals(primary, metadata.Title, StringComparison.OrdinalIgnoreCase)))
-                return !string.IsNullOrWhiteSpace(alternate) ? alternate : primary;
-
-            return primary;
-        }
-
-        private static string NonNarratorCandidate(string? candidate, string? narrator)
-        {
-            if (string.IsNullOrWhiteSpace(candidate))
-                return string.Empty;
-
-            var trimmed = candidate.Trim();
-            if (!string.IsNullOrWhiteSpace(narrator) &&
-                string.Equals(trimmed, narrator.Trim(), StringComparison.OrdinalIgnoreCase))
-                return string.Empty;
-
-            return trimmed;
-        }
     }
 }

@@ -59,6 +59,17 @@ namespace Listenarr.Tests.Features.Api.Services
         }
 
         [Fact]
+        public void From_AudioMetadata_AuthorNarratedBook_KeepsAuthor()
+        {
+            // A memoir whose author also narrates it has Artist == Narrator. The author must be kept,
+            // not collapsed to "Unknown Author" (the auto-import path takes Artist directly).
+            var settings = new ApplicationSettings { FolderNamingPattern = "{Author}/{Title}" };
+            var ctx = NamingContext.From(new AudioMetadata { Title = "Bossypants", Artist = "Tina Fey", Narrator = "Tina Fey" });
+
+            Assert.Equal(Path.Join("Tina Fey", "Bossypants"), _service.BuildDirectory(ctx, settings));
+        }
+
+        [Fact]
         public void BuildDirectory_NoAuthor_FallsBackToUnknownAuthor()
         {
             var settings = new ApplicationSettings { FolderNamingPattern = "{Author}/{Title}" };
