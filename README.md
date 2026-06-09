@@ -341,7 +341,7 @@ Listenarr/
 │   ├── Dockerfile.runtime      # Runtime Docker image for combined API + frontend
 │   ├── Program.cs              # Entry Point
 │   └── ...
-├── .env/development/config/    # Local runtime data (generated, gitignored)
+├── .env/development/config/    # Development runtime data (generated, gitignored)
 │   ├── appsettings/            # Application configuration files
 │   ├── cache/                  # Image cache storage
 │   ├── database/               # SQLite database files
@@ -377,7 +377,7 @@ You can control the application logging level in three ways:
 - Configuration file: create or edit `config/appsettings/appsettings.json` under the active content root. In local development this is `.env/development/config/appsettings/appsettings.json`; in Docker this is `/app/config/appsettings/appsettings.json`. Set either `Serilog:MinimumLevel:Default` or `Logging:LogLevel:Default` to the desired level.
 - Runtime args / orchestration: pass environment variables via `docker run -e LISTENARR_LOG_LEVEL=Debug` or `docker-compose` environment section.
 
-Docker users: the provided `docker-compose.yml` includes an example `LISTENARR_LOG_LEVEL` entry; for non-Docker users editing `.env/development/config/appsettings/appsettings.json` after first startup is the easiest way to set a custom default logging level.
+Docker users: the provided `docker-compose.yml` includes an example `LISTENARR_LOG_LEVEL` entry. For local development, edit `.env/development/config/appsettings/appsettings.json` after first startup; for a published non-Docker deployment, edit `config/appsettings/appsettings.json` under that deployment's content root.
 
 
 ### Download Clients

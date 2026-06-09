@@ -275,7 +275,7 @@ This produces a single deployment artifact containing both backend and frontend.
 ### Multiple Database Files
 - Running from `bin/Debug` creates a second, empty database
 - **Always run from repository root** (`npm run dev`)
-- Canonical DB location: `.env/development/config/database/listenarr.db`
+- Development DB location: `.env/development/config/database/listenarr.db`
 
 ### Hot Reload Not Working
 - Backend: Stop and restart `dotnet run` if changes aren't reflected
