@@ -17,6 +17,7 @@
  */
 using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Application.Audiobooks;
+using Listenarr.Domain.Common;
 using Listenarr.Domain.Models;
 using Microsoft.EntityFrameworkCore;
 
@@ -86,13 +87,52 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
 
         public async Task<bool> ExistsAtPathAsync(int audiobookId, string path, CancellationToken ct = default)
         {
-            return await _db.AudiobookFiles.AnyAsync(f => f.AudiobookId == audiobookId && f.Path == path, ct);
+            // Fast path: exact string match. Scans and imports store canonical absolute paths, so the
+            // incoming path normally string-matches the stored one — an index-friendly lookup that
+            // covers the overwhelming majority of calls.
+            if (await _db.AudiobookFiles.AnyAsync(f => f.AudiobookId == audiobookId && f.Path == path, ct))
+            {
+                return true;
+            }
+
+            // Robust path: a stored row may represent the *same* file under a different path shape —
+            // most commonly a legacy bare/relative path (e.g. "Elantris.mp3") left by an older scan,
+            // which never string-matches today's absolute path. Without this, a rescan re-registers
+            // the file and spawns a duplicate row. Resolve this book's rows to a canonical absolute
+            // form (anchoring relative paths on its BasePath) and compare. A book has only a handful
+            // of file rows, so this stays cheap and only runs when the exact match misses.
+            var storedPaths = await _db.AudiobookFiles
+                .Where(f => f.AudiobookId == audiobookId && f.Path != null)
+                .Select(f => f.Path!)
+                .ToListAsync(ct);
+
+            if (storedPaths.Count == 0)
+            {
+                return false;
+            }
+
+            var basePath = await _db.Audiobooks
+                .Where(a => a.Id == audiobookId)
+                .Select(a => a.BasePath)
+                .FirstOrDefaultAsync(ct);
+
+            var target = CanonicalizePath(path, basePath);
+            return storedPaths.Any(stored =>
+                string.Equals(CanonicalizePath(stored, basePath), target, StringComparison.OrdinalIgnoreCase));
         }
 
         public async Task<bool> IsPathUsedByOtherAsync(int audiobookId, string path, CancellationToken ct = default)
         {
+            // Cross-book guard: exact match is sufficient here because stored paths are canonical
+            // absolute by convention, and a file physically lives under exactly one book's folder
+            // (resolving every other book's relative paths would require each book's BasePath).
             return await _db.AudiobookFiles.AnyAsync(f => f.AudiobookId != audiobookId && f.Path == path, ct);
         }
+
+        // Resolve a stored or incoming path to a canonical absolute form so the same file is
+        // recognised regardless of shape (legacy relative vs. absolute, separator/`..` differences).
+        private static string CanonicalizePath(string path, string? basePath)
+            => FileUtils.NormalizeStoredPath(FileUtils.CombineWithOptionalBase(basePath, path));
 
         public async Task<List<string>> GetAllFilePathsAsync(CancellationToken ct = default)
         {
