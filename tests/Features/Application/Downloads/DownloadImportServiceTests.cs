@@ -382,6 +382,47 @@ namespace Listenarr.Tests.Features.Application.Downloads
         }
 
         [Fact]
+        public async Task ImportDownloadFilesAsync_MultiFile_NoNumberToken_AppendsSuffixToAvoidCollision()
+        {
+            // Multi-file download whose pattern has no {DiskNumber}/{ChapterNumber} token: every file would
+            // otherwise resolve to the same name and overwrite. Routing through BuildPath now appends a
+            // stable -NN sequence suffix, matching rename/manual-import behavior.
+            var outputDir = FileService.GetTempDirectory("listenarr-import-nosuffix");
+
+            var srcDir = FileService.GetTempDirectory("listenarr-import-nosuffix-src");
+            var part2 = await FileService.GetFileAsync(srcDir, "Part 2.mp3", "two");
+            var part1 = await FileService.GetFileAsync(srcDir, "Part 1.mp3", "one");
+
+            metadataServiceMock.AddMetadata(@"\.mp3$", new AudioMetadata { Title = "No Token Book", Format = "mp3", BitRate = 128000 });
+
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithBasePath(outputDir)
+                .Build());
+
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
+                .WithOutputPath(outputDir)
+                .WithMetadataProcessing()
+                .WithCopyFileOnCompleted()
+                .WithFolderNamingPattern("")
+                .WithFileNamingPattern("{Title}")
+                .WithMultiFileNamingPattern("{Title}") // no Disk/Chapter token -> would collide without a suffix
+                .Build());
+
+            var downloadImportService = _provider.GetRequiredService<IDownloadImportService>();
+            var results = await downloadImportService.ImportDownloadFilesAsync(audiobook, [part2, part1]);
+
+            var mapped = results
+                .Where(r => r.Success && !string.IsNullOrWhiteSpace(r.FinalPath) && !string.IsNullOrWhiteSpace(r.SourcePath))
+                .ToDictionary(r => r.SourcePath!, r => r.FinalPath!, StringComparer.OrdinalIgnoreCase);
+
+            // Distinct, suffixed names — no overwrite — with content preserved per source file.
+            Assert.Equal(Path.Join(outputDir, "No Token Book-01.mp3"), mapped[part1]);
+            Assert.Equal(Path.Join(outputDir, "No Token Book-02.mp3"), mapped[part2]);
+            Assert.Equal("one", await File.ReadAllTextAsync(mapped[part1]));
+            Assert.Equal("two", await File.ReadAllTextAsync(mapped[part2]));
+        }
+
+        [Fact]
         public async Task ImportDownloadFilesAsync_SameNumberOfResult_ThanNumberOfFiles()
         {
             var outputDir = FileService.GetTempDirectory("listenarr-import-ordered");

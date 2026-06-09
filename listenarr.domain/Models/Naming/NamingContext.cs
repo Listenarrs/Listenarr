@@ -95,7 +95,10 @@ namespace Listenarr.Domain.Models.Naming
             };
         }
 
-        /// <summary>Build from provider <see cref="AudibleBookMetadata"/> (library add, path preview).</summary>
+        /// <summary>
+        /// Build from provider <see cref="AudibleBookMetadata"/> (library add, path preview). Field coverage
+        /// follows <see cref="AudibleBookMetadata.ToAudiobook"/> — a field it does not map is absent here.
+        /// </summary>
         public static NamingContext From(AudibleBookMetadata metadata) => From(metadata.ToAudiobook());
 
         private static string? FirstNonEmpty(params string?[] candidates)

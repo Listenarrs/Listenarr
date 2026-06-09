@@ -71,7 +71,6 @@ namespace Listenarr.Application.Downloads
                 }
 
                 var results = new List<ImportResult>();
-                var folderPattern = settings.FolderNamingPattern;
                 var sourceFiles = files
                     .Where(file => !FileUtils.IsBlacklistedFile(file, settings.ImportBlacklistExtensions))
                     .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -196,9 +195,6 @@ namespace Listenarr.Application.Downloads
                                 logger.LogDebug(exception, $"ImportFilesFromDirectory: Failed to evaluate quality for multi-file import {file}");
                             }
 
-                            // Determine destination directory (prefer audiobook basepath)
-                            string destDirForFile = audiobook.BasePath;
-
                             // Build naming metadata: prefer audiobook metadata when available, otherwise use extracted candidate metadata
                             var namingMetadata = BuildNamingMetadata(audiobook, candidateMetadata, Path.GetFileNameWithoutExtension(file));
                             var effectiveDiskNumber = namingDiskNumber > 0 ? namingDiskNumber : (namingMetadata.DiscNumber ?? plan?.DiskNumberHint);
@@ -208,6 +204,7 @@ namespace Listenarr.Application.Downloads
                                 effectiveDiskNumber ??= effectiveChapterNumber;
                                 effectiveChapterNumber ??= effectiveDiskNumber;
                             }
+                            var stableSuffixNumber = effectiveChapterNumber ?? effectiveDiskNumber ?? plan?.SequenceNumber;
 
                             // Map the file's naming metadata into the unified NamingContext. The Title
                             // falls back to the source filename, and disk/chapter use the effective values
@@ -220,28 +217,19 @@ namespace Listenarr.Application.Downloads
                                 ChapterNumber = effectiveChapterNumber,
                             };
 
-                            var folderRelative = fileNamingService.ApplyNamingPattern(folderPattern, context, treatAsFilename: false);
-                            if (string.IsNullOrEmpty(audiobook.BasePath) && !string.IsNullOrWhiteSpace(folderRelative))
+                            // Route through the shared orchestrator. A set BasePath means the destination
+                            // folder is already chosen (file-only naming); an empty BasePath applies the
+                            // folder pattern. BuildPath also enforces path-length limits and appends the
+                            // multi-file sequence suffix when the pattern has no Disk/Chapter token.
+                            var result = fileNamingService.BuildPath(context, settings, new NamingOptions
                             {
-                                destDirForFile = CombineWithOptionalBase(destDirForFile, folderRelative);
-                            }
-
-                            var baseFilePattern = isMultiFileBatch ? settings.MultiFileNamingPattern : settings.FileNamingPattern;
-
-                            var ext = Path.GetExtension(file);
-
-                            var patternAllowsSubfolders = baseFilePattern.IndexOf("DiskNumber", StringComparison.OrdinalIgnoreCase) >= 0
-                                || baseFilePattern.Contains("ChapterNumber", StringComparison.OrdinalIgnoreCase)
-                                || baseFilePattern.Contains('/')
-                                || baseFilePattern.Contains('\\');
-                            var treatAsFilename = !patternAllowsSubfolders;
-
-                            // ApplyNamingPattern already sanitizes (and, for filename mode, strips any
-                            // directory separators) via the shared SanitizePathComponent path.
-                            var filename = fileNamingService.ApplyNamingPattern(baseFilePattern, context, treatAsFilename);
-                            if (!filename.EndsWith(ext, StringComparison.OrdinalIgnoreCase)) filename += ext;
-
-                            var destination = CombineWithOptionalBase(destDirForFile, filename);
+                                OutputRoot = audiobook.BasePath ?? string.Empty,
+                                IsCustomBasePath = !string.IsNullOrEmpty(audiobook.BasePath),
+                                IsMultiFile = isMultiFileBatch,
+                                SequenceNumber = stableSuffixNumber,
+                                Extension = Path.GetExtension(file),
+                            });
+                            var destination = result.FullPath;
 
                             if (!await fileMover.PerformActionOn(completedFileAction, file, destination))
                             {
