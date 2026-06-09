@@ -20,8 +20,8 @@ Setup guides, FAQ, troubleshooting tips - the more information we have in the do
 - **Rider** (optional alternative to Visual Studio, preferred by many) ([https://www.jetbrains.com/rider/](https://www.jetbrains.com/rider/))
 - **VS Code** (recommended for frontend) ([https://code.visualstudio.com/](https://code.visualstudio.com/))
 - **Git** ([https://git-scm.com/downloads](https://git-scm.com/downloads))
-- **Node.js** (Node 20.x or higher) ([https://nodejs.org/](https://nodejs.org/))
-- **.NET 8.0 SDK or higher** ([https://dotnet.microsoft.com/download](https://dotnet.microsoft.com/download))
+- **Node.js** (Node 24.x or higher) ([https://nodejs.org/](https://nodejs.org/))
+- **.NET 10.0 SDK or higher** ([https://dotnet.microsoft.com/download](https://dotnet.microsoft.com/download))
 
 ### Getting Started
 
@@ -72,7 +72,7 @@ Setup guides, FAQ, troubleshooting tips - the more information we have in the do
 ### Debugging
 
 #### Visual Studio / Rider
-1. Open `listenarr.sln` in Visual Studio or Rider
+1. Open `listenarr.slnx` in Visual Studio or Rider
 2. Set `listenarr.api` as the startup project
 3. Press F5 to start debugging
 4. The API will be available at [http://localhost:4545](http://localhost:4545)
@@ -263,14 +263,14 @@ Listenarr/
 │   │   ├── services/         # API client services
 │   │   └── types/            # TypeScript type definitions
 │   └── public/               # Static assets
-├── listenarr.api/            # Backend API (.NET Core)
+├── listenarr.api/            # Backend API (ASP.NET Core / .NET 10)
 |   ├── Attributes/           # Attributes to be used on endpoints
 │   ├── Controllers/          # API endpoints
 │   ├── Dtos/                 # Data transfer objects
 │   ├── Filters/              # Filters for swagger generation 
 │   ├── Middleware/           # Middleware to run on the request pipeline
 │   └── Program.cs            # Application entry
-├── listenarr.application/    # Backend API (.NET Core)
+├── listenarr.application/    # Application layer
 |   ├── Audiobooks/           # Service revolving around Audiobooks management
 │   ├── Common/             
 │   ├── Downloads/            # Download related services
@@ -332,7 +332,7 @@ Note: Those are general guidelines we will try to enforce during code review or 
 **Backend:**
 - ASP.NET Core Web API
 - Entity Framework Core with SQLite
-- C# 12 / .NET 8.0+
+- C# / .NET 10.0+
 
 **Frontend:**
 - Vue 3 (Composition API)
