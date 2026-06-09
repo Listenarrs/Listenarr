@@ -81,8 +81,8 @@ npm run dev  # Start both API and frontend from repository root
 - **Architecture**: Clean architecture (Domain, Application, Infrastructure layers)
 
 ### Critical Paths
-- **Database**: `listenarr.api/config/database/listenarr.db`
-- **Logs**: `listenarr.api/config/logs/listenarr-YYYYMMDD.log`
+- **Database**: `.env/development/config/database/listenarr.db`
+- **Logs**: `.env/development/config/logs/listenarr-YYYYMMDD.log`
 - **Backend**: http://localhost:4545
 - **Frontend**: http://localhost:5173
 

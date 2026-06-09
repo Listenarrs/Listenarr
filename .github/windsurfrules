@@ -23,8 +23,8 @@ Listenarr is a C# .NET 10.0 Web API backend with Vue.js 3 frontend for automated
 
 ### Quick Start
 - **Run**: `npm run dev` from repository root
-- **Database**: `listenarr.api/config/database/listenarr.db`
-- **Logs**: `listenarr.api/config/logs/listenarr-YYYYMMDD.log`
+- **Database**: `.env/development/config/database/listenarr.db`
+- **Logs**: `.env/development/config/logs/listenarr-YYYYMMDD.log`
 - **Backend**: http://localhost:4545
 - **Frontend**: http://localhost:5173
 

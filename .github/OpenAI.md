@@ -6,8 +6,8 @@ Listenarr is a C# .NET 10.0 audiobook management system with Vue.js 3 frontend. 
 ## Quick Start
 - **Run**: `npm run dev` from repository root
 - **Tech Stack**: .NET 10.0, Vue 3, TypeScript, Pinia, EF Core, SQLite, SignalR
-- **Database**: `listenarr.api/config/database/listenarr.db`
-- **Logs**: `listenarr.api/config/logs/listenarr-YYYYMMDD.log`
+- **Database**: `.env/development/config/database/listenarr.db`
+- **Logs**: `.env/development/config/logs/listenarr-YYYYMMDD.log`
 
 ## Critical Backend Patterns (.NET 10.0)
 1. **Download Status Lifecycle**: Always set `Status = DownloadStatus.Moved` after import (8 locations in CompletedDownloadProcessor.cs)

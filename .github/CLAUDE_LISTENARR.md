@@ -32,8 +32,8 @@ This file contains Claude-specific guidance for the Listenarr audiobook manageme
 
 ## Development Workflow
 1. **Run from repository root**: `npm run dev` (starts both API and frontend)
-2. **Database**: SQLite at `listenarr.api/config/database/listenarr.db`
-3. **Logs**: Check `listenarr.api/config/logs/listenarr-YYYYMMDD.log` for diagnostics
+2. **Database**: SQLite at `.env/development/config/database/listenarr.db`
+3. **Logs**: Check `.env/development/config/logs/listenarr-YYYYMMDD.log` for diagnostics
 4. **Hot Reload**: Backend uses `dotnet watch`, frontend uses Vite HMR
 
 ## Common Issues & Solutions
@@ -52,7 +52,7 @@ This file contains Claude-specific guidance for the Listenarr audiobook manageme
 - **Backend**: `listenarr.api/`, `listenarr.application/`, `listenarr.domain/`, `listenarr.infrastructure/`
 - **Frontend**: `fe/src/`
 - **Tests**: `tests/`
-- **Config**: `listenarr.api/config/` (database, logs, cache)
+- **Config**: `.env/development/config/` (database, logs, cache)
 
 ## When Making Changes
 1. Update tests when changing public APIs or DI constructors

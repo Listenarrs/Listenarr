@@ -250,7 +250,7 @@ This produces a single deployment artifact containing both backend and frontend.
 - macOS users: Port 5000 conflicts with Airplay, use `--urls` parameter to override
 
 ### Database Location
-- Development: `listenarr.api/config/database/listenarr.db`
+- Development: `.env/development/config/database/listenarr.db`
 - Production: `/app/config/database/listenarr.db`
 - Automatic migrations on startup
 
@@ -266,7 +266,7 @@ This produces a single deployment artifact containing both backend and frontend.
 ## Common Troubleshooting Scenarios
 
 ### Downloads Not Importing
-1. Check logs in `listenarr.api/config/logs/listenarr-YYYYMMDD.log`
+1. Check logs in `.env/development/config/logs/listenarr-YYYYMMDD.log`
 2. Look for authentication errors (401, 409, Unauthorized)
 3. Verify DownloadMonitorService is running and detecting candidates
 4. Check stability window logs (30-second delay before import)
@@ -275,7 +275,7 @@ This produces a single deployment artifact containing both backend and frontend.
 ### Multiple Database Files
 - Running from `bin/Debug` creates a second, empty database
 - **Always run from repository root** (`npm run dev`)
-- Canonical DB location: `listenarr.api/config/database/listenarr.db`
+- Canonical DB location: `.env/development/config/database/listenarr.db`
 
 ### Hot Reload Not Working
 - Backend: Stop and restart `dotnet run` if changes aren't reflected
