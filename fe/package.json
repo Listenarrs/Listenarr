@@ -68,7 +68,7 @@
     "eslint-plugin-vue": "^10.9.2",
     "jiti": "^2.7.0",
     "jsdom": "^29.1.1",
-    "npm-run-all2": "^8.0.4",
+    "npm-run-all2": "^9.0.1",
     "patch-package": "^8.0.1",
     "prettier": "^3.8.3",
     "rollup-plugin-visualizer": "^7.0.1",
