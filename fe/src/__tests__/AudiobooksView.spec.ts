@@ -21,7 +21,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import AudiobooksView from '@/views/library/AudiobooksView.vue'
 import { useLibraryStore } from '@/stores/library'
-// apiService stubbed in vi.mock below if needed
+import { apiService } from '@/services/api'
 
 vi.mock('@/services/api', () => ({
   apiService: {
@@ -30,6 +30,8 @@ vi.mock('@/services/api', () => ({
     getBootstrapConfig: vi.fn(async () => ({})),
     getStartupConfig: vi.fn(async () => ({})),
     getApplicationSettings: vi.fn(async () => ({})),
+    // Default: no lookup cover. Individual tests override the resolved value.
+    getAuthorLookup: vi.fn(async () => null),
   },
 }))
 
@@ -901,6 +903,94 @@ describe('AudiobooksView Grouping', () => {
       expect(names).toContain(secondName)
     },
   )
+
+  it('fetches the author-lookup cover for list-view author rows that have no authorAsins', async () => {
+    if (
+      typeof (globalThis as unknown as { ResizeObserver?: unknown }).ResizeObserver === 'undefined'
+    ) {
+      ;(globalThis as unknown as Record<string, unknown>).ResizeObserver = class {
+        observe() {}
+        disconnect() {}
+      }
+    }
+    if (typeof (globalThis as unknown as { WebSocket?: unknown }).WebSocket === 'undefined') {
+      ;(globalThis as unknown as Record<string, unknown>).WebSocket = function () {
+        /* noop */
+      }
+    }
+
+    localStorage.removeItem('listenarr.viewMode')
+    localStorage.removeItem('listenarr.viewMode.books')
+    localStorage.removeItem('listenarr.viewMode.authors')
+    localStorage.removeItem('listenarr.viewMode.series')
+
+    // Author has no authorAsins and no cover image, so the only way a cover can
+    // appear is the lazy getAuthorLookup() path that grid cards already use.
+    const lookup = vi.mocked(apiService.getAuthorLookup)
+    lookup.mockReset()
+    lookup.mockResolvedValue({
+      image: 'https://example.com/author-a-lookup.jpg',
+    } as unknown as Awaited<ReturnType<typeof apiService.getAuthorLookup>>)
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', name: 'home', component: { template: '<div />' } },
+        { path: '/audiobooks', name: 'audiobooks', component: AudiobooksView },
+        { path: '/collection/:type/:name', name: 'collection', component: { template: '<div />' } },
+      ],
+    })
+    await router.push('/audiobooks')
+    await router.isReady().catch(() => {})
+
+    const store = useLibraryStore()
+    store.audiobooks = [
+      {
+        id: 1,
+        title: 'Book 1',
+        authors: ['Author A'],
+        files: [],
+      },
+    ] as unknown as import('@/types').Audiobook[]
+    store.fetchLibrary = vi.fn(async () => undefined)
+
+    // attachTo document.body: observeAuthorCards() queries via document.querySelectorAll.
+    const wrapper = mount(AudiobooksView, {
+      attachTo: document.body,
+      global: {
+        plugins: [pinia, router],
+        stubs: [
+          'BulkEditModal',
+          'EditAudiobookModal',
+          'CustomFilterModal',
+          'FiltersDropdown',
+          'CustomSelect',
+        ],
+      },
+    })
+    await new Promise((r) => setTimeout(r, 0))
+
+    const vm = getVm(wrapper)
+    vm.toggleViewMode?.()
+    await vm.setGroupBy?.('authors')
+    await wrapper.vm.$nextTick()
+    // Let the lazy-observe fallback path resolve ensureAuthorCover().
+    await new Promise((r) => setTimeout(r, 0))
+    await wrapper.vm.$nextTick()
+
+    expect(vm.viewMode).toBe('list')
+    // List author row carries the marker the observer keys off of.
+    expect(wrapper.find('.collection-list-item.author-collection .list-thumb[data-author-name]').exists()).toBe(true)
+    // The list row participated in the same lookup flow as grid cards.
+    expect(lookup).toHaveBeenCalledWith('Author A')
+    const overrides = (wrapper.vm as unknown as { authorCoverOverrides: Record<string, string> })
+      .authorCoverOverrides
+    expect(overrides['Author A']).toBe('https://example.com/author-a-lookup.jpg')
+
+    wrapper.unmount()
+  })
 
   it('persists viewMode per grouping and restores it when grouping changes', async () => {
     if (

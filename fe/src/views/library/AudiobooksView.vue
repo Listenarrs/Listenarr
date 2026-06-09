@@ -237,15 +237,20 @@
           @keydown.space.prevent="navigateToCollection(collection)"
         >
           <img
+            v-if="groupBy === 'authors'"
             class="list-thumb"
-            :src="
-              getProtectedImageSrc(
-                groupBy === 'authors'
-                  ? getAuthorImageUrl(collection)
-                  : collection.coverUrls && collection.coverUrls[0],
-                `${groupBy}-list:${collection.name}`,
-              ) || getPlaceholderUrl()
-            "
+            :data-author-name="collection.name"
+            :data-author-has-cover="authorHasSpecificCoverMap[collection.name] ? '1' : ''"
+            :src="getProtectedImageSrc(getAuthorImageUrl(collection), getPlaceholderUrl())"
+            :alt="collection.name"
+            loading="lazy"
+            decoding="async"
+            @error="handleAuthorImageError(collection.name, $event)"
+          />
+          <img
+            v-else
+            class="list-thumb"
+            :src="getProtectedImageSrc(collection.coverUrls && collection.coverUrls[0], getPlaceholderUrl())"
             :alt="collection.name"
             loading="lazy"
             decoding="async"
@@ -1542,10 +1547,11 @@ let authorCardObserver: IntersectionObserver | null = null
 
 function observeAuthorCards() {
   if (groupBy.value !== 'authors') return
+  // Matches both grid author cards (.audiobook-poster-container[data-author-name])
+  // and list-view author rows (.list-thumb[data-author-name]) so both participate
+  // in the lazy author-cover lookup.
   const cards = Array.from(
-    document.querySelectorAll<HTMLElement>(
-      '.author-collection .audiobook-poster-container[data-author-name]',
-    ),
+    document.querySelectorAll<HTMLElement>('.author-collection [data-author-name]'),
   )
   if (cards.length === 0) return
 
@@ -1975,6 +1981,9 @@ async function initializeVirtualScroller() {
       await nextTick()
       syncMeasuredRowHeight()
       updateVisibleRange()
+      // Grid and list render different author markers, so re-observe after a
+      // view switch to keep list-view author rows in the lazy-cover-lookup path.
+      observeAuthorCards()
     })
   }
 }
