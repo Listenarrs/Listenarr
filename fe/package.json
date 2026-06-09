@@ -51,9 +51,9 @@
     "web-vitals": "^5.3.0"
   },
   "devDependencies": {
-    "@tsconfig/node22": "^22.0.5",
+    "@tsconfig/node24": "^24.0.4",
     "@types/jsdom": "^28.0.3",
-    "@types/node": "^25.9.2",
+    "@types/node": "^24.13.1",
     "@vitejs/plugin-vue": "^6.0.7",
     "@vitest/eslint-plugin": "^1.6.19",
     "@vue/compiler-sfc": "^3.5.35",

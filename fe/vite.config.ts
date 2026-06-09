@@ -12,7 +12,6 @@ export default defineConfig(({ mode }) => {
     mode === 'analysis' ||
     process.env.LISTENARR_BUNDLE_ANALYZE === 'true' ||
     process.env.ANALYZE === 'true'
-  const isProductionBuild = mode !== 'development'
 
   return {
     plugins: [
@@ -29,10 +28,6 @@ export default defineConfig(({ mode }) => {
     ],
     build: {
       sourcemap: analyzeBundle,
-    },
-    esbuild: {
-      // Remove console.log and debugger statements from production builds
-      drop: isProductionBuild ? ['console', 'debugger'] : [],
     },
     resolve: {
       alias: {
