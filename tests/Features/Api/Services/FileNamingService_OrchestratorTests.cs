@@ -132,5 +132,102 @@ namespace Listenarr.Tests.Features.Api.Services
             // The folder pattern is skipped under a custom base path — only the file name is produced.
             Assert.Equal("Book.m4b", result.RelativePath);
         }
+
+        [Fact]
+        public void BuildDirectory_AgreesWithBuildPathDirectory_AcrossPatternConfigs()
+        {
+            // Review item 7: BuildDirectory (folder) must agree with BuildPath's directory portion,
+            // including when only a (multi-segment) FileNamingPattern is set.
+            var ctx = NamingContext.From(new Audiobook
+            {
+                Title = "The Gunslinger",
+                Authors = new() { "Stephen King" },
+                Series = "The Dark Tower",
+                SeriesNumber = "1",
+            });
+
+            var configs = new[]
+            {
+                new ApplicationSettings { FolderNamingPattern = "{Author}/{Series}/{Title}", FileNamingPattern = "{Title}" },
+                new ApplicationSettings { FolderNamingPattern = "", FileNamingPattern = "{Author}/{Series}/{Title}" },
+            };
+
+            foreach (var settings in configs)
+            {
+                var dir = _service.BuildDirectory(ctx, settings);
+                var path = _service.BuildPath(ctx, settings, new NamingOptions { OutputRoot = string.Empty, Extension = ".m4b" });
+                Assert.Equal(Path.GetDirectoryName(path.RelativePath) ?? string.Empty, dir);
+            }
+        }
+
+        [Fact]
+        public void BuildPath_EmptyFolderPattern_UsesFilePatternAsFullRelativePath()
+        {
+            var ctx = NamingContext.From(new Audiobook { Title = "The Gunslinger", Authors = new() { "Stephen King" }, Series = "The Dark Tower" });
+            var settings = new ApplicationSettings { FolderNamingPattern = "", FileNamingPattern = "{Author}/{Series}/{Title}" };
+
+            var result = _service.BuildPath(ctx, settings, new NamingOptions { OutputRoot = string.Empty, Extension = ".m4b" });
+
+            Assert.Equal(Path.Join("Stephen King", "The Dark Tower", "The Gunslinger") + ".m4b", result.RelativePath);
+        }
+
+        [Fact]
+        public void BuildPath_EmptyFolderAndFilePattern_FallsBackToAuthorSeriesTitle()
+        {
+            var ctx = NamingContext.From(new Audiobook { Title = "The Gunslinger", Authors = new() { "Stephen King" }, Series = "The Dark Tower" });
+            var settings = new ApplicationSettings { FolderNamingPattern = "", FileNamingPattern = "" };
+
+            var result = _service.BuildPath(ctx, settings, new NamingOptions { OutputRoot = string.Empty, Extension = ".m4b" });
+
+            Assert.Equal(Path.Join("Stephen King", "The Dark Tower", "The Gunslinger") + ".m4b", result.RelativePath);
+        }
+
+        [Fact]
+        public void BuildPath_MultiFile_WithDiskNumberToken_RendersNumberWithoutExtraSuffix()
+        {
+            var ctx = NamingContext.From(new Audiobook { Title = "Book", Authors = new() { "Author" } }) with { DiskNumber = 3 };
+            var settings = new ApplicationSettings
+            {
+                OutputPath = "/audiobooks",
+                FolderNamingPattern = "{Author}",
+                FileNamingPattern = "{Title}",
+                MultiFileNamingPattern = "{Title}-{DiskNumber:00}",
+            };
+
+            var result = _service.BuildPath(ctx, settings, new NamingOptions
+            {
+                OutputRoot = "/audiobooks",
+                IsMultiFile = true,
+                SequenceNumber = 3,
+                Extension = ".mp3",
+            });
+
+            Assert.EndsWith("Book-03.mp3", result.RelativePath);
+            Assert.DoesNotContain("Book-03-03", result.RelativePath); // token renders; no extra suffix appended
+        }
+
+        [Fact]
+        public void From_AudiobookWithNullAuthors_DoesNotThrow_AndUsesUnknownAuthor()
+        {
+            var settings = new ApplicationSettings { FolderNamingPattern = "{Author}/{Title}" };
+            var ctx = NamingContext.From(new Audiobook { Title = "Orphan", Authors = null });
+
+            Assert.Equal(Path.Join("Unknown Author", "Orphan"), _service.BuildDirectory(ctx, settings));
+        }
+
+        [Fact]
+        public void From_AudibleBookMetadata_MapsAuthorSeriesTitle()
+        {
+            // LibraryAdd source: the provider metadata (via ToAudiobook) drives the name.
+            var settings = new ApplicationSettings { FolderNamingPattern = "{Author}/{Series}/{Title}" };
+            var ctx = NamingContext.From(new AudibleBookMetadata
+            {
+                Title = "The Gunslinger",
+                Authors = new() { "Stephen King" },
+                Series = "The Dark Tower",
+            });
+
+            Assert.Equal(Path.Join("Stephen King", "The Dark Tower", "The Gunslinger"), _service.BuildDirectory(ctx, settings));
+        }
     }
 }

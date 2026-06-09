@@ -81,13 +81,20 @@ namespace Listenarr.Application.Common
 
         public string BuildDirectory(NamingContext context, ApplicationSettings settings)
         {
-            // Folder-only computation (the audiobook's BasePath). Fall back to the file pattern when no
-            // folder pattern is configured, then rely on ApplyNamingPattern for empty-token cleanup.
-            var folderPattern = string.IsNullOrWhiteSpace(settings.FolderNamingPattern)
-                ? settings.FileNamingPattern
-                : settings.FolderNamingPattern;
+            // Folder-only computation (the audiobook's BasePath).
             var variables = BuildVariables(context);
-            return ApplyNamingPattern(folderPattern ?? string.Empty, variables, treatAsFilename: false);
+
+            if (!string.IsNullOrWhiteSpace(settings.FolderNamingPattern))
+                return ApplyNamingPattern(settings.FolderNamingPattern, variables, treatAsFilename: false);
+
+            // No folder pattern: FileNamingPattern is the full relative path (folder structure + filename)
+            // — the same legacy rule BuildPath uses — so the directory is everything except the final
+            // (file) segment. This keeps BuildDirectory consistent with BuildPath's legacy branch.
+            var legacyPattern = string.IsNullOrWhiteSpace(settings.FileNamingPattern)
+                ? "{Author}/{Series}/{Title}"
+                : settings.FileNamingPattern;
+            var full = ApplyNamingPattern(legacyPattern, variables, treatAsFilename: false);
+            return Path.GetDirectoryName(full) ?? string.Empty;
         }
 
         public NamingResult BuildPath(NamingContext context, ApplicationSettings settings, NamingOptions options)
