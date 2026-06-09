@@ -1,12 +1,53 @@
 using Listenarr.Domain.Models;
+using Listenarr.Domain.Models.Configurations;
+using Listenarr.Domain.Models.Naming;
 
 namespace Listenarr.Application.Interfaces
 {
+    /// <summary>
+    /// Options controlling how <see cref="IFileNamingService.BuildPath"/> assembles a path.
+    /// </summary>
+    public sealed record NamingOptions
+    {
+        /// <summary>Root the relative path is combined with (e.g. the configured output path or a root folder).</summary>
+        public string OutputRoot { get; init; } = string.Empty;
+
+        /// <summary>
+        /// When true, the destination folder is already decided (the audiobook has a custom BasePath), so only
+        /// the file naming pattern is applied — the folder pattern is skipped.
+        /// </summary>
+        public bool IsCustomBasePath { get; init; }
+
+        /// <summary>Whether this file is part of a multi-file audiobook (selects the multi-file naming pattern).</summary>
+        public bool IsMultiFile { get; init; }
+
+        /// <summary>Sequence number used to disambiguate multi-file names when the pattern has no Disk/Chapter token.</summary>
+        public int? SequenceNumber { get; init; }
+
+        /// <summary>File extension to ensure on the result (e.g. ".m4b").</summary>
+        public string Extension { get; init; } = ".m4b";
+    }
+
+    /// <summary>Result of <see cref="IFileNamingService.BuildPath"/>: both the relative path and the full path.</summary>
+    public sealed record NamingResult(string RelativePath, string FullPath);
+
     /// <summary>
     /// Generates file paths using configured naming patterns
     /// </summary>
     public interface IFileNamingService
     {
+        /// <summary>
+        /// Build the relative directory for an audiobook from the configured folder pattern only (no filename).
+        /// Used when computing an audiobook's BasePath.
+        /// </summary>
+        string BuildDirectory(NamingContext context, ApplicationSettings settings);
+
+        /// <summary>
+        /// Build the relative and full path for a single audiobook file, applying the folder + file naming
+        /// patterns, multi-file handling, sanitization and platform path-length limits.
+        /// </summary>
+        NamingResult BuildPath(NamingContext context, ApplicationSettings settings, NamingOptions options);
+
         /// <summary>
         /// Apply the configured file naming pattern to generate the final file path
         /// </summary>

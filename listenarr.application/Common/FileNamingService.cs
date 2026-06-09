@@ -20,8 +20,10 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using Listenarr.Application.Interfaces;
+using Listenarr.Domain.Common;
 using Listenarr.Domain.Models;
 using Listenarr.Domain.Models.Configurations;
+using Listenarr.Domain.Models.Naming;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Common
@@ -62,99 +64,115 @@ namespace Listenarr.Application.Common
             string originalExtension = ".m4b")
         {
             var settings = await _configService.GetApplicationSettingsAsync() ?? new ApplicationSettings();
+
+            var options = new NamingOptions
+            {
+                OutputRoot = string.IsNullOrWhiteSpace(outputPath) ? settings.OutputPath : outputPath,
+                // A custom output root means the destination folder is already chosen -> file pattern only.
+                IsCustomBasePath = IsCustomOutputRoot(outputPath, settings.OutputPath),
+                IsMultiFile = metadata.DiscNumber.HasValue || metadata.TrackNumber.HasValue,
+                SequenceNumber = null,
+                Extension = originalExtension,
+            };
+
+            var result = BuildPath(NamingContext.From(metadata), settings, options);
+            _logger.LogInformation("Generated file path: {FilePath}", result.FullPath);
+            return result.FullPath;
+        }
+
+        public string BuildDirectory(NamingContext context, ApplicationSettings settings)
+        {
+            // Folder-only computation (the audiobook's BasePath). Fall back to the file pattern when no
+            // folder pattern is configured, then rely on ApplyNamingPattern for empty-token cleanup.
+            var folderPattern = string.IsNullOrWhiteSpace(settings.FolderNamingPattern)
+                ? settings.FileNamingPattern
+                : settings.FolderNamingPattern;
+            var variables = BuildVariables(context);
+            return ApplyNamingPattern(folderPattern ?? string.Empty, variables, treatAsFilename: false);
+        }
+
+        public NamingResult BuildPath(NamingContext context, ApplicationSettings settings, NamingOptions options)
+        {
+            var variables = BuildVariables(context);
             var folderPattern = settings.FolderNamingPattern;
+            var filePattern = options.IsMultiFile ? settings.MultiFileNamingPattern : settings.FileNamingPattern;
 
-            // Determine if this is a multi-file import (has disk or chapter number)
-            bool isMultiFile = metadata.DiscNumber.HasValue || metadata.TrackNumber.HasValue;
-            var filePattern = isMultiFile
-                ? settings.MultiFileNamingPattern
-                : settings.FileNamingPattern;
-
-            var effectiveFolderPattern = folderPattern;
-            try
-            {
-                if (!string.IsNullOrWhiteSpace(outputPath) && !string.IsNullOrWhiteSpace(settings.OutputPath))
-                {
-                    var requestedRoot = Path.GetFullPath(outputPath);
-                    var configuredRoot = Path.GetFullPath(settings.OutputPath);
-                    if (!string.Equals(requestedRoot, configuredRoot, StringComparison.OrdinalIgnoreCase))
-                    {
-                        // Caller provided a custom base path (e.g., audiobook BasePath) -> skip folder pattern
-                        effectiveFolderPattern = string.Empty;
-                    }
-                }
-            }
-            catch (Exception caughtEx_2) when (caughtEx_2 is not OperationCanceledException && caughtEx_2 is not OutOfMemoryException && caughtEx_2 is not StackOverflowException)
-            {
-                // If paths are invalid, fall back to configured folder pattern
-                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
-            }
-
-            var variables = BuildVariables(metadata);
-
-            // Diagnostic logging: record the variables used for pattern replacement
-            try
-            {
-                var dbg = string.Join(", ", variables.Select(kv => $"{kv.Key}='{kv.Value}'"));
-                _logger.LogInformation("FileNamingService variables: {Vars}", dbg);
-            }
-            catch (Exception caughtEx_3) when (caughtEx_3 is not OperationCanceledException && caughtEx_3 is not OutOfMemoryException && caughtEx_3 is not StackOverflowException)
-            {
-                // ignore logging errors
-                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
-            }
+            var patternHasNumberTokens = !string.IsNullOrWhiteSpace(filePattern)
+                && (filePattern.IndexOf("DiskNumber", StringComparison.OrdinalIgnoreCase) >= 0
+                    || filePattern.IndexOf("ChapterNumber", StringComparison.OrdinalIgnoreCase) >= 0);
 
             string relativePath;
-            if (string.IsNullOrWhiteSpace(effectiveFolderPattern))
+            if (string.IsNullOrWhiteSpace(folderPattern))
             {
-                // Legacy behavior: use FileNamingPattern as the full relative path pattern
+                // Legacy behavior: use the file naming pattern as the full relative path.
                 var legacyPattern = string.IsNullOrWhiteSpace(filePattern)
                     ? "{Author}/{Series}/{Title}"
                     : filePattern;
-
-                relativePath = ApplyNamingPattern(legacyPattern, variables);
+                relativePath = ApplyNamingPattern(legacyPattern, variables, treatAsFilename: false);
+            }
+            else if (options.IsCustomBasePath)
+            {
+                // The destination folder is already decided; apply the file pattern only.
+                var effectiveFilePattern = string.IsNullOrWhiteSpace(filePattern) ? "{Title}" : filePattern;
+                relativePath = ApplyNamingPattern(effectiveFilePattern, variables, treatAsFilename: !PatternAllowsSubfolders(effectiveFilePattern));
             }
             else
             {
-                // New behavior: separate folder and file patterns
+                // Separate folder and file patterns.
                 var effectiveFilePattern = string.IsNullOrWhiteSpace(filePattern) ? "{Title}" : filePattern;
 
-                var folderRelative = ApplyNamingPattern(effectiveFolderPattern, variables, treatAsFilename: false);
-
-                // Normalize path separators to platform-specific ones
+                var folderRelative = ApplyNamingPattern(folderPattern, variables, treatAsFilename: false);
                 if (!string.IsNullOrWhiteSpace(folderRelative))
                 {
                     folderRelative = folderRelative.Replace('/', Path.DirectorySeparatorChar)
                                                    .Replace('\\', Path.DirectorySeparatorChar);
                 }
 
-                var patternAllowsSubfolders = effectiveFilePattern.IndexOf("DiskNumber", StringComparison.OrdinalIgnoreCase) >= 0
-                    || effectiveFilePattern.IndexOf("ChapterNumber", StringComparison.OrdinalIgnoreCase) >= 0
-                    || effectiveFilePattern.IndexOf('/') >= 0
-                    || effectiveFilePattern.IndexOf('\\') >= 0;
-
-                var fileRelative = ApplyNamingPattern(effectiveFilePattern, variables, treatAsFilename: !patternAllowsSubfolders);
+                var fileRelative = ApplyNamingPattern(effectiveFilePattern, variables, treatAsFilename: !PatternAllowsSubfolders(effectiveFilePattern));
+                if (options.IsMultiFile && !patternHasNumberTokens && options.SequenceNumber.HasValue)
+                    fileRelative = FileUtils.AppendSequenceSuffix(fileRelative, options.SequenceNumber.Value);
 
                 relativePath = string.IsNullOrWhiteSpace(folderRelative)
                     ? fileRelative
                     : CombineWithOptionalBase(folderRelative, fileRelative);
             }
 
-            // Ensure it has the correct extension
-            if (!relativePath.EndsWith(originalExtension, StringComparison.OrdinalIgnoreCase))
+            // For the legacy and custom-base branches the multi-file suffix is appended to the whole path.
+            if ((string.IsNullOrWhiteSpace(folderPattern) || options.IsCustomBasePath)
+                && options.IsMultiFile && !patternHasNumberTokens && options.SequenceNumber.HasValue)
             {
-                relativePath += originalExtension;
+                relativePath = FileUtils.AppendSequenceSuffix(relativePath, options.SequenceNumber.Value);
             }
 
-            // Combine with the provided output path
-            var fullPath = string.IsNullOrWhiteSpace(outputPath)
+            if (!relativePath.EndsWith(options.Extension, StringComparison.OrdinalIgnoreCase))
+                relativePath += options.Extension;
+
+            var fullPath = string.IsNullOrWhiteSpace(options.OutputRoot)
                 ? relativePath
-                : CombineWithOptionalBase(outputPath, relativePath);
+                : CombineWithOptionalBase(options.OutputRoot, relativePath);
 
             fullPath = EnsurePathWithinLimits(fullPath);
+            return new NamingResult(relativePath, fullPath);
+        }
 
-            _logger.LogInformation("Generated file path: {FilePath}", fullPath);
-            return fullPath;
+        private static bool PatternAllowsSubfolders(string pattern)
+            => pattern.IndexOf("DiskNumber", StringComparison.OrdinalIgnoreCase) >= 0
+                || pattern.IndexOf("ChapterNumber", StringComparison.OrdinalIgnoreCase) >= 0
+                || pattern.IndexOf('/') >= 0
+                || pattern.IndexOf('\\') >= 0;
+
+        private static bool IsCustomOutputRoot(string? outputPath, string? configuredOutput)
+        {
+            if (string.IsNullOrWhiteSpace(outputPath) || string.IsNullOrWhiteSpace(configuredOutput))
+                return false;
+            try
+            {
+                return !string.Equals(Path.GetFullPath(outputPath), Path.GetFullPath(configuredOutput), StringComparison.OrdinalIgnoreCase);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
+                return false;
+            }
         }
 
         public string ApplyNamingPattern(string pattern, Dictionary<string, object> variables, bool treatAsFilename = false)
@@ -390,6 +408,35 @@ namespace Listenarr.Application.Common
                 { "Quality", string.Empty },
                 { "DiskNumber", string.Empty },
                 { "ChapterNumber", string.Empty }
+            };
+        }
+
+        // Unified variable builder used by the orchestrator (BuildDirectory/BuildPath). All flows map their
+        // source type into a NamingContext, so token sanitization and empty-handling live in one place.
+        // The dictionary is case-insensitive so patterns like {author} resolve as well as {Author}.
+        private Dictionary<string, object> BuildVariables(NamingContext context)
+        {
+            var author = context.Authors?.FirstOrDefault(a => !string.IsNullOrWhiteSpace(a));
+            var narrator = context.Narrators != null
+                ? string.Join(", ", context.Narrators.Where(n => !string.IsNullOrWhiteSpace(n)))
+                : string.Empty;
+
+            return new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+            {
+                { "Author", SanitizePathComponent(FirstNonEmpty(author, "Unknown Author")) },
+                { "Series", string.IsNullOrWhiteSpace(context.Series) ? string.Empty : SanitizePathComponent(context.Series) },
+                { "Title", SanitizePathComponent(FirstNonEmpty(context.Title, "Unknown Title")) },
+                { "Subtitle", string.IsNullOrWhiteSpace(context.Subtitle) ? string.Empty : SanitizePathComponent(context.Subtitle) },
+                { "Edition", string.IsNullOrWhiteSpace(context.Edition) ? string.Empty : SanitizePathComponent(context.Edition) },
+                { "Narrator", string.IsNullOrWhiteSpace(narrator) ? string.Empty : SanitizePathComponent(narrator) },
+                { "Publisher", string.IsNullOrWhiteSpace(context.Publisher) ? string.Empty : SanitizePathComponent(context.Publisher) },
+                { "Language", string.IsNullOrWhiteSpace(context.Language) ? string.Empty : SanitizePathComponent(context.Language) },
+                { "Asin", string.IsNullOrWhiteSpace(context.Asin) ? string.Empty : SanitizePathComponent(context.Asin) },
+                { "SeriesNumber", context.SeriesNumber ?? string.Empty },
+                { "Year", context.Year ?? string.Empty },
+                { "Quality", context.Quality ?? string.Empty },
+                { "DiskNumber", context.DiskNumber?.ToString() ?? string.Empty },
+                { "ChapterNumber", context.ChapterNumber?.ToString() ?? string.Empty }
             };
         }
 
