@@ -31,16 +31,16 @@ namespace Listenarr.Infrastructure.FileSystem
 {
     public partial class FileMover : IFileMover
     {
-        // .NET 8 has no managed BCL equivalent for hardlink creation.
+        // .NET has no managed BCL equivalent for hardlink creation.
         // LibraryImport (source-generated P/Invoke, .NET 7+) is used instead of the legacy
         // DllImport attribute to minimise unmanaged interop overhead and satisfy CA1060/CA2101.
         [LibraryImport("kernel32.dll", EntryPoint = "CreateHardLinkW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
         [return: MarshalAs(UnmanagedType.Bool)]
-        [SuppressMessage("Interoperability", "SYSLIB1054", Justification = "No managed BCL equivalent for hardlink creation exists in .NET 8.")]
+        [SuppressMessage("Interoperability", "SYSLIB1054", Justification = "No managed BCL equivalent for hardlink creation exists in .NET.")]
         private static partial bool CreateHardLinkNative(string lpFileName, string lpExistingFileName, IntPtr lpSecurityAttributes);
 
         [LibraryImport("libc", EntryPoint = "link", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
-        [SuppressMessage("Interoperability", "SYSLIB1054", Justification = "No managed BCL equivalent for hardlink creation exists in .NET 8.")]
+        [SuppressMessage("Interoperability", "SYSLIB1054", Justification = "No managed BCL equivalent for hardlink creation exists in .NET.")]
         private static partial int LinkNative(string oldpath, string newpath);
 
         private readonly ILogger<FileMover> _logger;
@@ -467,5 +467,4 @@ namespace Listenarr.Infrastructure.FileSystem
         }
     }
 }
-
 

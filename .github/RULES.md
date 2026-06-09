@@ -7,7 +7,7 @@ This folder contains comprehensive instructions for AI assistants working with t
 ### [copilot-instructions.md](copilot-instructions.md) - **MOST COMPREHENSIVE**
 Complete project documentation including:
 - Full project structure and architecture
-- Technology stack (.NET 8.0, Vue 3, TypeScript, Pinia, EF Core, SQLite, SignalR)
+- Technology stack (.NET 10.0, Vue 3, TypeScript, Pinia, EF Core, SQLite, SignalR)
 - Critical backend patterns (download status lifecycle, file existence validation, authentication)
 - Critical frontend patterns (Pinia stores, performance optimization, type safety)
 - API endpoints and development workflow
@@ -68,7 +68,7 @@ These files provide quick-start guidance tailored to specific AI providers, with
 
 ## Project Overview (Quick Reference)
 
-**Listenarr** is a C# .NET 8.0 Web API backend with Vue.js 3 frontend for automated audiobook downloading and processing.
+**Listenarr** is a C# .NET 10.0 Web API backend with Vue.js 3 frontend for automated audiobook downloading and processing.
 
 ### Quick Start
 ```bash
@@ -76,7 +76,7 @@ npm run dev  # Start both API and frontend from repository root
 ```
 
 ### Key Technologies
-- **Backend**: ASP.NET Core (.NET 8), Entity Framework Core, SQLite
+- **Backend**: ASP.NET Core (.NET 10), Entity Framework Core, SQLite
 - **Frontend**: Vue 3, TypeScript, Pinia, Vite, SignalR
 - **Architecture**: Clean architecture (Domain, Application, Infrastructure layers)
 

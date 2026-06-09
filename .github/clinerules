@@ -10,10 +10,10 @@ Adhere strictly to best practices from OWASP, with particular consideration for 
 
 ## Listenarr Project Overview
 
-Listenarr is a C# .NET 8.0 Web API backend with Vue.js 3 frontend for automated audiobook downloading and processing via torrent/NZB clients.
+Listenarr is a C# .NET 10.0 Web API backend with Vue.js 3 frontend for automated audiobook downloading and processing via torrent/NZB clients.
 
 ### Technology Stack
-- **Backend**: ASP.NET Core (.NET 8), Entity Framework Core, SQLite
+- **Backend**: ASP.NET Core (.NET 10), Entity Framework Core, SQLite
 - **Frontend**: Vue 3, TypeScript, Pinia, Vite, SignalR
 - **Architecture**: Clean architecture (Domain, Application, Infrastructure layers)
 
@@ -26,7 +26,7 @@ Listenarr is a C# .NET 8.0 Web API backend with Vue.js 3 frontend for automated 
 
 ---
 
-## Critical Backend Patterns (.NET 8.0)
+## Critical Backend Patterns (.NET 10.0)
 
 1. **Download Status Lifecycle**: Always set `Status = DownloadStatus.Moved` after successful import (8 locations in CompletedDownloadProcessor.cs)
 2. **File Existence Validation**: Check `File.Exists(f.Path)` in wanted queries (3 locations: LibraryController x2, ScanBackgroundService)

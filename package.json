@@ -3,6 +3,9 @@
   "version": "1.0.9",
   "private": true,
   "description": "Listenarr - Automated audiobook downloading and management",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "version:sync": "node scripts/sync-fe-version-from-csproj.mjs",
     "predev": "npm run version:sync",

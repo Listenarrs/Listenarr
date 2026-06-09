@@ -4,10 +4,10 @@
 This file contains Claude-specific guidance for the Listenarr audiobook management system. For comprehensive secure coding practices, see [AGENTS.md](AGENTS.md) and [CLAUDE.md](CLAUDE.md). For complete project details, see [copilot-instructions.md](copilot-instructions.md).
 
 ## Project Summary
-**Listenarr** is a C# .NET 8.0 Web API backend with Vue.js 3 frontend for automated audiobook downloading and processing via torrent/NZB clients (qBittorrent, Transmission, SABnzbd, NZBGet).
+**Listenarr** is a C# .NET 10.0 Web API backend with Vue.js 3 frontend for automated audiobook downloading and processing via torrent/NZB clients (qBittorrent, Transmission, SABnzbd, NZBGet).
 
 ## Key Technologies
-- **Backend**: ASP.NET Core (.NET 8), Entity Framework Core, SQLite
+- **Backend**: ASP.NET Core (.NET 10), Entity Framework Core, SQLite
 - **Frontend**: Vue 3, TypeScript, Pinia, Vite, SignalR
 - **Architecture**: Clean architecture (Domain, Application, Infrastructure layers)
 

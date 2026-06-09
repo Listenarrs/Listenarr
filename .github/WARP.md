@@ -4,15 +4,15 @@ This file provides guidance to WARP (warp.dev) when working with code in this re
 
 ## Project Overview
 
-Listenarr is an automated audiobook collection management system built as a full-stack application with a C# .NET 8 backend API and Vue.js 3 frontend. The project follows a monorepo structure with integrated build processes.
+Listenarr is an automated audiobook collection management system built as a full-stack application with a C# .NET 10 backend API and Vue.js 3 frontend. The project follows a monorepo structure with integrated build processes.
 
 **Core Purpose**: Search multiple APIs for audiobook torrents/NZBs, manage downloads via popular clients (qBittorrent, Transmission, SABnzbd, NZBGet), and process files with rich metadata integration.
 
 ## Development Commands
 
 ### Prerequisites
-- .NET 8.0 SDK or later
-- Node.js 20.x or later (specified in `fe/package.json` engines)
+- .NET 10.0 SDK or later
+- Node.js 24.x or later (specified in `fe/package.json` engines)
 
 ### Common Development Tasks
 
@@ -101,7 +101,7 @@ The API's `.csproj` contains MSBuild targets that automatically:
 
 This produces a single deployment artifact containing both backend and frontend.
 
-### Backend Architecture (.NET 8 Web API)
+### Backend Architecture (.NET 10 Web API)
 
 **Service-Oriented Architecture** with dependency injection:
 
@@ -224,7 +224,7 @@ This produces a single deployment artifact containing both backend and frontend.
 5. Images cached in `listenarr.api/wwwroot/cache/` (gitignored)
 
 ### Production Deployment
-- Docker images available at `listenarrs/listenarr` (latest, stable, canary, beta tags)
+- Docker images are published to `ghcr.io/listenarrs/listenarr`; `docker.io/therobbiedavis/listenarr` is maintained as a compatibility mirror.
 - Self-contained executables for Windows, Linux, macOS
 - Single-container deployment includes both API and frontend
 - Persistent volume at `/app/config` for database and configuration
@@ -287,6 +287,6 @@ This produces a single deployment artifact containing both backend and frontend.
 - Check that files actually exist on disk, not just in database
 
 ### Build Errors
-- Ensure running .NET 8.0 SDK and Node.js 20.x or later
+- Ensure running .NET 10.0 SDK and Node.js 24.x or later
 - Clear node_modules and run `npm install` in `fe/` directory
 - Clean solution: `dotnet clean` then `dotnet build`

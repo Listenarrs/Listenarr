@@ -1,15 +1,15 @@
 # OpenAI Instructions for Listenarr
 
 ## Overview
-Listenarr is a C# .NET 8.0 audiobook management system with Vue.js 3 frontend. See [copilot-instructions.md](copilot-instructions.md) for complete details.
+Listenarr is a C# .NET 10.0 audiobook management system with Vue.js 3 frontend. See [copilot-instructions.md](copilot-instructions.md) for complete details.
 
 ## Quick Start
 - **Run**: `npm run dev` from repository root
-- **Tech Stack**: .NET 8.0, Vue 3, TypeScript, Pinia, EF Core, SQLite, SignalR
+- **Tech Stack**: .NET 10.0, Vue 3, TypeScript, Pinia, EF Core, SQLite, SignalR
 - **Database**: `listenarr.api/config/database/listenarr.db`
 - **Logs**: `listenarr.api/config/logs/listenarr-YYYYMMDD.log`
 
-## Critical Backend Patterns (.NET 8.0)
+## Critical Backend Patterns (.NET 10.0)
 1. **Download Status Lifecycle**: Always set `Status = DownloadStatus.Moved` after import (8 locations in CompletedDownloadProcessor.cs)
 2. **File Existence Validation**: Check `File.Exists(f.Path)` in wanted queries (3 locations)
 3. **Download Client Auth**: Transmission uses 409/session-id retry; qBittorrent uses cookies

@@ -1,17 +1,17 @@
 # Cohere Instructions for Listenarr
 
 ## Overview
-Listenarr is a C# .NET 8.0 audiobook management system with Vue.js 3 frontend. See [copilot-instructions.md](copilot-instructions.md) for complete details.
+Listenarr is a C# .NET 10.0 audiobook management system with Vue.js 3 frontend. See [copilot-instructions.md](copilot-instructions.md) for complete details.
 
 ## Quick Start
 - **Run**: `npm run dev` from repository root
-- **Tech**: .NET 8.0, Vue 3, TypeScript, Pinia, EF Core, SQLite, SignalR
+- **Tech**: .NET 10.0, Vue 3, TypeScript, Pinia, EF Core, SQLite, SignalR
 - **Database**: `listenarr.api/config/database/listenarr.db`
 - **Logs**: `listenarr.api/config/logs/listenarr-YYYYMMDD.log`
 
 ## Critical Patterns
 
-### Backend (.NET 8.0)
+### Backend (.NET 10.0)
 1. **Download Status**: Always set `Status = DownloadStatus.Moved` after import
 2. **File Checks**: Verify `File.Exists(f.Path)` for wanted status (3 locations)
 3. **Authentication**: Transmission (409/session-id retry), qBittorrent (cookies)

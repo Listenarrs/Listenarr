@@ -1,9 +1,9 @@
 # Listenarr Project Instructions
 
-This is a complete C# .NET Core Web API backend with Vue.js frontend for automated audiobook downloading and processing.
+This is a complete C# .NET Web API backend with Vue.js frontend for automated audiobook downloading and processing.
 
 ## Project Overview
-- **Backend**: ASP.NET Core Web API (.NET 8.0+ / net8.0) with modular service architecture
+- **Backend**: ASP.NET Core Web API (.NET 10.0+ / net10.0) with modular service architecture
 - **Frontend**: Vue.js 3 + TypeScript + Pinia + Vue Router + Vite
 - **Purpose**: Search multiple APIs for audiobook torrents/NZBs, manage downloads via clients (qBittorrent, Transmission, SABnzbd, NZBGet), and process files with metadata using Audnexus API
 - **Database**: SQLite with Entity Framework Core (ListenArrDbContext)
@@ -15,7 +15,6 @@ Listenarr/
 │   ├── Controllers/               # API endpoints
 │   ├── Models/                    # Data models (Audiobook, SearchResult, Download, etc.)
 │   ├── Services/                  # Business logic (Search, Metadata, DownloadMonitor, adapters)
-│   ├── tools/                    # Development utilities housed with API (discord-bot)
 │   ├── wwwroot/cache/            # Image cache directory (gitignored)
 │   └── Program.cs                # Application entry point
 ├── fe/                           # Frontend Vue application
@@ -33,16 +32,14 @@ Listenarr/
 │   ├── BRANDING.md              # Logo and branding guidelines
 │   ├── logo-icon.png            # Brand icon (square format)
 │   └── logo-full.png            # Full logo with text (horizontal)
-├── start-dev.bat                 # Windows startup script
-├── start-dev.ps1                 # PowerShell startup script
-├── start-dev.sh                  # Linux/macOS startup script
 ├── package.json                  # Root package with concurrently scripts
 ├── docker-compose.yml            # Docker orchestration
 ├── listenarr.application/        # Application layer (services, interfaces)
 ├── listenarr.domain/             # Domain models and enums
 ├── listenarr.infrastructure/     # Persistence, adapters, EF Core configs
 ├── tests/                        # Unit and integration tests
-└── listenarr.sln                 # Visual Studio solution file
+├── tools/                        # Development utilities, including discord-bot
+└── listenarr.slnx                # Visual Studio solution file
 ```
 
 ## Branding
@@ -87,33 +84,16 @@ The Listenarr logo combines headphones and a book to represent audiobook listeni
 ## How to Run This Project
 
 ### Prerequisites
-- **.NET 8.0 SDK or later (net8.0)** - [Download](https://dotnet.microsoft.com/download)  
+- **.NET 10.0 SDK or later (net10.0)** - [Download](https://dotnet.microsoft.com/download)  
 
-**Note:** Build/test environments in this repo target net8.0. Running with a different SDK may create build/run inconsistencies.
-- **Node.js 20.x or later** - [Download](https://nodejs.org/)
+**Note:** Build/test environments in this repo target net10.0. Running with a different SDK may create build/run inconsistencies.
+- **Node.js 24.x or later** - [Download](https://nodejs.org/)
 - **npm** (comes with Node.js)
 
 ### Recommended: Single Command Start
 
-Use the provided startup scripts that handle everything automatically:
+Use the root npm scripts to run the development stack:
 
-**Windows (Command Prompt):**
-```bash
-start-dev.bat
-```
-
-**Windows (PowerShell):**
-```bash
-.\start-dev.ps1
-```
-
-**Linux/macOS:**
-```bash
-chmod +x start-dev.sh
-./start-dev.sh
-```
-
-**Cross-platform (npm):**
 ```bash
 npm install          # First time only: installs concurrently
 npm run dev          # Starts both API and Web with colored output
@@ -182,7 +162,7 @@ docker-compose up --build
 ⚠️ **Note**: The backend directory is **lowercase** `listenarr.api`, not `ListenArr.Api`
 - Backend: `listenarr.api/`
 - Frontend: `fe/`
-- Solution file references: Uses proper casing in `listenarr.sln`
+- Solution file references: Uses proper casing in `listenarr.slnx`
 
 ## API Endpoints
 
@@ -247,7 +227,7 @@ docker-compose up --build
 - **Discord bot:** The dev/test Discord stub lives at `tools/discord-bot` — prefer updating the `README.md` there or the stub only when necessary; tests expect this stub to exist.
 - **Dev tools & scripts:** Misc scripts that are not API-specific may live under `tools/`, but major tooling is colocated with the API as shown above.
 - **Runtime notes:** Always run from the **repository root** (e.g., `npm run dev`) so the app uses the canonical DB at `listenarr.api/config/database/listenarr.db` and log paths under `listenarr.api/config/logs/`.
-- **Environment:** Project targets **.NET 8 (net8.0)** and Node.js **20.x+**. Use those versions for local dev and CI to avoid build/test inconsistencies.
+- **Environment:** Project targets **.NET 10 (net10.0)** and Node.js **24.x+**. Use those versions for local dev and CI to avoid build/test inconsistencies.
 - **Logging & debugging:** When adding diagnostics, prefer INFO-level logs for flow transitions and DEBUG for verbose data. Add clear early-return logs to background services (e.g., `DownloadMonitorService`) to make runtime behavior observable.
 
 > Quick tip: if a change affects DI constructors, update tests to include any newly required parameters (or adjust constructors to provide backward-compatible defaults) so builds stay green.
