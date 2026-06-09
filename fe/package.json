@@ -70,7 +70,7 @@
     "jsdom": "^29.1.1",
     "npm-run-all2": "^8.0.4",
     "patch-package": "^8.0.1",
-    "prettier": "^3.8.3",
+    "prettier": "^3.8.4",
     "rollup-plugin-visualizer": "^7.0.1",
     "start-server-and-test": "^3.0.8",
     "typescript": "^6.0.3",
