@@ -64,18 +64,18 @@ We take the security of Listenarr seriously. If you believe you have found a sec
 ### Configuration Security
 
 1. **Database**
-   - SQLite database stored in `/config/database/` (Docker) or `listenarr.api/config/database/`
+   - SQLite database stored in `/app/config/database/` (Docker) or `.env/development/config/database/` (local development)
    - Ensure proper file permissions on database files
    - Regular backups recommended
 
 2. **Image Cache**
-   - Cached images stored in `/config/cache/images/`
+   - Cached images stored in `/app/config/cache/images/` (Docker) or `.env/development/config/cache/images/` (local development)
    - Automatically cleaned up by background service
    - No user data stored in cache
 
 3. **Logs**
    - Logs may contain sensitive information
-   - Stored in `/config/logs/` directory
+   - Stored in `/app/config/logs/` (Docker) or `.env/development/config/logs/` (local development)
    - Implement log rotation to prevent disk space issues
    - Review log access permissions
 

@@ -335,18 +335,18 @@ Got a great idea? Throw it up on [Discussions](https://github.com/Listenarrs/Lis
 ```
 Listenarr/
 ├── listenarr.api/              # C# Backend API
-│   ├── config/                 # User configuration and data
-│   │   ├── appsettings/        # Application configuration files
-│   │   ├── cache/              # Image cache storage
-│   │   ├── database/           # SQLite database files
-│   │   ├── logs/               # Application log files
-│   │   └── temp/               # Temporary download storage
 │   ├── Controllers/            # API Endpoints
 │   ├── Models/                 # Data Models
 │   ├── Services/               # Business Logic
 │   ├── Dockerfile.runtime      # Runtime Docker image for combined API + frontend
 │   ├── Program.cs              # Entry Point
 │   └── ...
+├── .env/development/config/    # Local runtime data (generated, gitignored)
+│   ├── appsettings/            # Application configuration files
+│   ├── cache/                  # Image cache storage
+│   ├── database/               # SQLite database files
+│   ├── logs/                   # Application log files
+│   └── temp/                   # Temporary download storage
 ├── fe/                         # Vue.js Frontend
 │   ├── src/
 │   │   ├── components/         # Vue Components
@@ -374,10 +374,10 @@ Configure your search APIs in the Settings page:
 You can control the application logging level in three ways:
 
 - Environment variable (recommended for Docker): set LISTENARR_LOG_LEVEL to one of Verbose, Debug, Information, Warning, Error, Fatal (e.g., `LISTENARR_LOG_LEVEL=Debug`).
-- Configuration file: create or edit `appsettings.json` or `appsettings.Development.json` in the `listenarr.api` project (or the `config/appsettings` directory when running the container). Set either `Serilog:MinimumLevel:Default` or `Logging:LogLevel:Default` to the desired level.
+- Configuration file: create or edit `config/appsettings/appsettings.json` under the active content root. In local development this is `.env/development/config/appsettings/appsettings.json`; in Docker this is `/app/config/appsettings/appsettings.json`. Set either `Serilog:MinimumLevel:Default` or `Logging:LogLevel:Default` to the desired level.
 - Runtime args / orchestration: pass environment variables via `docker run -e LISTENARR_LOG_LEVEL=Debug` or `docker-compose` environment section.
 
-Docker users: the provided `docker-compose.yml` includes an example `LISTENARR_LOG_LEVEL` entry; for non-Docker users changing `appsettings.Development.json` before starting the app is the easiest way to set a custom default logging level.
+Docker users: the provided `docker-compose.yml` includes an example `LISTENARR_LOG_LEVEL` entry; for non-Docker users editing `.env/development/config/appsettings/appsettings.json` after first startup is the easiest way to set a custom default logging level.
 
 
 ### Download Clients

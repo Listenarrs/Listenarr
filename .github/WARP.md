@@ -221,7 +221,7 @@ This produces a single deployment artifact containing both backend and frontend.
 2. Backend auto-restarts on C# changes (via `dotnet watch`)
 3. Frontend hot-reloads on Vue/TS changes (via Vite HMR)
 4. Database migrations apply automatically on startup
-5. Images cached in `listenarr.api/wwwroot/cache/` (gitignored)
+5. Images cached in `.env/development/config/cache/images/` (gitignored)
 
 ### Production Deployment
 - Docker images are published to `ghcr.io/listenarrs/listenarr`; `docker.io/therobbiedavis/listenarr` is maintained as a compatibility mirror.

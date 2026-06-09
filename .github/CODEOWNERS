@@ -29,8 +29,9 @@ listenarr.infrastructure/Migrations/        @listenarrs/maintainers
 # Application entry point and DI wiring
 listenarr.api/Program.cs                    @listenarrs/maintainers
 
-# Default configuration shipped with the app
-listenarr.api/config/appsettings/           @listenarrs/maintainers
+# Configuration docs and launch profiles
+listenarr.api/CONFIG.md                     @listenarrs/maintainers
+listenarr.api/Properties/launchSettings.json @listenarrs/maintainers
 
 # Dependency manifests — watch for supply-chain changes
 package.json                                        @listenarrs/maintainers
