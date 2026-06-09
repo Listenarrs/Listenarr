@@ -3481,16 +3481,17 @@ namespace Listenarr.Api.Controllers
                 directoryPattern = Regex.Replace(directoryPattern, @"[\\/]\s*$", "");
 
                 // If the pattern is now empty, use a fallback; deliberately flat (slash-less)
-                // patterns are applied exactly as configured
+                // patterns are applied exactly as configured. Matches the orchestrator's legacy default
+                // (FileNamingService.BuildPath/BuildDirectory); empty {Series} is collapsed away.
                 if (string.IsNullOrWhiteSpace(directoryPattern))
                 {
-                    directoryPattern = "{Author}/{Title}";
+                    directoryPattern = "{Author}/{Series}/{Title}";
                 }
             }
             else
             {
-                // Fallback to default directory pattern
-                directoryPattern = "{Author}/{Title}";
+                // Fallback to default directory pattern (aligned with the orchestrator's legacy default).
+                directoryPattern = "{Author}/{Series}/{Title}";
             }
 
             // An empty {Series} (no series metadata) is handled by ApplyNamingPattern below, which
