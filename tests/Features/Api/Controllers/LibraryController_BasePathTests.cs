@@ -151,6 +151,32 @@ namespace Listenarr.Tests.Features.Api.Controllers
             Assert.DoesNotContain("Stephen Graham Jones", result);
         }
 
+        [Theory]
+        [InlineData(null)]
+        [InlineData("")]
+        [InlineData("   ")]
+        [Trait("Method", "ComputeAudiobookBaseDirectoryFromPattern")]
+        [Trait("Scenario", "NoPatternConfigured_FallsBackToAuthorSeriesTitle")]
+        public void ComputeAudiobookBaseDirectoryFromPattern_NoPatternConfigured_FallsBackToAuthorSeriesTitle(string? pattern)
+        {
+            // Given a series book and no configured pattern at all
+            var audiobook = new AudiobookBuilder()
+                .WithTitle("The Gunslinger")
+                .WithAuthor("Stephen King")
+                .WithSeries("The Dark Tower")
+                .WithSeriesNumber("1")
+                .Build();
+
+            var controller = _provider.GetRequiredService<LibraryController>();
+
+            // When
+            var result = (string)ComputeBaseDirectoryMethod.Invoke(controller, new object?[] { audiobook, RootPath, pattern })!;
+
+            // Then the legacy default {Author}/{Series}/{Title} applies — aligned with the
+            // orchestrator's no-pattern fallback (FileNamingService.BuildPath/BuildDirectory)
+            Assert.Equal(Path.Join(RootPath, "Stephen King", "The Dark Tower", "The Gunslinger"), result);
+        }
+
         [Fact]
         [Trait("Method", "ComputeAudiobookBaseDirectoryFromPattern")]
         [Trait("Scenario", "NonSeriesBook_KeepsSeriesNumberToken")]

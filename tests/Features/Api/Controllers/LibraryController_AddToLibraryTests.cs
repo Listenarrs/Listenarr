@@ -202,6 +202,39 @@ namespace Listenarr.Tests.Features.Api.Controllers
         }
 
         [Fact]
+        public async Task AddToLibrary_EmptyFolderPattern_DerivesBasePathFromFileNamingPattern()
+        {
+            // Given no folder pattern: the file naming pattern acts as the full relative path
+            // (legacy rule), so the BasePath is its directory portion — BuildDirectory's fallback.
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
+                .WithFolderNamingPattern("")
+                .WithFileNamingPattern("{Author}/{Series}/{Title}")
+                .Build());
+
+            var controller = _provider.GetRequiredService<LibraryController>();
+
+            var request = new LibraryController.AddToLibraryRequest
+            {
+                Metadata = new AudibleBookMetadata
+                {
+                    Title = "The Gunslinger",
+                    Authors = new List<string> { "Stephen King" },
+                    Series = "The Dark Tower"
+                },
+                Monitored = true
+            };
+
+            // Act
+            var actionResult = await controller.AddToLibrary(request);
+
+            // Assert
+            Assert.IsType<OkObjectResult>(actionResult);
+
+            var stored = (await _audiobookRepository.GetAllAsync()).First();
+            Assert.Equal(Path.Join(tempRoot, "Stephen King", "The Dark Tower"), stored.BasePath);
+        }
+
+        [Fact]
         public async Task AddToLibrary_WithCustomPath_StoresCustomPathAsBasePath()
         {
             var controller = _provider.GetRequiredService<LibraryController>();
