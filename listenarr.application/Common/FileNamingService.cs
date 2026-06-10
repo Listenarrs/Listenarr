@@ -435,13 +435,29 @@ namespace Listenarr.Application.Common
             if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
                 return fullPath;
 
+            return EnforceWindowsPathLimits(fullPath);
+        }
+
+        /// <summary>
+        /// Windows MAX_PATH enforcement, implemented with explicit Windows path semantics
+        /// (separators, drive and UNC roots) rather than the platform-dependent System.IO.Path
+        /// root helpers, so the behavior is identical — and testable — on any OS.
+        /// </summary>
+        internal string EnforceWindowsPathLimits(string fullPath)
+        {
+            if (string.IsNullOrWhiteSpace(fullPath))
+                return fullPath;
+
             var originalPath = fullPath;
 
-            // Split into root (e.g. "D:\") and component parts
-            var root = Path.GetPathRoot(fullPath) ?? string.Empty;
+            // Split into root (e.g. "D:\" or "\\server\share\") and component parts.
+            // The root — including a UNC server/share — is never truncated.
+            var root = GetWindowsPathRoot(fullPath);
             var withoutRoot = fullPath.Substring(root.Length);
-            var parts = withoutRoot.Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries)
+            var parts = withoutRoot.Split(WindowsSeparators, StringSplitOptions.RemoveEmptyEntries)
                 .ToList();
+
+            string Rebuild() => root + string.Join('\\', parts);
 
             if (parts.Count == 0)
                 return fullPath;
@@ -466,7 +482,7 @@ namespace Listenarr.Application.Common
             const int maxIterations = 50; // safety valve
             for (int iter = 0; iter < maxIterations; iter++)
             {
-                var currentPath = root + string.Join(Path.DirectorySeparatorChar.ToString(), parts);
+                var currentPath = Rebuild();
                 if (currentPath.Length <= WindowsMaxPath)
                     break;
 
@@ -506,7 +522,7 @@ namespace Listenarr.Application.Common
                     : nameWithoutExt.Substring(0, newLen).TrimEnd();
             }
 
-            var result = root + string.Join(Path.DirectorySeparatorChar.ToString(), parts);
+            var result = Rebuild();
 
             if (result != originalPath)
             {
@@ -515,6 +531,48 @@ namespace Listenarr.Application.Common
             }
 
             return result;
+        }
+
+        private static readonly char[] WindowsSeparators = { '\\', '/' };
+
+        /// <summary>
+        /// Windows-semantics equivalent of <see cref="Path.GetPathRoot(string)"/> for the path shapes
+        /// this service produces: drive paths ("C:\", drive-relative "C:"), UNC shares
+        /// ("\\server\share\"), and rooted paths ("\" or "/"). Unlike Path.GetPathRoot on Windows,
+        /// a UNC root includes the separator after the share, so root + components rebuilds a valid
+        /// path. (\\?\ device syntax is not produced by this code base and gets no special handling.)
+        /// </summary>
+        internal static string GetWindowsPathRoot(string path)
+        {
+            static bool IsSep(char c) => c == '\\' || c == '/';
+
+            if (string.IsNullOrEmpty(path))
+                return string.Empty;
+
+            if (path.Length >= 2 && IsSep(path[0]) && IsSep(path[1]))
+            {
+                // UNC: \\server\share[\...] — the root runs through the share name and the
+                // separator that follows it.
+                var separatorsSeen = 0;
+                for (var i = 2; i < path.Length; i++)
+                {
+                    if (!IsSep(path[i]))
+                        continue;
+                    separatorsSeen++;
+                    if (separatorsSeen == 2)
+                        return path.Substring(0, i + 1);
+                }
+                // "\\server" or "\\server\share" with nothing after it — the whole path is root.
+                return path;
+            }
+
+            if (path.Length >= 2 && char.IsAsciiLetter(path[0]) && path[1] == ':')
+            {
+                // Drive path "C:\..." (or drive-relative "C:foo", whose root is just "C:").
+                return path.Length >= 3 && IsSep(path[2]) ? path.Substring(0, 3) : path.Substring(0, 2);
+            }
+
+            return IsSep(path[0]) ? path.Substring(0, 1) : string.Empty;
         }
 
         private static string CombineWithOptionalBase(string? basePath, string candidatePath)
