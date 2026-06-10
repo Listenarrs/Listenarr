@@ -532,8 +532,38 @@
           <div v-if="audiobooks.length > 0" class="list-header">
             <div class="col-select"></div>
             <div class="col-cover">Cover</div>
-            <div class="col-title">Title / Author</div>
-            <div class="col-status">Status</div>
+            <div
+              class="col-title col-sortable"
+              role="button"
+              tabindex="0"
+              aria-label="Sort by title"
+              :aria-sort="
+                sortKey === 'title' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'
+              "
+              @click="sortKeyProxy = 'title'"
+              @keydown.enter.prevent="sortKeyProxy = 'title'"
+              @keydown.space.prevent="sortKeyProxy = 'title'"
+            >
+              Title / Author
+              <PhArrowUp v-if="sortKey === 'title' && sortOrder === 'asc'" class="sort-icon" />
+              <PhArrowDown v-if="sortKey === 'title' && sortOrder === 'desc'" class="sort-icon" />
+            </div>
+            <div
+              class="col-status col-sortable"
+              role="button"
+              tabindex="0"
+              aria-label="Sort by status"
+              :aria-sort="
+                sortKey === 'status' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'
+              "
+              @click="sortKeyProxy = 'status'"
+              @keydown.enter.prevent="sortKeyProxy = 'status'"
+              @keydown.space.prevent="sortKeyProxy = 'status'"
+            >
+              Status
+              <PhArrowUp v-if="sortKey === 'status' && sortOrder === 'asc'" class="sort-icon" />
+              <PhArrowDown v-if="sortKey === 'status' && sortOrder === 'desc'" class="sort-icon" />
+            </div>
             <div class="col-actions">Actions</div>
           </div>
           <div
@@ -809,6 +839,8 @@ import {
   PhUser,
   PhBooks,
   PhFolderOpen,
+  PhArrowUp,
+  PhArrowDown,
 } from '@phosphor-icons/vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useLibraryStore } from '@/stores/library'
@@ -3880,6 +3912,27 @@ defineExpose({
 }
 .list-header .col-actions {
   text-align: right;
+}
+.list-header .col-sortable {
+  cursor: pointer;
+  user-select: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.list-header .col-sortable:hover {
+  color: #fff;
+  opacity: 1;
+}
+.list-header .col-sortable:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+.sort-icon {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
 }
 
 /* Position badges between details and actions */

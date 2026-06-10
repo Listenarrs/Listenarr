@@ -796,3 +796,94 @@ describe('AudiobooksView Grouping', () => {
     expect(wrapper.find('.series-bottom-placard').exists()).toBe(true)
   })
 })
+
+describe('AudiobooksView list header sorting', () => {
+  beforeEach(() => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+  })
+
+  it('sorts on column header click, toggles direction, and exposes ARIA sort state', async () => {
+    if (
+      typeof (globalThis as unknown as { ResizeObserver?: unknown }).ResizeObserver === 'undefined'
+    ) {
+      ;(globalThis as unknown as Record<string, unknown>).ResizeObserver = class {
+        observe() {}
+        disconnect() {}
+      }
+    }
+    if (typeof (globalThis as unknown as { WebSocket?: unknown }).WebSocket === 'undefined') {
+      ;(globalThis as unknown as Record<string, unknown>).WebSocket = function () {
+        /* noop */
+      }
+    }
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', name: 'home', component: { template: '<div />' } },
+        { path: '/audiobooks', name: 'audiobooks', component: AudiobooksView },
+      ],
+    })
+    await router.push('/audiobooks')
+    await router.isReady().catch(() => {})
+
+    const store = useLibraryStore()
+    store.audiobooks = [
+      { id: 1, title: 'Book 1', authors: ['Author A'], imageUrl: 'cover1.jpg', files: [] },
+      { id: 2, title: 'Book 2', authors: ['Author B'], imageUrl: 'cover2.jpg', files: [] },
+    ] as unknown as import('@/types').Audiobook[]
+
+    store.fetchLibrary = vi.fn(async () => undefined)
+    // List view, books grouping so the sortable list header renders
+    localStorage.setItem('listenarr.groupBy', 'books')
+    localStorage.setItem('listenarr.viewMode', 'list')
+    const wrapper = mount(AudiobooksView, {
+      global: {
+        plugins: [pinia, router],
+        stubs: [
+          'BulkEditModal',
+          'EditAudiobookModal',
+          'CustomFilterModal',
+          'FiltersDropdown',
+          'CustomSelect',
+        ],
+      },
+    })
+    await new Promise((r) => setTimeout(r, 0))
+
+    const vm = wrapper.vm as unknown
+    vm.viewMode = 'list'
+    await wrapper.vm.$nextTick()
+
+    const titleHeader = wrapper.find('.col-title.col-sortable')
+    const statusHeader = wrapper.find('.col-status.col-sortable')
+    expect(titleHeader.exists()).toBe(true)
+    expect(statusHeader.exists()).toBe(true)
+    // Keyboard accessibility attributes are present
+    expect(statusHeader.attributes('role')).toBe('button')
+    expect(statusHeader.attributes('tabindex')).toBe('0')
+    // Books default sort is title/asc, so the title header starts active and status is inactive
+    expect(titleHeader.attributes('aria-sort')).toBe('ascending')
+    expect(statusHeader.attributes('aria-sort')).toBe('none')
+
+    // Click a new (inactive) header → sorts by it, ascending, with a direction icon
+    await statusHeader.trigger('click')
+    expect(vm.sortKey).toBe('status')
+    expect(vm.sortOrder).toBe('asc')
+    expect(wrapper.find('.col-status.col-sortable').attributes('aria-sort')).toBe('ascending')
+    expect(wrapper.find('.col-status.col-sortable .sort-icon').exists()).toBe(true)
+
+    // Click the same header again → reverses direction
+    await wrapper.find('.col-status.col-sortable').trigger('click')
+    expect(vm.sortOrder).toBe('desc')
+    expect(wrapper.find('.col-status.col-sortable').attributes('aria-sort')).toBe('descending')
+
+    // Keyboard activation (Enter) on a different header sorts by it, resetting to ascending
+    await wrapper.find('.col-title.col-sortable').trigger('keydown.enter')
+    expect(vm.sortKey).toBe('title')
+    expect(vm.sortOrder).toBe('asc')
+  })
+})
