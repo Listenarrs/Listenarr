@@ -25,7 +25,10 @@ using Listenarr.Application.Common;
 namespace Listenarr.Tests.Features.Api.Services
 {
     /// <summary>
-    /// Tests for FileNamingService Windows path length enforcement (MAX_PATH / per-component limits)
+    /// Tests for FileNamingService Windows path length enforcement (MAX_PATH / per-component limits).
+    /// The limit logic lives behind a testable seam (<c>EnforceWindowsPathLimits</c>) that uses explicit
+    /// Windows path semantics, so these tests exercise the real Windows behavior on any OS — including
+    /// the Linux CI runners. Only the public wrapper's platform gate is OS-dependent.
     /// </summary>
     [Trait("Category", "FileNamingService")]
     public class FileNamingService_PathLengthTests
@@ -39,93 +42,24 @@ namespace Listenarr.Tests.Features.Api.Services
             _service = new FileNamingService(mockConfig.Object, mockLogger.Object);
         }
 
+        // ---------- Public wrapper: platform gate ----------
+
         [Fact]
         public void EnsurePathWithinLimits_ShortPath_ReturnsUnchanged()
         {
+            // Under the limit on Windows; not enforced at all elsewhere — unchanged either way.
             var path = @"D:\Audiobooks\Author\Title\Book.m4b";
-            var result = _service.EnsurePathWithinLimits(path);
+            Assert.Equal(path, _service.EnsurePathWithinLimits(path));
+        }
 
+        [Fact]
+        public void EnsurePathWithinLimits_NonWindows_DoesNotTruncate()
+        {
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            {
-                Assert.Equal(path, result);
-            }
-        }
+                return; // The gate itself is what's under test here
 
-        [Fact]
-        public void EnsurePathWithinLimits_PathExceeding260Chars_IsTruncated()
-        {
-            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-                return; // Limit only enforced on Windows
-
-            // Build a path well over 260 characters
-            var longAuthor = new string('A', 100);
-            var longTitle = new string('T', 200);
-            var path = $@"D:\Audiobooks\{longAuthor}\{longTitle}\{longTitle}.m4b";
-
-            Assert.True(path.Length > 259, $"Test path should exceed 259 chars, was {path.Length}");
-
-            var result = _service.EnsurePathWithinLimits(path);
-
-            Assert.True(result.Length <= 259, $"Result path should be ≤ 259 chars, was {result.Length}");
-            Assert.EndsWith(".m4b", result);
-        }
-
-        [Fact]
-        public void EnsurePathWithinLimits_PreservesExtension()
-        {
-            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-                return;
-
-            var longTitle = new string('T', 300);
-            var path = $@"D:\Audiobooks\Author\{longTitle}.mp3";
-
-            var result = _service.EnsurePathWithinLimits(path);
-
-            Assert.True(result.Length <= 259);
-            Assert.EndsWith(".mp3", result);
-        }
-
-        [Fact]
-        public void EnsurePathWithinLimits_ComponentExceeding255Chars_IsTruncated()
-        {
-            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-                return;
-
-            // Single component over 255 chars but total path under 260
-            // Not realistic on Windows (260 total means components can't be that long with a root)
-            // but test the per-component logic directly
-            var longFolder = new string('F', 256);
-            var path = $@"D:\{longFolder}\Book.m4b";
-
-            var result = _service.EnsurePathWithinLimits(path);
-
-            // Each component should be ≤ 255
-            var parts = result.Substring(Path.GetPathRoot(result)!.Length)
-                .Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
-            foreach (var part in parts)
-            {
-                Assert.True(part.Length <= 255, $"Component '{part.Substring(0, Math.Min(30, part.Length))}...' is {part.Length} chars, exceeds 255");
-            }
-        }
-
-        [Fact]
-        public void EnsurePathWithinLimits_TruncatesLongestComponentFirst()
-        {
-            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-                return;
-
-            // Create a path where the title folder is much longer than the author
-            var shortAuthor = "Author";
-            var longTitle = new string('T', 200);
-            var filename = "Book.m4b";
-            var path = $@"D:\Audiobooks\{shortAuthor}\{longTitle}\{filename}";
-
-            var result = _service.EnsurePathWithinLimits(path);
-
-            Assert.True(result.Length <= 259);
-            // Author should be preserved since it's short; the long title should be truncated
-            Assert.Contains(shortAuthor, result);
-            Assert.EndsWith(".m4b", result);
+            var path = $"/audiobooks/{new string('A', 300)}/{new string('T', 300)}.m4b";
+            Assert.Equal(path, _service.EnsurePathWithinLimits(path));
         }
 
         [Fact]
@@ -135,12 +69,73 @@ namespace Listenarr.Tests.Features.Api.Services
             Assert.Null(_service.EnsurePathWithinLimits(null!));
         }
 
-        [Fact]
-        public void EnsurePathWithinLimits_ExactlyAtLimit_ReturnsUnchanged()
-        {
-            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-                return;
+        // ---------- Seam: Windows limit semantics, runnable on any OS ----------
 
+        [Fact]
+        public void EnforceWindowsPathLimits_PathExceeding260Chars_IsTruncated()
+        {
+            // Build a path well over 260 characters
+            var longAuthor = new string('A', 100);
+            var longTitle = new string('T', 200);
+            var path = $@"D:\Audiobooks\{longAuthor}\{longTitle}\{longTitle}.m4b";
+
+            Assert.True(path.Length > 259, $"Test path should exceed 259 chars, was {path.Length}");
+
+            var result = _service.EnforceWindowsPathLimits(path);
+
+            Assert.True(result.Length <= 259, $"Result path should be ≤ 259 chars, was {result.Length}");
+            Assert.EndsWith(".m4b", result);
+        }
+
+        [Fact]
+        public void EnforceWindowsPathLimits_PreservesExtension()
+        {
+            var longTitle = new string('T', 300);
+            var path = $@"D:\Audiobooks\Author\{longTitle}.mp3";
+
+            var result = _service.EnforceWindowsPathLimits(path);
+
+            Assert.True(result.Length <= 259);
+            Assert.EndsWith(".mp3", result);
+        }
+
+        [Fact]
+        public void EnforceWindowsPathLimits_ComponentExceeding255Chars_IsTruncated()
+        {
+            // Single component over 255 chars; the per-component limit applies independently
+            var longFolder = new string('F', 256);
+            var path = $@"D:\{longFolder}\Book.m4b";
+
+            var result = _service.EnforceWindowsPathLimits(path);
+
+            var parts = result.Substring(FileNamingService.GetWindowsPathRoot(result).Length)
+                .Split(new[] { '\\', '/' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (var part in parts)
+            {
+                Assert.True(part.Length <= 255, $"Component '{part.Substring(0, Math.Min(30, part.Length))}...' is {part.Length} chars, exceeds 255");
+            }
+        }
+
+        [Fact]
+        public void EnforceWindowsPathLimits_TruncatesLongestComponentFirst()
+        {
+            // Create a path where the title folder is much longer than the author
+            var shortAuthor = "Author";
+            var longTitle = new string('T', 200);
+            var filename = "Book.m4b";
+            var path = $@"D:\Audiobooks\{shortAuthor}\{longTitle}\{filename}";
+
+            var result = _service.EnforceWindowsPathLimits(path);
+
+            Assert.True(result.Length <= 259);
+            // Author should be preserved since it's short; the long title should be truncated
+            Assert.Contains(shortAuthor, result);
+            Assert.EndsWith(".m4b", result);
+        }
+
+        [Fact]
+        public void EnforceWindowsPathLimits_ExactlyAtLimit_ReturnsUnchanged()
+        {
             // Build a path that's exactly 259 chars
             var root = @"D:\";
             var remaining = 259 - root.Length - ".m4b".Length - 1; // -1 for separator before filename
@@ -151,8 +146,50 @@ namespace Listenarr.Tests.Features.Api.Services
             // Verify our test setup
             Assert.Equal(259, path.Length);
 
-            var result = _service.EnsurePathWithinLimits(path);
+            var result = _service.EnforceWindowsPathLimits(path);
             Assert.Equal(path, result);
+        }
+
+        // ---------- UNC (NAS shares) ----------
+
+        [Fact]
+        public void EnforceWindowsPathLimits_UncPathUnderLimit_ReturnsUnchanged()
+        {
+            // Regression: the rebuild used Path.GetPathRoot, whose UNC root has no trailing
+            // separator, producing "\\nas\audiobooksAuthor\..." even for in-limit paths.
+            var path = @"\\nas\audiobooks\Author\Series\Title\Book.m4b";
+            Assert.Equal(path, _service.EnforceWindowsPathLimits(path));
+        }
+
+        [Fact]
+        public void EnforceWindowsPathLimits_UncPathOverLimit_PreservesShareRootAndExtension()
+        {
+            var longTitle = new string('T', 300);
+            var path = $@"\\nas\audiobooks\Author\{longTitle}\Book.m4b";
+
+            var result = _service.EnforceWindowsPathLimits(path);
+
+            // The server/share root is never truncated; only components after it are.
+            Assert.StartsWith(@"\\nas\audiobooks\Author\", result);
+            Assert.True(result.Length <= 259, $"Result path should be ≤ 259 chars, was {result.Length}");
+            Assert.EndsWith(".m4b", result);
+        }
+
+        // ---------- Root parsing ----------
+
+        [Theory]
+        [InlineData(@"C:\Books\file.m4b", @"C:\")]
+        [InlineData("C:/Books/file.m4b", "C:/")]
+        [InlineData("C:relative", "C:")]
+        [InlineData(@"\\server\share\dir\file.m4b", @"\\server\share\")]
+        [InlineData(@"\\server\share", @"\\server\share")]
+        [InlineData(@"\dir\file.m4b", @"\")]
+        [InlineData("/dir/file.m4b", "/")]
+        [InlineData(@"relative\dir\file.m4b", "")]
+        [InlineData("", "")]
+        public void GetWindowsPathRoot_ParsesWindowsRootShapes(string path, string expectedRoot)
+        {
+            Assert.Equal(expectedRoot, FileNamingService.GetWindowsPathRoot(path));
         }
     }
 }

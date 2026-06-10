@@ -20,6 +20,7 @@ using Listenarr.Application.Interfaces;
 using Listenarr.Domain.Common;
 using Listenarr.Domain.Models;
 using Listenarr.Domain.Models.Enumerations;
+using Listenarr.Domain.Models.Naming;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Downloads
@@ -70,7 +71,6 @@ namespace Listenarr.Application.Downloads
                 }
 
                 var results = new List<ImportResult>();
-                var folderPattern = settings.FolderNamingPattern;
                 var sourceFiles = files
                     .Where(file => !FileUtils.IsBlacklistedFile(file, settings.ImportBlacklistExtensions))
                     .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -195,9 +195,6 @@ namespace Listenarr.Application.Downloads
                                 logger.LogDebug(exception, $"ImportFilesFromDirectory: Failed to evaluate quality for multi-file import {file}");
                             }
 
-                            // Determine destination directory (prefer audiobook basepath)
-                            string destDirForFile = audiobook.BasePath;
-
                             // Build naming metadata: prefer audiobook metadata when available, otherwise use extracted candidate metadata
                             var namingMetadata = BuildNamingMetadata(audiobook, candidateMetadata, Path.GetFileNameWithoutExtension(file));
                             var effectiveDiskNumber = namingDiskNumber > 0 ? namingDiskNumber : (namingMetadata.DiscNumber ?? plan?.DiskNumberHint);
@@ -209,67 +206,30 @@ namespace Listenarr.Application.Downloads
                             }
                             var stableSuffixNumber = effectiveChapterNumber ?? effectiveDiskNumber ?? plan?.SequenceNumber;
 
-                            // Build variables for naming patterns (used for both folder and file patterns)
-                            var variablesForFile = new Dictionary<string, object>
+                            // Map the file's naming metadata into the unified NamingContext. The Title
+                            // falls back to the source filename, and disk/chapter use the effective values
+                            // derived from hints above.
+                            var context = NamingContext.From(namingMetadata) with
                             {
-                                { "Author", namingMetadata.Artist ?? "Unknown Author" },
-                                { "Series", string.IsNullOrWhiteSpace(namingMetadata.Series) ? string.Empty : namingMetadata.Series },
-                                { "Title", namingMetadata.Title ?? Path.GetFileNameWithoutExtension(file) },
-                                { "Subtitle", string.IsNullOrWhiteSpace(namingMetadata.Subtitle) ? string.Empty : namingMetadata.Subtitle },
-                                { "Edition", string.IsNullOrWhiteSpace(namingMetadata.Edition) ? string.Empty : namingMetadata.Edition },
-                                { "Narrator", string.IsNullOrWhiteSpace(namingMetadata.Narrator) ? string.Empty : namingMetadata.Narrator },
-                                { "Publisher", string.IsNullOrWhiteSpace(namingMetadata.Publisher) ? string.Empty : namingMetadata.Publisher },
-                                { "Language", string.IsNullOrWhiteSpace(namingMetadata.Language) ? string.Empty : namingMetadata.Language },
-                                { "Asin", string.IsNullOrWhiteSpace(namingMetadata.Asin) ? string.Empty : namingMetadata.Asin },
-                                { "SeriesNumber", namingMetadata.SeriesPosition?.ToString() ?? effectiveChapterNumber?.ToString() ?? string.Empty },
-                                { "Year", namingMetadata.Year?.ToString() ?? string.Empty },
-                                { "Quality", (namingMetadata.BitRate.HasValue ? $"{namingMetadata.BitRate}kbps" : null) ?? namingMetadata.Format ?? string.Empty },
-                                { "DiskNumber", effectiveDiskNumber?.ToString() ?? string.Empty },
-                                { "ChapterNumber", effectiveChapterNumber?.ToString() ?? string.Empty }
+                                Title = !string.IsNullOrWhiteSpace(namingMetadata.Title) ? namingMetadata.Title : Path.GetFileNameWithoutExtension(file),
+                                SeriesNumber = namingMetadata.SeriesPosition?.ToString() ?? effectiveChapterNumber?.ToString(),
+                                DiskNumber = effectiveDiskNumber,
+                                ChapterNumber = effectiveChapterNumber,
                             };
 
-                            var folderRelative = fileNamingService.ApplyNamingPattern(folderPattern, variablesForFile, treatAsFilename: false);
-                            if (string.IsNullOrEmpty(audiobook.BasePath) && !string.IsNullOrWhiteSpace(folderRelative))
+                            // Route through the shared orchestrator. A set BasePath means the destination
+                            // folder is already chosen (file-only naming); an empty BasePath applies the
+                            // folder pattern. BuildPath also enforces path-length limits and appends the
+                            // multi-file sequence suffix when the pattern has no Disk/Chapter token.
+                            var result = fileNamingService.BuildPath(context, settings, new NamingOptions
                             {
-                                destDirForFile = CombineWithOptionalBase(destDirForFile, folderRelative);
-                            }
-
-                            var baseFilePattern = isMultiFileBatch ? settings.MultiFileNamingPattern : settings.FileNamingPattern;
-
-                            var ext = Path.GetExtension(file);
-                            var patternHasNumberTokens = !string.IsNullOrWhiteSpace(baseFilePattern)
-                                && (baseFilePattern.IndexOf("DiskNumber", StringComparison.OrdinalIgnoreCase) >= 0
-                                    || baseFilePattern.IndexOf("ChapterNumber", StringComparison.OrdinalIgnoreCase) >= 0);
-
-                            var patternAllowsSubfolders = baseFilePattern.IndexOf("DiskNumber", StringComparison.OrdinalIgnoreCase) >= 0
-                                || baseFilePattern.Contains("ChapterNumber", StringComparison.OrdinalIgnoreCase)
-                                || baseFilePattern.Contains('/')
-                                || baseFilePattern.Contains('\\');
-                            var treatAsFilename = !patternAllowsSubfolders;
-
-                            var filename = fileNamingService.ApplyNamingPattern(baseFilePattern, variablesForFile, treatAsFilename);
-                            if (!filename.EndsWith(ext, StringComparison.OrdinalIgnoreCase)) filename += ext; // FIXME: Should be in ApplyNamingPattern
-
-                            if (!patternAllowsSubfolders)
-                            {
-                                try
-                                {
-                                    var forced = Path.GetFileName(filename);
-                                    var invalid = Path.GetInvalidFileNameChars();
-                                    var sb = new System.Text.StringBuilder();
-                                    foreach (var c in forced)
-                                    {
-                                        sb.Append(invalid.Contains(c) ? '_' : c);
-                                    }
-                                    filename = sb.ToString();
-                                }
-                                catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
-                                {
-                                    filename = Path.GetFileName(filename);
-                                }
-                            }
-
-                            var destination = CombineWithOptionalBase(destDirForFile, filename);
+                                OutputRoot = audiobook.BasePath ?? string.Empty,
+                                IsCustomBasePath = !string.IsNullOrEmpty(audiobook.BasePath),
+                                IsMultiFile = isMultiFileBatch,
+                                SequenceNumber = stableSuffixNumber,
+                                Extension = Path.GetExtension(file),
+                            });
+                            var destination = result.FullPath;
 
                             if (!await fileMover.PerformActionOn(completedFileAction, file, destination))
                             {

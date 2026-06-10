@@ -119,6 +119,12 @@ namespace Listenarr.Tests.Builders
             return this;
         }
 
+        public AudiobookBuilder WithAsin(string value)
+        {
+            _audiobook.Asin = value;
+            return this;
+        }
+
         public AudiobookBuilder WithQualityProfile(QualityProfile value)
         {
             _audiobook.QualityProfile = value;

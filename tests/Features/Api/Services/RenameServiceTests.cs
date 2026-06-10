@@ -101,6 +101,76 @@ namespace Listenarr.Tests.Features.Api.Services
         }
 
         [Fact]
+        public async Task PreviewRename_PatternWithoutSubtitle_DoesNotCombineSubtitleIntoTitle()
+        {
+            // Given a book with a subtitle and patterns that deliberately omit {Subtitle}
+            var settings = new ApplicationSettings
+            {
+                OutputPath = _tempRoot,
+                FolderNamingPattern = "{Author}/{Title}",
+                FileNamingPattern = "{Title}"
+            };
+
+            var (service, db, _) = BuildService(settings);
+            db.Audiobooks.Add(new Audiobook
+            {
+                Id = 7,
+                Title = "The Land",
+                Subtitle = "Founding",
+                Authors = new List<string> { "Aleron Kong" },
+                BasePath = Path.Join(_tempRoot, "Wrong", "Folder"),
+                Files = new List<AudiobookFile>
+                {
+                    new() { Id = 71, AudiobookId = 7, Path = Path.Join(_tempRoot, "Wrong", "Folder", "old-name.m4b"), Format = "m4b" }
+                }
+            });
+            await db.SaveChangesAsync();
+
+            // When
+            var previews = await service.PreviewRenameAsync(new[] { 7 });
+
+            // Then the configured patterns are applied exactly — the subtitle is not folded into the title
+            var preview = Assert.Single(previews);
+            Assert.Contains("The Land", preview.NewFolderPath);
+            Assert.DoesNotContain("Founding", preview.NewFolderPath);
+            Assert.All(preview.FileRenames, file => Assert.DoesNotContain("Founding", file.NewPath));
+        }
+
+        [Fact]
+        public async Task PreviewRename_ExplicitSubtitleToken_IncludesSubtitle()
+        {
+            // Given a book with a subtitle and a file pattern that explicitly uses {Subtitle}
+            var settings = new ApplicationSettings
+            {
+                OutputPath = _tempRoot,
+                FolderNamingPattern = "{Author}/{Title}",
+                FileNamingPattern = "{Title} - {Subtitle}"
+            };
+
+            var (service, db, _) = BuildService(settings);
+            db.Audiobooks.Add(new Audiobook
+            {
+                Id = 8,
+                Title = "The Land",
+                Subtitle = "Founding",
+                Authors = new List<string> { "Aleron Kong" },
+                BasePath = Path.Join(_tempRoot, "Wrong", "Folder"),
+                Files = new List<AudiobookFile>
+                {
+                    new() { Id = 81, AudiobookId = 8, Path = Path.Join(_tempRoot, "Wrong", "Folder", "old-name.m4b"), Format = "m4b" }
+                }
+            });
+            await db.SaveChangesAsync();
+
+            // When
+            var previews = await service.PreviewRenameAsync(new[] { 8 });
+
+            // Then the explicit token still renders the subtitle
+            var preview = Assert.Single(previews);
+            Assert.Contains(preview.FileRenames, file => file.NewPath!.Contains("The Land - Founding"));
+        }
+
+        [Fact]
         public async Task PreviewRename_PreservesCustomBasePath()
         {
             var outputPath = Path.Join(_tempRoot, "library");

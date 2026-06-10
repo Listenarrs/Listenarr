@@ -27,6 +27,7 @@ using System.Text;
 using Listenarr.Domain.Common;
 using Listenarr.Application.Interfaces;
 using Listenarr.Domain.Models.Configurations;
+using Listenarr.Domain.Models.Naming;
 using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Application.Notification;
 using Listenarr.Application.Security;
@@ -3479,64 +3480,29 @@ namespace Listenarr.Api.Controllers
                 directoryPattern = Regex.Replace(directoryPattern, @"^\s*[\\/]", "");
                 directoryPattern = Regex.Replace(directoryPattern, @"[\\/]\s*$", "");
 
-                // If the pattern is now empty or doesn't contain directory separators, use a fallback
-                if (string.IsNullOrWhiteSpace(directoryPattern) || !directoryPattern.Contains("/"))
+                // If the pattern is now empty, use a fallback; deliberately flat (slash-less)
+                // patterns are applied exactly as configured. Matches the orchestrator's legacy default
+                // (FileNamingService.BuildPath/BuildDirectory); empty {Series} is collapsed away.
+                if (string.IsNullOrWhiteSpace(directoryPattern))
                 {
-                    directoryPattern = "{Author}/{Title}";
+                    directoryPattern = "{Author}/{Series}/{Title}";
                 }
             }
             else
             {
-                // Fallback to default directory pattern
-                directoryPattern = "{Author}/{Title}";
+                // Fallback to default directory pattern (aligned with the orchestrator's legacy default).
+                directoryPattern = "{Author}/{Series}/{Title}";
             }
 
-            // For series books, ensure we include the series in the directory structure
-            if (!string.IsNullOrWhiteSpace(audiobook.Series) && !directoryPattern.Contains("{Series}"))
-            {
-                // Insert series between author and title if not already present
-                if (directoryPattern.Contains("{Author}/{Title}"))
-                {
-                    directoryPattern = directoryPattern.Replace("{Author}/{Title}", "{Author}/{Series}/{Title}");
-                }
-                else if (directoryPattern.Contains("{Author}/"))
-                {
-                    directoryPattern = directoryPattern.Replace("{Author}/", "{Author}/{Series}/");
-                }
-            }
+            // An empty {Series} (no series metadata) is handled by ApplyNamingPattern below, which
+            // substitutes empty tokens and collapses the surrounding separators. We deliberately do
+            // not strip {Series} textually here: a regex like \{Series[^}]*\} also matches
+            // {SeriesNumber}/{SeriesNumber:00}, which would drop those tokens from patterns that use
+            // them. Applying the pattern exactly and letting the sentinel cleanup remove empties keeps
+            // {SeriesNumber} intact.
 
-            // If the audiobook has no Series, remove any {Series} tokens from the directory pattern
-            // Tests expect the controller to strip the Series token when series metadata is missing.
-            if (string.IsNullOrWhiteSpace(audiobook.Series))
-            {
-                directoryPattern = Regex.Replace(directoryPattern, @"\{Series[^}]*\}", string.Empty, RegexOptions.IgnoreCase);
-                // Clean up any resulting duplicate separators or empty parts again
-                directoryPattern = Regex.Replace(directoryPattern, @"[\\/]\s*[\\/]", "/");
-                directoryPattern = Regex.Replace(directoryPattern, @"^\s*[\\/]", "");
-                directoryPattern = Regex.Replace(directoryPattern, @"[\\/]\s*$", "");
-            }
-
-            // Build variables for naming pattern using audiobook-level metadata
-            var variables = new Dictionary<string, object>
-            {
-                { "Author", SanitizeDirectoryName(audiobook.Authors?.FirstOrDefault() ?? "Unknown Author") },
-                { "Series", SanitizeDirectoryName(!string.IsNullOrWhiteSpace(audiobook.Series) ? audiobook.Series! : string.Empty) },
-                { "Title", SanitizeDirectoryName(audiobook.Title ?? "Unknown Title") },
-                { "Subtitle", SanitizeDirectoryName(audiobook.Subtitle ?? string.Empty) },
-                { "Edition", SanitizeDirectoryName(audiobook.Edition ?? string.Empty) },
-                { "Narrator", SanitizeDirectoryName((audiobook.Narrators != null && audiobook.Narrators.Any()) ? string.Join(", ", audiobook.Narrators.Where(n => !string.IsNullOrWhiteSpace(n))) : string.Empty) },
-                { "Publisher", SanitizeDirectoryName(audiobook.Publisher ?? string.Empty) },
-                { "Language", SanitizeDirectoryName(audiobook.Language ?? string.Empty) },
-                { "Asin", SanitizeDirectoryName(audiobook.Asin ?? string.Empty) },
-                { "SeriesNumber", audiobook.SeriesNumber ?? string.Empty },
-                { "Year", audiobook.PublishYear ?? string.Empty },
-                { "Quality", string.Empty },
-                { "DiskNumber", string.Empty },
-                { "ChapterNumber", string.Empty }
-            };
-
-            // Apply the directory pattern to get the relative directory path
-            var relative = _fileNamingService.ApplyNamingPattern(directoryPattern, variables, false);
+            // Apply the directory pattern using the unified naming variables (single sanitizer + token engine).
+            var relative = _fileNamingService.ApplyNamingPattern(directoryPattern, NamingContext.From(audiobook), false);
 
             // Combine with root path
             var combined = ResolvePathWithOptionalBase(rootPath, relative);
@@ -3644,22 +3610,6 @@ namespace Listenarr.Api.Controllers
             }
 
             return commonPath;
-        }
-
-        private string SanitizeDirectoryName(string name)
-        {
-            // Remove or replace characters that are invalid in directory names
-            var invalidChars = Path.GetInvalidFileNameChars();
-            foreach (var c in invalidChars)
-            {
-                name = name.Replace(c, '_');
-            }
-
-            // Also replace some additional characters that might cause issues
-            name = name.Replace(":", "_").Replace("*", "_").Replace("?", "_").Replace("\"", "_").Replace("<", "_").Replace(">", "_").Replace("|", "_");
-
-            // Trim whitespace and return
-            return name.Trim();
         }
 
         private static string ComputeShortHash(string? input)

@@ -171,6 +171,48 @@ namespace Listenarr.Tests.Features.Api.Controllers
         }
 
         [Fact]
+        public async Task InteractiveManualImport_PatternWithoutSubtitle_DoesNotCombineSubtitleIntoFilename()
+        {
+            // Given a book with a subtitle and a file pattern that deliberately omits {Subtitle}
+            var basePath = CreateTempDirectory("listenarr-manual-subtitle");
+            var srcDir = CreateTempDirectory("listenarr-manual-subtitle-src");
+
+            var book = new Audiobook { Id = 99, Title = "The Land", Subtitle = "Founding", BasePath = basePath };
+
+            var src = Path.Join(srcDir, "one.mp3");
+            await File.WriteAllTextAsync(src, "one");
+
+            var request = new ManualImportRequestDto
+            {
+                Path = srcDir,
+                Mode = "interactive",
+                Action = FileAction.Copy,
+                Items =
+                [
+                    new ManualImportItemDto { FullPath = src, MatchedAudiobookId = book.Id }
+                ]
+            };
+
+            var controller = GetController(book, new ApplicationSettings
+            {
+                OutputPath = basePath,
+                FolderNamingPattern = "{Author}",
+                FileNamingPattern = "{Title}"
+            });
+
+            // When
+            await controller.Start(request);
+
+            // Then the configured pattern is applied exactly — the subtitle is not folded into the filename
+            var diskFiles = Directory.GetFiles(basePath, "*", SearchOption.AllDirectories)
+                .Select(Path.GetFileName)
+                .ToList();
+
+            Assert.Contains("The Land.mp3", diskFiles);
+            Assert.DoesNotContain(diskFiles, f => f!.Contains("Founding", StringComparison.OrdinalIgnoreCase));
+        }
+
+        [Fact]
         public async Task InteractiveManualImport_MultipartFiles_UsesStableNaturalOrderAndNumbering()
         {
             var basePath = CreateTempDirectory("listenarr-manual-ordered");
@@ -213,12 +255,16 @@ namespace Listenarr.Tests.Features.Api.Controllers
                 .Select(Path.GetFileName)
                 .ToList();
 
+            // The book has no author, so the unified naming applies the "{Author}" folder pattern as
+            // "Unknown Author" (the convention shared by every flow). Manual import previously omitted the
+            // empty author folder; it now matches the other flows.
+            var authorDir = Path.Join(basePath, "Unknown Author");
             Assert.Contains("Ordered Book-01.mp3", diskFiles);
             Assert.Contains("Ordered Book-02.mp3", diskFiles);
             Assert.Contains("Ordered Book-10.mp3", diskFiles);
-            Assert.Equal("one", await File.ReadAllTextAsync(Path.Join(basePath, "Ordered Book-01.mp3")));
-            Assert.Equal("two", await File.ReadAllTextAsync(Path.Join(basePath, "Ordered Book-02.mp3")));
-            Assert.Equal("ten", await File.ReadAllTextAsync(Path.Join(basePath, "Ordered Book-10.mp3")));
+            Assert.Equal("one", await File.ReadAllTextAsync(Path.Join(authorDir, "Ordered Book-01.mp3")));
+            Assert.Equal("two", await File.ReadAllTextAsync(Path.Join(authorDir, "Ordered Book-02.mp3")));
+            Assert.Equal("ten", await File.ReadAllTextAsync(Path.Join(authorDir, "Ordered Book-10.mp3")));
         }
 
         [Fact]
