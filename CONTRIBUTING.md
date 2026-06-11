@@ -400,6 +400,7 @@ If you have any questions about contributing, please:
 ---
 
 ## Layering rules & migration steps (practical)
+- Backend project boundaries are documented in `BACKEND_ARCHITECTURE.md`. Keep infrastructure-shaped dependencies out of `listenarr.application`; add an application-owned port and implement the adapter in infrastructure/API instead.
 - Keep contracts (interfaces, DTOs, domain models) in `listenarr.application` or `listenarr.domain`.
 - Keep framework-dependent implementations (EF Core, HttpClients, filesystem) in `listenarr.infrastructure`.
 - `listenarr.api` should only compose services, host controllers, and register DI; do not add new interfaces that duplicate application/infrastructure contracts.

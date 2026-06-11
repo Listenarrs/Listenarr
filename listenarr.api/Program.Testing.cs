@@ -27,4 +27,3 @@ public partial class Program
         builder.Configuration.AddInMemoryCollection(inMemory);
     }
 }
-

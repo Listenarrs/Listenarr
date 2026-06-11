@@ -55,7 +55,7 @@ namespace Listenarr.Api.Controllers
             try
             {
                 var configs = await _configurationService.GetDownloadClientConfigurationsAsync();
-                var redactSecrets = SecurityRequestUtils.ShouldRedactSecretsForCaller(HttpContext);
+                var redactSecrets = HttpSecurityRequestUtils.ShouldRedactSecretsForCaller(HttpContext);
                 var response = configs
                     .Select(c => redactSecrets ? ApiResponseRedactor.RedactDownloadClientConfiguration(c) : c)
                     .Select(ApiResponseRedactor.ToDownloadClientSummaryResponse)
@@ -88,7 +88,7 @@ namespace Listenarr.Api.Controllers
                     return NotFound();
                 }
 
-                var responseConfig = SecurityRequestUtils.ShouldRedactSecretsForCaller(HttpContext)
+                var responseConfig = HttpSecurityRequestUtils.ShouldRedactSecretsForCaller(HttpContext)
                     ? ApiResponseRedactor.RedactDownloadClientConfiguration(config)
                     : config;
                 var response = ApiResponseRedactor.ToDownloadClientDetailResponse(responseConfig);
@@ -248,7 +248,7 @@ namespace Listenarr.Api.Controllers
 
                 var (success, message) = await _downloadClientGateway.TestConnectionAsync(config);
                 var clientResponse = config;
-                if (SecurityRequestUtils.ShouldRedactSecretsForCaller(HttpContext))
+                if (HttpSecurityRequestUtils.ShouldRedactSecretsForCaller(HttpContext))
                 {
                     clientResponse = ApiResponseRedactor.RedactDownloadClientConfiguration(clientResponse);
                 }

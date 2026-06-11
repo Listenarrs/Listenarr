@@ -20,8 +20,6 @@ using Microsoft.AspNetCore.Authorization;
 using Listenarr.Application.Interfaces;
 using Listenarr.Domain.Models;
 using Listenarr.Application.Interfaces.Repositories;
-using Microsoft.AspNetCore.SignalR;
-using Listenarr.Application.Notification;
 using Listenarr.Application.Security;
 using Listenarr.Api.Attributes;
 
@@ -347,7 +345,7 @@ namespace Listenarr.Api.Controllers
                 .ThenBy(i => i.Name)
                 .ToList();
 
-            if (SecurityRequestUtils.ShouldRedactSecretsForCaller(HttpContext))
+            if (HttpSecurityRequestUtils.ShouldRedactSecretsForCaller(HttpContext))
             {
                 indexers = indexers.Select(ApiResponseRedactor.RedactIndexer).ToList();
             }

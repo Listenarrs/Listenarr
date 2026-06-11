@@ -1,5 +1,9 @@
 # Claude AI Instructions for Listenarr
 
+## Required Repository Context
+
+Before making code, dependency, workflow, or documentation changes, review and follow `CONTRIBUTING.md`, `BACKEND_ARCHITECTURE.md`, `.github/RULES.md`, and the primary AI guidance files. Repository-specific guidance takes precedence over generic provider guidance.
+
 ## Quick Reference
 This file contains Claude-specific guidance for the Listenarr audiobook management system. For comprehensive secure coding practices, see [AGENTS.md](AGENTS.md) and [CLAUDE.md](CLAUDE.md). For complete project details, see [copilot-instructions.md](copilot-instructions.md).
 

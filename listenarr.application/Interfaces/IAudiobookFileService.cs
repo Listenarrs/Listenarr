@@ -8,7 +8,7 @@ namespace Listenarr.Application.Interfaces
     public interface IAudiobookFileService
     {
         /// <summary>
-        /// Ensure an Audiobook file record exists for the given audiobook and file path. Extract metadata (ffprobe/taglib) and persist file-level metadata.
+        /// Ensure an Audiobook file record exists for the given audiobook and file path. Extract metadata and persist file-level metadata.
         /// </summary>
         /// <param name="audiobook">The audiobook</param>
         /// <param name="filePath">Path to the audio file</param>

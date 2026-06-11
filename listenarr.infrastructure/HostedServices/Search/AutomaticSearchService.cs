@@ -18,14 +18,11 @@
 
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Interfaces.Repositories;
-using Listenarr.Application.Notification;
 using Listenarr.Domain.Models;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace Listenarr.Application.Search
+namespace Listenarr.Infrastructure.HostedServices.Search
 {
     public class AutomaticSearchService : BackgroundService
     {
@@ -672,4 +669,3 @@ namespace Listenarr.Application.Search
         }
     }
 }
-

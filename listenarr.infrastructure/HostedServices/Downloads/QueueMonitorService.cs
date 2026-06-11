@@ -17,14 +17,11 @@
  */
 
 using Listenarr.Application.Interfaces;
-using Listenarr.Application.Notification;
 using Listenarr.Domain.Models;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace Listenarr.Application.Downloads
+namespace Listenarr.Infrastructure.HostedServices.Downloads
 {
     /// <summary>
     /// Background service that polls external download client queues and pushes updates via SignalR
@@ -228,5 +225,4 @@ namespace Listenarr.Application.Downloads
         }
     }
 }
-
 

@@ -2,6 +2,10 @@
 
 This file provides guidance to WARP (warp.dev) when working with code in this repository.
 
+## Required Repository Context
+
+Before making code, dependency, workflow, or documentation changes, review and follow `CONTRIBUTING.md`, `BACKEND_ARCHITECTURE.md`, `.github/RULES.md`, and the primary AI guidance files. Repository-specific guidance takes precedence over generic tool guidance.
+
 ## Project Overview
 
 Listenarr is an automated audiobook collection management system built as a full-stack application with a C# .NET 10 backend API and Vue.js 3 frontend. The project follows a monorepo structure with integrated build processes.

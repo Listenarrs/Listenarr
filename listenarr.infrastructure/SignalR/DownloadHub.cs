@@ -18,10 +18,9 @@
 
 using Listenarr.Application.Interfaces;
 using Listenarr.Domain.Models;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
 
-namespace Listenarr.Application.Notification
+namespace Listenarr.Infrastructure.SignalR
 {
     /// <summary>
     /// SignalR hub for real-time download progress updates
@@ -72,5 +71,4 @@ namespace Listenarr.Application.Notification
         }
     }
 }
-
 

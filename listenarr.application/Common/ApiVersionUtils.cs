@@ -17,7 +17,6 @@
  */
 using System.Text.RegularExpressions;
 using Listenarr.Domain.Common;
-using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Common
@@ -31,29 +30,12 @@ namespace Listenarr.Application.Common
         private static readonly Regex ApiVersionFromPathRegex = new(@"^/api/v(?<version>\d+(?:\.\d+)?)(?:/|$)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex LeadingApiPrefixRegex = new(@"^/api(?:/v\d+(?:\.\d+)?)?", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-        public static string ResolveApiVersion(HttpContext? context, string? fallbackVersion = null, ILogger? logger = null)
+        public static string ResolveApiVersion(string? path = null, string? fallbackVersion = null, ILogger? logger = null)
         {
             var fallback = ApiVersionNormalizer.NormalizeOrDefault(fallbackVersion);
 
             try
             {
-                if (context?.Request?.RouteValues?.TryGetValue("version", out var routeVersionObj) is true)
-                {
-                    var routeVersion = routeVersionObj?.ToString();
-                    if (!string.IsNullOrWhiteSpace(routeVersion))
-                    {
-                        return ApiVersionNormalizer.NormalizeOrDefault(routeVersion);
-                    }
-                }
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                logger?.LogWarning(ex, "API version route parse failed.");
-            }
-
-            try
-            {
-                var path = context?.Request?.Path.Value;
                 if (!string.IsNullOrWhiteSpace(path))
                 {
                     var match = ApiVersionFromPathRegex.Match(path);
@@ -75,19 +57,19 @@ namespace Listenarr.Application.Common
             return fallback;
         }
 
-        public static string GetApiVersionSegment(HttpContext? context, string? fallbackVersion = null)
-            => $"v{ResolveApiVersion(context, fallbackVersion)}";
+        public static string GetApiVersionSegment(string? path = null, string? fallbackVersion = null)
+            => $"v{ResolveApiVersion(path, fallbackVersion)}";
 
-        public static string BuildApiPath(string endpoint, HttpContext? context = null, string? fallbackVersion = null)
+        public static string BuildApiPath(string endpoint, string? requestPath = null, string? fallbackVersion = null)
         {
             var normalizedEndpoint = NormalizeEndpoint(endpoint);
-            return $"/api/{GetApiVersionSegment(context, fallbackVersion)}{normalizedEndpoint}";
+            return $"/api/{GetApiVersionSegment(requestPath, fallbackVersion)}{normalizedEndpoint}";
         }
 
-        public static string BuildImagePath(string identifier, HttpContext? context = null, string? fallbackVersion = null, string? sourceUrl = null)
+        public static string BuildImagePath(string identifier, string? requestPath = null, string? fallbackVersion = null, string? sourceUrl = null)
         {
             var encodedIdentifier = Uri.EscapeDataString(identifier ?? string.Empty);
-            var path = BuildApiPath($"/images/{encodedIdentifier}", context, fallbackVersion);
+            var path = BuildApiPath($"/images/{encodedIdentifier}", requestPath, fallbackVersion);
             if (string.IsNullOrWhiteSpace(sourceUrl)) return path;
             return $"{path}?url={Uri.EscapeDataString(sourceUrl)}";
         }

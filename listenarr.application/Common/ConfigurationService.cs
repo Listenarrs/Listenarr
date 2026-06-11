@@ -22,7 +22,6 @@ using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Application.Security;
 using Listenarr.Domain.Models;
 using Listenarr.Domain.Models.Configurations;
-using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Common
@@ -35,7 +34,7 @@ namespace Listenarr.Application.Common
         IUserService userService,
         IStartupConfigService startupConfigService,
         IRootFolderRepository rootFolderRepository,
-        IDataProtector dataProtector) : IConfigurationService
+        ISecretProtector secretProtector) : IConfigurationService
     {
         // API Configuration methods
         public async Task<List<ApiConfiguration>> GetApiConfigurationsAsync()
@@ -337,7 +336,7 @@ namespace Listenarr.Application.Common
                 if (!string.IsNullOrWhiteSpace(settings.ApiKey)
                     && !string.Equals(settings.ApiKey, ApiResponseRedactor.RedactedValue, StringComparison.Ordinal))
                 {
-                    existing.ProwlarrApiKeyEncrypted = dataProtector.Protect(settings.ApiKey.Trim());
+                    existing.ProwlarrApiKeyEncrypted = secretProtector.Protect(settings.ApiKey.Trim());
                 }
 
                 await settingsRepository.SaveAsync(existing);
@@ -359,7 +358,7 @@ namespace Listenarr.Application.Common
 
             try
             {
-                return dataProtector.Unprotect(encryptedApiKey);
+                return secretProtector.Unprotect(encryptedApiKey);
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {

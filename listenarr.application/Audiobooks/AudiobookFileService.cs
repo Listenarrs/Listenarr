@@ -15,9 +15,9 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using System.Text.Json;
+using Listenarr.Application.Common;
 using Listenarr.Domain.Common;
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Interfaces.Repositories;
@@ -241,15 +241,14 @@ namespace Listenarr.Application.Audiobooks
 
                         return true;
                     }
-                    catch (DbUpdateException dbEx)
+                    catch (UniqueConstraintViolationException)
+                    {
+                        logger.LogInformation("AudiobookFile insertion conflict detected (likely already created): {Path}", LogRedaction.SanitizeFilePath(filePath));
+                        return false;
+                    }
+                    catch (PersistenceException dbEx)
                     {
                         attempts++;
-                        var inner = dbEx.InnerException?.Message ?? dbEx.Message;
-                        if (inner != null && inner.IndexOf("UNIQUE", StringComparison.OrdinalIgnoreCase) >= 0)
-                        {
-                            logger.LogInformation("AudiobookFile insertion conflict detected (likely already created): {Path}", LogRedaction.SanitizeFilePath(filePath));
-                            return false;
-                        }
                         if (attempts >= 3)
                         {
                             logger.LogWarning(dbEx, "Failed to save AudiobookFile after {Attempts} attempts: {Path}", attempts, LogRedaction.SanitizeFilePath(filePath));

@@ -18,7 +18,6 @@
 
 using Listenarr.Api.Attributes;
 using Listenarr.Api.Dtos;
-using Listenarr.Application.Common;
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Application.Security;
@@ -50,7 +49,7 @@ namespace Listenarr.Api.Controllers
         }
 
         private bool ShouldRedactIndexerSecretsForCaller()
-            => SecurityRequestUtils.ShouldRedactSecretsForCaller(HttpContext);
+            => HttpSecurityRequestUtils.ShouldRedactSecretsForCaller(HttpContext);
 
         private Indexer RedactIndexerForCaller(Indexer indexer)
             => ShouldRedactIndexerSecretsForCaller() ? ApiResponseRedactor.RedactIndexer(indexer) : indexer;
@@ -1048,7 +1047,7 @@ namespace Listenarr.Api.Controllers
                 {
                     var scheme = Request.Scheme;
                     var hostVal = Request.Host.Value;
-                    var localSearchUrl = $"{scheme}://{hostVal}{ApiVersionUtils.BuildApiPath($"/search/{id}", HttpContext)}?query={Uri.EscapeDataString(query)}";
+                    var localSearchUrl = $"{scheme}://{hostVal}{HttpApiVersionUtils.BuildApiPath($"/search/{id}", HttpContext)}?query={Uri.EscapeDataString(query)}";
                     using var localResp = await _httpClient.GetAsync(localSearchUrl);
                     if (localResp.IsSuccessStatusCode)
                     {

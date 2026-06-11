@@ -187,4 +187,3 @@ namespace Listenarr.Api.Middleware
             => !string.IsNullOrWhiteSpace(path) && VersionedIndexerOrSystemPathRegex.IsMatch(path);
     }
 }
-

@@ -1,4 +1,3 @@
-using Listenarr.Application.Security;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
 
@@ -9,8 +8,8 @@ namespace Listenarr.Api.Attributes
     {
         public void OnAuthorization(AuthorizationFilterContext context)
         {
-            var isLoopback = SecurityRequestUtils.IsLoopbackRequest(context.HttpContext);
-            var isAuth = SecurityRequestUtils.IsAuthenticatedAdminOrApiKey(context.HttpContext);
+            var isLoopback = HttpSecurityRequestUtils.IsLoopbackRequest(context.HttpContext);
+            var isAuth = HttpSecurityRequestUtils.IsAuthenticatedAdminOrApiKey(context.HttpContext);
 
             if (!isLoopback && !isAuth)
             {

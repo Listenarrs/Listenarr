@@ -16,11 +16,10 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Listenarr.Application.Interfaces;
 
-namespace Listenarr.Application.Common
+namespace Listenarr.Infrastructure.HostedServices.Common
 {
     /// <summary>
     /// Background service that runs daily to clean up temporary image cache

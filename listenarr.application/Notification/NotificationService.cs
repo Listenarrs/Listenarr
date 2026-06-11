@@ -21,9 +21,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Listenarr.Application.Common;
 using Listenarr.Application.Interfaces;
-using Listenarr.Application.Security;
 using Listenarr.Domain.Models;
-using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Notification
@@ -39,17 +37,17 @@ namespace Listenarr.Application.Notification
         private readonly HttpClient _httpClientNoRedirect;
         private readonly ILogger<NotificationService> _logger;
         private readonly IConfigurationService _configurationService;
-        private readonly IHttpContextAccessor? _httpContextAccessor;
+        private readonly IRequestContextAccessor? _requestContextAccessor;
         private readonly INotificationPayloadBuilder _payloadBuilder;
 
-        public NotificationService(HttpClient httpClient, ILogger<NotificationService> logger, IConfigurationService configurationService, INotificationPayloadBuilder payloadBuilder, IHttpContextAccessor? httpContextAccessor = null)
+        public NotificationService(HttpClient httpClient, ILogger<NotificationService> logger, IConfigurationService configurationService, INotificationPayloadBuilder payloadBuilder, IRequestContextAccessor? requestContextAccessor = null)
         {
             _httpClient = httpClient;
             _httpClientNoRedirect = httpClient;
             _logger = logger;
             _configurationService = configurationService;
             _payloadBuilder = payloadBuilder ?? throw new ArgumentNullException(nameof(payloadBuilder));
-            _httpContextAccessor = httpContextAccessor;
+            _requestContextAccessor = requestContextAccessor;
         }
 
         // INotificationService interface stubs — webhook dispatch goes through SendNotificationAsync;
@@ -100,14 +98,15 @@ namespace Listenarr.Application.Notification
 
         private bool AllowPrivateWebhookTargetsForCurrentRequest()
         {
-            var context = _httpContextAccessor?.HttpContext;
+            var context = _requestContextAccessor?.Current;
             if (context == null)
             {
                 return true;
             }
 
-            return SecurityRequestUtils.IsLoopbackRequest(context)
-                   || SecurityRequestUtils.IsAuthenticatedAdminOrApiKey(context);
+            return context.RemoteIpAddress == null
+                   || System.Net.IPAddress.IsLoopback(context.RemoteIpAddress)
+                   || context.IsAuthenticatedAdminOrApiKey;
         }
 
         private async Task<HttpResponseMessage> PostValidatedAsync(string url, HttpContent content, CancellationToken cancellationToken = default)
@@ -250,9 +249,9 @@ namespace Listenarr.Application.Notification
                     var startup = await _configurationService.GetStartupConfigAsync();
                     var baseUrl = startup?.UrlBase;
 
-                    if (string.IsNullOrWhiteSpace(baseUrl) && _httpContextAccessor?.HttpContext != null)
+                    if (string.IsNullOrWhiteSpace(baseUrl) && _requestContextAccessor?.Current != null)
                     {
-                        var derived = NotificationPayloadBuilder.GetBaseUrlFromHttpContext(_httpContextAccessor.HttpContext);
+                        var derived = NotificationPayloadBuilder.GetBaseUrlFromRequestContext(_requestContextAccessor.Current);
                         if (!string.IsNullOrWhiteSpace(derived)) baseUrl = derived;
                     }
 
@@ -264,10 +263,10 @@ namespace Listenarr.Application.Notification
                     }
 
                     var (payloadObj, attachment) = await _payloadBuilder.CreateDiscordPayloadWithAttachmentAsync(
-                        trigger, data, baseUrl, _httpClient, _httpContextAccessor,
+                        trigger, data, baseUrl, _httpClient, _requestContextAccessor,
                         logInfo: msg => _logger.LogInformation(msg),
                         logDebug: (ex, msg) => _logger.LogDebug(ex, msg),
-                        apiVersion: ApiVersionUtils.ResolveApiVersion(_httpContextAccessor?.HttpContext, startup?.ApiVersion)
+                        apiVersion: ApiVersionUtils.ResolveApiVersion(_requestContextAccessor?.Current?.Path, startup?.ApiVersion)
                     );
 
                     _logger.LogDebug("Discord payload attachment present? {HasAttachment}", attachment != null);
@@ -322,13 +321,13 @@ namespace Listenarr.Application.Notification
                     string? baseUrl = null;
                     var startup = await _configurationService.GetStartupConfigAsync();
                     if (startup?.UrlBase != null) baseUrl = startup.UrlBase;
-                    if (string.IsNullOrWhiteSpace(baseUrl) && _httpContextAccessor?.HttpContext != null)
+                    if (string.IsNullOrWhiteSpace(baseUrl) && _requestContextAccessor?.Current != null)
                     {
-                        var derived = NotificationPayloadBuilder.GetBaseUrlFromHttpContext(_httpContextAccessor.HttpContext);
+                        var derived = NotificationPayloadBuilder.GetBaseUrlFromRequestContext(_requestContextAccessor.Current);
                         if (!string.IsNullOrWhiteSpace(derived)) baseUrl = derived;
                     }
 
-                    var discordPayload = NotificationPayloadBuilder.CreateDiscordPayload(trigger, data, baseUrl, ApiVersionUtils.ResolveApiVersion(_httpContextAccessor?.HttpContext, startup?.ApiVersion));
+                    var discordPayload = NotificationPayloadBuilder.CreateDiscordPayload(trigger, data, baseUrl, ApiVersionUtils.ResolveApiVersion(_requestContextAccessor?.Current?.Path, startup?.ApiVersion));
                     var title = discordPayload is JsonObject d && d.TryGetPropertyValue("content", out var c) ? (c?.ToString() ?? string.Empty) : string.Empty;
                     var message = title;
 
@@ -400,13 +399,13 @@ namespace Listenarr.Application.Notification
                         string? baseUrl = null;
                         var startup = await _configurationService.GetStartupConfigAsync();
                         if (startup?.UrlBase != null) baseUrl = startup.UrlBase;
-                        if (string.IsNullOrWhiteSpace(baseUrl) && _httpContextAccessor?.HttpContext != null)
+                        if (string.IsNullOrWhiteSpace(baseUrl) && _requestContextAccessor?.Current != null)
                         {
-                            var derived = NotificationPayloadBuilder.GetBaseUrlFromHttpContext(_httpContextAccessor.HttpContext);
+                            var derived = NotificationPayloadBuilder.GetBaseUrlFromRequestContext(_requestContextAccessor.Current);
                             if (!string.IsNullOrWhiteSpace(derived)) baseUrl = derived;
                         }
 
-                        var discordPayload = NotificationPayloadBuilder.CreateDiscordPayload(trigger, data, baseUrl, ApiVersionUtils.ResolveApiVersion(_httpContextAccessor?.HttpContext, startup?.ApiVersion));
+                        var discordPayload = NotificationPayloadBuilder.CreateDiscordPayload(trigger, data, baseUrl, ApiVersionUtils.ResolveApiVersion(_requestContextAccessor?.Current?.Path, startup?.ApiVersion));
                         var message = discordPayload is JsonObject d && d.TryGetPropertyValue("content", out var c) ? (c?.ToString() ?? string.Empty) : string.Empty;
 
                         var values = new List<KeyValuePair<string, string>>
@@ -474,13 +473,13 @@ namespace Listenarr.Application.Notification
                         string? baseUrl = null;
                         var startup = await _configurationService.GetStartupConfigAsync();
                         if (startup?.UrlBase != null) baseUrl = startup.UrlBase;
-                        if (string.IsNullOrWhiteSpace(baseUrl) && _httpContextAccessor?.HttpContext != null)
+                        if (string.IsNullOrWhiteSpace(baseUrl) && _requestContextAccessor?.Current != null)
                         {
-                            var derived = NotificationPayloadBuilder.GetBaseUrlFromHttpContext(_httpContextAccessor.HttpContext);
+                            var derived = NotificationPayloadBuilder.GetBaseUrlFromRequestContext(_requestContextAccessor.Current);
                             if (!string.IsNullOrWhiteSpace(derived)) baseUrl = derived;
                         }
 
-                        var discordPayload = NotificationPayloadBuilder.CreateDiscordPayload(trigger, data, baseUrl, ApiVersionUtils.ResolveApiVersion(_httpContextAccessor?.HttpContext, startup?.ApiVersion));
+                        var discordPayload = NotificationPayloadBuilder.CreateDiscordPayload(trigger, data, baseUrl, ApiVersionUtils.ResolveApiVersion(_requestContextAccessor?.Current?.Path, startup?.ApiVersion));
                         var text = discordPayload is JsonObject d && d.TryGetPropertyValue("content", out var c) ? (c?.ToString() ?? string.Empty) : string.Empty;
 
                         var telegramBody = new { chat_id = chatId, text = text ?? string.Empty, disable_notification = true, parse_mode = "Markdown" };
@@ -555,13 +554,13 @@ namespace Listenarr.Application.Notification
                         string? baseUrl = null;
                         var startup = await _configurationService.GetStartupConfigAsync();
                         if (startup?.UrlBase != null) baseUrl = startup.UrlBase;
-                        if (string.IsNullOrWhiteSpace(baseUrl) && _httpContextAccessor?.HttpContext != null)
+                        if (string.IsNullOrWhiteSpace(baseUrl) && _requestContextAccessor?.Current != null)
                         {
-                            var derived = NotificationPayloadBuilder.GetBaseUrlFromHttpContext(_httpContextAccessor.HttpContext);
+                            var derived = NotificationPayloadBuilder.GetBaseUrlFromRequestContext(_requestContextAccessor.Current);
                             if (!string.IsNullOrWhiteSpace(derived)) baseUrl = derived;
                         }
 
-                        var discordPayload = NotificationPayloadBuilder.CreateDiscordPayload(trigger, data, baseUrl, ApiVersionUtils.ResolveApiVersion(_httpContextAccessor?.HttpContext, startup?.ApiVersion));
+                        var discordPayload = NotificationPayloadBuilder.CreateDiscordPayload(trigger, data, baseUrl, ApiVersionUtils.ResolveApiVersion(_requestContextAccessor?.Current?.Path, startup?.ApiVersion));
                         var message = discordPayload is JsonObject d && d.TryGetPropertyValue("content", out var c) ? (c?.ToString() ?? string.Empty) : string.Empty;
 
                         var pushObj = new JsonObject
@@ -626,13 +625,13 @@ namespace Listenarr.Application.Notification
                     string? baseUrl = null;
                     var startup = await _configurationService.GetStartupConfigAsync();
                     if (startup?.UrlBase != null) baseUrl = startup.UrlBase;
-                    if (string.IsNullOrWhiteSpace(baseUrl) && _httpContextAccessor?.HttpContext != null)
+                    if (string.IsNullOrWhiteSpace(baseUrl) && _requestContextAccessor?.Current != null)
                     {
-                        var derived = NotificationPayloadBuilder.GetBaseUrlFromHttpContext(_httpContextAccessor.HttpContext);
+                        var derived = NotificationPayloadBuilder.GetBaseUrlFromRequestContext(_requestContextAccessor.Current);
                         if (!string.IsNullOrWhiteSpace(derived)) baseUrl = derived;
                     }
 
-                    var discordPayload = NotificationPayloadBuilder.CreateDiscordPayload(trigger, data, baseUrl, ApiVersionUtils.ResolveApiVersion(_httpContextAccessor?.HttpContext, startup?.ApiVersion));
+                    var discordPayload = NotificationPayloadBuilder.CreateDiscordPayload(trigger, data, baseUrl, ApiVersionUtils.ResolveApiVersion(_requestContextAccessor?.Current?.Path, startup?.ApiVersion));
                     var message = discordPayload is JsonObject d && d.TryGetPropertyValue("content", out var c) ? (c?.ToString() ?? string.Empty) : string.Empty;
 
                     var slackObj = new JsonObject
@@ -683,14 +682,14 @@ namespace Listenarr.Application.Notification
                 string? baseUrl = null;
                 var startup = await _configurationService.GetStartupConfigAsync();
                 if (startup?.UrlBase != null) baseUrl = startup.UrlBase;
-                if (string.IsNullOrWhiteSpace(baseUrl) && _httpContextAccessor?.HttpContext != null)
+                if (string.IsNullOrWhiteSpace(baseUrl) && _requestContextAccessor?.Current != null)
                 {
-                    var derived = NotificationPayloadBuilder.GetBaseUrlFromHttpContext(_httpContextAccessor.HttpContext);
+                    var derived = NotificationPayloadBuilder.GetBaseUrlFromRequestContext(_requestContextAccessor.Current);
                     if (!string.IsNullOrWhiteSpace(derived)) baseUrl = derived;
                 }
 
                 // Prefer rich payload created by the static helper (includes content, embeds, image links, etc.)
-                var payloadObj = NotificationPayloadBuilder.CreateDiscordPayload(trigger, data, baseUrl, ApiVersionUtils.ResolveApiVersion(_httpContextAccessor?.HttpContext, startup?.ApiVersion));
+                var payloadObj = NotificationPayloadBuilder.CreateDiscordPayload(trigger, data, baseUrl, ApiVersionUtils.ResolveApiVersion(_requestContextAccessor?.Current?.Path, startup?.ApiVersion));
                 string defaultJson = payloadObj != null ? payloadObj.ToJsonString() : JsonSerializer.Serialize(new { @event = trigger, data = data, timestamp = DateTime.UtcNow }, new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull });
 
                 using var defaultContent = new StringContent(defaultJson, Encoding.UTF8, "application/json");
@@ -773,7 +772,3 @@ namespace Listenarr.Application.Notification
         }
     }
 }
-
-
-
-

@@ -22,10 +22,9 @@ using Listenarr.Application.Security;
 using Listenarr.Domain.Models;
 using Listenarr.Domain.Models.Exceptions;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace Listenarr.Application.Downloads
+namespace Listenarr.Infrastructure.HostedServices.Downloads
 {
     /// <summary>
     /// Background service that monitors downloads

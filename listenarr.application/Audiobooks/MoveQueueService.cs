@@ -19,10 +19,8 @@ using System.Collections.Concurrent;
 using System.Threading.Channels;
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Interfaces.Repositories;
-using Listenarr.Application.Notification;
 using Listenarr.Application.Security;
 using Listenarr.Domain.Models;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -132,7 +130,7 @@ namespace Listenarr.Application.Audiobooks
                 // Broadcast status update to SignalR clients so UI can react to Processing/Failed/Completed
                 try
                 {
-                    var hub = scope.ServiceProvider.GetRequiredService<IHubContext<DownloadHub>>();
+                    var hub = scope.ServiceProvider.GetRequiredService<IHubBroadcaster>();
                     var payload = new
                     {
                         jobId = id.ToString(),
@@ -143,7 +141,7 @@ namespace Listenarr.Application.Audiobooks
                         updatedAt = DateTime.UtcNow
                     };
                     // Fire and forget but block briefly to surface errors during development
-                    hub.Clients.All.SendAsync("MoveJobUpdate", payload).GetAwaiter().GetResult();
+                    hub.BroadcastAsync("MoveJobUpdate", payload).GetAwaiter().GetResult();
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                 {
@@ -221,5 +219,4 @@ namespace Listenarr.Application.Audiobooks
         }
     }
 }
-
 

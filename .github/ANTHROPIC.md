@@ -1,5 +1,9 @@
 # Anthropic/Claude Instructions for Listenarr
 
+## Required Repository Context
+
+Before making code, dependency, workflow, or documentation changes, review and follow `CONTRIBUTING.md`, `BACKEND_ARCHITECTURE.md`, `.github/RULES.md`, and the primary AI guidance files. Repository-specific guidance takes precedence over generic provider guidance.
+
 ## Overview
 Listenarr is a C# .NET 10.0 audiobook management system with Vue.js 3 frontend. See [copilot-instructions.md](copilot-instructions.md) for complete details.
 

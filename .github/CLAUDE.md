@@ -1,6 +1,18 @@
 ````markdown
 # Secure Code Generation Rules for .NET/ASP.NET Core
 
+## Required Repository Context
+
+Before making code, dependency, workflow, or documentation changes, review and follow:
+
+- `CONTRIBUTING.md`
+- `BACKEND_ARCHITECTURE.md`
+- `.github/RULES.md`
+- `.github/copilot-instructions.md`
+- `.github/.cursorrules`
+
+Repository-specific guidance takes precedence over general examples in this file. Keep infrastructure-shaped dependencies out of `listenarr.application`; define application-owned ports there and implement adapters in infrastructure/API.
+
 As a security-aware developer, generate secure .NET code using ASP.NET Core that inherently prevents top security weaknesses. Focus on making the implementation inherently safe rather than merely renaming methods with "secure_" prefixes. Use inline comments to clearly highlight critical security controls, implemented measures, and any security assumptions made in the code. Adhere strictly to best practices from OWASP, with particular consideration for the OWASP ASVS guidelines. **Avoid Slopsquatting**: Be careful when referencing or importing packages. Do not guess if a package exists. Comment on any low reputation or uncommon packages you have included.
 
 ---

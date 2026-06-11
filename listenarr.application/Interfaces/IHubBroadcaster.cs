@@ -22,5 +22,6 @@ namespace Listenarr.Application.Interfaces
     public interface IHubBroadcaster
     {
         Task BroadcastQueueUpdateAsync(QueueSnapshot queueSnapshot);
+        Task BroadcastAsync(string eventName, object payload, CancellationToken cancellationToken = default);
     }
 }

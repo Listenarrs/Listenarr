@@ -16,9 +16,9 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using Listenarr.Application.Common;
 using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Domain.Models;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System.Security.Claims;
 using System.Security.Cryptography;
@@ -79,7 +79,7 @@ namespace Listenarr.Application.Security
                     _logger.LogInformation("Created session for user {Username} (RememberMe: {RememberMe})", username, rememberMe);
                     return sessionToken;
                 }
-                catch (DbUpdateException) when (attempt < 2)
+                catch (UniqueConstraintViolationException) when (attempt < 2)
                 {
                     // Try another token when uniqueness is violated.
                 }

@@ -17,7 +17,6 @@
  */
 
 using Listenarr.Application.Interfaces;
-using Listenarr.Application.Security;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
 
@@ -60,7 +59,7 @@ namespace Listenarr.Api.Attributes
             var user = context.HttpContext.User;
             if (user?.Identity?.IsAuthenticated == true &&
                 user.IsInRole("Administrator") &&
-                !SecurityRequestUtils.IsApiKeyAuthenticated(context.HttpContext))
+                !HttpSecurityRequestUtils.IsApiKeyAuthenticated(context.HttpContext))
             {
                 await next();
                 return;

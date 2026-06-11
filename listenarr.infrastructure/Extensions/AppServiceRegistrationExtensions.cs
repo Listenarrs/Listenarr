@@ -16,13 +16,8 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 // csharp
-using Listenarr.Application.Audiobooks;
-using Listenarr.Application.Common;
-using Listenarr.Application.Downloads;
 using Listenarr.Application.Interfaces;
-using Listenarr.Application.Metadata;
 using Listenarr.Application.Notification;
-using Listenarr.Application.Search;
 using Listenarr.Application.Security;
 using Listenarr.Domain.Models.Configurations;
 using Listenarr.Infrastructure.Ffmpeg;
@@ -33,7 +28,7 @@ using Listenarr.Infrastructure.Platform;
 using Listenarr.Infrastructure.Search.Providers;
 using Listenarr.Infrastructure.Security;
 using Listenarr.Infrastructure.Services;
-using Listenarr.Infrastructure.SignalR;
+using Listenarr.Infrastructure.Web;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -49,6 +44,8 @@ namespace Listenarr.Infrastructure.Extensions
         {
             // Core services and application logic
             services.AddScoped<IConfigurationService, ConfigurationService>();
+            services.AddSingleton<ISecretProtector, DataProtectionSecretProtector>();
+            services.AddScoped<IRequestContextAccessor, AspNetRequestContextAccessor>();
             // Startup config: read config.json (optional) and expose via IStartupConfigService
             services.AddSingleton<IStartupConfigService, StartupConfigService>();
 

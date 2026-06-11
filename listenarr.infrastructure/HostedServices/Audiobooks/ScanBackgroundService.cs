@@ -23,12 +23,10 @@ using Listenarr.Application.Notification;
 using Listenarr.Application.Security;
 using Listenarr.Domain.Common;
 using Listenarr.Domain.Models;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace Listenarr.Application.Audiobooks
+namespace Listenarr.Infrastructure.HostedServices.Audiobooks
 {
     public class ScanBackgroundService : BackgroundService
     {
@@ -682,6 +680,5 @@ namespace Listenarr.Application.Audiobooks
         }
     }
 }
-
 
 

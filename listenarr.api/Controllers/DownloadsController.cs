@@ -377,5 +377,3 @@ public class DownloadsController : ControllerBase
         }).Cast<object>().ToList();
     }
 }
-
-

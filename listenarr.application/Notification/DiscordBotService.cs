@@ -19,7 +19,6 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Security;
-using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Notification
@@ -37,7 +36,7 @@ namespace Listenarr.Application.Notification
         private readonly ILogger<DiscordBotService> _logger;
         private readonly IStartupConfigService _startupConfigService;
         private readonly IApplicationPathService _applicationPathService;
-        private readonly IHttpContextAccessor _httpContextAccessor;
+        private readonly IRequestContextAccessor _requestContextAccessor;
         private readonly IProcessRunner? _processRunner;
         private string? _botApiKey;
         private Process? _botProcess;
@@ -47,13 +46,13 @@ namespace Listenarr.Application.Notification
             ILogger<DiscordBotService> logger,
             IStartupConfigService startupConfigService,
             IApplicationPathService applicationPathService,
-            IHttpContextAccessor httpContextAccessor,
+            IRequestContextAccessor requestContextAccessor,
             IProcessRunner? processRunner = null)
         {
             _logger = logger;
             _startupConfigService = startupConfigService;
             _applicationPathService = applicationPathService;
-            _httpContextAccessor = httpContextAccessor;
+            _requestContextAccessor = requestContextAccessor;
             _processRunner = processRunner;
         }
 
@@ -262,31 +261,20 @@ namespace Listenarr.Application.Notification
             // Priority 2: Construct from current HTTP request (when available)
             try
             {
-                var httpContext = _httpContextAccessor.HttpContext;
-                if (httpContext != null)
+                var requestContext = _requestContextAccessor.Current;
+                if (requestContext != null)
                 {
-                    var request = httpContext.Request;
-                    var scheme = request.Scheme;
-                    var host = request.Host.Value;
-
-                    // Check if we're behind a reverse proxy (X-Forwarded headers)
-                    if (request.Headers.TryGetValue("X-Forwarded-Proto", out var forwardedProto))
-                    {
-                        scheme = forwardedProto.ToString();
-                    }
-                    if (request.Headers.TryGetValue("X-Forwarded-Host", out var forwardedHost))
-                    {
-                        host = forwardedHost.ToString();
-                    }
+                    var scheme = requestContext.Scheme;
+                    var host = requestContext.Host;
 
                     var url = $"{scheme}://{host}";
-                    _logger.LogInformation("Constructed URL from HTTP context: {Url}", url);
+                    _logger.LogInformation("Constructed URL from request context: {Url}", url);
                     return url;
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
-                _logger.LogWarning(ex, "Failed to construct URL from HTTP context");
+                _logger.LogWarning(ex, "Failed to construct URL from request context");
             }
 
             // Priority 3: Use startup config

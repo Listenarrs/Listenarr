@@ -16,8 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Listenarr.Application.Interfaces;
-using Listenarr.Application.Notification;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.SignalR
@@ -56,6 +54,17 @@ namespace Listenarr.Infrastructure.SignalR
                 _logger.LogWarning(ex, "Failed to broadcast QueueUpdate");
             }
         }
+
+        public async Task BroadcastAsync(string eventName, object payload, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                await _hubContext.Clients.All.SendAsync(eventName, payload, cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
+                _logger.LogWarning(ex, "Failed to broadcast {EventName}", eventName);
+            }
+        }
     }
 }
-

@@ -16,16 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Text.Json.Nodes;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.DependencyInjection;
-using Xunit;
 using System.Net;
-using Moq;
-using Moq.Protected;
-using Microsoft.Extensions.Logging;
-using Listenarr.Domain.Models;
-using Listenarr.Application.Interfaces;
-using Listenarr.Application.Notification;
 
 namespace Listenarr.Api.Tests
 {
@@ -191,13 +182,11 @@ namespace Listenarr.Api.Tests
     public partial class NotificationServiceTests
     {
         [Fact]
-        public void GetBaseUrlFromHttpContext_ReturnsExpectedBase()
+        public void GetBaseUrlFromRequestContext_ReturnsExpectedBase()
         {
-            var ctx = new DefaultHttpContext();
-            ctx.Request.Scheme = "https";
-            ctx.Request.Host = new HostString("listenarr.example.com");
+            var ctx = new RequestContextSnapshot(null, "https", "listenarr.example.com", null, false);
 
-            var baseUrl = NotificationPayloadBuilder.GetBaseUrlFromHttpContext(ctx);
+            var baseUrl = NotificationPayloadBuilder.GetBaseUrlFromRequestContext(ctx);
             Assert.Equal("https://listenarr.example.com", baseUrl);
         }
 
@@ -212,11 +201,9 @@ namespace Listenarr.Api.Tests
                 asin = "B123DERIVE"
             };
 
-            var ctx = new DefaultHttpContext();
-            ctx.Request.Scheme = "https";
-            ctx.Request.Host = new HostString("listenarr.example.com");
+            var ctx = new RequestContextSnapshot(null, "https", "listenarr.example.com", null, false);
 
-            var derived = NotificationPayloadBuilder.GetBaseUrlFromHttpContext(ctx);
+            var derived = NotificationPayloadBuilder.GetBaseUrlFromRequestContext(ctx);
             Assert.NotNull(derived);
 
             var node = NotificationPayloadBuilder.CreateDiscordPayload(trigger, data, derived);
@@ -315,7 +302,7 @@ namespace Listenarr.Api.Tests
                 .ReturnsAsync(startupConfig);
 
             // Mock HttpContextAccessor (optional for this test)
-            var mockHttpContextAccessor = new Mock<IHttpContextAccessor>();
+            var mockHttpContextAccessor = new Mock<IRequestContextAccessor>();
 
             // Create service
             var services = new ServiceCollection();
@@ -492,7 +479,7 @@ namespace Listenarr.Api.Tests
                 Mock.Of<ILogger<NotificationService>>(),
                 mockConfigService.Object,
                 payloadBuilder,
-                Mock.Of<IHttpContextAccessor>()
+                Mock.Of<IRequestContextAccessor>()
             );
 
             // Act

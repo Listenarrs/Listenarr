@@ -16,12 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Net;
-using Microsoft.AspNetCore.Http;
-using Moq;
-using Moq.Protected;
-using Xunit;
-using Microsoft.Extensions.DependencyInjection;
-using Listenarr.Application.Notification;
 
 namespace Listenarr.Tests.Features.Api.Services
 {
@@ -89,7 +83,7 @@ namespace Listenarr.Tests.Features.Api.Services
             };
 
             // Act
-            var (payload, attachment) = await adapter.CreateDiscordPayloadWithAttachmentAsync("book-added", data, "https://listenarr.example.com", httpClient, Mock.Of<IHttpContextAccessor>());
+            var (payload, attachment) = await adapter.CreateDiscordPayloadWithAttachmentAsync("book-added", data, "https://listenarr.example.com", httpClient, Mock.Of<IRequestContextAccessor>());
 
             // Assert
             Assert.NotNull(payload);

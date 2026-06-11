@@ -16,17 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Net;
-using Microsoft.Extensions.Logging;
-using Moq;
-using Moq.Protected;
-using Xunit;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.DependencyInjection;
-using Listenarr.Domain.Models;
 using Listenarr.Api.Controllers;
-using Listenarr.Application.Interfaces;
-using Listenarr.Domain.Models.Configurations;
-using Listenarr.Application.Notification;
 
 namespace Listenarr.Tests.Features.Api.Services
 {
@@ -93,7 +83,7 @@ namespace Listenarr.Tests.Features.Api.Services
             services.AddSingleton<INotificationPayloadBuilder, NotificationPayloadBuilderAdapter>();
             var provider = services.BuildServiceProvider();
             var payloadBuilder = provider.GetRequiredService<INotificationPayloadBuilder>();
-            var service = new NotificationService(httpClient, mockLogger.Object, mockConfigService.Object, payloadBuilder, Mock.Of<IHttpContextAccessor>());
+            var service = new NotificationService(httpClient, mockLogger.Object, mockConfigService.Object, payloadBuilder, Mock.Of<IRequestContextAccessor>());
 
             // Act
             await service.SendNotificationAsync(trigger, data, webhookUrl, enabledTriggers);

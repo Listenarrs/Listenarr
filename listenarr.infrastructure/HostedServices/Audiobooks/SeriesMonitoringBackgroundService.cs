@@ -17,10 +17,9 @@
  */
 using Listenarr.Application.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace Listenarr.Application.Audiobooks
+namespace Listenarr.Infrastructure.HostedServices.Audiobooks
 {
     public class SeriesMonitoringBackgroundService : BackgroundService
     {

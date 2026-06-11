@@ -53,6 +53,41 @@ namespace Listenarr.Infrastructure.Persistence
         {
         }
 
+        public override int SaveChanges()
+        {
+            try
+            {
+                return base.SaveChanges();
+            }
+            catch (DbUpdateException ex)
+            {
+                throw TranslatePersistenceException(ex);
+            }
+        }
+
+        public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                return await base.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException ex)
+            {
+                throw TranslatePersistenceException(ex);
+            }
+        }
+
+        private static PersistenceException TranslatePersistenceException(DbUpdateException ex)
+        {
+            var message = ex.InnerException?.Message ?? ex.Message;
+            if (message.IndexOf("UNIQUE", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return new UniqueConstraintViolationException("A unique persistence constraint was violated.", ex);
+            }
+
+            return new PersistenceException("A persistence operation failed.", ex);
+        }
+
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
         {
             // Only configure SQLite if no provider was configured externally (e.g. tests using InMemory)

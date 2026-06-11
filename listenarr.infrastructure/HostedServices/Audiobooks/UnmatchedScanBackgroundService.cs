@@ -15,19 +15,14 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Microsoft.EntityFrameworkCore;
 using System.Text.RegularExpressions;
 using Listenarr.Domain.Common;
 using Listenarr.Application.Interfaces;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.AspNetCore.SignalR;
 using Listenarr.Application.Interfaces.Repositories;
-using Listenarr.Application.Metadata;
-using Listenarr.Application.Notification;
 
-namespace Listenarr.Application.Audiobooks
+namespace Listenarr.Infrastructure.HostedServices.Audiobooks
 {
     public class UnmatchedScanBackgroundService : BackgroundService
     {
@@ -97,7 +92,7 @@ namespace Listenarr.Application.Audiobooks
                     {
                         await HandleJobFailureAsync(job.Id, ex, stoppingToken);
                     }
-                    catch (DbUpdateException ex)
+                    catch (PersistenceException ex)
                     {
                         await HandleJobFailureAsync(job.Id, ex, stoppingToken);
                     }

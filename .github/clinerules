@@ -1,5 +1,9 @@
 # Cline AI Instructions for Listenarr
 
+## Required Repository Context
+
+Before making code, dependency, workflow, or documentation changes, review and follow `CONTRIBUTING.md`, `BACKEND_ARCHITECTURE.md`, `.github/RULES.md`, and the primary AI guidance files. Repository-specific guidance takes precedence over generic tool guidance.
+
 As a security-aware developer, generate secure .NET code using ASP.NET Core that inherently prevents top security weaknesses.
 Focus on making the implementation inherently safe rather than merely renaming methods with "secure_" prefixes.
 Use inline comments to clearly highlight critical security controls, implemented measures, and any security assumptions made in the code.

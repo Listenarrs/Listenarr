@@ -16,7 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Text.Json.Nodes;
-using Microsoft.AspNetCore.Http;
+using Listenarr.Application.Interfaces;
 
 namespace Listenarr.Application.Notification
 {
@@ -33,7 +33,7 @@ namespace Listenarr.Application.Notification
             object data,
             string? startupBaseUrl,
             HttpClient httpClient,
-            IHttpContextAccessor? httpContextAccessor = null,
+            IRequestContextAccessor? requestContextAccessor = null,
             Action<string>? logInfo = null,
             Action<Exception, string>? logDebug = null,
             string? apiVersion = null);

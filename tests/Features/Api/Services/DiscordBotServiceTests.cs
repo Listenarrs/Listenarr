@@ -16,15 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Diagnostics;
-using Microsoft.Extensions.Logging;
-using Microsoft.AspNetCore.Http;
-using Xunit;
 using System.Runtime.InteropServices;
-using Listenarr.Domain.Common;
-using Listenarr.Domain.Models;
-using Moq;
-using Listenarr.Application.Interfaces;
-using Listenarr.Application.Notification;
 
 namespace Listenarr.Tests.Features.Api.Services
 {
@@ -107,11 +99,11 @@ namespace Listenarr.Tests.Features.Api.Services
             pathService.SetupGet(service => service.DiscordBotRootPath).Returns(botDir);
             var cfg = new StartupConfig { ApiKey = "test-api-key", EnableSsl = false, Port = 5000 };
             var startupService = new FakeStartupConfigService(cfg);
-            var httpAccessor = new HttpContextAccessor();
+            var requestContextAccessor = Mock.Of<IRequestContextAccessor>();
             var logger = new Mock<ILogger<DiscordBotService>>().Object;
             var fakeRunner = new FakeProcessRunner();
 
-            var svc = new DiscordBotService(logger, startupService, pathService.Object, httpAccessor, fakeRunner);
+            var svc = new DiscordBotService(logger, startupService, pathService.Object, requestContextAccessor, fakeRunner);
 
             try
             {

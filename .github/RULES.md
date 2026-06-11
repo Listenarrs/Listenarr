@@ -2,6 +2,16 @@
 
 This folder contains comprehensive instructions for AI assistants working with the Listenarr audiobook management system.
 
+## Mandatory First Step
+
+Before making code, dependency, workflow, or documentation changes, AI agents must review and follow:
+
+- Repository contribution rules: [`../CONTRIBUTING.md`](../CONTRIBUTING.md)
+- Backend architecture boundaries: [`../BACKEND_ARCHITECTURE.md`](../BACKEND_ARCHITECTURE.md)
+- The primary AI guidance files listed below, especially [`copilot-instructions.md`](copilot-instructions.md), [`AGENTS.md`](AGENTS.md), and [`.cursorrules`](.cursorrules)
+
+If these documents conflict, follow the more specific repository guidance first. In particular, keep infrastructure-shaped dependencies out of `listenarr.application`; add application-owned ports and implement adapters in infrastructure/API.
+
 ## Primary Reference Files
 
 ### [copilot-instructions.md](copilot-instructions.md) - **MOST COMPREHENSIVE**
@@ -61,10 +71,11 @@ These files provide quick-start guidance tailored to specific AI providers, with
 
 ## Quick Start
 
-1. **For comprehensive project understanding**: Read [copilot-instructions.md](copilot-instructions.md)
-2. **For security compliance**: Read [AGENTS.md](AGENTS.md)
-3. **For coding standards**: Read [.cursorrules](.cursorrules)
-4. **For provider-specific guidance**: Choose your AI provider file above
+1. **Before changing anything**: Read [`../CONTRIBUTING.md`](../CONTRIBUTING.md) and [`../BACKEND_ARCHITECTURE.md`](../BACKEND_ARCHITECTURE.md)
+2. **For comprehensive project understanding**: Read [copilot-instructions.md](copilot-instructions.md)
+3. **For security compliance**: Read [AGENTS.md](AGENTS.md)
+4. **For coding standards**: Read [.cursorrules](.cursorrules)
+5. **For provider-specific guidance**: Choose your AI provider file above
 
 ## Project Overview (Quick Reference)
 

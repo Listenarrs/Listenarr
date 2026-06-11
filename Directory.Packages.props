@@ -22,7 +22,12 @@
 		<PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="$(EFVersion)" />
 		<PackageVersion Include="Microsoft.EntityFrameworkCore.InMemory" Version="$(EFVersion)" />
 		<PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="$(EFVersion)" />
+		<PackageVersion Include="Microsoft.Extensions.Caching.Abstractions" Version="10.0.8" />
+		<PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.8" />
+		<PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.8" />
 		<PackageVersion Include="Microsoft.Extensions.Http.Polly" Version="10.0.8" />
+		<PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.8" />
+		<PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.8" />
 		<PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.6.0" />
 		<PackageVersion Include="Moq" Version="4.20.72" />
 		<PackageVersion Include="Polly" Version="8.6.6" />

@@ -20,7 +20,6 @@ using System.Text.RegularExpressions;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
-using Listenarr.Application.Common;
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Metadata;
 using Listenarr.Application.Search;
@@ -58,7 +57,7 @@ namespace Listenarr.Api.Controllers
         }
 
         private string BuildApiImagePath(string identifier, string? sourceUrl = null)
-            => ApiVersionUtils.BuildImagePath(identifier, HttpContext, sourceUrl: sourceUrl);
+            => HttpApiVersionUtils.BuildImagePath(identifier, HttpContext, sourceUrl: sourceUrl);
 
         private static string? NormalizeStructuredAdvancedField(string? value, string prefix)
         {
@@ -1448,4 +1447,3 @@ namespace Listenarr.Api.Controllers
         }
     }
 }
-

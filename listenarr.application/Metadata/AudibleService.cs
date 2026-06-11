@@ -18,8 +18,9 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
-using HtmlAgilityPack;
+using Listenarr.Application.Interfaces;
 using Listenarr.Application.Security;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Metadata
@@ -71,11 +72,19 @@ namespace Listenarr.Application.Metadata
             };
         private readonly HttpClient _httpClient;
         private readonly ILogger<AudibleService> _logger;
+        private readonly IAudibleAuthorPageParser? _authorPageParser;
 
         public AudibleService(HttpClient httpClient, ILogger<AudibleService> logger)
+            : this(httpClient, logger, null)
+        {
+        }
+
+        [ActivatorUtilitiesConstructor]
+        public AudibleService(HttpClient httpClient, ILogger<AudibleService> logger, IAudibleAuthorPageParser? authorPageParser)
         {
             _httpClient = httpClient;
             _logger = logger;
+            _authorPageParser = authorPageParser;
             _httpClient.DefaultRequestHeaders.Accept.Clear();
             _httpClient.DefaultRequestHeaders.Accept.ParseAdd(BrowserAcceptHeader);
             _httpClient.DefaultRequestHeaders.AcceptLanguage.Clear();
@@ -1504,55 +1513,13 @@ namespace Listenarr.Application.Metadata
                     return null;
                 }
 
-                var htmlDoc = new HtmlDocument();
-                htmlDoc.LoadHtml(html);
-
-                var tiles = htmlDoc.DocumentNode.SelectNodes("//adbl-full-width-product-tile");
-                var legacyProductListItems = htmlDoc.DocumentNode.SelectNodes("//li[contains(@class, 'productListItem')]");
-                if ((tiles == null || tiles.Count == 0) &&
-                    (legacyProductListItems == null || legacyProductListItems.Count == 0))
+                if (_authorPageParser == null)
                 {
-                    _logger.LogWarning("Audible author page contained no recognizable product tiles for author {Author}", LogRedaction.SanitizeText(author));
+                    _logger.LogWarning("Audible author page parser is unavailable for author {Author}", LogRedaction.SanitizeText(author));
                     return null;
                 }
 
-                var parsedTiles = new List<AudibleSearchResult>();
-                var seenAsins = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-                if (tiles != null)
-                {
-                    foreach (var tile in tiles)
-                    {
-                        var parsed = ParseAudibleAuthorTile(tile, author, authorAsin, region);
-                        if (parsed == null) continue;
-
-                        var key = string.IsNullOrWhiteSpace(parsed.Asin)
-                            ? $"{parsed.Title}|{parsed.Link}"
-                            : parsed.Asin;
-                        if (seenAsins.Add(key))
-                        {
-                            parsedTiles.Add(parsed);
-                        }
-                    }
-                }
-
-                if (legacyProductListItems != null)
-                {
-                    foreach (var item in legacyProductListItems)
-                    {
-                        var parsed = ParseAudibleAuthorListItem(item, author, authorAsin, region);
-                        if (parsed == null) continue;
-
-                        var key = string.IsNullOrWhiteSpace(parsed.Asin)
-                            ? $"{parsed.Title}|{parsed.Link}"
-                            : parsed.Asin;
-                        if (seenAsins.Add(key))
-                        {
-                            parsedTiles.Add(parsed);
-                        }
-                    }
-                }
-
+                var parsedTiles = _authorPageParser.ParseAuthorPage(html, author, authorAsin, region);
                 if (parsedTiles.Count == 0)
                 {
                     _logger.LogWarning("Audible author page tiles could not be parsed for author {Author}", LogRedaction.SanitizeText(author));
@@ -1722,124 +1689,6 @@ namespace Listenarr.Application.Metadata
             }
 
             return new List<SeriesLookupItem>();
-        }
-
-        private static AudibleSearchResult? ParseAudibleAuthorTile(HtmlNode tile, string author, string authorAsin, string region)
-        {
-            var productImageNode = tile.SelectSingleNode(".//adbl-product-image")
-                ?? tile.SelectSingleNode(".//adbl-full-bleed-image");
-            var asin = productImageNode?.GetAttributeValue("data-asin", string.Empty);
-            if (string.IsNullOrWhiteSpace(asin))
-            {
-                asin = tile.SelectSingleNode(".//*[@data-asin]")?.GetAttributeValue("data-asin", string.Empty);
-            }
-            if (string.IsNullOrWhiteSpace(asin)) return null;
-
-            var title = HtmlEntity.DeEntitize(tile.SelectSingleNode(".//*[@slot='title']")?.InnerText ?? string.Empty).Trim();
-            if (string.IsNullOrWhiteSpace(title)) return null;
-
-            var subtitle = HtmlEntity.DeEntitize(tile.SelectSingleNode(".//*[@slot='subtitle']")?.InnerText ?? string.Empty).Trim();
-            var imageUrl = productImageNode?.SelectSingleNode(".//img")?.GetAttributeValue("src", string.Empty);
-            if (string.IsNullOrWhiteSpace(imageUrl))
-            {
-                imageUrl = productImageNode?.GetAttributeValue("portrait-src", string.Empty);
-            }
-            if (string.IsNullOrWhiteSpace(imageUrl))
-            {
-                imageUrl = productImageNode?.GetAttributeValue("landscape-src", string.Empty);
-            }
-            var relativeUrl = productImageNode?.GetAttributeValue("data-url", string.Empty);
-            if (string.IsNullOrWhiteSpace(relativeUrl))
-            {
-                relativeUrl = tile.SelectSingleNode(".//adbl-button[@href]")?.GetAttributeValue("href", string.Empty)
-                    ?? tile.SelectSingleNode(".//a[@href]")?.GetAttributeValue("href", string.Empty);
-            }
-
-            var authors = ParseAudibleAuthorTileAuthors(tile, author, authorAsin, region);
-            if (authors.Count == 0 && !string.IsNullOrWhiteSpace(author))
-            {
-                authors.Add(new AudibleAuthor { Asin = authorAsin, Name = author, Region = region });
-            }
-
-            return new AudibleSearchResult
-            {
-                Asin = asin,
-                Title = title,
-                Subtitle = string.IsNullOrWhiteSpace(subtitle) ? null : subtitle,
-                Authors = authors,
-                ImageUrl = string.IsNullOrWhiteSpace(imageUrl) ? null : imageUrl,
-                Link = NormalizeAudibleUrl(relativeUrl, region)
-            };
-        }
-
-        private static AudibleSearchResult? ParseAudibleAuthorListItem(HtmlNode listItem, string author, string authorAsin, string region)
-        {
-            var asin = listItem.SelectSingleNode(".//*[@data-asin]")?.GetAttributeValue("data-asin", string.Empty);
-            if (string.IsNullOrWhiteSpace(asin))
-            {
-                return null;
-            }
-
-            var title = HtmlEntity.DeEntitize(listItem.GetAttributeValue("aria-label", string.Empty)).Trim();
-            if (string.IsNullOrWhiteSpace(title))
-            {
-                title = HtmlEntity.DeEntitize(
-                    listItem.SelectSingleNode(".//h2")?.InnerText ?? string.Empty).Trim();
-            }
-
-            if (string.IsNullOrWhiteSpace(title))
-            {
-                return null;
-            }
-
-            var imageUrl = listItem.SelectSingleNode(".//img[@src]")?.GetAttributeValue("src", string.Empty);
-            var relativeUrl = listItem.SelectSingleNode(".//a[@href]")?.GetAttributeValue("href", string.Empty);
-
-            return new AudibleSearchResult
-            {
-                Asin = asin,
-                Title = title,
-                Authors = new List<AudibleAuthor>
-                {
-                    new()
-                    {
-                        Asin = authorAsin,
-                        Name = author,
-                        Region = region
-                    }
-                },
-                ImageUrl = string.IsNullOrWhiteSpace(imageUrl) ? null : imageUrl,
-                Link = NormalizeAudibleUrl(relativeUrl, region)
-            };
-        }
-
-        private static List<AudibleAuthor> ParseAudibleAuthorTileAuthors(HtmlNode tile, string author, string authorAsin, string region)
-        {
-            var authors = new List<AudibleAuthor>();
-            var metadataJson = tile.SelectSingleNode(".//adbl-product-metadata/script[@type='application/json']")?.InnerText;
-            if (string.IsNullOrWhiteSpace(metadataJson)) return authors;
-
-            try
-            {
-                var metadata = JsonSerializer.Deserialize<AudibleAuthorTileMetadata>(metadataJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-                if (metadata?.Authors == null) return authors;
-
-                foreach (var metadataAuthor in metadata.Authors.Where(metadataAuthor => !string.IsNullOrWhiteSpace(metadataAuthor.Name)))
-                {
-                    authors.Add(new AudibleAuthor
-                    {
-                        Asin = string.Equals(metadataAuthor.Name, author, StringComparison.OrdinalIgnoreCase) ? authorAsin : null,
-                        Name = metadataAuthor.Name,
-                        Region = region
-                    });
-                }
-            }
-            catch (JsonException)
-            {
-                // Ignore malformed metadata blobs and fall back to the requested author name.
-            }
-
-            return authors;
         }
 
         private static string BuildAudibleAuthorPageUrl(string author, string authorAsin, string region)

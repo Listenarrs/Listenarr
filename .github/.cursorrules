@@ -1,5 +1,17 @@
 # Listenarr Copilot Rules
 
+## Required Repository Context
+
+Before making code, dependency, workflow, or documentation changes, review and follow:
+
+- `CONTRIBUTING.md`
+- `BACKEND_ARCHITECTURE.md`
+- `.github/RULES.md`
+- `.github/AGENTS.md`
+- `.github/copilot-instructions.md`
+
+Repository-specific guidance takes precedence over general examples in this file. Keep infrastructure-shaped dependencies out of `listenarr.application`; define application-owned ports there and implement adapters in infrastructure/API.
+
 ## Project Overview
 Listenarr is a C# .NET Core Web API backend with Vue.js frontend for automated audiobook downloading and processing. The backend uses ASP.NET Core with Entity Framework Core and SQLite, while the frontend uses Vue.js 3 with TypeScript, Pinia, and Vite.
 

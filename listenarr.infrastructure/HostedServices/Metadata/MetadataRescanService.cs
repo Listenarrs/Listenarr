@@ -21,10 +21,9 @@ using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Application.Security;
 using Listenarr.Domain.Common;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace Listenarr.Application.Metadata
+namespace Listenarr.Infrastructure.HostedServices.Metadata
 {
     // Background hosted service to rescan files missing metadata and populate DB fields
     public class MetadataRescanService : BackgroundService

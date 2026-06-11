@@ -2,6 +2,18 @@
 
 This is a complete C# .NET Web API backend with Vue.js frontend for automated audiobook downloading and processing.
 
+## Required Repository Context
+
+Before making code, dependency, workflow, or documentation changes, review and follow:
+
+- `CONTRIBUTING.md`
+- `BACKEND_ARCHITECTURE.md`
+- `.github/RULES.md`
+- `.github/AGENTS.md`
+- `.github/.cursorrules`
+
+Repository-specific guidance takes precedence over general examples in this file. Keep infrastructure-shaped dependencies out of `listenarr.application`; define application-owned ports there and implement adapters in infrastructure/API.
+
 ## Project Overview
 - **Backend**: ASP.NET Core Web API (.NET 10.0+ / net10.0) with modular service architecture
 - **Frontend**: Vue.js 3 + TypeScript + Pinia + Vue Router + Vite

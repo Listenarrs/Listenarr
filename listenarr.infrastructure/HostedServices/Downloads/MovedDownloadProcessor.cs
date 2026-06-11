@@ -20,10 +20,9 @@ using Listenarr.Application.Interfaces;
 using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Domain.Models;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace Listenarr.Application.Downloads
+namespace Listenarr.Infrastructure.HostedServices.Downloads
 {
     /// <summary>
     /// Background service that handles moved downloads to remove them from client
@@ -306,4 +305,3 @@ namespace Listenarr.Application.Downloads
         }
     }
 }
-

@@ -75,7 +75,7 @@ namespace Listenarr.Api.Controllers.Configurations
         {
             var config = await _configurationService.GetStartupConfigAsync() ?? new StartupConfig();
             config.ApiVersion = NormalizeStartupApiVersion(config.ApiVersion);
-            if (SecurityRequestUtils.ShouldRedactSecretsForCaller(HttpContext))
+            if (HttpSecurityRequestUtils.ShouldRedactSecretsForCaller(HttpContext))
             {
                 config = ApiResponseRedactor.RedactStartupConfig(config);
             }
@@ -105,7 +105,7 @@ namespace Listenarr.Api.Controllers.Configurations
             }
 
             savedConfig.ApiVersion = NormalizeStartupApiVersion(savedConfig.ApiVersion);
-            if (SecurityRequestUtils.ShouldRedactSecretsForCaller(HttpContext))
+            if (HttpSecurityRequestUtils.ShouldRedactSecretsForCaller(HttpContext))
             {
                 return Ok(ApiResponseRedactor.RedactStartupConfig(savedConfig));
             }

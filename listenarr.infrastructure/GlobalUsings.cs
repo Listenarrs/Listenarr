@@ -1,0 +1,15 @@
+global using Microsoft.AspNetCore.DataProtection;
+global using Microsoft.AspNetCore.Http;
+global using Microsoft.AspNetCore.SignalR;
+global using Microsoft.Extensions.Hosting;
+global using Listenarr.Application.Audiobooks;
+global using Listenarr.Application.Common;
+global using Listenarr.Application.Downloads;
+global using Listenarr.Application.Metadata;
+global using Listenarr.Application.Search;
+global using Listenarr.Infrastructure.SignalR;
+global using Listenarr.Infrastructure.HostedServices.Audiobooks;
+global using Listenarr.Infrastructure.HostedServices.Common;
+global using Listenarr.Infrastructure.HostedServices.Downloads;
+global using Listenarr.Infrastructure.HostedServices.Metadata;
+global using Listenarr.Infrastructure.HostedServices.Search;

@@ -18,12 +18,10 @@
 
 using Listenarr.Api.Attributes;
 using Listenarr.Application.Interfaces;
-using Listenarr.Application.Notification;
 using Listenarr.Application.Security;
 using Listenarr.Domain.Models;
 using Listenarr.Domain.Models.Configurations;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.SignalR;
 using System.Text.Json;
 
 namespace Listenarr.Api.Controllers.Configurations
@@ -57,7 +55,7 @@ namespace Listenarr.Api.Controllers.Configurations
             try
             {
                 var settings = PrepareApplicationSettingsResponse(await _configurationService.GetApplicationSettingsAsync());
-                if (SecurityRequestUtils.ShouldRedactSecretsForCaller(HttpContext))
+                if (HttpSecurityRequestUtils.ShouldRedactSecretsForCaller(HttpContext))
                 {
                     return Ok(ApiResponseRedactor.RedactApplicationSettings(settings));
                 }
@@ -91,7 +89,7 @@ namespace Listenarr.Api.Controllers.Configurations
                 await _settingsHub.Clients.All.SendAsync("SettingsUpdated", ApiResponseRedactor.RedactApplicationSettings(savedSettings));
 
                 _logger.LogDebug("Application settings saved successfully and broadcasted via SignalR");
-                if (SecurityRequestUtils.ShouldRedactSecretsForCaller(HttpContext))
+                if (HttpSecurityRequestUtils.ShouldRedactSecretsForCaller(HttpContext))
                 {
                     return Ok(ApiResponseRedactor.RedactApplicationSettings(savedSettings));
                 }

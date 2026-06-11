@@ -74,6 +74,10 @@ namespace Listenarr.Infrastructure.Extensions
             services.AddScoped<IRootFolderRepository, EfRootFolderRepository>();
             services.AddScoped<IDownloadHistoryRepository, DownloadHistoryRepository>();
             services.AddSingleton<IApplicationPathService>(_ => new ApplicationPathService(contentRootPath));
+            services.AddScoped<IAudioTagWriter, TagLibAudioTagWriter>();
+            services.AddSingleton<IHtmlTextExtractor, HtmlAgilityPackTextExtractor>();
+            services.AddSingleton<IAudibleAuthorPageParser, HtmlAgilityPackAudibleAuthorPageParser>();
+            services.AddHttpClient<ICoverImageProbe, ImageSharpCoverImageProbe>();
             services.AddHttpClient<ImageCacheService>()
                 .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
                 {

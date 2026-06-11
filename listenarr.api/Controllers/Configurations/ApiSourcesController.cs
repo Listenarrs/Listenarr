@@ -52,7 +52,7 @@ namespace Listenarr.Api.Controllers.Configurations
             try
             {
                 var configs = await _configurationService.GetApiConfigurationsAsync();
-                if (SecurityRequestUtils.ShouldRedactSecretsForCaller(HttpContext))
+                if (HttpSecurityRequestUtils.ShouldRedactSecretsForCaller(HttpContext))
                 {
                     configs = configs.Select(ApiResponseRedactor.RedactApiConfiguration).ToList();
                 }
@@ -83,7 +83,7 @@ namespace Listenarr.Api.Controllers.Configurations
                 {
                     return NotFound();
                 }
-                if (SecurityRequestUtils.ShouldRedactSecretsForCaller(HttpContext))
+                if (HttpSecurityRequestUtils.ShouldRedactSecretsForCaller(HttpContext))
                 {
                     return Ok(ApiResponseRedactor.RedactApiConfiguration(config));
                 }

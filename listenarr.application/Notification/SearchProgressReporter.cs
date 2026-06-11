@@ -15,7 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Microsoft.AspNetCore.SignalR;
+using Listenarr.Application.Interfaces;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Notification
@@ -25,12 +25,12 @@ namespace Listenarr.Application.Notification
     /// </summary>
     public class SearchProgressReporter
     {
-        private readonly IHubContext<DownloadHub>? _hubContext;
+        private readonly IHubBroadcaster? _hubBroadcaster;
         private readonly ILogger<SearchProgressReporter> _logger;
 
-        public SearchProgressReporter(IHubContext<DownloadHub>? hubContext, ILogger<SearchProgressReporter> logger)
+        public SearchProgressReporter(IHubBroadcaster? hubBroadcaster, ILogger<SearchProgressReporter> logger)
         {
-            _hubContext = hubContext;
+            _hubBroadcaster = hubBroadcaster;
             _logger = logger;
         }
 
@@ -43,10 +43,10 @@ namespace Listenarr.Application.Notification
         {
             try
             {
-                if (_hubContext != null)
+                if (_hubBroadcaster != null)
                 {
                     // Structured payload: include a type so clients can distinguish interactive vs automatic
-                    await _hubContext.Clients.All.SendAsync("SearchProgress", new { message, asin, type = "interactive" });
+                    await _hubBroadcaster.BroadcastAsync("SearchProgress", new { message, asin, type = "interactive" });
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)

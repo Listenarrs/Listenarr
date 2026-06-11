@@ -29,7 +29,6 @@ using Serilog;
 using Serilog.Events;
 using Listenarr.Infrastructure.Extensions;
 using Listenarr.Application.Interfaces;
-using Listenarr.Infrastructure.SignalR;
 using Listenarr.Application.Downloads;
 using Listenarr.Infrastructure.Persistence;
 using Listenarr.Application.Common;
@@ -42,7 +41,6 @@ using Listenarr.Infrastructure.Services;
 using Listenarr.Domain.Models.Configurations;
 using Listenarr.Application.Audiobooks;
 using Listenarr.Infrastructure.Persistence.Repositories;
-using Microsoft.AspNetCore.SignalR;
 using Listenarr.Api.Middleware;
 using Listenarr.Api.Filters;
 using System.Text.Json.Serialization;
@@ -416,9 +414,6 @@ if (!disableHostedServices)
 {
     builder.Services.AddListenarrHostedServices(builder.Configuration);
 }
-
-// FIXME: Required for ConfigurationService, what was planned with this feature ?
-builder.Services.AddSingleton(new EphemeralDataProtectionProvider().CreateProtector("Listenarr.ConfigurationService.ProwlarrImport"));
 
 // Startup DB normalizer: run once at startup to idempotently normalize legacy JSON columns
 builder.Services.AddHostedService<StartupDbNormalizer>();

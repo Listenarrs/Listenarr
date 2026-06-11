@@ -19,7 +19,7 @@ using System.Net;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Listenarr.Application.Common;
-using Microsoft.AspNetCore.Http;
+using Listenarr.Application.Interfaces;
 
 namespace Listenarr.Application.Notification
 {
@@ -259,7 +259,7 @@ namespace Listenarr.Application.Notification
             return payload;
         }
 
-        public static async Task<(JsonObject payload, AttachmentInfo? attachment)> CreateDiscordPayloadWithAttachmentAsync(string trigger, object data, string? startupBaseUrl, HttpClient httpClient, IHttpContextAccessor? httpContextAccessor = null, Action<string>? logInfo = null, Action<Exception, string>? logDebug = null, string? apiVersion = null)
+        public static async Task<(JsonObject payload, AttachmentInfo? attachment)> CreateDiscordPayloadWithAttachmentAsync(string trigger, object data, string? startupBaseUrl, HttpClient httpClient, IRequestContextAccessor? requestContextAccessor = null, Action<string>? logInfo = null, Action<Exception, string>? logDebug = null, string? apiVersion = null)
         {
             // Implementation mirrors previous CreateDiscordPayloadWithAttachmentAsync but kept here to centralize payload logic.
             JsonNode? node = data == null ? null : JsonSerializer.SerializeToNode(data);
@@ -341,9 +341,9 @@ namespace Listenarr.Application.Notification
                     absoluteImageUrl = startupBaseUrl.TrimEnd('/') + imageUrl;
                     logInfo?.Invoke($"Constructed absolute URL from relative path: {absoluteImageUrl}");
                 }
-                else if (imageUrl.StartsWith("/") && startupBaseUrl == null && httpContextAccessor?.HttpContext != null)
+                else if (imageUrl.StartsWith("/") && startupBaseUrl == null && requestContextAccessor?.Current != null)
                 {
-                    var derived = GetBaseUrlFromHttpContext(httpContextAccessor.HttpContext);
+                    var derived = GetBaseUrlFromRequestContext(requestContextAccessor.Current);
                     if (!string.IsNullOrWhiteSpace(derived)) absoluteImageUrl = derived.TrimEnd('/') + imageUrl;
                 }
             }
@@ -498,12 +498,11 @@ namespace Listenarr.Application.Notification
             return (payload, attachmentInfo);
         }
 
-        public static string? GetBaseUrlFromHttpContext(HttpContext? ctx)
+        public static string? GetBaseUrlFromRequestContext(RequestContextSnapshot? ctx)
         {
-            if (ctx?.Request == null) return null;
-            var req = ctx.Request;
-            var scheme = req.Scheme;
-            var host = req.Host.Value;
+            if (ctx == null) return null;
+            var scheme = ctx.Scheme;
+            var host = ctx.Host;
             if (string.IsNullOrWhiteSpace(scheme) || string.IsNullOrWhiteSpace(host)) return null;
             return scheme + "://" + host;
         }

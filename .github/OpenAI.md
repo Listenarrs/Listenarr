@@ -1,5 +1,18 @@
 # OpenAI Instructions for Listenarr
 
+## Required Repository Context
+
+Before making code, dependency, workflow, or documentation changes, review and follow:
+
+- `CONTRIBUTING.md`
+- `BACKEND_ARCHITECTURE.md`
+- `.github/RULES.md`
+- `.github/copilot-instructions.md`
+- `.github/AGENTS.md`
+- `.github/.cursorrules`
+
+Repository-specific guidance takes precedence over general examples in this file. Keep infrastructure-shaped dependencies out of `listenarr.application`; define application-owned ports there and implement adapters in infrastructure/API.
+
 ## Overview
 Listenarr is a C# .NET 10.0 audiobook management system with Vue.js 3 frontend. See [copilot-instructions.md](copilot-instructions.md) for complete details.
 

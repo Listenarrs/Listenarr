@@ -18,12 +18,11 @@
 using Listenarr.Application.Interfaces;
 using Listenarr.Domain.Models.Exceptions;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Hosting;
 using Listenarr.Domain.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Listenarr.Application.Interfaces.Repositories;
 
-namespace Listenarr.Application.Downloads
+namespace Listenarr.Infrastructure.HostedServices.Downloads
 {
     /// <summary>
     /// Process the download processing jobs queued

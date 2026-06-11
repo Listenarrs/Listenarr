@@ -18,89 +18,11 @@
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
-using Microsoft.AspNetCore.Http;
 
 namespace Listenarr.Application.Security;
 
 public static class SecurityRequestUtils
 {
-    public static bool IsLoopbackRequest(HttpContext? context)
-    {
-        var ip = context?.Connection?.RemoteIpAddress;
-        if (ip == null)
-        {
-            // TestServer and some internal calls may not populate RemoteIpAddress.
-            return true;
-        }
-
-        if (ip.IsIPv4MappedToIPv6)
-        {
-            ip = ip.MapToIPv4();
-        }
-
-        return IPAddress.IsLoopback(ip);
-    }
-
-    public static bool IsLocalOrPrivateRequest(HttpContext? context)
-    {
-        var ip = context?.Connection?.RemoteIpAddress;
-        if (ip == null)
-        {
-            // TestServer and some internal calls may not populate RemoteIpAddress.
-            return true;
-        }
-
-        return IsPrivateOrLoopback(ip);
-    }
-
-    public static bool IsAuthenticatedAdminOrApiKey(HttpContext? context)
-    {
-        var user = context?.User;
-        if (user?.Identity?.IsAuthenticated != true)
-        {
-            return false;
-        }
-
-        if (user.IsInRole("Administrator"))
-        {
-            return true;
-        }
-
-        var authMethod = user.FindFirst("AuthMethod")?.Value;
-        if (!string.IsNullOrWhiteSpace(authMethod) &&
-            string.Equals(authMethod, "ApiKey", StringComparison.Ordinal))
-        {
-            return true;
-        }
-
-        return false;
-    }
-
-    /// <summary>
-    /// Returns <see langword="true"/> if the request is authenticated exclusively via an API key
-    /// (i.e. the <c>AuthMethod</c> claim equals <c>"ApiKey"</c>).
-    /// Returns <see langword="false"/> for unauthenticated requests or session-authenticated requests.
-    /// </summary>
-    /// <param name="context">The current HTTP context, or <see langword="null"/> for non-HTTP callers.</param>
-    public static bool IsApiKeyAuthenticated(HttpContext? context)
-    {
-        var user = context?.User;
-        if (user?.Identity?.IsAuthenticated != true)
-        {
-            return false;
-        }
-
-        var authMethod = user.FindFirst("AuthMethod")?.Value;
-        return !string.IsNullOrWhiteSpace(authMethod) &&
-               string.Equals(authMethod, "ApiKey", StringComparison.Ordinal);
-    }
-
-    public static bool ShouldRedactSecretsForCaller(HttpContext? context)
-        // *Arr standard trust model:
-        // - trusted local/private-network callers may receive non-redacted config payloads
-        // - public-network callers must authenticate as admin/API-key to receive secrets
-        => !IsLocalOrPrivateRequest(context) && !IsAuthenticatedAdminOrApiKey(context);
-
     public static string HashSecretForLog(string? secret, string prefix = "sha256")
     {
         if (string.IsNullOrWhiteSpace(secret))

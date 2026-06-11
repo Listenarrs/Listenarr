@@ -30,13 +30,15 @@ namespace Listenarr.Application.Metadata
         private readonly HttpClient _httpClient;
         private readonly IConfigurationService _configurationService;
         private readonly IFfmpegService _ffmpegService;
+        private readonly IAudioTagWriter _audioTagWriter;
         private readonly ILogger<MetadataService> _logger;
 
-        public MetadataService(HttpClient httpClient, IConfigurationService configurationService, ILogger<MetadataService> logger, IFfmpegService ffmpegService)
+        public MetadataService(HttpClient httpClient, IConfigurationService configurationService, ILogger<MetadataService> logger, IFfmpegService ffmpegService, IAudioTagWriter audioTagWriter)
         {
             _httpClient = httpClient;
             _configurationService = configurationService;
             _ffmpegService = ffmpegService;
+            _audioTagWriter = audioTagWriter;
             _logger = logger;
         }
 
@@ -213,7 +215,7 @@ namespace Listenarr.Application.Metadata
         {
             try
             {
-                // This would use a library like TagLib# to apply metadata to audio files
+                // File tag writing is handled by an infrastructure adapter.
                 _logger.LogInformation("Applied metadata to file: {File}", LogRedaction.SanitizeText(filePath));
                 await Task.CompletedTask;
             }
@@ -225,35 +227,7 @@ namespace Listenarr.Application.Metadata
 
         public Task WriteAsinTagAsync(string filePath, string asin)
         {
-            if (string.IsNullOrWhiteSpace(filePath) || string.IsNullOrWhiteSpace(asin))
-                return Task.CompletedTask;
-            try
-            {
-                using var file = TagLib.File.Create(filePath);
-
-                // M4B / M4A / MP4 — iTunes freeform dash box  ----:com.apple.iTunes:ASIN
-                if (file.Tag is TagLib.Mpeg4.AppleTag appleTag)
-                    appleTag.SetDashBox("com.apple.iTunes", "ASIN", asin);
-                // MP3 — TXXX frame with description "ASIN"
-                else if (file.GetTag(TagLib.TagTypes.Id3v2) is TagLib.Id3v2.Tag id3Tag)
-                {
-                    var frame = TagLib.Id3v2.UserTextInformationFrame.Get(id3Tag, "ASIN", true);
-                    frame.Text = new[] { asin };
-                }
-                // FLAC / OGG / Opus — Vorbis comment
-                else if (file.GetTag(TagLib.TagTypes.Xiph) is TagLib.Ogg.XiphComment xiph)
-                    xiph.SetField("ASIN", asin);
-                else
-                    return Task.CompletedTask; // Unknown format — skip silently
-
-                file.Save();
-                _logger.LogDebug("Wrote ASIN tag '{Asin}' to {File}", asin, LogRedaction.SanitizeFilePath(filePath));
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogWarning(ex, "Failed to write ASIN tag to {File} — import will continue", LogRedaction.SanitizeFilePath(filePath));
-            }
-            return Task.CompletedTask;
+            return _audioTagWriter.WriteAsinTagAsync(filePath, asin);
         }
 
         public async Task<byte[]?> DownloadCoverArtAsync(string coverArtUrl)
@@ -307,4 +281,3 @@ namespace Listenarr.Application.Metadata
         }
     }
 }
-

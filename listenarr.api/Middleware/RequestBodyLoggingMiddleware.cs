@@ -119,4 +119,3 @@ namespace Listenarr.Api.Middleware
         }
     }
 }
-

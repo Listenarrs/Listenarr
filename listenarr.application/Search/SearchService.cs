@@ -29,7 +29,6 @@ using Listenarr.Application.Interfaces.Repositories;
 using Microsoft.Extensions.Logging;
 using Listenarr.Application.Notification;
 using Listenarr.Application.Metadata;
-using SixLabors.ImageSharp;
 using Listenarr.Application.Security;
 
 namespace Listenarr.Application.Search
@@ -50,6 +49,8 @@ namespace Listenarr.Application.Search
         private readonly AsinSearchHandler _asinSearchHandler;
         private readonly IMemoryCache? _cache;
         private readonly IEnumerable<IIndexerSearchProvider> _searchProviders;
+        private readonly ICoverImageProbe? _coverImageProbe;
+        private readonly IHtmlTextExtractor? _htmlTextExtractor;
 
         public SearchService(
             HttpClient httpClient,
@@ -65,7 +66,9 @@ namespace Listenarr.Application.Search
             SearchResultScorerService searchResultScorer,
             AsinSearchHandler asinSearchHandler,
             IEnumerable<IIndexerSearchProvider>? searchProviders = null,
-            IMemoryCache? cache = null)
+            IMemoryCache? cache = null,
+            ICoverImageProbe? coverImageProbe = null,
+            IHtmlTextExtractor? htmlTextExtractor = null)
         {
             _httpClient = httpClient;
             _configurationService = configurationService;
@@ -81,6 +84,8 @@ namespace Listenarr.Application.Search
             _searchResultScorer = searchResultScorer;
             _asinSearchHandler = asinSearchHandler;
             _cache = cache;
+            _coverImageProbe = coverImageProbe;
+            _htmlTextExtractor = htmlTextExtractor;
         }
 
         public async Task<List<SearchResult>> SearchAsync(string query, string? category = null, List<string>? apiIds = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false)
@@ -1429,30 +1434,19 @@ namespace Listenarr.Application.Search
                 try
                 {
                     var url = $"https://covers.openlibrary.org/b/id/{cid}-L.jpg";
-                    using var resp = await _httpClient.GetAsync(url);
-                    if (!resp.IsSuccessStatusCode) continue;
-                    using var ms = new System.IO.MemoryStream(await resp.Content.ReadAsByteArrayAsync());
-                    try
+                    var dimensions = _coverImageProbe == null ? null : await _coverImageProbe.ProbeAsync(url);
+                    if (dimensions == null || dimensions.Value.Height == 0) continue;
+
+                    var ratio = (double)dimensions.Value.Width / dimensions.Value.Height;
+                    var delta = Math.Abs(ratio - 1.0);
+                    if (delta < bestDelta)
                     {
-                        // Use ImageSharp to measure image dimensions in a cross-platform way
-                        using var img = Image.Load(ms);
-                        if (img.Height == 0) continue;
-                        var ratio = (double)img.Width / img.Height;
-                        var delta = Math.Abs(ratio - 1.0);
-                        if (delta < bestDelta)
-                        {
-                            bestDelta = delta;
-                            bestUrl = url;
-                        }
-                        // If exactly 1:1, short-circuit
-                        if (Math.Abs(delta) < 0.01)
-                            break;
+                        bestDelta = delta;
+                        bestUrl = url;
                     }
-                    catch (Exception imgEx) when (imgEx is not OperationCanceledException && imgEx is not OutOfMemoryException && imgEx is not StackOverflowException)
-                    {
-                        _logger.LogDebug(imgEx, "Failed to measure image dimensions for cover {Url}", url);
-                        continue;
-                    }
+
+                    if (Math.Abs(delta) < 0.01)
+                        break;
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                 {
@@ -3621,11 +3615,8 @@ namespace Listenarr.Application.Search
                                             if (resp.IsSuccessStatusCode)
                                             {
                                                 var html = await resp.Content.ReadAsStringAsync();
-                                                var htmlDoc = new HtmlAgilityPack.HtmlDocument();
-                                                htmlDoc.LoadHtml(html);
-
                                                 // Look for common comment count patterns in page text
-                                                var text = htmlDoc.DocumentNode.InnerText;
+                                                var text = _htmlTextExtractor?.ExtractText(html) ?? html;
                                                 var m = System.Text.RegularExpressions.Regex.Match(text, "(\\d{1,6})\\s+comments?", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
                                                 if (!m.Success)
                                                 {
@@ -4199,5 +4190,3 @@ namespace Listenarr.Application.Search
         }
     }
 }
-
-
