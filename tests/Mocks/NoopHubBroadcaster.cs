@@ -15,9 +15,6 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Listenarr.Application.Interfaces;
-using Listenarr.Domain.Models;
-
 namespace Listenarr.Tests.Mocks
 {
     // Minimal no-op broadcaster used as a safe fallback when the real
@@ -25,6 +22,12 @@ namespace Listenarr.Tests.Mocks
     public class NoopHubBroadcaster : IHubBroadcaster
     {
         public Task BroadcastQueueUpdateAsync(QueueSnapshot queueSnapshot)
+        {
+            // Intentionally do nothing in tests or lightweight hosts
+            return Task.CompletedTask;
+        }
+
+        public Task BroadcastAsync(string eventName, object payload, CancellationToken cancellationToken = default)
         {
             // Intentionally do nothing in tests or lightweight hosts
             return Task.CompletedTask;

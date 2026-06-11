@@ -44,6 +44,7 @@ namespace Listenarr.Infrastructure.Extensions
         {
             // Core services and application logic
             services.AddScoped<IConfigurationService, ConfigurationService>();
+            services.AddDataProtection();
             services.AddSingleton<ISecretProtector, DataProtectionSecretProtector>();
             services.AddScoped<IRequestContextAccessor, AspNetRequestContextAccessor>();
             // Startup config: read config.json (optional) and expose via IStartupConfigService

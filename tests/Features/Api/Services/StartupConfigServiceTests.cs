@@ -15,11 +15,6 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Microsoft.Extensions.Logging;
-using Xunit;
-using Listenarr.Domain.Models;
-using Listenarr.Application.Common;
-
 namespace Listenarr.Tests.Features.Api.Services
 {
     public class StartupConfigServiceTests
@@ -33,8 +28,8 @@ namespace Listenarr.Tests.Features.Api.Services
 
             using var loggerFactory = new LoggerFactory();
             var logger = loggerFactory.CreateLogger<StartupConfigService>();
-            var envMock = new Moq.Mock<Microsoft.Extensions.Hosting.IHostEnvironment>();
-            envMock.Setup(e => e.ContentRootPath).Returns(AppContext.BaseDirectory);
+            var pathServiceMock = new Moq.Mock<IApplicationPathService>();
+            pathServiceMock.Setup(e => e.ContentRootPath).Returns(AppContext.BaseDirectory);
 
             try
             {
@@ -43,7 +38,7 @@ namespace Listenarr.Tests.Features.Api.Services
                     Directory.Delete(cfgDir, recursive: true);
                 }
 
-                var svc = new StartupConfigService(logger, envMock.Object);
+                var svc = new StartupConfigService(logger, pathServiceMock.Object);
 
                 // default config should exist and have false auth
                 var original = svc.GetConfig();

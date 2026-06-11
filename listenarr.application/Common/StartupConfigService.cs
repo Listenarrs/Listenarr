@@ -30,7 +30,7 @@ namespace Listenarr.Application.Common
         private readonly string _configPath;
         private StartupConfig? _config;
 
-        public StartupConfigService(ILogger<StartupConfigService> logger, Microsoft.Extensions.Hosting.IHostEnvironment env)
+        public StartupConfigService(ILogger<StartupConfigService> logger, IApplicationPathService applicationPathService)
         {
             _logger = logger;
 
@@ -38,7 +38,7 @@ namespace Listenarr.Application.Common
             // <repoRoot>/listenarr.api/config/config.json for local development
             // so `npm run dev` uses the repo config file. Otherwise fall back to
             // content-root-based config (e.g., published/bin layouts).
-            var contentRoot = env.ContentRootPath ?? AppContext.BaseDirectory;
+            var contentRoot = applicationPathService.ContentRootPath ?? AppContext.BaseDirectory;
 
             // In Development, try to resolve the repository root from the current
             // working directory (most reliable when running via `npm run dev`).

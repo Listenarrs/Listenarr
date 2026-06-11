@@ -1,6 +1,7 @@
 global using Microsoft.Extensions.DependencyInjection;
 global using Microsoft.Extensions.Logging;
 global using Moq;
+global using Moq.Protected;
 global using Xunit;
 global using Listenarr.Application.Common;
 global using Listenarr.Application.Interfaces;
