@@ -49,7 +49,8 @@ namespace Listenarr.Api.Controllers
 
         private readonly ILogger<ProwlarrCompatController> _logger;
         private readonly IIndexerRepository _indexerRepository;
-        private readonly IHubContext<SettingsHub> _settingsHub;
+        private readonly IHubBroadcaster _hubBroadcaster;
+        private readonly IRealtimeClientRegistry _realtimeClientRegistry;
         private readonly IToastService _toastService;
         private readonly IStartupConfigService _startupConfigService;
         private readonly IApplicationVersionService _applicationVersionService;
@@ -107,14 +108,16 @@ namespace Listenarr.Api.Controllers
         public ProwlarrCompatController(
             ILogger<ProwlarrCompatController> logger,
             IIndexerRepository indexerRepository,
-            IHubContext<SettingsHub> settingsHub,
+            IHubBroadcaster hubBroadcaster,
+            IRealtimeClientRegistry realtimeClientRegistry,
             IToastService toastService,
             IStartupConfigService startupConfigService,
             IApplicationVersionService applicationVersionService)
         {
             _logger = logger;
             _indexerRepository = indexerRepository;
-            _settingsHub = settingsHub;
+            _hubBroadcaster = hubBroadcaster;
+            _realtimeClientRegistry = realtimeClientRegistry;
             _toastService = toastService;
             _startupConfigService = startupConfigService;
             _applicationVersionService = applicationVersionService;
@@ -381,7 +384,7 @@ namespace Listenarr.Api.Controllers
                     _logger?.LogInformation("Prowlarr: Deleted indexer {Id} (name={Name})", i.Id, i.Name);
                     try
                     {
-                        await _settingsHub.Clients.All.SendAsync("IndexersUpdated", new { created = 0, skipped = 0, indexers = new[] { new { id = i.Id, name = i.Name, baseUrl = i.Url } } });
+                        await _hubBroadcaster.BroadcastAsync(RealtimeHubTarget.Settings, "IndexersUpdated", new { created = 0, skipped = 0, indexers = new[] { new { id = i.Id, name = i.Name, baseUrl = i.Url } } });
                         var deleteMessage = $"Removed indexer: {i.Name}";
                         if (ShouldSendToastForIndexer(i.Id, deleteMessage) && ShouldSendToastForMessage(deleteMessage))
                         {
@@ -649,7 +652,7 @@ namespace Listenarr.Api.Controllers
                 {
                     var stillExists = (await _indexerRepository.GetByIdAsync(indexer.Id)) != null;
                     var createdForBroadcast = (created && stillExists) ? 1 : 0;
-                    await _settingsHub.Clients.All.SendAsync("IndexersUpdated", new { created = createdForBroadcast, skipped = 0, indexers = new[] { new { id = indexer.Id, name = indexer.Name, baseUrl = indexer.Url } } });
+                    await _hubBroadcaster.BroadcastAsync(RealtimeHubTarget.Settings, "IndexersUpdated", new { created = createdForBroadcast, skipped = 0, indexers = new[] { new { id = indexer.Id, name = indexer.Name, baseUrl = indexer.Url } } });
 
                     // Determine toast message. If the indexer was created very recently (by a prior POST or PUT),
                     // suppress an additional 'Updated' toast to avoid duplicate notifications for rapid import/update flows.
@@ -978,7 +981,7 @@ namespace Listenarr.Api.Controllers
 
                     _logger?.LogInformation("Broadcasting IndexersUpdated to clients: created={Created}, skipped={Skipped}, indexerCount={Count}", created, skipped, createdInfo.Length);
 
-                    await _settingsHub.Clients.All.SendAsync("IndexersUpdated", new { created, skipped, indexers = createdInfo });
+                    await _hubBroadcaster.BroadcastAsync(RealtimeHubTarget.Settings, "IndexersUpdated", new { created, skipped, indexers = createdInfo });
 
                     _logger?.LogInformation("IndexersUpdated broadcast complete");
 
@@ -1086,7 +1089,7 @@ namespace Listenarr.Api.Controllers
 
             _logger?.LogInformation("DEBUG: Broadcasting IndexersUpdated (manual test): created={Created}", created);
 
-            await _settingsHub.Clients.All.SendAsync("IndexersUpdated", new { created, skipped = 0, indexers });
+            await _hubBroadcaster.BroadcastAsync(RealtimeHubTarget.Settings, "IndexersUpdated", new { created, skipped = 0, indexers });
 
             _logger?.LogInformation("DEBUG: IndexersUpdated broadcast sent");
 
@@ -1117,8 +1120,8 @@ namespace Listenarr.Api.Controllers
         {
             try
             {
-                var clients = SettingsHub.ConnectedClientIds.ToArray();
-                return Ok(new { connected = clients.Length, clients });
+                var clients = _realtimeClientRegistry.GetSettingsClientIds();
+                return Ok(new { connected = clients.Count, clients });
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {

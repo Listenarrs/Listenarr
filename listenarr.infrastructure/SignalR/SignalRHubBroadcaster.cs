@@ -22,12 +22,17 @@ namespace Listenarr.Infrastructure.SignalR
 {
     public class SignalRHubBroadcaster : IHubBroadcaster
     {
-        private readonly IHubContext<DownloadHub> _hubContext;
+        private readonly IHubContext<DownloadHub> _downloadHubContext;
+        private readonly IHubContext<SettingsHub>? _settingsHubContext;
         private readonly ILogger<SignalRHubBroadcaster> _logger;
 
-        public SignalRHubBroadcaster(IHubContext<DownloadHub> hubContext, ILogger<SignalRHubBroadcaster> logger)
+        public SignalRHubBroadcaster(
+            IHubContext<DownloadHub> downloadHubContext,
+            ILogger<SignalRHubBroadcaster> logger,
+            IHubContext<SettingsHub>? settingsHubContext = null)
         {
-            _hubContext = hubContext ?? throw new ArgumentNullException(nameof(hubContext));
+            _downloadHubContext = downloadHubContext ?? throw new ArgumentNullException(nameof(downloadHubContext));
+            _settingsHubContext = settingsHubContext;
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
@@ -36,7 +41,7 @@ namespace Listenarr.Infrastructure.SignalR
             try
             {
                 // Primary, public API
-                var clientProxy = _hubContext.Clients.All;
+                var clientProxy = _downloadHubContext.Clients.All;
                 await clientProxy.SendAsync("QueueUpdate", queueSnapshot);
 
                 // Some tests/mocks expect SendCoreAsync; call as a compatibility step
@@ -57,13 +62,31 @@ namespace Listenarr.Infrastructure.SignalR
 
         public async Task BroadcastAsync(string eventName, object payload, CancellationToken cancellationToken = default)
         {
+            await BroadcastAsync(RealtimeHubTarget.Downloads, eventName, payload, cancellationToken);
+        }
+
+        public async Task BroadcastAsync(RealtimeHubTarget target, string eventName, object payload, CancellationToken cancellationToken = default)
+        {
             try
             {
-                await _hubContext.Clients.All.SendAsync(eventName, payload, cancellationToken);
+                if (target == RealtimeHubTarget.Settings && _settingsHubContext is null)
+                {
+                    _logger.LogWarning("Cannot broadcast {EventName} to {HubTarget} because the settings hub context is not registered", eventName, target);
+                    return;
+                }
+
+                var clientProxy = target switch
+                {
+                    RealtimeHubTarget.Downloads => _downloadHubContext.Clients.All,
+                    RealtimeHubTarget.Settings => _settingsHubContext!.Clients.All,
+                    _ => _downloadHubContext.Clients.All
+                };
+
+                await clientProxy.SendAsync(eventName, payload, cancellationToken);
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
-                _logger.LogWarning(ex, "Failed to broadcast {EventName}", eventName);
+                _logger.LogWarning(ex, "Failed to broadcast {EventName} to {HubTarget}", eventName, target);
             }
         }
     }

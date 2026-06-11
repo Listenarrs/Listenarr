@@ -2317,9 +2317,9 @@ namespace Listenarr.Api.Controllers
                     try
                     {
                         using var scope = _scopeFactory.CreateScope();
-                        var hub = scope.ServiceProvider.GetRequiredService<IHubContext<DownloadHub>>();
+                        var hub = scope.ServiceProvider.GetRequiredService<IHubBroadcaster>();
                         var job = new { jobId = jobId.ToString(), audiobookId = id, status = "Queued", enqueuedAt = DateTime.UtcNow };
-                        await hub.Clients.All.SendAsync("ScanJobUpdate", job);
+                        await hub.BroadcastAsync(RealtimeHubTarget.Downloads, "ScanJobUpdate", job);
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                     {
@@ -2906,9 +2906,9 @@ namespace Listenarr.Api.Controllers
                 try
                 {
                     using var hubScope = _scopeFactory.CreateScope();
-                    var hub = hubScope.ServiceProvider.GetRequiredService<IHubContext<DownloadHub>>();
+                    var hub = hubScope.ServiceProvider.GetRequiredService<IHubBroadcaster>();
                     var job = new { jobId = jobId.ToString(), audiobookId = id, status = "Queued", enqueuedAt = DateTime.UtcNow };
-                    await hub.Clients.All.SendAsync("MoveJobUpdate", job);
+                    await hub.BroadcastAsync(RealtimeHubTarget.Downloads, "MoveJobUpdate", job);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                 {
@@ -2961,9 +2961,9 @@ namespace Listenarr.Api.Controllers
             try
             {
                 using var scope = _scopeFactory.CreateScope();
-                var hub = scope.ServiceProvider.GetRequiredService<IHubContext<DownloadHub>>();
+                var hub = scope.ServiceProvider.GetRequiredService<IHubBroadcaster>();
                 var job = new { jobId = newJobId.ToString(), status = "Queued", enqueuedAt = DateTime.UtcNow };
-                await hub.Clients.All.SendAsync("MoveJobUpdate", job);
+                await hub.BroadcastAsync(RealtimeHubTarget.Downloads, "MoveJobUpdate", job);
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
@@ -2993,9 +2993,9 @@ namespace Listenarr.Api.Controllers
             try
             {
                 using var scope = _scopeFactory.CreateScope();
-                var hub = scope.ServiceProvider.GetRequiredService<IHubContext<DownloadHub>>();
+                var hub = scope.ServiceProvider.GetRequiredService<IHubBroadcaster>();
                 var job = new { jobId = newJobId.ToString(), status = "Queued", enqueuedAt = DateTime.UtcNow };
-                await hub.Clients.All.SendAsync("ScanJobUpdate", job);
+                await hub.BroadcastAsync(RealtimeHubTarget.Downloads, "ScanJobUpdate", job);
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
@@ -3043,9 +3043,9 @@ namespace Listenarr.Api.Controllers
                 }).ToList();
 
                 using var scope = _scopeFactory.CreateScope();
-                var hub = scope.ServiceProvider.GetRequiredService<IHubContext<DownloadHub>>();
+                var hub = scope.ServiceProvider.GetRequiredService<IHubBroadcaster>();
                 // Include a structured payload so clients can distinguish manual vs automatic searches
-                await hub.Clients.All.SendCoreAsync("SearchProgress", new object[] { new { message = $"Manual search query: {searchQuery}", details = new { rawCount = searchResults.Count, rawSamples = rawSummaries }, type = "interactive", audiobookId = audiobook.Id } });
+                await hub.BroadcastAsync(RealtimeHubTarget.Downloads, "SearchProgress", new { message = $"Manual search query: {searchQuery}", details = new { rawCount = searchResults.Count, rawSamples = rawSummaries }, type = "interactive", audiobookId = audiobook.Id });
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {

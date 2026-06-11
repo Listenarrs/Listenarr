@@ -28,6 +28,7 @@ using Microsoft.OpenApi;
 using Serilog;
 using Serilog.Events;
 using Listenarr.Infrastructure.Extensions;
+using Listenarr.Infrastructure.SignalR;
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Downloads;
 using Listenarr.Infrastructure.Persistence;

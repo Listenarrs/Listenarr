@@ -15,20 +15,16 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Listenarr.Domain.Models;
 
-namespace Listenarr.Application.Interfaces
+using Listenarr.Application.Interfaces;
+
+namespace Listenarr.Infrastructure.SignalR
 {
-    public enum RealtimeHubTarget
+    public sealed class SignalRClientRegistry : IRealtimeClientRegistry
     {
-        Downloads,
-        Settings
-    }
-
-    public interface IHubBroadcaster
-    {
-        Task BroadcastQueueUpdateAsync(QueueSnapshot queueSnapshot);
-        Task BroadcastAsync(string eventName, object payload, CancellationToken cancellationToken = default);
-        Task BroadcastAsync(RealtimeHubTarget target, string eventName, object payload, CancellationToken cancellationToken = default);
+        public IReadOnlyCollection<string> GetSettingsClientIds()
+        {
+            return SettingsHub.ConnectedClientIds.ToArray();
+        }
     }
 }

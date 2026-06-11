@@ -32,5 +32,11 @@ namespace Listenarr.Tests.Mocks
             // Intentionally do nothing in tests or lightweight hosts
             return Task.CompletedTask;
         }
+
+        public Task BroadcastAsync(RealtimeHubTarget target, string eventName, object payload, CancellationToken cancellationToken = default)
+        {
+            // Intentionally do nothing in tests or lightweight hosts
+            return Task.CompletedTask;
+        }
     }
 }

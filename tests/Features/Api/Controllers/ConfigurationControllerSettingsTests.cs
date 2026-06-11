@@ -17,7 +17,6 @@
  */
 using Listenarr.Api.Controllers.Configurations;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Listenarr.Tests.Features.Api.Controllers
@@ -42,7 +41,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
             var controller = new SettingsController(
                 configurationService.Object,
                 NullLogger<SettingsController>.Instance,
-                Mock.Of<IHubContext<SettingsHub>>());
+                Mock.Of<IHubBroadcaster>());
 
             var result = await controller.GetApplicationSettings();
             var ok = Assert.IsType<OkObjectResult>(result.Result);

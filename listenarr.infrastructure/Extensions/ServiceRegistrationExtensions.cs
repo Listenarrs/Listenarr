@@ -219,6 +219,7 @@ namespace Listenarr.Infrastructure.Extensions
 
             // SignalR broadcaster abstraction used to centralize broadcast logic and simplify testing
             services.AddSingleton<IHubBroadcaster, SignalRHubBroadcaster>();
+            services.AddSingleton<IRealtimeClientRegistry, SignalRClientRegistry>();
 
             return services;
         }

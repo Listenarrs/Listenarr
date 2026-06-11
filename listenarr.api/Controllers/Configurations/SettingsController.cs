@@ -33,16 +33,16 @@ namespace Listenarr.Api.Controllers.Configurations
     {
         private readonly IConfigurationService _configurationService;
         private readonly ILogger<SettingsController> _logger;
-        private readonly IHubContext<SettingsHub> _settingsHub;
+        private readonly IHubBroadcaster _hubBroadcaster;
 
         public SettingsController(
             IConfigurationService configurationService,
             ILogger<SettingsController> logger,
-            IHubContext<SettingsHub> settingsHub)
+            IHubBroadcaster hubBroadcaster)
         {
             _configurationService = configurationService;
             _logger = logger;
-            _settingsHub = settingsHub;
+            _hubBroadcaster = hubBroadcaster;
         }
 
         /// <summary>
@@ -86,7 +86,10 @@ namespace Listenarr.Api.Controllers.Configurations
                 savedSettings.AdminUsername = null;
                 savedSettings.AdminPassword = null;
 
-                await _settingsHub.Clients.All.SendAsync("SettingsUpdated", ApiResponseRedactor.RedactApplicationSettings(savedSettings));
+                await _hubBroadcaster.BroadcastAsync(
+                    RealtimeHubTarget.Settings,
+                    "SettingsUpdated",
+                    ApiResponseRedactor.RedactApplicationSettings(savedSettings));
 
                 _logger.LogDebug("Application settings saved successfully and broadcasted via SignalR");
                 if (HttpSecurityRequestUtils.ShouldRedactSecretsForCaller(HttpContext))
