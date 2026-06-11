@@ -18,7 +18,6 @@
 
 using System.Text.Json;
 using Listenarr.Application.Interfaces;
-using Listenarr.Application.Search;
 using Listenarr.Domain.Models;
 using Microsoft.Extensions.Logging;
 

@@ -16,7 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Listenarr.Infrastructure.Adapters;
-using Xunit;
 
 namespace Listenarr.Tests.Features.Infrastructure.Adapters
 {

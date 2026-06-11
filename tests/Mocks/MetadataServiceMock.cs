@@ -1,6 +1,4 @@
 using System.Text.RegularExpressions;
-using Listenarr.Application.Interfaces;
-using Listenarr.Domain.Models;
 using Listenarr.Tests.Builders;
 
 namespace Listenarr.Tests.Mocks

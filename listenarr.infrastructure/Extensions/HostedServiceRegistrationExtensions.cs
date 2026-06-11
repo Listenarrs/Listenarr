@@ -16,12 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 // csharp
-using Listenarr.Application.Audiobooks;
-using Listenarr.Application.Common;
-using Listenarr.Application.Downloads;
 using Listenarr.Application.Interfaces;
-using Listenarr.Application.Metadata;
-using Listenarr.Application.Search;
 using Listenarr.Infrastructure.Ffmpeg;
 using Listenarr.Infrastructure.FileSystem;
 using Microsoft.Extensions.Configuration;

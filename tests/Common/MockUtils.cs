@@ -1,12 +1,7 @@
 using System.Net;
 using System.Text;
 using Listenarr.Api.Controllers;
-using Listenarr.Application.Downloads;
-using Listenarr.Application.Interfaces;
 using Listenarr.Application.Interfaces.Repositories;
-using Listenarr.Application.Notification;
-using Listenarr.Domain.Models;
-using Listenarr.Domain.Models.Configurations;
 using Listenarr.Domain.Models.Enumerations;
 using Listenarr.Infrastructure.Adapters;
 using Listenarr.Infrastructure.Search.Providers;
@@ -14,9 +9,6 @@ using Listenarr.Infrastructure.Torrents;
 using Listenarr.Tests.Builders;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Caching.Memory;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
-using Moq;
 
 namespace Listenarr.Tests.Common
 {

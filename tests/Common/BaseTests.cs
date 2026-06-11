@@ -1,11 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
-using Listenarr.Application.Interfaces;
 using Listenarr.Application.Interfaces.Repositories;
-using Listenarr.Domain.Models;
-using Listenarr.Domain.Models.Configurations;
 using Listenarr.Tests.Builders;
-using Microsoft.Extensions.DependencyInjection;
-using Xunit;
 
 namespace Listenarr.Tests.Common
 {

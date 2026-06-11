@@ -19,7 +19,6 @@
 using Listenarr.Infrastructure.Platform;
 using Listenarr.Tests.Common;
 using Microsoft.Extensions.Logging.Abstractions;
-using Xunit;
 
 namespace Listenarr.Tests.Features.Infrastructure.Platform
 {

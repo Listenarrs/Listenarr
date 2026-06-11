@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Listenarr.Domain.Models;
 
 namespace Listenarr.Tests.Builders
 {

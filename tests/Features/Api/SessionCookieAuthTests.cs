@@ -19,18 +19,12 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using Listenarr.Api.Controllers;
-using Listenarr.Application.Interfaces;
-using Listenarr.Application.Security;
-using Listenarr.Domain.Models;
 using Listenarr.Tests.Common;
 using Listenarr.Tests.Mocks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
-using Moq;
-using Xunit;
 
 namespace Listenarr.Tests.Features.Api
 {

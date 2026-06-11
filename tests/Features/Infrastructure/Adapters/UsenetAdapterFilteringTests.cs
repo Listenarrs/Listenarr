@@ -17,13 +17,9 @@
  */
 using System.Net;
 using System.Text;
-using Listenarr.Application.Interfaces;
-using Listenarr.Domain.Models;
 using Listenarr.Infrastructure.Adapters;
 using Listenarr.Tests.Common;
 using Microsoft.Extensions.Logging.Abstractions;
-using Moq;
-using Xunit;
 
 namespace Listenarr.Tests.Features.Infrastructure.Adapters
 {

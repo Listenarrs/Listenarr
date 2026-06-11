@@ -16,14 +16,10 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using Listenarr.Application.Interfaces;
 using Listenarr.Infrastructure.Platform;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
-using Moq;
-using Xunit;
 
 namespace Listenarr.Tests.Features.Infrastructure.Platform
 {

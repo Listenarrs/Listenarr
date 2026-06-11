@@ -17,13 +17,9 @@
  */
 
 using Listenarr.Application.Downloads;
-using Listenarr.Domain.Models;
 using Listenarr.Infrastructure.Persistence;
 using Listenarr.Infrastructure.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
-using Moq;
-using Xunit;
 
 namespace Listenarr.Tests.Features.Api.Services
 {

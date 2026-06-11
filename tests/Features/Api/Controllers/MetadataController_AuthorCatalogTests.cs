@@ -17,14 +17,10 @@
  */
 using Listenarr.Api.Controllers;
 using Listenarr.Application.Audiobooks;
-using Listenarr.Application.Interfaces;
 using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Application.Metadata;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Memory;
-using Microsoft.Extensions.Logging;
-using Moq;
-using Xunit;
 
 namespace Listenarr.Tests.Features.Api.Controllers
 {

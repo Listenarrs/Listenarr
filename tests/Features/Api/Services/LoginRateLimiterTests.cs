@@ -16,7 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Listenarr.Infrastructure.Security;
-using Xunit;
 
 namespace Listenarr.Tests.Features.Api.Services
 {

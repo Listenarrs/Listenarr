@@ -17,14 +17,8 @@
  */
 using System.Runtime.InteropServices;
 using System.Text;
-using Microsoft.Extensions.DependencyInjection;
-using Moq;
-using Xunit;
-using Listenarr.Domain.Models;
 using Listenarr.Tests.Common;
-using Listenarr.Application.Interfaces;
 using Listenarr.Tests.Builders;
-using Listenarr.Domain.Models.Configurations;
 using Listenarr.Domain.Models.Enumerations;
 
 namespace Listenarr.Tests.Features.Api.Services

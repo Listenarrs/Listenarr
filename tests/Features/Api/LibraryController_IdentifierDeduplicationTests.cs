@@ -17,11 +17,8 @@
  */
 using System.Text;
 using System.Text.Json;
-using Listenarr.Domain.Models;
 using Listenarr.Infrastructure.Persistence;
 using Listenarr.Tests.Mocks;
-using Microsoft.Extensions.DependencyInjection;
-using Xunit;
 
 namespace Listenarr.Tests.Features.Api
 {

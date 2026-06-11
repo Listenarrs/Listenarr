@@ -19,8 +19,6 @@
 using Listenarr.Infrastructure.Platform;
 using Listenarr.Tests.Common;
 using Microsoft.Extensions.Hosting;
-using Moq;
-using Xunit;
 
 namespace Listenarr.Tests.Features.Infrastructure.Platform
 {

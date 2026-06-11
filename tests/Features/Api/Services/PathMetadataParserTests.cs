@@ -17,7 +17,6 @@
  */
 using System.Text.Json;
 using Listenarr.Application.Metadata;
-using Xunit;
 
 namespace Listenarr.Tests.Features.Api.Services
 {

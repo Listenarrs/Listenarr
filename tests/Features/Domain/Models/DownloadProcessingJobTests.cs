@@ -1,7 +1,5 @@
-using Listenarr.Domain.Models;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
-using Xunit;
 
 namespace Listenarr.Tests.Features.Domain.Models
 {

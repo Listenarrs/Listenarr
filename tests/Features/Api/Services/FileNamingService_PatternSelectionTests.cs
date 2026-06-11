@@ -15,15 +15,6 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Xunit;
-using Moq;
-using Microsoft.Extensions.Logging;
-using Listenarr.Domain.Common;
-using Listenarr.Domain.Models;
-using Listenarr.Application.Interfaces;
-using Listenarr.Application.Common;
-using Listenarr.Domain.Models.Configurations;
-
 namespace Listenarr.Tests.Features.Api.Services
 {
     /// <summary>

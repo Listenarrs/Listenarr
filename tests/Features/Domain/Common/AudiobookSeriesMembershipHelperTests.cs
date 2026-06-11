@@ -16,10 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using Listenarr.Domain.Common;
-using Listenarr.Domain.Models;
-using Xunit;
-
 namespace Listenarr.Tests.Features.Domain.Common
 {
     [Trait("Name", "AudiobookSeriesMembershipHelperTests")]

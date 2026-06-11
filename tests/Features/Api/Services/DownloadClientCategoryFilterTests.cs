@@ -18,13 +18,10 @@
 using System.Net;
 using System.Text;
 using Listenarr.Application.Downloads;
-using Listenarr.Domain.Models;
 using Listenarr.Infrastructure.Adapters;
 using Listenarr.Infrastructure.Torrents;
 using Listenarr.Tests.Common;
 using Microsoft.Extensions.Logging.Abstractions;
-using Moq;
-using Xunit;
 
 namespace Listenarr.Tests.Features.Api.Services
 {

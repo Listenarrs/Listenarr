@@ -3,7 +3,6 @@ using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Xunit;
 
 namespace Listenarr.Tests.Features.Infrastructure.Repositories
 {

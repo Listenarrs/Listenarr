@@ -17,14 +17,9 @@
  */
 using System.Text.Json;
 using Listenarr.Api.Controllers;
-using Listenarr.Application.Interfaces;
 using Listenarr.Application.Metadata;
 using Listenarr.Application.Search;
-using Listenarr.Domain.Models;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Logging;
-using Moq;
-using Xunit;
 
 namespace Listenarr.Tests.Features.Api.Controllers
 {

@@ -1,4 +1,3 @@
-using Listenarr.Domain.Models.Configurations;
 using Listenarr.Domain.Models.Enumerations;
 
 namespace Listenarr.Tests.Builders

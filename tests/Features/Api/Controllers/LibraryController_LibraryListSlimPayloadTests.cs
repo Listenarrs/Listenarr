@@ -17,11 +17,7 @@
  */
 using System.Text.Json;
 using Listenarr.Api.Controllers;
-using Listenarr.Domain.Models;
-using Listenarr.Domain.Common;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.DependencyInjection;
-using Xunit;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
 

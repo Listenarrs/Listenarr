@@ -16,18 +16,10 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Xunit;
-using Listenarr.Application.Downloads;
-using Listenarr.Application.Interfaces;
-using Listenarr.Application.Audiobooks;
 using Listenarr.Infrastructure.Extensions;
 using Listenarr.Infrastructure.FileSystem;
-using Listenarr.Application.Common;
 using Listenarr.Infrastructure.Ffmpeg;
-using Listenarr.Application.Metadata;
-using Listenarr.Application.Search;
 
 namespace Listenarr.Tests.Features.Api.Extensions
 {

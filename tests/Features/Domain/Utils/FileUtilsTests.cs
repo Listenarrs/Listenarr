@@ -15,10 +15,8 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Xunit;
 using System.Security.AccessControl;
 using System.Security.Principal;
-using Listenarr.Domain.Common;
 
 namespace Listenarr.Tests.Features.Domain.Utils
 {

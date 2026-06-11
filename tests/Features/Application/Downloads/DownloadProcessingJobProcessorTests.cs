@@ -1,11 +1,5 @@
-using Listenarr.Domain.Models;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
-using Microsoft.Extensions.DependencyInjection;
-using Xunit;
-using Listenarr.Application.Interfaces;
-using Listenarr.Application.Downloads;
-using Moq;
 using Listenarr.Tests.Mocks;
 
 namespace Listenarr.Tests.Features.Application.Downloads

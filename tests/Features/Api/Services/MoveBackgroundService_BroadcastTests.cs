@@ -15,14 +15,9 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Microsoft.Extensions.DependencyInjection;
-using Xunit;
-using Listenarr.Domain.Models;
 using Microsoft.AspNetCore.SignalR;
 using Listenarr.Tests.Common;
 using System.Text.Json;
-using Listenarr.Application.Notification;
-using Listenarr.Application.Interfaces;
 using Listenarr.Infrastructure.FileSystem;
 
 namespace Listenarr.Tests.Features.Api.Services

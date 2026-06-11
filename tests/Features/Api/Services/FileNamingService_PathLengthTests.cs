@@ -16,11 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Runtime.InteropServices;
-using Xunit;
-using Moq;
-using Microsoft.Extensions.Logging;
-using Listenarr.Application.Interfaces;
-using Listenarr.Application.Common;
 
 namespace Listenarr.Tests.Features.Api.Services
 {

@@ -16,15 +16,9 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Listenarr.Api.Controllers;
-using Listenarr.Domain.Models;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Logging;
-using Moq;
-using Xunit;
 using System.Text.Json;
-using Listenarr.Domain.Models.Configurations;
 using Listenarr.Application.Metadata;
-using Listenarr.Application.Interfaces;
 using Listenarr.Application.Search;
 
 namespace Listenarr.Tests.Features.Api.Controllers

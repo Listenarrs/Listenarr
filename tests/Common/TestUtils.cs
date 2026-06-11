@@ -1,8 +1,6 @@
 using System.Runtime.CompilerServices;
 using Asp.Versioning.ApiExplorer;
 using Listenarr.Application.Interfaces.Repositories;
-using Listenarr.Domain.Models;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace Listenarr.Tests.Common
 {

@@ -19,7 +19,6 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Listenarr.Infrastructure.Platform;
 using Microsoft.Extensions.Logging.Abstractions;
-using Xunit;
 
 namespace Listenarr.Tests.Features.Api.Services
 {

@@ -18,7 +18,6 @@
 using System.Text.Json;
 using Listenarr.Api.Filters;
 using Microsoft.OpenApi;
-using Xunit;
 
 namespace Listenarr.Tests.Features.Api.Extensions
 {

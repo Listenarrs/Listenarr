@@ -16,17 +16,12 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Listenarr.Application.Interfaces.Repositories;
-using Listenarr.Domain.Models;
-using Xunit;
 using Microsoft.Extensions.Logging.Abstractions;
 using System.Net;
 using Microsoft.EntityFrameworkCore;
-using Moq;
-using Listenarr.Application.Interfaces;
 using Listenarr.Infrastructure.Persistence;
 using Listenarr.Application.Metadata;
 using Listenarr.Application.Search;
-using Listenarr.Application.Notification;
 using Listenarr.Application.Search.Filters;
 using Listenarr.Application.Search.Strategies;
 using Listenarr.Infrastructure.Search.Providers;

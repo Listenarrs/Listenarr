@@ -16,16 +16,10 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Microsoft.EntityFrameworkCore;
-using Xunit;
 using Xunit.Abstractions;
-using Microsoft.Extensions.Logging;
-using Moq;
 using Listenarr.Infrastructure.Persistence.Repositories;
-using Listenarr.Domain.Models;
-using Listenarr.Domain.Common;
 using Listenarr.Infrastructure.Persistence;
 using Listenarr.Application.Downloads;
-using Listenarr.Application.Interfaces;
 
 namespace Listenarr.Tests.Features.Api.Services
 {

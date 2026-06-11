@@ -1,7 +1,3 @@
-using Listenarr.Application.Interfaces;
-using Listenarr.Domain.Common;
-using Listenarr.Domain.Models;
-
 namespace Listenarr.Tests.Mocks
 {
     /// <summary>

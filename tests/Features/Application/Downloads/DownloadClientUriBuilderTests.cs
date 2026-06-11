@@ -16,8 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Listenarr.Application.Downloads;
-using Listenarr.Domain.Models;
-using Xunit;
 
 namespace Listenarr.Tests.Features.Application.Downloads
 {

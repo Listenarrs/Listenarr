@@ -18,7 +18,6 @@
 using System.Diagnostics;
 using Listenarr.Application.Interfaces.Repositories;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.Persistence

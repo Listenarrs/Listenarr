@@ -16,17 +16,10 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Reflection;
-using Listenarr.Application.Downloads;
-using Listenarr.Application.Interfaces;
-using Listenarr.Domain.Models;
-using Listenarr.Domain.Models.Configurations;
 using Listenarr.Infrastructure.Persistence;
 using Listenarr.Tests.Common;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
-using Moq;
-using Xunit;
 
 namespace Listenarr.Tests.Features.Api.Services
 {

@@ -1,5 +1,3 @@
-using Listenarr.Domain.Models;
-
 namespace Listenarr.Tests.Builders
 {
     public class QualityProfileBuilder

@@ -1,12 +1,7 @@
 using Listenarr.Application.Downloads;
-using Listenarr.Application.Interfaces;
-using Listenarr.Domain.Common;
-using Listenarr.Domain.Models;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
 using Listenarr.Tests.Mocks;
-using Microsoft.Extensions.DependencyInjection;
-using Xunit;
 
 namespace Listenarr.Tests.Features.Application.Downloads
 {

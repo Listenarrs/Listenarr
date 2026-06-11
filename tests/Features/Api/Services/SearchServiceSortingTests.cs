@@ -17,8 +17,6 @@
  */
 using System.Reflection;
 using Listenarr.Application.Search;
-using Listenarr.Domain.Models;
-using Xunit;
 
 namespace Listenarr.Tests.Features.Api.Services
 {

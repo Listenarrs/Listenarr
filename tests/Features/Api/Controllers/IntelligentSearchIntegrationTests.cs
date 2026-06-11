@@ -15,11 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Listenarr.Domain.Models;
 using Listenarr.Api.Controllers;
-using Moq;
-using Xunit;
-using Listenarr.Application.Interfaces;
 using Listenarr.Application.Metadata;
 using Listenarr.Application.Search;
 

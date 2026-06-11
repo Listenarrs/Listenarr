@@ -17,8 +17,6 @@
  */
 using Listenarr.Application.Metadata;
 using Listenarr.Application.Audiobooks;
-using Listenarr.Domain.Models;
-using Xunit;
 
 namespace Listenarr.Tests.Features.Api.Services
 {

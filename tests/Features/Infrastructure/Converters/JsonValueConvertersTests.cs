@@ -16,7 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 // csharp
-using Xunit;
 using Listenarr.Infrastructure.Persistence.Converters;
 
 namespace Listenarr.Tests.Features.Infrastructure.Converters

@@ -16,18 +16,11 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Listenarr.Application.Audiobooks;
-using Listenarr.Application.Common;
-using Listenarr.Application.Interfaces;
-using Listenarr.Domain.Common;
-using Listenarr.Domain.Models;
-using Listenarr.Domain.Models.Configurations;
 using Listenarr.Domain.Models.Enumerations;
 using Listenarr.Infrastructure.Persistence;
 using Listenarr.Infrastructure.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
-using Moq;
-using Xunit;
 
 namespace Listenarr.Tests.Features.Api.Services
 {

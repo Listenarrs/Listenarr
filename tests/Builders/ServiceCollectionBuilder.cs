@@ -1,14 +1,10 @@
 using Listenarr.Api.Controllers;
 using Listenarr.Application.Audiobooks;
-using Listenarr.Application.Common;
 using Listenarr.Application.Downloads;
-using Listenarr.Application.Interfaces;
 using Listenarr.Application.Metadata;
-using Listenarr.Application.Notification;
 using Listenarr.Application.Search;
 using Listenarr.Application.Search.Filters;
 using Listenarr.Application.Search.Strategies;
-using Listenarr.Domain.Models;
 using Listenarr.Infrastructure.Extensions;
 using Listenarr.Infrastructure.FileSystem;
 using Listenarr.Tests.Mocks;
@@ -17,9 +13,7 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Moq;
 
 namespace Listenarr.Tests.Builders
 {

@@ -1,10 +1,5 @@
-using Listenarr.Application.Interfaces;
 using Listenarr.Infrastructure.Ffmpeg;
 using Listenarr.Tests.Common;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
-using Moq;
-using Xunit;
 
 namespace Listenarr.Tests.Features.Api.Services
 {

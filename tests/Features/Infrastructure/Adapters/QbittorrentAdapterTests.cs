@@ -16,15 +16,9 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Text.Json;
-using Listenarr.Domain.Models;
-using Listenarr.Domain.Common;
 using Listenarr.Tests.Common;
-using Moq;
-using Xunit;
 using Listenarr.Infrastructure.Adapters;
 using Listenarr.Tests.Builders;
-using Microsoft.Extensions.DependencyInjection;
-using Listenarr.Application.Interfaces;
 using Listenarr.Tests.Mocks.Api;
 using Listenarr.Application.Downloads;
 using Listenarr.Infrastructure.Torrents;

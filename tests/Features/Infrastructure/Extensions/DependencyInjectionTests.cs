@@ -16,9 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 // csharp
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.EntityFrameworkCore;
-using Xunit;
 using Listenarr.Infrastructure.Extensions;
 using Listenarr.Application.Interfaces.Repositories;
 

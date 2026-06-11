@@ -1,7 +1,4 @@
-using Listenarr.Application.Interfaces;
 using Listenarr.Application.Interfaces.Repositories;
-using Listenarr.Domain.Common;
-using Listenarr.Domain.Models;
 using Listenarr.Tests.Builders;
 
 namespace Listenarr.Tests.Mocks

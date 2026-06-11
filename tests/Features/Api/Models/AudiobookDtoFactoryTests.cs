@@ -16,8 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Microsoft.EntityFrameworkCore;
-using Xunit;
-using Listenarr.Domain.Models;
 using Listenarr.Infrastructure.Persistence;
 using Listenarr.Application.Mapping;
 using Listenarr.Tests.Builders;

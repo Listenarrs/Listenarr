@@ -18,12 +18,8 @@
 using System.Net;
 using System.Text;
 using Asp.Versioning.ApiExplorer;
-using Listenarr.Application.Interfaces;
-using Listenarr.Domain.Models;
 using Listenarr.Tests.Mocks;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Extensions.DependencyInjection;
-using Xunit;
 
 namespace Listenarr.Tests.Features.Api.Middleware
 {

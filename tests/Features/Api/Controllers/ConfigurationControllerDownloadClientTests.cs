@@ -19,19 +19,13 @@ using System.Net;
 using Listenarr.Api.Attributes;
 using Listenarr.Api.Controllers;
 using Listenarr.Api.Controllers.Configurations;
-using Listenarr.Application.Interfaces;
-using Listenarr.Application.Security;
-using Listenarr.Domain.Models;
 using Listenarr.Tests.Mocks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Abstractions;
 using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
-using Moq;
-using Xunit;
 
 namespace Listenarr.Tests.Features.Api.Controllers
 {

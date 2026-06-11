@@ -16,14 +16,9 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Listenarr.Api.Controllers.Configurations;
-using Listenarr.Application.Interfaces;
-using Listenarr.Application.Notification;
-using Listenarr.Domain.Models.Configurations;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging.Abstractions;
-using Moq;
-using Xunit;
 
 namespace Listenarr.Tests.Features.Api.Controllers
 {

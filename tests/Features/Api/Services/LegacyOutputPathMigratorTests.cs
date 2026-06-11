@@ -16,13 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Microsoft.Extensions.Logging.Abstractions;
-using Moq;
-using Xunit;
-using Listenarr.Domain.Common;
-using Listenarr.Domain.Models;
-using Listenarr.Application.Interfaces;
-using Listenarr.Domain.Models.Configurations;
-using Listenarr.Application.Common;
 
 namespace Listenarr.Tests.Features.Api.Services
 {

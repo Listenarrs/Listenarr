@@ -17,7 +17,6 @@
  */
 using Listenarr.Infrastructure.FileSystem;
 using Microsoft.Extensions.Logging.Abstractions;
-using Xunit;
 
 namespace Listenarr.Tests.Features.Api.Services
 {

@@ -17,12 +17,9 @@
  */
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using Listenarr.Application.Interfaces;
-using Listenarr.Domain.Models.Configurations;
 using Listenarr.Infrastructure.FileSystem;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using Xunit;
 
 namespace Listenarr.Tests.Features.Api.Services
 {

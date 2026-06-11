@@ -17,7 +17,6 @@
  */
 using System.Net;
 using System.Text.Json;
-using Xunit;
 using Listenarr.Tests.Mocks;
 
 namespace Listenarr.Tests.Features.Api

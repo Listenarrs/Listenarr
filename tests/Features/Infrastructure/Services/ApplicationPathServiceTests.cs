@@ -17,7 +17,6 @@
  */
 
 using Listenarr.Infrastructure.Services;
-using Xunit;
 
 namespace Listenarr.Tests.Features.Infrastructure.Services
 {

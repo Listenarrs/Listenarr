@@ -18,8 +18,6 @@
 using Listenarr.Tests.Mocks;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Xunit;
 
 namespace Listenarr.Tests.Features.Infrastructure.Persistence
 {

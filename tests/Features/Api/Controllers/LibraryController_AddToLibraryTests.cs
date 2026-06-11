@@ -16,14 +16,9 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.DependencyInjection;
-using Moq;
-using Xunit;
 using Listenarr.Api.Controllers;
-using Listenarr.Domain.Models;
 using Listenarr.Tests.Common;
 using Listenarr.Tests.Builders;
-using Listenarr.Application.Interfaces;
 
 namespace Listenarr.Tests.Features.Api.Controllers
 {

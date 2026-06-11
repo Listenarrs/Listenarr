@@ -18,7 +18,6 @@
 using System.Reflection;
 using Listenarr.Infrastructure.Persistence.Migrations;
 using Microsoft.EntityFrameworkCore.Migrations;
-using Xunit;
 
 namespace Listenarr.Tests.Features.Infrastructure.Migrations
 {

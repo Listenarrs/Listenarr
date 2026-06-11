@@ -15,15 +15,10 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Microsoft.Extensions.DependencyInjection;
-using Xunit;
 using Listenarr.Tests.Common;
 using Listenarr.Tests.Builders;
-using Listenarr.Application.Interfaces;
 using System.Runtime.InteropServices;
 using System.IO.Compression;
-using Listenarr.Domain.Models;
-using Listenarr.Domain.Models.Configurations;
 using Listenarr.Domain.Models.Enumerations;
 using Listenarr.Tests.Mocks;
 

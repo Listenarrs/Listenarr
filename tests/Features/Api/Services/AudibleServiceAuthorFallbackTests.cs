@@ -17,8 +17,6 @@
  */
 using Listenarr.Application.Metadata;
 using Listenarr.Tests.Common;
-using Microsoft.Extensions.DependencyInjection;
-using Xunit;
 
 namespace Listenarr.Tests.Features.Api.Services
 {

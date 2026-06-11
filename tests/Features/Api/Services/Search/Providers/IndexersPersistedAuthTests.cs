@@ -16,9 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Net;
-using Listenarr.Domain.Models;
 using Listenarr.Tests.Common;
-using Xunit;
 
 namespace Listenarr.Tests.Features.Api.Services.Search.Providers
 {

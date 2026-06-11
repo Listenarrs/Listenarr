@@ -16,13 +16,9 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Listenarr.Api.Controllers;
-using Listenarr.Domain.Models;
-using Listenarr.Domain.Common;
 using Microsoft.EntityFrameworkCore;
-using Xunit;
 using Listenarr.Infrastructure.Persistence;
 using Listenarr.Application.Audiobooks;
-using Listenarr.Application.Interfaces;
 using Listenarr.Infrastructure.Persistence.Repositories;
 
 namespace Listenarr.Tests.Features.Api.Controllers

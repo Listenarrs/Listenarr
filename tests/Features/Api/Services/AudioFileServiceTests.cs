@@ -16,11 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
-using Xunit;
-using Moq;
-using Listenarr.Domain.Models;
-using Listenarr.Application.Interfaces;
 using Listenarr.Tests.Common;
 using Listenarr.Tests.Builders;
 using Listenarr.Infrastructure.Persistence;

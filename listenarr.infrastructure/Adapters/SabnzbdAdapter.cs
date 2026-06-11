@@ -17,7 +17,6 @@
  */
 using System.Net;
 using System.Text.Json;
-using Listenarr.Application.Downloads;
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Security;
 using Listenarr.Domain.Common;

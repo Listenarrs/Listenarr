@@ -19,7 +19,6 @@
 using System.Diagnostics;
 using System.Reflection;
 using Listenarr.Application.Interfaces;
-using Microsoft.Extensions.Hosting;
 
 namespace Listenarr.Infrastructure.Platform
 {

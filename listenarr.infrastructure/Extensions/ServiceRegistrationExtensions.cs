@@ -19,13 +19,10 @@
 using System.Net;
 using Listenarr.Application.Interfaces;
 using Listenarr.Infrastructure.Factories;
-using Listenarr.Application.Downloads;
 using Listenarr.Infrastructure.Adapters;
 using Listenarr.Domain.Models.Configurations;
 using Listenarr.Application.Notification;
 using Listenarr.Infrastructure.FileSystem;
-using Listenarr.Infrastructure.SignalR;
-using Listenarr.Application.Metadata;
 using Microsoft.Extensions.DependencyInjection;
 using Polly.Extensions.Http;
 using Microsoft.Extensions.Configuration;

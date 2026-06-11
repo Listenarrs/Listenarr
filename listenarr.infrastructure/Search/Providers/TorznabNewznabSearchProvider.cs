@@ -19,7 +19,6 @@
 using System.Text.RegularExpressions;
 using HtmlAgilityPack;
 using Listenarr.Application.Interfaces;
-using Listenarr.Application.Search;
 using Listenarr.Application.Security;
 using Listenarr.Domain.Models;
 using Microsoft.Extensions.Logging;

@@ -18,7 +18,6 @@
 
 using System.Diagnostics;
 using Listenarr.Domain.Models;
-using Microsoft.AspNetCore.SignalR;
 using Serilog.Core;
 using Serilog.Events;
 

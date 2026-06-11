@@ -19,8 +19,6 @@ using System.Net;
 using System.Text.Json;
 using BencodeNET.Parsing;
 using BencodeNET.Torrents;
-using Listenarr.Application.Common;
-using Listenarr.Application.Downloads;
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Security;
 using Listenarr.Domain.Common;

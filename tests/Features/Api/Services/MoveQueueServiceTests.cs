@@ -15,10 +15,8 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.EntityFrameworkCore;
-using Xunit;
 using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Infrastructure.Persistence.Repositories;
 using Listenarr.Infrastructure.Persistence;

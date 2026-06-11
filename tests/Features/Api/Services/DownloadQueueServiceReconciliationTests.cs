@@ -17,14 +17,8 @@
  */
 using System.Text.Json;
 using Listenarr.Application.Interfaces.Repositories;
-using Listenarr.Domain.Models;
 using Microsoft.Extensions.Caching.Memory;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
-using Moq;
-using Xunit;
-using Listenarr.Application.Interfaces;
-using Listenarr.Domain.Models.Configurations;
 using Listenarr.Application.Downloads;
 
 namespace Listenarr.Tests.Features.Api.Services

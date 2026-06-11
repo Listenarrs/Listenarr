@@ -15,7 +15,6 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Listenarr.Application.Common;
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Domain.Models;
@@ -23,7 +22,6 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using AsyncKeyedLock;
 using Microsoft.Extensions.Logging;
-using Listenarr.Application.Search;
 using Listenarr.Application.Security;
 
 namespace Listenarr.Infrastructure.Search.Providers

@@ -16,18 +16,12 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Microsoft.AspNetCore.SignalR;
-using Microsoft.Extensions.Logging;
-using Moq;
-using Xunit;
 using Listenarr.Api.Controllers;
-using Listenarr.Domain.Models;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 using System.Reflection;
 using Listenarr.Infrastructure.Persistence.Repositories;
 using Listenarr.Infrastructure.Persistence;
-using Listenarr.Application.Interfaces;
-using Listenarr.Application.Notification;
 
 namespace Listenarr.Tests.Features.Api.Controllers
 {

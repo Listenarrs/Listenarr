@@ -32,7 +32,6 @@ using Listenarr.Application.Notification;
 using Listenarr.Application.Security;
 using Listenarr.Application.Metadata;
 using Listenarr.Application.Search;
-using Microsoft.AspNetCore.SignalR;
 using Listenarr.Application.Audiobooks;
 using Listenarr.Api.Attributes;
 
