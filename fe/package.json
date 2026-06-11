@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=24.0.0"
+    "node": "^24.15.0"
   },
   "scripts": {
     "version:sync": "node ../scripts/sync-fe-version-from-csproj.mjs",
@@ -62,21 +62,21 @@
     "@vue/test-utils": "^2.4.11",
     "@vue/tsconfig": "^0.9.1",
     "concurrently": "^10.0.3",
-    "cypress": "^15.16.0",
+    "cypress": "^15.17.0",
     "eslint": "^10.4.1",
     "eslint-plugin-cypress": "^6.4.1",
     "eslint-plugin-vue": "^10.9.2",
     "jiti": "^2.7.0",
     "jsdom": "^29.1.1",
-    "npm-run-all2": "^8.0.4",
+    "npm-run-all2": "^9.0.1",
     "patch-package": "^8.0.1",
-    "prettier": "^3.8.3",
+    "prettier": "^3.8.4",
     "rollup-plugin-visualizer": "^7.0.1",
-    "start-server-and-test": "^3.0.8",
+    "start-server-and-test": "^3.0.9",
     "typescript": "^6.0.3",
     "vite": "^8.0.16",
     "vitest": "^4.1.8",
-    "vue-tsc": "^3.3.3"
+    "vue-tsc": "^3.3.4"
   },
   "overrides": {
     "ajv": "^8.18.0",

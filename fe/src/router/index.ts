@@ -19,6 +19,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { getStartupConfigCached } from '@/services/startupConfigCache'
 import { logger } from '@/utils/logger'
+import { setRouter } from '@/services/routerInstance'
 import type { StartupConfig } from '@/types'
 
 // Module-level cache/promise for startup config to avoid repeated requests during rapid navigation
@@ -149,12 +150,6 @@ export function preloadRoute(nameOrPath: string) {
   }
   return Promise.resolve()
 }
-
-/**
- * Module-level reference set by createAppRouter().
- * Used by code that lazily imports the router (e.g. auth store).
- */
-let _routerInstance: ReturnType<typeof createRouter> | null = null
 
 // Factory function to create and configure the router.
 // Deferred to avoid calling createWebHistory/createRouter at module top-level,
@@ -333,17 +328,6 @@ export function createAppRouter() {
     return true
   })
 
-  _routerInstance = router
+  setRouter(router)
   return router
-}
-
-/**
- * Returns the router instance previously created by createAppRouter().
- * Throws if called before createAppRouter().
- */
-export function getRouter() {
-  if (!_routerInstance) {
-    throw new Error('Router not initialized – call createAppRouter() first')
-  }
-  return _routerInstance
 }

@@ -22,6 +22,7 @@ import { sessionTokenManager } from '@/utils/sessionToken'
 import { clearAllAuthData } from '@/utils/sessionDebug'
 import { errorTracking } from '@/services/errorTracking'
 import { getStartupConfigCached } from '@/services/startupConfigCache'
+import { getRouter } from '@/services/routerInstance'
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<{ authenticated: boolean; name?: string }>({ authenticated: false })
@@ -66,8 +67,7 @@ export const useAuthStore = defineStore('auth', () => {
     }
 
     try {
-      const routerModule = await import('@/router')
-      const router = routerModule.getRouter()
+      const router = getRouter()
       const route = router.currentRoute.value
       const redirect = route.fullPath || current
 

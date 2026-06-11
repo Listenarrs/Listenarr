@@ -28,6 +28,32 @@ export default defineConfig(({ mode }) => {
     ],
     build: {
       sourcemap: analyzeBundle,
+      rollupOptions: {
+        onLog(level, log, handler) {
+          const code = typeof log === 'object' && log ? String(log.code ?? '') : ''
+          const id = typeof log === 'object' && log ? String(log.id ?? '') : ''
+          const message = typeof log === 'object' && log ? String(log.message ?? '') : String(log)
+
+          if (
+            level === 'warn' &&
+            code === 'INVALID_ANNOTATION' &&
+            id.includes('node_modules/@vueuse/core/')
+          ) {
+            return
+          }
+
+          if (
+            level === 'warn' &&
+            code === 'INEFFECTIVE_DYNAMIC_IMPORT' &&
+            message.includes('src/router/index.ts') &&
+            message.includes('src/stores/auth.ts')
+          ) {
+            return
+          }
+
+          handler(level, log)
+        },
+      },
     },
     resolve: {
       alias: {

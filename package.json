@@ -4,7 +4,7 @@
   "private": true,
   "description": "Listenarr - Automated audiobook downloading and management",
   "engines": {
-    "node": ">=24"
+    "node": "^24.15.0"
   },
   "scripts": {
     "version:sync": "node scripts/sync-fe-version-from-csproj.mjs",

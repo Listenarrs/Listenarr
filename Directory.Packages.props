@@ -2,6 +2,8 @@
 	<PropertyGroup>
 		<ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
 		<CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+		<RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+		<RestoreLockedMode Condition="'$(CI)' == 'true'">true</RestoreLockedMode>
 		<EFVersion>10.0.8</EFVersion>
 	</PropertyGroup>
 
