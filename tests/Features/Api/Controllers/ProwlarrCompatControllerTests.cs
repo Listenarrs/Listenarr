@@ -45,7 +45,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
         }
 
         [Fact]
-        public async Task PostIndexers_BroadcastsSignalR_WhenNewIndexersCreated()
+        public async Task PostIndexers_BroadcastsRealtimeUpdate_WhenNewIndexersCreated()
         {
             var db = CreateInMemoryDb();
             var mockHubBroadcaster = new Mock<IHubBroadcaster>();

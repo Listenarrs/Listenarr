@@ -534,7 +534,7 @@ namespace Listenarr.Application.Downloads
 
             await notificationService.SendNotificationAsync("book-downloading", notificationData, settings.WebhookUrl, settings.EnabledNotificationTriggers);
 
-            // Trigger immediate queue update via SignalR so the UI shows the new download right away
+            // Trigger an immediate realtime queue update so the UI shows the new download right away
             // Add a small delay to allow the download client to process and index the new download
             try
             {

@@ -106,7 +106,7 @@ namespace Listenarr.Application.Notification
                 startInfo.EnvironmentVariables["LISTENARR_URL"] = listenarrUrl;
 
                 // Pass the server API key into the helper process so it can authenticate
-                // programmatic requests (SignalR negotiate, settings fetch, etc.). Only set
+                // programmatic requests (realtime negotiate, settings fetch, etc.). Only set
                 // when an API key is present in the startup config to avoid sending empty
                 // values into the child environment.
                 try

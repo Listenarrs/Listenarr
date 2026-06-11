@@ -1006,7 +1006,7 @@ namespace Listenarr.Api.Controllers
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                 {
-                    _logger?.LogWarning(ex, "Failed to broadcast IndexersUpdated via SignalR");
+                    _logger?.LogWarning(ex, "Failed to broadcast IndexersUpdated to realtime clients");
                 }
             }
 
@@ -1045,7 +1045,7 @@ namespace Listenarr.Api.Controllers
 
         /// <summary>
         /// DEBUG: POST /api/v1/debug/indexers/publish
-        /// Manually trigger an IndexersUpdated SignalR broadcast for testing client connectivity.
+        /// Manually trigger an IndexersUpdated realtime broadcast for testing client connectivity.
         /// </summary>
         [HttpPost("debug/indexers/publish")]
         [AllowAnonymous]
@@ -1110,13 +1110,13 @@ namespace Listenarr.Api.Controllers
 
         /// <summary>
         /// DEBUG: GET /api/v1/debug/settings/clients
-        /// Returns the list and count of currently connected SettingsHub clients.
+        /// Returns the list and count of currently connected settings realtime clients.
         /// </summary>
         [HttpGet("debug/settings/clients")]
         [AllowAnonymous]
         [LocalOrAdmin]
         [ApiExplorerSettings(IgnoreApi = true)]
-        public IActionResult GetSettingsHubClients()
+        public IActionResult GetSettingsRealtimeClients()
         {
             try
             {
@@ -1125,7 +1125,7 @@ namespace Listenarr.Api.Controllers
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
-                _logger?.LogWarning(ex, "Failed to retrieve SettingsHub clients");
+                _logger?.LogWarning(ex, "Failed to retrieve settings realtime clients");
                 return StatusCode(500, new { error = "Failed to retrieve clients" });
             }
         }
@@ -1133,7 +1133,7 @@ namespace Listenarr.Api.Controllers
         /// <summary>
         /// POST /api/v1/indexer
         /// Accepts a single indexer object (or an array) for compatibility with some clients that POST to the singular route.
-        /// Delegates to PostIndexers for the actual processing so persistence and SignalR broadcast happen in one place.
+        /// Delegates to PostIndexers for the actual processing so persistence and realtime broadcasts happen in one place.
         /// </summary>
         [HttpPost("indexer")]
         [AllowAnonymous]

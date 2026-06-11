@@ -2313,7 +2313,7 @@ namespace Listenarr.Api.Controllers
                     var jobId = await _scanQueueService.EnqueueScanAsync(audiobook, request?.Path);
                     _logger.LogInformation("Enqueued scan job {JobId} for audiobook {AudiobookId}", jobId, id);
 
-                    // Broadcast initial job status via SignalR so clients can show queued state
+                    // Broadcast initial job status so realtime clients can show queued state
                     try
                     {
                         using var scope = _scopeFactory.CreateScope();

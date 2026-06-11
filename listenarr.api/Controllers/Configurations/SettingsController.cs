@@ -70,7 +70,7 @@ namespace Listenarr.Api.Controllers.Configurations
         }
 
         /// <summary>
-        /// Save application settings. Broadcasts the update to all connected clients via SignalR.
+        /// Save application settings. Broadcasts the update to all connected realtime clients.
         /// </summary>
         /// <param name="settings">Updated application settings.</param>
         [Tags("Settings")]
@@ -91,7 +91,7 @@ namespace Listenarr.Api.Controllers.Configurations
                     "SettingsUpdated",
                     ApiResponseRedactor.RedactApplicationSettings(savedSettings));
 
-                _logger.LogDebug("Application settings saved successfully and broadcasted via SignalR");
+                _logger.LogDebug("Application settings saved successfully and broadcasted to realtime clients");
                 if (HttpSecurityRequestUtils.ShouldRedactSecretsForCaller(HttpContext))
                 {
                     return Ok(ApiResponseRedactor.RedactApplicationSettings(savedSettings));

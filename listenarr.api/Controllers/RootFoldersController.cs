@@ -149,7 +149,7 @@ namespace Listenarr.Api.Controllers
 
         /// <summary>
         /// Enqueues a background scan of a root folder to find audio files not in the library.
-        /// Returns a jobId; subscribe to SignalR "UnmatchedScanComplete" for completion notification.
+        /// Returns a jobId; subscribe to the realtime "UnmatchedScanComplete" event for completion notification.
         /// </summary>
         [HttpPost("{id}/scan-unmatched")]
         public async Task<IActionResult> ScanUnmatched(int id)

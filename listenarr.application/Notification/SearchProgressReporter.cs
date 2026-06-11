@@ -21,7 +21,7 @@ using Microsoft.Extensions.Logging;
 namespace Listenarr.Application.Notification
 {
     /// <summary>
-    /// Handles broadcasting search progress updates to connected clients via SignalR.
+    /// Handles broadcasting search progress updates to connected realtime clients.
     /// </summary>
     public class SearchProgressReporter
     {
@@ -35,7 +35,7 @@ namespace Listenarr.Application.Notification
         }
 
         /// <summary>
-        /// Broadcasts a search progress message to all connected SignalR clients.
+        /// Broadcasts a search progress message to all connected realtime clients.
         /// </summary>
         /// <param name="message">The progress message to broadcast</param>
         /// <param name="asin">Optional ASIN associated with this progress update</param>

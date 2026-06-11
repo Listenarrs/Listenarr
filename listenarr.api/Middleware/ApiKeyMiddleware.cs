@@ -59,7 +59,7 @@ namespace Listenarr.Api.Middleware
                             provided = s.Substring("ApiKey ".Length).Trim();
                     }
 
-                    // If headers didn't supply the key, only accept query-string token for SignalR hub connections.
+                    // If headers didn't supply the key, only accept query-string token for realtime hub connections.
                     // Avoiding query-string auth for normal API routes prevents credential leakage via logs/referrers.
                     if (string.IsNullOrWhiteSpace(provided))
                     {

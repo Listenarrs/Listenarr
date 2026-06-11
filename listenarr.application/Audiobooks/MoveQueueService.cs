@@ -127,7 +127,7 @@ namespace Listenarr.Application.Audiobooks
                     moveJobRepository.UpdateAsync(dbJob).GetAwaiter().GetResult();
                 }
 
-                // Broadcast status update to SignalR clients so UI can react to Processing/Failed/Completed
+                // Broadcast status update to realtime clients so UI can react to Processing/Failed/Completed
                 try
                 {
                     var hub = scope.ServiceProvider.GetRequiredService<IHubBroadcaster>();
@@ -219,4 +219,3 @@ namespace Listenarr.Application.Audiobooks
         }
     }
 }
-
