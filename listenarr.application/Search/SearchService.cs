@@ -2284,8 +2284,8 @@ namespace Listenarr.Application.Search
                             .FirstOrDefault() ?? string.Empty;
 
                         // Detect format from tags and from explicit field
-                        var formatFromTags = DetectFormatFromTags(tags ?? "");
-                        var formatFromField = !string.IsNullOrEmpty(rawFormatField) ? DetectFormatFromTags(rawFormatField) : null;
+                        var formatFromTags = SearchResultAttributeParser.DetectFormatFromTags(tags ?? "");
+                        var formatFromField = !string.IsNullOrEmpty(rawFormatField) ? SearchResultAttributeParser.DetectFormatFromTags(rawFormatField) : null;
                         var finalFormat = (formatFromField != null && formatFromField != "MP3") ? formatFromField : formatFromTags;
 
                         // Log explicit filetype when present
@@ -2295,19 +2295,19 @@ namespace Listenarr.Application.Search
                         }
 
                         // Detect quality: prefer tags, then explicit format field, then description/title
-                        var qualityFromTags = DetectQualityFromTags(tags ?? "");
-                        var finalQuality = qualityFromTags != "Unknown" ? qualityFromTags : (!string.IsNullOrEmpty(rawFormatField) ? DetectQualityFromFormat(rawFormatField) : "Unknown");
+                        var qualityFromTags = SearchResultAttributeParser.DetectQualityFromTags(tags ?? "");
+                        var finalQuality = qualityFromTags != "Unknown" ? qualityFromTags : (!string.IsNullOrEmpty(rawFormatField) ? SearchResultAttributeParser.DetectQualityFromFormat(rawFormatField) : "Unknown");
 
                         // Fallback: try to detect quality from description or title (filename-like text)
                         if (finalQuality == "Unknown")
                         {
                             if (!string.IsNullOrEmpty(description))
                             {
-                                var q = DetectQualityFromTags(description);
+                                var q = SearchResultAttributeParser.DetectQualityFromTags(description);
                                 if (q != "Unknown") finalQuality = q;
                                 else
                                 {
-                                    var q2 = DetectQualityFromFormat(description);
+                                    var q2 = SearchResultAttributeParser.DetectQualityFromFormat(description);
                                     if (q2 != "Unknown") finalQuality = q2;
                                 }
                             }
@@ -2315,11 +2315,11 @@ namespace Listenarr.Application.Search
                             if (finalQuality == "Unknown")
                             {
                                 var probeText = title;
-                                var q = DetectQualityFromTags(probeText);
+                                var q = SearchResultAttributeParser.DetectQualityFromTags(probeText);
                                 if (q != "Unknown") finalQuality = q;
                                 else
                                 {
-                                    var q2 = DetectQualityFromFormat(probeText);
+                                    var q2 = SearchResultAttributeParser.DetectQualityFromFormat(probeText);
                                     if (q2 != "Unknown") finalQuality = q2;
                                 }
                             }
@@ -2330,14 +2330,14 @@ namespace Listenarr.Application.Search
                         {
                             if (!string.IsNullOrEmpty(description))
                             {
-                                var f = DetectFormatFromTags(description);
+                                var f = SearchResultAttributeParser.DetectFormatFromTags(description);
                                 if (!string.IsNullOrEmpty(f) && f != "MP3") finalFormat = f;
                             }
 
                             if (finalFormat == "MP3")
                             {
                                 var probeText = title;
-                                var f = DetectFormatFromTags(probeText);
+                                var f = SearchResultAttributeParser.DetectFormatFromTags(probeText);
                                 if (!string.IsNullOrEmpty(f) && f != "MP3") finalFormat = f;
                             }
                         }
@@ -2394,7 +2394,7 @@ namespace Listenarr.Application.Search
                         // If we have a parsed language code, map to name and preserve raw code
                         if (!string.IsNullOrEmpty(rawLangCode) && string.IsNullOrEmpty(result.Language))
                         {
-                            result.Language = ParseLanguageFromCode(rawLangCode) ?? ParseLanguageFromText(rawLangCode);
+                            result.Language = SearchResultAttributeParser.ParseLanguageFromCode(rawLangCode) ?? SearchResultAttributeParser.ParseLanguageFromText(rawLangCode);
                         }
                         result.IndexerId = indexer.Id;
                         result.IndexerImplementation = indexer.Implementation ?? string.Empty;
@@ -2532,7 +2532,7 @@ namespace Listenarr.Application.Search
                         if (!string.IsNullOrWhiteSpace(explicitLang))
                         {
                             // Prefer direct code mapping (e.g., ENG -> English) when a short code is provided
-                            var parsedLang = ParseLanguageFromCode(explicitLang) ?? ParseLanguageFromText(explicitLang);
+                            var parsedLang = SearchResultAttributeParser.ParseLanguageFromCode(explicitLang) ?? SearchResultAttributeParser.ParseLanguageFromText(explicitLang);
                             if (!string.IsNullOrWhiteSpace(parsedLang))
                             {
                                 result.Language = parsedLang;
@@ -2543,7 +2543,7 @@ namespace Listenarr.Application.Search
                         if (string.IsNullOrWhiteSpace(result.Language))
                         {
                             var probe = string.Join(" ", new[] { title, tags ?? string.Empty, description ?? string.Empty }).Trim();
-                            var detectedLang = ParseLanguageFromText(probe);
+                            var detectedLang = SearchResultAttributeParser.ParseLanguageFromText(probe);
                             if (!string.IsNullOrEmpty(detectedLang))
                             {
                                 result.Language = detectedLang;
@@ -2735,7 +2735,7 @@ namespace Listenarr.Application.Search
                         if (grabs > 0) r.Grabs = grabs;
                         if (files > 0) r.Files = files;
                         if (!string.IsNullOrEmpty(format) && string.IsNullOrEmpty(r.Format)) r.Format = format.ToUpper();
-                        if (!string.IsNullOrEmpty(langCode) && string.IsNullOrEmpty(r.Language)) r.Language = ParseLanguageFromCode(langCode);
+                        if (!string.IsNullOrEmpty(langCode) && string.IsNullOrEmpty(r.Language)) r.Language = SearchResultAttributeParser.ParseLanguageFromCode(langCode);
 
                         _logger.LogDebug("Enriched MyAnonamouse result {Id}: grabs={Grabs}, files={Files}, format={Format}, language={Language}", r.Id, r.Grabs, r.Files, r.Format, r.Language);
                     }
@@ -3053,7 +3053,7 @@ namespace Listenarr.Application.Search
                             ResultUrl = !string.IsNullOrEmpty(identifier) ? $"https://archive.org/details/{identifier}" : null,
                             DownloadType = "DDL", // Direct Download Link
                             Format = audioFile.Format,
-                            Quality = DetectQualityFromFormat(audioFile.Format),
+                            Quality = SearchResultAttributeParser.DetectQualityFromFormat(audioFile.Format),
                             Source = $"{indexer.Name} (Internet Archive)",
                             PublishedDate = string.Empty,
                             IndexerId = indexer.Id,
@@ -3068,7 +3068,7 @@ namespace Listenarr.Application.Search
 
                         try
                         {
-                            var detectedLang = ParseLanguageFromText(title);
+                            var detectedLang = SearchResultAttributeParser.ParseLanguageFromText(title);
                             if (!string.IsNullOrEmpty(detectedLang)) iaResult.Language = detectedLang;
                         }
                         catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
@@ -3289,7 +3289,7 @@ namespace Listenarr.Application.Search
                                     // Standardized language codes (e.g., ENG, FR)
                                     try
                                     {
-                                        var parsedLang = ParseLanguageFromText(value);
+                                        var parsedLang = SearchResultAttributeParser.ParseLanguageFromText(value);
                                         if (!string.IsNullOrEmpty(parsedLang)) result.Language = parsedLang;
                                     }
                                     catch (Exception caughtEx_22) when (caughtEx_22 is not OperationCanceledException && caughtEx_22 is not OutOfMemoryException && caughtEx_22 is not StackOverflowException)
@@ -3308,7 +3308,7 @@ namespace Listenarr.Application.Search
                                     {
                                         try
                                         {
-                                            var pl = ParseLanguageFromText(value);
+                                            var pl = SearchResultAttributeParser.ParseLanguageFromText(value);
                                             if (!string.IsNullOrEmpty(pl)) result.Language = pl;
                                         }
                                         catch (Exception caughtEx_23) when (caughtEx_23 is not OperationCanceledException && caughtEx_23 is not OutOfMemoryException && caughtEx_23 is not StackOverflowException)
@@ -3516,7 +3516,7 @@ namespace Listenarr.Application.Search
                             // Detect language codes present in title or description (e.g. [ENG / M4B])
                             try
                             {
-                                var lang = ParseLanguageFromText(result.Title + " " + description);
+                                var lang = SearchResultAttributeParser.ParseLanguageFromText(result.Title + " " + description);
                                 if (!string.IsNullOrEmpty(lang)) result.Language = lang;
                             }
                             catch (Exception caughtEx_25) when (caughtEx_25 is not OperationCanceledException && caughtEx_25 is not OutOfMemoryException && caughtEx_25 is not StackOverflowException)
@@ -3681,149 +3681,6 @@ namespace Listenarr.Application.Search
                     Format = "MP3"
                 }
             };
-        }
-
-        private string DetectQualityFromTags(string tags)
-        {
-            var lowerTags = tags.ToLower();
-
-            if (lowerTags.Contains("flac"))
-                return "FLAC";
-            else if (lowerTags.Contains("320") || lowerTags.Contains("320kbps"))
-                return "MP3 320kbps";
-            else if (lowerTags.Contains("256") || lowerTags.Contains("256kbps"))
-                return "MP3 256kbps";
-            else if (lowerTags.Contains("192") || lowerTags.Contains("192kbps"))
-                return "MP3 192kbps";
-            else if (lowerTags.Contains("128") || lowerTags.Contains("128kbps"))
-                return "MP3 128kbps";
-            else if (lowerTags.Contains("64") || lowerTags.Contains("64kbps"))
-                return "MP3 64kbps";
-            else if (lowerTags.Contains("m4b"))
-                return "M4B";
-            else
-                return "Unknown";
-        }
-
-        private string DetectQualityFromFormat(string format)
-        {
-            if (string.IsNullOrEmpty(format))
-                return "Unknown";
-
-            var lowerFormat = format.ToLower();
-
-            if (lowerFormat.Contains("flac"))
-                return "FLAC";
-            else if (lowerFormat.Contains("m4b") || lowerFormat.Contains("apple audiobook"))
-                return "M4B";
-            else if (lowerFormat.Contains("320kbps") || lowerFormat.Contains("320 kbps"))
-                return "MP3 320kbps";
-            else if (lowerFormat.Contains("256kbps") || lowerFormat.Contains("256 kbps"))
-                return "MP3 256kbps";
-            else if (lowerFormat.Contains("192kbps") || lowerFormat.Contains("192 kbps"))
-                return "MP3 192kbps";
-            else if (lowerFormat.Contains("128kbps") || lowerFormat.Contains("128 kbps"))
-                return "MP3 128kbps";
-            else if (lowerFormat.Contains("64kbps") || lowerFormat.Contains("64 kbps"))
-                return "MP3 64kbps";
-            else if (lowerFormat.Contains("vbr mp3") || lowerFormat.Contains("variable bitrate"))
-                return "MP3 VBR";
-            else if (lowerFormat.Contains("ogg vorbis") || lowerFormat.Contains("ogg"))
-                return "OGG Vorbis";
-            else if (lowerFormat.Contains("opus"))
-                return "OPUS";
-            else if (lowerFormat.Contains("aac"))
-                return "AAC";
-            else if (lowerFormat.Contains("mp3"))
-                return "MP3";
-            else
-                return "Unknown";
-        }
-
-        private string DetectFormatFromTags(string tags)
-        {
-            var lowerTags = tags.ToLower();
-
-            if (lowerTags.Contains("m4b"))
-                return "M4B";
-            else if (lowerTags.Contains("flac"))
-                return "FLAC";
-            else if (lowerTags.Contains("mp3"))
-                return "MP3";
-            else if (lowerTags.Contains("opus"))
-                return "OPUS";
-            else if (lowerTags.Contains("aac"))
-                return "AAC";
-            else
-                return "MP3"; // Default to MP3
-        }
-
-        /// <summary>
-        /// Parse common language codes from a text block and return a full language name.
-        /// Matches bracketed tokens like "[ENG / M4B]", parenthesized "(ENG)", or standalone tokens with word boundaries.
-        /// Supports both three-letter codes and common two-letter aliases (ENG|EN -> English, DUT|NL -> Dutch, GER|DE -> German, FRE|FR -> French).
-        /// Matching is case-insensitive and conservative to avoid false positives.
-        /// </summary>
-        private string? ParseLanguageFromText(string text)
-        {
-            if (string.IsNullOrWhiteSpace(text)) return null;
-
-            // Normalize whitespace
-            var normalized = Regex.Replace(text, "\\s+", " ", RegexOptions.Compiled | RegexOptions.IgnoreCase).Trim();
-
-            // Combined pattern: look for bracketed or parenthesized tokens OR standalone word-boundary tokens
-            // Examples matched: [ENG / M4B], (EN), ENG, EN
-            var codes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            {
-                { "ENG", "English" }, { "EN", "English" },
-                { "DUT", "Dutch" },    { "NL", "Dutch" },
-                { "GER", "German" },   { "DE", "German" },
-                { "FRE", "French" },   { "FR", "French" }
-            };
-
-            // Build a joined alternation like ENG|EN|DUT|NL|...
-            var alternation = string.Join("|", codes.Keys.Select(Regex.Escape));
-
-            // Bracketed or parenthesis forms: [ ENG / ... ] or (EN)
-            // Use verbatim interpolated string and escape [ and (
-            var bracketedPattern = $@"[\[\(]\s*(?:{alternation})\b"; // starts with [ or ( then code
-
-            // Standalone word boundary pattern: \b(ENG|EN|DUT|NL|...)\b
-            var wordBoundaryPattern = $"\\b(?:{alternation})\\b";
-
-            // Try bracketed/parenthesized first (higher confidence)
-            var bracketMatch = Regex.Match(normalized, bracketedPattern, RegexOptions.IgnoreCase | RegexOptions.Compiled);
-            if (bracketMatch.Success)
-            {
-                var code = bracketMatch.Value.TrimStart('[', '(').Trim().Split(' ', '/', ',')[0];
-                if (codes.TryGetValue(code.ToUpperInvariant(), out var lang)) return lang;
-            }
-
-            // Fall back to standalone word match
-            var wordMatch = Regex.Match(normalized, wordBoundaryPattern, RegexOptions.IgnoreCase | RegexOptions.Compiled);
-            if (wordMatch.Success)
-            {
-                var code = wordMatch.Value.Trim();
-                if (codes.TryGetValue(code.ToUpperInvariant(), out var lang)) return lang;
-            }
-
-            return null;
-        }
-
-        private string? ParseLanguageFromCode(string? code)
-        {
-            if (string.IsNullOrWhiteSpace(code)) return null;
-
-            var codes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            {
-                { "ENG", "English" }, { "EN", "English" },
-                { "DUT", "Dutch" },    { "NL", "Dutch" },
-                { "GER", "German" },   { "DE", "German" },
-                { "FRE", "French" },   { "FR", "French" }
-            };
-
-            if (codes.TryGetValue(code.ToUpperInvariant(), out var lang)) return lang;
-            return null;
         }
 
         private long ExtractSizeFromMyAnonamouseDescription(string? description)

@@ -34,13 +34,7 @@ namespace Listenarr.Tests.Features.Api.Services
         [InlineData("No language here", null)]
         public void ParseLanguageFromText_RecognizesCodes(string input, string? expected)
         {
-            // Create an uninitialized SearchService instance so we don't have to satisfy constructor dependencies
-            var svcObj = System.Runtime.Serialization.FormatterServices.GetUninitializedObject(typeof(SearchService));
-
-            var method = typeof(SearchService).GetMethod("ParseLanguageFromText", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            Assert.NotNull(method);
-
-            var result = method.Invoke(svcObj, new object[] { input }) as string;
+            var result = SearchResultAttributeParser.ParseLanguageFromText(input);
             Assert.Equal(expected, result);
         }
     }

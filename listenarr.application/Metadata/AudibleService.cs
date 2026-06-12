@@ -16,7 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Globalization;
-using System.Text;
 using System.Text.Json;
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Security;
@@ -40,36 +39,6 @@ namespace Listenarr.Application.Metadata
             "media,product_attrs,product_desc,product_details,product_extended_attrs,product_plans,rating,series,relationships,review_attrs,category_ladders,customer_rights";
         private const string DefaultSeriesResponseGroups =
             "relationships,product_attrs,product_desc,product_extended_attrs";
-        private static readonly IReadOnlyDictionary<string, string> AudibleApiDomainMap =
-            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["us"] = "api.audible.com",
-                ["ca"] = "api.audible.ca",
-                ["uk"] = "api.audible.co.uk",
-                ["au"] = "api.audible.com.au",
-                ["fr"] = "api.audible.fr",
-                ["de"] = "api.audible.de",
-                ["jp"] = "api.audible.co.jp",
-                ["it"] = "api.audible.it",
-                ["in"] = "api.audible.in",
-                ["es"] = "api.audible.es",
-                ["br"] = "api.audible.com.br",
-            };
-        private static readonly IReadOnlyDictionary<string, string> AudibleLocaleMap =
-            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["us"] = "en-US",
-                ["ca"] = "en-CA",
-                ["uk"] = "en-GB",
-                ["au"] = "en-AU",
-                ["fr"] = "fr-FR",
-                ["de"] = "de-DE",
-                ["jp"] = "ja-JP",
-                ["it"] = "it-IT",
-                ["in"] = "en-IN",
-                ["es"] = "es-ES",
-                ["br"] = "pt-BR",
-            };
         private readonly HttpClient _httpClient;
         private readonly ILogger<AudibleService> _logger;
         private readonly IAudibleAuthorPageParser? _authorPageParser;
@@ -126,9 +95,9 @@ namespace Listenarr.Application.Metadata
                         ? string.Empty
                         : $"&pageSectionContinuationToken={Uri.EscapeDataString(continuationToken)}";
                     var authorPageUrl =
-                        $"{BuildAudibleApiBaseUrl(region)}/1.0/screens/audible-android-author-detail/{Uri.EscapeDataString(authorAsin)}" +
+                        $"{AudibleRequestHelper.BuildApiBaseUrl(region)}/1.0/screens/audible-android-author-detail/{Uri.EscapeDataString(authorAsin)}" +
                         $"?tabId=titles&author_asin={Uri.EscapeDataString(authorAsin)}&title_source=all" +
-                        $"&session_id={Uri.EscapeDataString(GenerateRandomSessionId())}" +
+                        $"&session_id={Uri.EscapeDataString(AudibleRequestHelper.GenerateRandomSessionId())}" +
                         $"&applicationType=Android_App&local_time={Uri.EscapeDataString(DateTime.UtcNow.ToString("O"))}" +
                         $"&response_groups=always-returned&surface=Android{tokenQuery}";
 
@@ -271,7 +240,7 @@ namespace Listenarr.Application.Metadata
                 {
                     Asin = GetString(product, "asin") ?? seriesAsin,
                     Name = GetString(product, "title"),
-                    Region = NormalizeRegion(region),
+                    Region = AudibleRequestHelper.NormalizeRegion(region),
                     Description = GetString(product, "publisher_summary") ?? GetString(product, "extended_product_description"),
                     Image = GetHighestResolutionImage(product)
                 };
@@ -437,7 +406,7 @@ namespace Listenarr.Application.Metadata
             _logger.LogInformation(
                 "Audible keyword title search returned no results for '{Title}' in region {Region}; retrying title-field search",
                 LogRedaction.SanitizeText(normalizedTitle),
-                NormalizeRegion(region));
+                AudibleRequestHelper.NormalizeRegion(region));
 
             var titleFieldResponse = await SearchProductsDirectAsync(
                 query: null,
@@ -653,9 +622,9 @@ namespace Listenarr.Application.Metadata
 
             try
             {
-                var locale = GetAudibleLocale(region);
+                var locale = AudibleRequestHelper.GetLocale(region);
                 var url =
-                    $"{BuildAudibleApiBaseUrl(region)}/1.0/catalog/contributors/{Uri.EscapeDataString(authorAsin)}" +
+                    $"{AudibleRequestHelper.BuildApiBaseUrl(region)}/1.0/catalog/contributors/{Uri.EscapeDataString(authorAsin)}" +
                     $"?locale={Uri.EscapeDataString(locale)}";
                 using var doc = await GetAudibleJsonDocumentAsync(url, region, includeLocaleHeaders: true, timeoutSeconds: 10);
                 if (doc == null ||
@@ -670,7 +639,7 @@ namespace Listenarr.Application.Metadata
                     Asin = GetString(contributor, "contributor_id") ?? authorAsin,
                     Name = GetString(contributor, "name"),
                     Image = GetString(contributor, "profile_image_url"),
-                    Region = NormalizeRegion(region),
+                    Region = AudibleRequestHelper.NormalizeRegion(region),
                     Description = GetString(contributor, "bio")
                 };
             }
@@ -711,7 +680,7 @@ namespace Listenarr.Application.Metadata
                         {
                             Asin = GetString(authorItem, "asin"),
                             Name = GetString(authorItem, "name"),
-                            Region = NormalizeRegion(region)
+                            Region = AudibleRequestHelper.NormalizeRegion(region)
                         }))
                 .Where(item => !string.IsNullOrWhiteSpace(item.Name))
                 .Where(item =>
@@ -777,7 +746,7 @@ namespace Listenarr.Application.Metadata
                             Asin = GetString(series, "asin"),
                             Name = GetString(series, "title"),
                             Position = GetString(series, "sequence"),
-                            Region = NormalizeRegion(region),
+                            Region = AudibleRequestHelper.NormalizeRegion(region),
                             Image = productImage
                         });
                 })
@@ -824,7 +793,7 @@ namespace Listenarr.Application.Metadata
             string sortBy,
             bool returnRawProducts = false)
         {
-            var safeRegion = NormalizeRegion(region);
+            var safeRegion = AudibleRequestHelper.NormalizeRegion(region);
 
             // Try with original text first (preserves diacritics for APIs that
             // handle them natively, e.g. audible.de for German/Swedish).
@@ -877,7 +846,7 @@ namespace Listenarr.Application.Metadata
             if (!string.IsNullOrWhiteSpace(narrator)) parameters["narrator"] = narrator;
             if (!string.IsNullOrWhiteSpace(publisher)) parameters["publisher"] = publisher;
 
-            var url = $"{BuildAudibleApiBaseUrl(safeRegion)}/1.0/catalog/products/?{BuildQueryString(parameters)}";
+            var url = $"{AudibleRequestHelper.BuildApiBaseUrl(safeRegion)}/1.0/catalog/products/?{AudibleRequestHelper.BuildQueryString(parameters)}";
             using var doc = await GetAudibleJsonDocumentAsync(url, safeRegion, includeLocaleHeaders: false, timeoutSeconds: 10);
             if (doc == null)
             {
@@ -922,10 +891,10 @@ namespace Listenarr.Application.Metadata
 
         private async Task<JsonDocument?> GetAudibleProductDocumentAsync(string asin, string region, string responseGroups)
         {
-            var safeRegion = NormalizeRegion(region);
+            var safeRegion = AudibleRequestHelper.NormalizeRegion(region);
             var url =
-                $"{BuildAudibleApiBaseUrl(safeRegion)}/1.0/catalog/products/{Uri.EscapeDataString(asin)}?" +
-                $"{BuildQueryString(new Dictionary<string, string?>
+                $"{AudibleRequestHelper.BuildApiBaseUrl(safeRegion)}/1.0/catalog/products/{Uri.EscapeDataString(asin)}?" +
+                $"{AudibleRequestHelper.BuildQueryString(new Dictionary<string, string?>
                 {
                     ["response_groups"] = responseGroups,
                     ["image_sizes"] = "500,1000,2400,3200"
@@ -936,7 +905,7 @@ namespace Listenarr.Application.Metadata
 
         private async Task<List<AudibleBookResponse>> GetBooksMetadataByAsinsAsync(IEnumerable<string> asins, string region)
         {
-            var normalizedRegion = NormalizeRegion(region);
+            var normalizedRegion = AudibleRequestHelper.NormalizeRegion(region);
             var orderedAsins = asins
                 .Where(asin => !string.IsNullOrWhiteSpace(asin))
                 .Select(asin => asin.Trim())
@@ -949,8 +918,8 @@ namespace Listenarr.Application.Metadata
                 var doc = chunk.Count == 1
                     ? await GetAudibleProductDocumentAsync(chunk[0], normalizedRegion, DefaultBookResponseGroups)
                     : await GetAudibleJsonDocumentAsync(
-                        $"{BuildAudibleApiBaseUrl(normalizedRegion)}/1.0/catalog/products/?" +
-                        $"{BuildQueryString(new Dictionary<string, string?>
+                        $"{AudibleRequestHelper.BuildApiBaseUrl(normalizedRegion)}/1.0/catalog/products/?" +
+                        $"{AudibleRequestHelper.BuildQueryString(new Dictionary<string, string?>
                         {
                             ["asins"] = string.Join(",", chunk),
                             ["response_groups"] = DefaultBookResponseGroups,
@@ -1017,7 +986,7 @@ namespace Listenarr.Application.Metadata
                     {
                         Asin = GetString(author, "asin"),
                         Name = GetString(author, "name"),
-                        Region = NormalizeRegion(region)
+                        Region = AudibleRequestHelper.NormalizeRegion(region)
                     })
                     .Where(author => !string.IsNullOrWhiteSpace(author.Name))
                     .ToList(),
@@ -1050,7 +1019,7 @@ namespace Listenarr.Application.Metadata
                 Explicit = GetBoolean(product, "is_adult_product"),
                 ReleaseDate = GetString(product, "release_date"),
                 Isbn = GetString(product, "isbn"),
-                Region = NormalizeRegion(region),
+                Region = AudibleRequestHelper.NormalizeRegion(region),
                 BookFormat = GetString(product, "format_type"),
                 ContentType = GetString(product, "content_type"),
                 ContentDeliveryType = GetString(product, "content_delivery_type"),
@@ -1087,7 +1056,7 @@ namespace Listenarr.Application.Metadata
                 Publisher = book.Publisher,
                 Narrators = book.Narrators,
                 ReleaseDate = book.ReleaseDate,
-                Link = string.IsNullOrWhiteSpace(book.Asin) ? null : $"{GetAudibleBaseUrl(book.Region ?? "us")}/pd/{book.Asin}",
+                Link = string.IsNullOrWhiteSpace(book.Asin) ? null : $"{AudibleRequestHelper.GetBaseUrl(book.Region ?? "us")}/pd/{book.Asin}",
                 Isbn = book.Isbn
             };
         }
@@ -1130,7 +1099,7 @@ namespace Listenarr.Application.Metadata
                 request.Headers.TryAddWithoutValidation("Accept-Charset", "utf-8");
                 if (includeLocaleHeaders)
                 {
-                    var locale = GetAudibleLocale(region);
+                    var locale = AudibleRequestHelper.GetLocale(region);
                     request.Headers.TryAddWithoutValidation("ACCEPTED-LANGUAGE", locale);
                     request.Headers.TryAddWithoutValidation("accept-language", locale);
                     request.Headers.TryAddWithoutValidation("X-ADP-SW", Random.Shared.Next(10_000_000, 99_999_999).ToString());
@@ -1159,34 +1128,6 @@ namespace Listenarr.Application.Metadata
             }
         }
 
-        private static string BuildAudibleApiBaseUrl(string region)
-        {
-            var normalizedRegion = NormalizeRegion(region);
-            return $"https://{(AudibleApiDomainMap.TryGetValue(normalizedRegion, out var domain) ? domain : AudibleApiDomainMap["us"])}";
-        }
-
-        private static string GetAudibleLocale(string region)
-        {
-            var normalizedRegion = NormalizeRegion(region);
-            return AudibleLocaleMap.TryGetValue(normalizedRegion, out var locale)
-                ? locale
-                : AudibleLocaleMap["us"];
-        }
-
-        private static string NormalizeRegion(string region)
-        {
-            return string.IsNullOrWhiteSpace(region) ? "us" : region.Trim().ToLowerInvariant();
-        }
-
-        private static string BuildQueryString(IEnumerable<KeyValuePair<string, string?>> parameters)
-        {
-            return string.Join(
-                "&",
-                parameters
-                    .Where(pair => !string.IsNullOrWhiteSpace(pair.Value))
-                    .Select(pair => $"{Uri.EscapeDataString(pair.Key)}={Uri.EscapeDataString(pair.Value!)}"));
-        }
-
         /// <summary>
         /// Strips diacritical marks (accents) from a string so that characters
         /// like Å → A, ä → a, ö → o, etc.  The Audible API returns poor or no
@@ -1196,12 +1137,7 @@ namespace Listenarr.Application.Metadata
         /// </summary>
         internal static string RemoveDiacritics(string text)
         {
-            if (string.IsNullOrEmpty(text)) return text;
-            var normalized = text.Normalize(NormalizationForm.FormD);
-            var sb = new StringBuilder(normalized.Length);
-            foreach (var ch in normalized.Where(ch => CharUnicodeInfo.GetUnicodeCategory(ch) != UnicodeCategory.NonSpacingMark))
-                sb.Append(ch);
-            return sb.ToString().Normalize(NormalizationForm.FormC);
+            return AudibleRequestHelper.RemoveDiacritics(text);
         }
 
         private static IEnumerable<JsonElement> GetArray(JsonElement element, string propertyName)
@@ -1331,16 +1267,6 @@ namespace Listenarr.Application.Metadata
             }
 
             return chunks;
-        }
-
-        private static string GenerateRandomSessionId()
-        {
-            static string RandomDigits()
-            {
-                return Random.Shared.Next(0, 10_000_000).ToString().PadLeft(7, '0');
-            }
-
-            return $"000-{RandomDigits()}-{RandomDigits()}";
         }
 
         private static AuthorLookupItem? ParseSingleAuthorLookupItem(string lookupJson)
@@ -1490,7 +1416,7 @@ namespace Listenarr.Application.Metadata
         {
             try
             {
-                var authorPageUrl = BuildAudibleAuthorPageUrl(author, authorAsin, region);
+                var authorPageUrl = AudibleRequestHelper.BuildAuthorPageUrl(author, authorAsin, region);
                 _logger.LogInformation("Scraping Audible author page as fallback: {Url}", authorPageUrl);
 
                 var response = await GetWithTimeoutAsync(authorPageUrl, timeoutSeconds: 10);
@@ -1689,42 +1615,6 @@ namespace Listenarr.Application.Metadata
             }
 
             return new List<SeriesLookupItem>();
-        }
-
-        private static string BuildAudibleAuthorPageUrl(string author, string authorAsin, string region)
-        {
-            var authorSlug = string.IsNullOrWhiteSpace(author)
-                ? authorAsin
-                : Uri.EscapeDataString(author.Trim().Replace(' ', '-'));
-            return $"{GetAudibleBaseUrl(region)}/author/{authorSlug}/{Uri.EscapeDataString(authorAsin)}";
-        }
-
-        private static string? NormalizeAudibleUrl(string? url, string region)
-        {
-            if (string.IsNullOrWhiteSpace(url)) return null;
-            if (Uri.TryCreate(url, UriKind.Absolute, out var absoluteUri)
-                && !string.Equals(absoluteUri.Scheme, Uri.UriSchemeFile, StringComparison.OrdinalIgnoreCase))
-            {
-                return absoluteUri.ToString();
-            }
-            return $"{GetAudibleBaseUrl(region)}{url}";
-        }
-
-        private static string GetAudibleBaseUrl(string region)
-        {
-            return region?.Trim().ToLowerInvariant() switch
-            {
-                "au" => "https://www.audible.com.au",
-                "ca" => "https://www.audible.ca",
-                "de" => "https://www.audible.de",
-                "es" => "https://www.audible.es",
-                "fr" => "https://www.audible.fr",
-                "in" => "https://www.audible.in",
-                "it" => "https://www.audible.it",
-                "jp" => "https://www.audible.co.jp",
-                "uk" => "https://www.audible.co.uk",
-                _ => "https://www.audible.com"
-            };
         }
 
         public virtual async Task<AudibleSearchResponse?> SearchByIsbnAsync(string isbn, int page = 1, int limit = 50, string region = "us", string? language = null)
