@@ -47,6 +47,7 @@ namespace Listenarr.Application.Search
         private readonly AsinCandidateCollector _asinCandidateCollector;
         private readonly AsinEnricher _asinEnricher;
         private readonly SearchResultScorerService _searchResultScorer;
+        private readonly SearchResultSortingService _searchResultSorting;
         private readonly AsinSearchHandler _asinSearchHandler;
         private readonly IMemoryCache? _cache;
         private readonly IEnumerable<IIndexerSearchProvider> _searchProviders;
@@ -63,6 +64,7 @@ namespace Listenarr.Application.Search
             AsinCandidateCollector asinCandidateCollector,
             AsinEnricher asinEnricher,
             SearchResultScorerService searchResultScorer,
+            SearchResultSortingService searchResultSorting,
             AsinSearchHandler asinSearchHandler,
             IEnumerable<IIndexerSearchProvider>? searchProviders = null,
             IMemoryCache? cache = null)
@@ -79,6 +81,7 @@ namespace Listenarr.Application.Search
             _asinEnricher = asinEnricher;
             _searchProviders = searchProviders ?? Enumerable.Empty<IIndexerSearchProvider>();
             _searchResultScorer = searchResultScorer;
+            _searchResultSorting = searchResultSorting;
             _asinSearchHandler = asinSearchHandler;
             _cache = cache;
         }
@@ -103,7 +106,7 @@ namespace Listenarr.Application.Search
                 {
                     _logger.LogInformation("No indexer results found for automatic search query: {Query}", LogRedaction.SanitizeText(query));
                 }
-                return await ApplySorting(results, sortBy, sortDirection);
+                return await _searchResultSorting.ApplySortingAsync(results, sortBy, sortDirection);
             }
 
             // For manual/interactive search, use intelligent search (Audible/Audnexus/OpenLibrary) + indexers
@@ -126,170 +129,7 @@ namespace Listenarr.Application.Search
                 _logger.LogInformation("Added {Count} indexer results (including DDL downloads) for query: {Query}", indexerResults.Count, LogRedaction.SanitizeText(query));
             }
 
-            return await ApplySorting(results, sortBy, sortDirection);
-        }
-
-        private async Task<List<SearchResult>> ApplySorting(List<SearchResult> results, SearchSortBy sortBy, SearchSortDirection sortDirection)
-        {
-            if (!results.Any())
-                return results;
-
-            IEnumerable<SearchResult> orderedResults;
-
-            Dictionary<int, Indexer>? indexerCache = null;
-            if (sortBy == SearchSortBy.Seeders || sortBy == SearchSortBy.Smart)
-            {
-                var allIndexers = await _indexerRepository.GetAllAsync();
-                indexerCache = allIndexers.ToDictionary(i => i.Id);
-            }
-
-            // Primary sort
-            switch (sortBy)
-            {
-                case SearchSortBy.Seeders:
-                    // Enhanced seeders sort: consider Prowlarr-inspired composite scoring
-                    var seedScored = results.Select(r =>
-                    {
-                        Indexer? idx = null;
-                        if (r.IndexerId.HasValue)
-                            indexerCache!.TryGetValue(r.IndexerId.Value, out idx);
-                        var score = CalculateProwlarrStyleScore(r, idx);
-                        return new { Result = r, Score = score };
-                    }).ToList();
-
-                    orderedResults = sortDirection == SearchSortDirection.Descending
-                        ? seedScored.OrderByDescending(x => x.Score).Select(x => x.Result)
-                        : seedScored.OrderBy(x => x.Score).Select(x => x.Result);
-                    break;
-
-                case SearchSortBy.Size:
-                    orderedResults = sortDirection == SearchSortDirection.Descending
-                        ? results.OrderByDescending(r => r.Size)
-                        : results.OrderBy(r => r.Size);
-                    break;
-
-                case SearchSortBy.PublishedDate:
-                    orderedResults = sortDirection == SearchSortDirection.Descending
-                        ? results.OrderByDescending(r => r.PublishedDate)
-                        : results.OrderBy(r => r.PublishedDate);
-                    break;
-
-                case SearchSortBy.Title:
-                    orderedResults = sortDirection == SearchSortDirection.Descending
-                        ? results.OrderByDescending(r => r.Title, StringComparer.OrdinalIgnoreCase)
-                        : results.OrderBy(r => r.Title, StringComparer.OrdinalIgnoreCase);
-                    break;
-
-                case SearchSortBy.Source:
-                    orderedResults = sortDirection == SearchSortDirection.Descending
-                        ? results.OrderByDescending(r => r.Source, StringComparer.OrdinalIgnoreCase)
-                        : results.OrderBy(r => r.Source, StringComparer.OrdinalIgnoreCase);
-                    break;
-
-                case SearchSortBy.Language:
-                    orderedResults = sortDirection == SearchSortDirection.Descending
-                        ? results.OrderByDescending(r => r.Language ?? string.Empty, StringComparer.OrdinalIgnoreCase)
-                        : results.OrderBy(r => r.Language ?? string.Empty, StringComparer.OrdinalIgnoreCase);
-                    break;
-
-                case SearchSortBy.Quality:
-                    orderedResults = sortDirection == SearchSortDirection.Descending
-                        ? results.OrderByDescending(r => GetQualityScore(r.Quality))
-                        : results.OrderBy(r => GetQualityScore(r.Quality));
-                    break;
-
-                case SearchSortBy.Smart:
-                    // Prowlarr-style mult-tier scoring
-                    var scored = results.Select(r =>
-                    {
-                        Indexer? idx = null;
-                        if (r.IndexerId.HasValue)
-                            indexerCache!.TryGetValue(r.IndexerId.Value, out idx);
-                        var score = CalculateProwlarrStyleScore(r, idx);
-                        return new { Result = r, Score = score };
-                    }).ToList();
-
-                    orderedResults = sortDirection == SearchSortDirection.Descending
-                        ? scored.OrderByDescending(x => x.Score).Select(x => x.Result)
-                        : scored.OrderBy(x => x.Score).Select(x => x.Result);
-                    break;
-
-                case SearchSortBy.Grabs:
-                    orderedResults = sortDirection == SearchSortDirection.Descending
-                        ? results.OrderByDescending(r => r.Grabs)
-                        : results.OrderBy(r => r.Grabs);
-                    break;
-
-                default:
-                    // Default to seeders descending
-                    orderedResults = results.OrderByDescending(r => r.Seeders ?? 0);
-                    break;
-            }
-
-            return orderedResults.ToList();
-        }
-
-        private int GetQualityScore(string? quality)
-        {
-            if (string.IsNullOrEmpty(quality))
-                return 0;
-
-            var lowerQuality = quality.ToLower();
-
-            // Highest quality
-            if (lowerQuality.Contains("flac"))
-                return 100;
-
-            // Audible format (AAX) - high quality
-            if (lowerQuality.Contains("aax"))
-                return 95;
-
-            // Container formats
-            if (lowerQuality.Contains("m4b"))
-                return 90;
-
-            // Modern efficient codecs
-            if (lowerQuality.Contains("opus"))
-                return 85;
-
-            // VBR quality presets (LAME VBR presets like V0/V1/V2)
-            if (lowerQuality.Contains("v0") || lowerQuality.Contains("-v0") || lowerQuality.Contains(" v0"))
-                return 82;
-            if (lowerQuality.Contains("v1") || lowerQuality.Contains("-v1") || lowerQuality.Contains(" v1"))
-                return 76;
-            if (lowerQuality.Contains("v2") || lowerQuality.Contains("-v2") || lowerQuality.Contains(" v2"))
-                return 70;
-
-
-            // AAC / M4A (check before numeric bitrates to prefer codec score for e.g. "AAC 256")
-            if (lowerQuality.Contains("aac") || lowerQuality.Contains("m4a"))
-                return 78;
-
-            // Explicit numeric bitrates
-            if (lowerQuality.Contains("320"))
-                return 80;
-            if (lowerQuality.Contains("256"))
-                return 74;
-            if (lowerQuality.Contains("192"))
-                return 60;
-
-            // VBR / CBR generic tokens (treat as mid-range if no numeric bitrate provided)
-            if (lowerQuality.Contains("vbr") || lowerQuality.Contains("cbr"))
-            {
-                // If there's an explicit numeric bitrate elsewhere, that will have matched above.
-                return 65;
-            }
-
-            // Generic MP3 mention without explicit bitrate -> mid-range
-            if (lowerQuality.Contains("mp3") && !lowerQuality.Contains("64") && !lowerQuality.Contains("128") && !lowerQuality.Contains("192") && !lowerQuality.Contains("256") && !lowerQuality.Contains("320"))
-                return 65;
-
-            if (lowerQuality.Contains("128"))
-                return 50;
-            if (lowerQuality.Contains("64"))
-                return 40;
-
-            return 0;
+            return await _searchResultSorting.ApplySortingAsync(results, sortBy, sortDirection);
         }
 
         // Prowlarr-style composite scoring helpers adapted for Listenarr
@@ -297,77 +137,6 @@ namespace Listenarr.Application.Search
         {
             var composite = CompositeScorer.CalculateProwlarrStyleScore(result, indexer, _logger);
             return composite.Total;
-        }
-
-        private double CalculateSeedScore(SearchResult result)
-        {
-            var downloadType = (result.DownloadType ?? string.Empty).ToLower();
-
-            if (downloadType.Contains("usenet") || downloadType.Contains("ddl") || !string.IsNullOrEmpty(result.NzbUrl))
-            {
-                var grabs = result.Grabs;
-                if (grabs > 0)
-                {
-                    return Math.Min(100.0, 20.0 + (Math.Log10(grabs) * 20.0));
-                }
-                return 0.0;
-            }
-
-            // Torrent
-            var seeders = result.Seeders ?? 0;
-            if (seeders <= 0) return 0.0;
-
-            var seederScore = Math.Min(100.0, 20.0 + (Math.Log10(seeders) * 20.0));
-            var leechers = result.Leechers ?? 0;
-            if (leechers > 0)
-            {
-                var ratio = (double)seeders / Math.Max(1, leechers);
-                if (ratio > 2.0) seederScore += 10.0;
-                else if (ratio > 1.0) seederScore += 5.0;
-            }
-
-            return Math.Min(100.0, seederScore);
-        }
-
-        private double CalculateAgeScore(DateTime publishedDate)
-        {
-            if (publishedDate == DateTime.MinValue) return 50.0;
-            var age = DateTime.UtcNow - publishedDate;
-            if (age.TotalDays < 1) return 100.0;
-            if (age.TotalDays < 7) return 90.0;
-            if (age.TotalDays < 30) return 75.0;
-            if (age.TotalDays < 90) return 60.0;
-            if (age.TotalDays < 365) return 40.0;
-            return 20.0;
-        }
-
-        private double CalculateSizeScore(long sizeBytes)
-        {
-            if (sizeBytes <= 0) return 50.0;
-            var sizeMB = sizeBytes / (1024.0 * 1024.0);
-            if (sizeMB >= 100 && sizeMB <= 800) return 100.0;
-            if (sizeMB >= 50 && sizeMB < 100) return 80.0;
-            if (sizeMB > 800 && sizeMB <= 1500) return 80.0;
-            if (sizeMB >= 10 && sizeMB < 50) return 50.0;
-            if (sizeMB > 1500 && sizeMB <= 3000) return 50.0;
-            if (sizeMB < 10) return 20.0;
-            if (sizeMB > 3000) return 30.0;
-            return 50.0;
-        }
-
-        private double GetFormatScore(string? format)
-        {
-            if (string.IsNullOrEmpty(format)) return 50.0;
-            var fmt = format.ToLower();
-            if (fmt.Contains("m4b")) return 100.0;
-            if (fmt.Contains("flac")) return 95.0;
-            if (fmt.Contains("opus")) return 90.0;
-            if (fmt.Contains("m4a") || fmt.Contains("aac")) return 85.0;
-            if (fmt.Contains("mp3")) return 75.0;
-            if (fmt.Contains("ogg") || fmt.Contains("vorbis")) return 70.0;
-            if (fmt.Contains("wma")) return 40.0;
-            if (fmt.Contains("ra") || fmt.Contains("realaudio")) return 30.0;
-            return 50.0;
         }
 
         public async Task<List<IndexerSearchResult>> SearchIndexersAsync(string query, string? category = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false, SearchRequest? request = null)
@@ -4199,5 +3968,4 @@ namespace Listenarr.Application.Search
         }
     }
 }
-
 

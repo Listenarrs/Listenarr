@@ -56,7 +56,6 @@ namespace Listenarr.Api.Controllers
         private readonly IAudiobookFileRepository _audioFileRepository;
         private readonly IQualityProfileRepository _qualityProfileRepository;
         private readonly IDownloadRepository _downloadRepository;
-        private readonly IRootFolderRepository _rootFolderRepository;
         private readonly IScanQueueService? _scanQueueService;
         private readonly IMoveQueueService? _moveQueueService;
         private readonly IFileNamingService _fileNamingService;
@@ -65,6 +64,7 @@ namespace Listenarr.Api.Controllers
         private readonly ILibraryAddService? _libraryAddService;
         private readonly IRenameService? _renameService;
         private readonly ILibraryListService _libraryListService;
+        private readonly IAudiobookFilesystemDeleteService _audiobookFilesystemDeleteService;
         private readonly string _contentRootPath;
         /// <summary>Initializes a new instance of <see cref="LibraryController"/>.</summary>
         /// <param name="repo">Repository for audiobook persistence and queries.</param>
@@ -75,7 +75,6 @@ namespace Listenarr.Api.Controllers
         /// <param name="audioFileRepository">Repository for audiobook file records.</param>
         /// <param name="qualityProfileRepository">Repository for quality profile configuration.</param>
         /// <param name="downloadRepository">Repository for active download records.</param>
-        /// <param name="rootFolderRepository">Repository for configured root folder paths.</param>
         /// <param name="fileNamingService">Service responsible for applying file naming patterns.</param>
         /// <param name="scanQueueService">Optional background scan queue service for asynchronous scans.</param>
         /// <param name="moveQueueService">Optional background move queue service for processing move requests.</param>
@@ -85,6 +84,7 @@ namespace Listenarr.Api.Controllers
         /// <param name="renameService">Optional organize/rename service used for previewing and executing library file organization.</param>
         /// <param name="applicationPathService">Application path service used to resolve content-root-relative cache files.</param>
         /// <param name="libraryListService">Application service that builds the slim library list payload.</param>
+        /// <param name="audiobookFilesystemDeleteService">Application service responsible for safe audiobook filesystem cleanup.</param>
         public LibraryController(
             IAudiobookRepository repo,
             IImageCacheService imageCacheService,
@@ -94,10 +94,10 @@ namespace Listenarr.Api.Controllers
             IAudiobookFileRepository audioFileRepository,
             IQualityProfileRepository qualityProfileRepository,
             IDownloadRepository downloadRepository,
-            IRootFolderRepository rootFolderRepository,
             IFileNamingService fileNamingService,
             IApplicationPathService applicationPathService,
             ILibraryListService libraryListService,
+            IAudiobookFilesystemDeleteService audiobookFilesystemDeleteService,
             IScanQueueService? scanQueueService = null,
             IMoveQueueService? moveQueueService = null,
             NotificationService? notificationService = null,
@@ -113,7 +113,6 @@ namespace Listenarr.Api.Controllers
             _audioFileRepository = audioFileRepository;
             _qualityProfileRepository = qualityProfileRepository;
             _downloadRepository = downloadRepository;
-            _rootFolderRepository = rootFolderRepository;
             _fileNamingService = fileNamingService;
             _scanQueueService = scanQueueService;
             _moveQueueService = moveQueueService;
@@ -122,6 +121,7 @@ namespace Listenarr.Api.Controllers
             _libraryAddService = libraryAddService;
             _renameService = renameService;
             _libraryListService = libraryListService;
+            _audiobookFilesystemDeleteService = audiobookFilesystemDeleteService;
             _contentRootPath = applicationPathService.ContentRootPath;
         }
 
@@ -1299,10 +1299,10 @@ namespace Listenarr.Api.Controllers
 
             deleteFiles = deleteFiles || deleteFolder;
 
-            DeleteFilesystemResult? filesystemResult = null;
+            AudiobookFilesystemDeleteResult? filesystemResult = null;
             if (deleteFiles)
             {
-                filesystemResult = await DeleteAudiobookFilesystemAsync(audiobook, deleteFolder);
+                filesystemResult = await _audiobookFilesystemDeleteService.DeleteAsync(audiobook, deleteFolder);
             }
 
             // Delete associated image from cache if it exists
@@ -1373,7 +1373,7 @@ namespace Listenarr.Api.Controllers
             var deleted = await _repo.DeleteByIdAsync(id);
             if (deleted)
             {
-                var message = BuildDeleteMessage(filesystemResult);
+                var message = filesystemResult?.BuildDeleteMessage() ?? "Audiobook deleted successfully.";
                 return Ok(new
                 {
                     message,
@@ -1386,583 +1386,6 @@ namespace Listenarr.Api.Controllers
             }
 
             return StatusCode(500, new { message = "Failed to delete audiobook" });
-        }
-
-        private sealed class DeleteFilesystemResult
-        {
-            public int DeletedFiles { get; set; }
-            public bool DeletedFolder { get; set; }
-            public bool DeletedParentFolder { get; set; }
-            public List<string> Warnings { get; } = new List<string>();
-        }
-
-        private sealed class DeleteFolderTarget
-        {
-            public required string FolderPath { get; init; }
-            public required IReadOnlyCollection<string> ProtectedRoots { get; init; }
-        }
-
-        private async Task<DeleteFilesystemResult> DeleteAudiobookFilesystemAsync(Audiobook audiobook, bool deleteFolder)
-        {
-            var result = new DeleteFilesystemResult();
-            var trackedFilePaths = CollectTrackedFilePaths(audiobook);
-            var deleteTarget = await ResolveDeleteFolderTargetAsync(audiobook, trackedFilePaths, result);
-
-            if (deleteTarget != null)
-            {
-                TryDeleteFolderContents(deleteTarget.FolderPath, result);
-
-                if (deleteFolder)
-                {
-                    await TryDeleteAudiobookFolderAsync(audiobook, deleteTarget, result);
-                }
-            }
-            else
-            {
-                foreach (var trackedFilePath in trackedFilePaths)
-                {
-                    TryDeleteFile(trackedFilePath, result);
-                }
-            }
-
-            return result;
-        }
-
-        private static IReadOnlyList<string> CollectTrackedFilePaths(Audiobook audiobook)
-        {
-            var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            if (!string.IsNullOrWhiteSpace(audiobook.FilePath))
-            {
-                var normalizedLegacy = NormalizePath(audiobook.FilePath);
-                if (!string.IsNullOrWhiteSpace(normalizedLegacy))
-                {
-                    paths.Add(normalizedLegacy);
-                }
-            }
-
-            if (audiobook.Files != null)
-            {
-                foreach (var normalizedTracked in audiobook.Files
-                    .Select(file => NormalizePath(file.Path))
-                    .Where(normalizedTracked => !string.IsNullOrWhiteSpace(normalizedTracked)))
-                {
-                    paths.Add(normalizedTracked!);
-                }
-            }
-
-            return paths.ToList();
-        }
-
-        private void TryDeleteFile(string path, DeleteFilesystemResult result)
-        {
-            try
-            {
-                if (!System.IO.File.Exists(path))
-                {
-                    return;
-                }
-
-                System.IO.File.Delete(path);
-                result.DeletedFiles++;
-                _logger.LogInformation("Deleted audiobook file {Path}", LogRedaction.SanitizeFilePath(path));
-            }
-            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
-            {
-                var warning = $"Could not delete file '{Path.GetFileName(path)}'.";
-                result.Warnings.Add(warning);
-                _logger.LogWarning(ex, "Failed to delete audiobook file {Path}", LogRedaction.SanitizeFilePath(path));
-            }
-        }
-
-        private void TryDeleteFolderContents(string folderPath, DeleteFilesystemResult result)
-        {
-            if (!Directory.Exists(folderPath))
-            {
-                return;
-            }
-
-            string[] files;
-            try
-            {
-                files = Directory.GetFiles(folderPath, "*", SearchOption.AllDirectories);
-            }
-            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
-            {
-                result.Warnings.Add("Could not enumerate the audiobook folder contents for deletion.");
-                _logger.LogWarning(ex, "Failed to enumerate audiobook folder contents for {FolderPath}", LogRedaction.SanitizeFilePath(folderPath));
-                return;
-            }
-
-            foreach (var filePath in files)
-            {
-                TryDeleteFile(filePath, result);
-            }
-
-            string[] directories;
-            try
-            {
-                directories = Directory.GetDirectories(folderPath, "*", SearchOption.AllDirectories)
-                    .OrderByDescending(path => path.Length)
-                    .ToArray();
-            }
-            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
-            {
-                result.Warnings.Add("Some nested folders could not be cleaned up after file deletion.");
-                _logger.LogWarning(ex, "Failed to enumerate nested audiobook directories for {FolderPath}", LogRedaction.SanitizeFilePath(folderPath));
-                return;
-            }
-
-            foreach (var directoryPath in directories)
-            {
-                try
-                {
-                    if (!Directory.Exists(directoryPath))
-                    {
-                        continue;
-                    }
-
-                    if (!Directory.EnumerateFileSystemEntries(directoryPath).Any())
-                    {
-                        Directory.Delete(directoryPath, recursive: false);
-                    }
-                }
-                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
-                {
-                    _logger.LogDebug(ex, "Failed to remove nested audiobook directory {FolderPath}", LogRedaction.SanitizeFilePath(directoryPath));
-                }
-            }
-        }
-
-        private async Task<DeleteFolderTarget?> ResolveDeleteFolderTargetAsync(
-            Audiobook audiobook,
-            IReadOnlyList<string> trackedFilePaths,
-            DeleteFilesystemResult result)
-        {
-            var protectedRoots = await GetProtectedRootPathsAsync();
-            var folderPath = ResolveAudiobookFolderPath(audiobook, trackedFilePaths);
-            if (string.IsNullOrWhiteSpace(folderPath))
-            {
-                result.Warnings.Add("Audiobook folder could not be determined, so only tracked audiobook files were deleted.");
-                return null;
-            }
-
-            if (protectedRoots.Any(root => PathsEqual(root, folderPath)))
-            {
-                var fallbackFolderPath = ResolveTrackedFolderPath(trackedFilePaths);
-                if (!string.IsNullOrWhiteSpace(fallbackFolderPath)
-                    && !protectedRoots.Any(root => PathsEqual(root, fallbackFolderPath))
-                    && IsSamePathOrWithin(fallbackFolderPath, folderPath))
-                {
-                    folderPath = fallbackFolderPath;
-                }
-            }
-
-            if (IsFilesystemRoot(folderPath))
-            {
-                result.Warnings.Add("Refused to delete all files in a filesystem root folder.");
-                return null;
-            }
-
-            if (protectedRoots.Any(root => PathsEqual(root, folderPath)))
-            {
-                result.Warnings.Add("Refused to delete all files in a configured library root folder.");
-                return null;
-            }
-
-            if (!Directory.Exists(folderPath))
-            {
-                return null;
-            }
-
-            var allFiles = await _audioFileRepository.GetAllAsync();
-            var otherFilePaths = allFiles
-                .Where(f => f.AudiobookId != audiobook.Id && f.Path != null)
-                .Select(f => f.Path!)
-                .ToList();
-
-            if (otherFilePaths
-                .Select(NormalizePath)
-                .Any(p => !string.IsNullOrWhiteSpace(p) && IsSamePathOrWithin(p!, folderPath)))
-            {
-                result.Warnings.Add("Refused to delete all files in the audiobook folder because other audiobook files are inside it.");
-                return null;
-            }
-
-            var allAudiobooks = await _repo.GetAllAsync();
-            var otherAudiobookPaths = allAudiobooks
-                .Where(a => a.Id != audiobook.Id)
-                .Select(a => new { a.Id, a.BasePath, a.FilePath })
-                .ToList();
-
-            foreach (var otherPath in otherAudiobookPaths)
-            {
-                var otherBasePath = NormalizePath(otherPath.BasePath);
-                if (!string.IsNullOrWhiteSpace(otherBasePath)
-                    && (IsSamePathOrWithin(otherBasePath, folderPath) || IsSamePathOrWithin(folderPath, otherBasePath)))
-                {
-                    result.Warnings.Add("Refused to delete all files in the audiobook folder because another audiobook references that location.");
-                    return null;
-                }
-
-                var otherFilePath = NormalizePath(otherPath.FilePath);
-                if (!string.IsNullOrWhiteSpace(otherFilePath) && IsSamePathOrWithin(otherFilePath, folderPath))
-                {
-                    result.Warnings.Add("Refused to delete all files in the audiobook folder because another audiobook file is inside it.");
-                    return null;
-                }
-            }
-
-            return new DeleteFolderTarget
-            {
-                FolderPath = folderPath,
-                ProtectedRoots = protectedRoots
-            };
-        }
-
-        private async Task TryDeleteAudiobookFolderAsync(Audiobook audiobook, DeleteFolderTarget deleteTarget, DeleteFilesystemResult result)
-        {
-            if (!Directory.Exists(deleteTarget.FolderPath))
-            {
-                return;
-            }
-
-            try
-            {
-                Directory.Delete(deleteTarget.FolderPath, recursive: true);
-                result.DeletedFolder = true;
-                _logger.LogInformation("Deleted audiobook folder {FolderPath}", LogRedaction.SanitizeFilePath(deleteTarget.FolderPath));
-                await TryDeleteEmptyAuthorFolderAsync(audiobook, deleteTarget.FolderPath, deleteTarget.ProtectedRoots, result);
-            }
-            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
-            {
-                result.Warnings.Add("Failed to delete the audiobook folder.");
-                _logger.LogWarning(ex, "Failed to delete audiobook folder {FolderPath}", LogRedaction.SanitizeFilePath(deleteTarget.FolderPath));
-            }
-        }
-
-        private async Task TryDeleteEmptyAuthorFolderAsync(
-            Audiobook audiobook,
-            string deletedFolderPath,
-            IReadOnlyCollection<string> protectedRoots,
-            DeleteFilesystemResult result)
-        {
-            var parentFolder = NormalizePath(Path.GetDirectoryName(deletedFolderPath));
-            if (string.IsNullOrWhiteSpace(parentFolder)
-                || IsFilesystemRoot(parentFolder)
-                || protectedRoots.Any(root => PathsEqual(root, parentFolder))
-                || !Directory.Exists(parentFolder)
-                || !IsAuthorFolder(parentFolder, audiobook.Authors?.FirstOrDefault()))
-            {
-                return;
-            }
-
-            try
-            {
-                if (Directory.EnumerateFileSystemEntries(parentFolder).Any())
-                {
-                    return;
-                }
-            }
-            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
-            {
-                _logger.LogDebug(ex, "Unable to inspect parent folder {FolderPath} after audiobook delete", LogRedaction.SanitizeFilePath(parentFolder));
-                return;
-            }
-
-            var allAbs = await _repo.GetAllAsync();
-            var otherAudiobookPaths = allAbs
-                .Where(a => a.Id != audiobook.Id)
-                .Select(a => new { a.Id, a.BasePath, a.FilePath })
-                .ToList();
-
-            foreach (var otherPath in otherAudiobookPaths)
-            {
-                var otherBasePath = NormalizePath(otherPath.BasePath);
-                if (!string.IsNullOrWhiteSpace(otherBasePath)
-                    && (IsSamePathOrWithin(otherBasePath, parentFolder) || IsSamePathOrWithin(parentFolder, otherBasePath)))
-                {
-                    return;
-                }
-
-                var otherFilePath = NormalizePath(otherPath.FilePath);
-                if (!string.IsNullOrWhiteSpace(otherFilePath) && IsSamePathOrWithin(otherFilePath, parentFolder))
-                {
-                    return;
-                }
-            }
-
-            try
-            {
-                Directory.Delete(parentFolder, recursive: false);
-                result.DeletedParentFolder = true;
-                _logger.LogInformation("Deleted empty parent author folder {FolderPath}", LogRedaction.SanitizeFilePath(parentFolder));
-            }
-            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
-            {
-                result.Warnings.Add("Failed to delete the empty author folder.");
-                _logger.LogWarning(ex, "Failed to delete empty parent author folder {FolderPath}", LogRedaction.SanitizeFilePath(parentFolder));
-            }
-        }
-
-        private async Task<HashSet<string>> GetProtectedRootPathsAsync()
-        {
-            var protectedRoots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            try
-            {
-                if (_rootFolderService != null)
-                {
-                    var roots = await _rootFolderService.GetAllAsync();
-                    foreach (var normalizedRoot in roots
-                        .Select(root => NormalizePath(root.Path))
-                        .Where(normalizedRoot => !string.IsNullOrWhiteSpace(normalizedRoot)))
-                    {
-                        protectedRoots.Add(normalizedRoot!);
-                    }
-                }
-                else
-                {
-                    var roots = (await _rootFolderRepository.GetAllAsync()).Select(r => r.Path).ToList();
-
-                    foreach (var normalizedRoot in roots
-                        .Select(root => NormalizePath(root))
-                        .Where(normalizedRoot => !string.IsNullOrWhiteSpace(normalizedRoot)))
-                    {
-                        protectedRoots.Add(normalizedRoot!);
-                    }
-                }
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogWarning(ex, "Failed to enumerate configured root folders while deleting audiobook files");
-            }
-
-            try
-            {
-                using var scope = _scopeFactory.CreateScope();
-                var configService = scope.ServiceProvider.GetService<IConfigurationService>();
-                if (configService != null)
-                {
-                    var settings = await configService.GetApplicationSettingsAsync();
-                    var outputPath = NormalizePath(settings?.OutputPath);
-                    if (!string.IsNullOrWhiteSpace(outputPath))
-                    {
-                        protectedRoots.Add(outputPath);
-                    }
-                }
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogWarning(ex, "Failed to load application settings while protecting root folders during delete");
-            }
-
-            return protectedRoots;
-        }
-
-        private static string? ResolveAudiobookFolderPath(Audiobook audiobook, IReadOnlyList<string> trackedFilePaths)
-        {
-            var basePath = NormalizePath(audiobook.BasePath);
-            if (!string.IsNullOrWhiteSpace(basePath))
-            {
-                return basePath;
-            }
-
-            var legacyFilePath = NormalizePath(audiobook.FilePath);
-            if (!string.IsNullOrWhiteSpace(legacyFilePath))
-            {
-                return NormalizePath(Path.GetDirectoryName(legacyFilePath));
-            }
-
-            return GetCommonDirectoryPath(trackedFilePaths);
-        }
-
-        private static string? ResolveTrackedFolderPath(IReadOnlyList<string> trackedFilePaths)
-        {
-            if (trackedFilePaths.Count == 0)
-            {
-                return null;
-            }
-
-            if (trackedFilePaths.Count == 1)
-            {
-                var directFolder = NormalizePath(Path.GetDirectoryName(trackedFilePaths[0]));
-                if (string.IsNullOrWhiteSpace(directFolder))
-                {
-                    return null;
-                }
-
-                var folderName = Path.GetFileName(directFolder);
-                if (IsLikelySegmentFolder(folderName))
-                {
-                    var parentFolder = NormalizePath(Path.GetDirectoryName(directFolder));
-                    if (!string.IsNullOrWhiteSpace(parentFolder))
-                    {
-                        return parentFolder;
-                    }
-                }
-
-                return directFolder;
-            }
-
-            return GetCommonDirectoryPath(trackedFilePaths);
-        }
-
-        private static bool IsLikelySegmentFolder(string? folderName)
-        {
-            if (string.IsNullOrWhiteSpace(folderName))
-            {
-                return false;
-            }
-
-            return Regex.IsMatch(
-                folderName.Trim(),
-                @"^(disc|disk|cd|part|chapter|track)[\s._-]*\d+$",
-                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-        }
-
-        private static string? GetCommonDirectoryPath(IReadOnlyList<string> filePaths)
-        {
-            if (filePaths.Count == 0)
-            {
-                return null;
-            }
-
-            var directories = filePaths
-                .Select(p => NormalizePath(Path.GetDirectoryName(p)))
-                .Where(p => !string.IsNullOrWhiteSpace(p))
-                .Cast<string>()
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            if (directories.Count == 0)
-            {
-                return null;
-            }
-
-            var commonPath = directories[0];
-            for (var i = 1; i < directories.Count; i++)
-            {
-                while (!IsSamePathOrWithin(directories[i], commonPath))
-                {
-                    var parent = NormalizePath(Path.GetDirectoryName(commonPath));
-                    if (string.IsNullOrWhiteSpace(parent) || PathsEqual(parent, commonPath))
-                    {
-                        return null;
-                    }
-
-                    commonPath = parent;
-                }
-            }
-
-            return IsFilesystemRoot(commonPath) ? null : commonPath;
-        }
-
-        private static string? NormalizePath(string? path)
-        {
-            if (string.IsNullOrWhiteSpace(path))
-            {
-                return null;
-            }
-
-            try
-            {
-                return FileUtils.NormalizeStoredPath(path)
-                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            }
-            catch (ArgumentException)
-            {
-                return null;
-            }
-        }
-
-        private static bool PathsEqual(string? left, string? right)
-        {
-            if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right))
-            {
-                return false;
-            }
-
-            return string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static bool IsSamePathOrWithin(string path, string rootPath)
-        {
-            return PathsEqual(path, rootPath) || FileUtils.IsPathInsideOf(path, rootPath);
-        }
-
-        private static bool IsFilesystemRoot(string? path)
-        {
-            if (string.IsNullOrWhiteSpace(path))
-            {
-                return false;
-            }
-
-            var root = NormalizePath(Path.GetPathRoot(path));
-            return !string.IsNullOrWhiteSpace(root) && PathsEqual(root, path);
-        }
-
-        private static bool IsAuthorFolder(string folderPath, string? authorName)
-        {
-            if (string.IsNullOrWhiteSpace(folderPath) || string.IsNullOrWhiteSpace(authorName))
-            {
-                return false;
-            }
-
-            var folderName = Path.GetFileName(folderPath);
-            return NormalizeName(folderName) == NormalizeName(authorName);
-        }
-
-        private static string NormalizeName(string? value)
-        {
-            if (string.IsNullOrWhiteSpace(value))
-            {
-                return string.Empty;
-            }
-
-            var cleaned = new string(value
-                .Where(c => char.IsLetterOrDigit(c) || char.IsWhiteSpace(c))
-                .ToArray());
-
-            return string.Join(
-                ' ',
-                cleaned.Split(new[] { ' ', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
-                .ToLowerInvariant();
-        }
-
-        private static string BuildDeleteMessage(DeleteFilesystemResult? result)
-        {
-            if (result == null)
-            {
-                return "Audiobook deleted successfully.";
-            }
-
-            var cleanupParts = new List<string>();
-            if (result.DeletedFiles > 0)
-            {
-                cleanupParts.Add($"removed {result.DeletedFiles} file{(result.DeletedFiles == 1 ? string.Empty : "s")}");
-            }
-
-            if (result.DeletedFolder)
-            {
-                cleanupParts.Add("deleted the audiobook folder");
-            }
-
-            if (result.DeletedParentFolder)
-            {
-                cleanupParts.Add("deleted the empty author folder");
-            }
-
-            var message = cleanupParts.Count > 0
-                ? $"Audiobook deleted and {string.Join(" and ", cleanupParts)}."
-                : "Audiobook deleted successfully.";
-
-            if (result.Warnings.Count > 0)
-            {
-                message += " Some filesystem cleanup steps were skipped.";
-            }
-
-            return message;
         }
 
         /// <summary>
