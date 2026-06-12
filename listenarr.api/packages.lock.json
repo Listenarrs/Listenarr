@@ -473,14 +473,7 @@
         "type": "Project",
         "dependencies": {
           "AsyncKeyedLock": "[8.0.2, )",
-          "HtmlAgilityPack": "[1.12.4, )",
-          "Listenarr.Domain": "[1.0.0, )",
-          "Microsoft.Data.Sqlite.Core": "[10.0.8, )",
-          "Microsoft.EntityFrameworkCore": "[10.0.8, )",
-          "Microsoft.EntityFrameworkCore.Sqlite": "[10.0.8, )",
-          "SixLabors.ImageSharp": "[3.1.12, )",
-          "Swashbuckle.AspNetCore": "[10.2.1, )",
-          "TagLibSharp": "[2.3.0, )"
+          "Listenarr.Domain": "[1.0.0, )"
         }
       },
       "listenarr.domain": {
@@ -489,6 +482,7 @@
       "listenarr.infrastructure": {
         "type": "Project",
         "dependencies": {
+          "AsyncKeyedLock": "[8.0.2, )",
           "BencodeNET": "[4.0.0, )",
           "HtmlAgilityPack": "[1.12.4, )",
           "Listenarr.Application": "[1.0.0, )",
@@ -499,7 +493,8 @@
           "Polly": "[8.6.6, )",
           "Serilog.Sinks.File": "[7.0.0, )",
           "SharpCompress": "[0.49.1, )",
-          "Swashbuckle.AspNetCore": "[10.2.1, )"
+          "SixLabors.ImageSharp": "[3.1.12, )",
+          "TagLibSharp": "[2.3.0, )"
         }
       },
       "BencodeNET": {
