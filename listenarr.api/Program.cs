@@ -28,7 +28,6 @@ using Microsoft.OpenApi;
 using Serilog;
 using Serilog.Events;
 using Listenarr.Infrastructure.Extensions;
-using Listenarr.Infrastructure.SignalR;
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Downloads;
 using Listenarr.Infrastructure.Persistence;
@@ -109,7 +108,7 @@ WebApplicationBuilder builder = WebApplication.CreateBuilder(new WebApplicationO
 
 // Configure Serilog for structured logging, file rotation and SignalR broadcasting
 var logFilePath = Path.Join(builder.Environment.ContentRootPath, "config", "logs", "listenarr-.log");
-var signalRSink = new SignalRLogSink();
+var signalRSink = RealtimeLoggingExtensions.CreateListenarrRealtimeLogSink();
 // Prefer explicit environment variable (useful for Docker/runtime overrides)
 var logLevelEnv = Environment.GetEnvironmentVariable("LISTENARR_LOG_LEVEL");
 
@@ -649,8 +648,8 @@ catch (Exception ex) when (ex is not OperationCanceledException && ex is not Out
     Log.Logger.Debug(ex, "[Startup] Failed to evaluate authentication-enabled startup warning");
 }
 
-// Initialize the SignalR sink now that the hub context is available
-signalRSink.Initialize(app.Services.GetRequiredService<IHubContext<LogHub>>());
+// Initialize realtime log broadcasting now that the hub context is available.
+signalRSink.InitializeListenarrRealtimeLogging(app.Services);
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
@@ -771,23 +770,7 @@ app.UseMiddleware<AntiforgeryValidationMiddleware>();
 app.UseAuthorization();
 
 app.MapControllers();
-
-// Map SignalR hub for real-time download updates
-if (app.Environment.IsDevelopment())
-{
-    app.MapHub<DownloadHub>("/hubs/downloads").RequireCors("DevOnly");
-    // Map SignalR hub for real-time log broadcasting
-    app.MapHub<LogHub>("/hubs/logs").RequireCors("DevOnly");
-    // Map SignalR hub for real-time settings updates
-    app.MapHub<SettingsHub>("/hubs/settings").RequireCors("DevOnly");
-}
-else
-{
-    app.MapHub<DownloadHub>("/hubs/downloads");
-    app.MapHub<LogHub>("/hubs/logs");
-    // Map SignalR hub for real-time settings updates
-    app.MapHub<SettingsHub>("/hubs/settings");
-}
+app.MapListenarrRealtimeHubs(app.Environment);
 
 // SPA fallback: serve index.html for non-API routes so client-side routing works
 app.MapFallbackToFile("index.html");
