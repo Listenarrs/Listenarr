@@ -652,13 +652,21 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
             });
 
             using var httpClient = new HttpClient(handler) { BaseAddress = new System.Uri("https://www.myanonamouse.net") };
-            var service = CreateSearchService(httpClient);
+            var provider = new MyAnonamouseSearchProvider(
+                NullLogger<MyAnonamouseSearchProvider>.Instance,
+                httpClient,
+                Mock.Of<IIndexerRepository>());
 
-            var method = typeof(SearchService).GetMethod("SearchMyAnonamouseAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            Assert.NotNull(method);
-            var task = (Task<List<IndexerSearchResult>>)method!.Invoke(service, new object[] { indexer, "Enrich Test", null, new SearchRequest { IncludeEnrichment = true, MyAnonamouse = new MyAnonamouseOptions { EnrichResults = true, EnrichTopResults = 1 } } })!;
+            var results = await provider.SearchAsync(
+                indexer,
+                "Enrich Test",
+                null,
+                new SearchRequest
+                {
+                    IncludeEnrichment = true,
+                    MyAnonamouse = new MyAnonamouseOptions { EnrichResults = true, EnrichTopResults = 1 }
+                });
 
-            var results = await task;
             Assert.Single(results);
             var r = results[0];
             Assert.Equal(15, r.Grabs);

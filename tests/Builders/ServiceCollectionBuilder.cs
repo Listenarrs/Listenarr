@@ -186,6 +186,7 @@ namespace Listenarr.Tests.Builders
             services.AddSingleton<AsinSearchHandler>();
             services.AddSingleton<DownloadTypeResolver>();
             services.AddSingleton<DownloadClientSelector>();
+            services.AddSingleton<LibraryMetadataRescanWorkflow>();
             services.AddSingleton<DownloadService>();
             services.AddSingleton<MoveBackgroundService>();
             services.AddSingleton<MoveQueueService>();

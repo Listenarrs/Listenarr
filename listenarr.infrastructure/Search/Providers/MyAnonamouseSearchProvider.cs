@@ -368,7 +368,7 @@ namespace Listenarr.Infrastructure.Search.Providers
 
                         var id = item.TryGetProperty("id", out var idElem)
                             ? (idElem.ValueKind == JsonValueKind.String ? idElem.GetString() ?? string.Empty : idElem.ToString())
-                            : Guid.NewGuid().ToString();
+                            : string.Empty;
 
                         // MyAnonamouse uses "title" in responses; fall back to "name" if needed
                         var title = "";
@@ -407,16 +407,6 @@ namespace Listenarr.Infrastructure.Search.Providers
                             dlHash = dlElem.ValueKind == JsonValueKind.String ? dlElem.GetString() ?? string.Empty : dlElem.ToString();
                         }
 
-                        // Get torrent ID for download URL fallback (note: 'id' already parsed above as variable 'id')
-                        string torrentId = id;
-
-                        // Debug logging for first result
-                        if (_mamDebugIndex == 0)
-                        {
-                            _logger.LogInformation("MyAnonamouse first result - Title: '{Title}', Size: '{Size}', Seeders: {Seeders}, DlHash: '{DlHash}', TorrentId: '{TorrentId}'",
-                                title, sizeStr, seeders, dlHash, torrentId);
-                        }
-
                         // Explicit downloadUrl / infoUrl / fileName fields
                         string? downloadUrlField = null;
                         string? infoUrlField = null;
@@ -430,6 +420,37 @@ namespace Listenarr.Infrastructure.Search.Providers
                                 infoUrlField = prop.Value.GetString();
                             if (fileNameField == null && string.Equals(name, "fileName", StringComparison.OrdinalIgnoreCase) && prop.Value.ValueKind == JsonValueKind.String)
                                 fileNameField = prop.Value.GetString();
+                        }
+
+                        if (string.IsNullOrWhiteSpace(infoUrlField) &&
+                            item.TryGetProperty("guid", out var guidElem) &&
+                            guidElem.ValueKind == JsonValueKind.String)
+                        {
+                            infoUrlField = guidElem.GetString();
+                        }
+
+                        if (string.IsNullOrWhiteSpace(id) &&
+                            !string.IsNullOrWhiteSpace(infoUrlField))
+                        {
+                            var idMatch = Regex.Match(infoUrlField, @"/t/(\d+)", RegexOptions.IgnoreCase);
+                            if (idMatch.Success)
+                            {
+                                id = idMatch.Groups[1].Value;
+                            }
+                        }
+
+                        if (string.IsNullOrWhiteSpace(id))
+                        {
+                            id = Guid.NewGuid().ToString();
+                        }
+
+                        var torrentId = id;
+
+                        // Debug logging for first result
+                        if (_mamDebugIndex == 0)
+                        {
+                            _logger.LogInformation("MyAnonamouse first result - Title: '{Title}', Size: '{Size}', Seeders: {Seeders}, DlHash: '{DlHash}', TorrentId: '{TorrentId}'",
+                                title, sizeStr, seeders, dlHash, torrentId);
                         }
 
                         string category = string.Empty;
@@ -705,7 +726,7 @@ namespace Listenarr.Infrastructure.Search.Providers
                             Quality = finalQuality,
                             Format = finalFormat,
                             TorrentUrl = downloadUrl,
-                            ResultUrl = !string.IsNullOrEmpty(id) ? $"https://myanonamouse.net/t/{Uri.EscapeDataString(id)}" : indexer.Url,
+                            ResultUrl = !string.IsNullOrWhiteSpace(infoUrlField) ? infoUrlField : $"https://myanonamouse.net/t/{Uri.EscapeDataString(id)}",
                             MagnetLink = "",
                             NzbUrl = "",
                             DownloadType = "Torrent",
@@ -1005,4 +1026,3 @@ namespace Listenarr.Infrastructure.Search.Providers
         }
     }
 }
-

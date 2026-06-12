@@ -162,12 +162,12 @@ namespace Listenarr.Application.Metadata
                 var books = await GetBooksMetadataByAsinsAsync(pagedAsins, region);
                 var mapped = books
                     .Where(book => book != null)
-                    .Select(MapBookResponseToSearchResult)
+                    .Select(AudibleProductMapper.MapBookResponseToSearchResult)
                     .Where(book => book != null)
                     .Cast<AudibleSearchResult>()
                     .ToList();
 
-                mapped = ApplyLanguageFilter(mapped, language);
+                mapped = AudibleProductMapper.ApplyLanguageFilter(mapped, language);
 
                 return new AudibleSearchResponse
                 {
@@ -325,7 +325,7 @@ namespace Listenarr.Application.Metadata
                         continue;
                     }
 
-                    var mapped = MapBookResponseToSearchResult(book);
+                    var mapped = AudibleProductMapper.MapBookResponseToSearchResult(book);
                     if (mapped == null)
                     {
                         continue;
@@ -859,15 +859,15 @@ namespace Listenarr.Application.Metadata
                 .Select(product => product.Clone())
                 .ToList();
             var results = rawProducts
-                .Select(product => MapProductToBookResponse(product, safeRegion))
+                .Select(product => AudibleProductMapper.MapProductToBookResponse(product, safeRegion))
                 .Where(product => product != null)
-                .Select(product => MapBookResponseToSearchResult(product!))
+                .Select(product => AudibleProductMapper.MapBookResponseToSearchResult(product!))
                 .Where(product => product != null)
                 .Cast<AudibleSearchResult>()
                 .Where(product => !SearchResultIndicatesPodcast(product))
                 .ToList();
 
-            results = ApplyLanguageFilter(results, language);
+            results = AudibleProductMapper.ApplyLanguageFilter(results, language);
 
             return new SearchProductsDirectResponse
             {
@@ -940,7 +940,7 @@ namespace Listenarr.Application.Metadata
                     if (root.TryGetProperty("products", out var products) && products.ValueKind == JsonValueKind.Array)
                     {
                         foreach (var mapped in products.EnumerateArray()
-                                     .Select(product => MapProductToBookResponse(product, normalizedRegion))
+                                     .Select(product => AudibleProductMapper.MapProductToBookResponse(product, normalizedRegion))
                                      .Where(mapped => !string.IsNullOrWhiteSpace(mapped?.Asin)))
                         {
                             results[mapped!.Asin!] = mapped;
@@ -948,7 +948,7 @@ namespace Listenarr.Application.Metadata
                     }
                     else if (root.TryGetProperty("product", out var product) && product.ValueKind == JsonValueKind.Object)
                     {
-                        var mapped = MapProductToBookResponse(product, normalizedRegion);
+                        var mapped = AudibleProductMapper.MapProductToBookResponse(product, normalizedRegion);
                         if (!string.IsNullOrWhiteSpace(mapped?.Asin))
                         {
                             results[mapped.Asin!] = mapped;
@@ -960,118 +960,6 @@ namespace Listenarr.Application.Metadata
             return orderedAsins
                 .Where(results.ContainsKey)
                 .Select(asin => results[asin])
-                .ToList();
-        }
-
-        private static AudibleBookResponse? MapProductToBookResponse(JsonElement product, string region)
-        {
-            if (product.ValueKind != JsonValueKind.Object)
-            {
-                return null;
-            }
-
-            var asin = GetString(product, "asin");
-            if (string.IsNullOrWhiteSpace(asin))
-            {
-                return null;
-            }
-
-            return new AudibleBookResponse
-            {
-                Asin = asin,
-                Title = GetString(product, "title"),
-                Subtitle = GetString(product, "subtitle"),
-                Authors = GetArray(product, "authors")
-                    .Select(author => new AudibleAuthor
-                    {
-                        Asin = GetString(author, "asin"),
-                        Name = GetString(author, "name"),
-                        Region = AudibleRequestHelper.NormalizeRegion(region)
-                    })
-                    .Where(author => !string.IsNullOrWhiteSpace(author.Name))
-                    .ToList(),
-                Narrators = GetArray(product, "narrators")
-                    .Select(narrator => new AudibleNarrator
-                    {
-                        Name = GetString(narrator, "name")
-                    })
-                    .Where(narrator => !string.IsNullOrWhiteSpace(narrator.Name))
-                    .ToList(),
-                Publisher = GetString(product, "publisher_name"),
-                PublishDate = GetString(product, "publication_datetime"),
-                Description = GetString(product, "publisher_summary")
-                    ?? GetString(product, "merchandising_summary")
-                    ?? GetString(product, "extended_product_description")
-                    ?? GetString(product, "merchandising_description"),
-                ImageUrl = GetHighestResolutionImage(product),
-                LengthMinutes = GetInt32(product, "runtime_length_min"),
-                Language = GetString(product, "language"),
-                Genres = MapGenres(product),
-                Series = GetArray(product, "series")
-                    .Select(series => new AudibleSeries
-                    {
-                        Asin = GetString(series, "asin"),
-                        Name = GetString(series, "title"),
-                        Position = GetString(series, "sequence")
-                    })
-                    .Where(series => !string.IsNullOrWhiteSpace(series.Name))
-                    .ToList(),
-                Explicit = GetBoolean(product, "is_adult_product"),
-                ReleaseDate = GetString(product, "release_date"),
-                Isbn = GetString(product, "isbn"),
-                Region = AudibleRequestHelper.NormalizeRegion(region),
-                BookFormat = GetString(product, "format_type"),
-                ContentType = GetString(product, "content_type"),
-                ContentDeliveryType = GetString(product, "content_delivery_type"),
-                EpisodeType = GetString(product, "episode_type"),
-                Sku = GetString(product, "sku")
-            };
-        }
-
-        private static AudibleSearchResult? MapBookResponseToSearchResult(AudibleBookResponse book)
-        {
-            if (string.IsNullOrWhiteSpace(book.Asin))
-            {
-                return null;
-            }
-
-            return new AudibleSearchResult
-            {
-                Asin = book.Asin,
-                Title = book.Title,
-                Subtitle = book.Subtitle,
-                Authors = book.Authors,
-                ImageUrl = book.ImageUrl,
-                RuntimeLengthMin = book.LengthMinutes,
-                LengthMinutes = book.LengthMinutes,
-                RuntimeMinutes = book.LengthMinutes,
-                Language = book.Language,
-                ContentType = book.ContentType,
-                ContentDeliveryType = book.ContentDeliveryType,
-                EpisodeType = book.EpisodeType,
-                Sku = book.Sku,
-                BookFormat = book.BookFormat,
-                Genres = book.Genres,
-                Series = book.Series,
-                Publisher = book.Publisher,
-                Narrators = book.Narrators,
-                ReleaseDate = book.ReleaseDate,
-                Link = string.IsNullOrWhiteSpace(book.Asin) ? null : $"{AudibleRequestHelper.GetBaseUrl(book.Region ?? "us")}/pd/{book.Asin}",
-                Isbn = book.Isbn
-            };
-        }
-
-        private static List<AudibleSearchResult> ApplyLanguageFilter(List<AudibleSearchResult> results, string? language)
-        {
-            if (string.IsNullOrWhiteSpace(language) ||
-                string.Equals(language, "all", StringComparison.OrdinalIgnoreCase))
-            {
-                return results;
-            }
-
-            return results
-                .Where(result => string.IsNullOrWhiteSpace(result.Language) ||
-                                 string.Equals(result.Language, language, StringComparison.OrdinalIgnoreCase))
                 .ToList();
         }
 
@@ -1357,7 +1245,7 @@ namespace Listenarr.Application.Metadata
                 }
             }
 
-            return ApplyLanguageFilter(results, language);
+            return AudibleProductMapper.ApplyLanguageFilter(results, language);
         }
 
         private static bool AuthorSearchResultMatchesTarget(AudibleSearchResult result, string author, string? authorAsin)

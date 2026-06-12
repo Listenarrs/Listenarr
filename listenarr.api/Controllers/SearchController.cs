@@ -59,48 +59,6 @@ namespace Listenarr.Api.Controllers
         private string BuildApiImagePath(string identifier, string? sourceUrl = null)
             => HttpApiVersionUtils.BuildImagePath(identifier, HttpContext, sourceUrl: sourceUrl);
 
-        private async Task NormalizeSearchResultImagesAsync(List<SearchResult> results)
-        {
-            if (_imageCacheService == null || results == null) return;
-
-            foreach (var r in results)
-            {
-                try
-                {
-                    if (r == null) continue;
-                    if (string.IsNullOrWhiteSpace(r.Asin)) continue;
-
-                    // If we already have a cached path, map to API endpoint
-                    var cached = await _imageCacheService.GetCachedImagePathAsync(r.Asin);
-                    if (!string.IsNullOrWhiteSpace(cached))
-                    {
-                        r.ImageUrl = BuildApiImagePath(r.Asin);
-                        continue;
-                    }
-
-                    // If the result includes an external HTTP(S) image URL, try
-                    // to download and cache it using the ASIN as identifier.
-                    if (!string.IsNullOrWhiteSpace(r.ImageUrl) && (r.ImageUrl.StartsWith("http://") || r.ImageUrl.StartsWith("https://")))
-                    {
-                        var downloaded = await _imageCacheService.DownloadAndCacheImageAsync(r.ImageUrl, r.Asin);
-                        r.ImageUrl = !string.IsNullOrWhiteSpace(downloaded)
-                            ? BuildApiImagePath(r.Asin)
-                            : BuildApiImagePath(r.Asin, r.ImageUrl);
-                    }
-                    // If no external URL was present, map to API endpoint if ASIN present
-                    else if (!string.IsNullOrWhiteSpace(r.Asin))
-                    {
-                        r.ImageUrl = BuildApiImagePath(r.Asin);
-                    }
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                {
-                    _logger.LogWarning(ex, "Failed to normalize image for search result ASIN {Asin}", r.Asin);
-                }
-            }
-        }
-
-
         private List<object> SimplifySearchResults(List<SearchResult> results)
         {
             return results?.Select(r => new
@@ -164,41 +122,13 @@ namespace Listenarr.Api.Controllers
                     var language = string.IsNullOrWhiteSpace(req.Language) ? null : req.Language;
                     var results = await _searchService.IntelligentSearchAsync(q, region: region, language: language, ct: HttpContext.RequestAborted) ?? new List<MetadataSearchResult>();
 
-                    // Normalize images for metadata results so the SPA receives local /api/v{version}/images/{asin} when possible
-                    if (_imageCacheService != null && results != null)
-                    {
-                        foreach (var r in results)
-                        {
-                            try
-                            {
-                                if (r == null) continue;
-                                if (string.IsNullOrWhiteSpace(r.Asin)) continue;
-
-                                var cached = await _imageCacheService.GetCachedImagePathAsync(r.Asin);
-                                if (!string.IsNullOrWhiteSpace(cached))
-                                {
-                                    r.ImageUrl = BuildApiImagePath(r.Asin);
-                                    continue;
-                                }
-
-                                if (!string.IsNullOrWhiteSpace(r.ImageUrl) && (r.ImageUrl.StartsWith("http://") || r.ImageUrl.StartsWith("https://")))
-                                {
-                                    var downloaded = await _imageCacheService.DownloadAndCacheImageAsync(r.ImageUrl, r.Asin);
-                                    r.ImageUrl = !string.IsNullOrWhiteSpace(downloaded)
-                                        ? BuildApiImagePath(r.Asin)
-                                        : BuildApiImagePath(r.Asin, r.ImageUrl);
-                                }
-                                else if (!string.IsNullOrWhiteSpace(r.Asin))
-                                {
-                                    r.ImageUrl = BuildApiImagePath(r.Asin);
-                                }
-                            }
-                            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                            {
-                                _logger.LogWarning(ex, "Failed to normalize image for metadata result ASIN {Asin}", r.Asin);
-                            }
-                        }
-                    }
+                    await SearchResultImageNormalizer.NormalizeMetadataResultsAsync(
+                        results,
+                        _imageCacheService,
+                        HttpContext,
+                        _logger,
+                        "metadata result",
+                        setApiPathWhenNoExternalImage: true);
 
                     // Map metadata results into Audible-shaped objects for public API consumers
                     var mapped = await Task.WhenAll((results ?? new List<MetadataSearchResult>()).Select(r => MapMetadataResultToAudibleAsync(r, region))).ConfigureAwait(false);
@@ -292,28 +222,13 @@ namespace Listenarr.Api.Controllers
                                 SanitizeResultForPublicApi(sr, region);
                                 // Convert to metadata result and normalize images for API response
                                 var md = SearchResultConverters.ToMetadata(sr);
-                                if (_imageCacheService != null && !string.IsNullOrWhiteSpace(md.Asin))
-                                {
-                                    try
-                                    {
-                                        var cached = await _imageCacheService.GetCachedImagePathAsync(md.Asin);
-                                        if (!string.IsNullOrWhiteSpace(cached))
-                                        {
-                                            md.ImageUrl = BuildApiImagePath(md.Asin);
-                                        }
-                                        else if (!string.IsNullOrWhiteSpace(md.ImageUrl) && (md.ImageUrl.StartsWith("http://") || md.ImageUrl.StartsWith("https://")))
-                                        {
-                                            var downloaded = await _imageCacheService.DownloadAndCacheImageAsync(md.ImageUrl, md.Asin);
-                                            md.ImageUrl = !string.IsNullOrWhiteSpace(downloaded)
-                                                ? BuildApiImagePath(md.Asin)
-                                                : BuildApiImagePath(md.Asin, md.ImageUrl);
-                                        }
-                                    }
-                                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                                    {
-                                        _logger.LogWarning(ex, "Failed to normalize image for ASIN metadata {Asin}", md?.Asin);
-                                    }
-                                }
+                                await SearchResultImageNormalizer.NormalizeMetadataResultAsync(
+                                    md,
+                                    _imageCacheService,
+                                    HttpContext,
+                                    _logger,
+                                    "ASIN metadata",
+                                    setApiPathWhenNoExternalImage: false);
                                 if (md != null)
                                 {
                                     var result = SearchResultConverters.ToSearchResult(md);

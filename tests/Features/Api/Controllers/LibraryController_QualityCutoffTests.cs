@@ -15,8 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using System.Reflection;
-using Listenarr.Api.Controllers;
+using Listenarr.Application.Audiobooks;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
 
@@ -52,23 +51,11 @@ namespace Listenarr.Tests.Features.Api.Controllers
                 .WithTitle("Dune")
                 .Build());
 
-            var controller = _provider.GetRequiredService<LibraryController>();
-
             // When
-            var method = typeof(LibraryController).GetMethod(
-                "IsQualityCutoffMetAsync",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.NotNull(method);
-
-            var task = (Task<bool>?)method!.Invoke(controller, new object[]
-            {
+            var result = await AudiobookQualityCutoffEvaluator.IsQualityCutoffMetAsync(
                 audiobook,
-                _provider.GetRequiredService<IQualityProfileService>(),
                 _downloadRepository,
-                _audiobookFileRepository
-            });
-            Assert.NotNull(task);
-            var result = await task!;
+                _audiobookFileRepository);
 
             // Then
             Assert.True(result);
