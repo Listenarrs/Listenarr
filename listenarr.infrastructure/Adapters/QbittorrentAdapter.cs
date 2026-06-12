@@ -1198,7 +1198,7 @@ namespace Listenarr.Infrastructure.Adapters
                 }
 
                 // ✅ Apply remote path mapping
-                result.SourceFiles = await TranslateSourceFilesAsync(client.Id, BuildTorrentSourceFiles(savePath, files));
+                result.SourceFiles = await TranslateSourceFilesAsync(client.Id, TorrentClientPathMapper.BuildQbittorrentSourceFiles(savePath, files));
                 if (!string.IsNullOrWhiteSpace(outputPath))
                 {
                     result.ContentPath = outputPath;
@@ -1214,47 +1214,11 @@ namespace Listenarr.Infrastructure.Adapters
             return result;
         }
 
-        private static string CombineWithOptionalBase(string? basePath, string candidatePath)
-        {
-            var normalizedPath = candidatePath.Trim();
-
-            if (string.IsNullOrEmpty(normalizedPath))
-            {
-                return normalizedPath;
-            }
-
-            if (Path.IsPathRooted(normalizedPath) || string.IsNullOrWhiteSpace(basePath))
-            {
-                return normalizedPath;
-            }
-
-            var relativePath = normalizedPath.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            if (Path.IsPathRooted(relativePath))
-            {
-                return relativePath;
-            }
-
-            var normalizedBasePath = basePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            return string.IsNullOrEmpty(normalizedBasePath)
-                ? relativePath
-                : normalizedBasePath + Path.DirectorySeparatorChar + relativePath;
-        }
-
         private static List<string> BuildTorrentSourceFiles(
             string savePath,
             List<Dictionary<string, JsonElement>> files)
         {
-            if (string.IsNullOrWhiteSpace(savePath) || files == null || files.Count == 0)
-            {
-                return new List<string>();
-            }
-
-            return files
-                .Select(file => file.TryGetValue("name", out var nameEl) ? nameEl.GetString() ?? string.Empty : string.Empty)
-                .Where(name => !string.IsNullOrWhiteSpace(name))
-                .Select(name => CombineWithOptionalBase(savePath, name.Replace('/', Path.DirectorySeparatorChar)))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            return TorrentClientPathMapper.BuildQbittorrentSourceFiles(savePath, files);
         }
 
         private async Task<List<string>> TranslateSourceFilesAsync(string clientId, IEnumerable<string> sourceFiles)
@@ -1276,47 +1240,7 @@ namespace Listenarr.Infrastructure.Adapters
             string savePath,
             List<Dictionary<string, JsonElement>> files)
         {
-            if (string.IsNullOrWhiteSpace(savePath) || files == null || files.Count == 0)
-            {
-                return string.Empty;
-            }
-
-            var fileNames = files
-                .Select(f => f.TryGetValue("name", out var nameEl) ? nameEl.GetString() ?? string.Empty : string.Empty)
-                .Where(name => !string.IsNullOrWhiteSpace(name))
-                .ToList();
-
-            if (fileNames.Count == 0)
-            {
-                return string.Empty;
-            }
-
-            var firstFile = fileNames[0];
-            var firstParts = firstFile.Split('/', StringSplitOptions.RemoveEmptyEntries);
-            var hasNestedPath = firstParts.Length > 1;
-
-            if (fileNames.Count == 1)
-            {
-                return hasNestedPath
-                    ? CombineWithOptionalBase(savePath, firstParts[0])
-                    : CombineWithOptionalBase(savePath, firstFile);
-            }
-
-            if (!hasNestedPath)
-            {
-                return savePath;
-            }
-
-            var topLevel = firstParts[0];
-            var allShareTopLevel = fileNames.All(name =>
-            {
-                var parts = name.Split('/', StringSplitOptions.RemoveEmptyEntries);
-                return parts.Length > 1 && string.Equals(parts[0], topLevel, StringComparison.Ordinal);
-            });
-
-            return allShareTopLevel
-                ? CombineWithOptionalBase(savePath, topLevel)
-                : savePath;
+            return TorrentClientPathMapper.ResolveQbittorrentContentPath(savePath, files);
         }
 
         public async Task<List<Download>> FetchDownloadsAsync(
@@ -1651,7 +1575,7 @@ namespace Listenarr.Infrastructure.Adapters
                             var completionPath = !string.IsNullOrEmpty(matched.ContentPath)
                                 ? matched.ContentPath
                                 : (!string.IsNullOrEmpty(matched.SavePath) && !string.IsNullOrEmpty(matched.Name)
-                                    ? CombineWithOptionalBase(matched.SavePath, matched.Name)
+                                    ? FileUtils.CombineWithOptionalBase(matched.SavePath, matched.Name)
                                     : matched.SavePath);
 
                             _logger.LogInformation("Download {DownloadId} observed as complete candidate (qBittorrent). Torrent: {TorrentName}, Path: {Path}. Waiting for stability window.",
@@ -1722,4 +1646,3 @@ namespace Listenarr.Infrastructure.Adapters
         }
     }
 }
-

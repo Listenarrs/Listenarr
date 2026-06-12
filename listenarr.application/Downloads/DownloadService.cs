@@ -42,20 +42,14 @@ namespace Listenarr.Application.Downloads
         IDownloadQueueService downloadQueueService,
         INotificationService notificationService,
         IHubBroadcaster hubBroadcaster,
-        IDownloadHistoryService downloadHistoryService) : IDownloadService
+        IDownloadHistoryService downloadHistoryService,
+        DownloadTypeResolver downloadTypeResolver,
+        DownloadClientSelector downloadClientSelector) : IDownloadService
     {
         // Cache expiration constants
         private const int QueueCacheExpirationSeconds = 10;
         private const int ClientStatusCacheExpirationSeconds = 30;
         private const int DirectDownloadTimeoutHours = 2;
-
-        private enum EffectiveDownloadType
-        {
-            Unknown,
-            Torrent,
-            Usenet,
-            DirectDownload
-        }
 
         // Track qBittorrent sync state for incremental updates (clientId -> last rid)
         private readonly Dictionary<string, int> _qbittorrentSyncState = new();
@@ -240,8 +234,8 @@ namespace Listenarr.Application.Downloads
             // Assign score to SearchResult
             topResult.SearchResult.Score = topResult.TotalScore;
 
-            var effectiveDownloadType = await ResolveEffectiveDownloadTypeAsync(topResult.SearchResult);
-            topResult.SearchResult.DownloadType = GetDownloadTypeLabel(effectiveDownloadType);
+            var effectiveDownloadType = await downloadTypeResolver.ResolveAsync(topResult.SearchResult);
+            topResult.SearchResult.DownloadType = DownloadTypeResolver.GetLabel(effectiveDownloadType);
 
             if (effectiveDownloadType == EffectiveDownloadType.Unknown)
             {
@@ -274,7 +268,7 @@ namespace Listenarr.Application.Downloads
 
             // Use topResult.SearchResult for torrent/nzb download
             var isTorrent = effectiveDownloadType == EffectiveDownloadType.Torrent;
-            var downloadClientId = await GetAppropriateDownloadClient(isTorrent);
+            var downloadClientId = await downloadClientSelector.GetAppropriateDownloadClientAsync(isTorrent);
 
             if (downloadClientId == null)
             {
@@ -311,8 +305,8 @@ namespace Listenarr.Application.Downloads
                 searchResult.TorrentUrl ?? "(null)",
                 audiobookId);
 
-            var effectiveDownloadType = await ResolveEffectiveDownloadTypeAsync(searchResult);
-            searchResult.DownloadType = GetDownloadTypeLabel(effectiveDownloadType);
+            var effectiveDownloadType = await downloadTypeResolver.ResolveAsync(searchResult);
+            searchResult.DownloadType = DownloadTypeResolver.GetLabel(effectiveDownloadType);
 
             if (effectiveDownloadType == EffectiveDownloadType.Unknown)
             {
@@ -335,7 +329,7 @@ namespace Listenarr.Application.Downloads
 
             if (downloadClientId == null)
             {
-                downloadClientId = await GetAppropriateDownloadClient(isTorrent);
+                downloadClientId = await downloadClientSelector.GetAppropriateDownloadClientAsync(isTorrent);
 
                 if (downloadClientId == null)
                 {
@@ -998,211 +992,11 @@ namespace Listenarr.Application.Downloads
             return string.Join(" ", parts);
         }
 
-        private async Task<EffectiveDownloadType> ResolveEffectiveDownloadTypeAsync(SearchResult result)
-        {
-            ArgumentNullException.ThrowIfNull(result);
-
-            if (!string.IsNullOrWhiteSpace(result.NzbUrl))
-            {
-                logger.LogDebug("Result identified as Usenet from NzbUrl: {Title}", result.Title);
-                return EffectiveDownloadType.Usenet;
-            }
-
-            if (!string.IsNullOrWhiteSpace(result.MagnetLink))
-            {
-                logger.LogDebug("Result identified as Torrent from MagnetLink: {Title}", result.Title);
-                return EffectiveDownloadType.Torrent;
-            }
-
-            if (result.TorrentFileContent != null && result.TorrentFileContent.Length > 0)
-            {
-                logger.LogDebug("Result identified as Torrent from cached torrent bytes: {Title}", result.Title);
-                return EffectiveDownloadType.Torrent;
-            }
-
-            if (await IsTrustedDirectDownloadAsync(result))
-            {
-                logger.LogDebug("Result identified as trusted DDL from configured Internet Archive indexer: {Title}", result.Title);
-                return EffectiveDownloadType.DirectDownload;
-            }
-
-            if (DownloadClientUriBuilder.TryParseHttpOrHttpsAbsoluteUri(result.TorrentUrl, out _))
-            {
-                logger.LogDebug("Result identified as Torrent from TorrentUrl: {Title}", result.Title);
-                return EffectiveDownloadType.Torrent;
-            }
-
-            logger.LogWarning(
-                "Unable to derive effective download type for '{Title}'. Incoming DownloadType '{DownloadType}' was ignored because no trusted download target was present.",
-                result.Title,
-                result.DownloadType ?? "(null)");
-
-            return EffectiveDownloadType.Unknown;
-        }
-
-        private async Task<bool> IsTrustedDirectDownloadAsync(SearchResult result)
-        {
-            if (result?.IndexerId is not int indexerId || indexerId <= 0)
-            {
-                return false;
-            }
-
-            if (!DownloadClientUriBuilder.TryParseHttpOrHttpsAbsoluteUri(result.TorrentUrl, out var downloadUri) ||
-                downloadUri == null)
-            {
-                return false;
-            }
-
-            if (!IsTrustedArchiveOrgHost(downloadUri) ||
-                !downloadUri.AbsolutePath.StartsWith("/download/", StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-
-            try
-            {
-                var indexer = await indexerRepository.GetByIdAsync(indexerId);
-
-                if (indexer == null || !indexer.IsEnabled)
-                {
-                    logger.LogDebug(
-                        "Direct-download validation rejected '{Title}': indexer {IndexerId} was missing or disabled",
-                        result.Title,
-                        indexerId);
-                    return false;
-                }
-
-                if (!string.Equals(indexer.Implementation, "InternetArchive", StringComparison.OrdinalIgnoreCase))
-                {
-                    logger.LogDebug(
-                        "Direct-download validation rejected '{Title}': indexer {IndexerId} implementation was {Implementation}",
-                        result.Title,
-                        indexerId,
-                        indexer.Implementation);
-                    return false;
-                }
-
-                if (!Uri.TryCreate(indexer.Url, UriKind.Absolute, out var indexerUri) ||
-                    !IsTrustedArchiveOrgHost(indexerUri))
-                {
-                    logger.LogDebug(
-                        "Direct-download validation rejected '{Title}': configured indexer URL '{IndexerUrl}' is not a trusted archive.org host",
-                        result.Title,
-                        indexer.Url);
-                    return false;
-                }
-
-                return true;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                logger.LogWarning(
-                    ex,
-                    "Failed to validate direct-download route for '{Title}' against configured indexer {IndexerId}",
-                    result.Title,
-                    indexerId);
-                return false;
-            }
-        }
-
-        private static bool IsTrustedArchiveOrgHost(Uri uri)
-        {
-            var host = uri.Host.Trim();
-            return host.Equals("archive.org", StringComparison.OrdinalIgnoreCase) ||
-                   host.EndsWith(".archive.org", StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static string GetDownloadTypeLabel(EffectiveDownloadType effectiveDownloadType)
-        {
-            return effectiveDownloadType switch
-            {
-                EffectiveDownloadType.Torrent => "Torrent",
-                EffectiveDownloadType.Usenet => "Usenet",
-                EffectiveDownloadType.DirectDownload => "DDL",
-                _ => string.Empty
-            };
-        }
-
-        private bool IsTorrentResult(SearchResult result)
-        {
-            // Use transport indicators only. Do not trust caller-provided DownloadType.
-            if (!string.IsNullOrEmpty(result.NzbUrl))
-            {
-                logger.LogDebug("Result identified as NZB (has NzbUrl): {Title}", result.Title);
-                return false;
-            }
-
-            if (result.TorrentFileContent != null && result.TorrentFileContent.Length > 0)
-            {
-                logger.LogDebug("Result identified as Torrent (has cached torrent bytes): {Title}", result.Title);
-                return true;
-            }
-
-            if (!string.IsNullOrEmpty(result.MagnetLink) ||
-                DownloadClientUriBuilder.TryParseHttpOrHttpsAbsoluteUri(result.TorrentUrl, out _))
-            {
-                logger.LogDebug("Result identified as Torrent (has MagnetLink or TorrentUrl): {Title}", result.Title);
-                return true;
-            }
-
-            // If neither is set, we can't reliably determine the type
-            // Log a warning and default to false (NZB) as a safer choice
-            logger.LogWarning("Unable to determine result type for '{Title}' from source '{Source}'. No MagnetLink, TorrentUrl, or NzbUrl found. Defaulting to NZB.",
-                result.Title, result.Source);
-            return false;
-        }
-
         // Small container for caching torrent bytes + filename in memory
         private class CachedTorrent
         {
             public byte[]? Bytes { get; set; }
             public string? FileName { get; set; }
-        }
-
-        private async Task<string?> GetAppropriateDownloadClient(bool isTorrent)
-        {
-            var downloadClients = await configurationService.GetDownloadClientConfigurationsAsync();
-            var enabledClients = downloadClients.Where(c => c.IsEnabled).ToList();
-
-            logger.LogInformation("Looking for {ClientType} client. Found {Count} enabled download clients: {Clients}",
-                isTorrent ? "torrent" : "NZB",
-                enabledClients.Count,
-                string.Join(", ", enabledClients.Select(c => $"{c.Name} ({c.Type})")));
-
-            if (isTorrent)
-            {
-                // Prefer qBittorrent, then Transmission
-                var client = enabledClients.FirstOrDefault(c => c.Type.Equals("qbittorrent", StringComparison.OrdinalIgnoreCase))
-                          ?? enabledClients.FirstOrDefault(c => c.Type.Equals("transmission", StringComparison.OrdinalIgnoreCase));
-
-                if (client != null)
-                {
-                    logger.LogInformation("Selected torrent client: {ClientName} ({ClientType})", client.Name, client.Type);
-                }
-                else
-                {
-                    logger.LogWarning("No torrent client (qBittorrent or Transmission) found among enabled clients");
-                }
-
-                return client?.Id;
-            }
-            else
-            {
-                // Prefer SABnzbd, then NZBGet
-                var client = enabledClients.FirstOrDefault(c => c.Type.Equals("sabnzbd", StringComparison.OrdinalIgnoreCase))
-                          ?? enabledClients.FirstOrDefault(c => c.Type.Equals("nzbget", StringComparison.OrdinalIgnoreCase));
-
-                if (client != null)
-                {
-                    logger.LogInformation("Selected NZB client: {ClientName} ({ClientType})", client.Name, client.Type);
-                }
-                else
-                {
-                    logger.LogWarning("No NZB client (SABnzbd or NZBGet) found among enabled clients");
-                }
-
-                return client?.Id;
-            }
         }
 
         public async Task<bool> RemoveFromQueueAsync(string downloadId, string? downloadClientId = null, bool force = false)
@@ -1427,7 +1221,7 @@ namespace Listenarr.Application.Downloads
 
         private string? TryResolveClientSpecificIdFallback(DownloadClientConfiguration client, SearchResult searchResult)
         {
-            if (client == null || searchResult == null || !IsTorrentResult(searchResult))
+            if (client == null || searchResult == null || !downloadTypeResolver.IsTorrentResult(searchResult))
             {
                 return null;
             }

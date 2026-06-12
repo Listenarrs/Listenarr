@@ -88,6 +88,8 @@ namespace Listenarr.Infrastructure.Extensions
             services.AddSingleton<IAppMetricsService, NoopAppMetricsService>();
 
             services.AddScoped<IDownloadService, DownloadService>();
+            services.AddScoped<DownloadTypeResolver>();
+            services.AddScoped<DownloadClientSelector>();
             // Queue service extracted from DownloadService to encapsulate queue-building and filtering
             services.AddScoped<IDownloadQueueService, DownloadQueueService>();
             services.AddScoped<IOpenLibraryService, OpenLibraryService>();

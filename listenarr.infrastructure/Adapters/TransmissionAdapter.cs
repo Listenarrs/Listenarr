@@ -637,7 +637,7 @@ namespace Listenarr.Infrastructure.Adapters
 
                 if (torrent.TryGetProperty("files", out var filesElement))
                 {
-                    var sourceFiles = BuildTransmissionSourceFiles(downloadDir, filesElement);
+                    var sourceFiles = TorrentClientPathMapper.BuildTransmissionSourceFiles(downloadDir, filesElement);
                     result.SourceFiles = [.. sourceFiles.Where(path => !string.IsNullOrWhiteSpace(path))];
                 }
 
@@ -653,33 +653,6 @@ namespace Listenarr.Infrastructure.Adapters
                 _logger.LogWarning(ex, "Error resolving import item for Transmission torrent {TorrentId}", queueItem.Id);
                 return result;
             }
-        }
-
-        private static List<string> BuildTransmissionSourceFiles(string? downloadDir, JsonElement filesElement)
-        {
-            if (string.IsNullOrWhiteSpace(downloadDir) || filesElement.ValueKind != JsonValueKind.Array)
-            {
-                return new List<string>();
-            }
-
-            var sourceFiles = new List<string>();
-            foreach (var file in filesElement.EnumerateArray())
-            {
-                if (!file.TryGetProperty("name", out var nameProp))
-                {
-                    continue;
-                }
-
-                var relativePath = nameProp.GetString();
-                if (string.IsNullOrWhiteSpace(relativePath))
-                {
-                    continue;
-                }
-
-                sourceFiles.Add(FileUtils.CombineWithOptionalBase(downloadDir, relativePath));
-            }
-
-            return sourceFiles;
         }
 
         private async Task<QueueItem> MapTorrentAsync(DownloadClientConfiguration client, JsonElement torrent, CancellationToken ct)
@@ -1597,4 +1570,3 @@ namespace Listenarr.Infrastructure.Adapters
         }
     }
 }
-

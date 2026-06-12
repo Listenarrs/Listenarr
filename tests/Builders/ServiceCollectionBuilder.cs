@@ -184,6 +184,8 @@ namespace Listenarr.Tests.Builders
             services.AddSingleton<SearchResultScorerService>();
             services.AddSingleton<SearchResultSortingService>();
             services.AddSingleton<AsinSearchHandler>();
+            services.AddSingleton<DownloadTypeResolver>();
+            services.AddSingleton<DownloadClientSelector>();
             services.AddSingleton<DownloadService>();
             services.AddSingleton<MoveBackgroundService>();
             services.AddSingleton<MoveQueueService>();

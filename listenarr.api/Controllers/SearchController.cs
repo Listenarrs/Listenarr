@@ -59,23 +59,6 @@ namespace Listenarr.Api.Controllers
         private string BuildApiImagePath(string identifier, string? sourceUrl = null)
             => HttpApiVersionUtils.BuildImagePath(identifier, HttpContext, sourceUrl: sourceUrl);
 
-        private static string? NormalizeStructuredAdvancedField(string? value, string prefix)
-        {
-            if (string.IsNullOrWhiteSpace(value))
-            {
-                return value;
-            }
-
-            var trimmed = value.Trim();
-            if (!trimmed.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            {
-                return trimmed;
-            }
-
-            var stripped = trimmed.Substring(prefix.Length).Trim();
-            return string.IsNullOrWhiteSpace(stripped) ? null : stripped;
-        }
-
         private async Task NormalizeSearchResultImagesAsync(List<SearchResult> results)
         {
             if (_imageCacheService == null || results == null) return;
@@ -225,10 +208,10 @@ namespace Listenarr.Api.Controllers
                 else // Advanced
                 {
                     // Route all advanced search logic through SearchService for normalization, filtering, and orchestration
-                    req.Author = NormalizeStructuredAdvancedField(req.Author, "AUTHOR:");
-                    req.Title = NormalizeStructuredAdvancedField(req.Title, "TITLE:");
-                    req.Isbn = NormalizeStructuredAdvancedField(req.Isbn, "ISBN:");
-                    req.Asin = NormalizeStructuredAdvancedField(req.Asin, "ASIN:");
+                    req.Author = SearchRequestNormalizer.NormalizeStructuredAdvancedField(req.Author, "AUTHOR:");
+                    req.Title = SearchRequestNormalizer.NormalizeStructuredAdvancedField(req.Title, "TITLE:");
+                    req.Isbn = SearchRequestNormalizer.NormalizeStructuredAdvancedField(req.Isbn, "ISBN:");
+                    req.Asin = SearchRequestNormalizer.NormalizeStructuredAdvancedField(req.Asin, "ASIN:");
 
                     // Validate and normalize ISBN/ASIN inputs for advanced searches.
                     // If an ISBN-10 is supplied, convert it to ISBN-13 using the 978 prefix.
@@ -239,7 +222,7 @@ namespace Listenarr.Api.Controllers
                             var rawIsbn = Regex.Replace(req.Isbn, "[^0-9Xx]", string.Empty);
                             if (rawIsbn.Length == 10)
                             {
-                                var converted = ConvertIsbn10ToIsbn13(rawIsbn);
+                                var converted = SearchRequestNormalizer.ConvertIsbn10ToIsbn13(rawIsbn);
                                 if (converted == null)
                                 {
                                     return BadRequest("Invalid ISBN-10 provided");
@@ -816,25 +799,6 @@ namespace Listenarr.Api.Controllers
                 series = fallbackSeries,
                 updatedAt = (string?)null
             };
-        }
-
-        private static string? ConvertIsbn10ToIsbn13(string isbn10)
-        {
-            if (string.IsNullOrWhiteSpace(isbn10)) return null;
-            // isbn10 is expected to be 10 chars where first 9 are digits and last is digit or 'X'
-            if (isbn10.Length != 10) return null;
-            var first9 = isbn10.Substring(0, 9);
-            if (!Regex.IsMatch(first9, "^[0-9]{9}$")) return null;
-            var twelve = "978" + first9; // 12 digits
-            int sum = 0;
-            for (int i = 0; i < 12; i++)
-            {
-                int d = twelve[i] - '0';
-                sum += (i % 2 == 0) ? d * 1 : d * 3;
-            }
-            int mod = sum % 10;
-            int check = (10 - mod) % 10;
-            return string.Concat(twelve, check);
         }
 
         private async Task EnsureCachedImagesForAudibleResultsAsync(List<AudibleSearchResult>? results)

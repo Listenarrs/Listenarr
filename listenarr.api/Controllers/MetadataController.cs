@@ -196,7 +196,7 @@ namespace Listenarr.Api.Controllers
 
                 var normalizedName = name.Trim();
                 var normalizedAsin = string.IsNullOrWhiteSpace(asin) ? null : asin.Trim();
-                var cacheKey = BuildAuthorLookupCacheKey(region, normalizedName, normalizedAsin);
+                var cacheKey = MetadataCacheKeys.BuildAuthorLookupCacheKey(region, normalizedName, normalizedAsin);
                 string? seededName = null;
                 string? seededImage = null;
                 string? seededDescription = null;
@@ -481,7 +481,7 @@ namespace Listenarr.Api.Controllers
                     result);
 
                 CacheAuthorLookupResponse(cacheKey, result);
-                CacheAuthorLookupResponse(BuildAuthorLookupCacheKey(region, normalizedName, result.Asin), result);
+                CacheAuthorLookupResponse(MetadataCacheKeys.BuildAuthorLookupCacheKey(region, normalizedName, result.Asin), result);
 
                 return Ok(result);
             }
@@ -800,21 +800,15 @@ namespace Listenarr.Api.Controllers
         {
             if (!string.IsNullOrWhiteSpace(book.Asin))
             {
-                return $"asin:{NormalizeCatalogToken(book.Asin)}";
+                return $"asin:{MetadataCacheKeys.NormalizeCatalogToken(book.Asin)}";
             }
 
-            var title = NormalizeCatalogToken(book.Title);
+            var title = MetadataCacheKeys.NormalizeCatalogToken(book.Title);
             var authors = string.Join("|", (book.Authors ?? new List<AudibleAuthor>())
-                .Select(a => NormalizeCatalogToken(a.Name))
+                .Select(a => MetadataCacheKeys.NormalizeCatalogToken(a.Name))
                 .Where(a => !string.IsNullOrWhiteSpace(a)));
 
             return $"title:{title}:authors:{authors}";
-        }
-
-        private static string NormalizeCatalogToken(string? value)
-        {
-            if (string.IsNullOrWhiteSpace(value)) return string.Empty;
-            return new string(value.Trim().ToUpperInvariant().Where(char.IsLetterOrDigit).ToArray());
         }
 
         private static AuthorCatalogBookItem MapAuthorCatalogBook(AudibleSearchResult book)
@@ -1040,7 +1034,7 @@ namespace Listenarr.Api.Controllers
             {
                 var entry = existingEntry ?? new AuthorCacheEntry();
                 entry.AuthorName = response.Name;
-                entry.AuthorNameNormalized = NormalizeAuthorCacheKey(normalizedName);
+                entry.AuthorNameNormalized = MetadataCacheKeys.NormalizeAuthorCacheKey(normalizedName);
                 entry.AuthorAsin = response.Asin;
                 entry.Region = AudiobookIdentifierNormalizer.NormalizeRegion(region) ?? "us";
                 entry.ImageUrl = response.Image;
@@ -1075,17 +1069,6 @@ namespace Listenarr.Api.Controllers
                 SimilarAuthors = response.SimilarAuthors,
                 NotFound = false
             }, new MemoryCacheEntryOptions { SlidingExpiration = TimeSpan.FromHours(12) });
-        }
-
-        private static string BuildAuthorLookupCacheKey(string region, string name, string? asin = null)
-        {
-            var normalizedRegion = AudiobookIdentifierNormalizer.NormalizeRegion(region) ?? "us";
-            var normalizedName = NormalizeAuthorCacheKey(name);
-            var normalizedAsin = string.IsNullOrWhiteSpace(asin) ? null : asin.Trim().ToUpperInvariant();
-
-            return string.IsNullOrWhiteSpace(normalizedAsin)
-                ? $"author-lookup:{normalizedRegion}:{normalizedName}"
-                : $"author-lookup:{normalizedRegion}:{normalizedName}:{normalizedAsin}";
         }
 
         private async Task<SeriesCacheEntry?> ResolvePersistedSeriesCacheAsync(string normalizedName, string region, string? normalizedAsin)
@@ -1159,7 +1142,7 @@ namespace Listenarr.Api.Controllers
             {
                 var entry = existingEntry ?? new SeriesCacheEntry();
                 entry.SeriesName = response.Name;
-                entry.SeriesNameNormalized = NormalizeSeriesCacheKey(normalizedName);
+                entry.SeriesNameNormalized = MetadataCacheKeys.NormalizeSeriesCacheKey(normalizedName);
                 entry.SeriesAsin = response.Asin;
                 entry.Region = AudiobookIdentifierNormalizer.NormalizeRegion(region) ?? "us";
                 entry.ImageUrl = response.Image;
@@ -1219,40 +1202,6 @@ namespace Listenarr.Api.Controllers
                 Description = response.Description,
                 TotalBooks = response.TotalBooks
             }, new MemoryCacheEntryOptions { SlidingExpiration = TimeSpan.FromHours(12) });
-        }
-
-        private static string NormalizeAuthorCacheKey(string? value)
-        {
-            if (string.IsNullOrWhiteSpace(value))
-            {
-                return string.Empty;
-            }
-
-            var cleaned = new string(value
-                .Where(character => char.IsLetterOrDigit(character) || char.IsWhiteSpace(character))
-                .ToArray());
-            var parts = cleaned.Split(
-                new[] { ' ', '\t', '\n', '\r' },
-                StringSplitOptions.RemoveEmptyEntries);
-
-            return string.Join(' ', parts).ToLowerInvariant();
-        }
-
-        private static string NormalizeSeriesCacheKey(string? value)
-        {
-            if (string.IsNullOrWhiteSpace(value))
-            {
-                return string.Empty;
-            }
-
-            var cleaned = new string(value
-                .Where(character => char.IsLetterOrDigit(character) || char.IsWhiteSpace(character))
-                .ToArray());
-            var parts = cleaned.Split(
-                new[] { ' ', '\t', '\n', '\r' },
-                StringSplitOptions.RemoveEmptyEntries);
-
-            return string.Join(' ', parts).ToLowerInvariant();
         }
 
         private static AuthorLookupResponse MapAuthorLookupResponse(AuthorLookupCacheEntry entry, string fallbackName)
