@@ -15,61 +15,19 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Listenarr.Application.Interfaces.Repositories;
 using Microsoft.Extensions.Logging.Abstractions;
 using Listenarr.Application.Search;
-using Listenarr.Application.Metadata;
-using Listenarr.Application.Search.Strategies;
-using Listenarr.Application.Search.Filters;
 
 namespace Listenarr.Tests.Features.Api.Services
 {
     public class SearchServiceFixesTests
     {
-        private static SearchService CreateSearchService()
-        {
-            var client = new HttpClient();
-            var configuration = Mock.Of<IConfigurationService>();
-            var logger = NullLogger<SearchService>.Instance;
-            var openLibraryService = Mock.Of<IOpenLibraryService>();
-            var imageCache = Mock.Of<IImageCacheService>();
-            var audible = new AudibleService(new HttpClient(), NullLogger<AudibleService>.Instance);
-            var converters = new MetadataConverters(imageCache, NullLogger<MetadataConverters>.Instance);
-            var progress = new SearchProgressReporter(null, NullLogger<SearchProgressReporter>.Instance);
-            var pipeline = new SearchResultFilterPipeline(Enumerable.Empty<ISearchResultFilter>(), NullLogger<SearchResultFilterPipeline>.Instance);
-            var coordinator = new MetadataStrategyCoordinator(Enumerable.Empty<IMetadataStrategy>(), NullLogger<MetadataStrategyCoordinator>.Instance);
-            var collector = new AsinCandidateCollector(NullLogger<AsinCandidateCollector>.Instance, openLibraryService, converters, progress);
-            var enricher = new AsinEnricher(NullLogger<AsinEnricher>.Instance, coordinator, converters, pipeline, progress);
-            var scorer = new SearchResultScorerService(NullLogger<SearchResultScorerService>.Instance);
-            var sorting = new SearchResultSortingService(Mock.Of<IIndexerRepository>(), NullLogger<SearchResultSortingService>.Instance);
-            var handler = new AsinSearchHandler(NullLogger<AsinSearchHandler>.Instance, configuration, audible, Mock.Of<IAudnexusService>(), converters, progress);
-
-            return new SearchService(
-              client,
-              configuration,
-              logger,
-              Mock.Of<IIndexerRepository>(),
-              Mock.Of<IApiConfigurationRepository>(),
-              audible,
-              converters,
-              progress,
-              collector,
-              enricher,
-              scorer,
-              sorting,
-              handler,
-              Enumerable.Empty<IIndexerSearchProvider>());
-        }
-
         [Fact]
         public void ParseMyAnonamouse_With_NoDateOrAge_Sets_Empty_PublishedDate()
         {
             var json = "[ { \"guid\": \"https://www.myanonamouse.net/t/100\", \"size\": 12345, \"title\": \"Test Title\" } ]";
             var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse" };
-            var service = CreateSearchService();
-
-            var method = typeof(SearchService).GetMethod("ParseMyAnonamouseResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var results = (System.Collections.Generic.List<IndexerSearchResult>)method.Invoke(service, new object[] { json, indexer });
+            var results = MyAnonamouseResponseParser.Parse(json, indexer, NullLogger.Instance);
 
             Assert.Single(results);
             var r = results[0];
@@ -81,10 +39,7 @@ namespace Listenarr.Tests.Features.Api.Services
         {
             var json = "[ { \"guid\": \"https://www.myanonamouse.net/t/101\", \"grabs\": \"0\", \"files\": \"1\", \"title\": \"Test Title 2\" } ]";
             var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse" };
-            var service = CreateSearchService();
-
-            var method = typeof(SearchService).GetMethod("ParseMyAnonamouseResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var results = (System.Collections.Generic.List<IndexerSearchResult>)method.Invoke(service, new object[] { json, indexer });
+            var results = MyAnonamouseResponseParser.Parse(json, indexer, NullLogger.Instance);
 
             Assert.Single(results);
             var r = results[0];

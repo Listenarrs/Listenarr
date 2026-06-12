@@ -400,12 +400,7 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
 ]";
 
             var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse" };
-            var service = CreateSearchService();
-
-            // Use reflection to call the private parser
-            var method = typeof(SearchService).GetMethod("ParseMyAnonamouseResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            Assert.NotNull(method);
-            var results = (List<IndexerSearchResult>)method!.Invoke(service, new object[] { json, indexer });
+            var results = MyAnonamouseResponseParser.Parse(json, indexer, NullLogger.Instance);
 
             Assert.Single(results);
             var r = results[0];
@@ -432,11 +427,7 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
   }
 ]";
             var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse", AdditionalSettings = "{ \"mam_id\": \"test_mam\" }" };
-            var service = CreateSearchService();
-
-            var method = typeof(SearchService).GetMethod("ParseMyAnonamouseResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            Assert.NotNull(method);
-            var results = (List<IndexerSearchResult>)method!.Invoke(service, new object[] { json, indexer });
+            var results = MyAnonamouseResponseParser.Parse(json, indexer, NullLogger.Instance);
 
             Assert.Single(results);
             var r = results[0];
@@ -456,16 +447,13 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
 
             // Case A: raw mam_id with + and = characters
             var indexerRaw = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse", AdditionalSettings = "{ \"mam_id\": \"abc+def==\" }" };
-            var method = typeof(SearchService).GetMethod("ParseMyAnonamouseResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            Assert.NotNull(method);
-            var service = CreateSearchService();
-            var resRaw = (List<IndexerSearchResult>)method!.Invoke(service, new object[] { json, indexerRaw });
+            var resRaw = MyAnonamouseResponseParser.Parse(json, indexerRaw, NullLogger.Instance);
             Assert.Single(resRaw);
             Assert.Equal("https://www.myanonamouse.net/tor/download.php/abc123?mam_id=abc%2Bdef%3D%3D", resRaw[0].TorrentUrl);
 
             // Case B: mam_id already percent-encoded (should not double-encode)
             var indexerEnc = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse", AdditionalSettings = "{ \"mam_id\": \"abc%2Bdef%3D%3D\" }" };
-            var resEnc = (List<IndexerSearchResult>)method!.Invoke(service, new object[] { json, indexerEnc })!;
+            var resEnc = MyAnonamouseResponseParser.Parse(json, indexerEnc, NullLogger.Instance);
             Assert.Single(resEnc);
             Assert.Equal("https://www.myanonamouse.net/tor/download.php/abc123?mam_id=abc%2Bdef%3D%3D", resEnc[0].TorrentUrl);
         }
@@ -487,12 +475,7 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
 ]";
 
             var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse" };
-            var service = CreateSearchService();
-
-            // Use reflection to call the private parser
-            var method = typeof(SearchService).GetMethod("ParseMyAnonamouseResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            Assert.NotNull(method);
-            var results = (List<IndexerSearchResult>)method!.Invoke(service, new object[] { json, indexer });
+            var results = MyAnonamouseResponseParser.Parse(json, indexer, NullLogger.Instance);
 
             Assert.Single(results);
             var r = results[0];
@@ -515,11 +498,7 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
 ]";
 
             var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse" };
-            var service = CreateSearchService();
-
-            var method = typeof(SearchService).GetMethod("ParseMyAnonamouseResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            Assert.NotNull(method);
-            var results = (List<IndexerSearchResult>)method!.Invoke(service, new object[] { json, indexer });
+            var results = MyAnonamouseResponseParser.Parse(json, indexer, NullLogger.Instance);
 
             Assert.Single(results);
             var r = results[0];
@@ -540,11 +519,7 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
 ]";
 
             var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse" };
-            var service = CreateSearchService();
-
-            var method = typeof(SearchService).GetMethod("ParseMyAnonamouseResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            Assert.NotNull(method);
-            var results = (List<IndexerSearchResult>)method!.Invoke(service, new object[] { json, indexer });
+            var results = MyAnonamouseResponseParser.Parse(json, indexer, NullLogger.Instance);
 
             Assert.Single(results);
             var r = results[0];
@@ -562,11 +537,7 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
 ]";
 
             var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse" };
-            var service = CreateSearchService();
-
-            var method = typeof(SearchService).GetMethod("ParseMyAnonamouseResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            Assert.NotNull(method);
-            var results = (List<IndexerSearchResult>)method!.Invoke(service, new object[] { json, indexer });
+            var results = MyAnonamouseResponseParser.Parse(json, indexer, NullLogger.Instance);
 
             Assert.Single(results);
             var r = results[0];
@@ -588,11 +559,7 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
 ]";
 
             var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse" };
-            var service = CreateSearchService();
-
-            var method = typeof(SearchService).GetMethod("ParseMyAnonamouseResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            Assert.NotNull(method);
-            var results = (List<IndexerSearchResult>)method!.Invoke(service, new object[] { json, indexer });
+            var results = MyAnonamouseResponseParser.Parse(json, indexer, NullLogger.Instance);
 
             Assert.Single(results);
             var r = results[0];
@@ -617,12 +584,7 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
 ]";
 
             var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse" };
-            var service = CreateSearchService();
-
-            // Use reflection to call the private parser
-            var method = typeof(SearchService).GetMethod("ParseMyAnonamouseResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            Assert.NotNull(method);
-            var results = (List<IndexerSearchResult>)method!.Invoke(service, new object[] { json, indexer });
+            var results = MyAnonamouseResponseParser.Parse(json, indexer, NullLogger.Instance);
 
             Assert.Single(results);
             var r = results[0];
@@ -646,11 +608,7 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
 ]";
 
             var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse" };
-            var service = CreateSearchService();
-
-            var method = typeof(SearchService).GetMethod("ParseMyAnonamouseResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            Assert.NotNull(method);
-            var results = (List<IndexerSearchResult>)method!.Invoke(service, new object[] { json, indexer })!;
+            var results = MyAnonamouseResponseParser.Parse(json, indexer, NullLogger.Instance);
 
             Assert.Single(results);
             var r = results[0];
