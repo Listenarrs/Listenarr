@@ -41,6 +41,7 @@ namespace Listenarr.Tests.Features.Api.Services
             var collector = new AsinCandidateCollector(NullLogger<AsinCandidateCollector>.Instance, openLibraryService, converters, progress);
             var enricher = new AsinEnricher(NullLogger<AsinEnricher>.Instance, coordinator, converters, pipeline, progress);
             var scorer = new SearchResultScorerService(NullLogger<SearchResultScorerService>.Instance);
+            var sorting = new SearchResultSortingService(Mock.Of<IIndexerRepository>(), NullLogger<SearchResultSortingService>.Instance);
             var handler = new AsinSearchHandler(NullLogger<AsinSearchHandler>.Instance, configuration, audible, Mock.Of<IAudnexusService>(), converters, progress);
 
             return new SearchService(
@@ -55,6 +56,7 @@ namespace Listenarr.Tests.Features.Api.Services
               collector,
               enricher,
               scorer,
+              sorting,
               handler,
               Enumerable.Empty<IIndexerSearchProvider>());
         }

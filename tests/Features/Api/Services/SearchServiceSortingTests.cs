@@ -15,8 +15,9 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using System.Reflection;
+using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Application.Search;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Listenarr.Tests.Features.Api.Services
 {
@@ -25,7 +26,9 @@ namespace Listenarr.Tests.Features.Api.Services
         [Fact]
         public async Task ApplySorting_SortsByLanguage_Descending()
         {
-            var svc = (SearchService)System.Runtime.Serialization.FormatterServices.GetUninitializedObject(typeof(SearchService));
+            var service = new SearchResultSortingService(
+                Mock.Of<IIndexerRepository>(),
+                NullLogger<SearchResultSortingService>.Instance);
 
             var results = new List<SearchResult>
             {
@@ -35,9 +38,7 @@ namespace Listenarr.Tests.Features.Api.Services
                 new SearchResult { Id = "4", Title = "D", Language = "German" }
             };
 
-            // Call private ApplySorting via reflection
-            var method = typeof(SearchService).GetMethod("ApplySorting", BindingFlags.Instance | BindingFlags.NonPublic)!;
-            var ordered = await (Task<List<SearchResult>>)method.Invoke(svc, new object[] { results, SearchSortBy.Language, SearchSortDirection.Descending })!;
+            var ordered = await service.ApplySortingAsync(results, SearchSortBy.Language, SearchSortDirection.Descending);
 
             // Expect order: 'english', 'German', 'french', null (case-insensitive, descending)
             // StringComparer.OrdinalIgnoreCase sorts lexicographically; descending should put 'french' > 'english' > 'German' > '' but to be deterministic test the comparer by actual result
@@ -49,7 +50,9 @@ namespace Listenarr.Tests.Features.Api.Services
         [Fact]
         public async Task ApplySorting_SortsByLanguage_Ascending()
         {
-            var svc = (SearchService)System.Runtime.Serialization.FormatterServices.GetUninitializedObject(typeof(SearchService));
+            var service = new SearchResultSortingService(
+                Mock.Of<IIndexerRepository>(),
+                NullLogger<SearchResultSortingService>.Instance);
 
             var results = new List<SearchResult>
             {
@@ -59,8 +62,7 @@ namespace Listenarr.Tests.Features.Api.Services
                 new SearchResult { Id = "4", Title = "D", Language = "German" }
             };
 
-            var method = typeof(SearchService).GetMethod("ApplySorting", BindingFlags.Instance | BindingFlags.NonPublic)!;
-            var ordered = await (Task<List<SearchResult>>)method.Invoke(svc, new object[] { results, SearchSortBy.Language, SearchSortDirection.Ascending })!;
+            var ordered = await service.ApplySortingAsync(results, SearchSortBy.Language, SearchSortDirection.Ascending);
 
             // Ascending should place null/empty first
             Assert.Equal(4, ordered.Count);

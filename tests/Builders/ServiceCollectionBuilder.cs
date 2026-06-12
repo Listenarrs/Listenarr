@@ -170,6 +170,7 @@ namespace Listenarr.Tests.Builders
             services.AddSingleton(new Mock<IDiscordBotService>().Object);
             services.AddSingleton<IFfmpegService, FfmpegServiceMock>();
             services.AddSingleton<IConfigurationService, ConfigurationService>();
+            services.AddSingleton<IAudiobookFilesystemDeleteService, AudiobookFilesystemDeleteService>();
             services.AddSingleton<IMoveQueueService, MoveQueueService>();
             services.AddSingleton<IScanQueueService, ScanQueueService>();
             services.AddSingleton<IRootFolderService, RootFolderService>();
@@ -181,6 +182,7 @@ namespace Listenarr.Tests.Builders
             services.AddSingleton<AsinCandidateCollector>();
             services.AddSingleton<AsinEnricher>();
             services.AddSingleton<SearchResultScorerService>();
+            services.AddSingleton<SearchResultSortingService>();
             services.AddSingleton<AsinSearchHandler>();
             services.AddSingleton<DownloadService>();
             services.AddSingleton<MoveBackgroundService>();

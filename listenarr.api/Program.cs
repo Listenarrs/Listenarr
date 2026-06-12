@@ -340,6 +340,7 @@ builder.Services.AddScoped<AsinEnricher>();
 // Add fallback scraper
 // Add search result scorer
 builder.Services.AddScoped<SearchResultScorerService>();
+builder.Services.AddScoped<SearchResultSortingService>();
 
 // Add ASIN search handler
 builder.Services.AddScoped<AsinSearchHandler>();
