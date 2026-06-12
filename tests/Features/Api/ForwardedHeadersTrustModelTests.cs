@@ -16,8 +16,10 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Net;
+using Listenarr.Infrastructure.Web;
 using Listenarr.Tests.Mocks;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Options;
 
@@ -47,6 +49,27 @@ namespace Listenarr.Tests.Features.Api
             Assert.Contains(options.KnownIPNetworks, network => Matches(network, "192.168.0.0", 16));
             Assert.Contains(options.KnownIPNetworks, network => Matches(network, "fc00::", 7));
             Assert.Contains(options.KnownIPNetworks, network => Matches(network, "fe80::", 10));
+        }
+
+        [Fact]
+        public void RequestContextAccessor_IgnoresRawForwardedHostHeaders()
+        {
+            var httpContext = new DefaultHttpContext();
+            httpContext.Request.Scheme = "http";
+            httpContext.Request.Host = new HostString("listenarr.internal:4545");
+            httpContext.Request.Headers["X-Forwarded-Proto"] = "https";
+            httpContext.Request.Headers["X-Forwarded-Host"] = "attacker.example";
+
+            var accessor = new AspNetRequestContextAccessor(new HttpContextAccessor
+            {
+                HttpContext = httpContext
+            });
+
+            var snapshot = accessor.Current;
+
+            Assert.NotNull(snapshot);
+            Assert.Equal("http", snapshot.Scheme);
+            Assert.Equal("listenarr.internal:4545", snapshot.Host);
         }
 
         private static bool Matches(System.Net.IPNetwork network, string prefix, int prefixLength)

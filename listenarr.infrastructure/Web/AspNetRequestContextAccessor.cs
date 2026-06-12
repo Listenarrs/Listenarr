@@ -35,22 +35,10 @@ namespace Listenarr.Infrastructure.Web
                     && (user.IsInRole("Administrator")
                         || string.Equals(user.FindFirst("AuthMethod")?.Value, "ApiKey", StringComparison.Ordinal));
 
-                var scheme = context.Request.Scheme;
-                var host = context.Request.Host.Value;
-                if (context.Request.Headers.TryGetValue("X-Forwarded-Proto", out var forwardedProto))
-                {
-                    scheme = forwardedProto.ToString();
-                }
-
-                if (context.Request.Headers.TryGetValue("X-Forwarded-Host", out var forwardedHost))
-                {
-                    host = forwardedHost.ToString();
-                }
-
                 return new RequestContextSnapshot(
                     context.Request.Path.Value,
-                    scheme,
-                    host,
+                    context.Request.Scheme,
+                    context.Request.Host.Value,
                     context.Connection.RemoteIpAddress,
                     isAuthenticatedAdminOrApiKey);
             }
