@@ -21,7 +21,6 @@ using Microsoft.Extensions.Caching.Memory;
 using Listenarr.Domain.Models;
 using System.Text.Json;
 using System.Reflection;
-using System.Text.RegularExpressions;
 using System.Security.Cryptography;
 using System.Text;
 using Listenarr.Domain.Common;
@@ -547,7 +546,7 @@ namespace Listenarr.Api.Controllers
                 var namingPattern = !string.IsNullOrWhiteSpace(settings.FolderNamingPattern)
                     ? settings.FolderNamingPattern
                     : settings.FileNamingPattern;
-                var full = ComputeAudiobookBaseDirectoryFromPattern(temp, root ?? string.Empty, namingPattern);
+                var full = LibraryPathPlanner.ComputeAudiobookBaseDirectoryFromPattern(temp, root ?? string.Empty, namingPattern, _fileNamingService);
 
                 var relative = full;
                 if (!string.IsNullOrEmpty(root) && full.StartsWith(root, StringComparison.OrdinalIgnoreCase))
@@ -1666,7 +1665,7 @@ namespace Listenarr.Api.Controllers
                                 var fileNamingPattern = !string.IsNullOrWhiteSpace(settings?.FolderNamingPattern)
                                     ? settings!.FolderNamingPattern
                                     : settings?.FileNamingPattern ?? string.Empty;
-                                var newBase = ComputeAudiobookBaseDirectoryFromPattern(audiobook, rootPath, fileNamingPattern);
+                                var newBase = LibraryPathPlanner.ComputeAudiobookBaseDirectoryFromPattern(audiobook, rootPath, fileNamingPattern, _fileNamingService);
 
                                 try
                                 {
@@ -1956,7 +1955,7 @@ namespace Listenarr.Api.Controllers
             }
 
             // Calculate base path for the audiobook files
-            var basePath = CalculateBasePath(foundFiles);
+            var basePath = LibraryPathPlanner.CalculateBasePath(foundFiles, _logger);
             _logger.LogInformation("Calculated base path for audiobook '{Title}': {BasePath}", LogRedaction.SanitizeText(audiobook.Title), LogRedaction.SanitizeFilePath(basePath));
 
             var created = new List<AudiobookFile>();
@@ -2884,208 +2883,6 @@ namespace Listenarr.Api.Controllers
 
             // As a last resort, return the original value
             return value;
-        }
-
-        private string ComputeAudiobookBaseDirectoryFromPattern(Audiobook audiobook, string rootPath, string fileNamingPattern)
-        {
-            // Derive directory pattern from the user's file naming pattern
-            // Remove file-specific tokens like DiskNumber and ChapterNumber to create a directory structure
-            string directoryPattern;
-            if (!string.IsNullOrWhiteSpace(fileNamingPattern))
-            {
-                // Remove file-specific patterns and create a directory pattern
-                directoryPattern = fileNamingPattern;
-
-                // Remove file-specific tokens that don't make sense for directories
-                directoryPattern = Regex.Replace(directoryPattern, @"\{DiskNumber[^}]*\}", "", RegexOptions.IgnoreCase);
-                directoryPattern = Regex.Replace(directoryPattern, @"\{ChapterNumber[^}]*\}", "", RegexOptions.IgnoreCase);
-
-                // Clean up any resulting double separators or empty parts
-                directoryPattern = Regex.Replace(directoryPattern, @"[\\/]\s*[\\/]", "/");
-                directoryPattern = Regex.Replace(directoryPattern, @"^\s*[\\/]", "");
-                directoryPattern = Regex.Replace(directoryPattern, @"[\\/]\s*$", "");
-
-                // If the pattern is now empty or doesn't contain directory separators, use a fallback
-                if (string.IsNullOrWhiteSpace(directoryPattern) || !directoryPattern.Contains("/"))
-                {
-                    directoryPattern = "{Author}/{Title}";
-                }
-            }
-            else
-            {
-                // Fallback to default directory pattern
-                directoryPattern = "{Author}/{Title}";
-            }
-
-            // For series books, ensure we include the series in the directory structure
-            if (!string.IsNullOrWhiteSpace(audiobook.Series) && !directoryPattern.Contains("{Series}"))
-            {
-                // Insert series between author and title if not already present
-                if (directoryPattern.Contains("{Author}/{Title}"))
-                {
-                    directoryPattern = directoryPattern.Replace("{Author}/{Title}", "{Author}/{Series}/{Title}");
-                }
-                else if (directoryPattern.Contains("{Author}/"))
-                {
-                    directoryPattern = directoryPattern.Replace("{Author}/", "{Author}/{Series}/");
-                }
-            }
-
-            // If the audiobook has no Series, remove any {Series} tokens from the directory pattern
-            // Tests expect the controller to strip the Series token when series metadata is missing.
-            if (string.IsNullOrWhiteSpace(audiobook.Series))
-            {
-                directoryPattern = Regex.Replace(directoryPattern, @"\{Series[^}]*\}", string.Empty, RegexOptions.IgnoreCase);
-                // Clean up any resulting duplicate separators or empty parts again
-                directoryPattern = Regex.Replace(directoryPattern, @"[\\/]\s*[\\/]", "/");
-                directoryPattern = Regex.Replace(directoryPattern, @"^\s*[\\/]", "");
-                directoryPattern = Regex.Replace(directoryPattern, @"[\\/]\s*$", "");
-            }
-
-            // Build variables for naming pattern using audiobook-level metadata
-            var variables = new Dictionary<string, object>
-            {
-                { "Author", SanitizeDirectoryName(audiobook.Authors?.FirstOrDefault() ?? "Unknown Author") },
-                { "Series", SanitizeDirectoryName(!string.IsNullOrWhiteSpace(audiobook.Series) ? audiobook.Series! : string.Empty) },
-                { "Title", SanitizeDirectoryName(audiobook.Title ?? "Unknown Title") },
-                { "Subtitle", SanitizeDirectoryName(audiobook.Subtitle ?? string.Empty) },
-                { "Edition", SanitizeDirectoryName(audiobook.Edition ?? string.Empty) },
-                { "Narrator", SanitizeDirectoryName((audiobook.Narrators != null && audiobook.Narrators.Any()) ? string.Join(", ", audiobook.Narrators.Where(n => !string.IsNullOrWhiteSpace(n))) : string.Empty) },
-                { "Publisher", SanitizeDirectoryName(audiobook.Publisher ?? string.Empty) },
-                { "Language", SanitizeDirectoryName(audiobook.Language ?? string.Empty) },
-                { "Asin", SanitizeDirectoryName(audiobook.Asin ?? string.Empty) },
-                { "SeriesNumber", audiobook.SeriesNumber ?? string.Empty },
-                { "Year", audiobook.PublishYear ?? string.Empty },
-                { "Quality", string.Empty },
-                { "DiskNumber", string.Empty },
-                { "ChapterNumber", string.Empty }
-            };
-
-            // Apply the directory pattern to get the relative directory path
-            var relative = _fileNamingService.ApplyNamingPattern(directoryPattern, variables, false);
-
-            // Combine with root path
-            var combined = ResolvePathWithOptionalBase(rootPath, relative);
-
-            return combined;
-        }
-
-        private string CalculateBasePath(List<string> filePaths)
-        {
-            if (!filePaths.Any())
-                return string.Empty;
-
-            // Convert all paths to directory paths (get parent directory for each file)
-            var directories = filePaths
-                .Select(p => FileUtils.NormalizeStoredPath(Path.GetDirectoryName(p) ?? p))
-                .Where(p => !string.IsNullOrWhiteSpace(p))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            if (directories.Count == 1)
-            {
-                // All files are in the same directory
-                return directories[0];
-            }
-
-            // Find the common ancestor directory where there are no longer <=1 things stored
-            var commonPath = GetCommonPath(directories);
-
-            // Walk up the directory tree until we find a directory that has more than 1 subdirectory or file
-            var currentPath = commonPath;
-            while (!string.IsNullOrEmpty(currentPath))
-            {
-                try
-                {
-                    var parent = Directory.GetParent(currentPath)?.FullName;
-                    if (string.IsNullOrEmpty(parent))
-                        break;
-
-                    // Count subdirectories and files in parent
-                    var subDirs = Directory.GetDirectories(parent).Length;
-                    var files = Directory.GetFiles(parent).Length;
-
-                    // If parent has more than 1 thing (subdirs + files), we've found our base path
-                    if (subDirs + files > 1)
-                    {
-                        return currentPath;
-                    }
-
-                    currentPath = parent;
-                }
-                catch (Exception traversalEx) when (
-                    traversalEx is IOException
-                    || traversalEx is UnauthorizedAccessException
-                    || traversalEx is System.Security.SecurityException
-                    || traversalEx is ArgumentException
-                    || traversalEx is NotSupportedException)
-                {
-                    // If we can't access the directory, stop here
-                    _logger.LogDebug(traversalEx, "Stopping common-base-path ascent at {Path} due to traversal error", currentPath);
-                    break;
-                }
-            }
-
-            return commonPath;
-        }
-
-        private string GetCommonPath(List<string> paths)
-        {
-            if (!paths.Any())
-                return string.Empty;
-
-            var firstPath = FileUtils.NormalizeStoredPath(paths[0]);
-            var commonPath = firstPath;
-
-            foreach (var path in paths.Skip(1).Select(rawPath => FileUtils.NormalizeStoredPath(rawPath)))
-            {
-                var minLength = Math.Min(commonPath.Length, path.Length);
-                var commonLength = 0;
-
-                for (int i = 0; i < minLength; i++)
-                {
-                    if (commonPath[i] == path[i])
-                        commonLength++;
-                    else
-                        break;
-                }
-
-                // Ensure we don't break in the middle of a directory name
-                if (commonLength < commonPath.Length)
-                    commonLength = commonPath.LastIndexOf(Path.DirectorySeparatorChar, commonLength - 1) is var lastSep && lastSep >= 0
-                        ? lastSep + 1
-                        : 0;
-
-                commonPath = commonPath.Substring(0, commonLength);
-
-                if (string.IsNullOrEmpty(commonPath))
-                    break;
-            }
-
-            // Ensure it's a valid directory path
-            if (!string.IsNullOrEmpty(commonPath) && !Directory.Exists(commonPath))
-            {
-                var parent = Directory.GetParent(commonPath)?.FullName;
-                return parent ?? commonPath;
-            }
-
-            return commonPath;
-        }
-
-        private string SanitizeDirectoryName(string name)
-        {
-            // Remove or replace characters that are invalid in directory names
-            var invalidChars = Path.GetInvalidFileNameChars();
-            foreach (var c in invalidChars)
-            {
-                name = name.Replace(c, '_');
-            }
-
-            // Also replace some additional characters that might cause issues
-            name = name.Replace(":", "_").Replace("*", "_").Replace("?", "_").Replace("\"", "_").Replace("<", "_").Replace(">", "_").Replace("|", "_");
-
-            // Trim whitespace and return
-            return name.Trim();
         }
 
         private static string ComputeShortHash(string? input)

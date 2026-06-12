@@ -15,7 +15,6 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using System.Reflection;
 using Listenarr.Api.Controllers;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
@@ -30,10 +29,6 @@ namespace Listenarr.Tests.Features.Api.Controllers
         private const string RootPath = "/server/mnt/drive/Audiobooks";
         private const string FileNamingPattern = "{Author}/{Series}/{Title}";
 
-        private static readonly MethodInfo ComputeBaseDirectoryMethod =
-            typeof(LibraryController).GetMethod("ComputeAudiobookBaseDirectoryFromPattern",
-                BindingFlags.NonPublic | BindingFlags.Instance)!;
-
         [Fact]
         [Trait("Method", "ComputeAudiobookBaseDirectoryFromPattern")]
         [Trait("Scenario", "NonSeriesBook_ReturnsCorrectPath")]
@@ -46,10 +41,10 @@ namespace Listenarr.Tests.Features.Api.Controllers
                 .WithYear("2025")
                 .Build();
 
-            var controller = _provider.GetRequiredService<LibraryController>();
+            var fileNamingService = _provider.GetRequiredService<IFileNamingService>();
 
             // When
-            var result = (string)ComputeBaseDirectoryMethod.Invoke(controller, new object[] { audiobook, RootPath, FileNamingPattern });
+            var result = LibraryPathPlanner.ComputeAudiobookBaseDirectoryFromPattern(audiobook, RootPath, FileNamingPattern, fileNamingService);
 
             // Then
             Assert.Equal(Path.Join(RootPath, "Stephen Graham Jones", "The Buffalo Hunter Hunter"), result);
@@ -69,10 +64,10 @@ namespace Listenarr.Tests.Features.Api.Controllers
                 .WithSeriesNumber("1")
                 .Build();
 
-            var controller = _provider.GetRequiredService<LibraryController>();
+            var fileNamingService = _provider.GetRequiredService<IFileNamingService>();
 
             // When
-            var result = (string)ComputeBaseDirectoryMethod.Invoke(controller, new object[] { audiobook, RootPath, FileNamingPattern });
+            var result = LibraryPathPlanner.ComputeAudiobookBaseDirectoryFromPattern(audiobook, RootPath, FileNamingPattern, fileNamingService);
 
             // Then
             Assert.Equal(Path.Join(RootPath, "Stephen King", "The Dark Tower", "The Gunslinger"), result);
