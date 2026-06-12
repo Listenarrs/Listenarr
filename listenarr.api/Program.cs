@@ -345,6 +345,8 @@ builder.Services.AddScoped<SearchResultSortingService>();
 // Add ASIN search handler
 builder.Services.AddScoped<AsinSearchHandler>();
 builder.Services.AddScoped<Listenarr.Api.Controllers.LibraryMetadataRescanWorkflow>();
+builder.Services.AddScoped<Listenarr.Api.Controllers.LibraryScanPathResolver>();
+builder.Services.AddScoped<Listenarr.Api.Controllers.LibraryScanQueueWorkflow>();
 
 // Register named HttpClients for each adapter type so adapter implementations can request the appropriately-configured client.
 builder.Services.AddListenarrHttpClients(builder.Configuration);

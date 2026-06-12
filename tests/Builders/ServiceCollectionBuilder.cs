@@ -187,6 +187,8 @@ namespace Listenarr.Tests.Builders
             services.AddSingleton<DownloadTypeResolver>();
             services.AddSingleton<DownloadClientSelector>();
             services.AddSingleton<LibraryMetadataRescanWorkflow>();
+            services.AddSingleton<LibraryScanPathResolver>();
+            services.AddSingleton<LibraryScanQueueWorkflow>();
             services.AddSingleton<DownloadService>();
             services.AddSingleton<MoveBackgroundService>();
             services.AddSingleton<MoveQueueService>();

@@ -46,16 +46,16 @@ namespace Listenarr.Api.Controllers
         private readonly IAudiobookFileRepository _audioFileRepository;
         private readonly IQualityProfileRepository _qualityProfileRepository;
         private readonly IDownloadRepository _downloadRepository;
-        private readonly IScanQueueService? _scanQueueService;
         private readonly IMoveQueueService? _moveQueueService;
         private readonly IFileNamingService _fileNamingService;
         private readonly NotificationService? _notificationService;
-        private readonly IRootFolderService? _rootFolderService;
         private readonly ILibraryAddService? _libraryAddService;
         private readonly IRenameService? _renameService;
         private readonly ILibraryListService _libraryListService;
         private readonly IAudiobookFilesystemDeleteService _audiobookFilesystemDeleteService;
         private readonly LibraryMetadataRescanWorkflow _metadataRescanWorkflow;
+        private readonly LibraryScanPathResolver _scanPathResolver;
+        private readonly LibraryScanQueueWorkflow _scanQueueWorkflow;
         private readonly string _contentRootPath;
         /// <summary>Initializes a new instance of <see cref="LibraryController"/>.</summary>
         /// <param name="repo">Repository for audiobook persistence and queries.</param>
@@ -67,16 +67,16 @@ namespace Listenarr.Api.Controllers
         /// <param name="qualityProfileRepository">Repository for quality profile configuration.</param>
         /// <param name="downloadRepository">Repository for active download records.</param>
         /// <param name="fileNamingService">Service responsible for applying file naming patterns.</param>
-        /// <param name="scanQueueService">Optional background scan queue service for asynchronous scans.</param>
         /// <param name="moveQueueService">Optional background move queue service for processing move requests.</param>
         /// <param name="notificationService">Service for sending webhook notifications.</param>
-        /// <param name="rootFolderService">Optional root folder service for managing and enumerating configured root folders used for validating explicit scan paths.</param>
         /// <param name="libraryAddService">Optional shared add-to-library service used by runtime requests and background syncs.</param>
         /// <param name="renameService">Optional organize/rename service used for previewing and executing library file organization.</param>
         /// <param name="applicationPathService">Application path service used to resolve content-root-relative cache files.</param>
         /// <param name="libraryListService">Application service that builds the slim library list payload.</param>
         /// <param name="audiobookFilesystemDeleteService">Application service responsible for safe audiobook filesystem cleanup.</param>
         /// <param name="metadataRescanWorkflow">API workflow for on-demand audiobook metadata rescans.</param>
+        /// <param name="scanPathResolver">API workflow for resolving and validating scan roots.</param>
+        /// <param name="scanQueueWorkflow">API workflow for background scan queue operations.</param>
         public LibraryController(
             IAudiobookRepository repo,
             IImageCacheService imageCacheService,
@@ -91,10 +91,10 @@ namespace Listenarr.Api.Controllers
             ILibraryListService libraryListService,
             IAudiobookFilesystemDeleteService audiobookFilesystemDeleteService,
             LibraryMetadataRescanWorkflow metadataRescanWorkflow,
-            IScanQueueService? scanQueueService = null,
+            LibraryScanPathResolver scanPathResolver,
+            LibraryScanQueueWorkflow scanQueueWorkflow,
             IMoveQueueService? moveQueueService = null,
             NotificationService? notificationService = null,
-            IRootFolderService? rootFolderService = null,
             ILibraryAddService? libraryAddService = null,
             IRenameService? renameService = null)
         {
@@ -107,15 +107,15 @@ namespace Listenarr.Api.Controllers
             _qualityProfileRepository = qualityProfileRepository;
             _downloadRepository = downloadRepository;
             _fileNamingService = fileNamingService;
-            _scanQueueService = scanQueueService;
             _moveQueueService = moveQueueService;
             _notificationService = notificationService;
-            _rootFolderService = rootFolderService;
             _libraryAddService = libraryAddService;
             _renameService = renameService;
             _libraryListService = libraryListService;
             _audiobookFilesystemDeleteService = audiobookFilesystemDeleteService;
             _metadataRescanWorkflow = metadataRescanWorkflow;
+            _scanPathResolver = scanPathResolver;
+            _scanQueueWorkflow = scanQueueWorkflow;
             _contentRootPath = applicationPathService.ContentRootPath;
         }
 
@@ -1462,142 +1462,19 @@ namespace Listenarr.Api.Controllers
             var audiobook = await _repo.GetByIdAsync(id);
             if (audiobook == null) return NotFound(new { message = "Audiobook not found" });
 
-            // If a background scan queue is available, enqueue the job and return Accepted
-            if (_scanQueueService != null)
+            var queuedResult = await _scanQueueWorkflow.TryEnqueueAsync(audiobook, request?.Path);
+            if (queuedResult != null)
             {
-                try
-                {
-                    var jobId = await _scanQueueService.EnqueueScanAsync(audiobook, request?.Path);
-                    _logger.LogInformation("Enqueued scan job {JobId} for audiobook {AudiobookId}", jobId, id);
-
-                    // Broadcast initial job status so realtime clients can show queued state
-                    try
-                    {
-                        using var scope = _scopeFactory.CreateScope();
-                        var hub = scope.ServiceProvider.GetRequiredService<IHubBroadcaster>();
-                        var job = new { jobId = jobId.ToString(), audiobookId = id, status = "Queued", enqueuedAt = DateTime.UtcNow };
-                        await hub.BroadcastAsync(RealtimeHubTarget.Downloads, "ScanJobUpdate", job);
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                    {
-                        _logger.LogWarning(ex, "Failed to broadcast ScanJobUpdate for job {JobId}", jobId);
-                    }
-
-                    return Accepted(new { message = "Scan enqueued", jobId });
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                {
-                    _logger.LogError(ex, "Failed to enqueue scan job for audiobook {AudiobookId}", id);
-                    return StatusCode(500, new { message = "Failed to enqueue scan job", error = ex.Message });
-                }
+                return queuedResult;
             }
 
-            // Determine scan root: request.Path, audiobook.BasePath, or application settings output path
-            string? scanRoot = null;
-            try
+            var scanPathResolution = await _scanPathResolver.ResolveAsync(audiobook, request?.Path);
+            if (scanPathResolution.ErrorResult != null)
             {
-                using var scope = _scopeFactory.CreateScope();
-                var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
-                var settings = await configService.GetApplicationSettingsAsync();
-
-                // If audiobook has a BasePath configured, always scan that path for safety
-                // Do not fall back to the global output path when a BasePath is present.
-                if (!string.IsNullOrEmpty(audiobook.BasePath))
-                {
-                    scanRoot = Path.GetFullPath(audiobook.BasePath);
-                    _logger.LogDebug("Audiobook has BasePath; using it as scan root: {ScanRoot}", LogRedaction.SanitizeFilePath(scanRoot));
-                }
-                else if (!string.IsNullOrEmpty(request?.Path))
-                {
-                    // Validate requested path is absolute and contained within a configured root folder or the global output path
-                    string requestedFull;
-                    try
-                    {
-                        requestedFull = Path.GetFullPath(request.Path!);
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                    {
-                        _logger.LogWarning(ex, "Invalid requested scan path provided: {Path}", LogRedaction.SanitizeFilePath(request.Path));
-                        return BadRequest(new { message = "Invalid scan path", path = request.Path });
-                    }
-
-                    // Build whitelist of allowed root paths
-                    var allowedRoots = new List<string>();
-                    if (_rootFolderService != null)
-                    {
-                        var roots = await _rootFolderService.GetAllAsync();
-                        foreach (var r in roots)
-                        {
-                            try
-                            {
-                                allowedRoots.Add(Path.GetFullPath(r.Path));
-                            }
-                            catch (Exception rootPathEx) when (
-                                rootPathEx is ArgumentException
-                                || rootPathEx is NotSupportedException
-                                || rootPathEx is PathTooLongException
-                                || rootPathEx is System.Security.SecurityException)
-                            {
-                                _logger.LogDebug(rootPathEx, "Skipping invalid root folder path during scan allowlist build: {RootPath}", LogRedaction.SanitizeFilePath(r.Path));
-                            }
-                        }
-                    }
-
-                    if (!string.IsNullOrEmpty(settings?.OutputPath))
-                    {
-                        try
-                        {
-                            allowedRoots.Add(Path.GetFullPath(settings.OutputPath));
-                        }
-                        catch (Exception outputPathEx) when (
-                            outputPathEx is ArgumentException
-                            || outputPathEx is NotSupportedException
-                            || outputPathEx is PathTooLongException
-                            || outputPathEx is System.Security.SecurityException)
-                        {
-                            _logger.LogDebug(outputPathEx, "Skipping invalid output path during scan allowlist build: {OutputPath}", settings.OutputPath);
-                        }
-                    }
-
-                    if (allowedRoots.Count == 0)
-                    {
-                        _logger.LogWarning("Scan request path provided but no root folders are configured; rejecting request.");
-                        return BadRequest(new { message = "No root folders configured; cannot accept explicit scan path" });
-                    }
-
-                    // Check that requestedFull is equal to or under one of the allowed roots
-                    var allowed = allowedRoots.Any(ar => string.Equals(requestedFull, ar, StringComparison.OrdinalIgnoreCase)
-                        || requestedFull.StartsWith(ar.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
-                        || requestedFull.StartsWith(ar.TrimEnd(Path.AltDirectorySeparatorChar) + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
-
-                    if (!allowed)
-                    {
-                        _logger.LogWarning("Requested scan path {Path} is not inside configured root folders", LogRedaction.SanitizeFilePath(request.Path));
-                        return BadRequest(new { message = "Requested scan path is not within configured root folders", path = request.Path });
-                    }
-
-                    scanRoot = requestedFull;
-                }
-                else
-                {
-                    // No BasePath and no explicit path - fall back to configured output path
-                    scanRoot = !string.IsNullOrEmpty(settings?.OutputPath) ? Path.GetFullPath(settings.OutputPath) : null;
-                }
+                return scanPathResolution.ErrorResult;
             }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogWarning(ex, "Failed to read application settings for scan; cannot validate request path without configured roots");
-                // If BasePath exists prefer it; otherwise, we cannot determine a safe scan root
-                if (!string.IsNullOrEmpty(audiobook.BasePath))
-                {
-                    scanRoot = Path.GetFullPath(audiobook.BasePath);
-                }
-                else
-                {
-                    _logger.LogWarning("Configuration unavailable and audiobook has no BasePath; rejecting scan request for audiobook {AudiobookId}", id);
-                    return StatusCode(500, new { message = "Failed to determine a safe scan path" });
-                }
-            }
+
+            var scanRoot = scanPathResolution.ScanRoot;
 
             if (string.IsNullOrEmpty(scanRoot) || !Directory.Exists(scanRoot))
             {
@@ -1939,14 +1816,7 @@ namespace Listenarr.Api.Controllers
         [HttpGet("scan/{jobId}")]
         public IActionResult GetScanJobStatus(string jobId)
         {
-            if (_scanQueueService == null) return NotFound(new { message = "Scan queue not available" });
-            if (!Guid.TryParse(jobId, out var gid)) return BadRequest(new { message = "Invalid jobId" });
-            if (_scanQueueService.TryGetJob(gid, out var job))
-            {
-                _logger.LogInformation("Queried scan job {JobId} status: {Status}", gid, job!.Status);
-                return Ok(job);
-            }
-            return NotFound(new { message = "Job not found" });
+            return _scanQueueWorkflow.GetStatus(jobId);
         }
 
         /// <summary>
@@ -2138,28 +2008,7 @@ namespace Listenarr.Api.Controllers
         [HttpPost("scan/requeue/{jobId}")]
         public async Task<IActionResult> RequeueScanJob(string jobId)
         {
-            if (_scanQueueService == null) return NotFound(new { message = "Scan queue not available" });
-            if (!Guid.TryParse(jobId, out var gid)) return BadRequest(new { message = "Invalid jobId" });
-
-            var newJobId = await _scanQueueService.RequeueScanAsync(gid);
-            if (newJobId == null)
-            {
-                return BadRequest(new { message = "Unable to requeue job (not found or invalid status)" });
-            }
-
-            try
-            {
-                using var scope = _scopeFactory.CreateScope();
-                var hub = scope.ServiceProvider.GetRequiredService<IHubBroadcaster>();
-                var job = new { jobId = newJobId.ToString(), status = "Queued", enqueuedAt = DateTime.UtcNow };
-                await hub.BroadcastAsync(RealtimeHubTarget.Downloads, "ScanJobUpdate", job);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogWarning(ex, "Failed to broadcast ScanJobUpdate for requeued job {JobId}", newJobId);
-            }
-
-            return Accepted(new { message = "Requeued scan job", jobId = newJobId });
+            return await _scanQueueWorkflow.RequeueAsync(jobId);
         }
 
         // Helper to convert incoming update values (possibly JsonElement or boxed types) to the target property type
