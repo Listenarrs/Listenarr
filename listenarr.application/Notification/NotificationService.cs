@@ -106,7 +106,7 @@ namespace Listenarr.Application.Notification
             }
 
             return context.RemoteIpAddress == null
-                   || System.Net.IPAddress.IsLoopback(context.RemoteIpAddress)
+                   || SecurityRequestUtils.IsLoopback(context.RemoteIpAddress)
                    || context.IsAuthenticatedAdminOrApiKey;
         }
 

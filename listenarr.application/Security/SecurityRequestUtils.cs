@@ -23,6 +23,16 @@ namespace Listenarr.Application.Security;
 
 public static class SecurityRequestUtils
 {
+    public static bool IsLoopback(IPAddress ip)
+    {
+        if (ip.IsIPv4MappedToIPv6)
+        {
+            ip = ip.MapToIPv4();
+        }
+
+        return IPAddress.IsLoopback(ip);
+    }
+
     public static string HashSecretForLog(string? secret, string prefix = "sha256")
     {
         if (string.IsNullOrWhiteSpace(secret))
@@ -45,12 +55,7 @@ public static class SecurityRequestUtils
 
     public static bool IsPrivateOrLoopback(IPAddress ip)
     {
-        if (ip.IsIPv4MappedToIPv6)
-        {
-            ip = ip.MapToIPv4();
-        }
-
-        if (IPAddress.IsLoopback(ip))
+        if (IsLoopback(ip))
         {
             return true;
         }

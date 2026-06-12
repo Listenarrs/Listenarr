@@ -7,8 +7,6 @@
  * by the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  */
-using System.Net;
-
 namespace Listenarr.Api.Security;
 
 public static class HttpSecurityRequestUtils
@@ -21,12 +19,7 @@ public static class HttpSecurityRequestUtils
             return true;
         }
 
-        if (ip.IsIPv4MappedToIPv6)
-        {
-            ip = ip.MapToIPv4();
-        }
-
-        return IPAddress.IsLoopback(ip);
+        return Listenarr.Application.Security.SecurityRequestUtils.IsLoopback(ip);
     }
 
     public static bool IsLocalOrPrivateRequest(HttpContext? context)

@@ -382,6 +382,58 @@ namespace Listenarr.Api.Tests
             }
 
         }
+
+        [Fact]
+        public async Task SendNotificationAsync_AllowsPrivateWebhook_WhenCallerIsIpv4MappedLoopback()
+        {
+            var trigger = "book-added";
+            var webhookUrl = "http://127.0.0.1:4545/webhook";
+            var enabledTriggers = new List<string> { trigger };
+            var data = new { title = "Local Webhook Book" };
+
+            HttpRequestMessage? capturedRequest = null;
+            var mockHttpMessageHandler = new Mock<HttpMessageHandler>();
+            using var postResponse = new HttpResponseMessage(HttpStatusCode.OK);
+
+            mockHttpMessageHandler
+                .Protected()
+                .Setup<Task<HttpResponseMessage>>(
+                    "SendAsync",
+                    ItExpr.IsAny<HttpRequestMessage>(),
+                    ItExpr.IsAny<CancellationToken>())
+                .Callback<HttpRequestMessage, CancellationToken>((request, _) =>
+                {
+                    capturedRequest = request;
+                })
+                .ReturnsAsync(postResponse);
+
+            var mockConfigService = new Mock<IConfigurationService>();
+            mockConfigService
+                .Setup(x => x.GetStartupConfigAsync())
+                .ReturnsAsync(new StartupConfig());
+
+            var mockRequestContextAccessor = new Mock<IRequestContextAccessor>();
+            mockRequestContextAccessor
+                .Setup(x => x.Current)
+                .Returns(new RequestContextSnapshot(
+                    Path: null,
+                    Scheme: "http",
+                    Host: "localhost:4545",
+                    RemoteIpAddress: IPAddress.Parse("::ffff:127.0.0.1"),
+                    IsAuthenticatedAdminOrApiKey: false));
+
+            var service = new NotificationService(
+                new HttpClient(mockHttpMessageHandler.Object),
+                Mock.Of<ILogger<NotificationService>>(),
+                mockConfigService.Object,
+                new NotificationPayloadBuilderAdapter(),
+                mockRequestContextAccessor.Object);
+
+            await service.SendNotificationAsync(trigger, data, webhookUrl, enabledTriggers);
+
+            Assert.NotNull(capturedRequest);
+            Assert.Equal(webhookUrl, capturedRequest!.RequestUri?.ToString());
+        }
     }
 
     public partial class NotificationServiceTests
