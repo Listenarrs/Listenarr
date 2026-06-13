@@ -558,7 +558,7 @@ namespace Listenarr.Infrastructure.Adapters
             if (!string.IsNullOrEmpty(result.OutputPath))
             {
                 var localPath = result.OutputPath;
-                if (!string.IsNullOrEmpty(localPath) && (File.Exists(localPath) || Directory.Exists(localPath)))
+                if (SabnzbdImportPathResolver.IsExistingLocalPath(localPath))
                 {
                     result.OutputPath = localPath;
                     return result;
@@ -612,7 +612,7 @@ namespace Listenarr.Infrastructure.Adapters
                     if (!string.Equals(nzoId, item.DownloadId, StringComparison.OrdinalIgnoreCase)) continue;
 
                     // Extract storage path
-                    var storage = slot.TryGetProperty("storage", out var storageProp) ? storageProp.GetString() : null;
+                    var storage = SabnzbdImportPathResolver.GetStoragePath(slot);
                     if (string.IsNullOrEmpty(storage))
                     {
                         _logger.LogWarning("No storage path found for SABnzbd download {NzoId}", item.DownloadId);
@@ -660,7 +660,7 @@ namespace Listenarr.Infrastructure.Adapters
             if (!string.IsNullOrEmpty(result.ContentPath))
             {
                 var localPath = result.ContentPath;
-                if (!string.IsNullOrEmpty(localPath) && (File.Exists(localPath) || Directory.Exists(localPath)))
+                if (SabnzbdImportPathResolver.IsExistingLocalPath(localPath))
                 {
                     result.ContentPath = localPath;
                     return result;
@@ -714,7 +714,7 @@ namespace Listenarr.Infrastructure.Adapters
                     if (nzoId != queueItem.Id) continue;
 
                     // Extract storage path
-                    var storage = slot.TryGetProperty("storage", out var storageProp) ? storageProp.GetString() : null;
+                    var storage = SabnzbdImportPathResolver.GetStoragePath(slot);
                     if (string.IsNullOrEmpty(storage))
                     {
                         _logger.LogWarning("No storage path found for SABnzbd download {NzoId}", queueItem.Id);

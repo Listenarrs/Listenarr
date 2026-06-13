@@ -357,7 +357,7 @@ namespace Listenarr.Infrastructure.Adapters
             if (!string.IsNullOrEmpty(result.OutputPath))
             {
                 var localPath = result.OutputPath;
-                if (!string.IsNullOrEmpty(localPath) && (File.Exists(localPath) || Directory.Exists(localPath)))
+                if (TransmissionImportPathResolver.IsExistingLocalPath(localPath))
                 {
                     result.OutputPath = localPath;
                     return result;
@@ -404,7 +404,7 @@ namespace Listenarr.Infrastructure.Adapters
                 }
 
                 // Transmission stores files as: downloadDir/name.
-                var contentPath = FileUtils.CombineWithOptionalBase(downloadDir, name);
+                var contentPath = TransmissionImportPathResolver.BuildContentPath(downloadDir, name)!;
 
                 // Apply path mapping
                 // FIXME: Path mapping should be the responsability of the download processors
@@ -445,7 +445,7 @@ namespace Listenarr.Infrastructure.Adapters
             if (!string.IsNullOrEmpty(result.ContentPath))
             {
                 var localPath = result.ContentPath;
-                if (!string.IsNullOrEmpty(localPath) && (File.Exists(localPath) || Directory.Exists(localPath)))
+                if (TransmissionImportPathResolver.IsExistingLocalPath(localPath))
                 {
                     result.ContentPath = localPath;
                     resolvedExistingContentPath = localPath;
@@ -492,9 +492,7 @@ namespace Listenarr.Infrastructure.Adapters
                 }
 
                 // Transmission stores files as: downloadDir/name
-                var contentPath = !string.IsNullOrWhiteSpace(downloadDir) && !string.IsNullOrWhiteSpace(name)
-                    ? FileUtils.CombineWithOptionalBase(downloadDir, name)
-                    : resolvedExistingContentPath;
+                var contentPath = TransmissionImportPathResolver.BuildContentPath(downloadDir, name, resolvedExistingContentPath);
                 string? localContentPath = resolvedExistingContentPath;
                 if (!string.IsNullOrWhiteSpace(contentPath))
                 {
@@ -504,8 +502,7 @@ namespace Listenarr.Infrastructure.Adapters
 
                 if (torrent.TryGetProperty("files", out var filesElement))
                 {
-                    var sourceFiles = TorrentClientPathMapper.BuildTransmissionSourceFiles(downloadDir, filesElement);
-                    result.SourceFiles = [.. sourceFiles.Where(path => !string.IsNullOrWhiteSpace(path))];
+                    result.SourceFiles = TransmissionImportPathResolver.BuildSourceFiles(downloadDir, filesElement);
                 }
 
                 _logger.LogDebug(
