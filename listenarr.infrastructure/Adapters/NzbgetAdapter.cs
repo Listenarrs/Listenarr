@@ -15,7 +15,6 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
@@ -34,8 +33,6 @@ namespace Listenarr.Infrastructure.Adapters
         public string ClientId => "nzbget";
         public string ClientType => "nzbget";
         public DownloadProtocol Protocol => DownloadProtocol.Usenet;
-
-        private static readonly HashSet<char> InvalidFileNameChars = new(Path.GetInvalidFileNameChars());
 
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly INzbUrlResolver _nzbUrlResolver;
@@ -139,13 +136,13 @@ namespace Listenarr.Infrastructure.Adapters
             string? indexerApiKey,
             CancellationToken ct)
         {
-            var category = ResolveCategory(client);
-            var priority = ResolvePriority(client);
+            var category = NzbgetRequestPlanner.ResolveCategory(client);
+            var priority = NzbgetRequestPlanner.ResolvePriority(client);
             var droneId = Guid.NewGuid().ToString().Replace("-", string.Empty);
 
             // Download NZB content
             var nzbBytes = await _nzbDownloader.DownloadAsync(nzbUrl, indexerApiKey, ct);
-            var nzbFileName = BuildNzbFileName(result);
+            var nzbFileName = NzbgetRequestPlanner.BuildNzbFileName(result);
 
             var uploadUrl = DownloadClientUriBuilder.BuildUri(client, "/api/v2/nzb");
 
@@ -212,14 +209,14 @@ namespace Listenarr.Infrastructure.Adapters
             string? indexerApiKey,
             CancellationToken ct)
         {
-            var category = ResolveCategory(client);
-            var priority = ResolvePriority(client);
+            var category = NzbgetRequestPlanner.ResolveCategory(client);
+            var priority = NzbgetRequestPlanner.ResolvePriority(client);
             var droneId = Guid.NewGuid().ToString().Replace("-", string.Empty);
 
             // Download and base64-encode the NZB content
             var nzbBytes = await _nzbDownloader.DownloadAsync(nzbUrl, indexerApiKey, ct);
             var nzbContentBase64 = Convert.ToBase64String(nzbBytes);
-            var nzbFileName = BuildNzbFileName(result);
+            var nzbFileName = NzbgetRequestPlanner.BuildNzbFileName(result);
 
             // PPParameters as array of structs (key-value pairs)
             var ppParams = new[]
@@ -273,7 +270,7 @@ namespace Listenarr.Infrastructure.Adapters
             if (string.IsNullOrWhiteSpace(id)) throw new ArgumentNullException(nameof(id));
 
             // First try to parse as numeric NZBID (for queue removal)
-            var numericId = TryParseId(id);
+            var numericId = NzbgetRequestPlanner.TryParseId(id);
 
             // If it's not a numeric ID, it might be a droneId (GUID from Listenarr)
             // Try to find it in history first
@@ -624,83 +621,6 @@ namespace Listenarr.Infrastructure.Adapters
             }
         }
 
-        private string ResolveCategory(DownloadClientConfiguration client)
-        {
-            if (client.Settings != null && client.Settings.TryGetValue("category", out var categoryObj))
-            {
-                var category = categoryObj?.ToString();
-                if (!string.IsNullOrWhiteSpace(category))
-                {
-                    return category;
-                }
-            }
-
-            return string.Empty;
-        }
-
-        private int ResolvePriority(DownloadClientConfiguration client)
-        {
-            if (client.Settings != null && client.Settings.TryGetValue("recentPriority", out var priorityObj))
-            {
-                var priority = priorityObj?.ToString();
-                if (!string.IsNullOrWhiteSpace(priority) && !string.Equals(priority, "default", StringComparison.OrdinalIgnoreCase))
-                {
-                    return priority.ToLowerInvariant() switch
-                    {
-                        "force" => 100,
-                        "high" => 50,
-                        "normal" => 0,
-                        "low" => -50,
-                        _ => 0
-                    };
-                }
-            }
-
-            return 0;
-        }
-
-        private static string BuildNzbFileName(SearchResult result)
-        {
-            if (result == null)
-            {
-                return "listenarr-download.nzb";
-            }
-
-            var rawName = result.Title;
-            if (string.IsNullOrWhiteSpace(rawName))
-            {
-                if (!string.IsNullOrWhiteSpace(result.NzbUrl) && Uri.TryCreate(result.NzbUrl, UriKind.Absolute, out var nzbUri))
-                {
-                    rawName = Path.GetFileName(nzbUri.AbsolutePath);
-                }
-
-                if (string.IsNullOrWhiteSpace(rawName))
-                {
-                    rawName = result.Id;
-                }
-            }
-
-            if (string.IsNullOrWhiteSpace(rawName))
-            {
-                rawName = "listenarr-download";
-            }
-
-            // NZBGet v25.4 is very strict about filenames - remove ALL special characters except basic ones
-            var sanitizedChars = rawName.Where(c => char.IsLetterOrDigit(c) || c == ' ' || c == '-' || c == '_' || c == '.').ToArray();
-            var sanitized = new string(sanitizedChars).Trim();
-            if (string.IsNullOrWhiteSpace(sanitized))
-            {
-                sanitized = "listenarr-download";
-            }
-
-            if (!sanitized.EndsWith(".nzb", StringComparison.OrdinalIgnoreCase))
-            {
-                sanitized = sanitized + ".nzb";
-            }
-
-            return sanitized;
-        }
-
         private static AuthenticationHeaderValue? BuildAuthHeader(DownloadClientConfiguration client)
         {
             if (string.IsNullOrWhiteSpace(client.Username))
@@ -710,16 +630,6 @@ namespace Listenarr.Infrastructure.Adapters
 
             var credentials = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{client.Username}:{client.Password}"));
             return new AuthenticationHeaderValue("Basic", credentials);
-        }
-
-        private static int? TryParseId(string id)
-        {
-            if (int.TryParse(id, NumberStyles.Integer, CultureInfo.InvariantCulture, out var numericId))
-            {
-                return numericId;
-            }
-
-            return null;
         }
 
         /// <summary>

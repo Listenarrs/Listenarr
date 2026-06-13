@@ -329,20 +329,10 @@ namespace Listenarr.Application.Downloads
             {
                 try
                 {
-                    var downloadClients = await configurationService.GetDownloadClientConfigurationsAsync();
-                    var enabledClientIds = downloadClients
-                        .Where(c => c.IsEnabled && !string.IsNullOrWhiteSpace(c.Id))
-                        .Select(c => c.Id)
-                        .ToHashSet();
-
-                    var allDownloads = await downloadRepository.GetAllAsync();
-                    var existingActive = allDownloads
-                        .Any(d => d.AudiobookId == audiobookIdValue &&
-                                  (d.Status == DownloadStatus.Queued ||
-                                   d.Status == DownloadStatus.Downloading ||
-                                   d.Status == DownloadStatus.ImportPending) &&
-                                  (d.DownloadClientId == "DDL" ||
-                                   (!string.IsNullOrEmpty(d.DownloadClientId) && enabledClientIds.Contains(d.DownloadClientId))));
+                    var existingActive = await DownloadDuplicateGuard.HasActiveDownloadAsync(
+                        audiobookIdValue,
+                        configurationService,
+                        downloadRepository);
 
                     if (existingActive)
                     {
@@ -406,72 +396,19 @@ namespace Listenarr.Application.Downloads
                 var downloadToUpdate = await downloadRepository.FindAsync(downloadId);
                 if (downloadToUpdate != null)
                 {
-                    if (downloadToUpdate.Metadata == null)
-                        downloadToUpdate.Metadata = new Dictionary<string, object>();
-
-                    downloadToUpdate.Metadata["ClientDownloadId"] = clientSpecificId;
-
-                    if (downloadClient.Type.Equals("qbittorrent", StringComparison.OrdinalIgnoreCase) ||
-                        downloadClient.Type.Equals("transmission", StringComparison.OrdinalIgnoreCase))
-                    {
-                        downloadToUpdate.Metadata["TorrentHash"] = clientSpecificId;
-                    }
-
+                    DownloadClientMetadataUpdater.ApplyClientSpecificId(downloadToUpdate, downloadClient, clientSpecificId);
                     await UpdateAsync(downloadToUpdate);
                     logger.LogInformation("Updated download {DownloadId} with client-specific ID: {ClientId}", downloadId, clientSpecificId);
                 }
             }
 
             var settings = await configurationService.GetApplicationSettingsAsync();
-
-            // Fetch audiobook data if available for better notification content
-            object notificationData;
-            if (audiobookId.HasValue)
-            {
-                var audiobook = await audiobookRepository.GetByIdAsync(audiobookId.Value);
-                notificationData = audiobook != null
-                    ? new
-                    {
-                        title = audiobook.Title,
-                        authors = audiobook.Authors,
-                        asin = audiobook.Asin,
-                        publisher = audiobook.Publisher,
-                        year = audiobook.PublishYear?.ToString(),
-                        publishedDate = audiobook.PublishYear?.ToString(),
-                        imageUrl = audiobook.ImageUrl,
-                        narrators = audiobook.Narrators,
-                        description = audiobook.Description,
-                        downloadId = downloadId,
-                        source = searchResult.Source ?? "Unknown Source",
-                        downloadClient = downloadClient.Name ?? "Unknown Client",
-                        size = searchResult.Size
-                    }
-                    : new
-                    {
-                        downloadId = downloadId,
-                        title = searchResult.Title ?? "Unknown Title",
-                        artist = searchResult.Artist ?? "Unknown Artist",
-                        album = searchResult.Album ?? "Unknown Album",
-                        size = searchResult.Size,
-                        source = searchResult.Source ?? "Unknown Source",
-                        downloadClient = downloadClient.Name ?? "Unknown Client",
-                        audiobookId = audiobookId
-                    };
-            }
-            else
-            {
-                // No audiobook ID, use search result data
-                notificationData = new
-                {
-                    downloadId = downloadId,
-                    title = searchResult.Title ?? "Unknown Title",
-                    artist = searchResult.Artist ?? "Unknown Artist",
-                    album = searchResult.Album ?? "Unknown Album",
-                    size = searchResult.Size,
-                    source = searchResult.Source ?? "Unknown Source",
-                    downloadClient = downloadClient.Name ?? "Unknown Client"
-                };
-            }
+            var notificationData = await DownloadNotificationPayloadBuilder.BuildBookDownloadingPayloadAsync(
+                audiobookRepository,
+                audiobookId,
+                downloadId,
+                searchResult,
+                downloadClient);
 
             await notificationService.SendNotificationAsync("book-downloading", notificationData, settings.WebhookUrl, settings.EnabledNotificationTriggers);
 

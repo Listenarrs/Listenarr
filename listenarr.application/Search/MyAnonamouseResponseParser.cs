@@ -322,23 +322,13 @@ namespace Listenarr.Application.Search
                         string? author = null;
                         if (item.TryGetProperty("author_info", out var authorInfo))
                         {
-                            var authorJson = authorInfo.GetString();
-                            if (!string.IsNullOrEmpty(authorJson))
+                            try
                             {
-                                try
-                                {
-                                    var authorDoc = JsonDocument.Parse(authorJson);
-                                    var authors = new List<string>();
-                                    foreach (var prop in authorDoc.RootElement.EnumerateObject())
-                                    {
-                                        authors.Add(prop.Value.GetString() ?? "");
-                                    }
-                                    author = string.Join(", ", authors.Where(a => !string.IsNullOrEmpty(a)));
-                                }
-                                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                                {
-                                    logger.LogWarning(ex, "Failed to parse author JSON for search result");
-                                }
+                                author = MyAnonamouseContributorParser.ParseContributorList(authorInfo.GetString());
+                            }
+                            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                            {
+                                logger.LogWarning(ex, "Failed to parse author JSON for search result");
                             }
                         }
 
@@ -346,23 +336,13 @@ namespace Listenarr.Application.Search
                         string? narrator = null;
                         if (item.TryGetProperty("narrator_info", out var narratorInfo))
                         {
-                            var narratorJson = narratorInfo.GetString();
-                            if (!string.IsNullOrEmpty(narratorJson))
+                            try
                             {
-                                try
-                                {
-                                    var narratorDoc = JsonDocument.Parse(narratorJson);
-                                    var narrators = new List<string>();
-                                    foreach (var prop in narratorDoc.RootElement.EnumerateObject())
-                                    {
-                                        narrators.Add(prop.Value.GetString() ?? "");
-                                    }
-                                    narrator = string.Join(", ", narrators.Where(n => !string.IsNullOrEmpty(n)));
-                                }
-                                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                                {
-                                    logger.LogWarning(ex, "Failed to parse narrator JSON for search result");
-                                }
+                                narrator = MyAnonamouseContributorParser.ParseContributorList(narratorInfo.GetString());
+                            }
+                            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                            {
+                                logger.LogWarning(ex, "Failed to parse narrator JSON for search result");
                             }
                         }
 

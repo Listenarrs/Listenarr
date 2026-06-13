@@ -123,39 +123,7 @@ namespace Listenarr.Infrastructure.Adapters
 
                 var sensitiveValues = _requestBuilder.BuildSensitiveValues(requestContext, indexerApiKey);
 
-                var queryParams = new Dictionary<string, string>
-                {
-                    { "mode", "addurl" },
-                    { "name", nzbUrl },
-                    { "output", "json" },
-                    { "nzbname", result.Title }
-                };
-
-                if (client.Settings != null && client.Settings.TryGetValue("recentPriority", out var priorityObj))
-                {
-                    var priority = priorityObj?.ToString();
-                    if (!string.IsNullOrEmpty(priority) && priority != "default")
-                    {
-                        queryParams["priority"] = priority switch
-                        {
-                            "force" => "2",
-                            "high" => "1",
-                            "normal" => "0",
-                            "low" => "-1",
-                            _ => "0"
-                        };
-                    }
-                }
-
-                var category = "audiobooks";
-                if (client.Settings != null && client.Settings.TryGetValue("category", out var categoryObj))
-                {
-                    var configuredCategory = categoryObj?.ToString();
-                    if (!string.IsNullOrEmpty(configuredCategory))
-                        category = configuredCategory;
-                }
-                queryParams["cat"] = category;
-
+                var queryParams = SabnzbdAddRequestPlanner.BuildQueryParams(client, result, nzbUrl);
                 var requestUrl = _requestBuilder.BuildUrl(requestContext, queryParams);
 
                 _logger.LogDebug("SABnzbd request URL: {Url}", LogRedaction.RedactText(requestUrl, sensitiveValues));

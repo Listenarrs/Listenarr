@@ -42,6 +42,7 @@ namespace Listenarr.Infrastructure.Adapters
         private readonly ITorrentFileDownloader _torrentFileDownloader;
         private readonly QbittorrentTorrentAddPlanner _torrentAddPlanner;
         private readonly QbittorrentAuthSession _authSession;
+        private readonly QbittorrentConnectionTester _connectionTester;
 
         public QbittorrentAdapter(IHttpClientFactory httpFactory, ITorrentFileDownloader torrentFileDownloader, ILogger<QbittorrentAdapter> logger)
         {
@@ -50,154 +51,12 @@ namespace Listenarr.Infrastructure.Adapters
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _torrentAddPlanner = new QbittorrentTorrentAddPlanner(_torrentFileDownloader, _logger);
             _authSession = new QbittorrentAuthSession(_logger);
+            _connectionTester = new QbittorrentConnectionTester(_httpClientFactory, _logger, ClientType);
         }
 
         public async Task<(bool Success, string Message)> TestConnectionAsync(DownloadClientConfiguration client, CancellationToken ct = default)
         {
-            try
-            {
-                var baseUrl = DownloadClientUriBuilder.BuildAuthority(client);
-
-                using var http = _httpClientFactory.CreateClient(ClientType);
-                using var resp = await http.GetAsync($"{baseUrl}/api/v2/app/version", ct);
-                if (resp.IsSuccessStatusCode)
-                    return (true, "Successfully connected to qBittorrent.");
-
-                // If we get Forbidden and credentials are provided, try to authenticate and retry
-                if (resp.StatusCode == HttpStatusCode.Forbidden && !string.IsNullOrEmpty(client.Username))
-                {
-                    try
-                    {
-                        // Helper to POST login with optional User-Agent header
-                        async Task<HttpResponseMessage> PostLoginWithAgent(string userAgent)
-                        {
-                            var content = new FormUrlEncodedContent(new[]
-                            {
-                                new KeyValuePair<string, string>("username", client.Username ?? string.Empty),
-                                new KeyValuePair<string, string>("password", client.Password ?? string.Empty)
-                            });
-
-                            using var req = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/api/v2/auth/login") { Content = content };
-                            if (!string.IsNullOrEmpty(userAgent)) req.Headers.UserAgent.ParseAdd(userAgent);
-                            req.Headers.Referrer = new Uri(baseUrl + "/");
-                            return await http.SendAsync(req, ct);
-                        }
-
-                        // Try a minimal UA first, then a browser-like UA if Forbidden
-                        var loginResp = await PostLoginWithAgent("Listenarr/1.0");
-                        if (!loginResp.IsSuccessStatusCode && loginResp.StatusCode == HttpStatusCode.Forbidden)
-                        {
-                            _logger.LogDebug("qBittorrent TestConnection: initial login returned Forbidden, retrying with browser UA for client {ClientId}", LogRedaction.SanitizeText(client.Id));
-                            loginResp.Dispose();
-                            loginResp = await PostLoginWithAgent("Mozilla/5.0 (compatible; Listenarr)");
-                        }
-                        using (loginResp)
-                        {
-                            if (loginResp.IsSuccessStatusCode)
-                            {
-                                // Try to detect cookies via Set-Cookie header when using factory clients
-                                try
-                                {
-                                    if (loginResp.Headers.TryGetValues("Set-Cookie", out var cookieHeaders))
-                                    {
-                                        _logger.LogDebug("qBittorrent TestConnection: login returned Set-Cookie header for client {ClientId}", LogRedaction.SanitizeText(client.Id));
-                                    }
-                                    else
-                                    {
-                                        _logger.LogDebug("qBittorrent TestConnection: login succeeded but no Set-Cookie header present for client {ClientId}", LogRedaction.SanitizeText(client.Id));
-                                    }
-                                }
-                                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                                {
-                                    _logger.LogDebug(ex, "qBittorrent TestConnection: unable to inspect login response headers for client {ClientId}", LogRedaction.SanitizeText(client.Id));
-                                }
-
-                                // Retry using the same client first (this covers unit tests which
-                                // simulate stateful behavior on the mocked handler). If the retry
-                                // fails and we created a factory client that doesn't handle cookies,
-                                // fall back to a local cookie-enabled client attempt.
-                                using var retry = await http.GetAsync($"{baseUrl}/api/v2/app/version", ct);
-                                if (retry.IsSuccessStatusCode)
-                                    return (true, "Successfully connected to qBittorrent.");
-
-                                _logger.LogWarning("qBittorrent TestConnection: authenticated but subsequent request returned {Status} for client {ClientId}", retry.StatusCode, LogRedaction.SanitizeText(client.Id));
-
-                                // Try a cookie-enabled HttpClient as a last resort
-                                try
-                                {
-                                    var cookieJar2 = new CookieContainer();
-                                    var handler2 = new HttpClientHandler
-                                    {
-                                        CookieContainer = cookieJar2,
-                                        UseCookies = true,
-                                        AutomaticDecompression = DecompressionMethods.All
-                                    };
-
-                                    using var local = new HttpClient(handler2) { Timeout = TimeSpan.FromSeconds(30) };
-                                    using var localLoginContent = new FormUrlEncodedContent(
-                                    [
-                                        new KeyValuePair<string, string>("username", client.Username),
-                                        new KeyValuePair<string, string>("password", client.Password)
-                                    ]);
-
-                                    using var localLogin = await local.PostAsync($"{baseUrl}/api/v2/auth/login", localLoginContent, ct);
-                                    if (localLogin.IsSuccessStatusCode)
-                                    {
-                                        using var final = await local.GetAsync($"{baseUrl}/api/v2/app/version", ct);
-                                        if (final.IsSuccessStatusCode)
-                                            return (true, "Successfully connected to qBittorrent.");
-                                    }
-                                }
-                                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                                {
-                                    _logger.LogDebug(ex, "qBittorrent TestConnection: fallback local login attempt failed for client {ClientId}", LogRedaction.SanitizeText(client.Id));
-                                }
-                            }
-                            else
-                            {
-                                var body = string.Empty;
-                                try { body = await loginResp.Content.ReadAsStringAsync(ct); }
-                                catch (Exception caughtEx_1) when (caughtEx_1 is not OperationCanceledException && caughtEx_1 is not OutOfMemoryException && caughtEx_1 is not StackOverflowException)
-                                {
-                                    _logger.LogDebug("Suppressed non-fatal exception in catch block.");
-                                }
-                                var redacted = LogRedaction.RedactText(body, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { client.Password ?? string.Empty }));
-                                _logger.LogWarning("qBittorrent TestConnection: login failed with status {Status} for client {ClientId} - {Body}", loginResp.StatusCode, LogRedaction.SanitizeText(client.Id), redacted);
-                                return (false, "qBittorrent: Connection to download client successful but could not authenticate. Please check username/password.");
-                            }
-                        }
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                    {
-                        _logger.LogDebug(ex, "qBittorrent TestConnection login attempt failed");
-                        return (false, "Connection failed: login attempt failed.");
-                    }
-                }
-
-                // Provide clearer, user-friendly messages for common HTTP statuses
-                if (resp.StatusCode == HttpStatusCode.Forbidden || resp.StatusCode == HttpStatusCode.Unauthorized)
-                {
-                    if (string.IsNullOrEmpty(client.Username))
-                        return (false, "Forbidden: Authentication required.");
-
-                    return (false, "Authentication Failed. Check your username and/or password.");
-                }
-
-                if (resp.StatusCode == HttpStatusCode.NotFound)
-                {
-                    return (false, "Could not connect to the host and/or port.");
-                }
-
-                return (false, $"qBittorrent: network error ({resp.StatusCode})");
-            }
-            catch (TaskCanceledException)
-            {
-                return (false, "Connection timed out.");
-            }
-            catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
-            {
-                return (false, "Connection failed.");
-            }
+            return await _connectionTester.TestConnectionAsync(client, ct);
         }
 
         public async Task<string?> AddAsync(DownloadClientConfiguration client, SearchResult result, CancellationToken ct = default)
