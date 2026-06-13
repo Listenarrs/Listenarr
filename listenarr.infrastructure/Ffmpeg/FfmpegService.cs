@@ -16,7 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Security.Cryptography;
-using SharpCompress.Archives;
 using SharpCompress.Common;
 using SharpCompress.Readers;
 using System.Runtime.InteropServices;
@@ -711,87 +710,7 @@ namespace Listenarr.Infrastructure.Ffmpeg
                 throw new FfmpegException($"Error running ffprobe for {sanitizedFilePath}", ex);
             }
 
-            var metadata = new AudioMetadata();
-
-            // Try to get format info
-            if (ffprobeData.TryGetProperty("format", out var fmt))
-            {
-                if (fmt.TryGetProperty("duration", out var durEl)
-                    && durEl.ValueKind == JsonValueKind.String
-                    && double.TryParse(durEl.GetString(), out var dur))
-                {
-                    metadata.Duration = TimeSpan.FromSeconds(dur);
-                }
-                if (fmt.TryGetProperty("format_name", out var fmtName) && fmtName.ValueKind == JsonValueKind.String)
-                {
-                    var rawFmt = fmtName.GetString() ?? string.Empty;
-                    var primary = rawFmt.Split(',')[0];
-
-                    var ext = Path.GetExtension(filePath)?.TrimStart('.')?.ToLowerInvariant();
-                    if (!string.IsNullOrEmpty(ext))
-                    {
-                        if (ext == "m4b")
-                        {
-                            metadata.Format = ext.ToUpperInvariant();
-                            metadata.Container = ext.ToUpperInvariant();
-                        }
-                        else
-                        {
-                            metadata.Format = primary.ToUpperInvariant();
-                            metadata.Container = primary.ToUpperInvariant();
-                        }
-                    }
-                    else
-                    {
-                        metadata.Format = primary.ToUpperInvariant();
-                        metadata.Container = primary.ToUpperInvariant();
-                    }
-                }
-                if (fmt.TryGetProperty("bit_rate", out var br) && br.ValueKind == JsonValueKind.String && int.TryParse(br.GetString(), out var bitRate))
-                {
-                    metadata.BitRate = bitRate;
-                }
-                if (fmt.TryGetProperty("tags", out var formatTags) && formatTags.ValueKind == JsonValueKind.Object)
-                {
-                    FfprobeTagMetadataMapper.Apply(metadata, formatTags);
-                }
-            }
-
-            // Streams: look for audio stream for sample rate, channels
-            if (ffprobeData.TryGetProperty("streams", out var streams) && streams.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var s in streams
-                    .EnumerateArray()
-                    .Where(s => s.TryGetProperty("codec_type", out var codecType) && codecType.GetString() == "audio"))
-                {
-                    if (s.TryGetProperty("sample_rate", out var sr) && sr.ValueKind == JsonValueKind.String && int.TryParse(sr.GetString(), out var sampleRate))
-                    {
-                        metadata.SampleRate = sampleRate;
-                    }
-                    if (s.TryGetProperty("channels", out var ch) && ch.ValueKind == JsonValueKind.Number)
-                    {
-                        metadata.Channels = ch.GetInt32();
-                    }
-                    if (s.TryGetProperty("bit_rate", out var sbr) && sbr.ValueKind == JsonValueKind.String && int.TryParse(sbr.GetString(), out var sbit))
-                    {
-                        metadata.BitRate = metadata.BitRate == 0 ? sbit : metadata.BitRate;
-                    }
-                    if (s.TryGetProperty("codec_name", out var codecName) && codecName.ValueKind == JsonValueKind.String)
-                    {
-                        metadata.Codec = codecName.GetString();
-                    }
-                    if (s.TryGetProperty("tags", out var streamTags) && streamTags.ValueKind == JsonValueKind.Object)
-                    {
-                        FfprobeTagMetadataMapper.Apply(metadata, streamTags);
-                    }
-                    break;
-                }
-            }
-
-            var fileName = Path.GetFileNameWithoutExtension(filePath);
-            if (string.IsNullOrEmpty(metadata.Title)) metadata.Title = fileName;
-            if (string.IsNullOrEmpty(metadata.Format)) metadata.Format = Path.GetExtension(filePath).TrimStart('.').ToUpper();
-            if (string.IsNullOrEmpty(metadata.Container)) metadata.Container = Path.GetExtension(filePath).TrimStart('.').ToUpper();
+            var metadata = FfprobeMetadataMapper.Map(ffprobeData, filePath);
 
             _logger.LogInformation("Extracted ffprobe metadata from file: {File}", LogRedaction.SanitizeText(filePath));
             _logger.LogDebug("Parsed metadata: Duration={Duration} seconds, Format={Format}, Bitrate={Bitrate}, SampleRate={SampleRate}, Channels={Channels}", metadata.Duration.TotalSeconds, metadata.Format, metadata.BitRate, metadata.SampleRate, metadata.Channels);
