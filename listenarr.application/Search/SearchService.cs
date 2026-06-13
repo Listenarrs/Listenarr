@@ -43,6 +43,7 @@ namespace Listenarr.Application.Search
         private readonly AsinSearchHandler _asinSearchHandler;
         private readonly IndexerSearchWorkflow _indexerSearchWorkflow;
         private readonly MetadataSourceCatalog _metadataSourceCatalog;
+        private readonly AudibleAuthorPageCollector _audibleAuthorPageCollector;
 
         public SearchService(
             HttpClient httpClient,
@@ -63,7 +64,8 @@ namespace Listenarr.Application.Search
             ICoverImageProbe? coverImageProbe = null,
             IHtmlTextExtractor? htmlTextExtractor = null,
             IndexerSearchWorkflow? indexerSearchWorkflow = null,
-            MetadataSourceCatalog? metadataSourceCatalog = null)
+            MetadataSourceCatalog? metadataSourceCatalog = null,
+            AudibleAuthorPageCollector? audibleAuthorPageCollector = null)
         {
             _configurationService = configurationService;
             _logger = logger;
@@ -87,6 +89,9 @@ namespace Listenarr.Application.Search
             _metadataSourceCatalog = metadataSourceCatalog ?? new MetadataSourceCatalog(
                 apiConfigRepository,
                 NullLogger<MetadataSourceCatalog>.Instance);
+            _audibleAuthorPageCollector = audibleAuthorPageCollector ?? new AudibleAuthorPageCollector(
+                audibleService,
+                NullLogger<AudibleAuthorPageCollector>.Instance);
         }
 
         public async Task<List<SearchResult>> SearchAsync(string query, string? category = null, List<string>? apiIds = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false)
@@ -221,42 +226,12 @@ namespace Listenarr.Application.Search
                     // AUTHOR-only
                     if (searchType == "AUTHOR" && !string.IsNullOrEmpty(authorVal))
                     {
-                        // Aggregate multiple pages from Audible until we reach candidateLimit
-                        var aggregated = new List<AudibleSearchResult>();
-                        int page = 1;
-                        int pageSize = Math.Min(50, Math.Max(10, candidateLimit));
-                        // For Audible author listings, do not artificially cap aggregation
-                        // by the Amazon candidateLimit. Instead, fetch pages until a
-                        // page returns fewer than pageSize results (natural end).
-                        int maxPages = int.MaxValue;
-                        for (; page <= maxPages; page++)
-                        {
-                            try
-                            {
-                                var pageRes = await _audibleService.SearchByAuthorAsync(authorVal, page, pageSize, region, language);
-                                var pageCount = pageRes?.Results?.Count ?? 0;
-                                aggregated.AddRange(pageRes?.Results ?? Enumerable.Empty<AudibleSearchResult>());
-                                _logger.LogInformation("Audible author page {Page} returned {PageCount} results (aggregated {AggregatedCount}) for author '{Author}'", page, pageCount, aggregated.Count, authorVal);
-                                if (pageRes?.Results == null || pageCount == 0)
-                                {
-                                    _logger.LogInformation("Stopping aggregation: page {Page} returned no results for author '{Author}'", page, authorVal);
-                                    break;
-                                }
-                                if (pageCount < pageSize)
-                                {
-                                    _logger.LogInformation("Stopping aggregation: page {Page} result count {PageCount} < pageSize {PageSize}", page, pageCount, pageSize);
-                                    break; // last page
-                                }
-                                // Do not stop aggregating based on candidateLimit for audible
-                            }
-                            catch (Exception exPage) when (exPage is not OperationCanceledException && exPage is not OutOfMemoryException && exPage is not StackOverflowException)
-                            {
-                                _logger.LogDebug(exPage, "Failed fetching audible author page {Page} for author {Author}", page, authorVal);
-                                break;
-                            }
-                        }
-
-                        _logger.LogInformation("Finished aggregating author pages for '{Author}': total aggregated={AggregatedCount}, candidateLimit={CandidateLimit}, pageSize={PageSize}, maxPages={MaxPages}", authorVal, aggregated.Count, candidateLimit, pageSize, maxPages);
+                        var aggregated = await _audibleAuthorPageCollector.CollectAsync(
+                            authorVal,
+                            candidateLimit,
+                            region,
+                            language,
+                            "author");
                         if (aggregated.Any())
                         {
                             // Deduplicate results based on ASIN to prevent repeated books across pages
@@ -306,39 +281,12 @@ namespace Listenarr.Application.Search
                         {
                             System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
                         }
-                        // Aggregate author pages up to candidateLimit to enrich matching
-                        var aggregated = new List<AudibleSearchResult>();
-                        int page = 1;
-                        int pageSize = Math.Min(50, Math.Max(10, candidateLimit));
-                        // For Audible author/title combined flows, allow full aggregation
-                        // across available pages; we will narrow/return a bounded set later.
-                        int maxPages = int.MaxValue;
-                        for (; page <= maxPages; page++)
-                        {
-                            try
-                            {
-                                var pageRes = await _audibleService.SearchByAuthorAsync(authorVal, page, pageSize, region, language);
-                                var pageCount = pageRes?.Results?.Count ?? 0;
-                                aggregated.AddRange(pageRes?.Results ?? Enumerable.Empty<AudibleSearchResult>());
-                                _logger.LogInformation("Audible AUTHOR_TITLE: page {Page} returned {PageCount} results (aggregated {AggregatedCount}) for author '{Author}'", page, pageCount, aggregated.Count, authorVal);
-                                if (pageRes?.Results == null || pageCount == 0)
-                                {
-                                    _logger.LogInformation("Audible AUTHOR_TITLE: stopping aggregation — page {Page} returned no results", page);
-                                    break;
-                                }
-                                if (pageCount < pageSize)
-                                {
-                                    _logger.LogInformation("Audible AUTHOR_TITLE: stopping aggregation — page {Page} count {PageCount} < pageSize {PageSize}", page, pageCount, pageSize);
-                                    break;
-                                }
-                            }
-                            catch (Exception exPage) when (exPage is not OperationCanceledException && exPage is not OutOfMemoryException && exPage is not StackOverflowException)
-                            {
-                                _logger.LogDebug(exPage, "Failed fetching audible author page {Page} for author {Author}", page, authorVal);
-                                break;
-                            }
-                        }
-                        _logger.LogInformation("Audible AUTHOR_TITLE: finished aggregating pages for '{Author}': aggregated={AggregatedCount}, pageSize={PageSize}, maxPages={MaxPages}", authorVal, aggregated.Count, pageSize, maxPages);
+                        var aggregated = await _audibleAuthorPageCollector.CollectAsync(
+                            authorVal,
+                            candidateLimit,
+                            region,
+                            language,
+                            "AUTHOR_TITLE");
                         if (aggregated?.Any() == true)
                         {
                             // Deduplicate results based on ASIN to prevent repeated books across pages

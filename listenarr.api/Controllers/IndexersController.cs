@@ -38,14 +38,24 @@ namespace Listenarr.Api.Controllers
         private readonly HttpClient _httpClient;
         private readonly HttpClient _httpClientNoRedirect;
         private readonly IConfigurationService _configurationService;
+        private readonly IndexerTestWorkflow _indexerTestWorkflow;
 
-        public IndexersController(IIndexerRepository indexerRepository, ILogger<IndexersController> logger, HttpClient httpClient, IConfigurationService configurationService)
+        public IndexersController(
+            IIndexerRepository indexerRepository,
+            ILogger<IndexersController> logger,
+            HttpClient httpClient,
+            IConfigurationService configurationService,
+            IndexerTestWorkflow? indexerTestWorkflow = null)
         {
             _indexerRepository = indexerRepository;
             _logger = logger;
             _httpClient = httpClient;
             _httpClientNoRedirect = httpClient;
             _configurationService = configurationService;
+            _indexerTestWorkflow = indexerTestWorkflow ?? new IndexerTestWorkflow(
+                indexerRepository,
+                httpClient,
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<IndexerTestWorkflow>.Instance);
         }
 
         private bool ShouldRedactIndexerSecretsForCaller()
@@ -181,122 +191,23 @@ namespace Listenarr.Api.Controllers
 
         private async Task<IActionResult> TestGenericIndexer(Indexer indexer, bool persist)
         {
-            // Minimal connectivity check: attempt to hit base URL or indexer 'api' endpoint
-            try
+            var result = await _indexerTestWorkflow.TestGenericIndexerAsync(indexer, persist);
+            if (result.Succeeded)
             {
-                var target = indexer.Url?.TrimEnd('/') ?? string.Empty;
-                // Prefer /api endpoint if present, otherwise base URL
-                var testUrl = target.EndsWith("/api", StringComparison.OrdinalIgnoreCase) ? target : target + "/api";
-
-                // If this is a Newznab/Torznab style indexer, append the apikey query parameter and add capabilities query to test auth
-                var implName = (indexer.Implementation ?? string.Empty).Trim().ToLowerInvariant();
-                var isNewznabStyle = implName == "newznab" || implName == "torznab";
-
-                if (isNewznabStyle)
-                {
-                    // Newznab/Torznab indexers REQUIRE an API key for authentication
-                    if (string.IsNullOrWhiteSpace(indexer.ApiKey))
-                    {
-                        await SaveTestResultAsync(indexer, persist, false, "API key is required for Newznab/Torznab indexers");
-                        return BadRequest(new { success = false, message = "API key is required for Newznab/Torznab indexers", indexer = RedactIndexerForCaller(indexer) });
-                    }
-
-                    // Use search endpoint (t=search) instead of capabilities (t=caps) because
-                    // many indexers expose t=caps publicly without authentication.
-                    // t=search reliably enforces authentication.
-                    var separator = testUrl.Contains('?') ? '&' : '?';
-                    testUrl = testUrl + separator + "t=search&limit=1&offset=0";
-                    testUrl = testUrl + "&apikey=" + System.Net.WebUtility.UrlEncode(indexer.ApiKey);
-                }
-
-                // Ensure User-Agent is present even if the injected HttpClient was created without defaults
-                var version = typeof(IndexersController).Assembly.GetName().Version?.ToString() ?? "0.0.0";
-                var userAgent = $"Listenarr/{version} (+https://github.com/listenarrs/listenarr)";
-
-                _logger.LogInformation("[IndexerTest] GET {Url} UA={UserAgent}", LogRedaction.SanitizeUrl(testUrl), LogRedaction.SanitizeText(userAgent));
-
-                var blockedReason = await ValidateOutboundUrlForCallerAsync(testUrl);
-                if (!string.IsNullOrWhiteSpace(blockedReason))
-                {
-                    await SaveTestResultAsync(indexer, persist, false, $"Blocked outbound target: {blockedReason}");
-                    return BadRequest(new { success = false, message = $"Blocked outbound target: {blockedReason}", indexer = RedactIndexerForCaller(indexer) });
-                }
-
-                using var response = await SendValidatedAsync(currentUri =>
-                {
-                    var retryRequest = new HttpRequestMessage(HttpMethod.Get, currentUri);
-                    retryRequest.Headers.UserAgent.ParseAdd(userAgent);
-                    if (!string.IsNullOrEmpty(indexer.ApiKey))
-                    {
-                        retryRequest.Headers.Add("X-Api-Key", indexer.ApiKey);
-                    }
-                    return retryRequest;
-                }, testUrl);
-
-                _logger.LogInformation("[IndexerTest] {Name} responded {StatusCode}", LogRedaction.SanitizeText(indexer.Name), (int)response.StatusCode);
-
-                // Check for HTTP-level authentication failures
-                if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized ||
-                    response.StatusCode == System.Net.HttpStatusCode.Forbidden)
-                {
-                    await SaveTestResultAsync(indexer, persist, false, $"Authentication failed: HTTP {(int)response.StatusCode}");
-                    return BadRequest(new { success = false, message = "Authentication failed", status = (int)response.StatusCode, indexer = RedactIndexerForCaller(indexer) });
-                }
-
-                if (!response.IsSuccessStatusCode)
-                {
-                    await SaveTestResultAsync(indexer, persist, false, $"HTTP {(int)response.StatusCode}");
-                    return BadRequest(new { success = false, message = "Generic indexer test failed", status = (int)response.StatusCode, indexer = RedactIndexerForCaller(indexer) });
-                }
-
-                // For Newznab/Torznab, parse XML response to check for error elements
-                if (isNewznabStyle)
-                {
-                    var xmlContent = await response.Content.ReadAsStringAsync();
-                    var errorMessage = NewznabErrorParser.Parse(xmlContent);
-
-                    if (errorMessage != null)
-                    {
-                        var isAuthError = errorMessage.Contains("api", StringComparison.OrdinalIgnoreCase) ||
-                                         errorMessage.Contains("key", StringComparison.OrdinalIgnoreCase) ||
-                                         errorMessage.Contains("unauthorized", StringComparison.OrdinalIgnoreCase) ||
-                                         errorMessage.Contains("invalid", StringComparison.OrdinalIgnoreCase) ||
-                                         errorMessage.Contains("authentication", StringComparison.OrdinalIgnoreCase);
-
-                        var failureMessage = isAuthError ? $"Authentication failed: {errorMessage}" : errorMessage;
-                        await SaveTestResultAsync(indexer, persist, false, failureMessage);
-                        return BadRequest(new { success = false, message = failureMessage, indexer = RedactIndexerForCaller(indexer) });
-                    }
-                }
-
-                await SaveTestResultAsync(indexer, persist, true, null);
-                return Ok(new { success = true, message = "Indexer authentication successful", indexer = RedactIndexerForCaller(indexer) });
+                return Ok(new { success = true, message = result.Message, indexer = RedactIndexerForCaller(indexer) });
             }
-            catch (HttpRequestException ex)
+
+            if (result.Status.HasValue)
             {
-                _logger.LogWarning(ex, "Generic indexer test failed for {Name}", LogRedaction.SanitizeText(indexer.Name));
-                return await BuildIndexerTestBadRequestAsync(indexer, persist, "Indexer test failed", ex);
+                return BadRequest(new { success = false, message = result.Message, status = result.Status.Value, indexer = RedactIndexerForCaller(indexer) });
             }
-            catch (TaskCanceledException ex)
+
+            if (!string.IsNullOrEmpty(result.Error))
             {
-                _logger.LogWarning(ex, "Generic indexer test failed for {Name}", LogRedaction.SanitizeText(indexer.Name));
-                return await BuildIndexerTestBadRequestAsync(indexer, persist, "Indexer test failed", ex);
+                return BadRequest(new { success = false, message = result.Message, error = result.Error, indexer = RedactIndexerForCaller(indexer) });
             }
-            catch (JsonException ex)
-            {
-                _logger.LogWarning(ex, "Generic indexer test failed for {Name}", LogRedaction.SanitizeText(indexer.Name));
-                return await BuildIndexerTestBadRequestAsync(indexer, persist, "Indexer test failed", ex);
-            }
-            catch (UriFormatException ex)
-            {
-                _logger.LogWarning(ex, "Generic indexer test failed for {Name}", LogRedaction.SanitizeText(indexer.Name));
-                return await BuildIndexerTestBadRequestAsync(indexer, persist, "Indexer test failed", ex);
-            }
-            catch (InvalidOperationException ex)
-            {
-                _logger.LogWarning(ex, "Generic indexer test failed for {Name}", LogRedaction.SanitizeText(indexer.Name));
-                return await BuildIndexerTestBadRequestAsync(indexer, persist, "Indexer test failed", ex);
-            }
+
+            return BadRequest(new { success = false, message = result.Message, indexer = RedactIndexerForCaller(indexer) });
         }
 
         /// <summary>

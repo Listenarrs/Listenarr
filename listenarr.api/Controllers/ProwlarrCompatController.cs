@@ -437,75 +437,10 @@ namespace Listenarr.Api.Controllers
                 var created = false;
                 if (indexer == null)
                 {
-                    // Parse payload for upsert/create (tolerant to fields/settings shapes)
-                    var nameFromPayload = GetStringProperty(payload, "name", "title");
-                    var implementationFromPayload = GetStringProperty(payload, "implementation", "type");
-                    var baseUrlFromPayload = GetStringProperty(payload, "baseUrl", "url");
-                    var apiPathFromPayload = GetStringProperty(payload, "apiPath", null);
-                    var apiKeyFromPayload = GetStringProperty(payload, "apiKey", null);
-                    var categoriesFromPayload = ParseCategories(payload);
-
-                    // Try settings object
-                    if (string.IsNullOrEmpty(baseUrlFromPayload) && payload.TryGetProperty("settings", out var settingsPayload) && settingsPayload.ValueKind == System.Text.Json.JsonValueKind.Object)
-                    {
-                        baseUrlFromPayload = GetStringProperty(settingsPayload, "baseUrl", "url");
-                        if (string.IsNullOrEmpty(apiKeyFromPayload)) apiKeyFromPayload = GetStringProperty(settingsPayload, "apiKey", "apikey");
-                        if (string.IsNullOrEmpty(apiPathFromPayload)) apiPathFromPayload = GetStringProperty(settingsPayload, "apiPath", null);
-                    }
-
-                    // Try fields array
-                    if (payload.TryGetProperty("fields", out var fieldsArray) && fieldsArray.ValueKind == System.Text.Json.JsonValueKind.Array)
-                    {
-                        foreach (var f in fieldsArray.EnumerateArray().Where(field => field.ValueKind == System.Text.Json.JsonValueKind.Object))
-                        {
-                            var fname = GetStringProperty(f, "name", null);
-                            if (string.IsNullOrEmpty(fname)) continue;
-
-                            if (fname.Equals("baseUrl", System.StringComparison.InvariantCultureIgnoreCase) &&
-                                f.TryGetProperty("value", out var baseUrlValue) &&
-                                baseUrlValue.ValueKind == System.Text.Json.JsonValueKind.String)
-                            {
-                                baseUrlFromPayload = baseUrlValue.GetString() ?? baseUrlFromPayload;
-                            }
-
-                            if (fname.Equals("apiKey", System.StringComparison.InvariantCultureIgnoreCase) &&
-                                f.TryGetProperty("value", out var apiKeyValue) &&
-                                apiKeyValue.ValueKind == System.Text.Json.JsonValueKind.String)
-                            {
-                                apiKeyFromPayload = apiKeyValue.GetString() ?? apiKeyFromPayload;
-                            }
-
-                            if (fname.Equals("apiPath", System.StringComparison.InvariantCultureIgnoreCase) &&
-                                f.TryGetProperty("value", out var apiPathValue) &&
-                                apiPathValue.ValueKind == System.Text.Json.JsonValueKind.String)
-                            {
-                                apiPathFromPayload = apiPathValue.GetString() ?? apiPathFromPayload;
-                            }
-
-                            if (fname.Equals("categories", System.StringComparison.InvariantCultureIgnoreCase))
-                            {
-                                if (f.TryGetProperty("value", out var v) && v.ValueKind == System.Text.Json.JsonValueKind.Array)
-                                {
-                                    var parts = v.EnumerateArray().Select(x => x.ValueKind == System.Text.Json.JsonValueKind.Number ? x.GetInt32().ToString() : x.GetString() ?? string.Empty).Where(s => !string.IsNullOrEmpty(s));
-                                    categoriesFromPayload = string.Join(',', parts);
-                                }
-                                else if (f.TryGetProperty("value", out var vs) && vs.ValueKind == System.Text.Json.JsonValueKind.String)
-                                {
-                                    categoriesFromPayload = vs.GetString() ?? categoriesFromPayload;
-                                }
-                            }
-                        }
-                    }
-
-                    var urlFromPayload = (baseUrlFromPayload ?? string.Empty).Trim();
-                    if (!string.IsNullOrEmpty(apiPathFromPayload) && !string.IsNullOrEmpty(urlFromPayload))
-                    {
-                        urlFromPayload = urlFromPayload.TrimEnd('/') + "/" + apiPathFromPayload.Trim('/');
-                    }
-
-                    var normalized = NormalizeIndexerUrl(urlFromPayload);
+                    var parsed = ProwlarrIndexerPayloadReader.ParseForPut(payload);
+                    var normalized = NormalizeIndexerUrl(parsed.Url);
                     var allIndexers = await _indexerRepository.GetAllAsync();
-                    var existing = allIndexers.FirstOrDefault(i => NormalizeIndexerUrl(i.Url) == normalized && (i.ApiKey ?? string.Empty) == (apiKeyFromPayload ?? string.Empty));
+                    var existing = allIndexers.FirstOrDefault(i => NormalizeIndexerUrl(i.Url) == normalized && (i.ApiKey ?? string.Empty) == (parsed.ApiKey ?? string.Empty));
                     if (existing != null)
                     {
                         indexer = await _indexerRepository.GetByIdAsync(existing.Id);
@@ -515,11 +450,11 @@ namespace Listenarr.Api.Controllers
                         // Not found: create new indexer entry from parsed payload (upsert behavior)
                         indexer = new Indexer
                         {
-                            Name = string.IsNullOrEmpty(nameFromPayload) ? (string.IsNullOrEmpty(baseUrlFromPayload) ? "Prowlarr Indexer" : baseUrlFromPayload) : nameFromPayload,
-                            Implementation = string.IsNullOrEmpty(implementationFromPayload) ? "Custom" : implementationFromPayload,
-                            Url = urlFromPayload,
-                            ApiKey = string.IsNullOrEmpty(apiKeyFromPayload) ? null : apiKeyFromPayload,
-                            Categories = categoriesFromPayload ?? string.Empty,
+                            Name = parsed.Name,
+                            Implementation = parsed.Implementation,
+                            Url = parsed.Url,
+                            ApiKey = string.IsNullOrEmpty(parsed.ApiKey) ? null : parsed.ApiKey,
+                            Categories = parsed.Categories ?? string.Empty,
                             CreatedAt = DateTime.UtcNow,
                             UpdatedAt = DateTime.UtcNow,
                             IsEnabled = true,
@@ -552,80 +487,12 @@ namespace Listenarr.Api.Controllers
                     return BadRequest(new { message = "Expected JSON object for indexer update" });
                 }
 
-                // Extract tolerant fields from payload
-                var name = GetStringProperty(payload, "name", "title");
-                var implementation = GetStringProperty(payload, "implementation", "type");
-                var baseUrl = GetStringProperty(payload, "baseUrl", "url");
-                var apiPath = GetStringProperty(payload, "apiPath", null);
-                var apiKey = GetStringProperty(payload, "apiKey", null);
-
-                // Try settings object
-                if (string.IsNullOrEmpty(baseUrl) && payload.TryGetProperty("settings", out var settings) && settings.ValueKind == System.Text.Json.JsonValueKind.Object)
-                {
-                    baseUrl = GetStringProperty(settings, "baseUrl", "url");
-                    if (string.IsNullOrEmpty(apiKey)) apiKey = GetStringProperty(settings, "apiKey", "apikey");
-                    if (string.IsNullOrEmpty(apiPath)) apiPath = GetStringProperty(settings, "apiPath", null);
-                }
-
-                // Try fields array
-                var categories = ParseCategories(payload);
-
-                if (payload.TryGetProperty("fields", out var fieldsProp) && fieldsProp.ValueKind == System.Text.Json.JsonValueKind.Array)
-                {
-                    foreach (var f in fieldsProp.EnumerateArray().Where(field => field.ValueKind == System.Text.Json.JsonValueKind.Object))
-                    {
-                        var fname = GetStringProperty(f, "name", null);
-                        if (string.IsNullOrEmpty(fname)) continue;
-
-                        if (fname.Equals("baseUrl", System.StringComparison.InvariantCultureIgnoreCase) &&
-                            f.TryGetProperty("value", out var baseUrlValue) &&
-                            baseUrlValue.ValueKind == System.Text.Json.JsonValueKind.String)
-                        {
-                            baseUrl = baseUrlValue.GetString() ?? baseUrl;
-                        }
-
-                        if (fname.Equals("apiKey", System.StringComparison.InvariantCultureIgnoreCase) &&
-                            f.TryGetProperty("value", out var apiKeyValue) &&
-                            apiKeyValue.ValueKind == System.Text.Json.JsonValueKind.String)
-                        {
-                            apiKey = apiKeyValue.GetString() ?? apiKey;
-                        }
-
-                        if (fname.Equals("apiPath", System.StringComparison.InvariantCultureIgnoreCase) &&
-                            f.TryGetProperty("value", out var apiPathValue) &&
-                            apiPathValue.ValueKind == System.Text.Json.JsonValueKind.String)
-                        {
-                            apiPath = apiPathValue.GetString() ?? apiPath;
-                        }
-
-                        if (fname.Equals("categories", System.StringComparison.InvariantCultureIgnoreCase))
-                        {
-                            if (f.TryGetProperty("value", out var categoriesValue) && categoriesValue.ValueKind == System.Text.Json.JsonValueKind.Array)
-                            {
-                                var parts = categoriesValue.EnumerateArray().Select(x => x.ValueKind == System.Text.Json.JsonValueKind.Number ? x.GetInt32().ToString() : x.GetString() ?? string.Empty).Where(s => !string.IsNullOrEmpty(s));
-                                categories = string.Join(',', parts);
-                            }
-                            else if (f.TryGetProperty("value", out var vs) && vs.ValueKind == System.Text.Json.JsonValueKind.String)
-                            {
-                                categories = vs.GetString() ?? categories;
-                            }
-                        }
-                    }
-                }
-
-                // Apply updates
-                if (!string.IsNullOrEmpty(name)) indexer.Name = name;
-                if (!string.IsNullOrEmpty(implementation)) indexer.Implementation = implementation;
-
-                var url = (baseUrl ?? string.Empty).Trim();
-                if (!string.IsNullOrEmpty(apiPath) && !string.IsNullOrEmpty(url))
-                {
-                    url = url.TrimEnd('/') + "/" + apiPath.Trim('/');
-                }
-
-                if (!string.IsNullOrEmpty(url)) indexer.Url = url;
-                indexer.ApiKey = string.IsNullOrEmpty(apiKey) ? null : apiKey;
-                indexer.Categories = categories ?? indexer.Categories;
+                var update = ProwlarrIndexerPayloadReader.ParseForPut(payload);
+                if (!string.IsNullOrEmpty(update.Name)) indexer.Name = update.Name;
+                if (!string.IsNullOrEmpty(update.Implementation)) indexer.Implementation = update.Implementation;
+                if (!string.IsNullOrEmpty(update.Url)) indexer.Url = update.Url;
+                indexer.ApiKey = string.IsNullOrEmpty(update.ApiKey) ? null : update.ApiKey;
+                indexer.Categories = update.Categories ?? indexer.Categories;
                 indexer.UpdatedAt = DateTime.UtcNow;
 
                 await _indexerRepository.UpdateAsync(indexer);
@@ -811,128 +678,25 @@ namespace Listenarr.Api.Controllers
 
             foreach (var item in payload.EnumerateArray().Where(item => item.ValueKind == System.Text.Json.JsonValueKind.Object))
             {
-                // Extract common fields with tolerant mapping
-                string getString(System.Text.Json.JsonElement el, string prop1, string? prop2 = null)
-                {
-                    if (el.TryGetProperty(prop1, out var p) && p.ValueKind == System.Text.Json.JsonValueKind.String)
-                        return p.GetString() ?? string.Empty;
-                    if (prop2 != null && el.TryGetProperty(prop2, out var p2) && p2.ValueKind == System.Text.Json.JsonValueKind.String)
-                        return p2.GetString() ?? string.Empty;
-                    return string.Empty;
-                }
-
-                var name = getString(item, "name", "title");
-                var implementation = getString(item, "implementation", "type");
-                var baseUrl = getString(item, "baseUrl", "url");
-                var apiPath = getString(item, "apiPath", null);
-                var apiKey = getString(item, "apiKey", null);
-
-                // categories can be array or string
-                string? categories = null;
-                if (item.TryGetProperty("categories", out var cats))
-                {
-                    if (cats.ValueKind == System.Text.Json.JsonValueKind.Array)
-                    {
-                        var parts = cats.EnumerateArray().Select(x => x.ValueKind == System.Text.Json.JsonValueKind.Number ? x.GetInt32().ToString() : x.GetString() ?? string.Empty).Where(s => !string.IsNullOrEmpty(s));
-                        categories = string.Join(',', parts);
-                    }
-                    else if (cats.ValueKind == System.Text.Json.JsonValueKind.String)
-                    {
-                        categories = cats.GetString();
-                    }
-                }
-
-                if (!string.IsNullOrEmpty(apiPath) && !string.IsNullOrEmpty(baseUrl))
-                {
-                    baseUrl = baseUrl.TrimEnd('/') + "/" + apiPath.Trim('/');
-                }
-
-                // If baseUrl/apiKey/apiPath absent, try to look for a settings object with baseUrl/apiKey
-                if (string.IsNullOrEmpty(baseUrl) && item.TryGetProperty("settings", out var settings) && settings.ValueKind == System.Text.Json.JsonValueKind.Object)
-                {
-                    baseUrl = GetStringProperty(settings, "baseUrl", "url");
-                    if (string.IsNullOrEmpty(apiKey)) apiKey = GetStringProperty(settings, "apiKey", "apikey");
-                    if (string.IsNullOrEmpty(apiPath)) apiPath = GetStringProperty(settings, "apiPath", null);
-                }
-
-                // If still missing, try to extract from a "fields" array (Prowlarr sends baseUrl/apiKey/categories within fields)
-                if ((string.IsNullOrEmpty(baseUrl) || string.IsNullOrEmpty(apiKey) || string.IsNullOrEmpty(apiPath) || string.IsNullOrEmpty(categories)) &&
-                    item.TryGetProperty("fields", out var fields) && fields.ValueKind == System.Text.Json.JsonValueKind.Array)
-                {
-                    foreach (var f in fields.EnumerateArray().Where(field => field.ValueKind == System.Text.Json.JsonValueKind.Object))
-                    {
-                        var fname = getString(f, "name", null);
-                        if (string.IsNullOrEmpty(fname))
-                            continue;
-
-                        // baseUrl, apiKey, apiPath are strings inside field.value
-                        if (string.IsNullOrEmpty(baseUrl) &&
-                            fname.Equals("baseUrl", StringComparison.InvariantCultureIgnoreCase) &&
-                            f.TryGetProperty("value", out var v) &&
-                            v.ValueKind == System.Text.Json.JsonValueKind.String)
-                        {
-                            baseUrl = v.GetString() ?? string.Empty;
-                        }
-
-                        if (string.IsNullOrEmpty(apiKey) &&
-                            fname.Equals("apiKey", StringComparison.InvariantCultureIgnoreCase) &&
-                            f.TryGetProperty("value", out v) &&
-                            v.ValueKind == System.Text.Json.JsonValueKind.String)
-                        {
-                            apiKey = v.GetString() ?? string.Empty;
-                        }
-
-                        if (string.IsNullOrEmpty(apiPath) &&
-                            fname.Equals("apiPath", StringComparison.InvariantCultureIgnoreCase) &&
-                            f.TryGetProperty("value", out v) &&
-                            v.ValueKind == System.Text.Json.JsonValueKind.String)
-                        {
-                            apiPath = v.GetString() ?? string.Empty;
-                        }
-
-                        if (string.IsNullOrEmpty(categories) && fname.Equals("categories", StringComparison.InvariantCultureIgnoreCase))
-                        {
-                            if (f.TryGetProperty("value", out var categoriesValue) && categoriesValue.ValueKind == System.Text.Json.JsonValueKind.Array)
-                            {
-                                var parts = categoriesValue.EnumerateArray().Select(x => x.ValueKind == System.Text.Json.JsonValueKind.Number ? x.GetInt32().ToString() : x.GetString() ?? string.Empty).Where(s => !string.IsNullOrEmpty(s));
-                                categories = string.Join(',', parts);
-                            }
-                            else if (f.TryGetProperty("value", out var vs) && vs.ValueKind == System.Text.Json.JsonValueKind.String)
-                            {
-                                categories = vs.GetString();
-                            }
-                        }
-
-                        if (!string.IsNullOrEmpty(baseUrl) && !string.IsNullOrEmpty(apiKey) && !string.IsNullOrEmpty(apiPath) && !string.IsNullOrEmpty(categories))
-                        {
-                            break;
-                        }
-                    }
-                }
-
-                if (string.IsNullOrEmpty(name)) name = baseUrl ?? "Prowlarr Indexer";
-                if (string.IsNullOrEmpty(implementation)) implementation = "Custom";
-
-                // Normalize URLs
-                var url = (baseUrl ?? string.Empty).Trim();
+                var parsed = ProwlarrIndexerPayloadReader.ParseForBulkPost(item);
 
                 // Deduplicate by normalized URL + ApiKey (normalizes trailing slash and trailing /api)
-                var normalizedUrl = NormalizeIndexerUrl(url);
-                var exists = existingIndexers.FirstOrDefault(i => NormalizeIndexerUrl(i.Url) == normalizedUrl && (i.ApiKey ?? string.Empty) == (apiKey ?? string.Empty));
+                var normalizedUrl = NormalizeIndexerUrl(parsed.Url);
+                var exists = existingIndexers.FirstOrDefault(i => NormalizeIndexerUrl(i.Url) == normalizedUrl && (i.ApiKey ?? string.Empty) == (parsed.ApiKey ?? string.Empty));
                 if (exists != null)
                 {
                     skipped++;
-                    _logger?.LogInformation("Prowlarr: Skipping existing indexer (name={Name}, url={Url}, apiKeyPresent={HasApiKey})", name, exists.Url, !string.IsNullOrEmpty(apiKey));
+                    _logger?.LogInformation("Prowlarr: Skipping existing indexer (name={Name}, url={Url}, apiKeyPresent={HasApiKey})", parsed.Name, exists.Url, !string.IsNullOrEmpty(parsed.ApiKey));
                     continue;
                 }
 
                 var indexer = new Indexer
                 {
-                    Name = name,
-                    Implementation = implementation,
-                    Url = url,
-                    ApiKey = string.IsNullOrEmpty(apiKey) ? null : apiKey,
-                    Categories = categories ?? string.Empty,
+                    Name = parsed.Name,
+                    Implementation = parsed.Implementation,
+                    Url = parsed.Url,
+                    ApiKey = string.IsNullOrEmpty(parsed.ApiKey) ? null : parsed.ApiKey,
+                    Categories = parsed.Categories ?? string.Empty,
                     Tags = string.Empty,
                     AdditionalSettings = string.Empty,
                     CreatedAt = DateTime.UtcNow,
@@ -941,7 +705,7 @@ namespace Listenarr.Api.Controllers
                 };
 
                 // Guess Type from implementation
-                var implLower = (implementation ?? string.Empty).ToLowerInvariant();
+                var implLower = (parsed.Implementation ?? string.Empty).ToLowerInvariant();
                 indexer.Type = implLower.Contains("newznab") ? "Usenet" : (implLower.Contains("torznab") ? "Torrent" : "Custom");
 
                 indexer = await _indexerRepository.AddAsync(indexer);
@@ -1218,37 +982,6 @@ namespace Listenarr.Api.Controllers
             {
                 return url.TrimEnd('/');
             }
-        }
-
-        // Helper to read tolerant string properties from a JSON element
-        private static string GetStringProperty(System.Text.Json.JsonElement el, string prop1, string? prop2 = null)
-        {
-            if (el.ValueKind != System.Text.Json.JsonValueKind.Object) return string.Empty;
-
-            if (el.TryGetProperty(prop1, out var p) && p.ValueKind == System.Text.Json.JsonValueKind.String)
-                return p.GetString() ?? string.Empty;
-            if (prop2 != null && el.TryGetProperty(prop2, out var p2) && p2.ValueKind == System.Text.Json.JsonValueKind.String)
-                return p2.GetString() ?? string.Empty;
-            return string.Empty;
-        }
-
-        // Helper to parse categories property (array or string) into a comma-separated string
-        private static string? ParseCategories(System.Text.Json.JsonElement el)
-        {
-            if (el.TryGetProperty("categories", out var cats))
-            {
-                if (cats.ValueKind == System.Text.Json.JsonValueKind.Array)
-                {
-                    var parts = cats.EnumerateArray().Select(x => x.ValueKind == System.Text.Json.JsonValueKind.Number ? x.GetInt32().ToString() : x.GetString() ?? string.Empty).Where(s => !string.IsNullOrEmpty(s));
-                    return string.Join(',', parts);
-                }
-                else if (cats.ValueKind == System.Text.Json.JsonValueKind.String)
-                {
-                    return cats.GetString();
-                }
-            }
-
-            return null;
         }
 
         // DTOs
