@@ -138,13 +138,13 @@ namespace Listenarr.Application.Downloads
 
             var includeCompletedExternal = appSettings != null && appSettings.ShowCompletedExternalDownloads;
             var clientQueueResults = await FetchClientQueueResultsAsync(enabledClients);
-            var clientStatuses = BuildClientStatuses(clientQueueResults);
+            var clientStatuses = DownloadQueueSnapshotMapper.BuildClientStatuses(clientQueueResults);
 
             foreach (var clientQueueResult in clientQueueResults)
             {
                 var client = clientQueueResult.Client;
                 var clientQueue = clientQueueResult.QueueItems;
-                ApplySnapshotMetadata(clientQueue, clientQueueResult);
+                DownloadQueueSnapshotMapper.ApplySnapshotMetadata(clientQueue, clientQueueResult);
 
                 try
                 {
@@ -533,7 +533,7 @@ namespace Listenarr.Application.Downloads
 
                 return new ClientQueueFetchResult(
                     client,
-                    CloneQueueItems(clientQueue),
+                    DownloadQueueSnapshotMapper.CloneQueueItems(clientQueue),
                     usedCachedSnapshot: false,
                     isUnavailable: false,
                     snapshotAge: null,
@@ -563,7 +563,7 @@ namespace Listenarr.Application.Downloads
 
         private ClientQueueFetchResult BuildFallbackQueueResult(DownloadClientConfiguration client, string failureReason)
         {
-            if (cache.TryGetValue(GetClientQueueSnapshotCacheKey(client), out ClientQueueSnapshotCacheEntry? cachedSnapshot) &&
+            if (cache.TryGetValue(DownloadQueueSnapshotMapper.GetClientQueueSnapshotCacheKey(client), out ClientQueueSnapshotCacheEntry? cachedSnapshot) &&
                 cachedSnapshot != null)
             {
                 var snapshotAge = DateTimeOffset.UtcNow - cachedSnapshot.RefreshedAtUtc;
@@ -573,7 +573,7 @@ namespace Listenarr.Application.Downloads
 
                     return new ClientQueueFetchResult(
                         client,
-                        CloneQueueItems(cachedSnapshot.QueueItems),
+                        DownloadQueueSnapshotMapper.CloneQueueItems(cachedSnapshot.QueueItems),
                         usedCachedSnapshot: true,
                         isUnavailable: false,
                         snapshotAge: snapshotAge,
@@ -599,87 +599,14 @@ namespace Listenarr.Application.Downloads
             List<QueueItem> clientQueue,
             DateTimeOffset refreshedAtUtc)
         {
-            var cacheEntry = new ClientQueueSnapshotCacheEntry(CloneQueueItems(clientQueue), refreshedAtUtc);
+            var cacheEntry = new ClientQueueSnapshotCacheEntry(DownloadQueueSnapshotMapper.CloneQueueItems(clientQueue), refreshedAtUtc);
             cache.Set(
-                GetClientQueueSnapshotCacheKey(client),
+                DownloadQueueSnapshotMapper.GetClientQueueSnapshotCacheKey(client),
                 cacheEntry,
                 new MemoryCacheEntryOptions
                 {
                     AbsoluteExpirationRelativeToNow = _staleSnapshotMaxAge
                 });
-        }
-
-        private static string GetClientQueueSnapshotCacheKey(DownloadClientConfiguration client)
-        {
-            return $"download-queue:snapshot:{client.Id}";
-        }
-
-        private static List<QueueItem> CloneQueueItems(IEnumerable<QueueItem>? queueItems)
-        {
-            if (queueItems == null)
-            {
-                return new List<QueueItem>();
-            }
-
-            return queueItems
-                .Where(item => item != null)
-                .Select(item => item.Clone())
-                .ToList();
-        }
-
-        private static void ApplySnapshotMetadata(List<QueueItem> queueItems, ClientQueueFetchResult clientQueueResult)
-        {
-            if (queueItems == null || queueItems.Count == 0)
-            {
-                return;
-            }
-
-            var snapshotAgeSeconds = clientQueueResult.SnapshotAge.HasValue
-                ? (int?)Math.Max(0, Math.Round(clientQueueResult.SnapshotAge.Value.TotalSeconds))
-                : null;
-            var snapshotRefreshedAt = clientQueueResult.SnapshotRefreshedAtUtc?.UtcDateTime;
-
-            foreach (var queueItem in queueItems)
-            {
-                queueItem.IsStaleSnapshot = clientQueueResult.UsedCachedSnapshot;
-                queueItem.SnapshotState = clientQueueResult.SnapshotState;
-                queueItem.SnapshotFailureReason = clientQueueResult.FailureReason;
-                queueItem.SnapshotAgeSeconds = snapshotAgeSeconds;
-                queueItem.SnapshotRefreshedAt = snapshotRefreshedAt;
-            }
-        }
-
-        private static List<QueueClientStatus> BuildClientStatuses(IEnumerable<ClientQueueFetchResult> clientQueueResults)
-        {
-            if (clientQueueResults == null)
-            {
-                return new List<QueueClientStatus>();
-            }
-
-            return clientQueueResults
-                .Where(result => result?.Client != null)
-                .Select(result =>
-                {
-                    var snapshotAgeSeconds = result.SnapshotAge.HasValue
-                        ? (int?)Math.Max(0, Math.Round(result.SnapshotAge.Value.TotalSeconds))
-                        : null;
-
-                    return new QueueClientStatus
-                    {
-                        ClientId = result.Client.Id ?? string.Empty,
-                        ClientName = result.Client.Name ?? result.Client.Id ?? "Download client",
-                        ClientType = result.Client.Type?.ToLowerInvariant() ?? "unknown",
-                        SnapshotState = result.SnapshotState,
-                        IsStaleSnapshot = result.UsedCachedSnapshot,
-                        IsUnavailable = result.IsUnavailable,
-                        SnapshotFailureReason = result.FailureReason,
-                        SnapshotAgeSeconds = snapshotAgeSeconds,
-                        SnapshotRefreshedAt = result.SnapshotRefreshedAtUtc?.UtcDateTime,
-                        ItemCount = result.QueueItems?.Count ?? 0
-                    };
-                })
-                .OrderBy(status => status.ClientName, StringComparer.OrdinalIgnoreCase)
-                .ToList();
         }
 
         private void ObserveFaultedPollTask(Task<List<QueueItem>> pollTask, DownloadClientConfiguration client)
@@ -754,48 +681,5 @@ namespace Listenarr.Application.Downloads
             }
         }
 
-        private sealed class ClientQueueFetchResult
-        {
-            public ClientQueueFetchResult(
-                DownloadClientConfiguration client,
-                List<QueueItem> queueItems,
-                bool usedCachedSnapshot,
-                bool isUnavailable,
-                TimeSpan? snapshotAge,
-                string? failureReason,
-                string snapshotState,
-                DateTimeOffset? snapshotRefreshedAtUtc)
-            {
-                Client = client;
-                QueueItems = queueItems ?? new List<QueueItem>();
-                UsedCachedSnapshot = usedCachedSnapshot;
-                IsUnavailable = isUnavailable;
-                SnapshotAge = snapshotAge;
-                FailureReason = failureReason;
-                SnapshotState = snapshotState;
-                SnapshotRefreshedAtUtc = snapshotRefreshedAtUtc;
-            }
-
-            public DownloadClientConfiguration Client { get; }
-            public List<QueueItem> QueueItems { get; }
-            public bool UsedCachedSnapshot { get; }
-            public bool IsUnavailable { get; }
-            public TimeSpan? SnapshotAge { get; }
-            public string? FailureReason { get; }
-            public string SnapshotState { get; }
-            public DateTimeOffset? SnapshotRefreshedAtUtc { get; }
-        }
-
-        private sealed class ClientQueueSnapshotCacheEntry
-        {
-            public ClientQueueSnapshotCacheEntry(List<QueueItem> queueItems, DateTimeOffset refreshedAtUtc)
-            {
-                QueueItems = queueItems ?? new List<QueueItem>();
-                RefreshedAtUtc = refreshedAtUtc;
-            }
-
-            public List<QueueItem> QueueItems { get; }
-            public DateTimeOffset RefreshedAtUtc { get; }
-        }
     }
 }

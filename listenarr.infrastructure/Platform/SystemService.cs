@@ -18,7 +18,6 @@
 
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using System.Text.RegularExpressions;
 using Listenarr.Application.Interfaces;
 using Listenarr.Domain.Models;
 using Microsoft.Extensions.Logging;
@@ -497,7 +496,7 @@ namespace Listenarr.Infrastructure.Platform
                     lines = allLines.TakeLast(limit).ToList();
                 }
 
-                logs.AddRange(lines.Select(ParseLogLine).Where(logEntry => logEntry != null)!);
+                logs.AddRange(lines.Select(SystemLogParser.ParseLogLine).Where(logEntry => logEntry != null)!);
 
                 // If no logs were parsed, return sample logs
                 if (logs.Count == 0)
@@ -556,69 +555,5 @@ namespace Listenarr.Infrastructure.Platform
             return todayLogPath;
         }
 
-        private LogEntry? ParseLogLine(string line)
-        {
-            try
-            {
-                // Expected Serilog format: 2025-11-05 11:43:58.516 -05:00 [INF] Message here
-
-                if (string.IsNullOrWhiteSpace(line))
-                    return null;
-
-                // Try to parse Serilog format with regex
-                // Format: YYYY-MM-DD HH:MM:SS.FFF ZZZ [LEVEL] Message
-                var match = Regex.Match(
-                    line,
-                    @"^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3}\s+[+-]\d{2}:\d{2})\s+\[(\w{3})\]\s+(.+)$"
-                );
-
-                if (match.Success)
-                {
-                    var timestampStr = match.Groups[1].Value;
-                    var level = match.Groups[2].Value.ToUpperInvariant();
-                    var message = match.Groups[3].Value;
-
-                    // Parse timestamp
-                    DateTime timestamp;
-                    if (!DateTime.TryParse(timestampStr, out timestamp))
-                    {
-                        timestamp = DateTime.UtcNow;
-                    }
-
-                    // Map Serilog log levels
-                    var mappedLevel = level switch
-                    {
-                        "VRB" => "Debug",  // Verbose
-                        "DBG" => "Debug",  // Debug
-                        "INF" => "Info",   // Information
-                        "WRN" => "Warning", // Warning
-                        "ERR" => "Error",  // Error
-                        "FTL" => "Error",  // Fatal
-                        _ => "Info"
-                    };
-
-                    return new LogEntry
-                    {
-                        Timestamp = timestamp,
-                        Level = mappedLevel,
-                        Message = message,
-                        Source = "Application"
-                    };
-                }
-
-                // Fallback: treat the whole line as info message
-                return new LogEntry
-                {
-                    Timestamp = DateTime.UtcNow,
-                    Level = "Info",
-                    Message = line,
-                    Source = "Application"
-                };
-            }
-            catch (Exception caughtEx_1) when (caughtEx_1 is not OperationCanceledException && caughtEx_1 is not OutOfMemoryException && caughtEx_1 is not StackOverflowException)
-            {
-                return null;
-            }
-        }
     }
 }
