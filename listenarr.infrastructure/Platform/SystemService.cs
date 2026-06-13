@@ -172,25 +172,7 @@ namespace Listenarr.Infrastructure.Platform
                 // Get external API health
                 var externalApiHealth = await GetExternalApiHealthAsync();
 
-                // Determine overall status
-                var overallStatus = "healthy";
-                if (downloadClientHealth.Status == "error" || externalApiHealth.Status == "error")
-                {
-                    overallStatus = "error";
-                }
-                else if (downloadClientHealth.Status == "warning" || externalApiHealth.Status == "warning")
-                {
-                    overallStatus = "warning";
-                }
-
-                return new ServiceHealth
-                {
-                    Status = overallStatus,
-                    Version = version,
-                    Uptime = uptimeFormatted,
-                    DownloadClients = downloadClientHealth,
-                    ExternalApis = externalApiHealth
-                };
+                return SystemHealthMapper.BuildServiceHealth(version, uptimeFormatted, downloadClientHealth, externalApiHealth);
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
@@ -204,58 +186,12 @@ namespace Listenarr.Infrastructure.Platform
             try
             {
                 var clients = await _configurationService.GetDownloadClientConfigurationsAsync();
-                var clientStatuses = new List<ClientStatus>();
-                var connectedCount = 0;
-
-                foreach (var client in clients)
-                {
-                    if (!client.IsEnabled)
-                    {
-                        continue;
-                    }
-
-                    // TODO: Implement actual connection testing for each client type
-                    // For now, assume enabled clients are connected
-                    var status = "connected";
-                    connectedCount++;
-
-                    clientStatuses.Add(new ClientStatus
-                    {
-                        Name = client.Name,
-                        Status = status,
-                        Type = client.Type
-                    });
-                }
-
-                var totalEnabled = clients.Count(c => c.IsEnabled);
-                var overallStatus = "healthy";
-                if (connectedCount == 0 && totalEnabled > 0)
-                {
-                    overallStatus = "error";
-                }
-                else if (connectedCount < totalEnabled)
-                {
-                    overallStatus = "warning";
-                }
-
-                return new DownloadClientHealth
-                {
-                    Status = overallStatus,
-                    Connected = connectedCount,
-                    Total = totalEnabled,
-                    Clients = clientStatuses
-                };
+                return SystemHealthMapper.BuildDownloadClientHealth(clients);
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
                 _logger.LogError(ex, "Error getting download client health");
-                return new DownloadClientHealth
-                {
-                    Status = "error",
-                    Connected = 0,
-                    Total = 0,
-                    Clients = new List<ClientStatus>()
-                };
+                return SystemHealthMapper.BuildDownloadClientHealthError();
             }
         }
 
@@ -264,58 +200,12 @@ namespace Listenarr.Infrastructure.Platform
             try
             {
                 var apis = await _configurationService.GetApiConfigurationsAsync();
-                var apiStatuses = new List<ApiStatus>();
-                var connectedCount = 0;
-
-                foreach (var api in apis)
-                {
-                    if (!api.IsEnabled)
-                    {
-                        continue;
-                    }
-
-                    // TODO: Implement actual connection testing for each API
-                    // For now, assume enabled APIs are connected
-                    var status = "connected";
-                    connectedCount++;
-
-                    apiStatuses.Add(new ApiStatus
-                    {
-                        Name = api.Name,
-                        Status = status,
-                        Enabled = api.IsEnabled
-                    });
-                }
-
-                var totalEnabled = apis.Count(c => c.IsEnabled);
-                var overallStatus = "healthy";
-                if (connectedCount == 0 && totalEnabled > 0)
-                {
-                    overallStatus = "error";
-                }
-                else if (connectedCount < totalEnabled)
-                {
-                    overallStatus = "warning";
-                }
-
-                return new ExternalApiHealth
-                {
-                    Status = overallStatus,
-                    Connected = connectedCount,
-                    Total = totalEnabled,
-                    Apis = apiStatuses
-                };
+                return SystemHealthMapper.BuildExternalApiHealth(apis);
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
                 _logger.LogError(ex, "Error getting external API health");
-                return new ExternalApiHealth
-                {
-                    Status = "error",
-                    Connected = 0,
-                    Total = 0,
-                    Apis = new List<ApiStatus>()
-                };
+                return SystemHealthMapper.BuildExternalApiHealthError();
             }
         }
 
