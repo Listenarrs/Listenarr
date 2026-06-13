@@ -20,7 +20,6 @@ using Listenarr.Application.Interfaces;
 using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Application.Metadata;
 using Listenarr.Application.Security;
-using Listenarr.Domain.Common;
 using Listenarr.Domain.Models;
 using Microsoft.AspNetCore.Mvc;
 
@@ -193,7 +192,7 @@ namespace Listenarr.Api.Controllers
                         _logger.LogDebug("ImagesController: initial relativePath for {Identifier}: {RelativePath}", LogRedaction.SanitizeText(identifier), LogRedaction.SanitizeText(relativePath));
                         try
                         {
-                            var candidateFull = Path.GetFullPath(ResolvePathWithOptionalBase(_effectiveContentRootPath, relativePath));
+                            var candidateFull = Path.GetFullPath(ImageIdentifierHelper.ResolvePathWithOptionalBase(_effectiveContentRootPath, relativePath));
 
                             if (!IsInsidePermittedImageRoot(candidateFull))
                             {
@@ -251,7 +250,7 @@ namespace Listenarr.Api.Controllers
                                     // Validate moved path as well
                                     try
                                     {
-                                        var movedFull = Path.GetFullPath(ResolvePathWithOptionalBase(_effectiveContentRootPath, moved));
+                                        var movedFull = Path.GetFullPath(ImageIdentifierHelper.ResolvePathWithOptionalBase(_effectiveContentRootPath, moved));
 
                                         if (IsInsidePermittedImageRoot(movedFull))
                                         {
@@ -326,7 +325,7 @@ namespace Listenarr.Api.Controllers
 
                         void AddCandidateUrl(string? url, string source)
                         {
-                            var normalized = NormalizeHttpImageUrl(url);
+                            var normalized = ImageIdentifierHelper.NormalizeHttpImageUrl(url);
                             if (string.IsNullOrWhiteSpace(normalized)) return;
                             if (candidateUrlSet.Add(normalized))
                             {
@@ -344,7 +343,7 @@ namespace Listenarr.Api.Controllers
                         // missing/stale but the book already has ISBN/OLID persisted.
                         try
                         {
-                            if (LooksLikeAsin(identifier))
+                            if (ImageIdentifierHelper.LooksLikeAsin(identifier))
                             {
                                 var localBook = await _audiobookRepository.GetByAsinAsync(identifier);
                                 if (localBook != null)
@@ -359,14 +358,14 @@ namespace Listenarr.Api.Controllers
                                         switch (extId.Type)
                                         {
                                             case AudiobookExternalIdentifierType.Asin:
-                                                if (LooksLikeAsin(extId.ValueNormalized) &&
+                                                if (ImageIdentifierHelper.LooksLikeAsin(extId.ValueNormalized) &&
                                                     !localAsinCandidates.Contains(extId.ValueNormalized, StringComparer.OrdinalIgnoreCase))
                                                 {
                                                     localAsinCandidates.Add(extId.ValueNormalized);
                                                 }
                                                 break;
                                             case AudiobookExternalIdentifierType.Isbn:
-                                                if (LooksLikeIsbn(extId.ValueNormalized) &&
+                                                if (ImageIdentifierHelper.LooksLikeIsbn(extId.ValueNormalized) &&
                                                     !localIsbnCandidates.Contains(extId.ValueNormalized, StringComparer.OrdinalIgnoreCase))
                                                 {
                                                     localIsbnCandidates.Add(extId.ValueNormalized);
@@ -374,7 +373,7 @@ namespace Listenarr.Api.Controllers
                                                 break;
                                             case AudiobookExternalIdentifierType.OpenLibraryId:
                                                 {
-                                                    var normalizedOlid = NormalizeOpenLibraryId(extId.ValueNormalized);
+                                                    var normalizedOlid = ImageIdentifierHelper.NormalizeOpenLibraryId(extId.ValueNormalized);
                                                     if (!string.IsNullOrWhiteSpace(normalizedOlid) &&
                                                         !localOpenLibraryIds.Contains(normalizedOlid, StringComparer.OrdinalIgnoreCase))
                                                     {
@@ -386,8 +385,8 @@ namespace Listenarr.Api.Controllers
                                     }
 
                                     var localIsbn = localBook.Isbn?
-                                        .Select(NormalizeIsbn)
-                                        .FirstOrDefault(v => !string.IsNullOrWhiteSpace(v) && LooksLikeIsbn(v));
+                                        .Select(ImageIdentifierHelper.NormalizeIsbn)
+                                        .FirstOrDefault(v => !string.IsNullOrWhiteSpace(v) && ImageIdentifierHelper.LooksLikeIsbn(v));
                                     if (!string.IsNullOrWhiteSpace(localIsbn))
                                     {
                                         if (!localIsbnCandidates.Contains(localIsbn, StringComparer.OrdinalIgnoreCase))
@@ -400,7 +399,7 @@ namespace Listenarr.Api.Controllers
 
                                     if (!string.IsNullOrWhiteSpace(localBook.OpenLibraryId))
                                     {
-                                        var normalizedLocalOlid = NormalizeOpenLibraryId(localBook.OpenLibraryId);
+                                        var normalizedLocalOlid = ImageIdentifierHelper.NormalizeOpenLibraryId(localBook.OpenLibraryId);
                                         if (!string.IsNullOrWhiteSpace(normalizedLocalOlid))
                                         {
                                             if (!localOpenLibraryIds.Contains(normalizedLocalOlid, StringComparer.OrdinalIgnoreCase))
@@ -411,7 +410,7 @@ namespace Listenarr.Api.Controllers
                                         }
                                     }
 
-                                    if (LooksLikeAsin(localBook.Asin ?? string.Empty))
+                                    if (ImageIdentifierHelper.LooksLikeAsin(localBook.Asin ?? string.Empty))
                                     {
                                         var normalizedLocalAsin = (localBook.Asin ?? string.Empty).Trim().ToUpperInvariant();
                                         if (!localAsinCandidates.Contains(normalizedLocalAsin, StringComparer.OrdinalIgnoreCase))
@@ -426,7 +425,7 @@ namespace Listenarr.Api.Controllers
                         {
                             throw;
                         }
-                        catch (Exception ex) when (IsRecoverableImageLookupException(ex))
+                        catch (Exception ex) when (ImageIdentifierHelper.IsRecoverableImageLookupException(ex))
                         {
                             _logger.LogDebug(ex, "Failed to seed image fallback metadata from local library record for {Identifier}", LogRedaction.SanitizeText(identifier));
                         }
@@ -462,7 +461,7 @@ namespace Listenarr.Api.Controllers
                                 {
                                     throw;
                                 }
-                                catch (Exception ex) when (IsRecoverableImageLookupException(ex))
+                                catch (Exception ex) when (ImageIdentifierHelper.IsRecoverableImageLookupException(ex))
                                 {
                                     _logger.LogDebug(ex, "Failed probing alternate cached image identifier {AliasIdentifier} for {Identifier}", LogRedaction.SanitizeText(aliasIdentifier), LogRedaction.SanitizeText(identifier));
                                 }
@@ -478,13 +477,13 @@ namespace Listenarr.Api.Controllers
                                 AddCandidateUrl(audible.ImageUrl, "Audible");
                                 if (!string.IsNullOrWhiteSpace(audible.Isbn))
                                 {
-                                    candidateIsbn = NormalizeIsbn(audible.Isbn);
+                                    candidateIsbn = ImageIdentifierHelper.NormalizeIsbn(audible.Isbn);
                                 }
                             }
 
                             // Try Audnexus for ASINs as an additional candidate source even when
                             // Audible returned an image (Audible images can be placeholders or stale).
-                            if (LooksLikeAsin(identifier))
+                            if (ImageIdentifierHelper.LooksLikeAsin(identifier))
                             {
                                 try
                                 {
@@ -494,7 +493,7 @@ namespace Listenarr.Api.Controllers
                                         AddCandidateUrl(audnexus.Image, "AudnexusBook");
                                         if (string.IsNullOrWhiteSpace(candidateIsbn) && !string.IsNullOrWhiteSpace(audnexus.Isbn))
                                         {
-                                            candidateIsbn = NormalizeIsbn(audnexus.Isbn);
+                                            candidateIsbn = ImageIdentifierHelper.NormalizeIsbn(audnexus.Isbn);
                                         }
                                     }
                                 }
@@ -502,7 +501,7 @@ namespace Listenarr.Api.Controllers
                                 {
                                     throw;
                                 }
-                                catch (Exception ex) when (IsRecoverableImageLookupException(ex))
+                                catch (Exception ex) when (ImageIdentifierHelper.IsRecoverableImageLookupException(ex))
                                 {
                                     _logger.LogDebug(ex, "Audnexus ASIN lookup failed for {Identifier}", LogRedaction.SanitizeText(identifier));
                                 }
@@ -510,7 +509,7 @@ namespace Listenarr.Api.Controllers
 
                             // Try alternate stored ASIN identifiers for this audiobook when the requested
                             // ASIN is region-limited or missing from providers.
-                            if (LooksLikeAsin(identifier) && localAsinCandidates.Count > 0)
+                            if (ImageIdentifierHelper.LooksLikeAsin(identifier) && localAsinCandidates.Count > 0)
                             {
                                 foreach (var altAsin in localAsinCandidates
                                     .Where(a => !string.Equals(a, identifier, StringComparison.OrdinalIgnoreCase))
@@ -525,7 +524,7 @@ namespace Listenarr.Api.Controllers
                                             AddCandidateUrl(altAudible.ImageUrl, "AudibleAltAsin");
                                             if (string.IsNullOrWhiteSpace(candidateIsbn) && !string.IsNullOrWhiteSpace(altAudible.Isbn))
                                             {
-                                                candidateIsbn = NormalizeIsbn(altAudible.Isbn);
+                                                candidateIsbn = ImageIdentifierHelper.NormalizeIsbn(altAudible.Isbn);
                                             }
                                         }
                                     }
@@ -533,7 +532,7 @@ namespace Listenarr.Api.Controllers
                                     {
                                         throw;
                                     }
-                                    catch (Exception ex) when (IsRecoverableImageLookupException(ex))
+                                    catch (Exception ex) when (ImageIdentifierHelper.IsRecoverableImageLookupException(ex))
                                     {
                                         _logger.LogDebug(ex, "Audible alternate ASIN lookup failed for {Identifier} via {AltAsin}", LogRedaction.SanitizeText(identifier), LogRedaction.SanitizeText(altAsin));
                                     }
@@ -546,7 +545,7 @@ namespace Listenarr.Api.Controllers
                                             AddCandidateUrl(altAudnexus.Image, "AudnexusBookAltAsin");
                                             if (string.IsNullOrWhiteSpace(candidateIsbn) && !string.IsNullOrWhiteSpace(altAudnexus.Isbn))
                                             {
-                                                candidateIsbn = NormalizeIsbn(altAudnexus.Isbn);
+                                                candidateIsbn = ImageIdentifierHelper.NormalizeIsbn(altAudnexus.Isbn);
                                             }
                                         }
                                     }
@@ -554,7 +553,7 @@ namespace Listenarr.Api.Controllers
                                     {
                                         throw;
                                     }
-                                    catch (Exception ex) when (IsRecoverableImageLookupException(ex))
+                                    catch (Exception ex) when (ImageIdentifierHelper.IsRecoverableImageLookupException(ex))
                                     {
                                         _logger.LogDebug(ex, "Audnexus alternate ASIN lookup failed for {Identifier} via {AltAsin}", LogRedaction.SanitizeText(identifier), LogRedaction.SanitizeText(altAsin));
                                     }
@@ -562,9 +561,9 @@ namespace Listenarr.Api.Controllers
                             }
 
                             // Build an OpenLibrary ISBN candidate when we have an ISBN (identifier or metadata/local record).
-                            if (string.IsNullOrWhiteSpace(candidateIsbn) && LooksLikeIsbn(identifier))
+                            if (string.IsNullOrWhiteSpace(candidateIsbn) && ImageIdentifierHelper.LooksLikeIsbn(identifier))
                             {
-                                candidateIsbn = NormalizeIsbn(identifier);
+                                candidateIsbn = ImageIdentifierHelper.NormalizeIsbn(identifier);
                             }
                             if (!string.IsNullOrWhiteSpace(candidateIsbn))
                             {
@@ -627,7 +626,7 @@ namespace Listenarr.Api.Controllers
                                                         var isbnVal = isbnProp?.GetValue(mdObj)?.ToString();
                                                         if (!string.IsNullOrWhiteSpace(isbnVal))
                                                         {
-                                                            candidateIsbn = NormalizeIsbn(isbnVal);
+                                                            candidateIsbn = ImageIdentifierHelper.NormalizeIsbn(isbnVal);
                                                         }
                                                     }
                                                 }
@@ -642,7 +641,7 @@ namespace Listenarr.Api.Controllers
                                                 _logger.LogDebug("Fallback metadata returned no image URL for {Identifier}", LogRedaction.SanitizeText(identifier));
                                             }
                                         }
-                                        catch (Exception ex) when (IsRecoverableImageLookupException(ex))
+                                        catch (Exception ex) when (ImageIdentifierHelper.IsRecoverableImageLookupException(ex))
                                         {
                                             _logger.LogDebug(ex, "Failed to parse fallback metadata envelope for {Identifier}", LogRedaction.SanitizeText(identifier));
                                         }
@@ -656,7 +655,7 @@ namespace Listenarr.Api.Controllers
                                 {
                                     throw;
                                 }
-                                catch (Exception ex) when (IsRecoverableImageLookupException(ex))
+                                catch (Exception ex) when (ImageIdentifierHelper.IsRecoverableImageLookupException(ex))
                                 {
                                     _logger.LogDebug(ex, "Fallback metadata lookup failed for {Identifier}", LogRedaction.SanitizeText(identifier));
                                 }
@@ -683,15 +682,15 @@ namespace Listenarr.Api.Controllers
                             // search OpenLibrary when providers/local metadata do not include ISBN/OLID.
                             if (string.IsNullOrWhiteSpace(candidateIsbn) &&
                                 _openLibraryService != null &&
-                                LooksLikeAsin(identifier) &&
+                                ImageIdentifierHelper.LooksLikeAsin(identifier) &&
                                 !string.IsNullOrWhiteSpace(localTitle))
                             {
                                 try
                                 {
                                     var titleIsbns = await _openLibraryService.GetIsbnsForTitleAsync(localTitle!, localAuthor);
                                     var normalizedTitleIsbns = titleIsbns
-                                        .Select(NormalizeIsbn)
-                                        .Where(v => !string.IsNullOrWhiteSpace(v) && LooksLikeIsbn(v))
+                                        .Select(ImageIdentifierHelper.NormalizeIsbn)
+                                        .Where(v => !string.IsNullOrWhiteSpace(v) && ImageIdentifierHelper.LooksLikeIsbn(v))
                                         .Distinct(StringComparer.OrdinalIgnoreCase)
                                         .Take(5)
                                         .ToList();
@@ -717,7 +716,7 @@ namespace Listenarr.Api.Controllers
                                 {
                                     throw;
                                 }
-                                catch (Exception ex) when (IsRecoverableImageLookupException(ex))
+                                catch (Exception ex) when (ImageIdentifierHelper.IsRecoverableImageLookupException(ex))
                                 {
                                     _logger.LogDebug(ex, "OpenLibrary title/author ISBN fallback failed for {Identifier}", LogRedaction.SanitizeText(identifier));
                                 }
@@ -750,7 +749,7 @@ namespace Listenarr.Api.Controllers
                                     {
                                         throw;
                                     }
-                                    catch (Exception ex) when (IsRecoverableImageLookupException(ex))
+                                    catch (Exception ex) when (ImageIdentifierHelper.IsRecoverableImageLookupException(ex))
                                     {
                                         _logger.LogDebug(ex, "Failed to lookup stored author ASIN for identifier {Identifier}", LogRedaction.SanitizeText(identifier));
                                     }
@@ -770,7 +769,7 @@ namespace Listenarr.Api.Controllers
                                 {
                                     throw;
                                 }
-                                catch (Exception ex) when (IsRecoverableImageLookupException(ex))
+                                catch (Exception ex) when (ImageIdentifierHelper.IsRecoverableImageLookupException(ex))
                                 {
                                     _logger.LogDebug(ex, "Audible author lookup failed for {Identifier}", LogRedaction.SanitizeText(identifier));
                                 }
@@ -796,7 +795,7 @@ namespace Listenarr.Api.Controllers
                                             {
                                                 throw;
                                             }
-                                            catch (Exception ex) when (IsRecoverableImageLookupException(ex))
+                                            catch (Exception ex) when (ImageIdentifierHelper.IsRecoverableImageLookupException(ex))
                                             {
                                                 _logger.LogDebug(ex, "Audnexus GetAuthorAsync failed for ASIN {Identifier}", LogRedaction.SanitizeText(identifier));
                                             }
@@ -826,7 +825,7 @@ namespace Listenarr.Api.Controllers
                                                         {
                                                             throw;
                                                         }
-                                                        catch (Exception ex) when (IsRecoverableImageLookupException(ex))
+                                                        catch (Exception ex) when (ImageIdentifierHelper.IsRecoverableImageLookupException(ex))
                                                         {
                                                             _logger.LogDebug(ex, "Audnexus GetAuthorAsync failed for ASIN {Asin}", LogRedaction.SanitizeText(authorAsin));
                                                         }
@@ -837,7 +836,7 @@ namespace Listenarr.Api.Controllers
                                             {
                                                 throw;
                                             }
-                                            catch (Exception ex) when (IsRecoverableImageLookupException(ex))
+                                            catch (Exception ex) when (ImageIdentifierHelper.IsRecoverableImageLookupException(ex))
                                             {
                                                 _logger.LogDebug(ex, "Failed to lookup author ASINs in database for identifier {Identifier}", LogRedaction.SanitizeText(identifier));
                                             }
@@ -859,7 +858,7 @@ namespace Listenarr.Api.Controllers
                                     {
                                         throw;
                                     }
-                                    catch (Exception ex) when (IsRecoverableImageLookupException(ex))
+                                    catch (Exception ex) when (ImageIdentifierHelper.IsRecoverableImageLookupException(ex))
                                     {
                                         _logger.LogDebug(ex, "Audnexus author search failed for {Identifier}", LogRedaction.SanitizeText(identifier));
                                     }
@@ -890,7 +889,7 @@ namespace Listenarr.Api.Controllers
                                     {
                                         throw;
                                     }
-                                    catch (Exception ex) when (IsRecoverableImageLookupException(ex))
+                                    catch (Exception ex) when (ImageIdentifierHelper.IsRecoverableImageLookupException(ex))
                                     {
                                         _logger.LogWarning(ex, "Failed to download metadata-driven image for {Identifier} from {Url}", LogRedaction.SanitizeText(identifier), LogRedaction.SanitizeText(urlCandidate));
                                     }
@@ -902,7 +901,7 @@ namespace Listenarr.Api.Controllers
                     {
                         throw;
                     }
-                    catch (Exception ex) when (IsRecoverableImageLookupException(ex))
+                    catch (Exception ex) when (ImageIdentifierHelper.IsRecoverableImageLookupException(ex))
                     {
                         _logger.LogDebug(ex, "Metadata-driven image download failed for {Identifier}", LogRedaction.SanitizeText(identifier));
                     }
@@ -926,7 +925,7 @@ namespace Listenarr.Api.Controllers
                 }
 
                 // Build the full file path
-                var fullPath = ResolvePathWithOptionalBase(_effectiveContentRootPath, relativePath);
+                var fullPath = ImageIdentifierHelper.ResolvePathWithOptionalBase(_effectiveContentRootPath, relativePath);
 
                 if (!System.IO.File.Exists(fullPath))
                 {
@@ -944,89 +943,6 @@ namespace Listenarr.Api.Controllers
                 _logger.LogError(ex, "Error retrieving image for identifier: {Identifier}", LogRedaction.SanitizeText(identifier));
                 return StatusCode(500, new { message = "Error retrieving image" });
             }
-        }
-
-        private static bool LooksLikeAsin(string value)
-        {
-            if (string.IsNullOrWhiteSpace(value)) return false;
-            var v = value.Trim();
-            if (v.Length != 10) return false;
-            return v.All(char.IsLetterOrDigit);
-        }
-
-        private static bool LooksLikeIsbn(string value)
-        {
-            var v = NormalizeIsbn(value);
-            if (string.IsNullOrWhiteSpace(v)) return false;
-            if (v.Length == 10)
-            {
-                // ISBN-10 is 9 digits plus a digit or X checksum.
-                for (var i = 0; i < 9; i++)
-                {
-                    if (!char.IsDigit(v[i])) return false;
-                }
-                return char.IsDigit(v[9]) || v[9] == 'X';
-            }
-
-            if (v.Length == 13)
-            {
-                // ISBN-13 is digits only (typically 978/979 prefix).
-                return v.All(char.IsDigit);
-            }
-
-            return false;
-        }
-
-        private static string NormalizeIsbn(string? value)
-        {
-            if (string.IsNullOrWhiteSpace(value)) return string.Empty;
-            return new string(value.Where(ch => char.IsLetterOrDigit(ch)).ToArray()).ToUpperInvariant();
-        }
-
-        private static string? NormalizeOpenLibraryId(string? value)
-        {
-            if (string.IsNullOrWhiteSpace(value)) return null;
-            var v = value.Trim();
-            if (Uri.TryCreate(v, UriKind.Absolute, out var abs))
-            {
-                v = abs.AbsolutePath;
-            }
-
-            v = v.Trim('/');
-            var segments = v.Split('/', StringSplitOptions.RemoveEmptyEntries);
-            var candidate = segments.Length > 0 ? segments[^1] : v;
-            if (string.IsNullOrWhiteSpace(candidate)) return null;
-            // Covers API expects the bare OLID (e.g. OL12345M)
-            return candidate.Trim();
-        }
-
-        private static string? NormalizeHttpImageUrl(string? value)
-        {
-            if (string.IsNullOrWhiteSpace(value)) return null;
-            var trimmed = value.Trim();
-            if (trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
-                trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-            {
-                return trimmed;
-            }
-            return null;
-        }
-
-        private static bool IsRecoverableImageLookupException(Exception ex)
-        {
-            return ex is System.IO.IOException
-                or UnauthorizedAccessException
-                or InvalidOperationException
-                or ArgumentException
-                or FormatException
-                or UriFormatException
-                or System.Net.Http.HttpRequestException
-                or System.Text.Json.JsonException;
-        }
-
-        private static string ResolvePathWithOptionalBase(string? basePath, string candidatePath)
-        {
-            return FileUtils.CombineWithOptionalBase(basePath, candidatePath.Trim());
         }
 
         private bool IsInsidePermittedImageRoot(string fullPath)
@@ -1065,7 +981,7 @@ namespace Listenarr.Api.Controllers
                     return NotFound(new { message = "Image not found" });
                 }
 
-                var fullPath = ResolvePathWithOptionalBase(_effectiveContentRootPath, relativePath);
+                var fullPath = ImageIdentifierHelper.ResolvePathWithOptionalBase(_effectiveContentRootPath, relativePath);
 
                 if (System.IO.File.Exists(fullPath))
                 {
