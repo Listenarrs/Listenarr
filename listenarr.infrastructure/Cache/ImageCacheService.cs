@@ -20,17 +20,15 @@ using AsyncKeyedLock;
 using Listenarr.Application.Security;
 using Listenarr.Application.Interfaces;
 using Microsoft.Extensions.Logging;
-using System.Net;
-using System.Net.Sockets;
 
 namespace Listenarr.Infrastructure.Cache
 {
     public class ImageCacheService : IImageCacheService, IDisposable
     {
-        private const int MaxImageRedirects = 5;
         private const long MaxDownloadedImageBytes = 10L * 1024L * 1024L;
         private readonly ILogger<ImageCacheService> _logger;
         private readonly HttpClient _httpClient;
+        private readonly ImageDownloadValidator _downloadValidator;
         private readonly string _tempCachePath;
         private readonly string _libraryImagePath;
         private readonly string _authorImagePath;
@@ -46,6 +44,7 @@ namespace Listenarr.Infrastructure.Cache
         {
             _logger = logger;
             _httpClient = httpClient;
+            _downloadValidator = new ImageDownloadValidator(_httpClient, _logger);
             _contentRootPath = applicationPathService.ContentRootPath;
             _tempCachePath = applicationPathService.ResolveFromConfig("cache", "images", "temp");
             _libraryImagePath = applicationPathService.ResolveFromConfig("cache", "images", "library");
@@ -69,7 +68,7 @@ namespace Listenarr.Infrastructure.Cache
                 _logger.LogWarning("Cannot cache image: URL or identifier is empty");
                 return null;
             }
-            if (!TryValidateExternalImageUrl(imageUrl, out var validationReason))
+            if (!ImageDownloadValidator.TryValidateExternalImageUrl(imageUrl, out var validationReason))
             {
                 _logger.LogWarning("Blocked image download URL for {Identifier}: {Reason}", LogRedaction.SanitizeText(identifier), LogRedaction.SanitizeText(validationReason));
                 return null;
@@ -151,7 +150,7 @@ namespace Listenarr.Infrastructure.Cache
                 }
 
                 // Download image with manual redirect handling so every redirect target is revalidated.
-                var download = await DownloadWithValidatedRedirectsAsync(imageUrl);
+                var download = await _downloadValidator.DownloadWithValidatedRedirectsAsync(imageUrl);
                 using var response = download.Response;
                 var finalUri = download.FinalUri;
                 response.EnsureSuccessStatusCode();
@@ -608,206 +607,6 @@ namespace Listenarr.Infrastructure.Cache
             }
 
             return bufferStream.ToArray();
-        }
-
-        private async Task<(HttpResponseMessage Response, Uri FinalUri)> DownloadWithValidatedRedirectsAsync(string imageUrl)
-        {
-            if (!Uri.TryCreate(imageUrl, UriKind.Absolute, out var currentUri))
-            {
-                throw new InvalidOperationException("Invalid image URL format");
-            }
-
-            HttpResponseMessage? response = null;
-
-            for (var redirectCount = 0; redirectCount <= MaxImageRedirects; redirectCount++)
-            {
-                if (!TryValidateExternalImageUri(currentUri, out var uriValidationReason))
-                {
-                    throw new InvalidOperationException($"Blocked image URL: {uriValidationReason}");
-                }
-
-                if (!await TryValidateResolvedExternalImageUriAsync(currentUri))
-                {
-                    throw new InvalidOperationException("Blocked image URL: DNS resolved to private or loopback address");
-                }
-
-                response?.Dispose();
-                using var request = new HttpRequestMessage(HttpMethod.Get, currentUri);
-                response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
-
-                if (IsRedirectStatusCode(response.StatusCode))
-                {
-                    var location = response.Headers.Location;
-                    if (location == null)
-                    {
-                        throw new HttpRequestException($"Redirect response from {currentUri} did not include a Location header.");
-                    }
-
-                    var nextUri = location.IsAbsoluteUri ? location : new Uri(currentUri, location);
-                    if (!TryValidateExternalImageUri(nextUri, out var redirectValidationReason))
-                    {
-                        throw new InvalidOperationException($"Blocked redirect target: {redirectValidationReason}");
-                    }
-
-                    currentUri = nextUri;
-                    continue;
-                }
-
-                var finalUri = response.RequestMessage?.RequestUri ?? currentUri;
-                if (!TryValidateExternalImageUri(finalUri, out var finalValidationReason))
-                {
-                    throw new InvalidOperationException($"Blocked final image URL: {finalValidationReason}");
-                }
-
-                if (!await TryValidateResolvedExternalImageUriAsync(finalUri))
-                {
-                    throw new InvalidOperationException("Blocked final image URL: DNS resolved to private or loopback address");
-                }
-
-                return (response, finalUri);
-            }
-
-            response?.Dispose();
-            throw new HttpRequestException($"Too many redirects while downloading image (>{MaxImageRedirects}).");
-        }
-
-        private static bool TryValidateExternalImageUrl(string imageUrl, out string reason)
-        {
-            reason = string.Empty;
-            if (!Uri.TryCreate(imageUrl, UriKind.Absolute, out var uri))
-            {
-                reason = "Invalid URL format";
-                return false;
-            }
-
-            return TryValidateExternalImageUri(uri, out reason);
-        }
-
-        private static bool TryValidateExternalImageUri(Uri uri, out string reason)
-        {
-            reason = string.Empty;
-
-            if (!uri.IsAbsoluteUri)
-            {
-                reason = "URL must be absolute";
-                return false;
-            }
-
-            if (!string.Equals(uri.Scheme, "http", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(uri.Scheme, "https", StringComparison.OrdinalIgnoreCase))
-            {
-                reason = $"Unsupported URL scheme '{uri.Scheme}'";
-                return false;
-            }
-
-            if (!string.IsNullOrWhiteSpace(uri.UserInfo))
-            {
-                reason = "URLs with embedded credentials are not allowed";
-                return false;
-            }
-
-            var host = uri.Host ?? string.Empty;
-            if (string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)
-                || host.EndsWith(".local", StringComparison.OrdinalIgnoreCase)
-                || host.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase))
-            {
-                reason = "Localhost or local-network hostnames are not allowed";
-                return false;
-            }
-
-            if (IPAddress.TryParse(host, out var ip) && IsPrivateOrLoopback(ip))
-            {
-                reason = "Private or loopback IP targets are not allowed";
-                return false;
-            }
-
-            return true;
-        }
-
-        private async Task<bool> TryValidateResolvedExternalImageUriAsync(Uri uri)
-        {
-            try
-            {
-                var host = uri.Host;
-                if (string.IsNullOrWhiteSpace(host))
-                {
-                    return false;
-                }
-
-                if (IPAddress.TryParse(host, out var ip))
-                {
-                    return !IsPrivateOrLoopback(ip);
-                }
-
-                var addresses = await Dns.GetHostAddressesAsync(host);
-                if (addresses == null || addresses.Length == 0)
-                {
-                    _logger.LogWarning("Blocked image URL because DNS resolution returned no addresses: {Host}", LogRedaction.SanitizeText(host));
-                    return false;
-                }
-
-                var privateOrLoopback = addresses.FirstOrDefault(IsPrivateOrLoopback);
-                if (privateOrLoopback != null)
-                {
-                    _logger.LogWarning(
-                        "Blocked image URL because DNS resolved to private/loopback address. Host={Host}, Address={Address}",
-                        LogRedaction.SanitizeText(host),
-                        privateOrLoopback);
-                    return false;
-                }
-
-                return true;
-            }
-            catch (SocketException ex)
-            {
-                _logger.LogWarning(ex, "Blocked image URL because DNS resolution failed for host {Host}", LogRedaction.SanitizeText(uri.Host));
-                return false;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogWarning(ex, "Blocked image URL due to unexpected DNS validation error for host {Host}", LogRedaction.SanitizeText(uri.Host));
-                return false;
-            }
-        }
-
-        private static bool IsRedirectStatusCode(HttpStatusCode statusCode)
-        {
-            return statusCode == HttpStatusCode.Moved
-                || statusCode == HttpStatusCode.Redirect
-                || statusCode == HttpStatusCode.RedirectMethod
-                || statusCode == HttpStatusCode.TemporaryRedirect
-                || (int)statusCode == 308; // Permanent Redirect
-        }
-
-        private static bool IsPrivateOrLoopback(System.Net.IPAddress ip)
-        {
-            if (ip.IsIPv4MappedToIPv6)
-            {
-                ip = ip.MapToIPv4();
-            }
-
-            if (System.Net.IPAddress.IsLoopback(ip)) return true;
-
-            if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
-            {
-                var b = ip.GetAddressBytes();
-                if (b[0] == 10) return true;
-                if (b[0] == 127) return true;
-                if (b[0] == 169 && b[1] == 254) return true;
-                if (b[0] == 172 && b[1] >= 16 && b[1] <= 31) return true;
-                if (b[0] == 192 && b[1] == 168) return true;
-                return false;
-            }
-
-            if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6)
-            {
-                if (ip.IsIPv6LinkLocal || ip.IsIPv6SiteLocal) return true;
-                var b = ip.GetAddressBytes();
-                if (b.Length > 0 && (b[0] & 0xFE) == 0xFC) return true; // fc00::/7
-                return false;
-            }
-
-            return false;
         }
 
         private bool IsValidCachedCoverFile(string filePath, string identifier, string bucket)

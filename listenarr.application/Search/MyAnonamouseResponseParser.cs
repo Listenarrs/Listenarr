@@ -40,86 +40,8 @@ namespace Listenarr.Application.Search
             {
                 logger.LogDebug("Parsing MyAnonamouse response, length: {Length}", jsonResponse.Length);
 
-                JsonDocument? doc = null;
-                JsonElement dataArrayElement = default;
-
-                // Try to parse JSON directly. If that fails, try to extract the first JSON array substring.
-                try
+                if (!MyAnonamouseJsonResultExtractor.TryExtractResultArray(jsonResponse, indexer, logger, out var doc, out var dataArrayElement))
                 {
-                    doc = JsonDocument.Parse(jsonResponse);
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                {
-                    // Attempt to extract a JSON array from an HTML-wrapped response or stray text
-                    var start = jsonResponse.IndexOf('[');
-                    var end = jsonResponse.LastIndexOf(']');
-                    if (start >= 0 && end > start)
-                    {
-                        var sub = jsonResponse.Substring(start, end - start + 1);
-                        try
-                        {
-                            doc = JsonDocument.Parse(sub);
-                        }
-                        catch (Exception parseEx) when (parseEx is not OperationCanceledException && parseEx is not OutOfMemoryException && parseEx is not StackOverflowException)
-                        {
-                            logger.LogWarning(parseEx, "Failed to parse extracted JSON array from MyAnonamouse response");
-                            return results;
-                        }
-                    }
-                    else
-                    {
-                        logger.LogWarning("Unable to locate JSON array in MyAnonamouse response");
-                        return results;
-                    }
-                }
-
-                var root = doc!.RootElement;
-
-                // Support multiple response shapes:
-                // 1) Root is an array of items
-                // 2) Root is an object with property "data" containing array
-                // 3) Root is an object with property "parsed" or "results" or "items"
-                if (root.ValueKind == JsonValueKind.Array)
-                {
-                    dataArrayElement = root;
-                }
-                else if (root.ValueKind == JsonValueKind.Object)
-                {
-                    if (root.TryGetProperty("data", out var tmp) && tmp.ValueKind == JsonValueKind.Array)
-                    {
-                        dataArrayElement = tmp;
-                    }
-                    else if (root.TryGetProperty("parsed", out tmp) && tmp.ValueKind == JsonValueKind.Array)
-                    {
-                        dataArrayElement = tmp;
-                    }
-                    else if (root.TryGetProperty("results", out tmp) && tmp.ValueKind == JsonValueKind.Array)
-                    {
-                        dataArrayElement = tmp;
-                    }
-                    else if (root.TryGetProperty("items", out tmp) && tmp.ValueKind == JsonValueKind.Array)
-                    {
-                        dataArrayElement = tmp;
-                    }
-                    else
-                    {
-                        // As a last resort, try to find the first array value anywhere in the object
-                        foreach (var prop in root.EnumerateObject().Where(prop => prop.Value.ValueKind == JsonValueKind.Array))
-                        {
-                            dataArrayElement = prop.Value;
-                            break;
-                        }
-
-                        if (dataArrayElement.ValueKind == JsonValueKind.Undefined)
-                        {
-                            logger.LogWarning("MyAnonamouse response did not contain an expected array property. Response preview: {Preview}", LogRedaction.RedactText(jsonResponse.Length > 500 ? jsonResponse.Substring(0, 500) + "..." : jsonResponse, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { indexer.ApiKey ?? string.Empty })));
-                            return results;
-                        }
-                    }
-                }
-                else
-                {
-                    logger.LogWarning("Unexpected MyAnonamouse root JSON kind: {Kind}", root.ValueKind);
                     return results;
                 }
 

@@ -717,7 +717,7 @@ namespace Listenarr.Infrastructure.Adapters
                     return result;
                 }
 
-                var outputPath = ResolveTorrentContentPath(savePath, files);
+                var outputPath = QbittorrentImportPathResolver.ResolveContentPath(savePath, files);
                 if (string.IsNullOrEmpty(outputPath))
                 {
                     _logger.LogWarning("Unable to resolve content path from torrent files for hash {Hash}", hash);
@@ -841,7 +841,7 @@ namespace Listenarr.Infrastructure.Adapters
                     return result;
                 }
 
-                var outputPath = ResolveTorrentContentPath(savePath, files);
+                var outputPath = QbittorrentImportPathResolver.ResolveContentPath(savePath, files);
                 if (string.IsNullOrEmpty(outputPath) && string.IsNullOrWhiteSpace(resolvedExistingContentPath))
                 {
                     _logger.LogWarning("Unable to resolve content path from torrent files for hash {Hash}", hash);
@@ -849,7 +849,7 @@ namespace Listenarr.Infrastructure.Adapters
                 }
 
                 // ✅ Apply remote path mapping
-                result.SourceFiles = await TranslateSourceFilesAsync(client.Id, TorrentClientPathMapper.BuildQbittorrentSourceFiles(savePath, files));
+                result.SourceFiles = QbittorrentImportPathResolver.TranslateSourceFiles(QbittorrentImportPathResolver.BuildSourceFiles(savePath, files));
                 if (!string.IsNullOrWhiteSpace(outputPath))
                 {
                     result.ContentPath = outputPath;
@@ -865,33 +865,11 @@ namespace Listenarr.Infrastructure.Adapters
             return result;
         }
 
-        private static List<string> BuildTorrentSourceFiles(
-            string savePath,
-            List<Dictionary<string, JsonElement>> files)
-        {
-            return TorrentClientPathMapper.BuildQbittorrentSourceFiles(savePath, files);
-        }
-
-        private async Task<List<string>> TranslateSourceFilesAsync(string clientId, IEnumerable<string> sourceFiles)
-        {
-            var translated = new List<string>();
-            foreach (var sourceFile in sourceFiles.Where(path => !string.IsNullOrWhiteSpace(path)))
-            {
-                var localPath = sourceFile;
-                translated.Add(localPath);
-            }
-
-            return translated
-                .Where(path => !string.IsNullOrWhiteSpace(path))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-        }
-
         internal static string ResolveTorrentContentPath(
             string savePath,
             List<Dictionary<string, JsonElement>> files)
         {
-            return TorrentClientPathMapper.ResolveQbittorrentContentPath(savePath, files);
+            return QbittorrentImportPathResolver.ResolveContentPath(savePath, files);
         }
 
         public async Task<List<Download>> FetchDownloadsAsync(
