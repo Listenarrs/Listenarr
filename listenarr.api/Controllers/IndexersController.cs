@@ -551,92 +551,25 @@ namespace Listenarr.Api.Controllers
         /// </summary>
         private async Task<IActionResult> TestInternetArchive(Indexer indexer, bool persist)
         {
-            try
+            var result = await _indexerTestWorkflow.TestInternetArchiveAsync(indexer, persist);
+            if (result.Succeeded)
             {
-                // Parse collection from AdditionalSettings
-                string collection = "librivoxaudio"; // Default
-                if (!string.IsNullOrEmpty(indexer.AdditionalSettings))
-                {
-                    try
-                    {
-                        using var doc = JsonDocument.Parse(indexer.AdditionalSettings);
-                        if (doc.RootElement.TryGetProperty("collection", out var collectionProperty))
-                        {
-                            collection = collectionProperty.GetString() ?? "librivoxaudio";
-                        }
-                    }
-                    catch (JsonException ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to parse AdditionalSettings for Internet Archive indexer");
-                    }
-                }
-
-                // Build test URL with minimal query
-                var testUrl = $"https://archive.org/advancedsearch.php?q=collection:{collection}&rows=1&output=json";
-
-                _logger.LogInformation("Testing Internet Archive indexer '{Name}' with collection '{Collection}'",
-                    LogRedaction.SanitizeText(indexer.Name), LogRedaction.SanitizeText(collection));
-
-                // Make HTTP request
-                using var response = await SendValidatedAsync(
-                    currentUri => new HttpRequestMessage(HttpMethod.Get, currentUri),
-                    testUrl);
-                response.EnsureSuccessStatusCode();
-
-                // Parse JSON response
-                var content = await response.Content.ReadAsStringAsync();
-                using var jsonDoc = JsonDocument.Parse(content);
-
-                // Validate response structure
-                if (!jsonDoc.RootElement.TryGetProperty("response", out var responseProperty))
-                {
-                    throw new InvalidOperationException("Invalid response format: missing 'response' property");
-                }
-
-                if (!responseProperty.TryGetProperty("docs", out var docsProperty))
-                {
-                    throw new InvalidOperationException("Invalid response format: missing 'docs' property");
-                }
-
-                // Update indexer with success
-                await SaveTestResultAsync(indexer, persist, true, null);
-
-                _logger.LogInformation("Internet Archive indexer '{Name}' test succeeded for collection '{Collection}'",
-                    LogRedaction.SanitizeText(indexer.Name), LogRedaction.SanitizeText(collection));
-
                 return Ok(new
                 {
                     success = true,
-                    message = $"Internet Archive connection successful for collection '{collection}'",
-                    collection = collection,
+                    message = result.Message,
+                    collection = result.Collection,
                     indexer = RedactIndexerForCaller(indexer)
                 });
             }
-            catch (HttpRequestException ex)
+
+            return BadRequest(new
             {
-                _logger.LogWarning(ex, "Internet Archive indexer '{Name}' test failed", LogRedaction.SanitizeText(indexer.Name));
-                return await BuildIndexerTestBadRequestAsync(indexer, persist, "Internet Archive test failed", ex);
-            }
-            catch (TaskCanceledException ex)
-            {
-                _logger.LogWarning(ex, "Internet Archive indexer '{Name}' test failed", LogRedaction.SanitizeText(indexer.Name));
-                return await BuildIndexerTestBadRequestAsync(indexer, persist, "Internet Archive test failed", ex);
-            }
-            catch (JsonException ex)
-            {
-                _logger.LogWarning(ex, "Internet Archive indexer '{Name}' test failed", LogRedaction.SanitizeText(indexer.Name));
-                return await BuildIndexerTestBadRequestAsync(indexer, persist, "Internet Archive test failed", ex);
-            }
-            catch (UriFormatException ex)
-            {
-                _logger.LogWarning(ex, "Internet Archive indexer '{Name}' test failed", LogRedaction.SanitizeText(indexer.Name));
-                return await BuildIndexerTestBadRequestAsync(indexer, persist, "Internet Archive test failed", ex);
-            }
-            catch (InvalidOperationException ex)
-            {
-                _logger.LogWarning(ex, "Internet Archive indexer '{Name}' test failed", LogRedaction.SanitizeText(indexer.Name));
-                return await BuildIndexerTestBadRequestAsync(indexer, persist, "Internet Archive test failed", ex);
-            }
+                success = false,
+                message = result.Message,
+                error = result.Error,
+                indexer = RedactIndexerForCaller(indexer)
+            });
         }
 
         /// <summary>
@@ -644,171 +577,23 @@ namespace Listenarr.Api.Controllers
         /// </summary>
         private async Task<IActionResult> TestMyAnonamouse(Indexer indexer, bool persist)
         {
-            try
+            var result = await _indexerTestWorkflow.TestMyAnonamouseAsync(indexer, persist);
+            if (result.Succeeded)
             {
-                // Parse mam_id from AdditionalSettings
-                string mamId = string.Empty;
-
-                if (!string.IsNullOrEmpty(indexer.AdditionalSettings))
-                {
-                    try
-                    {
-                        using var doc = JsonDocument.Parse(indexer.AdditionalSettings);
-                        if (doc.RootElement.TryGetProperty("mam_id", out var mamIdProperty))
-                        {
-                            mamId = mamIdProperty.GetString() ?? string.Empty;
-                        }
-                    }
-                    catch (JsonException ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to parse AdditionalSettings for MyAnonamouse indexer");
-                    }
-                }
-
-                if (string.IsNullOrEmpty(mamId))
-                {
-                    throw new InvalidOperationException("MAM ID is required for MyAnonamouse");
-                }
-
-                // Build test URL (mam_id is sent as a cookie)
-                var testUrl = $"https://www.myanonamouse.net/tor/js/loadSearchJSONbasic.php";
-
-                _logger.LogInformation("Testing MyAnonamouse indexer '{Name}' with MAM ID '{MamId}'",
-                    LogRedaction.SanitizeText(indexer.Name), LogRedaction.RedactText(mamId, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { mamId })));
-
-                // Create request with mam_id as cookie
-                using var request = new HttpRequestMessage(HttpMethod.Post, testUrl);
-
-                // Add browser-like headers to avoid "invalid request" errors
-                request.Headers.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
-                request.Headers.Accept.ParseAdd("application/json, text/javascript, */*; q=0.01");
-                request.Headers.AcceptLanguage.ParseAdd("en-US,en;q=0.9");
-                request.Headers.Referrer = new Uri("https://www.myanonamouse.net/");
-
-                // Create form data (without mam_id since it's now in the cookie)
-                var formData = new Dictionary<string, string>
-                {
-                    ["tor[text]"] = "test",
-                    ["tor[srchIn][]"] = "title",
-                    ["tor[searchType]"] = "all",
-                    ["tor[searchIn]"] = "torrents",
-                    ["tor[cat][]"] = "0",
-                    ["tor[browseFlagsHideVsShow]"] = "0",
-                    ["tor[startDate]"] = "",
-                    ["tor[endDate]"] = "",
-                    ["tor[hash]"] = "",
-                    ["tor[sortType]"] = "default",
-                    ["tor[startNumber]"] = "0",
-                    ["perpage"] = "1",
-                    ["thumbnail"] = "false",
-                    ["dlLink"] = "",
-                    ["description"] = ""
-                };
-
-                var formContent = new FormUrlEncodedContent(formData);
-                request.Content = formContent;
-
-                // Add mam_id as a cookie for authentication (bind cookie to the indexer's base host)
-                var cookieContainer = new System.Net.CookieContainer();
-                var baseUrl = indexer.Url.TrimEnd('/');
-                var baseUri = new Uri(baseUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? baseUrl : "https://" + baseUrl);
-                cookieContainer.Add(baseUri, new System.Net.Cookie("mam_id", mamId));
-                try
-                {
-                    var host = baseUri.Host;
-                    if (!host.StartsWith("www.", StringComparison.OrdinalIgnoreCase))
-                    {
-                        var wwwUri = new Uri($"{baseUri.Scheme}://www.{host}");
-                        cookieContainer.Add(wwwUri, new System.Net.Cookie("mam_id", mamId));
-                    }
-                }
-                catch (UriFormatException ex)
-                {
-                    _logger.LogDebug(ex, "Failed to add www host alias cookie for MyAnonamouse test request to {Host}", baseUri.Host);
-                }
-                catch (System.Net.CookieException ex)
-                {
-                    _logger.LogDebug(ex, "Failed to add www host alias cookie for MyAnonamouse test request to {Host}", baseUri.Host);
-                }
-
-                // Create HttpClientHandler with cookies
-                var handler = new HttpClientHandler
-                {
-                    CookieContainer = cookieContainer,
-                    UseCookies = true
-                };
-
-                using var cookieClient = new HttpClient(handler);
-                cookieClient.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
-                cookieClient.DefaultRequestHeaders.Accept.ParseAdd("application/json, text/javascript, */*; q=0.01");
-                cookieClient.DefaultRequestHeaders.AcceptLanguage.ParseAdd("en-US,en;q=0.9");
-                cookieClient.DefaultRequestHeaders.Referrer = new Uri("https://www.myanonamouse.net/");
-
-                // Make HTTP request
-                using var response = await cookieClient.SendAsync(request);
-                response.EnsureSuccessStatusCode();
-
-                // Parse JSON response
-                var content = await response.Content.ReadAsStringAsync();
-                using var jsonDoc = JsonDocument.Parse(content);
-
-                // Validate response (MyAnonamouse returns JSON with data array)
-                if (!jsonDoc.RootElement.TryGetProperty("data", out _))
-                {
-                    throw new InvalidOperationException("Invalid response format: missing 'data' property");
-                }
-
-                // Update indexer with success
-                await SaveTestResultAsync(indexer, persist, true, null);
-
-                _logger.LogInformation("MyAnonamouse indexer '{Name}' test succeeded with MAM ID '{MamId}'",
-                    LogRedaction.SanitizeText(indexer.Name), LogRedaction.RedactText(mamId, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { mamId })));
-
                 return Ok(new
                 {
                     success = true,
-                    message = $"MyAnonamouse authentication successful with MAM ID '{mamId}'",
-                    mam_id = RedactMamIdForCaller(mamId),
+                    message = result.Message,
+                    mam_id = RedactMamIdForCaller(result.MamId),
                     indexer = RedactIndexerForCaller(indexer)
                 });
             }
-            catch (HttpRequestException ex)
-            {
-                return await BuildMamTestFailureResultAsync(indexer, persist, ex);
-            }
-            catch (TaskCanceledException ex)
-            {
-                return await BuildMamTestFailureResultAsync(indexer, persist, ex);
-            }
-            catch (UriFormatException ex)
-            {
-                return await BuildMamTestFailureResultAsync(indexer, persist, ex);
-            }
-            catch (System.Net.CookieException ex)
-            {
-                return await BuildMamTestFailureResultAsync(indexer, persist, ex);
-            }
-            catch (JsonException ex)
-            {
-                return await BuildMamTestFailureResultAsync(indexer, persist, ex);
-            }
-            catch (InvalidOperationException ex)
-            {
-                return await BuildMamTestFailureResultAsync(indexer, persist, ex);
-            }
-        }
-
-        private async Task<IActionResult> BuildMamTestFailureResultAsync(Indexer indexer, bool persist, Exception ex)
-        {
-            await SaveTestResultAsync(indexer, persist, false, ex.Message);
-
-            _logger.LogWarning(ex, "MyAnonamouse indexer '{Name}' test failed", LogRedaction.SanitizeText(indexer.Name));
 
             return BadRequest(new
             {
                 success = false,
-                message = "MyAnonamouse test failed",
-                error = ex.Message,
+                message = result.Message,
+                error = result.Error,
                 indexer = RedactIndexerForCaller(indexer)
             });
         }

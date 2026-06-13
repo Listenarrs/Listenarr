@@ -44,6 +44,7 @@ namespace Listenarr.Application.Search
         private readonly IndexerSearchWorkflow _indexerSearchWorkflow;
         private readonly MetadataSourceCatalog _metadataSourceCatalog;
         private readonly AudibleAuthorPageCollector _audibleAuthorPageCollector;
+        private readonly AudibleSimpleLookupWorkflow _audibleSimpleLookupWorkflow;
 
         public SearchService(
             HttpClient httpClient,
@@ -65,7 +66,8 @@ namespace Listenarr.Application.Search
             IHtmlTextExtractor? htmlTextExtractor = null,
             IndexerSearchWorkflow? indexerSearchWorkflow = null,
             MetadataSourceCatalog? metadataSourceCatalog = null,
-            AudibleAuthorPageCollector? audibleAuthorPageCollector = null)
+            AudibleAuthorPageCollector? audibleAuthorPageCollector = null,
+            AudibleSimpleLookupWorkflow? audibleSimpleLookupWorkflow = null)
         {
             _configurationService = configurationService;
             _logger = logger;
@@ -92,6 +94,9 @@ namespace Listenarr.Application.Search
             _audibleAuthorPageCollector = audibleAuthorPageCollector ?? new AudibleAuthorPageCollector(
                 audibleService,
                 NullLogger<AudibleAuthorPageCollector>.Instance);
+            _audibleSimpleLookupWorkflow = audibleSimpleLookupWorkflow ?? new AudibleSimpleLookupWorkflow(
+                audibleService,
+                metadataConverters);
         }
 
         public async Task<List<SearchResult>> SearchAsync(string query, string? category = null, List<string>? apiIds = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false)
@@ -186,41 +191,16 @@ namespace Listenarr.Application.Search
                 {
                     // ASIN case is handled separately above via ASIN handler
 
-                    // ISBN
-                    if (searchType == "ISBN" && !string.IsNullOrEmpty(isbnVal))
+                    var simpleAudibleResults = await _audibleSimpleLookupWorkflow.TrySearchAsync(
+                        searchType,
+                        isbnVal,
+                        titleVal,
+                        actualQuery,
+                        region,
+                        language);
+                    if (simpleAudibleResults?.Any() == true)
                     {
-                        var amRes = await _audibleService.SearchByIsbnAsync(isbnVal, 1, 50, region, language);
-                        if (amRes?.Results != null && amRes.Results.Any())
-                        {
-                            var converted = new List<SearchResult>();
-                            var amFiltered = amRes.Results.AsEnumerable();
-                            if (!string.IsNullOrWhiteSpace(language)) amFiltered = amFiltered.Where(b => !string.IsNullOrWhiteSpace(b.Language) && string.Equals(b.Language, language, StringComparison.OrdinalIgnoreCase));
-                            foreach (var book in amFiltered.Where(book => !string.IsNullOrWhiteSpace(book.Asin)))
-                            {
-                                var bookResp = new AudibleBookResponse
-                                {
-                                    Asin = book.Asin,
-                                    Title = book.Title,
-                                    Subtitle = book.Subtitle,
-                                    Authors = book.Authors,
-                                    ImageUrl = book.ImageUrl,
-                                    Language = book.Language,
-                                    BookFormat = book.BookFormat,
-                                    Genres = book.Genres,
-                                    Series = book.Series,
-                                    Publisher = book.Publisher,
-                                    Narrators = book.Narrators,
-                                    ReleaseDate = book.ReleaseDate,
-                                    Isbn = book.Isbn
-                                };
-                                var meta = _metadataConverters.ConvertAudibleToMetadata(bookResp, book.Asin!, "Audible");
-                                var sr = await _metadataConverters.ConvertMetadataToSearchResultAsync(meta, book.Asin!);
-                                sr.IsEnriched = true;
-                                sr.MetadataSource = "Audible";
-                                converted.Add(sr);
-                            }
-                            if (converted.Any()) return SearchResultConverters.ToMetadataList(converted);
-                        }
+                        return simpleAudibleResults;
                     }
 
                     // AUTHOR-only
@@ -372,36 +352,6 @@ namespace Listenarr.Application.Search
                         }
                     }
 
-                    // TITLE-only
-                    if (searchType == "TITLE" && !string.IsNullOrEmpty(titleVal))
-                    {
-                        var titleRes = await _audibleService.SearchByTitleAsync(titleVal, 1, 50, region, language);
-                        if (titleRes?.Results != null && titleRes.Results.Any())
-                        {
-                            var titleFiltered = titleRes.Results.AsEnumerable();
-                            if (!string.IsNullOrWhiteSpace(language)) titleFiltered = titleFiltered.Where(b => string.IsNullOrWhiteSpace(b.Language) || string.Equals(b.Language, language, StringComparison.OrdinalIgnoreCase));
-                            var converted = await AudibleSearchResultMapper.ConvertToSearchResultsAsync(
-                                titleFiltered,
-                                _metadataConverters);
-                            if (converted.Any()) return SearchResultConverters.ToMetadataList(converted);
-                        }
-
-                    }
-
-                    // General/simple query - try audible search endpoint first
-                    if (string.IsNullOrWhiteSpace(searchType) && !string.IsNullOrWhiteSpace(actualQuery))
-                    {
-                        var simpleRes = await _audibleService.SearchBooksAsync(actualQuery, 1, 50, region, language);
-                        if (simpleRes?.Results != null && simpleRes.Results.Any())
-                        {
-                            var simpleFiltered = simpleRes.Results.AsEnumerable();
-                            if (!string.IsNullOrWhiteSpace(language)) simpleFiltered = simpleFiltered.Where(b => string.IsNullOrWhiteSpace(b.Language) || string.Equals(b.Language, language, StringComparison.OrdinalIgnoreCase));
-                            var converted = await AudibleSearchResultMapper.ConvertToSearchResultsAsync(
-                                simpleFiltered,
-                                _metadataConverters);
-                            if (converted.Any()) return SearchResultConverters.ToMetadataList(converted);
-                        }
-                    }
                 }
                 catch (Exception exAudibleFirst) when (exAudibleFirst is not OperationCanceledException && exAudibleFirst is not OutOfMemoryException && exAudibleFirst is not StackOverflowException)
                 {

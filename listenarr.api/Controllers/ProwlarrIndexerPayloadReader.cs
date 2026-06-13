@@ -214,7 +214,7 @@ namespace Listenarr.Api.Controllers
         }
     }
 
-    internal sealed record ParsedProwlarrIndexerPayload(
+    public sealed record ParsedProwlarrIndexerPayload(
         string Name,
         string Implementation,
         string BaseUrl,

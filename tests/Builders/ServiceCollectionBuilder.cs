@@ -203,7 +203,9 @@ namespace Listenarr.Tests.Builders
             services.AddSingleton<SearchResponseMapper>();
             services.AddSingleton<ImagePlaceholderResolver>();
             services.AddSingleton<IndexerTestWorkflow>();
+            services.AddSingleton<ProwlarrIndexerUpsertWorkflow>();
             services.AddSingleton<AudibleAuthorPageCollector>();
+            services.AddSingleton<AudibleSimpleLookupWorkflow>();
             services.AddSingleton<DownloadService>();
             services.AddSingleton<MoveBackgroundService>();
             services.AddSingleton<MoveQueueService>();

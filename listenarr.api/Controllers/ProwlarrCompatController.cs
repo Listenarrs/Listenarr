@@ -54,6 +54,7 @@ namespace Listenarr.Api.Controllers
         private readonly IToastService _toastService;
         private readonly IStartupConfigService _startupConfigService;
         private readonly IApplicationVersionService _applicationVersionService;
+        private readonly ProwlarrIndexerUpsertWorkflow _indexerUpsertWorkflow;
 
         // Suppress update toasts for indexers that were created within this window (in seconds)
         private const int NotificationSuppressionSeconds = 5;
@@ -112,7 +113,8 @@ namespace Listenarr.Api.Controllers
             IRealtimeClientRegistry realtimeClientRegistry,
             IToastService toastService,
             IStartupConfigService startupConfigService,
-            IApplicationVersionService applicationVersionService)
+            IApplicationVersionService applicationVersionService,
+            ProwlarrIndexerUpsertWorkflow? indexerUpsertWorkflow = null)
         {
             _logger = logger;
             _indexerRepository = indexerRepository;
@@ -121,6 +123,9 @@ namespace Listenarr.Api.Controllers
             _toastService = toastService;
             _startupConfigService = startupConfigService;
             _applicationVersionService = applicationVersionService;
+            _indexerUpsertWorkflow = indexerUpsertWorkflow ?? new ProwlarrIndexerUpsertWorkflow(
+                indexerRepository,
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<ProwlarrIndexerUpsertWorkflow>.Instance);
         }
 
         private string GetApplicationVersion()
@@ -433,87 +438,21 @@ namespace Listenarr.Api.Controllers
                     System.Diagnostics.Debug.WriteLine($"ProwlarrCompatController payload logging failed (PUT indexer): {ex.Message}");
                 }
 
-                var indexer = await _indexerRepository.GetByIdAsync(id);
-                var created = false;
-                if (indexer == null)
-                {
-                    var parsed = ProwlarrIndexerPayloadReader.ParseForPut(payload);
-                    var normalized = NormalizeIndexerUrl(parsed.Url);
-                    var allIndexers = await _indexerRepository.GetAllAsync();
-                    var existing = allIndexers.FirstOrDefault(i => NormalizeIndexerUrl(i.Url) == normalized && (i.ApiKey ?? string.Empty) == (parsed.ApiKey ?? string.Empty));
-                    if (existing != null)
-                    {
-                        indexer = await _indexerRepository.GetByIdAsync(existing.Id);
-                    }
-                    else
-                    {
-                        // Not found: create new indexer entry from parsed payload (upsert behavior)
-                        indexer = new Indexer
-                        {
-                            Name = parsed.Name,
-                            Implementation = parsed.Implementation,
-                            Url = parsed.Url,
-                            ApiKey = string.IsNullOrEmpty(parsed.ApiKey) ? null : parsed.ApiKey,
-                            Categories = parsed.Categories ?? string.Empty,
-                            CreatedAt = DateTime.UtcNow,
-                            UpdatedAt = DateTime.UtcNow,
-                            IsEnabled = true,
-                            Tags = string.Empty,
-                            AdditionalSettings = string.Empty
-                        };
-
-                        var implLower = (indexer.Implementation ?? string.Empty).ToLowerInvariant();
-                        indexer.Type = implLower.Contains("newznab") ? "Usenet" : (implLower.Contains("torznab") ? "Torrent" : "Custom");
-
-                        indexer = await _indexerRepository.AddAsync(indexer);
-                        created = true;
-
-                        _logger?.LogInformation("Prowlarr: Created indexer (upsert from PUT) (name={Name}, url={Url}, apiKeyPresent={HasApiKey})", indexer.Name, indexer.Url, !string.IsNullOrEmpty(indexer.ApiKey));
-
-                        // NOTE: Do not broadcast notifications here. We will broadcast once at the end of the handler
-                        // after dedupe to avoid duplicate notifications when concurrent PUTs create duplicate entries.
-                    }
-                }
-
-                // Defensive: indexer should be non-null after upsert logic; if it is still null, return an error instead of throwing
-                if (indexer == null)
-                {
-                    _logger?.LogError("Prowlarr: Indexer was null after upsert logic for id={Id}", id);
-                    return StatusCode(500, new { error = "Failed to locate or create indexer" });
-                }
-
                 if (payload.ValueKind != System.Text.Json.JsonValueKind.Object)
                 {
                     return BadRequest(new { message = "Expected JSON object for indexer update" });
                 }
 
-                var update = ProwlarrIndexerPayloadReader.ParseForPut(payload);
-                if (!string.IsNullOrEmpty(update.Name)) indexer.Name = update.Name;
-                if (!string.IsNullOrEmpty(update.Implementation)) indexer.Implementation = update.Implementation;
-                if (!string.IsNullOrEmpty(update.Url)) indexer.Url = update.Url;
-                indexer.ApiKey = string.IsNullOrEmpty(update.ApiKey) ? null : update.ApiKey;
-                indexer.Categories = update.Categories ?? indexer.Categories;
-                indexer.UpdatedAt = DateTime.UtcNow;
-
-                await _indexerRepository.UpdateAsync(indexer);
-
-                // After saving, ensure we dedupe any other entries with same normalized URL + ApiKey (concurrent upsert safety)
-                try
-                {
-                    var normalizedUrl = NormalizeIndexerUrl(indexer.Url);
-                    var apiKeyCompare = indexer.ApiKey ?? string.Empty;
-                    await CleanupDuplicateIndexersAsync(normalizedUrl, apiKeyCompare);
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                {
-                    _logger?.LogWarning(ex, "Failed to dedupe indexers after update for {Id}", indexer.Id);
-                }
+                var upsertResult = await _indexerUpsertWorkflow.UpsertFromPutAsync(
+                    id,
+                    ProwlarrIndexerPayloadReader.ParseForPut(payload));
+                var indexer = upsertResult.Indexer;
+                var created = upsertResult.Created;
 
                 // Notify clients (compute whether the created indexer still exists after dedupe to avoid duplicate notifications)
                 try
                 {
-                    var stillExists = (await _indexerRepository.GetByIdAsync(indexer.Id)) != null;
-                    var createdForBroadcast = (created && stillExists) ? 1 : 0;
+                    var createdForBroadcast = (created && upsertResult.StillExists) ? 1 : 0;
                     await _hubBroadcaster.BroadcastAsync(RealtimeHubTarget.Settings, "IndexersUpdated", new { created = createdForBroadcast, skipped = 0, indexers = new[] { new { id = indexer.Id, name = indexer.Name, baseUrl = indexer.Url } } });
 
                     // Determine toast message. If the indexer was created very recently (by a prior POST or PUT),
@@ -606,34 +545,6 @@ namespace Listenarr.Api.Controllers
             }
         }
 
-        // Remove duplicate persisted indexers that share the same normalized URL + ApiKey.
-        // Keeps the earliest created (lowest Id) and removes the rest.
-        private async Task CleanupDuplicateIndexersAsync(string normalizedUrl, string apiKey)
-        {
-            try
-            {
-                var all = await _indexerRepository.GetAllAsync();
-                var duplicates = all
-                    .Where(i => NormalizeIndexerUrl(i.Url) == normalizedUrl && (i.ApiKey ?? string.Empty) == apiKey)
-                    .OrderBy(i => i.Id)
-                    .ToList();
-
-                if (duplicates.Count <= 1) return;
-
-                // Keep the first, remove the rest
-                var remove = duplicates.Skip(1).ToList();
-
-                _logger?.LogInformation("Dedupe: Removing {Count} duplicate indexer(s) for url={Url}", remove.Count, normalizedUrl);
-
-                foreach (var r in remove)
-                    await _indexerRepository.DeleteAsync(r.Id);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger?.LogWarning(ex, "Failed to cleanup duplicate indexers for {Url}", normalizedUrl);
-            }
-        }
-
         /// <summary>
         /// POST /api/v1/indexers
         /// Accepts an array of indexers from Prowlarr. Expects a JSON array; returns 200 OK if received.
@@ -671,68 +582,20 @@ namespace Listenarr.Api.Controllers
                 return BadRequest(new { message = "Expected JSON array of indexers" });
             }
 
-            var created = 0;
-            var skipped = 0;
-            var createdIndexers = new List<Indexer>();
-            var existingIndexers = await _indexerRepository.GetAllAsync();
-
-            foreach (var item in payload.EnumerateArray().Where(item => item.ValueKind == System.Text.Json.JsonValueKind.Object))
+            var importResult = await _indexerUpsertWorkflow.ImportManyAsync(
+                payload.EnumerateArray()
+                    .Where(item => item.ValueKind == System.Text.Json.JsonValueKind.Object)
+                    .Select(ProwlarrIndexerPayloadReader.ParseForBulkPost));
+            var created = importResult.Created;
+            var skipped = importResult.Skipped;
+            var createdIndexers = importResult.CreatedIndexers;
+            foreach (var createdIndexer in createdIndexers)
             {
-                var parsed = ProwlarrIndexerPayloadReader.ParseForBulkPost(item);
-
-                // Deduplicate by normalized URL + ApiKey (normalizes trailing slash and trailing /api)
-                var normalizedUrl = NormalizeIndexerUrl(parsed.Url);
-                var exists = existingIndexers.FirstOrDefault(i => NormalizeIndexerUrl(i.Url) == normalizedUrl && (i.ApiKey ?? string.Empty) == (parsed.ApiKey ?? string.Empty));
-                if (exists != null)
-                {
-                    skipped++;
-                    _logger?.LogInformation("Prowlarr: Skipping existing indexer (name={Name}, url={Url}, apiKeyPresent={HasApiKey})", parsed.Name, exists.Url, !string.IsNullOrEmpty(parsed.ApiKey));
-                    continue;
-                }
-
-                var indexer = new Indexer
-                {
-                    Name = parsed.Name,
-                    Implementation = parsed.Implementation,
-                    Url = parsed.Url,
-                    ApiKey = string.IsNullOrEmpty(parsed.ApiKey) ? null : parsed.ApiKey,
-                    Categories = parsed.Categories ?? string.Empty,
-                    Tags = string.Empty,
-                    AdditionalSettings = string.Empty,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow,
-                    IsEnabled = true
-                };
-
-                // Guess Type from implementation
-                var implLower = (parsed.Implementation ?? string.Empty).ToLowerInvariant();
-                indexer.Type = implLower.Contains("newznab") ? "Usenet" : (implLower.Contains("torznab") ? "Torrent" : "Custom");
-
-                indexer = await _indexerRepository.AddAsync(indexer);
-                existingIndexers.Add(indexer);
-                created++;
-                createdIndexers.Add(indexer);
-                _logger?.LogInformation("Prowlarr: Created indexer (name={Name}, url={Url}, apiKeyPresent={HasApiKey})", indexer.Name, indexer.Url, !string.IsNullOrEmpty(indexer.ApiKey));
+                _logger?.LogInformation("Prowlarr: Created indexer (name={Name}, url={Url}, apiKeyPresent={HasApiKey})", createdIndexer.Name, createdIndexer.Url, !string.IsNullOrEmpty(createdIndexer.ApiKey));
             }
 
             if (created > 0)
             {
-
-                // Cleanup any duplicates caused by concurrent upserts (dedupe by normalized URL + ApiKey)
-                foreach (var ci in createdIndexers.ToList())
-                {
-                    try
-                    {
-                        var normalizedUrl = NormalizeIndexerUrl(ci.Url);
-                        var apiKey = ci.ApiKey ?? string.Empty;
-                        await CleanupDuplicateIndexersAsync(normalizedUrl, apiKey);
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                    {
-                        _logger?.LogWarning(ex, "Failed to dedupe indexers for {Name}", ci.Name);
-                    }
-                }
-
                 // Notify connected clients that indexers changed so the UI can refresh
                 try
                 {
@@ -955,33 +818,6 @@ namespace Listenarr.Api.Controllers
         {
             // Delegate to singular route handler to avoid duplication and ensure consistent output
             return GetIndexerSchema();
-        }
-
-        private static string NormalizeIndexerUrl(string url)
-        {
-            if (string.IsNullOrWhiteSpace(url)) return string.Empty;
-
-            try
-            {
-                var uri = new Uri(url);
-                var path = uri.AbsolutePath ?? string.Empty;
-                // Trim trailing slash
-                path = path.TrimEnd('/');
-
-                // Remove trailing /api if present
-                if (path.EndsWith("/api", StringComparison.OrdinalIgnoreCase))
-                {
-                    path = path.Substring(0, path.Length - 4);
-                }
-
-                var port = uri.IsDefaultPort ? string.Empty : ":" + uri.Port;
-                var normalized = $"{uri.Scheme}://{uri.Host}{port}{path}";
-                return normalized.TrimEnd('/');
-            }
-            catch (Exception caughtEx_6) when (caughtEx_6 is not OperationCanceledException && caughtEx_6 is not OutOfMemoryException && caughtEx_6 is not StackOverflowException)
-            {
-                return url.TrimEnd('/');
-            }
         }
 
         // DTOs
