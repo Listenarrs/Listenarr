@@ -516,11 +516,11 @@ namespace Listenarr.Application.Downloads
                 if (completedTask != pollTask)
                 {
                     timeoutCts.Cancel();
-                    ObserveFaultedPollTask(pollTask, client);
+                    DownloadQueueDiagnostics.ObserveFaultedPollTask(pollTask, client, logger);
 
                     stopwatch.Stop();
-                    TryIncrementMetric("download.queue.client.poll.timeout");
-                    TryTimingMetric("download.queue.client.poll.duration", stopwatch.Elapsed);
+                    DownloadQueueDiagnostics.TryIncrementMetric(metrics, "download.queue.client.poll.timeout");
+                    DownloadQueueDiagnostics.TryTimingMetric(metrics, "download.queue.client.poll.duration", stopwatch.Elapsed);
                     return BuildFallbackQueueResult(client, "timeout");
                 }
 
@@ -529,7 +529,7 @@ namespace Listenarr.Application.Downloads
                 var refreshedAtUtc = DateTimeOffset.UtcNow;
 
                 CacheClientQueueSnapshot(client, clientQueue, refreshedAtUtc);
-                TryTimingMetric("download.queue.client.poll.duration", stopwatch.Elapsed);
+                DownloadQueueDiagnostics.TryTimingMetric(metrics, "download.queue.client.poll.duration", stopwatch.Elapsed);
 
                 return new ClientQueueFetchResult(
                     client,
@@ -544,8 +544,8 @@ namespace Listenarr.Application.Downloads
             catch (OperationCanceledException) when (!timeoutCts.IsCancellationRequested)
             {
                 stopwatch.Stop();
-                TryIncrementMetric("download.queue.client.poll.failure");
-                TryTimingMetric("download.queue.client.poll.duration", stopwatch.Elapsed);
+                DownloadQueueDiagnostics.TryIncrementMetric(metrics, "download.queue.client.poll.failure");
+                DownloadQueueDiagnostics.TryTimingMetric(metrics, "download.queue.client.poll.duration", stopwatch.Elapsed);
 
                 logger.LogWarning("Queue poll for client {ClientName} was canceled before timeout; using fallback behavior", client.Name ?? client.Id);
                 return BuildFallbackQueueResult(client, "canceled");
@@ -553,8 +553,8 @@ namespace Listenarr.Application.Downloads
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
                 stopwatch.Stop();
-                TryIncrementMetric("download.queue.client.poll.failure");
-                TryTimingMetric("download.queue.client.poll.duration", stopwatch.Elapsed);
+                DownloadQueueDiagnostics.TryIncrementMetric(metrics, "download.queue.client.poll.failure");
+                DownloadQueueDiagnostics.TryTimingMetric(metrics, "download.queue.client.poll.duration", stopwatch.Elapsed);
 
                 logger.LogWarning(ex, "Error getting queue snapshot from download client {ClientName}", client.Name ?? client.Id);
                 return BuildFallbackQueueResult(client, "error");
@@ -569,7 +569,7 @@ namespace Listenarr.Application.Downloads
                 var snapshotAge = DateTimeOffset.UtcNow - cachedSnapshot.RefreshedAtUtc;
                 if (snapshotAge <= _staleSnapshotMaxAge)
                 {
-                    TryIncrementMetric("download.queue.client.snapshot.fallback");
+                    DownloadQueueDiagnostics.TryIncrementMetric(metrics, "download.queue.client.snapshot.fallback");
 
                     return new ClientQueueFetchResult(
                         client,
@@ -607,42 +607,6 @@ namespace Listenarr.Application.Downloads
                 {
                     AbsoluteExpirationRelativeToNow = _staleSnapshotMaxAge
                 });
-        }
-
-        private void ObserveFaultedPollTask(Task<List<QueueItem>> pollTask, DownloadClientConfiguration client)
-        {
-            _ = pollTask.ContinueWith(task =>
-            {
-                if (task.Exception != null)
-                {
-                    logger.LogDebug(task.Exception, "Observed late poll failure after timeout for client {ClientName}", client.Name ?? client.Id);
-                    _ = task.Exception;
-                }
-            }, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
-        }
-
-        private void TryIncrementMetric(string metricName, double value = 1)
-        {
-            try
-            {
-                metrics.Increment(metricName, value);
-            }
-            catch (Exception caughtEx) when (caughtEx is not OperationCanceledException && caughtEx is not OutOfMemoryException && caughtEx is not StackOverflowException)
-            {
-                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
-            }
-        }
-
-        private void TryTimingMetric(string metricName, TimeSpan duration)
-        {
-            try
-            {
-                metrics.Timing(metricName, duration);
-            }
-            catch (Exception caughtEx) when (caughtEx is not OperationCanceledException && caughtEx is not OutOfMemoryException && caughtEx is not StackOverflowException)
-            {
-                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
-            }
         }
 
         private async Task PersistDiscoveredClientIdentifiersAsync(

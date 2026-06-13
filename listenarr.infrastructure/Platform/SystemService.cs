@@ -107,7 +107,7 @@ namespace Listenarr.Infrastructure.Platform
                 var appDataPath = Directory.Exists(_applicationPathService.ConfigRootPath)
                     ? _applicationPathService.ConfigRootPath
                     : _applicationPathService.ContentRootPath;
-                var appDisk = MeasureDisk("App Data", appDataPath);
+                var appDisk = SystemStorageMapper.MeasureDisk(_diskSpaceProbe, "App Data", appDataPath);
 
                 var storageInfo = new StorageInfo
                 {
@@ -127,7 +127,7 @@ namespace Listenarr.Infrastructure.Platform
                 var systemRoot = Path.GetPathRoot(_applicationPathService.ContentRootPath);
                 if (!string.IsNullOrEmpty(systemRoot))
                 {
-                    storageInfo.Disks.Add(MeasureDisk("System", systemRoot));
+                    storageInfo.Disks.Add(SystemStorageMapper.MeasureDisk(_diskSpaceProbe, "System", systemRoot));
                 }
 
                 storageInfo.Disks.Add(appDisk);
@@ -146,7 +146,7 @@ namespace Listenarr.Infrastructure.Platform
                 foreach (var folder in rootFolders)
                 {
                     var label = string.IsNullOrWhiteSpace(folder.Name) ? folder.Path : folder.Name;
-                    storageInfo.Disks.Add(MeasureDisk(label, folder.Path));
+                    storageInfo.Disks.Add(SystemStorageMapper.MeasureDisk(_diskSpaceProbe, label, folder.Path));
                 }
 
                 return storageInfo;
@@ -156,42 +156,6 @@ namespace Listenarr.Infrastructure.Platform
                 _logger.LogError(ex, "Error getting storage info");
                 throw;
             }
-        }
-
-        private DiskStorageInfo MeasureDisk(string label, string path)
-        {
-            // The probe owns the platform-specific measurement (Windows native call vs.
-            // DriveInfo) and returns false for anything it cannot read; here we only map
-            // its result into the labelled, formatted DiskStorageInfo.
-            if (_diskSpaceProbe.TryGetDiskSpace(path, out var totalBytes, out var freeBytes))
-            {
-                return BuildDiskInfo(label, path, totalBytes, freeBytes);
-            }
-
-            return new DiskStorageInfo { Label = label, Path = path, Status = "unavailable" };
-        }
-
-        private DiskStorageInfo BuildDiskInfo(string label, string path, long totalBytes, long freeBytes)
-        {
-            // Clamp defensively: some filesystems report free space that exceeds the
-            // total (reserved blocks, over-provisioning, compression/dedup on ZFS/Btrfs,
-            // or network shares), which would otherwise drive used bytes/percentage negative.
-            var usedBytes = Math.Clamp(totalBytes - freeBytes, 0, totalBytes);
-            var usedPercentage = totalBytes > 0 ? Math.Clamp((double)usedBytes / totalBytes * 100, 0, 100) : 0;
-
-            return new DiskStorageInfo
-            {
-                Label = label,
-                Path = path,
-                UsedBytes = usedBytes,
-                TotalBytes = totalBytes,
-                FreeBytes = freeBytes,
-                UsedPercentage = Math.Round(usedPercentage, 2),
-                UsedFormatted = SystemFormatters.FormatBytes(usedBytes),
-                TotalFormatted = SystemFormatters.FormatBytes(totalBytes),
-                FreeFormatted = SystemFormatters.FormatBytes(freeBytes),
-                Status = "available"
-            };
         }
 
         public async Task<ServiceHealth> GetServiceHealthAsync()
