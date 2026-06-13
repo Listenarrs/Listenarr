@@ -20,7 +20,6 @@ using AsyncKeyedLock;
 using Listenarr.Application.Security;
 using Listenarr.Application.Interfaces;
 using Microsoft.Extensions.Logging;
-using SixLabors.ImageSharp;
 using System.Net;
 using System.Net.Sockets;
 
@@ -30,32 +29,6 @@ namespace Listenarr.Infrastructure.Cache
     {
         private const int MaxImageRedirects = 5;
         private const long MaxDownloadedImageBytes = 10L * 1024L * 1024L;
-        private static readonly HashSet<string> AllowedDownloadedImageMediaTypes = new(StringComparer.OrdinalIgnoreCase)
-        {
-            "image/jpeg",
-            "image/png",
-            "image/webp",
-            "image/gif",
-        };
-
-        private static readonly HashSet<string> AllowedDownloadedImageExtensions = new(StringComparer.OrdinalIgnoreCase)
-        {
-            ".jpg",
-            ".jpeg",
-            ".png",
-            ".webp",
-            ".gif",
-        };
-
-        private static readonly IReadOnlyDictionary<string, string> ImageExtensionsByMediaType =
-            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["image/jpeg"] = ".jpg",
-                ["image/png"] = ".png",
-                ["image/webp"] = ".webp",
-                ["image/gif"] = ".gif",
-            };
-
         private readonly ILogger<ImageCacheService> _logger;
         private readonly HttpClient _httpClient;
         private readonly string _tempCachePath;
@@ -184,7 +157,7 @@ namespace Listenarr.Infrastructure.Cache
                 response.EnsureSuccessStatusCode();
 
                 var mediaType = response.Content.Headers.ContentType?.MediaType;
-                if (!IsAllowedDownloadedImageContent(mediaType, finalUri))
+                if (!ImageCacheContentValidator.IsAllowedDownloadedImageContent(mediaType, finalUri))
                 {
                     _logger.LogWarning(
                         "Blocked image download for {Identifier} from {Url}: unsupported content type {ContentType}",
@@ -208,14 +181,14 @@ namespace Listenarr.Infrastructure.Cache
 
                 // Read bytes first so we can reject tiny placeholder images (for example 1x1).
                 var imageBytes = await ReadContentWithLimitAsync(response.Content, MaxDownloadedImageBytes);
-                if (IsPlaceholderImage(imageBytes, mediaType))
+                if (ImageCacheContentValidator.IsPlaceholderImage(imageBytes, mediaType, _logger))
                 {
                     _logger.LogInformation("Skipping placeholder/tiny image for {Identifier} from {Url}", LogRedaction.SanitizeText(identifier), LogRedaction.SanitizeText(imageUrl));
                     return null;
                 }
 
                 // Determine file extension from content type or URL
-                var extension = GetImageExtension(finalUri.ToString(), mediaType);
+                var extension = ImageCacheContentValidator.GetImageExtension(finalUri.ToString(), mediaType);
                 var filePath = _pathResolver.BuildTempFilePath(identifier, extension, _tempCachePath);
 
                 // Save to temp cache
@@ -637,56 +610,6 @@ namespace Listenarr.Infrastructure.Cache
             return bufferStream.ToArray();
         }
 
-        private static bool IsAllowedDownloadedImageContent(string? mediaType, Uri finalUri)
-        {
-            if (!string.IsNullOrWhiteSpace(mediaType))
-            {
-                return AllowedDownloadedImageMediaTypes.Contains(mediaType.Trim());
-            }
-
-            var extension = GetUrlPathExtension(finalUri.ToString());
-            return AllowedDownloadedImageExtensions.Contains(extension);
-        }
-
-        private static string GetImageExtension(string url, string? contentType)
-        {
-            // Try to get extension from content type
-            if (!string.IsNullOrEmpty(contentType))
-            {
-                if (ImageExtensionsByMediaType.TryGetValue(contentType, out var mappedExtension))
-                {
-                    return mappedExtension;
-                }
-            }
-
-            // Try to get extension from URL
-            var urlExtension = GetUrlPathExtension(url);
-            if (AllowedDownloadedImageExtensions.Contains(urlExtension))
-            {
-                return urlExtension.Equals(".jpeg", StringComparison.OrdinalIgnoreCase) ? ".jpg" : urlExtension.ToLowerInvariant();
-            }
-
-            // Default to .jpg
-            return ".jpg";
-        }
-
-        private static string GetUrlPathExtension(string url)
-        {
-            try
-            {
-                if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
-                {
-                    return Path.GetExtension(uri.AbsolutePath) ?? string.Empty;
-                }
-            }
-            catch (ArgumentException)
-            {
-                // Fall back to path parsing below.
-            }
-
-            return Path.GetExtension(url.Split('?', '#')[0]) ?? string.Empty;
-        }
-
         private async Task<(HttpResponseMessage Response, Uri FinalUri)> DownloadWithValidatedRedirectsAsync(string imageUrl)
         {
             if (!Uri.TryCreate(imageUrl, UriKind.Absolute, out var currentUri))
@@ -893,8 +816,8 @@ namespace Listenarr.Infrastructure.Cache
             {
                 if (!File.Exists(filePath)) return false;
                 var bytes = File.ReadAllBytes(filePath);
-                var mediaType = GetMediaTypeFromExtension(Path.GetExtension(filePath));
-                if (IsPlaceholderImage(bytes, mediaType))
+                var mediaType = ImageCacheContentValidator.GetMediaTypeFromExtension(Path.GetExtension(filePath));
+                if (ImageCacheContentValidator.IsPlaceholderImage(bytes, mediaType, _logger))
                 {
                     _logger.LogInformation("Deleting placeholder/tiny cached image for {Identifier} in {Bucket}: {Path}", LogRedaction.SanitizeText(identifier), bucket, LogRedaction.SanitizeText(filePath));
                     try
@@ -914,42 +837,6 @@ namespace Listenarr.Infrastructure.Cache
                 _logger.LogWarning(ex, "Failed validating cached image file for {Identifier}: {Path}", LogRedaction.SanitizeText(identifier), LogRedaction.SanitizeText(filePath));
                 return false;
             }
-        }
-
-        private static string? GetMediaTypeFromExtension(string ext)
-        {
-            return ext.ToLowerInvariant() switch
-            {
-                ".jpg" or ".jpeg" => "image/jpeg",
-                ".png" => "image/png",
-                ".gif" => "image/gif",
-                ".webp" => "image/webp",
-                ".svg" => "image/svg+xml",
-                _ => null
-            };
-        }
-
-        private bool IsPlaceholderImage(byte[] data, string? mediaType)
-        {
-            if (data == null || data.Length == 0) return true;
-            if (!string.IsNullOrWhiteSpace(mediaType) && mediaType.Contains("gif", StringComparison.OrdinalIgnoreCase) && data.Length < 2048)
-                return true;
-
-            try
-            {
-                var info = Image.Identify(data);
-                if (info != null && (info.Width <= 1 || info.Height <= 1))
-                    return true;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                // If dimensions can't be detected, keep existing behavior and allow caching.
-                // We do not treat undecodable images as placeholders because some valid images
-                // may not be recognized by Identify for edge codecs/content.
-                _logger.LogDebug(ex, "Failed to inspect image dimensions for placeholder detection");
-            }
-
-            return false;
         }
 
         public void Dispose()
