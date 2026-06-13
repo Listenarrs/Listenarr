@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Security.Cryptography;
+using SharpCompress.Archives;
 using SharpCompress.Common;
 using SharpCompress.Readers;
 using System.Runtime.InteropServices;
