@@ -39,6 +39,7 @@ namespace Listenarr.Api.Controllers
         private readonly IOpenLibraryService? _openLibraryService;
         private readonly ILogger<ImagesController> _logger;
         private readonly IApplicationPathService _applicationPathService;
+        private readonly ImagePlaceholderResolver _placeholderResolver;
         private readonly string _effectiveContentRootPath;
 
         [ActivatorUtilitiesConstructor]
@@ -58,7 +59,8 @@ namespace Listenarr.Api.Controllers
                 audiobookRepository,
                 openLibraryService: null,
                 logger,
-                applicationPathService)
+                applicationPathService,
+                placeholderResolver: null)
         {
         }
 
@@ -70,7 +72,8 @@ namespace Listenarr.Api.Controllers
             IAudiobookRepository audiobookRepository,
             IOpenLibraryService? openLibraryService,
             ILogger<ImagesController> logger,
-            IApplicationPathService applicationPathService)
+            IApplicationPathService applicationPathService,
+            ImagePlaceholderResolver? placeholderResolver = null)
         {
             _imageCacheService = imageCacheService;
             _audiobookMetadataService = audiobookMetadataService;
@@ -80,6 +83,7 @@ namespace Listenarr.Api.Controllers
             _openLibraryService = openLibraryService;
             _logger = logger;
             _applicationPathService = applicationPathService;
+            _placeholderResolver = placeholderResolver ?? new ImagePlaceholderResolver(Microsoft.Extensions.Logging.Abstractions.NullLogger<ImagePlaceholderResolver>.Instance);
             _effectiveContentRootPath = applicationPathService.ContentRootPath;
         }
 
@@ -1062,7 +1066,7 @@ namespace Listenarr.Api.Controllers
         {
             try
             {
-                var placeholderPath = ResolvePlaceholderPath();
+                var placeholderPath = _placeholderResolver.ResolvePlaceholderPath(_effectiveContentRootPath);
                 if (!string.IsNullOrWhiteSpace(placeholderPath))
                 {
                     _logger.LogInformation("Serving placeholder image for {LogContext}: {LogValue}", LogRedaction.SanitizeText(logContext), LogRedaction.SanitizeText(logValue));
@@ -1086,89 +1090,6 @@ namespace Listenarr.Api.Controllers
 
             Response.Headers["Cache-Control"] = "public, max-age=300";
             return NotFound(new { message = notFoundMessage });
-        }
-
-        private string? ResolvePlaceholderPath()
-        {
-            foreach (var candidate in EnumeratePlaceholderCandidates())
-            {
-                if (string.IsNullOrWhiteSpace(candidate))
-                {
-                    continue;
-                }
-
-                try
-                {
-                    var fullPath = Path.GetFullPath(candidate);
-                    if (System.IO.File.Exists(fullPath))
-                    {
-                        return fullPath;
-                    }
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                {
-                    _logger.LogDebug(ex, "Failed probing placeholder candidate path {Path}", candidate);
-                }
-            }
-
-            return null;
-        }
-
-        private IEnumerable<string> EnumeratePlaceholderCandidates()
-        {
-            var baseDirectories = new[]
-            {
-                _effectiveContentRootPath,
-                AppContext.BaseDirectory,
-                Directory.GetCurrentDirectory()
-            }
-            .Where(path => !string.IsNullOrWhiteSpace(path))
-            .Select(path =>
-            {
-                try
-                {
-                    return Path.GetFullPath(path);
-                }
-                catch (Exception ex) when (
-                    ex is ArgumentException or
-                    ArgumentNullException or
-                    PathTooLongException or
-                    NotSupportedException or
-                    System.Security.SecurityException)
-                {
-                    return path;
-                }
-            })
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-            foreach (var baseDirectory in baseDirectories)
-            {
-                DirectoryInfo? current = null;
-                try
-                {
-                    current = new DirectoryInfo(baseDirectory);
-                }
-                catch (Exception ex) when (
-                    ex is ArgumentException or
-                    ArgumentNullException or
-                    PathTooLongException or
-                    NotSupportedException or
-                    System.Security.SecurityException)
-                {
-                    current = null;
-                }
-
-                var depth = 0;
-                while (current != null && depth++ < 8)
-                {
-                    yield return FileUtils.CombineRelativePath(current.FullName, "wwwroot", "placeholder.svg");
-                    yield return FileUtils.CombineRelativePath(current.FullName, "fe", "public", "placeholder.svg");
-                    yield return FileUtils.CombineRelativePath(current.FullName, "listenarr.api", "wwwroot", "placeholder.svg");
-
-                    current = current.Parent;
-                }
-            }
         }
 
         /// <summary>

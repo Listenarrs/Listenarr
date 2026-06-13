@@ -25,7 +25,6 @@ using Listenarr.Application.Search;
 using Listenarr.Domain.Models;
 using Microsoft.AspNetCore.Mvc;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 
 namespace Listenarr.Api.Controllers
 {
@@ -121,7 +120,7 @@ namespace Listenarr.Api.Controllers
         private async Task<IActionResult> ExecuteIndexerTestAsync(Indexer indexer, bool persist)
         {
             // Normalize URL first
-            indexer.Url = NormalizeIndexerUrl(indexer.Url);
+            indexer.Url = IndexerUrlNormalizer.NormalizeIndexerUrl(indexer.Url);
 
             var impl = (indexer.Implementation ?? string.Empty).Trim().ToLowerInvariant();
 
@@ -254,7 +253,7 @@ namespace Listenarr.Api.Controllers
                 if (isNewznabStyle)
                 {
                     var xmlContent = await response.Content.ReadAsStringAsync();
-                    var errorMessage = ParseNewznabError(xmlContent);
+                    var errorMessage = NewznabErrorParser.Parse(xmlContent);
 
                     if (errorMessage != null)
                     {
@@ -297,45 +296,6 @@ namespace Listenarr.Api.Controllers
             {
                 _logger.LogWarning(ex, "Generic indexer test failed for {Name}", LogRedaction.SanitizeText(indexer.Name));
                 return await BuildIndexerTestBadRequestAsync(indexer, persist, "Indexer test failed", ex);
-            }
-        }
-
-        private string? ParseNewznabError(string xmlContent)
-        {
-            try
-            {
-                // Parse XML response to check for error element
-                // Newznab spec: <error code="XXX" description="..." />
-                var settings = new System.Xml.XmlReaderSettings
-                {
-                    DtdProcessing = System.Xml.DtdProcessing.Ignore,
-                    XmlResolver = null
-                };
-
-                using var reader = System.Xml.XmlReader.Create(new System.IO.StringReader(xmlContent), settings);
-                var doc = System.Xml.Linq.XDocument.Load(reader);
-
-                // Check for error element (can be at root, under rss, or as a descendant)
-                System.Xml.Linq.XElement? errorElement = null;
-
-                // Case 1: Root element is <error>, Case 2: Error is a child or descendant
-                errorElement = doc.Root?.Name.LocalName.Equals("error", StringComparison.OrdinalIgnoreCase) == true
-                    ? doc.Root
-                    : doc.Root?.Descendants().FirstOrDefault(e => e.Name.LocalName.Equals("error", StringComparison.OrdinalIgnoreCase));
-
-                if (errorElement != null)
-                {
-                    var code = errorElement.Attribute("code")?.Value;
-                    var description = errorElement.Attribute("description")?.Value ?? errorElement.Value;
-                    return string.IsNullOrEmpty(description) ? $"Error code: {code}" : description;
-                }
-
-                return null;
-            }
-            catch (Exception caughtEx_1) when (caughtEx_1 is not OperationCanceledException && caughtEx_1 is not OutOfMemoryException && caughtEx_1 is not StackOverflowException)
-            {
-                // If we can't parse the XML, assume no error element
-                return null;
             }
         }
 
@@ -1146,39 +1106,6 @@ namespace Listenarr.Api.Controllers
                 .ToList();
 
             return Ok(RedactIndexersForCaller(indexers));
-        }
-
-        /// <summary>
-        /// Normalize indexer URL by removing duplicate or trailing '/api' segments and ensuring a scheme
-        /// </summary>
-        private string NormalizeIndexerUrl(string? rawUrl)
-        {
-            if (string.IsNullOrWhiteSpace(rawUrl)) return rawUrl ?? string.Empty;
-
-            var url = rawUrl.Trim();
-
-            // Add scheme if missing (assume https)
-            if (!url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-            {
-                url = "https://" + url;
-            }
-
-            // Remove repeated '/api/api' or trailing '/api'
-            // Normalize multiple slashes
-            while (url.Contains("/api/api", StringComparison.OrdinalIgnoreCase))
-            {
-                url = url.Replace("/api/api", "/api", StringComparison.OrdinalIgnoreCase);
-            }
-
-            // Preserve /api for Prowlarr proxy URLs (/{id}/api or /api/v{version}/indexer/{id}/api)
-            var prowlarrProxyPattern = @"/((api/v\d+(?:\.\d+)?/indexer/\d+)|\d+)/api$";
-            if (url.EndsWith("/api", StringComparison.OrdinalIgnoreCase) &&
-                !Regex.IsMatch(url, prowlarrProxyPattern, RegexOptions.IgnoreCase))
-            {
-                url = url.Substring(0, url.Length - 4);
-            }
-
-            return url.TrimEnd('/');
         }
 
         private string BuildProwlarrBaseUrl(string rawUrl, int? port)

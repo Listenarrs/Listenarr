@@ -322,12 +322,7 @@ namespace Listenarr.Api.Controllers
         public IActionResult GetIndexersInfo()
         {
             Response.ContentType = "application/json";
-            var payload = new
-            {
-                implementations = new[] { "Newznab", "Torznab" },
-                schema = "/api/v1/indexer/schema"
-            };
-            return Ok(payload);
+            return Ok(ProwlarrCompatSchemaBuilder.BuildInfo());
         }
 
         /// <summary>
@@ -1182,24 +1177,7 @@ namespace Listenarr.Api.Controllers
         public IActionResult GetIndexerSchema()
         {
             Response.ContentType = "application/json";
-
-            var fields = new[]
-            {
-                new IndexerFieldDto { Name = "name", Type = "string", Required = true, Description = "Indexer name" },
-                new IndexerFieldDto { Name = "baseUrl", Type = "string", Required = true, Description = "Base URL of indexer" },
-                new IndexerFieldDto { Name = "apiPath", Type = "string", Required = true, Description = "API path (e.g. /api or /torznab)" },
-                new IndexerFieldDto { Name = "apiKey", Type = "string", Required = false, Description = "API key or token" },
-                new IndexerFieldDto { Name = "categories", Type = "array", Required = false, Description = "Optional categories filter (array of integers or strings)" }
-            };
-
-            // Return an array of schema entries, one per supported implementation (Prowlarr expects a JSON array here)
-            var schemaArray = new[]
-            {
-                new { fields = fields, implementation = "Newznab" },
-                new { fields = fields, implementation = "Torznab" }
-            };
-
-            return Ok(schemaArray);
+            return Ok(ProwlarrCompatSchemaBuilder.BuildSchema());
         }
 
         /// <summary>

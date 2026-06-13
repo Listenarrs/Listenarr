@@ -39,6 +39,7 @@ namespace Listenarr.Api.Controllers
         private readonly IAudiobookMetadataService _metadataService;
         private readonly IImageCacheService? _imageCacheService;
         private readonly MetadataConverters _metadataConverters;
+        private readonly SearchResponseMapper _responseMapper;
 
         public SearchController(
             ISearchService searchService,
@@ -46,7 +47,8 @@ namespace Listenarr.Api.Controllers
             AudibleService audibleService,
             IAudiobookMetadataService metadataService,
             IImageCacheService? imageCacheService = null,
-            MetadataConverters? metadataConverters = null)
+            MetadataConverters? metadataConverters = null,
+            SearchResponseMapper? responseMapper = null)
         {
             _searchService = searchService;
             _logger = logger;
@@ -54,40 +56,14 @@ namespace Listenarr.Api.Controllers
             _metadataService = metadataService;
             _imageCacheService = imageCacheService;
             _metadataConverters = metadataConverters ?? new MetadataConverters(imageCacheService, Microsoft.Extensions.Logging.Abstractions.NullLogger<MetadataConverters>.Instance);
+            _responseMapper = responseMapper ?? new SearchResponseMapper(
+                metadataService,
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<SearchResponseMapper>.Instance,
+                imageCacheService);
         }
 
         private string BuildApiImagePath(string identifier, string? sourceUrl = null)
-            => HttpApiVersionUtils.BuildImagePath(identifier, HttpContext, sourceUrl: sourceUrl);
-
-        private List<object> SimplifySearchResults(List<SearchResult> results)
-        {
-            return results?.Select(r => new
-            {
-                r.Id,
-                r.Title,
-                Artist = r.Artist,
-                r.Subtitle,
-                r.Description,
-                r.Publisher,
-                r.Language,
-                r.Runtime,
-                r.Narrator,
-                r.ImageUrl,
-                r.Asin,
-                Isbn = r.Isbn ?? new List<string>(),
-                r.Series,
-                r.SeriesNumber,
-                r.ProductUrl,
-                r.PublishedDate,
-                r.PublishYear,
-                r.Genres,
-                r.IsEnriched,
-                r.MetadataSource,
-                r.Source,
-                r.SourceLink,
-                r.Score
-            }).Cast<object>().ToList() ?? new List<object>();
-        }
+            => _responseMapper.BuildApiImagePath(identifier, HttpContext, sourceUrl: sourceUrl);
 
         /// <summary>
         /// Perform a combined metadata and indexer search using a structured request body.
@@ -131,7 +107,7 @@ namespace Listenarr.Api.Controllers
                         setApiPathWhenNoExternalImage: true);
 
                     // Map metadata results into Audible-shaped objects for public API consumers
-                    var mapped = await Task.WhenAll((results ?? new List<MetadataSearchResult>()).Select(r => MapMetadataResultToAudibleAsync(r, region))).ConfigureAwait(false);
+                    var mapped = await Task.WhenAll((results ?? new List<MetadataSearchResult>()).Select(r => _responseMapper.MapMetadataResultToAudibleAsync(r, region, HttpContext))).ConfigureAwait(false);
                     _logger.LogDebug("[DBG] Search(simple) returning {Count} metadata results", mapped?.Length ?? 0);
                     return Ok(mapped);
                 }
@@ -219,7 +195,7 @@ namespace Listenarr.Api.Controllers
                                 // Convert audible response to internal metadata then to SearchResult
                                 var metadata = _metadataConverters.ConvertAudibleToMetadata(audible, req.Asin, source: "Audible");
                                 var sr = await _metadataConverters.ConvertMetadataToSearchResultAsync(metadata, req.Asin, req.Title, req.Author, fallbackImageUrl: null, fallbackLanguage: language);
-                                SanitizeResultForPublicApi(sr, region);
+                                _responseMapper.SanitizeResultForPublicApi(sr);
                                 // Convert to metadata result and normalize images for API response
                                 var md = SearchResultConverters.ToMetadata(sr);
                                 await SearchResultImageNormalizer.NormalizeMetadataResultAsync(
@@ -233,7 +209,7 @@ namespace Listenarr.Api.Controllers
                                 {
                                     var result = SearchResultConverters.ToSearchResult(md);
                                     var asinResults = new List<SearchResult> { result };
-                                    return Ok(useSimplified ? SimplifySearchResults(asinResults) : asinResults);
+                                    return Ok(useSimplified ? _responseMapper.SimplifySearchResults(asinResults) : asinResults);
                                 }
                             }
                             // If audible didn't return a record, fall through to unified search below
@@ -316,7 +292,7 @@ namespace Listenarr.Api.Controllers
                                     {
                                         try
                                         {
-                                            seriesResults.Add(await MapAudibleSearchResultToOutputAsync(book, region));
+                                            seriesResults.Add(await _responseMapper.MapAudibleSearchResultToOutputAsync(book, region, HttpContext));
                                         }
                                         catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                                         {
@@ -373,42 +349,7 @@ namespace Listenarr.Api.Controllers
                     var returnLimit = req.Pagination != null && req.Pagination.Limit > 0 ? Math.Clamp(req.Pagination.Limit, 1, 1000) : 50;
                     var results = await _searchService.IntelligentSearchAsync(query, candidateLimit, returnLimit, region: region, language: language, ct: HttpContext.RequestAborted);
 
-                    // Ensure images for results are served via our API when possible.
-                    // For results that provide an ASIN, prefer the local /api/v{version}/images/{asin}
-                    // endpoint by checking cached images or attempting to download and cache
-                    // external image URLs. This prevents leaking external Amazon/Audible
-                    // image URLs to the SPA and avoids mixed image sources.
-                    if (_imageCacheService != null && results != null)
-                    {
-                        foreach (var r in results)
-                        {
-                            try
-                            {
-                                if (r == null) continue;
-                                if (string.IsNullOrWhiteSpace(r.Asin)) continue;
-
-                                var cached = await _imageCacheService.GetCachedImagePathAsync(r.Asin);
-                                if (!string.IsNullOrWhiteSpace(cached))
-                                {
-                                    r.ImageUrl = BuildApiImagePath(r.Asin);
-                                    continue;
-                                }
-
-                                if (!string.IsNullOrWhiteSpace(r.ImageUrl) && (r.ImageUrl.StartsWith("http://") || r.ImageUrl.StartsWith("https://")))
-                                {
-                                    var downloaded = await _imageCacheService.DownloadAndCacheImageAsync(r.ImageUrl, r.Asin);
-                                    if (!string.IsNullOrWhiteSpace(downloaded))
-                                    {
-                                        r.ImageUrl = BuildApiImagePath(r.Asin);
-                                    }
-                                }
-                            }
-                            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                            {
-                                _logger.LogWarning(ex, "Failed to normalize image for result with ASIN {Asin}", r.Asin);
-                            }
-                        }
-                    }
+                    await _responseMapper.NormalizeMetadataResultImagesAsync(results, HttpContext, "result");
 
                     // When a Series filter was provided, apply it to unified search results so only
                     // books actually belonging to the series are returned. This covers both the
@@ -435,7 +376,7 @@ namespace Listenarr.Api.Controllers
                     }
 
                     // Flatten metadata results into Audible-shaped objects for public POST /api/search response
-                    var flatMapped = await Task.WhenAll((results ?? new List<MetadataSearchResult>()).Select(r => MapMetadataResultToAudibleAsync(r, region))).ConfigureAwait(false);
+                    var flatMapped = await Task.WhenAll((results ?? new List<MetadataSearchResult>()).Select(r => _responseMapper.MapMetadataResultToAudibleAsync(r, region, HttpContext))).ConfigureAwait(false);
                     return Ok(flatMapped);
                 }
             }
@@ -443,310 +384,6 @@ namespace Listenarr.Api.Controllers
             {
                 _logger.LogError(ex, "Error parsing search request body");
                 return BadRequest("Invalid search request");
-            }
-        }
-
-        private void SanitizeResultForPublicApi(SearchResult r, string region)
-        {
-            // Minimal sanitization for public API: ensure ProductUrl is an http(s) URL when ASIN is available
-            try
-            {
-                if (r == null) return;
-                if (string.IsNullOrWhiteSpace(r.ProductUrl) && !string.IsNullOrWhiteSpace(r.Asin))
-                {
-                    r.ProductUrl = $"https://www.amazon.com/dp/{r.Asin}";
-                }
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogDebug(ex, "Failed to sanitize public search result for ASIN {Asin}", r.Asin);
-            }
-        }
-
-        // Map an AudibleSearchResult (from series/direct endpoints) to the Audible-shaped output object
-        private async Task<object> MapAudibleSearchResultToOutputAsync(AudibleSearchResult book, string region)
-        {
-            string? imageUrl = book.ImageUrl;
-            if (!string.IsNullOrWhiteSpace(book.Asin) && _imageCacheService != null)
-            {
-                try
-                {
-                    var cached = await _imageCacheService.GetCachedImagePathAsync(book.Asin);
-                    if (!string.IsNullOrWhiteSpace(cached))
-                    {
-                        imageUrl = BuildApiImagePath(book.Asin);
-                    }
-                    else if (!string.IsNullOrWhiteSpace(imageUrl) && (imageUrl.StartsWith("http://") || imageUrl.StartsWith("https://")))
-                    {
-                        var downloaded = await _imageCacheService.DownloadAndCacheImageAsync(imageUrl, book.Asin);
-                        if (!string.IsNullOrWhiteSpace(downloaded)) imageUrl = BuildApiImagePath(book.Asin);
-                    }
-                    else
-                    {
-                        imageUrl = BuildApiImagePath(book.Asin);
-                    }
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                {
-                    _logger.LogDebug(ex, "Failed to normalize image for series result ASIN {Asin}", book.Asin);
-                }
-            }
-
-            var authors = (book.Authors ?? new List<AudibleAuthor>()).Where(a => a != null).Select(a => new
-            {
-                asin = a!.Asin,
-                name = a!.Name,
-                region = a!.Region ?? region,
-                regions = new[] { a!.Region ?? region },
-                updatedAt = DateTime.UtcNow.ToString("o")
-            }).ToList();
-            var narrators = (book.Narrators ?? new List<AudibleNarrator>()).Where(n => n != null).Select(n => new { name = n!.Name, updatedAt = DateTime.UtcNow.ToString("o") }).ToList();
-            var genres = (book.Genres ?? new List<AudibleGenre>()).Where(g => g != null).Select(g => new
-            {
-                asin = g!.Asin,
-                name = g!.Name,
-                type = g!.Type,
-                updatedAt = DateTime.UtcNow.ToString("o")
-            }).ToList();
-            var series = (book.Series ?? new List<AudibleSeries>()).Where(s => s != null).Select(s => new
-            {
-                asin = s!.Asin,
-                name = s!.Name,
-                region = region,
-                position = s!.Position,
-                updatedAt = DateTime.UtcNow.ToString("o")
-            }).ToList();
-
-            return new
-            {
-                asin = book.Asin,
-                title = book.Title,
-                subtitle = book.Subtitle,
-                region = region,
-                regions = new[] { region },
-                description = (string?)null,
-                summary = (string?)null,
-                bookFormat = book.BookFormat,
-                imageUrl = imageUrl,
-                lengthMinutes = book.RuntimeLengthMin ?? book.LengthMinutes ?? book.RuntimeMinutes,
-                whisperSync = false,
-                publisher = book.Publisher,
-                isbn = book.Isbn,
-                language = book.Language,
-                releaseDate = book.ReleaseDate,
-                @explicit = false,
-                hasPdf = false,
-                link = !string.IsNullOrWhiteSpace(book.Asin) ? $"https://www.audible.com/pd/{book.Asin}" : (string?)null,
-                sku = book.Sku,
-                isListenable = !string.IsNullOrWhiteSpace(book.Asin),
-                isAvailable = true,
-                isBuyable = true,
-                contentType = book.ContentType ?? "Product",
-                contentDeliveryType = book.ContentDeliveryType,
-                authors,
-                narrators,
-                genres,
-                series,
-                seriesList = series.Select(s => $"{s.name}{(s.position != null ? $" #{s.position}" : "")}").ToList(),
-                updatedAt = DateTime.UtcNow.ToString("o")
-            };
-        }
-
-        // Map our internal MetadataSearchResult to a lightweight Audible-shaped object (async)
-        private async Task<object> MapMetadataResultToAudibleAsync(MetadataSearchResult md, string region)
-        {
-            // If we have an ASIN and the metadata was enriched, try to fetch the canonical Audible payload
-            AudibleBookResponse? aud = null;
-            try
-            {
-                if (!string.IsNullOrWhiteSpace(md?.Asin))
-                {
-                    aud = await _metadataService.GetAudibleMetadataAsync(md.Asin, region, true);
-                }
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogDebug(ex, "Failed to retrieve Audible metadata for ASIN {Asin}", md?.Asin);
-            }
-
-            // If Audible provided a rich response, prefer it (but normalize image URLs to local /api/v{version}/images/{asin} when possible)
-            if (aud != null)
-            {
-                string? imageUrl = aud.ImageUrl;
-                try
-                {
-                    if (!string.IsNullOrWhiteSpace(aud.Asin) && _imageCacheService != null)
-                    {
-                        var cached = await _imageCacheService.GetCachedImagePathAsync(aud.Asin);
-                        if (!string.IsNullOrWhiteSpace(cached))
-                        {
-                            imageUrl = BuildApiImagePath(aud.Asin);
-                        }
-                        else if (!string.IsNullOrWhiteSpace(imageUrl) && (imageUrl.StartsWith("http://") || imageUrl.StartsWith("https://")))
-                        {
-                            var downloaded = await _imageCacheService.DownloadAndCacheImageAsync(imageUrl, aud.Asin);
-                            if (!string.IsNullOrWhiteSpace(downloaded)) imageUrl = BuildApiImagePath(aud.Asin);
-                        }
-                        else
-                        {
-                            // Map to API endpoint even if not cached to keep behaviour consistent
-                            imageUrl = BuildApiImagePath(aud.Asin);
-                            _ = _imageCacheService.DownloadAndCacheImageAsync(aud.ImageUrl ?? imageUrl, aud.Asin);
-                        }
-                    }
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                {
-                    _logger.LogWarning(ex, "Failed to normalize Audible image for {Asin}", aud.Asin);
-                }
-
-                var authors = (aud.Authors ?? new List<AudibleAuthor>()).Where(a => a != null).Select(a => new
-                {
-                    asin = a!.Asin,
-                    name = a!.Name,
-                    region = a!.Region ?? region,
-                    regions = new[] { a!.Region ?? region },
-                    image = (string?)null,
-                    updatedAt = DateTime.UtcNow.ToString("o")
-                }).ToList();
-
-                var narrators = (aud.Narrators ?? new List<AudibleNarrator>()).Where(n => n != null).Select(n => new { name = n!.Name, updatedAt = DateTime.UtcNow.ToString("o") }).ToList();
-
-                var genres = (aud.Genres ?? new List<AudibleGenre>()).Where(g => g != null).Select(g => new
-                {
-                    asin = g!.Asin,
-                    name = g!.Name,
-                    type = g!.Type,
-                    betterType = (string?)null,
-                    updatedAt = DateTime.UtcNow.ToString("o")
-                }).ToList();
-
-                var series = (aud.Series ?? new List<AudibleSeries>()).Where(s => s != null).Select(s => new
-                {
-                    asin = s!.Asin,
-                    name = s!.Name,
-                    region = region,
-                    position = s!.Position,
-                    updatedAt = DateTime.UtcNow.ToString("o")
-                }).ToList();
-
-                return new
-                {
-                    asin = aud.Asin ?? md?.Asin,
-                    title = aud.Title ?? md?.Title,
-                    subtitle = aud.Subtitle ?? md?.Subtitle,
-                    region = aud.Region ?? region,
-                    regions = new[] { aud.Region ?? region },
-                    description = aud.Description ?? md?.Description,
-                    summary = aud.Description ?? md?.Description,
-                    copyright = (string?)null,
-                    bookFormat = aud.BookFormat,
-                    imageUrl = imageUrl,
-                    lengthMinutes = aud.LengthMinutes ?? md?.Runtime,
-                    whisperSync = false,
-                    publisher = aud.Publisher ?? md?.Publisher,
-                    isbn = aud.Isbn,
-                    language = aud.Language ?? md?.Language,
-                    rating = (double?)null,
-                    releaseDate = aud.ReleaseDate ?? aud.PublishDate ?? md?.PublishedDate,
-                    @explicit = aud.Explicit ?? false,
-                    hasPdf = false,
-                    link = !string.IsNullOrWhiteSpace(md?.ProductUrl)
-                        ? md.ProductUrl
-                        : !string.IsNullOrWhiteSpace(aud.Asin) ? $"https://www.audible.com/pd/{aud.Asin}" : null,
-                    sku = aud.Sku,
-                    skuGroup = (string?)null,
-                    isListenable = !string.IsNullOrWhiteSpace(aud.Asin ?? md?.Asin),
-                    isAvailable = true,
-                    isBuyable = true,
-                    contentType = aud.ContentType ?? (string?)null,
-                    contentDeliveryType = aud.ContentDeliveryType,
-                    authors = authors,
-                    narrators = narrators,
-                    genres = genres,
-                    series = series,
-                    seriesList = series?.Select(s => $"{s.name}{(s.position != null ? $" #{s.position}" : "")}").ToList(),
-                    updatedAt = DateTime.UtcNow.ToString("o")
-                };
-            }
-
-            // Fallback: build a permissive Audible-like object from available MetadataSearchResult fields
-            var fallbackAuthors = new List<object>();
-            var fallbackNarrators = new List<object>();
-            if (!string.IsNullOrWhiteSpace(md?.Narrator)) fallbackNarrators.Add(new { name = md.Narrator, updatedAt = (string?)null });
-            if (!string.IsNullOrWhiteSpace(md?.Author)) fallbackAuthors.Add(new { asin = (string?)null, name = md.Author, region = region, regions = new[] { region }, image = (string?)null, updatedAt = (string?)null });
-
-            var fallbackSeries = new List<object>();
-            if (!string.IsNullOrWhiteSpace(md?.Series)) fallbackSeries.Add(new { asin = md.Series, name = md.Series, region = region, position = md.SeriesNumber, updatedAt = (string?)null });
-
-            return new
-            {
-                asin = md?.Asin,
-                title = md?.Title,
-                subtitle = md?.Subtitle,
-                region = region,
-                regions = new[] { region },
-                description = md?.Description,
-                summary = md?.Description,
-                copyright = (string?)null,
-                bookFormat = (string?)null,
-                imageUrl = md?.ImageUrl,
-                lengthMinutes = md?.Runtime,
-                whisperSync = false,
-                publisher = md?.Publisher,
-                isbn = md?.Isbn,
-                language = md?.Language,
-                rating = (double?)null,
-                releaseDate = md?.PublishedDate,
-                @explicit = false,
-                hasPdf = false,
-                link = md?.ProductUrl,
-                sku = (string?)null,
-                skuGroup = (string?)null,
-                isListenable = !string.IsNullOrWhiteSpace(md?.Asin),
-                isAvailable = true,
-                isBuyable = true,
-                contentType = "Product",
-                contentDeliveryType = (string?)null,
-                authors = fallbackAuthors,
-                narrators = fallbackNarrators,
-                genres = new List<object>(),
-                series = fallbackSeries,
-                updatedAt = (string?)null
-            };
-        }
-
-        private async Task EnsureCachedImagesForAudibleResultsAsync(List<AudibleSearchResult>? results)
-        {
-            if (results == null || results.Count == 0) return;
-            if (_imageCacheService == null) return; // nothing to do in tests if not provided
-
-            foreach (var r in results)
-            {
-                try
-                {
-                    if (string.IsNullOrWhiteSpace(r.Asin)) continue;
-
-                    var cached = await _imageCacheService.GetCachedImagePathAsync(r.Asin);
-                    if (!string.IsNullOrWhiteSpace(cached))
-                    {
-                        r.ImageUrl = BuildApiImagePath(r.Asin);
-                        continue;
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(r.ImageUrl))
-                    {
-                        var downloaded = await _imageCacheService.DownloadAndCacheImageAsync(r.ImageUrl, r.Asin);
-                        if (!string.IsNullOrWhiteSpace(downloaded))
-                        {
-                            r.ImageUrl = BuildApiImagePath(r.Asin);
-                        }
-                    }
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                {
-                    _logger.LogWarning(ex, "Failed to ensure cached image for {Asin}", r?.Asin);
-                }
             }
         }
 
@@ -907,35 +544,7 @@ namespace Listenarr.Api.Controllers
                 var region = Request.Query.TryGetValue("region", out var regionValue) ? regionValue.ToString() ?? "us" : "us";
                 var language = Request.Query.TryGetValue("language", out var languageValue) ? languageValue.ToString() : null;
                 var results = await _searchService.IntelligentSearchAsync(query, candidateLimit, returnLimit, containmentMode, requireAuthorAndPublisher, fuzzyThreshold, region, language, HttpContext.RequestAborted);
-                // Normalize images for metadata results so the SPA receives local /api/v{version}/images/{asin} when possible
-                if (_imageCacheService != null && results != null)
-                {
-                    foreach (var r in results)
-                    {
-                        try
-                        {
-                            if (r == null) continue;
-                            if (string.IsNullOrWhiteSpace(r.Asin)) continue;
-
-                            var cached = await _imageCacheService.GetCachedImagePathAsync(r.Asin);
-                            if (!string.IsNullOrWhiteSpace(cached))
-                            {
-                                r.ImageUrl = BuildApiImagePath(r.Asin);
-                                continue;
-                            }
-
-                            if (!string.IsNullOrWhiteSpace(r.ImageUrl) && (r.ImageUrl.StartsWith("http://") || r.ImageUrl.StartsWith("https://")))
-                            {
-                                var downloaded = await _imageCacheService.DownloadAndCacheImageAsync(r.ImageUrl, r.Asin);
-                                if (!string.IsNullOrWhiteSpace(downloaded)) r.ImageUrl = BuildApiImagePath(r.Asin);
-                            }
-                        }
-                        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                        {
-                            _logger.LogWarning(ex, "Failed to normalize image for metadata result ASIN {Asin}", r.Asin);
-                        }
-                    }
-                }
+                await _responseMapper.NormalizeMetadataResultImagesAsync(results, HttpContext, "metadata result");
                 _logger.LogInformation("IntelligentSearch returning {Count} results for query: {Query}", results?.Count ?? 0, LogRedaction.SanitizeText(query));
                 return Ok(results ?? new List<MetadataSearchResult>());
             }

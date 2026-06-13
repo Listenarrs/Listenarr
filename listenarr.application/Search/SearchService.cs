@@ -41,8 +41,6 @@ namespace Listenarr.Application.Search
         private readonly SearchResultScorerService _searchResultScorer;
         private readonly SearchResultSortingService _searchResultSorting;
         private readonly AsinSearchHandler _asinSearchHandler;
-        private readonly IMemoryCache? _cache;
-        private readonly ICoverImageProbe? _coverImageProbe;
         private readonly IndexerSearchWorkflow _indexerSearchWorkflow;
         private readonly MetadataSourceCatalog _metadataSourceCatalog;
 
@@ -78,8 +76,6 @@ namespace Listenarr.Application.Search
             _searchResultScorer = searchResultScorer;
             _searchResultSorting = searchResultSorting;
             _asinSearchHandler = asinSearchHandler;
-            _cache = cache;
-            _coverImageProbe = coverImageProbe;
             _indexerSearchWorkflow = indexerSearchWorkflow ?? new IndexerSearchWorkflow(
                 httpClient,
                 configurationService,
@@ -884,113 +880,6 @@ namespace Listenarr.Application.Search
             }
         }
 
-        private static bool isOpenLibraryResult(SearchResult r)
-        {
-            return string.Equals(r?.MetadataSource, "OpenLibrary", StringComparison.OrdinalIgnoreCase);
-        }
-
-        // Try to pick the best cover URL from a list of OpenLibrary cover IDs by measuring image aspect ratios.
-        // Returns a full covers.openlibrary.org URL or null on failure.
-        private async Task<string?> PickBestCoverUrlAsync(List<int> coverIds)
-        {
-            if (coverIds == null || !coverIds.Any()) return null;
-
-            double bestDelta = double.MaxValue;
-            string? bestUrl = null;
-
-            foreach (var cid in coverIds)
-            {
-                try
-                {
-                    var url = $"https://covers.openlibrary.org/b/id/{cid}-L.jpg";
-                    var dimensions = _coverImageProbe == null ? null : await _coverImageProbe.ProbeAsync(url);
-                    if (dimensions == null || dimensions.Value.Height == 0) continue;
-
-                    var ratio = (double)dimensions.Value.Width / dimensions.Value.Height;
-                    var delta = Math.Abs(ratio - 1.0);
-                    if (delta < bestDelta)
-                    {
-                        bestDelta = delta;
-                        bestUrl = url;
-                    }
-
-                    if (Math.Abs(delta) < 0.01)
-                        break;
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                {
-                    _logger.LogDebug(ex, "Failed to fetch cover image for id {Id}", cid);
-                    continue;
-                }
-            }
-
-            return bestUrl;
-        }
-
-
-        private int? ParseDuration(string? duration)
-        {
-            if (string.IsNullOrEmpty(duration)) return null;
-
-            try
-            {
-                // Try to extract hours and minutes from duration string
-                var hoursMatch = System.Text.RegularExpressions.Regex.Match(duration, @"(\d+)\s*hrs?");
-                var minutesMatch = System.Text.RegularExpressions.Regex.Match(duration, @"(\d+)\s*mins?");
-
-                int totalMinutes = 0;
-
-                if (hoursMatch.Success)
-                {
-                    totalMinutes += int.Parse(hoursMatch.Groups[1].Value) * 60;
-                }
-
-                if (minutesMatch.Success)
-                {
-                    totalMinutes += int.Parse(minutesMatch.Groups[1].Value);
-                }
-
-                return totalMinutes > 0 ? totalMinutes : null;
-            }
-            catch (Exception caughtEx_17) when (caughtEx_17 is not OperationCanceledException && caughtEx_17 is not OutOfMemoryException && caughtEx_17 is not StackOverflowException)
-            {
-                return null;
-            }
-        }
-
-        private async Task<List<SearchResult>> TraditionalSearchAsync(string query, string? category = null, List<string>? apiIds = null)
-        {
-            var results = new List<SearchResult>();
-            var apis = await _configurationService.GetApiConfigurationsAsync();
-
-            if (apiIds != null && apiIds.Any())
-            {
-                apis = apis.Where(a => apiIds.Contains(a.Id)).ToList();
-            }
-
-            var enabledApis = apis.Where(a => a.IsEnabled).OrderBy(a => a.Priority).ToList();
-
-            var searchTasks = enabledApis.Select(api => SearchByApiAsync(api.Id, query, category));
-            var apiResults = await Task.WhenAll(searchTasks);
-
-            foreach (var apiResult in apiResults)
-            {
-                foreach (var result in apiResult)
-                {
-                    results.Add(result);
-                }
-            }
-
-            return results;
-        }
-
-        private string ExtractAsin(string magnetLink)
-        {
-            // TODO: Implement ASIN extraction logic from magnet/torrent/nzb or other property
-            // For now, return empty string
-            return string.Empty;
-        }
-
         public async Task<List<SearchResult>> SearchByApiAsync(string apiId, string query, string? category = null)
         {
             return await _indexerSearchWorkflow.SearchByApiAsync(apiId, query, category);
@@ -1010,31 +899,6 @@ namespace Listenarr.Application.Search
         {
             return await _indexerSearchWorkflow.ParseTorznabResponseAsync(xmlContent, indexer);
         }
-
-        private List<SearchResult> GenerateMockResults(string query, string source)
-        {
-            // This is mock data for development purposes
-            return new List<SearchResult>
-            {
-                new SearchResult
-                {
-                    Id = Guid.NewGuid().ToString(),
-                    Title = $"Sample Audiobook - {query}",
-                    Artist = "Sample Author",
-                    Album = "Sample Series Book 1",
-                    Category = "Audiobook",
-                    Size = 512_000_000, // 512 MB
-                    Seeders = 25,
-                    Leechers = 3,
-                    MagnetLink = "magnet:?xt=urn:btih:sample",
-                    Source = source,
-                    PublishedDate = DateTime.UtcNow.AddDays(-Random.Shared.Next(1, 365)).ToString("o"),
-                    Quality = "MP3 128kbps",
-                    Format = "MP3"
-                }
-            };
-        }
-
 
         public async Task<List<ApiConfiguration>> GetEnabledMetadataSourcesAsync()
         {

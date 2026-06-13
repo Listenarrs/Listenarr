@@ -25,7 +25,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Search
 {
-    internal static class MyAnonamouseResponseParser
+    public static class MyAnonamouseResponseParser
     {
         public static List<IndexerSearchResult> Parse(string jsonResponse, Indexer indexer, ILogger logger)
         {

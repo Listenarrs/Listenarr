@@ -429,7 +429,7 @@ namespace Listenarr.Infrastructure.Adapters
                                 continue;
                             }
 
-                            var queueItem = MapGroup(client, structElement);
+                            var queueItem = NzbgetResponseMapper.MapGroup(client, structElement);
                             items.Add(queueItem);
                         }
                     }
@@ -534,7 +534,7 @@ namespace Listenarr.Infrastructure.Adapters
                                 continue;
                             }
 
-                            var downloadClientItem = await MapGroupToDownloadClientItemAsync(client, structElement);
+                            var downloadClientItem = NzbgetResponseMapper.MapGroupToDownloadClientItem(client, structElement);
                             items.Add(downloadClientItem);
                         }
                     }
@@ -619,166 +619,6 @@ namespace Listenarr.Infrastructure.Adapters
                 _logger.LogWarning(ex, "Error resolving import item for NZBGet download {Id}", item.DownloadId);
                 return result;
             }
-        }
-
-        private async Task<DownloadClientItem> MapGroupToDownloadClientItemAsync(DownloadClientConfiguration client, XElement structElement)
-        {
-            var members = (IReadOnlyDictionary<string, string?>)structElement.Elements("member").ToDictionary(
-                m => m.Element("name")?.Value ?? string.Empty,
-                m => m.Element("value")?.Elements().FirstOrDefault()?.Value ?? string.Empty
-            );
-
-            var id = members.GetValueOrDefault("GroupID", null)
-                ?? members.GetValueOrDefault("LastID", null)
-                ?? Guid.NewGuid().ToString("N");
-
-            var title = members.GetValueOrDefault("NZBName", string.Empty);
-            var statusRaw = members.GetValueOrDefault("Status", string.Empty);
-            var category = members.GetValueOrDefault("Category", string.Empty);
-            var sizeMb = double.TryParse(members.GetValueOrDefault("FileSizeMB", "0"), NumberStyles.Any, CultureInfo.InvariantCulture, out var sm) ? sm : 0d;
-            var remainingMb = double.TryParse(members.GetValueOrDefault("RemainingSizeMB", "0"), NumberStyles.Any, CultureInfo.InvariantCulture, out var rm) ? rm : 0d;
-            var downloadRate = double.TryParse(members.GetValueOrDefault("DownloadRate", "0"), NumberStyles.Any, CultureInfo.InvariantCulture, out var dr) ? dr : 0d;
-            var destDir = members.GetValueOrDefault("DestDir", string.Empty);
-
-            var sizeBytes = Convert.ToInt64(Math.Max(0, sizeMb) * 1024 * 1024);
-            var remainingBytes = Convert.ToInt64(Math.Max(0, remainingMb) * 1024 * 1024);
-
-            TimeSpan? remainingTime = null;
-            if (downloadRate > 0 && remainingMb > 0)
-            {
-                var remainingBytesExact = remainingMb * 1024 * 1024;
-                var etaSeconds = (int)Math.Max(0, remainingBytesExact / downloadRate);
-                remainingTime = TimeSpan.FromSeconds(etaSeconds);
-            }
-
-            // Map NZBGet status to DownloadItemStatus.
-            // NZBGet can emit suffixed states (e.g. SUCCESS/HEALTH, FAILURE/HEALTH).
-            var normalizedStatus = (statusRaw ?? "QUEUED").ToUpperInvariant();
-            var status = normalizedStatus switch
-            {
-                "QUEUED" => DownloadItemStatus.Queued,
-                "DOWNLOADING" => DownloadItemStatus.Downloading,
-                "PAUSED" => DownloadItemStatus.Paused,
-                "FETCHING" => DownloadItemStatus.Downloading,
-                "SCANNING" => DownloadItemStatus.Downloading,
-                "PP_QUEUED" => DownloadItemStatus.Downloading,
-                "PP_PROCESSING" => DownloadItemStatus.Downloading,
-                _ when normalizedStatus.StartsWith("SUCCESS", StringComparison.Ordinal) => DownloadItemStatus.Completed,
-                _ when normalizedStatus.StartsWith("FAILURE", StringComparison.Ordinal) || normalizedStatus.StartsWith("FAILED", StringComparison.Ordinal) => DownloadItemStatus.Failed,
-                _ => DownloadItemStatus.Queued
-            };
-
-            // For NZBGet, construct OutputPath from destDir + title
-            var contentPath = !string.IsNullOrEmpty(destDir) && !string.IsNullOrEmpty(title)
-                ? CombineWithOptionalBase(destDir, title)
-                : (destDir ?? string.Empty);
-            var localContentPath = contentPath ?? string.Empty;
-
-            var progress = sizeMb > 0 ? Math.Clamp((sizeMb - remainingMb) / sizeMb * 100, 0, 100) : 0;
-
-            return new DownloadClientItem
-            {
-                DownloadId = id.ToUpperInvariant(),
-                Title = title ?? string.Empty,
-                Category = category ?? string.Empty,
-                Status = status,
-                TotalSize = sizeBytes,
-                RemainingSize = remainingBytes,
-                RemainingTime = remainingTime,
-                OutputPath = localContentPath ?? string.Empty,
-                Message = statusRaw ?? "QUEUED",
-                Progress = progress,
-                DownloadSpeed = downloadRate,
-                CanBeRemoved = true,
-                CanMoveFiles = status == DownloadItemStatus.Completed,
-                DownloadClientInfo = DownloadClientItemClientInfo.FromClient(
-                    clientId: client.Id,
-                    clientName: client.Name,
-                    clientType: "nzbget",
-                    protocol: DownloadProtocol.Usenet,
-                    removeCompletedDownloads: client.Settings?.TryGetValue("removeCompletedDownloads", out var removeVal) is true &&
-                                             (removeVal is bool boolVal && boolVal),
-                    hasPostImportCategory: !string.IsNullOrEmpty(client.Settings?.GetValueOrDefault("postImportCategory")?.ToString())
-                )
-            };
-        }
-
-        private QueueItem MapGroup(DownloadClientConfiguration client, XElement structElement)
-        {
-            var members = (IReadOnlyDictionary<string, string?>)structElement.Elements("member").ToDictionary(
-                m => m.Element("name")?.Value ?? string.Empty,
-                m => m.Element("value")?.Elements().FirstOrDefault()?.Value ?? string.Empty
-            );
-
-            var id = members.GetValueOrDefault("GroupID", null)
-                ?? members.GetValueOrDefault("LastID", null)
-                ?? Guid.NewGuid().ToString("N");
-
-            var title = members.GetValueOrDefault("NZBName", string.Empty);
-            var statusRaw = members.GetValueOrDefault("Status", string.Empty);
-            var category = members.GetValueOrDefault("Category", string.Empty);
-            var sizeMb = double.TryParse(members.GetValueOrDefault("FileSizeMB", "0"), NumberStyles.Any, CultureInfo.InvariantCulture, out var sm) ? sm : 0d;
-            var remainingMb = double.TryParse(members.GetValueOrDefault("RemainingSizeMB", "0"), NumberStyles.Any, CultureInfo.InvariantCulture, out var rm) ? rm : 0d;
-            var downloadedMb = sizeMb - remainingMb;
-            var downloadRate = double.TryParse(members.GetValueOrDefault("DownloadRate", "0"), NumberStyles.Any, CultureInfo.InvariantCulture, out var dr) ? dr : 0d;
-            var destDir = members.GetValueOrDefault("DestDir", string.Empty);
-
-            var sizeBytes = Convert.ToInt64(Math.Max(0, sizeMb) * 1024 * 1024);
-            var downloadedBytes = Convert.ToInt64(Math.Max(0, downloadedMb) * 1024 * 1024);
-
-            int? etaSeconds = null;
-            if (downloadRate > 0 && remainingMb > 0)
-            {
-                var remainingBytes = remainingMb * 1024 * 1024;
-                etaSeconds = (int)Math.Max(0, remainingBytes / downloadRate);
-            }
-
-            var normalizedStatus = (statusRaw ?? "QUEUED").ToUpperInvariant();
-            string status = normalizedStatus switch
-            {
-                "QUEUED" => "queued",
-                "DOWNLOADING" => "downloading",
-                "PAUSED" => "paused",
-                "FETCHING" => "downloading",
-                "SCANNING" => "downloading",
-                "PP_QUEUED" => "downloading",
-                "PP_PROCESSING" => "downloading",
-                _ when normalizedStatus.StartsWith("SUCCESS", StringComparison.Ordinal) => "completed",
-                _ when normalizedStatus.StartsWith("FAILURE", StringComparison.Ordinal) || normalizedStatus.StartsWith("FAILED", StringComparison.Ordinal) => "failed",
-                _ => "queued"
-            };
-
-            string? localPath = destDir;
-
-            // For NZBGet, construct ContentPath from destDir + title
-            var contentPath = !string.IsNullOrEmpty(destDir) && !string.IsNullOrEmpty(title)
-                ? CombineWithOptionalBase(destDir, title)
-                : destDir;
-            var localContentPath = contentPath;
-
-            var addedAt = DateTime.UtcNow;
-
-            return new QueueItem
-            {
-                Id = id,
-                Title = title ?? string.Empty,
-                Quality = category ?? string.Empty,
-                Status = status,
-                Progress = sizeMb > 0 ? Math.Clamp(downloadedMb / sizeMb * 100, 0, 100) : 0,
-                Size = sizeBytes,
-                Downloaded = downloadedBytes,
-                DownloadSpeed = downloadRate,
-                Eta = etaSeconds > 0 ? etaSeconds : null,
-                DownloadClient = client.Name ?? client.Id ?? "NZBGet",
-                DownloadClientId = client.Id ?? string.Empty,
-                DownloadClientType = ClientType,
-                AddedAt = addedAt,
-                CanPause = status is "downloading" or "queued",
-                CanRemove = true,
-                RemotePath = destDir,
-                LocalPath = localPath,
-                ContentPath = localContentPath
-            };
         }
 
         private string ResolveCategory(DownloadClientConfiguration client)
@@ -1091,32 +931,6 @@ namespace Listenarr.Infrastructure.Adapters
             }
         }
 
-        private static string CombineWithOptionalBase(string? basePath, string candidatePath)
-        {
-            var normalizedPath = candidatePath.Trim();
-
-            if (string.IsNullOrEmpty(normalizedPath))
-            {
-                return normalizedPath;
-            }
-
-            if (Path.IsPathRooted(normalizedPath) || string.IsNullOrWhiteSpace(basePath))
-            {
-                return normalizedPath;
-            }
-
-            var relativePath = normalizedPath.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            if (Path.IsPathRooted(relativePath))
-            {
-                return relativePath;
-            }
-
-            var normalizedBasePath = basePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            return string.IsNullOrEmpty(normalizedBasePath)
-                ? relativePath
-                : normalizedBasePath + Path.DirectorySeparatorChar + relativePath;
-        }
-
         public async Task<List<Download>> FetchDownloadsAsync(
             DownloadClientConfiguration client,
             List<Download> downloads,
@@ -1226,4 +1040,3 @@ namespace Listenarr.Infrastructure.Adapters
         }
     }
 }
-

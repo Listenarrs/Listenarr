@@ -357,6 +357,8 @@ builder.Services.AddScoped<Listenarr.Api.Controllers.LibraryMoveWorkflow>();
 builder.Services.AddScoped<Listenarr.Api.Controllers.LibraryDeleteWorkflow>();
 builder.Services.AddScoped<Listenarr.Api.Controllers.LibraryUpdateWorkflow>();
 builder.Services.AddScoped<Listenarr.Api.Controllers.LibraryIdentifierWorkflow>();
+builder.Services.AddScoped<Listenarr.Api.Controllers.SearchResponseMapper>();
+builder.Services.AddScoped<Listenarr.Api.Controllers.ImagePlaceholderResolver>();
 
 // Register named HttpClients for each adapter type so adapter implementations can request the appropriately-configured client.
 builder.Services.AddListenarrHttpClients(builder.Configuration);

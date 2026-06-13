@@ -200,6 +200,8 @@ namespace Listenarr.Tests.Builders
             services.AddSingleton<LibraryDeleteWorkflow>();
             services.AddSingleton<LibraryUpdateWorkflow>();
             services.AddSingleton<LibraryIdentifierWorkflow>();
+            services.AddSingleton<SearchResponseMapper>();
+            services.AddSingleton<ImagePlaceholderResolver>();
             services.AddSingleton<DownloadService>();
             services.AddSingleton<MoveBackgroundService>();
             services.AddSingleton<MoveQueueService>();

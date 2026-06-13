@@ -351,106 +351,27 @@ namespace Listenarr.Infrastructure.Adapters
                 if (!doc.RootElement.TryGetProperty("queue", out var queue)) return items;
                 if (!queue.TryGetProperty("slots", out var slots) || slots.ValueKind != JsonValueKind.Array) return items;
 
+                var speed = 0.0;
+                if (queue.TryGetProperty("speed", out var speedProp))
+                {
+                    speed = SabnzbdResponseMapper.ParseSpeed(speedProp.GetString() ?? "0");
+                }
+
                 foreach (var slot in slots.EnumerateArray())
                 {
                     try
                     {
-                        var nzoId = slot.TryGetProperty("nzo_id", out var id) ? id.GetString() ?? "" : "";
-                        var filename = slot.TryGetProperty("filename", out var fn) ? fn.GetString() ?? "Unknown" : "Unknown";
-                        var status = slot.TryGetProperty("status", out var st) ? st.GetString() ?? "Unknown" : "Unknown";
-
-                        double ParseNumericValue(JsonElement element)
+                        var queueItem = SabnzbdResponseMapper.MapQueueSlotToQueueItem(client, slot, configuredCategory ?? string.Empty, speed);
+                        if (queueItem != null)
                         {
-                            if (element.ValueKind == JsonValueKind.Number)
-                                return element.GetDouble();
-                            if (element.ValueKind == JsonValueKind.String)
-                            {
-                                var str = element.GetString() ?? "0";
-                                if (double.TryParse(str, out var value))
-                                    return value;
-                            }
-                            return 0;
+                            items.Add(queueItem);
                         }
-
-                        var sizeMB = slot.TryGetProperty("mb", out var mb) ? ParseNumericValue(mb) : 0;
-                        var mbLeft = slot.TryGetProperty("mbleft", out var left) ? ParseNumericValue(left) : 0;
-                        var downloadedMB = sizeMB - mbLeft;
-                        var percentage = slot.TryGetProperty("percentage", out var pct) ? ParseNumericValue(pct) : 0;
-
-                        var timeLeft = slot.TryGetProperty("timeleft", out var time) ? time.GetString() ?? "0:00:00" : "0:00:00";
-                        var category = slot.TryGetProperty("cat", out var cat) ? cat.GetString() ?? "" : "";
-
-                        if (!DownloadClientCategoryFilter.Matches(configuredCategory, category))
-                        {
-                            continue;
-                        }
-
-                        int etaSeconds = 0;
-                        if (!string.IsNullOrEmpty(timeLeft) && timeLeft != "0:00:00")
-                        {
-                            etaSeconds = ParseSABnzbdTimeLeft(timeLeft);
-                        }
-
-                        var sizeBytes = (long)(sizeMB * 1024 * 1024);
-                        var downloadedBytes = (long)(downloadedMB * 1024 * 1024);
-
-                        var speed = 0.0;
-                        if (queue.TryGetProperty("speed", out var speedProp))
-                        {
-                            var speedStr = speedProp.GetString() ?? "0";
-                            speed = ParseSABnzbdSpeed(speedStr);
-                        }
-
-                        var mappedStatus = status.ToLower() switch
-                        {
-                            "downloading" => "downloading",
-                            "queued" => "queued",
-                            "paused" => "paused",
-                            "checking" => "downloading",
-                            "extracting" => "downloading",
-                            "moving" => "downloading",
-                            "completed" => "completed",
-                            "failed" => "failed",
-                            _ => "queued"
-                        };
-
-                        var remotePath = client.DownloadPath ?? "";
-                        var localPath = remotePath;
-
-                        // For SABnzbd, construct ContentPath from download path + filename
-                        var contentPath = !string.IsNullOrEmpty(remotePath) && !string.IsNullOrEmpty(filename)
-                            ? CombineWithOptionalBase(remotePath, filename)
-                            : remotePath;
-                        var localContentPath = contentPath;
-
-                        items.Add(new QueueItem
-                        {
-                            Id = nzoId,
-                            Title = filename,
-                            Quality = category,
-                            Status = mappedStatus,
-                            Progress = percentage,
-                            Size = sizeBytes,
-                            Downloaded = downloadedBytes,
-                            DownloadSpeed = speed,
-                            Eta = etaSeconds > 0 ? etaSeconds : null,
-                            DownloadClient = client.Name,
-                            DownloadClientId = client.Id,
-                            DownloadClientType = "sabnzbd",
-                            AddedAt = DateTime.UtcNow,
-                            CanPause = mappedStatus == "downloading" || mappedStatus == "queued",
-                            CanRemove = true,
-                            RemotePath = remotePath,
-                            LocalPath = localPath,
-                            ContentPath = localContentPath
-                        });
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                     {
                         _logger.LogError(ex, "Error parsing SABnzbd queue item");
                     }
                 }
-
                 _logger.LogInformation("Retrieved {Count} items from SABnzbd active queue", items.Count);
 
                 // Also fetch completed items from SABnzbd history — SABnzbd moves finished
@@ -475,65 +396,17 @@ namespace Listenarr.Infrastructure.Adapters
                                 {
                                     try
                                     {
-                                        var nzoId = slot.TryGetProperty("nzo_id", out var hid) ? hid.GetString() ?? "" : "";
-                                        if (string.IsNullOrEmpty(nzoId) || existingNzoIds.Contains(nzoId))
-                                            continue;
-
-                                        var histStatus = slot.TryGetProperty("status", out var hst) ? hst.GetString() ?? "" : "";
-                                        var histName = slot.TryGetProperty("name", out var hn) ? hn.GetString() ?? "Unknown" : "Unknown";
-                                        var histCategory = slot.TryGetProperty("category", out var hcat) ? hcat.GetString() ?? "" : "";
-                                        var histBytes = slot.TryGetProperty("bytes", out var hb) && hb.TryGetInt64(out var hbl) ? hbl : 0L;
-                                        var storagePath = slot.TryGetProperty("storage", out var sp) ? sp.GetString() ?? "" : "";
-
-                                        if (!DownloadClientCategoryFilter.Matches(configuredCategory, histCategory))
-                                            continue;
-
-                                        var mappedStatus = histStatus.ToLower() switch
+                                        var historyItem = SabnzbdResponseMapper.MapHistorySlotToQueueItem(client, slot, configuredCategory ?? string.Empty, existingNzoIds);
+                                        if (historyItem != null)
                                         {
-                                            "completed" => "completed",
-                                            "failed" => "failed",
-                                            _ => "completed"
-                                        };
-
-                                        var remotePath = !string.IsNullOrEmpty(storagePath) ? storagePath : (client.DownloadPath ?? "");
-                                        var localPath = remotePath;
-
-                                        // Parse completed timestamp
-                                        DateTime? completedAt = null;
-                                        if (slot.TryGetProperty("completed", out var compEpoch) && compEpoch.TryGetInt64(out var epoch))
-                                        {
-                                            completedAt = DateTimeOffset.FromUnixTimeSeconds(epoch).UtcDateTime;
+                                            items.Add(historyItem);
                                         }
-
-                                        items.Add(new QueueItem
-                                        {
-                                            Id = nzoId,
-                                            Title = histName,
-                                            Quality = histCategory,
-                                            Status = mappedStatus,
-                                            Progress = mappedStatus == "completed" ? 100 : 0,
-                                            Size = histBytes,
-                                            Downloaded = histBytes,
-                                            DownloadSpeed = 0,
-                                            Eta = null,
-                                            DownloadClient = client.Name,
-                                            DownloadClientId = client.Id,
-                                            DownloadClientType = "sabnzbd",
-                                            AddedAt = completedAt ?? DateTime.UtcNow,
-                                            CompletionTime = completedAt,
-                                            CanPause = false,
-                                            CanRemove = true,
-                                            RemotePath = remotePath,
-                                            LocalPath = localPath,
-                                            ContentPath = localPath
-                                        });
                                     }
                                     catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                                     {
                                         _logger.LogDebug(ex, "Error parsing SABnzbd history item");
                                     }
                                 }
-
                                 _logger.LogInformation("Retrieved {Count} total items from SABnzbd (queue + history)", items.Count);
                             }
                         }
@@ -642,105 +515,24 @@ namespace Listenarr.Infrastructure.Adapters
                 if (queue.TryGetProperty("speed", out var speedProp))
                 {
                     var speedStr = speedProp.GetString() ?? "0";
-                    queueSpeed = ParseSABnzbdSpeed(speedStr);
+                    queueSpeed = SabnzbdResponseMapper.ParseSpeed(speedStr);
                 }
 
                 foreach (var slot in slots.EnumerateArray())
                 {
                     try
                     {
-                        var nzoId = slot.TryGetProperty("nzo_id", out var id) ? id.GetString() ?? "" : "";
-                        var filename = slot.TryGetProperty("filename", out var fn) ? fn.GetString() ?? "Unknown" : "Unknown";
-                        var status = slot.TryGetProperty("status", out var st) ? st.GetString() ?? "Unknown" : "Unknown";
-
-                        double ParseNumericValue(JsonElement element)
+                        var downloadClientItem = SabnzbdResponseMapper.MapQueueSlotToDownloadClientItem(client, slot, configuredCategory ?? string.Empty, queueSpeed);
+                        if (downloadClientItem != null)
                         {
-                            if (element.ValueKind == JsonValueKind.Number)
-                                return element.GetDouble();
-                            if (element.ValueKind == JsonValueKind.String)
-                            {
-                                var str = element.GetString() ?? "0";
-                                if (double.TryParse(str, out var value))
-                                    return value;
-                            }
-                            return 0;
+                            items.Add(downloadClientItem);
                         }
-
-                        var sizeMB = slot.TryGetProperty("mb", out var mb) ? ParseNumericValue(mb) : 0;
-                        var mbLeft = slot.TryGetProperty("mbleft", out var left) ? ParseNumericValue(left) : 0;
-                        var percentage = slot.TryGetProperty("percentage", out var pct) ? ParseNumericValue(pct) : 0;
-
-                        var timeLeft = slot.TryGetProperty("timeleft", out var time) ? time.GetString() ?? "0:00:00" : "0:00:00";
-                        var category = slot.TryGetProperty("cat", out var cat) ? cat.GetString() ?? "" : "";
-
-                        if (!DownloadClientCategoryFilter.Matches(configuredCategory, category))
-                        {
-                            continue;
-                        }
-
-                        int etaSeconds = 0;
-                        if (!string.IsNullOrEmpty(timeLeft) && timeLeft != "0:00:00")
-                        {
-                            etaSeconds = ParseSABnzbdTimeLeft(timeLeft);
-                        }
-
-                        var sizeBytes = (long)(sizeMB * 1024 * 1024);
-                        var remainingBytes = (long)(mbLeft * 1024 * 1024);
-
-                        // Map SABnzbd status to DownloadItemStatus
-                        var mappedStatus = status.ToLower() switch
-                        {
-                            "downloading" => DownloadItemStatus.Downloading,
-                            "queued" => DownloadItemStatus.Queued,
-                            "paused" => DownloadItemStatus.Paused,
-                            "checking" => DownloadItemStatus.Downloading,
-                            "extracting" => DownloadItemStatus.Downloading,
-                            "moving" => DownloadItemStatus.Downloading,
-                            "completed" => DownloadItemStatus.Completed,
-                            "failed" => DownloadItemStatus.Failed,
-                            _ => DownloadItemStatus.Queued
-                        };
-
-                        var remotePath = client.DownloadPath ?? "";
-                        var contentPath = !string.IsNullOrEmpty(remotePath) && !string.IsNullOrEmpty(filename)
-                            ? CombineWithOptionalBase(remotePath, filename)
-                            : remotePath;
-                        var localContentPath = contentPath;
-
-                        TimeSpan? remainingTime = etaSeconds > 0 ? TimeSpan.FromSeconds(etaSeconds) : null;
-
-                        items.Add(new DownloadClientItem
-                        {
-                            DownloadId = nzoId.ToUpperInvariant(), // SABnzbd uses nzo_id as unique identifier
-                            Title = filename,
-                            Category = category,
-                            Status = mappedStatus,
-                            TotalSize = sizeBytes,
-                            RemainingSize = remainingBytes,
-                            RemainingTime = remainingTime,
-                            OutputPath = localContentPath,
-                            Message = status,
-                            Progress = percentage,
-                            DownloadSpeed = queueSpeed, // SABnzbd provides global speed
-                            CanBeRemoved = true,
-                            CanMoveFiles = mappedStatus == DownloadItemStatus.Completed,
-                            DownloadClientInfo = DownloadClientItemClientInfo.FromClient(
-                                clientId: client.Id,
-                                clientName: client.Name,
-                                clientType: "sabnzbd",
-                                protocol: DownloadProtocol.Usenet,
-                                removeCompletedDownloads: client.Settings?.TryGetValue("removeCompletedDownloads", out var removeVal) is true &&
-                                                         (removeVal is bool boolVal && boolVal),
-                                hasPostImportCategory: !string.IsNullOrEmpty(client.Settings?.GetValueOrDefault("postImportCategory")?.ToString())
-                            )
-                        });
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                     {
                         _logger.LogError(ex, "Error parsing SABnzbd queue item");
                     }
                 }
-
                 _logger.LogInformation("Retrieved {Count} items from SABnzbd queue", items.Count);
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
@@ -852,68 +644,6 @@ namespace Listenarr.Infrastructure.Adapters
             }
         }
 
-        private int ParseSABnzbdTimeLeft(string timeLeft)
-        {
-            try
-            {
-                var totalSeconds = 0;
-
-                if (timeLeft.Contains("day"))
-                {
-                    var parts = timeLeft.Split(new[] { " day ", " days " }, StringSplitOptions.None);
-                    if (parts.Length == 2 && int.TryParse(parts[0], out var days))
-                    {
-                        totalSeconds += days * 86400;
-                        timeLeft = parts[1];
-                    }
-                }
-
-                var timeParts = timeLeft.Split(':');
-                if (timeParts.Length == 3)
-                {
-                    if (int.TryParse(timeParts[0], out var hours))
-                        totalSeconds += hours * 3600;
-                    if (int.TryParse(timeParts[1], out var minutes))
-                        totalSeconds += minutes * 60;
-                    if (int.TryParse(timeParts[2], out var seconds))
-                        totalSeconds += seconds;
-                }
-
-                return totalSeconds;
-            }
-            catch (Exception caughtEx_1) when (caughtEx_1 is not OperationCanceledException && caughtEx_1 is not OutOfMemoryException && caughtEx_1 is not StackOverflowException)
-            {
-                return 0;
-            }
-        }
-
-        private double ParseSABnzbdSpeed(string speedStr)
-        {
-            try
-            {
-                var parts = speedStr.Trim().Split(' ');
-                if (parts.Length != 2)
-                    return 0;
-
-                if (!double.TryParse(parts[0], out var value))
-                    return 0;
-
-                var unit = parts[1].ToUpper();
-                return unit switch
-                {
-                    "B" => value,
-                    "K" => value * 1024,
-                    "M" => value * 1024 * 1024,
-                    "G" => value * 1024 * 1024 * 1024,
-                    _ => 0
-                };
-            }
-            catch (Exception caughtEx_2) when (caughtEx_2 is not OperationCanceledException && caughtEx_2 is not OutOfMemoryException && caughtEx_2 is not StackOverflowException)
-            {
-                return 0;
-            }
-        }
-
         /// <summary>
         /// Resolves the actual import item for a completed download.
         /// Queries SABnzbd history for storage path.
@@ -1010,32 +740,6 @@ namespace Listenarr.Infrastructure.Adapters
                 _logger.LogWarning(ex, "Error resolving import item for SABnzbd download {NzoId}", queueItem.Id);
                 return result;
             }
-        }
-
-        private static string CombineWithOptionalBase(string? basePath, string candidatePath)
-        {
-            var normalizedPath = candidatePath.Trim();
-
-            if (string.IsNullOrEmpty(normalizedPath))
-            {
-                return normalizedPath;
-            }
-
-            if (Path.IsPathRooted(normalizedPath) || string.IsNullOrWhiteSpace(basePath))
-            {
-                return normalizedPath;
-            }
-
-            var relativePath = normalizedPath.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            if (Path.IsPathRooted(relativePath))
-            {
-                return relativePath;
-            }
-
-            var normalizedBasePath = basePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            return string.IsNullOrEmpty(normalizedBasePath)
-                ? relativePath
-                : normalizedBasePath + Path.DirectorySeparatorChar + relativePath;
         }
 
         public async Task<List<Download>> FetchDownloadsAsync(
