@@ -220,27 +220,6 @@ namespace Listenarr.Application.Notification
                 return;
             }
 
-            // Helper to handle a non-successful response consistently
-            async Task HandleFailedResponseAsync(HttpResponseMessage response)
-            {
-                string body = string.Empty;
-                try { body = await response.Content.ReadAsStringAsync(); }
-                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                {
-                    _logger.LogDebug(ex, "Failed to read notification response body for diagnostic logging");
-                }
-
-                var redactedUrl = LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment());
-                var redactedBody = LogRedaction.RedactText(body, LogRedaction.GetSensitiveValuesFromEnvironment());
-                redactedBody = NotificationDiagnostics.AggressiveRedact(redactedBody);
-                if (string.IsNullOrEmpty(redactedBody)) redactedBody = "<redacted>";
-
-                // Structured log so tests and external consumers can inspect the Body property.
-                _logger.LogWarning("Failed to send notification to {WebhookUrl}: {Status} - {Body}", redactedUrl, response.StatusCode, redactedBody);
-                // Emit an explicit redaction marker so the test's logger-capture reliably sees '<redacted>'.
-                _logger.LogWarning("BodyRedacted: {Body}", "<redacted>");
-            }
-
             // Discord-specific handling
             if (webhookUrl.Contains("discord.com/api/webhooks", StringComparison.OrdinalIgnoreCase))
             {
@@ -269,14 +248,14 @@ namespace Listenarr.Application.Notification
 
                         _logger.LogDebug("Posting multipart to {WebhookUrl} (attachment filename={Filename}, size={Size})", LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment()), attachment.Filename, attachment.ImageData?.Length ?? 0);
                         var response = await PostValidatedAsync(webhookUrl, multipartContent);
-                        if (!response.IsSuccessStatusCode) await HandleFailedResponseAsync(response);
+                        if (!response.IsSuccessStatusCode) await NotificationDiagnostics.LogFailedResponseAsync(response, webhookUrl, _logger);
                     }
                     else
                     {
                         var discordJson = payloadObj.ToJsonString();
                         using var discordContent = new System.Net.Http.StringContent(discordJson, Encoding.UTF8, "application/json");
                         var response = await PostValidatedAsync(webhookUrl, discordContent);
-                        if (!response.IsSuccessStatusCode) await HandleFailedResponseAsync(response);
+                        if (!response.IsSuccessStatusCode) await NotificationDiagnostics.LogFailedResponseAsync(response, webhookUrl, _logger);
                     }
                 }
                 catch (HttpRequestException ex)
@@ -333,7 +312,7 @@ namespace Listenarr.Application.Notification
                         var respText = await NotificationDiagnostics.TryReadContentAsync(response.Content, _logger);
                         var redactedResp = NotificationDiagnostics.AggressiveRedact(LogRedaction.RedactText(respText, LogRedaction.GetSensitiveValuesFromEnvironment()));
                         _logger.LogWarning("NTFY response from {WebhookUrl}: {Status} - {Body}", redactedUrl, response.StatusCode, redactedResp);
-                        await HandleFailedResponseAsync(response);
+                        await NotificationDiagnostics.LogFailedResponseAsync(response, webhookUrl, _logger);
                     }
                 }
                 catch (HttpRequestException ex)
@@ -400,7 +379,7 @@ namespace Listenarr.Application.Notification
                             var respText = await NotificationDiagnostics.TryReadContentAsync(response.Content, _logger);
                             var redactedResp = NotificationDiagnostics.AggressiveRedact(LogRedaction.RedactText(respText, LogRedaction.GetSensitiveValuesFromEnvironment()));
                             _logger.LogWarning("Pushover response from {WebhookUrl}: {Status} - {Body}", redactedUrl, response.StatusCode, redactedResp);
-                            await HandleFailedResponseAsync(response);
+                            await NotificationDiagnostics.LogFailedResponseAsync(response, webhookUrl, _logger);
                         }
                         return;
                     }
@@ -457,7 +436,7 @@ namespace Listenarr.Application.Notification
                             var respText = await NotificationDiagnostics.TryReadContentAsync(response.Content, _logger);
                             var redactedResp = NotificationDiagnostics.AggressiveRedact(LogRedaction.RedactText(respText, LogRedaction.GetSensitiveValuesFromEnvironment()));
                             _logger.LogWarning("Telegram response from {WebhookUrl}: {Status} - {Body}", redactedUrl, response.StatusCode, redactedResp);
-                            await HandleFailedResponseAsync(response);
+                            await NotificationDiagnostics.LogFailedResponseAsync(response, webhookUrl, _logger);
                         }
                         return;
                     }
@@ -545,7 +524,7 @@ namespace Listenarr.Application.Notification
                             var respText = await NotificationDiagnostics.TryReadContentAsync(response.Content, _logger);
                             var redactedResp = NotificationDiagnostics.AggressiveRedact(LogRedaction.RedactText(respText, LogRedaction.GetSensitiveValuesFromEnvironment()));
                             _logger.LogWarning("Pushbullet response from {WebhookUrl}: {Status} - {Body}", redactedUrl, response.StatusCode, redactedResp);
-                            await HandleFailedResponseAsync(response);
+                            await NotificationDiagnostics.LogFailedResponseAsync(response, webhookUrl, _logger);
                         }
                         return;
                     }
@@ -598,7 +577,7 @@ namespace Listenarr.Application.Notification
                         var respText = await NotificationDiagnostics.TryReadContentAsync(response.Content, _logger);
                         var redactedResp = NotificationDiagnostics.AggressiveRedact(LogRedaction.RedactText(respText, LogRedaction.GetSensitiveValuesFromEnvironment()));
                         _logger.LogWarning("Slack response from {WebhookUrl}: {Status} - {Body}", redactedUrl, response.StatusCode, redactedResp);
-                        await HandleFailedResponseAsync(response);
+                        await NotificationDiagnostics.LogFailedResponseAsync(response, webhookUrl, _logger);
                     }
                     return;
                 }
@@ -639,7 +618,7 @@ namespace Listenarr.Application.Notification
                 var response = await PostValidatedAsync(webhookUrl, defaultContent);
                 if (!response.IsSuccessStatusCode)
                 {
-                    await HandleFailedResponseAsync(response);
+                    await NotificationDiagnostics.LogFailedResponseAsync(response, webhookUrl, _logger);
                 }
             }
             catch (HttpRequestException ex)

@@ -61,6 +61,24 @@ namespace Listenarr.Application.Notification
             }
         }
 
+        public static async Task LogFailedResponseAsync(HttpResponseMessage response, string webhookUrl, ILogger logger)
+        {
+            string body = string.Empty;
+            try { body = await response.Content.ReadAsStringAsync(); }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
+                logger.LogDebug(ex, "Failed to read notification response body for diagnostic logging");
+            }
+
+            var redactedUrl = LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment());
+            var redactedBody = LogRedaction.RedactText(body, LogRedaction.GetSensitiveValuesFromEnvironment());
+            redactedBody = AggressiveRedact(redactedBody);
+            if (string.IsNullOrEmpty(redactedBody)) redactedBody = "<redacted>";
+
+            logger.LogWarning("Failed to send notification to {WebhookUrl}: {Status} - {Body}", redactedUrl, response.StatusCode, redactedBody);
+            logger.LogWarning("BodyRedacted: {Body}", "<redacted>");
+        }
+
         public static bool TryValidateWebhookTarget(string webhookUrl, out string reason, bool allowPrivateTargets = false)
         {
             return OutboundRequestSecurity.TryValidateExternalHttpUrl(webhookUrl, out reason, allowPrivateTargets);
