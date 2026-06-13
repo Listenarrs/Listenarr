@@ -359,31 +359,12 @@ namespace Listenarr.Application.Downloads
             }
 
             // Create Download record in database before sending to client
-            var download = new Download
-            {
-                Id = downloadId,
-                AudiobookId = audiobookId,
-                Title = searchResult.Title ?? string.Empty,
-                Artist = searchResult.Artist ?? string.Empty,
-                Album = searchResult.Album ?? string.Empty,
-                Language = searchResult.Language,
-                OriginalUrl = !string.IsNullOrEmpty(searchResult.MagnetLink) ? searchResult.MagnetLink : (searchResult.TorrentUrl ?? searchResult.NzbUrl ?? string.Empty),
-                Progress = 0,
-                TotalSize = searchResult.Size,
-                DownloadedSize = 0,
-                DownloadPath = downloadClient.DownloadPath ?? string.Empty,
-                FinalPath = string.Empty,
-                StartedAt = DateTime.UtcNow,
-                DownloadClientId = downloadClientIdForModel,
-                Metadata = new Dictionary<string, object>
-                {
-                    ["Source"] = searchResult.Source ?? string.Empty,
-                    ["Seeders"] = searchResult.Seeders ?? 0,
-                    ["Quality"] = searchResult.Quality ?? string.Empty,
-                    ["Language"] = searchResult.Language ?? string.Empty,
-                    ["DownloadType"] = searchResult.DownloadType
-                }
-            };
+            var download = DownloadRecordFactory.CreateQueuedDownload(
+                downloadId,
+                searchResult,
+                downloadClient,
+                downloadClientIdForModel,
+                audiobookId);
 
             await downloadRepository.AddAsync(download);
             logger.LogInformation("Created download record in database: {DownloadId} for '{Title}'", downloadId, searchResult.Title);
