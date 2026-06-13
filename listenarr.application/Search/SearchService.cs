@@ -33,8 +33,6 @@ namespace Listenarr.Application.Search
     {
         private readonly IConfigurationService _configurationService;
         private readonly ILogger<SearchService> _logger;
-        private readonly AudibleService _audibleService;
-        private readonly MetadataConverters _metadataConverters;
         private readonly SearchProgressReporter _searchProgressReporter;
         private readonly AsinCandidateCollector _asinCandidateCollector;
         private readonly AsinEnricher _asinEnricher;
@@ -43,8 +41,8 @@ namespace Listenarr.Application.Search
         private readonly AsinSearchHandler _asinSearchHandler;
         private readonly IndexerSearchWorkflow _indexerSearchWorkflow;
         private readonly MetadataSourceCatalog _metadataSourceCatalog;
-        private readonly AudibleAuthorPageCollector _audibleAuthorPageCollector;
         private readonly AudibleSimpleLookupWorkflow _audibleSimpleLookupWorkflow;
+        private readonly AudibleAuthorSearchWorkflow _audibleAuthorSearchWorkflow;
 
         public SearchService(
             HttpClient httpClient,
@@ -67,12 +65,11 @@ namespace Listenarr.Application.Search
             IndexerSearchWorkflow? indexerSearchWorkflow = null,
             MetadataSourceCatalog? metadataSourceCatalog = null,
             AudibleAuthorPageCollector? audibleAuthorPageCollector = null,
-            AudibleSimpleLookupWorkflow? audibleSimpleLookupWorkflow = null)
+            AudibleSimpleLookupWorkflow? audibleSimpleLookupWorkflow = null,
+            AudibleAuthorSearchWorkflow? audibleAuthorSearchWorkflow = null)
         {
             _configurationService = configurationService;
             _logger = logger;
-            _audibleService = audibleService;
-            _metadataConverters = metadataConverters;
             _searchProgressReporter = searchProgressReporter;
             _asinCandidateCollector = asinCandidateCollector;
             _asinEnricher = asinEnricher;
@@ -91,12 +88,17 @@ namespace Listenarr.Application.Search
             _metadataSourceCatalog = metadataSourceCatalog ?? new MetadataSourceCatalog(
                 apiConfigRepository,
                 NullLogger<MetadataSourceCatalog>.Instance);
-            _audibleAuthorPageCollector = audibleAuthorPageCollector ?? new AudibleAuthorPageCollector(
+            var resolvedAudibleAuthorPageCollector = audibleAuthorPageCollector ?? new AudibleAuthorPageCollector(
                 audibleService,
                 NullLogger<AudibleAuthorPageCollector>.Instance);
             _audibleSimpleLookupWorkflow = audibleSimpleLookupWorkflow ?? new AudibleSimpleLookupWorkflow(
                 audibleService,
                 metadataConverters);
+            _audibleAuthorSearchWorkflow = audibleAuthorSearchWorkflow ?? new AudibleAuthorSearchWorkflow(
+                audibleService,
+                resolvedAudibleAuthorPageCollector,
+                metadataConverters,
+                NullLogger<AudibleAuthorSearchWorkflow>.Instance);
         }
 
         public async Task<List<SearchResult>> SearchAsync(string query, string? category = null, List<string>? apiIds = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false)
@@ -203,153 +205,17 @@ namespace Listenarr.Application.Search
                         return simpleAudibleResults;
                     }
 
-                    // AUTHOR-only
-                    if (searchType == "AUTHOR" && !string.IsNullOrEmpty(authorVal))
+                    var authorAudibleResults = await _audibleAuthorSearchWorkflow.TrySearchAsync(
+                        searchType,
+                        authorVal,
+                        titleVal,
+                        isbnVal,
+                        candidateLimit,
+                        region,
+                        language);
+                    if (authorAudibleResults?.Any() == true)
                     {
-                        var aggregated = await _audibleAuthorPageCollector.CollectAsync(
-                            authorVal,
-                            candidateLimit,
-                            region,
-                            language,
-                            "author");
-                        if (aggregated.Any())
-                        {
-                            // Deduplicate results based on ASIN to prevent repeated books across pages
-                            var deduplicated = aggregated
-                                .Where(b => !string.IsNullOrWhiteSpace(b.Asin))
-                                .GroupBy(b => b.Asin, StringComparer.OrdinalIgnoreCase)
-                                .Select(g => g.First())
-                                .ToList();
-
-                            _logger.LogInformation("Deduplicated author results for '{Author}': {OriginalCount} -> {DeduplicatedCount}", authorVal, aggregated.Count, deduplicated.Count);
-
-                            var converted = new List<SearchResult>();
-                            var authorFiltered = deduplicated.AsEnumerable();
-                            if (!string.IsNullOrWhiteSpace(language)) authorFiltered = authorFiltered.Where(b => !string.IsNullOrWhiteSpace(b.Language) && string.Equals(b.Language, language, StringComparison.OrdinalIgnoreCase));
-                            foreach (var book in authorFiltered.Where(book => !string.IsNullOrWhiteSpace(book.Asin)))
-                            {
-                                var bookResp = new AudibleBookResponse
-                                {
-                                    Asin = book.Asin,
-                                    Title = book.Title,
-                                    Subtitle = book.Subtitle,
-                                    Authors = book.Authors,
-                                    ImageUrl = book.ImageUrl,
-                                    Language = book.Language,
-                                    BookFormat = book.BookFormat,
-                                    Genres = book.Genres,
-                                    Series = book.Series,
-                                    Publisher = book.Publisher,
-                                    Narrators = book.Narrators,
-                                    ReleaseDate = book.ReleaseDate
-                                };
-                                var meta = _metadataConverters.ConvertAudibleToMetadata(bookResp, book.Asin!, "Audible");
-                                var sr = await _metadataConverters.ConvertMetadataToSearchResultAsync(meta, book.Asin!);
-                                sr.IsEnriched = true;
-                                sr.MetadataSource = "Audible";
-                                converted.Add(sr);
-                            }
-                            if (converted.Any()) return SearchResultConverters.ToMetadataList(converted);
-                        }
-                    }
-
-                    // AUTHOR + TITLE: prefer author endpoint then filter by title/isbn to ensure consistent Audible enrichment
-                    if (searchType == "AUTHOR_TITLE" && !string.IsNullOrEmpty(authorVal))
-                    {
-                        try { _logger.LogInformation("Entering AUTHOR_TITLE branch: author='{Author}', title='{Title}', isbn='{Isbn}'", authorVal, titleVal, isbnVal); }
-                        catch (Exception caughtEx_3) when (caughtEx_3 is not OperationCanceledException && caughtEx_3 is not OutOfMemoryException && caughtEx_3 is not StackOverflowException)
-                        {
-                            System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
-                        }
-                        var aggregated = await _audibleAuthorPageCollector.CollectAsync(
-                            authorVal,
-                            candidateLimit,
-                            region,
-                            language,
-                            "AUTHOR_TITLE");
-                        if (aggregated?.Any() == true)
-                        {
-                            // Deduplicate results based on ASIN to prevent repeated books across pages
-                            var deduplicated = aggregated
-                                .Where(b => !string.IsNullOrWhiteSpace(b.Asin))
-                                .GroupBy(b => b.Asin, StringComparer.OrdinalIgnoreCase)
-                                .Select(g => g.First())
-                                .ToList();
-
-                            _logger.LogInformation("Deduplicated AUTHOR_TITLE results for '{Author}': {OriginalCount} -> {DeduplicatedCount}", authorVal, aggregated.Count, deduplicated.Count);
-
-                            try { _logger.LogInformation("Audible author lookup returned {Count} aggregated results for author '{Author}'", deduplicated.Count, authorVal); }
-                            catch (Exception caughtEx_4) when (caughtEx_4 is not OperationCanceledException && caughtEx_4 is not OutOfMemoryException && caughtEx_4 is not StackOverflowException)
-                            {
-                                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
-                            }
-
-                            // Use the lightweight author/books results to perform title filtering
-                            // and avoid fetching detailed metadata for every ASIN. Only fetch
-                            // detailed metadata when an ISBN lookup is explicitly required or
-                            // when we need to enrich a small set of final matches.
-                            var authorFiltered = deduplicated.AsEnumerable();
-                            if (!string.IsNullOrWhiteSpace(language)) authorFiltered = authorFiltered.Where(b => !string.IsNullOrWhiteSpace(b.Language) && string.Equals(b.Language, language, StringComparison.OrdinalIgnoreCase));
-
-                            // Title-based filtering can be done directly against the author results
-                            if (!string.IsNullOrEmpty(titleVal))
-                            {
-                                authorFiltered = authorFiltered.Where(b =>
-                                    (!string.IsNullOrWhiteSpace(b.Title) && b.Title.IndexOf(titleVal, StringComparison.OrdinalIgnoreCase) >= 0) ||
-                                    (!string.IsNullOrWhiteSpace(b.Subtitle) && b.Subtitle.IndexOf(titleVal, StringComparison.OrdinalIgnoreCase) >= 0)
-                                );
-                            }
-
-                            // If an ISBN was provided we must match against detailed metadata;
-                            // instead of fetching metadata for every ASIN, scan a limited set
-                            // of candidates and only fetch metadata until we find ISBN matches.
-                            var detailedMetaByAsin = new Dictionary<string, AudibleBookResponse>(StringComparer.OrdinalIgnoreCase);
-                            if (!string.IsNullOrEmpty(isbnVal))
-                            {
-                                // Limit how many author results to scan for ISBNs to avoid huge loads
-                                var isbnScanLimit = Math.Min(200, Math.Max(50, candidateLimit));
-                                var scanCandidates = aggregated.Where(r => !string.IsNullOrWhiteSpace(r.Asin)).Take(isbnScanLimit).ToList();
-                                try { _logger.LogInformation("Scanning up to {Limit} author candidates for ISBN {Isbn}", scanCandidates.Count, isbnVal); }
-                                catch (Exception caughtEx_5) when (caughtEx_5 is not OperationCanceledException && caughtEx_5 is not OutOfMemoryException && caughtEx_5 is not StackOverflowException)
-                                {
-                                    System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
-                                }
-                                foreach (var c in scanCandidates.Where(c => !string.IsNullOrWhiteSpace(c.Asin)))
-                                {
-                                    try
-                                    {
-                                        var meta = await _audibleService.GetBookMetadataAsync(c.Asin!, region, true, language);
-                                        if (meta == null) continue;
-                                        detailedMetaByAsin[c.Asin!] = meta;
-                                        if (!string.IsNullOrWhiteSpace(meta.Isbn) && string.Equals(meta.Isbn.Trim(), isbnVal, StringComparison.OrdinalIgnoreCase))
-                                        {
-                                            // Narrow authorFiltered to only matching ASINs
-                                            authorFiltered = authorFiltered.Where(r => !string.IsNullOrWhiteSpace(r.Asin) && string.Equals(r.Asin, c.Asin, StringComparison.OrdinalIgnoreCase));
-                                            break; // stop scanning once we found the ISBN match
-                                        }
-                                    }
-                                    catch (Exception exMeta) when (exMeta is not OperationCanceledException && exMeta is not OutOfMemoryException && exMeta is not StackOverflowException)
-                                    {
-                                        _logger.LogDebug(exMeta, "Failed fetching audible metadata for ASIN {Asin} while scanning for ISBN", c.Asin);
-                                    }
-                                }
-                            }
-
-                            try { _logger.LogInformation("[DBG] authorFiltered count after language/title/isbn filtering: {Count}", authorFiltered.Count()); }
-                            catch (Exception caughtEx_6) when (caughtEx_6 is not OperationCanceledException && caughtEx_6 is not OutOfMemoryException && caughtEx_6 is not StackOverflowException)
-                            {
-                                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
-                            }
-
-                            var converted = await AudibleSearchResultMapper.ConvertToSearchResultsAsync(
-                                authorFiltered,
-                                _metadataConverters,
-                                detailedMetaByAsin,
-                                _logger,
-                                continueOnConversionError: true);
-
-                            if (converted.Any()) return SearchResultConverters.ToMetadataList(converted);
-                        }
+                        return authorAudibleResults;
                     }
 
                 }

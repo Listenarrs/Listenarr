@@ -17,8 +17,6 @@
  */
 using System.Net;
 using System.Text.Json;
-using BencodeNET.Parsing;
-using BencodeNET.Torrents;
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Security;
 using Listenarr.Domain.Common;
@@ -42,12 +40,16 @@ namespace Listenarr.Infrastructure.Adapters
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly ILogger<QbittorrentAdapter> _logger;
         private readonly ITorrentFileDownloader _torrentFileDownloader;
+        private readonly QbittorrentTorrentAddPlanner _torrentAddPlanner;
+        private readonly QbittorrentAuthSession _authSession;
 
         public QbittorrentAdapter(IHttpClientFactory httpFactory, ITorrentFileDownloader torrentFileDownloader, ILogger<QbittorrentAdapter> logger)
         {
             _httpClientFactory = httpFactory ?? throw new ArgumentNullException(nameof(httpFactory));
             _torrentFileDownloader = torrentFileDownloader ?? throw new ArgumentNullException(nameof(torrentFileDownloader));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _torrentAddPlanner = new QbittorrentTorrentAddPlanner(_torrentFileDownloader, _logger);
+            _authSession = new QbittorrentAuthSession(_logger);
         }
 
         public async Task<(bool Success, string Message)> TestConnectionAsync(DownloadClientConfiguration client, CancellationToken ct = default)
@@ -198,66 +200,17 @@ namespace Listenarr.Infrastructure.Adapters
             }
         }
 
-        /// <summary>
-        /// Perform the login operation with qBittorrent API
-        /// </summary>
-        /// <param name="httpClient"></param>
-        /// <param name="client"></param>
-        /// <param name="cancellationToken"></param>
-        /// <returns></returns>
-        /// <exception cref="QbittorrentException"></exception>
-        private async Task<bool> LoginAsync(HttpClient httpClient, DownloadClientConfiguration client, CancellationToken cancellationToken = default)
-        {
-            var baseUrl = DownloadClientUriBuilder.BuildAuthority(client);
-
-            using var loginData = new FormUrlEncodedContent(
-            [
-                new KeyValuePair<string, string>("username", client.Username ?? string.Empty),
-                new KeyValuePair<string, string>("password", client.Password ?? string.Empty)
-            ]);
-
-            using var loginResponse = await httpClient.PostAsync($"{baseUrl}/api/v2/auth/login", loginData, cancellationToken);
-            if (!loginResponse.IsSuccessStatusCode)
-            {
-                var body = await loginResponse.Content.ReadAsStringAsync(cancellationToken);
-
-                if (loginResponse.StatusCode == HttpStatusCode.Forbidden)
-                {
-                    using var testResp = await httpClient.GetAsync($"{baseUrl}/api/v2/app/version", cancellationToken);
-                    if (!testResp.IsSuccessStatusCode)
-                    {
-                        throw new QbittorrentException($"qBittorrent authentication enabled but credentials are incorrect for {client.Id}");
-                    }
-
-                    _logger.LogDebug($"qBittorrent authentication disabled; proceeding without credentials for client {client.Id}");
-                }
-                else
-                {
-                    throw new QbittorrentException($"qBittorrent login failed with status {loginResponse.StatusCode}");
-                }
-            }
-            else
-            {
-                _logger.LogDebug("Authenticated to qBittorrent for client {ClientId}", LogRedaction.SanitizeText(client.Id));
-            }
-
-            return true;
-        }
-
         public async Task<string?> AddAsync(DownloadClientConfiguration client, SearchResult result, CancellationToken ct = default)
         {
             ArgumentNullException.ThrowIfNull(client);
             ArgumentNullException.ThrowIfNull(result);
-
-            var magnetLink = DownloadClientUriBuilder.NormalizeMagnetLink(result.MagnetLink);
-            var httpTorrentUrl = NormalizeTorrentUrl(result.TorrentUrl);
 
             var baseUrl = DownloadClientUriBuilder.BuildAuthority(client);
             using var httpClient = _httpClientFactory.CreateClient(ClientType);
 
             try
             {
-                await LoginAsync(httpClient, client, ct);
+                await _authSession.LoginAsync(httpClient, client, ct);
             }
             catch (QbittorrentException exception)
             {
@@ -265,78 +218,25 @@ namespace Listenarr.Infrastructure.Adapters
                 return null;
             }
 
-            var savePath = client.DownloadPath ?? string.Empty;
-            string? category = null;
-            string? tags = null;
-
-            if (client.Settings != null)
+            var addPlan = await _torrentAddPlanner.CreateAsync(client, result, ct);
+            if (addPlan == null)
             {
-                if (client.Settings.TryGetValue("category", out var categoryObj))
-                    category = categoryObj?.ToString();
-                if (client.Settings.TryGetValue("tags", out var tagsObj))
-                    tags = tagsObj?.ToString();
-            }
-
-            var hash = string.Empty;
-
-            byte[]? torrentFileData = result.TorrentFileContent;
-            if (torrentFileData == null && !string.IsNullOrEmpty(httpTorrentUrl))
-            {
-                // Try to get torrent file with the torrent URL
-                var downloadResult = await _torrentFileDownloader.DownloadAsync(httpTorrentUrl, ct);
-                if (downloadResult.TorrentBytes != null)
-                {
-                    torrentFileData = downloadResult.TorrentBytes;
-                    _logger.LogInformation($"Pre-downloaded torrent file ({torrentFileData!.Length} bytes) for '{LogRedaction.SanitizeText(result.Title)}'");
-                }
-                else if (downloadResult.HasMagnet && string.IsNullOrEmpty(magnetLink))
-                {
-                    magnetLink = DownloadClientUriBuilder.NormalizeMagnetLink(downloadResult.MagnetUri);
-                    _logger.LogInformation($"Indexer redirected to magnet link for '{LogRedaction.SanitizeText(result.Title)}'");
-                }
-            }
-
-            if (torrentFileData == null && string.IsNullOrEmpty(httpTorrentUrl) && string.IsNullOrEmpty(magnetLink))
-            {
-                _logger.LogError($"No torrent URL, no magnet link and no torrent file given, nothing can be added for search result {result.Title}");
-                return null;
-            }
-
-            // Compute hash from torrent file
-            if (torrentFileData != null)
-            {
-                using (var stream = new MemoryStream(torrentFileData))
-                {
-                    var parser = new BencodeParser();
-                    Torrent torrent = parser.Parse<Torrent>(stream);
-                    hash = torrent.GetInfoHash();
-                }
-            }
-            // Get hash in magnet link
-            else if (!string.IsNullOrEmpty(magnetLink))
-            {
-                hash = TryExtractMagnetHash(magnetLink);
-            }
-
-            if (string.IsNullOrEmpty(hash))
-            {
-                _logger.LogError($"Unable to compute hash for the given torrent: {result.Title} with torrent URL: {result.TorrentUrl} and magnet link: {result.MagnetLink}");
                 return null;
             }
 
             // Add download using torrent file
             HttpResponseMessage addResponse;
-            if (torrentFileData != null)
+            if (addPlan.TorrentFileData != null)
             {
                 using var multipart = new MultipartFormDataContent();
-                multipart.Add(new StringContent(savePath), "savepath");
-                if (!string.IsNullOrEmpty(category))
-                    multipart.Add(new StringContent(category), "category");
-                if (!string.IsNullOrEmpty(tags))
-                    multipart.Add(new StringContent(tags), "tags");
+                multipart.Add(new StringContent(addPlan.SavePath), "savepath");
+                if (!string.IsNullOrEmpty(addPlan.Category))
+                    multipart.Add(new StringContent(addPlan.Category), "category");
+                if (!string.IsNullOrEmpty(addPlan.Tags))
+                    multipart.Add(new StringContent(addPlan.Tags), "tags");
 
                 var torrentFileName = string.IsNullOrEmpty(result.TorrentFileName) ? "download.torrent" : result.TorrentFileName;
-                var torrentContent = new ByteArrayContent(torrentFileData);
+                var torrentContent = new ByteArrayContent(addPlan.TorrentFileData);
                 torrentContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/x-bittorrent");
                 multipart.Add(torrentContent, "torrents", torrentFileName);
 
@@ -345,19 +245,19 @@ namespace Listenarr.Infrastructure.Adapters
             // Add using magnet link or torrent url
             else
             {
-                var url = new[] { magnetLink, httpTorrentUrl }
+                var url = new[] { addPlan.MagnetLink, addPlan.HttpTorrentUrl }
                     .FirstOrDefault(static url => !string.IsNullOrEmpty(url)) ?? string.Empty;
 
                 var formData = new List<KeyValuePair<string, string>>
                 {
                     new("urls", url),
-                    new("savepath", savePath)
+                    new("savepath", addPlan.SavePath)
                 };
 
-                if (!string.IsNullOrEmpty(category))
-                    formData.Add(new("category", category));
-                if (!string.IsNullOrEmpty(tags))
-                    formData.Add(new("tags", tags));
+                if (!string.IsNullOrEmpty(addPlan.Category))
+                    formData.Add(new("category", addPlan.Category));
+                if (!string.IsNullOrEmpty(addPlan.Tags))
+                    formData.Add(new("tags", addPlan.Tags));
 
                 using var addData = new FormUrlEncodedContent(formData);
                 addResponse = await httpClient.PostAsync($"{baseUrl}/api/v2/torrents/add", addData, ct);
@@ -378,11 +278,11 @@ namespace Listenarr.Infrastructure.Adapters
 
             // Inject tracker URLs via addTrackers API as a fallback to ensure the tracker
             // is registered even if qBittorrent didn't parse it from the torrent file.
-            if (torrentFileData != null)
+            if (addPlan.TorrentFileData != null)
             {
                 try
                 {
-                    var announces = MyAnonamouseHelper.ExtractAnnounceUrls(torrentFileData);
+                    var announces = MyAnonamouseHelper.ExtractAnnounceUrls(addPlan.TorrentFileData);
                     // Filter to only actual tracker announce URLs — exclude file/web-seed URLs
                     var trackerAnnounces = announces?.Where(a =>
                         a.Contains("/announce", StringComparison.OrdinalIgnoreCase) ||
@@ -392,14 +292,14 @@ namespace Listenarr.Infrastructure.Adapters
                         var trackerUrls = string.Join("\n", trackerAnnounces.Distinct());
                         using var addTrackersData = new FormUrlEncodedContent(new[]
                         {
-                            new KeyValuePair<string, string>("hash", hash),
+                            new KeyValuePair<string, string>("hash", addPlan.Hash),
                             new KeyValuePair<string, string>("urls", trackerUrls)
                         });
                         using var trackersResp = await httpClient.PostAsync($"{baseUrl}/api/v2/torrents/addTrackers", addTrackersData, ct);
                         if (trackersResp.IsSuccessStatusCode)
-                            _logger.LogInformation($"Injected {trackerAnnounces.Count} tracker(s) for torrent {hash} via addTrackers API");
+                            _logger.LogInformation($"Injected {trackerAnnounces.Count} tracker(s) for torrent {addPlan.Hash} via addTrackers API");
                         else
-                            _logger.LogDebug($"addTrackers API returned {trackersResp.StatusCode} for torrent {hash} (non-fatal)");
+                            _logger.LogDebug($"addTrackers API returned {trackersResp.StatusCode} for torrent {addPlan.Hash} (non-fatal)");
                     }
                 }
                 catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
@@ -408,37 +308,7 @@ namespace Listenarr.Infrastructure.Adapters
                 }
             }
 
-            return hash;
-        }
-
-        private static string? TryExtractMagnetHash(string? torrentUrl)
-        {
-            if (string.IsNullOrEmpty(torrentUrl) ||
-                !torrentUrl.Contains("xt=urn:btih:", StringComparison.OrdinalIgnoreCase))
-            {
-                return null;
-            }
-
-            var start = torrentUrl.IndexOf("xt=urn:btih:", StringComparison.OrdinalIgnoreCase) + "xt=urn:btih:".Length;
-            var end = torrentUrl.IndexOf('&', start);
-            if (end == -1) end = torrentUrl.Length;
-            return torrentUrl[start..end].ToLowerInvariant();
-        }
-
-        private static string? NormalizeTorrentUrl(string? torrentUrl)
-        {
-            var trimmed = (torrentUrl ?? string.Empty).Trim();
-            if (trimmed.Length == 0)
-            {
-                return null;
-            }
-
-            if (!DownloadClientUriBuilder.TryParseHttpOrHttpsAbsoluteUri(trimmed, out var torrentUri))
-            {
-                throw new ArgumentException("Torrent URL must be an absolute HTTP or HTTPS URL.", nameof(torrentUrl));
-            }
-
-            return torrentUri!.ToString();
+            return addPlan.Hash;
         }
 
         /// <summary>

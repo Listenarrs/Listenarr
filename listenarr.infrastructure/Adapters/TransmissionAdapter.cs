@@ -17,8 +17,6 @@
  */
 using System.Globalization;
 using System.Net;
-using System.Net.Http.Headers;
-using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using Listenarr.Application.Interfaces;
@@ -40,12 +38,16 @@ namespace Listenarr.Infrastructure.Adapters
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly ITorrentFileDownloader _torrentFileDownloader;
         private readonly ILogger<TransmissionAdapter> _logger;
+        private readonly TransmissionTorrentAddPlanner _torrentAddPlanner;
+        private readonly TransmissionRpcClient _rpcClient;
 
         public TransmissionAdapter(IHttpClientFactory httpClientFactory, ITorrentFileDownloader torrentFileDownloader, ILogger<TransmissionAdapter> logger)
         {
             _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
             _torrentFileDownloader = torrentFileDownloader ?? throw new ArgumentNullException(nameof(torrentFileDownloader));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _torrentAddPlanner = new TransmissionTorrentAddPlanner(_torrentFileDownloader, _logger);
+            _rpcClient = new TransmissionRpcClient(_httpClientFactory, ClientType, _logger);
         }
 
         public async Task<(bool Success, string Message)> TestConnectionAsync(DownloadClientConfiguration client, CancellationToken ct = default)
@@ -59,7 +61,7 @@ namespace Listenarr.Infrastructure.Adapters
                     arguments = new { },
                     tag = 1
                 };
-                var response = await InvokeRpcAsync(client, payload, ct);
+                var response = await _rpcClient.InvokeAsync(client, payload, ct);
 
                 // Validate that the RPC endpoint actually responded with a successful session-get.
                 // Without this check, a non-Transmission service on the same port (or Transmission's
@@ -100,143 +102,8 @@ namespace Listenarr.Infrastructure.Adapters
             if (client == null) throw new ArgumentNullException(nameof(client));
             if (result == null) throw new ArgumentNullException(nameof(result));
 
-            var arguments = new Dictionary<string, object>();
-
-            // Prefer cached torrent file data over URL (required for private trackers with authentication)
-            byte[]? torrentFileData = result.TorrentFileContent;
-            var magnetLink = DownloadClientUriBuilder.NormalizeMagnetLink(result.MagnetLink);
-            var httpTorrentUrl = NormalizeTorrentUrl(result.TorrentUrl);
-            var torrentUrl = magnetLink.Length > 0 ? magnetLink : httpTorrentUrl ?? string.Empty;
-            var isMagnetTarget = magnetLink.Length > 0;
-
-            _logger.LogDebug("AddAsync entry for '{Title}': TorrentFileContent={HasContent}, MagnetLink={HasMagnet}, TorrentUrl={Url}",
-                LogRedaction.SanitizeText(result.Title),
-                result.TorrentFileContent != null && result.TorrentFileContent.Length > 0 ? $"{result.TorrentFileContent.Length} bytes" : "null",
-                isMagnetTarget ? "yes" : "no",
-                LogRedaction.SanitizeUrl(torrentUrl));
-
-            // Transmission's magnet link handling is less reliable than qBittorrent's — it
-            // often stalls at "Downloading metadata..." because its DHT/tracker resolution is
-            // weaker. When a separate TorrentUrl (HTTP) is available alongside a magnet link,
-            // prefer fetching the .torrent file from TorrentUrl. The .torrent file contains
-            // full tracker lists and piece hashes, giving Transmission everything it needs to
-            // start immediately without metadata resolution.
-            if ((torrentFileData == null || torrentFileData.Length == 0) &&
-                isMagnetTarget &&
-                !string.IsNullOrEmpty(httpTorrentUrl))
-            {
-                _logger.LogDebug("Magnet link available but TorrentUrl also present — attempting .torrent pre-download from {Url} for better Transmission compatibility",
-                    LogRedaction.SanitizeUrl(httpTorrentUrl));
-                try
-                {
-                    var altResult = await _torrentFileDownloader.DownloadAsync(httpTorrentUrl, ct);
-                    if (altResult.HasBytes)
-                    {
-                        torrentFileData = altResult.TorrentBytes;
-                        _logger.LogInformation("Pre-downloaded .torrent file ({Bytes} bytes) from TorrentUrl for '{Title}' — using instead of magnet link",
-                            torrentFileData!.Length, LogRedaction.SanitizeText(result.Title));
-                    }
-                    else
-                    {
-                        _logger.LogDebug("TorrentUrl pre-download did not return file data for '{Title}', will use magnet link", LogRedaction.SanitizeText(result.Title));
-                    }
-                }
-                catch (Exception ex) when (ex is not OutOfMemoryException && ex is not StackOverflowException)
-                {
-                    _logger.LogDebug(ex, "TorrentUrl pre-download failed for '{Title}', will use magnet link", LogRedaction.SanitizeText(result.Title));
-                }
-            }
-
-            // Pre-download torrent file if not cached and URL is HTTP(S) (not magnet).
-            // Transmission's built-in HTTP client cannot always follow redirects from indexers
-            // (e.g. Prowlarr returning 301), so we fetch the .torrent file ourselves and send
-            // the raw bytes via the metainfo field instead.
-            if ((torrentFileData == null || torrentFileData.Length == 0) &&
-                !isMagnetTarget &&
-                !string.IsNullOrEmpty(httpTorrentUrl))
-            {
-                _logger.LogDebug("Attempting pre-download of torrent file from {Url}", LogRedaction.SanitizeUrl(httpTorrentUrl));
-                try
-                {
-                    var downloadResult = await _torrentFileDownloader.DownloadAsync(httpTorrentUrl, ct);
-                    if (downloadResult.HasBytes)
-                    {
-                        torrentFileData = downloadResult.TorrentBytes;
-                        _logger.LogInformation("Pre-downloaded torrent file ({Bytes} bytes) for '{Title}'",
-                            torrentFileData!.Length, LogRedaction.SanitizeText(result.Title));
-                    }
-                    else if (downloadResult.HasMagnet)
-                    {
-                        // Indexer redirected to a magnet link — use it directly
-                        torrentUrl = DownloadClientUriBuilder.NormalizeMagnetLink(downloadResult.MagnetUri);
-                        _logger.LogInformation("Indexer redirected to magnet link for '{Title}'", LogRedaction.SanitizeText(result.Title));
-                    }
-                    else
-                    {
-                        _logger.LogWarning("Pre-download returned no data for '{Title}', falling back to URL", LogRedaction.SanitizeText(result.Title));
-                    }
-                }
-                catch (Exception ex) when (ex is not OutOfMemoryException && ex is not StackOverflowException)
-                {
-                    _logger.LogWarning(ex, "Failed to pre-download torrent file for '{Title}', falling back to URL", LogRedaction.SanitizeText(result.Title));
-                }
-            }
-            else if (torrentFileData == null || torrentFileData.Length == 0)
-            {
-                _logger.LogDebug("Skipping pre-download: torrentFileData={HasData}, torrentUrl={Url}, isMagnet={IsMagnet}",
-                    torrentFileData != null && torrentFileData.Length > 0 ? "has data" : "null/empty",
-                    string.IsNullOrEmpty(torrentUrl) ? "(empty)" : LogRedaction.SanitizeUrl(torrentUrl),
-                    torrentUrl?.StartsWith("magnet:", StringComparison.OrdinalIgnoreCase) == true ? "yes" : "no");
-            }
-
-            if (torrentFileData != null && torrentFileData.Length > 0)
-            {
-                // Use metainfo field for torrent file data (base64 encoded)
-                arguments["metainfo"] = Convert.ToBase64String(torrentFileData);
-                _logger.LogDebug("Using cached torrent file data ({Bytes} bytes) for '{Title}'", torrentFileData.Length, LogRedaction.SanitizeText(result.Title));
-            }
-            else
-            {
-                // Fall back to filename field for URLs/magnet links
-                if (string.IsNullOrEmpty(torrentUrl))
-                {
-                    throw new ArgumentException("No magnet link, torrent URL, or cached torrent file provided", nameof(result));
-                }
-
-                // Transmission does not reliably decode percent-encoded magnet parameter
-                // values, so decode safe values ahead of time. Leave values encoded when
-                // decoding would introduce top-level separators like '&' or '#' and corrupt
-                // the magnet payload.
-                if (torrentUrl.StartsWith("magnet:", StringComparison.OrdinalIgnoreCase))
-                {
-                    var normalizedMagnetUrl = NormalizeMagnetUriForTransmission(torrentUrl);
-                    if (!string.Equals(normalizedMagnetUrl, torrentUrl, StringComparison.Ordinal))
-                    {
-                        _logger.LogDebug("Normalized percent-encoded magnet link for Transmission compatibility");
-                    }
-                    torrentUrl = normalizedMagnetUrl;
-                }
-
-                arguments["filename"] = torrentUrl;
-                _logger.LogDebug("Using torrent URL for '{Title}': {Url}", LogRedaction.SanitizeText(result.Title), LogRedaction.SanitizeUrl(torrentUrl));
-            }
-
-            // Only include download-dir if it's not empty (Transmission requires absolute path or omit)
-            if (!string.IsNullOrWhiteSpace(client.DownloadPath))
-            {
-                arguments["download-dir"] = client.DownloadPath;
-            }
-
-            // Explicitly request that the torrent starts immediately. Without this,
-            // Transmission uses its session setting `start-added-torrents` which
-            // defaults to true but may be set to false by the user.
-            arguments["paused"] = false;
-
             var labels = CollectLabels(client);
-            if (labels.Count > 0)
-            {
-                arguments["labels"] = labels.ToArray();
-            }
+            var arguments = await _torrentAddPlanner.BuildArgumentsAsync(client, result, labels, ct);
 
             // Use old format for compatibility with Transmission < 4.1.0
             var payload = new
@@ -248,7 +115,7 @@ namespace Listenarr.Infrastructure.Adapters
 
             try
             {
-                var response = await InvokeRpcAsync(client, payload, ct);
+                var response = await _rpcClient.InvokeAsync(client, payload, ct);
 
                 // Log the full response for debugging
                 _logger.LogDebug("Transmission add torrent response: {Response}", response.GetRawText());
@@ -309,7 +176,7 @@ namespace Listenarr.Infrastructure.Adapters
 
             try
             {
-                var response = await InvokeRpcAsync(client, payload, ct);
+                var response = await _rpcClient.InvokeAsync(client, payload, ct);
                 if (response.TryGetProperty("result", out var resultProp) && string.Equals(resultProp.GetString(), "success", StringComparison.OrdinalIgnoreCase))
                 {
                     _logger.LogInformation("Removed torrent {Id} from Transmission (deleteFiles={DeleteFiles})", LogRedaction.SanitizeText(id), deleteFiles);
@@ -351,7 +218,7 @@ namespace Listenarr.Infrastructure.Adapters
 
             try
             {
-                var response = await InvokeRpcAsync(client, payload, ct);
+                var response = await _rpcClient.InvokeAsync(client, payload, ct);
                 if (!response.TryGetProperty("arguments", out var args) || !args.TryGetProperty("torrents", out var torrents) || torrents.ValueKind != JsonValueKind.Array)
                 {
                     return items;
@@ -408,7 +275,7 @@ namespace Listenarr.Infrastructure.Adapters
             try
             {
                 var sessionPayload = new { method = "session-get", arguments = new { }, tag = 99 };
-                var sessionResp = await InvokeRpcAsync(client, sessionPayload, ct);
+                var sessionResp = await _rpcClient.InvokeAsync(client, sessionPayload, ct);
                 if (sessionResp.TryGetProperty("arguments", out var sessionArgs))
                 {
                     sessionSeedRatioLimited = (sessionArgs.TryGetProperty("seedRatioLimited", out var srl) || sessionArgs.TryGetProperty("seed_ratio_limited", out srl)) && srl.GetBoolean();
@@ -441,7 +308,7 @@ namespace Listenarr.Infrastructure.Adapters
 
             try
             {
-                var response = await InvokeRpcAsync(client, payload, ct);
+                var response = await _rpcClient.InvokeAsync(client, payload, ct);
                 if (!response.TryGetProperty("arguments", out var args) || !args.TryGetProperty("torrents", out var torrents) || torrents.ValueKind != JsonValueKind.Array)
                 {
                     return items;
@@ -511,7 +378,7 @@ namespace Listenarr.Infrastructure.Adapters
 
             try
             {
-                var response = await InvokeRpcAsync(client, payload, ct);
+                var response = await _rpcClient.InvokeAsync(client, payload, ct);
                 if (!response.TryGetProperty("arguments", out var args) ||
                     !args.TryGetProperty("torrents", out var torrents) ||
                     torrents.ValueKind != JsonValueKind.Array)
@@ -599,7 +466,7 @@ namespace Listenarr.Infrastructure.Adapters
 
             try
             {
-                var response = await InvokeRpcAsync(client, payload, ct);
+                var response = await _rpcClient.InvokeAsync(client, payload, ct);
                 if (!response.TryGetProperty("arguments", out var args) ||
                     !args.TryGetProperty("torrents", out var torrents) ||
                     torrents.ValueKind != JsonValueKind.Array)
@@ -701,183 +568,6 @@ namespace Listenarr.Infrastructure.Adapters
             }
 
             return new object[] { id };
-        }
-
-        /// <summary>
-        /// JsonSerializerOptions that use UnsafeRelaxedJsonEscaping so that characters like
-        /// &amp;, +, and = inside magnet-link query strings are NOT escaped to \u00XX sequences.
-        /// Transmission's built-in JSON parser does not always decode unicode escape sequences
-        /// correctly, which causes tracker URLs in magnet links (&amp;tr=...) to be silently lost.
-        /// </summary>
-        private static readonly JsonSerializerOptions s_rpcJsonOptions = new()
-        {
-            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-        };
-
-        private async Task<JsonElement> InvokeRpcAsync(DownloadClientConfiguration client, object payload, CancellationToken ct)
-        {
-            var httpClient = _httpClientFactory.CreateClient(ClientType);
-            var baseUrl = BuildBaseUrl(client);
-            var serializedPayload = JsonSerializer.Serialize(payload, s_rpcJsonOptions);
-            string? sessionId = null;
-
-            _logger.LogDebug("Transmission RPC request to {Url}: {Payload}", LogRedaction.SanitizeUrl(baseUrl), LogRedaction.SanitizeText(serializedPayload, 500));
-
-            for (var attempt = 0; attempt < 2; attempt++)
-            {
-                using var request = new HttpRequestMessage(HttpMethod.Post, baseUrl)
-                {
-                    Content = new StringContent(serializedPayload, Encoding.UTF8, "application/json")
-                };
-
-                if (!string.IsNullOrEmpty(sessionId))
-                {
-                    request.Headers.Add("X-Transmission-Session-Id", sessionId);
-                    _logger.LogDebug("Using X-Transmission-Session-Id: {SessionId}", LogRedaction.SanitizeText(sessionId));
-                }
-
-                var authHeader = BuildAuthHeader(client);
-                if (authHeader != null)
-                {
-                    request.Headers.Authorization = authHeader;
-                }
-
-                var response = await httpClient.SendAsync(request, ct);
-                var body = await response.Content.ReadAsStringAsync(ct);
-
-                if (response.StatusCode == HttpStatusCode.Conflict && attempt == 0 && response.Headers.TryGetValues("X-Transmission-Session-Id", out var values))
-                {
-                    sessionId = values.FirstOrDefault();
-                    _logger.LogDebug("Received 409 Conflict, retrying with session ID: {SessionId}", LogRedaction.SanitizeText(sessionId));
-                    continue;
-                }
-
-                if (!response.IsSuccessStatusCode)
-                {
-                    var sensitiveValues = LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { client.Password ?? string.Empty });
-                    var redacted = LogRedaction.RedactText(body, sensitiveValues);
-                    _logger.LogWarning("Transmission returned {StatusCode}: {Body}", response.StatusCode, redacted);
-                    throw new HttpRequestException($"Transmission returned {response.StatusCode}: {redacted}", null, response.StatusCode);
-                }
-
-                _logger.LogDebug("Transmission RPC response ({StatusCode}): {Body}", response.StatusCode, body);
-
-                if (string.IsNullOrWhiteSpace(body))
-                {
-                    _logger.LogWarning("Transmission returned empty response body");
-                    using var emptyDoc = JsonDocument.Parse("{}");
-                    return emptyDoc.RootElement.Clone();
-                }
-
-                // Validate the response is actually JSON before parsing. A non-Transmission service
-                // (or the web UI on the wrong port) may return HTML which would fail JSON parsing
-                // with an unhelpful error message.
-                var trimmedBody = body.TrimStart();
-                if (trimmedBody.Length > 0 && trimmedBody[0] != '{' && trimmedBody[0] != '[')
-                {
-                    var preview = trimmedBody.Length > 100 ? trimmedBody[..100] + "..." : trimmedBody;
-                    _logger.LogWarning("Transmission RPC returned non-JSON response: {Preview}", LogRedaction.SanitizeText(preview));
-                    throw new HttpRequestException("Transmission RPC endpoint returned a non-JSON response. Verify the host and port point to the Transmission RPC endpoint (default port 9091).");
-                }
-
-                using var doc = JsonDocument.Parse(body);
-                return doc.RootElement.Clone();
-            }
-
-            throw new InvalidOperationException("Transmission did not supply a session identifier after retrying.");
-        }
-
-        private static string BuildBaseUrl(DownloadClientConfiguration client)
-        {
-            var rpcPath = "/transmission/rpc";
-            if (client.Settings?.TryGetValue("urlBase", out var urlBaseObj) is true)
-            {
-                var custom = urlBaseObj?.ToString()?.Trim();
-                if (!string.IsNullOrEmpty(custom))
-                {
-                    rpcPath = custom.StartsWith('/') ? custom : "/" + custom;
-                }
-            }
-            return DownloadClientUriBuilder.BuildUri(client, rpcPath).ToString();
-        }
-
-        private static string? NormalizeTorrentUrl(string? torrentUrl)
-        {
-            var trimmed = (torrentUrl ?? string.Empty).Trim();
-            if (trimmed.Length == 0)
-            {
-                return null;
-            }
-
-            if (!DownloadClientUriBuilder.TryParseHttpOrHttpsAbsoluteUri(trimmed, out var torrentUri))
-            {
-                throw new ArgumentException("Torrent URL must be an absolute HTTP or HTTPS URL.", nameof(torrentUrl));
-            }
-
-            return torrentUri!.ToString();
-        }
-
-        private static string NormalizeMagnetUriForTransmission(string magnetUri)
-        {
-            var queryStart = magnetUri.IndexOf('?');
-            if (queryStart < 0 || queryStart >= magnetUri.Length - 1)
-            {
-                return magnetUri;
-            }
-
-            var segments = magnetUri[(queryStart + 1)..].Split('&');
-            var changed = false;
-
-            for (var i = 0; i < segments.Length; i++)
-            {
-                var segment = segments[i];
-                if (string.IsNullOrEmpty(segment))
-                {
-                    continue;
-                }
-
-                var equalsIndex = segment.IndexOf('=');
-                if (equalsIndex <= 0 || equalsIndex >= segment.Length - 1)
-                {
-                    continue;
-                }
-
-                var value = segment[(equalsIndex + 1)..];
-                if (!value.Contains('%'))
-                {
-                    continue;
-                }
-
-                var decodedValue = Uri.UnescapeDataString(value);
-                if (decodedValue.Contains('&') || decodedValue.Contains('#'))
-                {
-                    continue;
-                }
-
-                if (!string.Equals(decodedValue, value, StringComparison.Ordinal))
-                {
-                    segments[i] = $"{segment[..(equalsIndex + 1)]}{decodedValue}";
-                    changed = true;
-                }
-            }
-
-            if (!changed)
-            {
-                return magnetUri;
-            }
-
-            return $"{magnetUri[..(queryStart + 1)]}{string.Join("&", segments)}";
-        }
-
-        private static AuthenticationHeaderValue? BuildAuthHeader(DownloadClientConfiguration client)
-        {
-            if (string.IsNullOrWhiteSpace(client.Username))
-            {
-                return null;
-            }
-
-            var credentials = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{client.Username}:{client.Password}"));
-            return new AuthenticationHeaderValue("Basic", credentials);
         }
 
         private async Task<byte[]?> PreDownloadTorrentFileAsync(string torrentUrl, CancellationToken ct)

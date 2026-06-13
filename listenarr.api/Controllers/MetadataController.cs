@@ -40,6 +40,7 @@ namespace Listenarr.Api.Controllers
         private readonly ISeriesCatalogService _seriesCatalogService;
         private readonly MetadataImageCacheWorkflow _imageCacheWorkflow;
         private readonly MetadataLookupCacheWorkflow _lookupCacheWorkflow;
+        private readonly MetadataLookupResponseCache _lookupResponseCache;
 
         public MetadataController(
             IAudiobookMetadataService metadataService,
@@ -65,6 +66,7 @@ namespace Listenarr.Api.Controllers
             _logger = logger;
             _imageCacheWorkflow = new MetadataImageCacheWorkflow(_audiobookRepository, _imageCacheService, _logger);
             _lookupCacheWorkflow = new MetadataLookupCacheWorkflow(_audiobookRepository, _imageCacheService, _imageCacheWorkflow, _logger);
+            _lookupResponseCache = new MetadataLookupResponseCache(_cache);
         }
 
         /// <summary>
@@ -210,7 +212,7 @@ namespace Listenarr.Api.Controllers
                 {
                     _cache.Remove(cacheKey);
                 }
-                else if (_cache.TryGetValue(cacheKey, out AuthorLookupCacheEntry? cachedEntry) && cachedEntry != null)
+                else if (_cache.TryGetValue(cacheKey, out MetadataAuthorLookupCacheEntry? cachedEntry) && cachedEntry != null)
                 {
                     cachedEntry.Asin ??= normalizedAsin;
 
@@ -226,7 +228,7 @@ namespace Listenarr.Api.Controllers
                             cachedEntry.NotFound = false;
                             _cache.Set(cacheKey, cachedEntry, new MemoryCacheEntryOptions { SlidingExpiration = TimeSpan.FromHours(12) });
 
-                            return Ok(MapAuthorLookupResponse(cachedEntry, normalizedName));
+                            return Ok(_lookupResponseCache.MapAuthorLookupResponse(cachedEntry, normalizedName));
                         }
 
                         return NotFound("Author not found");
@@ -242,7 +244,7 @@ namespace Listenarr.Api.Controllers
 
                     if (MetadataResponseMapper.HasCompleteAuthorLookupData(cachedEntry.CachedPath, cachedEntry.Description, cachedEntry.SimilarAuthors))
                     {
-                        return Ok(MapAuthorLookupResponse(cachedEntry, normalizedName));
+                        return Ok(_lookupResponseCache.MapAuthorLookupResponse(cachedEntry, normalizedName));
                     }
 
                     normalizedAsin ??= cachedEntry.Asin;
@@ -262,7 +264,7 @@ namespace Listenarr.Api.Controllers
                     if (!refresh &&
                         MetadataResponseMapper.HasCompleteAuthorLookupData(persistedResponse.CachedPath, persistedResponse.Description, persistedResponse.SimilarAuthors))
                     {
-                        CacheAuthorLookupResponse(cacheKey, persistedResponse);
+                        _lookupResponseCache.CacheAuthorLookupResponse(cacheKey, persistedResponse);
                         return Ok(persistedResponse);
                     }
 
@@ -411,11 +413,7 @@ namespace Listenarr.Api.Controllers
 
                 if (!hasResolvedAuthorIdentity)
                 {
-                    _cache.Set(cacheKey, new AuthorLookupCacheEntry
-                    {
-                        NotFound = true,
-                        Name = normalizedName
-                    }, new MemoryCacheEntryOptions { SlidingExpiration = TimeSpan.FromHours(6) });
+                    _lookupResponseCache.CacheAuthorNotFound(cacheKey, normalizedName);
 
                     return NotFound("Author not found");
                 }
@@ -483,8 +481,8 @@ namespace Listenarr.Api.Controllers
                     region,
                     result);
 
-                CacheAuthorLookupResponse(cacheKey, result);
-                CacheAuthorLookupResponse(MetadataCacheKeys.BuildAuthorLookupCacheKey(region, normalizedName, result.Asin), result);
+                _lookupResponseCache.CacheAuthorLookupResponse(cacheKey, result);
+                _lookupResponseCache.CacheAuthorLookupResponse(MetadataCacheKeys.BuildAuthorLookupCacheKey(region, normalizedName, result.Asin), result);
 
                 return Ok(result);
             }
@@ -621,17 +619,17 @@ namespace Listenarr.Api.Controllers
                 {
                     _cache.Remove(cacheKey);
                 }
-                else if (_cache.TryGetValue(cacheKey, out SeriesLookupCacheEntry? cachedEntry) && cachedEntry != null)
+                else if (_cache.TryGetValue(cacheKey, out MetadataSeriesLookupCacheEntry? cachedEntry) && cachedEntry != null)
                 {
                     cachedEntry.Asin ??= normalizedAsin;
-                    return Ok(MapSeriesLookupResponse(cachedEntry, normalizedName));
+                    return Ok(_lookupResponseCache.MapSeriesLookupResponse(cachedEntry, normalizedName));
                 }
 
                 var persistedEntry = await _lookupCacheWorkflow.ResolvePersistedSeriesCacheAsync(normalizedName, region, normalizedAsin);
                 if (!refresh && persistedEntry != null)
                 {
                     var persistedResponse = await _lookupCacheWorkflow.MapPersistedSeriesLookupResponseAsync(persistedEntry, normalizedName);
-                    CacheSeriesLookupResponse(cacheKey, persistedResponse);
+                    _lookupResponseCache.CacheSeriesLookupResponse(cacheKey, persistedResponse);
                     return Ok(persistedResponse);
                 }
 
@@ -712,7 +710,7 @@ namespace Listenarr.Api.Controllers
                     result,
                     catalog?.Books);
 
-                CacheSeriesLookupResponse(cacheKey, result);
+                _lookupResponseCache.CacheSeriesLookupResponse(cacheKey, result);
 
                 return Ok(result);
             }
@@ -797,80 +795,6 @@ namespace Listenarr.Api.Controllers
                 _logger.LogError(ex, "Error fetching series catalog for {Name}", name);
                 return StatusCode(500, "Internal server error");
             }
-        }
-
-        private void CacheAuthorLookupResponse(string cacheKey, AuthorLookupResponse response)
-        {
-            _cache.Set(cacheKey, new AuthorLookupCacheEntry
-            {
-                Asin = response.Asin,
-                Name = response.Name,
-                Image = response.Image,
-                CachedPath = response.CachedPath,
-                Description = response.Description,
-                SimilarAuthors = response.SimilarAuthors,
-                NotFound = false
-            }, new MemoryCacheEntryOptions { SlidingExpiration = TimeSpan.FromHours(12) });
-        }
-
-        private void CacheSeriesLookupResponse(string cacheKey, SeriesLookupResponse response)
-        {
-            _cache.Set(cacheKey, new SeriesLookupCacheEntry
-            {
-                Asin = response.Asin,
-                Name = response.Name,
-                Image = response.Image,
-                CachedPath = response.CachedPath,
-                Description = response.Description,
-                TotalBooks = response.TotalBooks
-            }, new MemoryCacheEntryOptions { SlidingExpiration = TimeSpan.FromHours(12) });
-        }
-
-        private static AuthorLookupResponse MapAuthorLookupResponse(AuthorLookupCacheEntry entry, string fallbackName)
-        {
-            return new AuthorLookupResponse
-            {
-                Asin = entry.Asin,
-                Name = entry.Name ?? fallbackName,
-                Image = entry.Image,
-                CachedPath = entry.CachedPath,
-                Description = entry.Description,
-                SimilarAuthors = entry.SimilarAuthors ?? new List<RelatedAuthorItem>()
-            };
-        }
-
-        private static SeriesLookupResponse MapSeriesLookupResponse(SeriesLookupCacheEntry entry, string fallbackName)
-        {
-            return new SeriesLookupResponse
-            {
-                Asin = entry.Asin,
-                Name = entry.Name ?? fallbackName,
-                Image = entry.Image,
-                CachedPath = entry.CachedPath,
-                Description = entry.Description,
-                TotalBooks = entry.TotalBooks
-            };
-        }
-
-        private sealed class AuthorLookupCacheEntry
-        {
-            public string? Asin { get; set; }
-            public string? Name { get; set; }
-            public string? Image { get; set; }
-            public string? CachedPath { get; set; }
-            public string? Description { get; set; }
-            public List<RelatedAuthorItem>? SimilarAuthors { get; set; }
-            public bool NotFound { get; set; }
-        }
-
-        private sealed class SeriesLookupCacheEntry
-        {
-            public string? Asin { get; set; }
-            public string? Name { get; set; }
-            public string? Image { get; set; }
-            public string? CachedPath { get; set; }
-            public string? Description { get; set; }
-            public int TotalBooks { get; set; }
         }
 
         public sealed class AuthorLookupResponse

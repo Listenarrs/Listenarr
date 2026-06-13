@@ -40,6 +40,8 @@ namespace Listenarr.Api.Controllers
         private readonly ILogger<ImagesController> _logger;
         private readonly IApplicationPathService _applicationPathService;
         private readonly ImagePlaceholderResolver _placeholderResolver;
+        private readonly ImageResponseBuilder _imageResponseBuilder;
+        private readonly ImagePathValidator _imagePathValidator;
         private readonly string _effectiveContentRootPath;
 
         [ActivatorUtilitiesConstructor]
@@ -85,6 +87,8 @@ namespace Listenarr.Api.Controllers
             _applicationPathService = applicationPathService;
             _placeholderResolver = placeholderResolver ?? new ImagePlaceholderResolver(Microsoft.Extensions.Logging.Abstractions.NullLogger<ImagePlaceholderResolver>.Instance);
             _effectiveContentRootPath = applicationPathService.ContentRootPath;
+            _imageResponseBuilder = new ImageResponseBuilder(_placeholderResolver, _logger, _effectiveContentRootPath);
+            _imagePathValidator = new ImagePathValidator(_effectiveContentRootPath);
         }
 
         /// <summary>
@@ -933,23 +937,7 @@ namespace Listenarr.Api.Controllers
                         notFoundMessage: "Image file not found");
                 }
 
-                // Determine content type based on file extension
-                var extension = Path.GetExtension(fullPath).ToLowerInvariant();
-                var contentType = extension switch
-                {
-                    ".jpg" or ".jpeg" => "image/jpeg",
-                    ".png" => "image/png",
-                    ".gif" => "image/gif",
-                    ".webp" => "image/webp",
-                    ".svg" => "image/svg+xml",
-                    _ => "application/octet-stream"
-                };
-
-                _logger.LogInformation("Serving cached image for identifier: {Identifier}, path: {Path}", LogRedaction.SanitizeText(identifier), LogRedaction.SanitizeText(relativePath));
-
-                // Return the image with caching headers
-                Response.Headers["Cache-Control"] = "private, max-age=3600";
-                return PhysicalFile(fullPath, contentType, enableRangeProcessing: true);
+                return _imageResponseBuilder.CreateCachedImageResult(Response.Headers, identifier!, relativePath, fullPath);
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
@@ -1043,53 +1031,17 @@ namespace Listenarr.Api.Controllers
 
         private bool IsInsidePermittedImageRoot(string fullPath)
         {
-            var candidateFull = Path.GetFullPath(fullPath);
-            return GetPermittedImageRoots().Any(root => IsSamePathOrInside(candidateFull, root));
-        }
-
-        private IEnumerable<string> GetPermittedImageRoots()
-        {
-            yield return Path.GetFullPath(FileUtils.CombineRelativePath(_effectiveContentRootPath, "cache", "images"));
-            yield return Path.GetFullPath(FileUtils.CombineRelativePath(_effectiveContentRootPath, "config", "cache", "images"));
-            yield return Path.GetFullPath(FileUtils.CombineRelativePath(_effectiveContentRootPath, "wwwroot"));
-        }
-
-        private static bool IsSamePathOrInside(string candidateFullPath, string rootFullPath)
-        {
-            var relativePath = Path.GetRelativePath(rootFullPath, candidateFullPath);
-            return relativePath == "." ||
-                (!relativePath.StartsWith("..", StringComparison.Ordinal) &&
-                 !Path.IsPathRooted(relativePath));
+            return _imagePathValidator.IsInsidePermittedImageRoot(fullPath);
         }
 
         private IActionResult CreatePlaceholderResult(string logContext, string? logValue, string notFoundMessage)
         {
-            try
-            {
-                var placeholderPath = _placeholderResolver.ResolvePlaceholderPath(_effectiveContentRootPath);
-                if (!string.IsNullOrWhiteSpace(placeholderPath))
-                {
-                    _logger.LogInformation("Serving placeholder image for {LogContext}: {LogValue}", LogRedaction.SanitizeText(logContext), LogRedaction.SanitizeText(logValue));
-                    Response.Headers["Cache-Control"] = "public, max-age=300";
-                    return PhysicalFile(placeholderPath, "image/svg+xml");
-                }
-            }
-            catch (Exception ex) when (IsRecoverableImageLookupException(ex))
-            {
-                _logger.LogDebug(ex, "Failed to resolve placeholder for {LogContext}: {LogValue}", LogRedaction.SanitizeText(logContext), LogRedaction.SanitizeText(logValue));
-            }
-
-            // Fall back to the shared placeholder route before returning JSON 404. This
-            // keeps image consumers rendering an actual placeholder even when the local
-            // file cannot be resolved from the current content root.
-            if (!string.Equals(HttpContext?.Request?.Path.Value, "/placeholder.svg", StringComparison.OrdinalIgnoreCase))
-            {
-                Response.Headers["Cache-Control"] = "public, max-age=300";
-                return Redirect("/placeholder.svg");
-            }
-
-            Response.Headers["Cache-Control"] = "public, max-age=300";
-            return NotFound(new { message = notFoundMessage });
+            return _imageResponseBuilder.CreatePlaceholderResult(
+                Response.Headers,
+                HttpContext?.Request?.Path ?? PathString.Empty,
+                logContext,
+                logValue,
+                notFoundMessage);
         }
 
         /// <summary>

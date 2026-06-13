@@ -19,7 +19,6 @@
 using AsyncKeyedLock;
 using Listenarr.Application.Security;
 using Listenarr.Application.Interfaces;
-using Listenarr.Domain.Common;
 using Microsoft.Extensions.Logging;
 using SixLabors.ImageSharp;
 using System.Net;
@@ -64,6 +63,7 @@ namespace Listenarr.Infrastructure.Cache
         private readonly string _authorImagePath;
         private readonly string _seriesImagePath;
         private readonly string _contentRootPath;
+        private readonly ImageCachePathResolver _pathResolver;
         private readonly AsyncKeyedLocker<string> _downloadLocks = new();
 
         public ImageCacheService(
@@ -78,6 +78,7 @@ namespace Listenarr.Infrastructure.Cache
             _libraryImagePath = applicationPathService.ResolveFromConfig("cache", "images", "library");
             _authorImagePath = applicationPathService.ResolveFromConfig("cache", "images", "authors");
             _seriesImagePath = applicationPathService.ResolveFromConfig("cache", "images", "series");
+            _pathResolver = new ImageCachePathResolver(_contentRootPath);
 
             Directory.CreateDirectory(_tempCachePath);
             Directory.CreateDirectory(_libraryImagePath);
@@ -215,8 +216,7 @@ namespace Listenarr.Infrastructure.Cache
 
                 // Determine file extension from content type or URL
                 var extension = GetImageExtension(finalUri.ToString(), mediaType);
-                var fileName = NormalizeRelativeFileName($"{SanitizeFileName(identifier)}{extension}");
-                var filePath = FileUtils.CombineRelativePath(_tempCachePath, fileName);
+                var filePath = _pathResolver.BuildTempFilePath(identifier, extension, _tempCachePath);
 
                 // Save to temp cache
                 await File.WriteAllBytesAsync(filePath, imageBytes);
@@ -547,12 +547,11 @@ namespace Listenarr.Infrastructure.Cache
 
         private string? GetBestTempImagePathIfValid(string identifier)
         {
-            var sanitized = SanitizeFileName(identifier);
             var extensions = new[] { ".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg" };
 
             foreach (var ext in extensions)
             {
-                var path = FileUtils.CombineRelativePath(_tempCachePath, NormalizeRelativeFileName(sanitized + ext));
+                var path = _pathResolver.BuildFilePath(identifier, ext, _tempCachePath);
                 if (!File.Exists(path)) continue;
 
                 // Remove placeholder images (e.g. 1x1) from temp cache so fallback can continue.
@@ -603,37 +602,12 @@ namespace Listenarr.Infrastructure.Cache
 
         private string GetImagePath(string identifier, string basePath)
         {
-            // Try to find existing file with any extension
-            var sanitized = SanitizeFileName(identifier);
-            var extensions = new[] { ".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg" };
-
-            foreach (var ext in extensions)
-            {
-                var path = FileUtils.CombineRelativePath(basePath, NormalizeRelativeFileName(sanitized + ext));
-                if (File.Exists(path))
-                    return path;
-            }
-
-            // Default to .jpg if not found
-            return FileUtils.CombineRelativePath(basePath, NormalizeRelativeFileName(sanitized + ".jpg"));
+            return _pathResolver.GetImagePath(identifier, basePath);
         }
 
         private string GetRelativePath(string fullPath)
         {
-            var relativePath = Path.GetRelativePath(_contentRootPath, fullPath).Replace("\\", "/");
-            return relativePath;
-        }
-
-        private string SanitizeFileName(string fileName)
-        {
-            var invalid = Path.GetInvalidFileNameChars();
-            return string.Join("_", fileName.Split(invalid, StringSplitOptions.RemoveEmptyEntries));
-        }
-
-        private static string NormalizeRelativeFileName(string fileName)
-        {
-            var normalized = Path.GetFileName(fileName);
-            return normalized.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            return _pathResolver.GetRelativePath(fullPath);
         }
 
         private static async Task<byte[]> ReadContentWithLimitAsync(HttpContent content, long maxBytes)
