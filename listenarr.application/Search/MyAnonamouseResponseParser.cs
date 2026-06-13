@@ -17,7 +17,6 @@
  */
 
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using Listenarr.Application.Common;
 using Listenarr.Application.Security;
 using Listenarr.Domain.Models;
@@ -380,13 +379,13 @@ namespace Listenarr.Application.Search
                         long size = 0;
                         if (!string.IsNullOrEmpty(sizeStr) && sizeStr != "0")
                         {
-                            size = ParseSizeString(sizeStr, logger);
+                            size = MyAnonamouseSizeParser.ParseSizeString(sizeStr, logger);
                             logger.LogDebug("Parsed size for MyAnonamouse result '{Title}': {Size} bytes from size field '{SizeStr}'", title, size, sizeStr);
                         }
                         else
                         {
                             // Try to extract size from description when size field is 0
-                            size = ExtractSizeFromMyAnonamouseDescription(description, logger);
+                            size = MyAnonamouseSizeParser.ExtractFromDescription(description, logger);
                             if (size > 0)
                             {
                                 logger.LogDebug("Parsed size for MyAnonamouse result '{Title}': {Size} bytes from description", title, size);
@@ -823,102 +822,5 @@ namespace Listenarr.Application.Search
             return null;
         }
 
-        private static long ExtractSizeFromMyAnonamouseDescription(string? description, ILogger logger)
-        {
-            if (string.IsNullOrEmpty(description))
-                return 0;
-
-            // Look for patterns like "Total Size : 259MB (272 033 986 bytes)"
-            var match = Regex.Match(description, @"Total Size\s*:\s*([\d\.,]+)\s*(MB|GB|KB|B)\s*\(([\d\s,]+)\s*bytes?\)", RegexOptions.IgnoreCase);
-            if (match.Success)
-            {
-                // Try to parse the bytes value first (most accurate)
-                var bytesStr = match.Groups[3].Value.Replace(",", "").Replace(" ", "");
-                if (long.TryParse(bytesStr, out var bytes))
-                {
-                    logger.LogDebug("Extracted size from MyAnonamouse description bytes: {Bytes}", bytes);
-                    return bytes;
-                }
-
-                // Fallback to parsing the formatted size
-                var sizeValue = match.Groups[1].Value.Replace(",", "");
-                var unit = match.Groups[2].Value.ToUpper();
-                if (double.TryParse(sizeValue, out var value))
-                {
-                    var result = unit switch
-                    {
-                        "B" => (long)value,
-                        "KB" => (long)(value * 1024),
-                        "MB" => (long)(value * 1024 * 1024),
-                        "GB" => (long)(value * 1024 * 1024 * 1024),
-                        _ => (long)value
-                    };
-                    logger.LogDebug("Extracted size from MyAnonamouse description formatted: {Value} {Unit} = {Result} bytes", value, unit, result);
-                    return result;
-                }
-            }
-
-            // Alternative pattern: just "Total Size : 259MB" without bytes
-            match = Regex.Match(description, @"Total Size\s*:\s*([\d\.,]+)\s*(MB|GB|KB|B)", RegexOptions.IgnoreCase);
-            if (match.Success)
-            {
-                var sizeValue = match.Groups[1].Value.Replace(",", "");
-                var unit = match.Groups[2].Value.ToUpper();
-                if (double.TryParse(sizeValue, out var value))
-                {
-                    var result = unit switch
-                    {
-                        "B" => (long)value,
-                        "KB" => (long)(value * 1024),
-                        "MB" => (long)(value * 1024 * 1024),
-                        "GB" => (long)(value * 1024 * 1024 * 1024),
-                        _ => (long)value
-                    };
-                    logger.LogDebug("Extracted size from MyAnonamouse description (no bytes): {Value} {Unit} = {Result} bytes", value, unit, result);
-                    return result;
-                }
-            }
-
-            logger.LogDebug("No size found in MyAnonamouse description");
-            return 0;
-        }
-
-        private static long ParseSizeString(string sizeStr, ILogger logger)
-        {
-            if (string.IsNullOrEmpty(sizeStr))
-                return 0;
-
-            // Remove any commas and extra spaces
-            sizeStr = sizeStr.Replace(",", "").Trim();
-
-            // Try to parse as direct bytes first
-            if (long.TryParse(sizeStr, out var bytes))
-                return bytes;
-
-            // Handle formats like "500 MB", "1.2 GB", "1024 KB", "3.7 GiB", "279.0 MiB", etc.
-            // Support both decimal (KB/MB/GB/TB) and binary (KiB/MiB/GiB/TiB) units
-            var match = System.Text.RegularExpressions.Regex.Match(sizeStr, @"^([\d\.]+)\s*(KiB|MiB|GiB|TiB|KB|MB|GB|TB|B)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            if (match.Success &&
-                double.TryParse(match.Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var value))
-            {
-                var unit = match.Groups[2].Value.ToUpper();
-                return unit switch
-                {
-                    "B" => (long)value,
-                    "KB" => (long)(value * 1000),
-                    "MB" => (long)(value * 1000 * 1000),
-                    "GB" => (long)(value * 1000 * 1000 * 1000),
-                    "TB" => (long)(value * 1000 * 1000 * 1000 * 1000),
-                    "KIB" => (long)(value * 1024),
-                    "MIB" => (long)(value * 1024 * 1024),
-                    "GIB" => (long)(value * 1024 * 1024 * 1024),
-                    "TIB" => (long)(value * 1024 * 1024 * 1024 * 1024),
-                    _ => (long)value
-                };
-            }
-
-            logger.LogWarning("Unable to parse size string: '{SizeStr}'", sizeStr);
-            return 0;
-        }
     }
 }

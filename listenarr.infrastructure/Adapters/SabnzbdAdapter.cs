@@ -15,6 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using System.Globalization;
 using System.Net;
 using System.Text.Json;
 using Listenarr.Application.Interfaces;
@@ -36,6 +37,7 @@ namespace Listenarr.Infrastructure.Adapters
         private readonly INzbUrlResolver _nzbUrlResolver;
         private readonly ILogger<SabnzbdAdapter> _logger;
         private readonly IAppMetricsService _appMetricsService;
+        private readonly SabnzbdRequestBuilder _requestBuilder;
 
         public SabnzbdAdapter(
             IHttpClientFactory httpFactory,
@@ -47,6 +49,7 @@ namespace Listenarr.Infrastructure.Adapters
             _nzbUrlResolver = nzbUrlResolver ?? throw new ArgumentNullException(nameof(nzbUrlResolver));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _appMetricsService = appMetricsService;
+            _requestBuilder = new SabnzbdRequestBuilder();
         }
 
         public async Task<(bool Success, string Message)> TestConnectionAsync(DownloadClientConfiguration client, CancellationToken ct = default)
@@ -55,15 +58,15 @@ namespace Listenarr.Infrastructure.Adapters
             {
                 if (client == null) throw new ArgumentNullException(nameof(client));
 
-                var baseUrl = DownloadClientUriBuilder.BuildUri(client, "/api").ToString();
-                var apiKey = "";
-                if (client.Settings != null && client.Settings.TryGetValue("apiKey", out var apiKeyObj))
-                    apiKey = apiKeyObj?.ToString() ?? "";
-
-                if (string.IsNullOrEmpty(apiKey))
+                var requestContext = _requestBuilder.CreateContext(client);
+                if (!requestContext.HasApiKey)
                     return (false, "SABnzbd API key not configured in client settings");
 
-                var url = $"{baseUrl}?mode=version&output=json&apikey={Uri.EscapeDataString(apiKey)}";
+                var url = _requestBuilder.BuildUrl(requestContext, new Dictionary<string, string>
+                {
+                    ["mode"] = "version",
+                    ["output"] = "json"
+                });
                 var http = _httpFactory.CreateClient(ClientType);
                 var resp = await http.GetAsync(url, ct);
                 if (!resp.IsSuccessStatusCode)
@@ -108,16 +111,8 @@ namespace Listenarr.Infrastructure.Adapters
 
             try
             {
-                var baseUrl = DownloadClientUriBuilder.BuildUri(client, "/api").ToString();
-
-                // Get API key
-                var apiKey = "";
-                if (client.Settings != null && client.Settings.TryGetValue("apiKey", out var apiKeyObj))
-                {
-                    apiKey = apiKeyObj?.ToString() ?? "";
-                }
-
-                if (string.IsNullOrEmpty(apiKey))
+                var requestContext = _requestBuilder.CreateContext(client);
+                if (!requestContext.HasApiKey)
                     throw new Exception("SABnzbd API key not configured");
 
                 var (nzbUrl, indexerApiKey) = await _nzbUrlResolver.ResolveAsync(result, ct);
@@ -126,14 +121,12 @@ namespace Listenarr.Infrastructure.Adapters
 
                 _logger.LogInformation("Sending NZB to SABnzbd: {Title} from {Source}", LogRedaction.SanitizeText(result.Title), LogRedaction.SanitizeText(result.Source));
 
-                var sensitiveValues = LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { apiKey }).ToList();
-                if (!string.IsNullOrEmpty(indexerApiKey)) sensitiveValues.Add(indexerApiKey);
+                var sensitiveValues = _requestBuilder.BuildSensitiveValues(requestContext, indexerApiKey);
 
                 var queryParams = new Dictionary<string, string>
                 {
                     { "mode", "addurl" },
                     { "name", nzbUrl },
-                    { "apikey", apiKey },
                     { "output", "json" },
                     { "nzbname", result.Title }
                 };
@@ -163,8 +156,7 @@ namespace Listenarr.Infrastructure.Adapters
                 }
                 queryParams["cat"] = category;
 
-                var queryString = string.Join("&", queryParams.Select(kvp => $"{kvp.Key}={Uri.EscapeDataString(kvp.Value)}"));
-                var requestUrl = $"{baseUrl}?{queryString}";
+                var requestUrl = _requestBuilder.BuildUrl(requestContext, queryParams);
 
                 _logger.LogDebug("SABnzbd request URL: {Url}", LogRedaction.RedactText(requestUrl, sensitiveValues));
 
@@ -223,15 +215,8 @@ namespace Listenarr.Infrastructure.Adapters
 
             try
             {
-                var baseUrl = DownloadClientUriBuilder.BuildUri(client, "/api").ToString();
-
-                var apiKey = "";
-                if (client.Settings != null && client.Settings.TryGetValue("apiKey", out var apiKeyObj))
-                {
-                    apiKey = apiKeyObj?.ToString() ?? "";
-                }
-
-                if (string.IsNullOrEmpty(apiKey))
+                var requestContext = _requestBuilder.CreateContext(client);
+                if (!requestContext.HasApiKey)
                 {
                     _logger.LogWarning("SABnzbd API key not configured for {ClientName}", client.Name);
                     return false;
@@ -242,7 +227,13 @@ namespace Listenarr.Infrastructure.Adapters
                 bool removedFromHistory = false;
 
                 // Try to remove from queue first (for active downloads)
-                var queueRemoveUrl = $"{baseUrl}?mode=queue&name=delete&value={Uri.EscapeDataString(id)}&apikey={Uri.EscapeDataString(apiKey)}&output=json";
+                var queueRemoveUrl = _requestBuilder.BuildUrl(requestContext, new Dictionary<string, string>
+                {
+                    ["mode"] = "queue",
+                    ["name"] = "delete",
+                    ["value"] = id,
+                    ["output"] = "json"
+                });
                 if (deleteFiles)
                     queueRemoveUrl += "&del_files=1";
 
@@ -265,7 +256,13 @@ namespace Listenarr.Infrastructure.Adapters
                 }
 
                 // Try to remove from history (for completed downloads)
-                var historyRemoveUrl = $"{baseUrl}?mode=history&name=delete&value={Uri.EscapeDataString(id)}&apikey={Uri.EscapeDataString(apiKey)}&output=json";
+                var historyRemoveUrl = _requestBuilder.BuildUrl(requestContext, new Dictionary<string, string>
+                {
+                    ["mode"] = "history",
+                    ["name"] = "delete",
+                    ["value"] = id,
+                    ["output"] = "json"
+                });
                 if (deleteFiles)
                     historyRemoveUrl += "&del_files=1";
 
@@ -316,21 +313,19 @@ namespace Listenarr.Infrastructure.Adapters
 
             try
             {
-                var baseUrl = DownloadClientUriBuilder.BuildUri(client, "/api").ToString();
-                var apiKey = "";
-                if (client.Settings != null && client.Settings.TryGetValue("apiKey", out var apiKeyObj))
-                {
-                    apiKey = apiKeyObj?.ToString() ?? "";
-                }
-
-                if (string.IsNullOrEmpty(apiKey))
+                var requestContext = _requestBuilder.CreateContext(client);
+                if (!requestContext.HasApiKey)
                 {
                     _logger.LogWarning("SABnzbd API key not configured for {ClientName}", client.Name);
                     return items;
                 }
 
-                var requestUrl = $"{baseUrl}?mode=queue&output=json&apikey={Uri.EscapeDataString(apiKey)}";
-                _logger.LogDebug("SABnzbd queue request (redacted): {Url}", LogRedaction.RedactText(requestUrl, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { apiKey })));
+                var requestUrl = _requestBuilder.BuildUrl(requestContext, new Dictionary<string, string>
+                {
+                    ["mode"] = "queue",
+                    ["output"] = "json"
+                });
+                _logger.LogDebug("SABnzbd queue request (redacted): {Url}", LogRedaction.RedactText(requestUrl, _requestBuilder.BuildSensitiveValues(requestContext)));
 
                 var http = _httpFactory.CreateClient(ClientType);
                 var response = await http.GetAsync(requestUrl, ct);
@@ -380,7 +375,12 @@ namespace Listenarr.Infrastructure.Adapters
                 var existingNzoIds = new HashSet<string>(items.Select(i => i.Id), StringComparer.OrdinalIgnoreCase);
                 try
                 {
-                    var historyUrl = $"{baseUrl}?mode=history&output=json&limit=30&apikey={Uri.EscapeDataString(apiKey)}";
+                    var historyUrl = _requestBuilder.BuildUrl(requestContext, new Dictionary<string, string>
+                    {
+                        ["mode"] = "history",
+                        ["output"] = "json",
+                        ["limit"] = "30"
+                    });
                     var historyResp = await http.GetAsync(historyUrl, ct);
                     if (historyResp.IsSuccessStatusCode)
                     {
@@ -432,15 +432,15 @@ namespace Listenarr.Infrastructure.Adapters
 
             try
             {
-                var baseUrl = DownloadClientUriBuilder.BuildUri(client, "/api").ToString();
-                var apiKey = "";
-                if (client.Settings != null && client.Settings.TryGetValue("apiKey", out var apiKeyObj))
-                {
-                    apiKey = apiKeyObj?.ToString() ?? "";
-                }
-                if (string.IsNullOrEmpty(apiKey)) return result;
+                var requestContext = _requestBuilder.CreateContext(client);
+                if (!requestContext.HasApiKey) return result;
 
-                var historyUrl = $"{baseUrl}?mode=history&output=json&limit={limit}&apikey={Uri.EscapeDataString(apiKey)}";
+                var historyUrl = _requestBuilder.BuildUrl(requestContext, new Dictionary<string, string>
+                {
+                    ["mode"] = "history",
+                    ["output"] = "json",
+                    ["limit"] = limit.ToString(CultureInfo.InvariantCulture)
+                });
                 var http = _httpFactory.CreateClient(ClientType);
                 var historyResp = await http.GetAsync(historyUrl, ct);
                 if (!historyResp.IsSuccessStatusCode) return result;
@@ -479,19 +479,18 @@ namespace Listenarr.Infrastructure.Adapters
 
             try
             {
-                var baseUrl = DownloadClientUriBuilder.BuildUri(client, "/api").ToString();
-                var apiKey = "";
-                if (client.Settings != null && client.Settings.TryGetValue("apiKey", out var apiKeyObj))
-                {
-                    apiKey = apiKeyObj?.ToString() ?? "";
-                }
-                if (string.IsNullOrEmpty(apiKey))
+                var requestContext = _requestBuilder.CreateContext(client);
+                if (!requestContext.HasApiKey)
                 {
                     _logger.LogWarning("SABnzbd API key not configured for client {ClientName}", LogRedaction.SanitizeText(client.Name));
                     return items;
                 }
 
-                var requestUrl = $"{baseUrl}?mode=queue&output=json&apikey={Uri.EscapeDataString(apiKey)}";
+                var requestUrl = _requestBuilder.BuildUrl(requestContext, new Dictionary<string, string>
+                {
+                    ["mode"] = "queue",
+                    ["output"] = "json"
+                });
                 var http = _httpFactory.CreateClient(ClientType);
                 var response = await http.GetAsync(requestUrl, ct);
                 if (!response.IsSuccessStatusCode)
@@ -569,21 +568,19 @@ namespace Listenarr.Infrastructure.Adapters
             try
             {
                 // Query SABnzbd history for the download
-                var baseUrl = DownloadClientUriBuilder.BuildUri(client, "/api").ToString();
-                var apiKey = "";
-                if (client.Settings != null && client.Settings.TryGetValue("apiKey", out var apiKeyObj))
-                {
-                    apiKey = apiKeyObj?.ToString() ?? "";
-                }
-
-                if (string.IsNullOrEmpty(apiKey))
+                var requestContext = _requestBuilder.CreateContext(client);
+                if (!requestContext.HasApiKey)
                 {
                     _logger.LogWarning("SABnzbd API key not configured for client {ClientId}", client.Id);
                     return result;
                 }
 
                 // Query history with nzo_id filter
-                var historyUrl = $"{baseUrl}?mode=history&output=json&apikey={Uri.EscapeDataString(apiKey)}";
+                var historyUrl = _requestBuilder.BuildUrl(requestContext, new Dictionary<string, string>
+                {
+                    ["mode"] = "history",
+                    ["output"] = "json"
+                });
                 var http = _httpFactory.CreateClient(ClientType);
                 var historyResp = await http.GetAsync(historyUrl, ct);
 
@@ -673,21 +670,19 @@ namespace Listenarr.Infrastructure.Adapters
             try
             {
                 // Query SABnzbd history for the download
-                var baseUrl = DownloadClientUriBuilder.BuildUri(client, "/api").ToString();
-                var apiKey = "";
-                if (client.Settings != null && client.Settings.TryGetValue("apiKey", out var apiKeyObj))
-                {
-                    apiKey = apiKeyObj?.ToString() ?? "";
-                }
-
-                if (string.IsNullOrEmpty(apiKey))
+                var requestContext = _requestBuilder.CreateContext(client);
+                if (!requestContext.HasApiKey)
                 {
                     _logger.LogWarning("SABnzbd API key not configured for client {ClientId}", client.Id);
                     return result;
                 }
 
                 // Query history with nzo_id filter
-                var historyUrl = $"{baseUrl}?mode=history&output=json&apikey={Uri.EscapeDataString(apiKey)}";
+                var historyUrl = _requestBuilder.BuildUrl(requestContext, new Dictionary<string, string>
+                {
+                    ["mode"] = "history",
+                    ["output"] = "json"
+                });
                 var http = _httpFactory.CreateClient(ClientType);
                 var historyResp = await http.GetAsync(historyUrl, ct);
 
@@ -750,26 +745,22 @@ namespace Listenarr.Infrastructure.Adapters
             _logger.LogDebug("Polling SABnzbd client {ClientName}", client.Name);
             try
             {
-                var baseUrl = DownloadClientUriBuilder.BuildUri(client, "/api").ToString();
-
                 using var http = _httpFactory.CreateClient(ClientType);
 
-                // Get API key from settings
-                var apiKey = "";
-                if (client.Settings != null && client.Settings.TryGetValue("apiKey", out var apiKeyObj))
-                {
-                    apiKey = apiKeyObj?.ToString() ?? "";
-                }
-
-                if (string.IsNullOrEmpty(apiKey))
+                var requestContext = _requestBuilder.CreateContext(client);
+                if (!requestContext.HasApiKey)
                 {
                     throw new DownloadClientAdapterPollingException($"SABnzbd API key not configured for client {client.Id}");
                 }
 
                 // Poll SABnzbd queue for active downloads progress updates
-                var queueUrl = $"{baseUrl}?mode=queue&output=json&apikey={Uri.EscapeDataString(apiKey)}";
+                var queueUrl = _requestBuilder.BuildUrl(requestContext, new Dictionary<string, string>
+                {
+                    ["mode"] = "queue",
+                    ["output"] = "json"
+                });
                 // Redacted queue URL for safe diagnostics
-                _logger.LogDebug("SABnzbd poll queue URL (redacted): {Url}", LogRedaction.RedactText(queueUrl, LogRedaction.GetSensitiveValuesFromEnvironment().Concat([apiKey])));
+                _logger.LogDebug("SABnzbd poll queue URL (redacted): {Url}", LogRedaction.RedactText(queueUrl, _requestBuilder.BuildSensitiveValues(requestContext)));
                 using var queueResponse = await http.GetAsync(queueUrl, cancellationToken);
 
                 if (queueResponse.IsSuccessStatusCode)
@@ -850,9 +841,14 @@ namespace Listenarr.Infrastructure.Adapters
                 }
 
                 // Get completed downloads (history) - limit to recent items
-                var historyUrl = $"{baseUrl}?mode=history&limit=100&output=json&apikey={Uri.EscapeDataString(apiKey)}";
+                var historyUrl = _requestBuilder.BuildUrl(requestContext, new Dictionary<string, string>
+                {
+                    ["mode"] = "history",
+                    ["limit"] = "100",
+                    ["output"] = "json"
+                });
                 // Redacted history URL for safe diagnostics
-                _logger.LogDebug("SABnzbd history URL (redacted): {Url}", LogRedaction.RedactText(historyUrl, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { apiKey })));
+                _logger.LogDebug("SABnzbd history URL (redacted): {Url}", LogRedaction.RedactText(historyUrl, _requestBuilder.BuildSensitiveValues(requestContext)));
                 using var historyResponse = await http.GetAsync(historyUrl, cancellationToken);
 
                 if (!historyResponse.IsSuccessStatusCode)
@@ -995,4 +991,3 @@ namespace Listenarr.Infrastructure.Adapters
         }
     }
 }
-

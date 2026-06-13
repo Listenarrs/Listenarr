@@ -28,6 +28,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
     {
         private readonly ILogger<AutomaticSearchService> _logger;
         private readonly IServiceScopeFactory _serviceScopeFactory;
+        private readonly AutomaticSearchResultClassifier _resultClassifier;
         private readonly TimeSpan _searchInterval = TimeSpan.FromHours(6); // Search every 6 hours
 
         public AutomaticSearchService(
@@ -36,6 +37,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
         {
             _logger = logger;
             _serviceScopeFactory = serviceScopeFactory;
+            _resultClassifier = new AutomaticSearchResultClassifier(_logger);
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -198,7 +200,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             }
 
             // Build search query
-            var searchQuery = BuildSearchQuery(audiobook);
+            var searchQuery = _resultClassifier.BuildSearchQuery(audiobook);
             _logger.LogInformation("Searching for audiobook '{Title}' with query: {Query}", audiobook.Title, searchQuery);
 
             // Search for results
@@ -319,7 +321,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             try
             {
                 // Determine appropriate download client for this result
-                var isTorrent = IsTorrentResult(topResult.SearchResult);
+                var isTorrent = _resultClassifier.IsTorrentResult(topResult.SearchResult);
                 var downloadClientId = await GetAppropriateDownloadClientAsync(topResult.SearchResult, isTorrent);
 
                 if (string.IsNullOrEmpty(downloadClientId))
@@ -489,64 +491,6 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             }
 
             return null; // Unable to determine quality
-        }
-
-        private string BuildSearchQuery(Audiobook audiobook)
-        {
-            var parts = new List<string>();
-
-            // Add title
-            if (!string.IsNullOrEmpty(audiobook.Title))
-                parts.Add(audiobook.Title);
-
-            // Add primary author
-            if (audiobook.Authors != null && audiobook.Authors.Any())
-                parts.Add(audiobook.Authors.First());
-
-            // Add series if available
-            if (!string.IsNullOrEmpty(audiobook.Series))
-                parts.Add(audiobook.Series);
-
-            return string.Join(" ", parts);
-        }
-
-        private bool IsTorrentResult(SearchResult result)
-        {
-            // Check DownloadType first if it's set
-            if (!string.IsNullOrEmpty(result.DownloadType))
-            {
-                if (result.DownloadType == "DDL")
-                {
-                    return false; // DDL is not a torrent
-                }
-                else if (result.DownloadType == "Torrent")
-                {
-                    return true;
-                }
-                else if (result.DownloadType == "Usenet")
-                {
-                    return false;
-                }
-            }
-
-            // Fallback to legacy detection logic
-            // Check for NZB first - if it has an NZB URL, it's a Usenet/NZB download
-            if (!string.IsNullOrEmpty(result.NzbUrl))
-            {
-                return false;
-            }
-
-            // Check for torrent indicators - magnet link or torrent file
-            if (!string.IsNullOrEmpty(result.MagnetLink) || !string.IsNullOrEmpty(result.TorrentUrl))
-            {
-                return true;
-            }
-
-            // If neither is set, we can't reliably determine the type
-            // Log a warning and default to false (NZB) as a safer choice
-            _logger.LogWarning("Unable to determine result type for '{Title}' from source '{Source}'. No MagnetLink, TorrentUrl, or NzbUrl found. Defaulting to NZB.",
-                result.Title, result.Source);
-            return false;
         }
 
         /// <summary>

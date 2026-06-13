@@ -20,7 +20,6 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
-using System.Xml.Linq;
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Security;
 using Listenarr.Domain.Common;
@@ -41,6 +40,8 @@ namespace Listenarr.Infrastructure.Adapters
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly INzbUrlResolver _nzbUrlResolver;
         private readonly ILogger<NzbgetAdapter> _logger;
+        private readonly NzbgetXmlRpcClient _xmlRpcClient;
+        private readonly NzbgetNzbDownloader _nzbDownloader;
 
         public NzbgetAdapter(
             IHttpClientFactory httpClientFactory,
@@ -50,6 +51,8 @@ namespace Listenarr.Infrastructure.Adapters
             _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
             _nzbUrlResolver = nzbUrlResolver ?? throw new ArgumentNullException(nameof(nzbUrlResolver));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _xmlRpcClient = new NzbgetXmlRpcClient(_httpClientFactory, ClientType);
+            _nzbDownloader = new NzbgetNzbDownloader(_httpClientFactory, ClientType, _logger);
         }
 
         public async Task<(bool Success, string Message)> TestConnectionAsync(DownloadClientConfiguration client, CancellationToken ct = default)
@@ -67,7 +70,7 @@ namespace Listenarr.Infrastructure.Adapters
             try
             {
                 // Test connection via XML-RPC
-                var versionResult = await CallXmlRpcAsync(client, "version");
+                var versionResult = await _xmlRpcClient.CallAsync(client, "version");
                 var version = versionResult.Element("string")?.Value ?? "unknown";
 
                 if (string.IsNullOrWhiteSpace(version))
@@ -141,7 +144,7 @@ namespace Listenarr.Infrastructure.Adapters
             var droneId = Guid.NewGuid().ToString().Replace("-", string.Empty);
 
             // Download NZB content
-            var nzbBytes = await DownloadNzbAsync(nzbUrl, indexerApiKey, ct);
+            var nzbBytes = await _nzbDownloader.DownloadAsync(nzbUrl, indexerApiKey, ct);
             var nzbFileName = BuildNzbFileName(result);
 
             var uploadUrl = DownloadClientUriBuilder.BuildUri(client, "/api/v2/nzb");
@@ -214,7 +217,7 @@ namespace Listenarr.Infrastructure.Adapters
             var droneId = Guid.NewGuid().ToString().Replace("-", string.Empty);
 
             // Download and base64-encode the NZB content
-            var nzbBytes = await DownloadNzbAsync(nzbUrl, indexerApiKey, ct);
+            var nzbBytes = await _nzbDownloader.DownloadAsync(nzbUrl, indexerApiKey, ct);
             var nzbContentBase64 = Convert.ToBase64String(nzbBytes);
             var nzbFileName = BuildNzbFileName(result);
 
@@ -232,7 +235,7 @@ namespace Listenarr.Infrastructure.Adapters
             {
                 // Call append via XML-RPC
                 _logger.LogInformation("Calling NZBGet append via XML-RPC for '{Title}'", LogRedaction.SanitizeText(result.Title));
-                var appendResult = await CallXmlRpcAsync(client, "append",
+                var appendResult = await _xmlRpcClient.CallAsync(client, "append",
                     nzbFileName,
                     nzbContentBase64,
                     category ?? string.Empty,
@@ -281,7 +284,7 @@ namespace Listenarr.Infrastructure.Adapters
                 try
                 {
                     // Get history to find the NZBID by matching droneId
-                    var historyResult = await CallXmlRpcAsync(client, "history", false);
+                    var historyResult = await _xmlRpcClient.CallAsync(client, "history", false);
                     var arrayData = historyResult.Element("array")?.Element("data");
 
                     var historyCount = arrayData?.Elements("value").Count() ?? 0;
@@ -359,7 +362,7 @@ namespace Listenarr.Infrastructure.Adapters
             // Try to remove from history first (for completed downloads)
             try
             {
-                var historyDeleteResult = await CallXmlRpcAsync(client, "editqueue", "HistoryDelete", 0, string.Empty, new[] { numericId.Value });
+                var historyDeleteResult = await _xmlRpcClient.CallAsync(client, "editqueue", "HistoryDelete", 0, string.Empty, new[] { numericId.Value });
                 var historySuccess = historyDeleteResult.Element("boolean")?.Value == "1";
 
                 if (historySuccess)
@@ -377,7 +380,7 @@ namespace Listenarr.Infrastructure.Adapters
             try
             {
                 var command = deleteFiles ? "GroupDeleteFinal" : "GroupDelete";
-                var editResult = await CallXmlRpcAsync(client, "editqueue", command, 0, string.Empty, new[] { numericId.Value });
+                var editResult = await _xmlRpcClient.CallAsync(client, "editqueue", command, 0, string.Empty, new[] { numericId.Value });
                 var success = editResult.Element("boolean")?.Value == "1";
 
                 if (success)
@@ -405,7 +408,7 @@ namespace Listenarr.Infrastructure.Adapters
 
             try
             {
-                var listResult = await CallXmlRpcAsync(client, "listgroups");
+                var listResult = await _xmlRpcClient.CallAsync(client, "listgroups");
                 var arrayData = listResult.Element("array")?.Element("data");
 
                 if (arrayData == null)
@@ -458,7 +461,7 @@ namespace Listenarr.Infrastructure.Adapters
 
             try
             {
-                var historyResult = await CallXmlRpcAsync(client, "history", false);
+                var historyResult = await _xmlRpcClient.CallAsync(client, "history", false);
                 var arrayData = historyResult.Element("array")?.Element("data");
 
                 if (arrayData == null)
@@ -510,7 +513,7 @@ namespace Listenarr.Infrastructure.Adapters
 
             try
             {
-                var listResult = await CallXmlRpcAsync(client, "listgroups");
+                var listResult = await _xmlRpcClient.CallAsync(client, "listgroups");
                 var arrayData = listResult.Element("array")?.Element("data");
 
                 if (arrayData == null)
@@ -573,7 +576,7 @@ namespace Listenarr.Infrastructure.Adapters
             try
             {
                 // Query NZBGet history for the download
-                var historyResult = await CallXmlRpcAsync(client, "history", false);
+                var historyResult = await _xmlRpcClient.CallAsync(client, "history", false);
                 var arrayData = historyResult.Element("array")?.Element("data");
 
                 if (arrayData == null)
@@ -698,140 +701,6 @@ namespace Listenarr.Infrastructure.Adapters
             return sanitized;
         }
 
-        private async Task<XElement> CallXmlRpcAsync(DownloadClientConfiguration client, string methodName, params object[] parameters)
-        {
-            var baseUrl = DownloadClientUriBuilder.BuildUri(client, "/xmlrpc").ToString();
-            var httpClient = _httpClientFactory.CreateClient(ClientType);
-
-            // Build XML-RPC request
-            var methodCall = new XElement("methodCall",
-                new XElement("methodName", methodName),
-                new XElement("params",
-                    parameters.Select(p => new XElement("param", new XElement("value", SerializeValue(p))))
-                )
-            );
-
-            var xmlContent = $"<?xml version=\"1.0\"?>\n{methodCall}";
-            var content = new StringContent(xmlContent, Encoding.UTF8, "text/xml");
-
-            using var request = new HttpRequestMessage(HttpMethod.Post, baseUrl) { Content = content };
-            var authHeader = BuildAuthHeader(client);
-            if (authHeader != null)
-                request.Headers.Authorization = authHeader;
-
-            using var response = await httpClient.SendAsync(request);
-            var responseBody = await response.Content.ReadAsStringAsync();
-
-            if (!response.IsSuccessStatusCode)
-            {
-                throw new HttpRequestException($"NZBGet XML-RPC error: {response.StatusCode} - {responseBody}", null, response.StatusCode);
-            }
-
-            var doc = XDocument.Parse(responseBody);
-            var fault = doc.Root?.Element("fault");
-            if (fault != null)
-            {
-                var faultStruct = fault.Descendants("member").ToDictionary(
-                    m => m.Element("name")?.Value ?? string.Empty,
-                    m => m.Element("value")?.Value ?? string.Empty
-                );
-                var faultString = faultStruct.GetValueOrDefault("faultString", "Unknown error");
-                throw new Exception($"NZBGet XML-RPC fault: {faultString}");
-            }
-
-            return doc.Root?.Element("params")?.Element("param")?.Element("value")
-                ?? throw new Exception("Invalid XML-RPC response");
-        }
-
-        private XElement SerializeValue(object value)
-        {
-            return value switch
-            {
-                string s => new XElement("string", s),
-                int i => new XElement("i4", i),
-                bool b => new XElement("boolean", b ? "1" : "0"),
-                double d => new XElement("double", d.ToString(CultureInfo.InvariantCulture)),
-                int[] arr => new XElement("array",
-                    new XElement("data",
-                        arr.Select(item => new XElement("value", new XElement("i4", item)))
-                    )
-                ),
-                object[] arr => new XElement("array",
-                    new XElement("data",
-                        arr.Select(item => new XElement("value", SerializeValue(item)))
-                    )
-                ),
-                Dictionary<string, object> dict => new XElement("struct",
-                    dict.Select(kvp => new XElement("member",
-                        new XElement("name", kvp.Key),
-                        new XElement("value", SerializeValue(kvp.Value))
-                    ))
-                ),
-                _ => new XElement("string", value.ToString() ?? string.Empty)
-            };
-        }
-
-
-        private async Task<byte[]> DownloadNzbAsync(string nzbUrl, string? indexerApiKey, CancellationToken ct)
-        {
-            // SSRF guard: reject non-HTTP(S) schemes and embedded credentials; allow private/LAN hosts
-            // because indexers are commonly self-hosted (Prowlarr, Jackett, etc.) on local networks.
-            if (!OutboundRequestSecurity.TryValidateExternalHttpUrl(nzbUrl, out var ssrfReason, allowPrivateTargets: true))
-            {
-                _logger.LogWarning("Blocked SSRF attempt in NZB download: {Reason}", ssrfReason);
-                throw new InvalidOperationException($"NZB URL blocked: {ssrfReason}");
-            }
-
-            try
-            {
-                _logger.LogDebug("Downloading NZB from {Url}", LogRedaction.SanitizeUrl(nzbUrl));
-
-                var httpClient = _httpClientFactory.CreateClient(ClientType);
-                using var request = new HttpRequestMessage(HttpMethod.Get, nzbUrl);
-
-                // Note: Newznab/Torznab APIs include the API key in the URL query string (e.g., &apikey=xxx)
-                // We should NOT add an X-Api-Key header as it may conflict with URL-based authentication
-                // and cause the API to return error responses instead of the actual NZB file
-
-                // Set User-Agent header - many indexers require this and will reject requests without it
-                request.Headers.Add("User-Agent", "Listenarr/1.0.0.0");
-
-                using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
-
-                _logger.LogDebug("NZB download response: StatusCode={StatusCode}, ContentType={ContentType}, ContentLength={ContentLength}",
-                    response.StatusCode,
-                    response.Content.Headers.ContentType?.ToString() ?? "null",
-                    response.Content.Headers.ContentLength?.ToString() ?? "unknown");
-
-                response.EnsureSuccessStatusCode();
-
-                var contentBytes = await response.Content.ReadAsByteArrayAsync(ct);
-
-                _logger.LogInformation("Downloaded NZB content: {Size} bytes", contentBytes.Length);
-
-                // If the content is suspiciously small, log it to see if it's an error message
-                if (contentBytes.Length > 0 && contentBytes.Length < 500)
-                {
-                    var contentText = Encoding.UTF8.GetString(contentBytes);
-                    _logger.LogWarning("NZB content is suspiciously small ({Size} bytes). Content: {Content}",
-                        contentBytes.Length, contentText);
-                }
-
-                if (contentBytes.Length == 0)
-                {
-                    _logger.LogError("Downloaded NZB file is empty (0 bytes) from {Url}", LogRedaction.SanitizeUrl(nzbUrl));
-                    throw new InvalidOperationException($"Downloaded NZB file is empty from {nzbUrl}");
-                }
-
-                return contentBytes;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogError(ex, "Failed to download NZB content from {Url}", LogRedaction.SanitizeUrl(nzbUrl));
-                throw new InvalidOperationException($"Unable to retrieve NZB content from {nzbUrl}");
-            }
-        }
-
         private static AuthenticationHeaderValue? BuildAuthHeader(DownloadClientConfiguration client)
         {
             if (string.IsNullOrWhiteSpace(client.Username))
@@ -877,7 +746,7 @@ namespace Listenarr.Infrastructure.Adapters
             try
             {
                 // Query NZBGet history for the download
-                var historyResult = await CallXmlRpcAsync(client, "history", false);
+                var historyResult = await _xmlRpcClient.CallAsync(client, "history", false);
                 var arrayData = historyResult.Element("array")?.Element("data");
 
                 if (arrayData == null)

@@ -39,6 +39,7 @@ namespace Listenarr.Api.Controllers
         private readonly HttpClient _httpClientNoRedirect;
         private readonly IConfigurationService _configurationService;
         private readonly IndexerTestWorkflow _indexerTestWorkflow;
+        private readonly IndexerResponseRedactor _responseRedactor;
 
         public IndexersController(
             IIndexerRepository indexerRepository,
@@ -56,23 +57,20 @@ namespace Listenarr.Api.Controllers
                 indexerRepository,
                 httpClient,
                 Microsoft.Extensions.Logging.Abstractions.NullLogger<IndexerTestWorkflow>.Instance);
+            _responseRedactor = new IndexerResponseRedactor();
         }
 
         private bool ShouldRedactIndexerSecretsForCaller()
-            => HttpSecurityRequestUtils.ShouldRedactSecretsForCaller(HttpContext);
+            => _responseRedactor.ShouldRedact(HttpContext);
 
         private Indexer RedactIndexerForCaller(Indexer indexer)
-            => ShouldRedactIndexerSecretsForCaller() ? ApiResponseRedactor.RedactIndexer(indexer) : indexer;
+            => _responseRedactor.RedactIndexerForCaller(indexer, HttpContext);
 
         private List<Indexer> RedactIndexersForCaller(IEnumerable<Indexer> indexers)
-            => ShouldRedactIndexerSecretsForCaller()
-                ? indexers.Select(ApiResponseRedactor.RedactIndexer).ToList()
-                : indexers.ToList();
+            => _responseRedactor.RedactIndexersForCaller(indexers, HttpContext);
 
         private string? RedactMamIdForCaller(string? mamId)
-            => ShouldRedactIndexerSecretsForCaller() && !string.IsNullOrWhiteSpace(mamId)
-                ? ApiResponseRedactor.RedactedValue
-                : mamId;
+            => _responseRedactor.RedactMamIdForCaller(mamId, HttpContext);
 
         private Task<string?> ValidateOutboundUrlForCallerAsync(string url)
         {

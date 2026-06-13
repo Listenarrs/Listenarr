@@ -16,9 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using System.Text.RegularExpressions;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Metadata;
@@ -40,6 +38,7 @@ namespace Listenarr.Api.Controllers
         private readonly IImageCacheService? _imageCacheService;
         private readonly MetadataConverters _metadataConverters;
         private readonly SearchResponseMapper _responseMapper;
+        private readonly SearchRequestReader _requestReader;
 
         public SearchController(
             ISearchService searchService,
@@ -60,6 +59,7 @@ namespace Listenarr.Api.Controllers
                 metadataService,
                 Microsoft.Extensions.Logging.Abstractions.NullLogger<SearchResponseMapper>.Instance,
                 imageCacheService);
+            _requestReader = new SearchRequestReader(_logger);
         }
 
         private string BuildApiImagePath(string identifier, string? sourceUrl = null)
@@ -81,10 +81,7 @@ namespace Listenarr.Api.Controllers
                     return BadRequest("SearchRequest body is required");
                 }
 
-                var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-                options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
-
-                var req = JsonSerializer.Deserialize<SearchRequest>(reqJson.GetRawText(), options);
+                var req = _requestReader.Read(reqJson);
                 if (req == null) return BadRequest("SearchRequest body is required");
                 _logger.LogDebug("[DBG] Search received mode={Mode}, query='{Query}'", req.Mode, LogRedaction.SanitizeText(req.Query ?? "<null>"));
 
@@ -113,47 +110,10 @@ namespace Listenarr.Api.Controllers
                 }
                 else // Advanced
                 {
-                    // Route all advanced search logic through SearchService for normalization, filtering, and orchestration
-                    req.Author = SearchRequestNormalizer.NormalizeStructuredAdvancedField(req.Author, "AUTHOR:");
-                    req.Title = SearchRequestNormalizer.NormalizeStructuredAdvancedField(req.Title, "TITLE:");
-                    req.Isbn = SearchRequestNormalizer.NormalizeStructuredAdvancedField(req.Isbn, "ISBN:");
-                    req.Asin = SearchRequestNormalizer.NormalizeStructuredAdvancedField(req.Asin, "ASIN:");
-
-                    // Validate and normalize ISBN/ASIN inputs for advanced searches.
-                    // If an ISBN-10 is supplied, convert it to ISBN-13 using the 978 prefix.
-                    try
+                    var advancedValidationError = _requestReader.NormalizeAdvancedRequest(req);
+                    if (!string.IsNullOrWhiteSpace(advancedValidationError))
                     {
-                        if (!string.IsNullOrWhiteSpace(req.Isbn))
-                        {
-                            var rawIsbn = Regex.Replace(req.Isbn, "[^0-9Xx]", string.Empty);
-                            if (rawIsbn.Length == 10)
-                            {
-                                var converted = SearchRequestNormalizer.ConvertIsbn10ToIsbn13(rawIsbn);
-                                if (converted == null)
-                                {
-                                    return BadRequest("Invalid ISBN-10 provided");
-                                }
-                                req.Isbn = converted; // replace with ISBN-13
-                                _logger.LogInformation("Converted ISBN-10 to ISBN-13: {Original} -> {Converted}", rawIsbn, converted);
-                            }
-                            else if (rawIsbn.Length == 13)
-                            {
-                                if (!Regex.IsMatch(rawIsbn, "^[0-9]{13}$"))
-                                {
-                                    return BadRequest("ISBN must be 13 digits");
-                                }
-                                req.Isbn = rawIsbn;
-                            }
-                            else
-                            {
-                                return BadRequest("ISBN must be either 10 or 13 characters");
-                            }
-                        }
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                    {
-                        _logger.LogWarning(ex, "Failed to normalize ISBN in advanced search");
-                        return BadRequest("Invalid ISBN format");
+                        return BadRequest(advancedValidationError);
                     }
 
                     // Compose a query string from advanced parameters for unified handling

@@ -16,7 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using System.Text.RegularExpressions;
 using Listenarr.Domain.Common;
 using Listenarr.Application.Interfaces;
 using Listenarr.Domain.Models;
@@ -54,6 +53,7 @@ namespace Listenarr.Application.Downloads
 
         // Track qBittorrent torrent cache for merging incremental updates (clientId -> (torrentHash -> QueueItem))
         private readonly Dictionary<string, Dictionary<string, QueueItem>> _qbittorrentTorrentCache = new();
+        private readonly DownloadClientIdFallbackResolver _clientIdFallbackResolver = new(downloadTypeResolver, logger);
 
         public async Task<string> StartDownloadAsync(SearchResult searchResult, string downloadClientId, int? audiobookId = null)
         {
@@ -147,7 +147,7 @@ namespace Listenarr.Application.Downloads
             }
 
             // Build search query from audiobook metadata
-            var searchQuery = BuildSearchQuery(audiobook);
+            var searchQuery = DownloadSearchQueryBuilder.Build(audiobook);
             logger.LogInformation("Searching for audiobook '{Title}' with query: {Query}", LogRedaction.SanitizeText(audiobook.Title), LogRedaction.SanitizeText(searchQuery));
 
             // Search using the working search service. This is an automatic search (triggered
@@ -417,7 +417,7 @@ namespace Listenarr.Application.Downloads
 
             // Route to appropriate client handler via adapter and capture client-specific IDs when provided
             string? clientSpecificId = await clientGateway.AddAsync(downloadClient, searchResult);
-            clientSpecificId ??= TryResolveClientSpecificIdFallback(downloadClient, searchResult);
+            clientSpecificId ??= _clientIdFallbackResolver.TryResolve(downloadClient, searchResult);
 
             // Update download record with client-specific ID if available
             if (!string.IsNullOrEmpty(clientSpecificId))
@@ -522,20 +522,6 @@ namespace Listenarr.Application.Downloads
                 cachedTorrentStore,
                 logger);
             await preparationService.PrepareAsync(searchResult, downloadId);
-        }
-
-        private string BuildSearchQuery(Audiobook audiobook)
-        {
-            // Build a search query from audiobook metadata
-            var parts = new List<string>();
-
-            if (!string.IsNullOrEmpty(audiobook.Title))
-                parts.Add(audiobook.Title);
-
-            if (audiobook.Authors != null && audiobook.Authors.Any())
-                parts.Add(audiobook.Authors.First());
-
-            return string.Join(" ", parts);
         }
 
         public async Task<bool> RemoveFromQueueAsync(string downloadId, string? downloadClientId = null, bool force = false)
@@ -756,43 +742,6 @@ namespace Listenarr.Application.Downloads
                 System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
             }
             await Task.CompletedTask;
-        }
-
-        private string? TryResolveClientSpecificIdFallback(DownloadClientConfiguration client, SearchResult searchResult)
-        {
-            if (client == null || searchResult == null || !downloadTypeResolver.IsTorrentResult(searchResult))
-            {
-                return null;
-            }
-
-            var magnetHash = TryExtractMagnetHash(searchResult.MagnetLink);
-            if (!string.IsNullOrWhiteSpace(magnetHash))
-            {
-                logger.LogInformation(
-                    "Using magnet hash fallback for download '{Title}' on client {ClientName}",
-                    LogRedaction.SanitizeText(searchResult.Title),
-                    LogRedaction.SanitizeText(client.Name ?? client.Id));
-                return magnetHash;
-            }
-
-            return null;
-        }
-
-        private static string? TryExtractMagnetHash(string? magnetLink)
-        {
-            if (string.IsNullOrWhiteSpace(magnetLink))
-            {
-                return null;
-            }
-
-            var match = Regex.Match(magnetLink, @"xt=urn:btih:([^&]+)", RegexOptions.IgnoreCase);
-            if (!match.Success)
-            {
-                return null;
-            }
-
-            var rawHash = Uri.UnescapeDataString(match.Groups[1].Value).Trim();
-            return string.IsNullOrWhiteSpace(rawHash) ? null : rawHash;
         }
 
         private async Task<bool> RemoveFromClientAsync(DownloadClientConfiguration client, string downloadId, Download? downloadRecord = null)
