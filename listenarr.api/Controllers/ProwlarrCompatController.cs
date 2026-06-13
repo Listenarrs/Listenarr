@@ -56,55 +56,9 @@ namespace Listenarr.Api.Controllers
         private readonly IApplicationVersionService _applicationVersionService;
         private readonly ProwlarrIndexerUpsertWorkflow _indexerUpsertWorkflow;
 
-        // Suppress update toasts for indexers that were created within this window (in seconds)
-        private const int NotificationSuppressionSeconds = 5;
-
-        // Track last toast timestamps per indexer id to avoid duplicate toasts when rapid updates/deletes occur
-        private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, DateTime> _lastToastTimes = new System.Collections.Concurrent.ConcurrentDictionary<int, DateTime>();
-
-        // Track last global toast messages to deduplicate identical messages across indexers (message text -> last sent time)
-        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> _lastToastMessages = new System.Collections.Concurrent.ConcurrentDictionary<string, DateTime>();
-
-        private static bool ShouldSendToastForIndexer(int indexerId, string message)
-        {
-            try
-            {
-                var now = DateTime.UtcNow;
-                if (_lastToastTimes.TryGetValue(indexerId, out var last) && (now - last).TotalSeconds < NotificationSuppressionSeconds)
-                {
-                    return false;
-                }
-
-                // Update last time for this indexer
-                _lastToastTimes[indexerId] = now;
-                return true;
-            }
-            catch (Exception caughtEx_1) when (caughtEx_1 is not OperationCanceledException && caughtEx_1 is not OutOfMemoryException && caughtEx_1 is not StackOverflowException)
-            {
-                // Fallback to sending toast if anything goes wrong with suppression logic
-                return true;
-            }
-        }
-
-        private static bool ShouldSendToastForMessage(string message)
-        {
-            try
-            {
-                var now = DateTime.UtcNow;
-                var key = message ?? string.Empty;
-                if (_lastToastMessages.TryGetValue(key, out var last) && (now - last).TotalSeconds < NotificationSuppressionSeconds)
-                {
-                    return false;
-                }
-
-                _lastToastMessages[key] = now;
-                return true;
-            }
-            catch (Exception caughtEx_2) when (caughtEx_2 is not OperationCanceledException && caughtEx_2 is not OutOfMemoryException && caughtEx_2 is not StackOverflowException)
-            {
-                return true;
-            }
-        }
+        // Preserve the existing private reflection seam used by controller tests to reset toast state.
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, DateTime> _lastToastTimes = ProwlarrToastThrottler.LastToastTimes;
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> _lastToastMessages = ProwlarrToastThrottler.LastToastMessages;
 
         public ProwlarrCompatController(
             ILogger<ProwlarrCompatController> logger,
@@ -386,7 +340,7 @@ namespace Listenarr.Api.Controllers
                     {
                         await _hubBroadcaster.BroadcastAsync(RealtimeHubTarget.Settings, "IndexersUpdated", new { created = 0, skipped = 0, indexers = new[] { new { id = i.Id, name = i.Name, baseUrl = i.Url } } });
                         var deleteMessage = $"Removed indexer: {i.Name}";
-                        if (ShouldSendToastForIndexer(i.Id, deleteMessage) && ShouldSendToastForMessage(deleteMessage))
+                        if (ProwlarrToastThrottler.ShouldSendForIndexer(i.Id) && ProwlarrToastThrottler.ShouldSendForMessage(deleteMessage))
                         {
                             await _toastService.PublishNotificationAsync("Indexers", deleteMessage, icon: null, timeoutMs: 8000);
                         }
@@ -461,7 +415,7 @@ namespace Listenarr.Api.Controllers
                     var publishToast = true;
                     try
                     {
-                        if (createdForBroadcast == 0 && indexer.CreatedAt != default && (DateTime.UtcNow - indexer.CreatedAt).TotalSeconds < NotificationSuppressionSeconds)
+                        if (createdForBroadcast == 0 && indexer.CreatedAt != default && (DateTime.UtcNow - indexer.CreatedAt).TotalSeconds < ProwlarrToastThrottler.NotificationSuppressionSeconds)
                         {
                             publishToast = false;
                             _logger?.LogDebug("Suppressing update toast for indexer {Id} since it was created recently", indexer.Id);
@@ -479,12 +433,12 @@ namespace Listenarr.Api.Controllers
                         bool sendByMessage = false;
                         try
                         {
-                            sendByIndexer = ShouldSendToastForIndexer(indexer.Id, toastMessage);
+                            sendByIndexer = ProwlarrToastThrottler.ShouldSendForIndexer(indexer.Id);
                         }
                         catch (Exception caughtEx_4) when (caughtEx_4 is not OperationCanceledException && caughtEx_4 is not OutOfMemoryException && caughtEx_4 is not StackOverflowException) { sendByIndexer = true; }
                         try
                         {
-                            sendByMessage = ShouldSendToastForMessage(toastMessage);
+                            sendByMessage = ProwlarrToastThrottler.ShouldSendForMessage(toastMessage);
                         }
                         catch (Exception caughtEx_5) when (caughtEx_5 is not OperationCanceledException && caughtEx_5 is not OutOfMemoryException && caughtEx_5 is not StackOverflowException) { sendByMessage = true; }
 
@@ -612,7 +566,7 @@ namespace Listenarr.Api.Controllers
                     {
                         var names = createdIndexers.Select(i => i.Name).ToArray();
                         var message = names.Length > 0 ? $"Imported {created} indexer(s): {string.Join(", ", names)}" : $"Imported {created} indexer(s) successfully";
-                        if (ShouldSendToastForMessage(message))
+                        if (ProwlarrToastThrottler.ShouldSendForMessage(message))
                         {
                             await _toastService.PublishNotificationAsync("Indexers", message, icon: null, timeoutMs: 8000);
                         }

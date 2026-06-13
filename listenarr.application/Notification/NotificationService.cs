@@ -215,7 +215,7 @@ namespace Listenarr.Application.Notification
             if (string.IsNullOrWhiteSpace(webhookUrl) || enabledTriggers == null || !enabledTriggers.Contains(trigger))
                 return;
             var allowPrivateWebhookTargets = AllowPrivateWebhookTargetsForCurrentRequest();
-            if (!TryValidateWebhookTarget(webhookUrl, out var validationReason, allowPrivateWebhookTargets))
+            if (!NotificationDiagnostics.TryValidateWebhookTarget(webhookUrl, out var validationReason, allowPrivateWebhookTargets))
             {
                 _logger.LogWarning("Blocked outbound notification target: {Reason}", validationReason);
                 return;
@@ -233,7 +233,7 @@ namespace Listenarr.Application.Notification
 
                 var redactedUrl = LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment());
                 var redactedBody = LogRedaction.RedactText(body, LogRedaction.GetSensitiveValuesFromEnvironment());
-                redactedBody = AggressiveRedact(redactedBody);
+                redactedBody = NotificationDiagnostics.AggressiveRedact(redactedBody);
                 if (string.IsNullOrEmpty(redactedBody)) redactedBody = "<redacted>";
 
                 // Structured log so tests and external consumers can inspect the Body property.
@@ -345,7 +345,7 @@ namespace Listenarr.Application.Notification
                     var redactedUrl = LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment());
                     var headers = string.Join(", ", request.Headers.Select(h => $"{h.Key}={string.Join(';', h.Value)}"));
                     var requestBody = request.Content != null ? await request.Content.ReadAsStringAsync() : string.Empty;
-                    var redactedRequestBody = AggressiveRedact(LogRedaction.RedactText(requestBody, LogRedaction.GetSensitiveValuesFromEnvironment()));
+                    var redactedRequestBody = NotificationDiagnostics.AggressiveRedact(LogRedaction.RedactText(requestBody, LogRedaction.GetSensitiveValuesFromEnvironment()));
 
                     _logger.LogInformation("Sending NTFY POST to {WebhookUrl} with headers {Headers} and body: {Body}", redactedUrl, headers, redactedRequestBody);
 
@@ -353,8 +353,8 @@ namespace Listenarr.Application.Notification
 
                     if (!response.IsSuccessStatusCode)
                     {
-                        var respText = await TryReadContentAsync(response.Content);
-                        var redactedResp = AggressiveRedact(LogRedaction.RedactText(respText, LogRedaction.GetSensitiveValuesFromEnvironment()));
+                        var respText = await NotificationDiagnostics.TryReadContentAsync(response.Content, _logger);
+                        var redactedResp = NotificationDiagnostics.AggressiveRedact(LogRedaction.RedactText(respText, LogRedaction.GetSensitiveValuesFromEnvironment()));
                         _logger.LogWarning("NTFY response from {WebhookUrl}: {Status} - {Body}", redactedUrl, response.StatusCode, redactedResp);
                         await HandleFailedResponseAsync(response);
                     }
@@ -418,8 +418,8 @@ namespace Listenarr.Application.Notification
                         };
 
                         using var content = new FormUrlEncodedContent(values);
-                        var requestBody = await TryReadContentAsync(content);
-                        var redactedRequestBody = AggressiveRedact(LogRedaction.RedactText(requestBody, LogRedaction.GetSensitiveValuesFromEnvironment()));
+                        var requestBody = await NotificationDiagnostics.TryReadContentAsync(content, _logger);
+                        var redactedRequestBody = NotificationDiagnostics.AggressiveRedact(LogRedaction.RedactText(requestBody, LogRedaction.GetSensitiveValuesFromEnvironment()));
                         var redactedUrl = LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment());
                         _logger.LogInformation("Sending Pushover POST to {WebhookUrl} with body: {Body}", redactedUrl, redactedRequestBody);
 
@@ -428,8 +428,8 @@ namespace Listenarr.Application.Notification
                         var response = await PostValidatedAsync(postUrl, content);
                         if (!response.IsSuccessStatusCode)
                         {
-                            var respText = await TryReadContentAsync(response.Content);
-                            var redactedResp = AggressiveRedact(LogRedaction.RedactText(respText, LogRedaction.GetSensitiveValuesFromEnvironment()));
+                            var respText = await NotificationDiagnostics.TryReadContentAsync(response.Content, _logger);
+                            var redactedResp = NotificationDiagnostics.AggressiveRedact(LogRedaction.RedactText(respText, LogRedaction.GetSensitiveValuesFromEnvironment()));
                             _logger.LogWarning("Pushover response from {WebhookUrl}: {Status} - {Body}", redactedUrl, response.StatusCode, redactedResp);
                             await HandleFailedResponseAsync(response);
                         }
@@ -488,13 +488,13 @@ namespace Listenarr.Application.Notification
                         using var content = new StringContent(json, Encoding.UTF8, "application/json");
 
                         var redactedUrl = LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment());
-                        _logger.LogInformation("Sending Telegram POST to {WebhookUrl} with body: {Body}", redactedUrl, AggressiveRedact(LogRedaction.RedactText(json, LogRedaction.GetSensitiveValuesFromEnvironment())));
+                        _logger.LogInformation("Sending Telegram POST to {WebhookUrl} with body: {Body}", redactedUrl, NotificationDiagnostics.AggressiveRedact(LogRedaction.RedactText(json, LogRedaction.GetSensitiveValuesFromEnvironment())));
 
                         var response = await PostValidatedAsync(webhookUrl, content);
                         if (!response.IsSuccessStatusCode)
                         {
-                            var respText = await TryReadContentAsync(response.Content);
-                            var redactedResp = AggressiveRedact(LogRedaction.RedactText(respText, LogRedaction.GetSensitiveValuesFromEnvironment()));
+                            var respText = await NotificationDiagnostics.TryReadContentAsync(response.Content, _logger);
+                            var redactedResp = NotificationDiagnostics.AggressiveRedact(LogRedaction.RedactText(respText, LogRedaction.GetSensitiveValuesFromEnvironment()));
                             _logger.LogWarning("Telegram response from {WebhookUrl}: {Status} - {Body}", redactedUrl, response.StatusCode, redactedResp);
                             await HandleFailedResponseAsync(response);
                         }
@@ -583,14 +583,14 @@ namespace Listenarr.Application.Notification
                         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
                         var redactedUrl = LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment());
-                        var redactedBody = AggressiveRedact(LogRedaction.RedactText(json, LogRedaction.GetSensitiveValuesFromEnvironment()));
+                        var redactedBody = NotificationDiagnostics.AggressiveRedact(LogRedaction.RedactText(json, LogRedaction.GetSensitiveValuesFromEnvironment()));
                         _logger.LogInformation("Sending Pushbullet POST to {WebhookUrl} with body: {Body}", redactedUrl, redactedBody);
 
                         var response = await SendValidatedAsync(request);
                         if (!response.IsSuccessStatusCode)
                         {
-                            var respText = await TryReadContentAsync(response.Content);
-                            var redactedResp = AggressiveRedact(LogRedaction.RedactText(respText, LogRedaction.GetSensitiveValuesFromEnvironment()));
+                            var respText = await NotificationDiagnostics.TryReadContentAsync(response.Content, _logger);
+                            var redactedResp = NotificationDiagnostics.AggressiveRedact(LogRedaction.RedactText(respText, LogRedaction.GetSensitiveValuesFromEnvironment()));
                             _logger.LogWarning("Pushbullet response from {WebhookUrl}: {Status} - {Body}", redactedUrl, response.StatusCode, redactedResp);
                             await HandleFailedResponseAsync(response);
                         }
@@ -644,14 +644,14 @@ namespace Listenarr.Application.Notification
                     using var content = new StringContent(json, Encoding.UTF8, "application/json");
 
                     var redactedUrl = LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment());
-                    var redactedBody = AggressiveRedact(LogRedaction.RedactText(json, LogRedaction.GetSensitiveValuesFromEnvironment()));
+                    var redactedBody = NotificationDiagnostics.AggressiveRedact(LogRedaction.RedactText(json, LogRedaction.GetSensitiveValuesFromEnvironment()));
                     _logger.LogInformation("Sending Slack POST to {WebhookUrl} with body: {Body}", redactedUrl, redactedBody);
 
                     var response = await PostValidatedAsync(webhookUrl, content);
                     if (!response.IsSuccessStatusCode)
                     {
-                        var respText = await TryReadContentAsync(response.Content);
-                        var redactedResp = AggressiveRedact(LogRedaction.RedactText(respText, LogRedaction.GetSensitiveValuesFromEnvironment()));
+                        var respText = await NotificationDiagnostics.TryReadContentAsync(response.Content, _logger);
+                        var redactedResp = NotificationDiagnostics.AggressiveRedact(LogRedaction.RedactText(respText, LogRedaction.GetSensitiveValuesFromEnvironment()));
                         _logger.LogWarning("Slack response from {WebhookUrl}: {Status} - {Body}", redactedUrl, response.StatusCode, redactedResp);
                         await HandleFailedResponseAsync(response);
                     }
@@ -696,7 +696,7 @@ namespace Listenarr.Application.Notification
                 using var defaultContent = new StringContent(defaultJson, Encoding.UTF8, "application/json");
 
                 var redactedUrl = LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment());
-                var redactedBody = AggressiveRedact(LogRedaction.RedactText(defaultJson, LogRedaction.GetSensitiveValuesFromEnvironment()));
+                var redactedBody = NotificationDiagnostics.AggressiveRedact(LogRedaction.RedactText(defaultJson, LogRedaction.GetSensitiveValuesFromEnvironment()));
                 _logger.LogInformation("Sending Generic POST to {WebhookUrl} with body: {Body}", redactedUrl, redactedBody);
 
                 var response = await PostValidatedAsync(webhookUrl, defaultContent);
@@ -723,53 +723,5 @@ namespace Listenarr.Application.Notification
 #pragma warning restore CA1031
         }
 
-        // Ensure that any sensitive environment-derived values are redacted even if they were missed
-        // by the primary redaction routine. Uses regex replace to catch variants.
-        private static string AggressiveRedact(string input)
-        {
-            if (string.IsNullOrEmpty(input)) return string.Empty;
-            try
-            {
-                var secrets = LogRedaction.GetSensitiveValuesFromEnvironment().Where(s => !string.IsNullOrWhiteSpace(s)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-                var result = input;
-                foreach (var s in secrets)
-                {
-                    try
-                    {
-                        var esc = System.Text.RegularExpressions.Regex.Escape(s);
-                        result = System.Text.RegularExpressions.Regex.Replace(result, esc, "<redacted>", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                    {
-                        System.Diagnostics.Debug.WriteLine($"NotificationService.AggressiveRedact regex replace failed: {ex.Message}");
-                    }
-                }
-
-                return result;
-            }
-            catch (Exception caughtEx_2) when (caughtEx_2 is not OperationCanceledException && caughtEx_2 is not OutOfMemoryException && caughtEx_2 is not StackOverflowException) { return input; }
-        }
-
-        // Safely attempt to read the content of an HttpContent instance. If reading
-        // fails (disposed stream, IO error, etc.) the exception is logged at Debug
-        // and an empty string is returned to avoid masking the original failure.
-        private async Task<string> TryReadContentAsync(HttpContent? content)
-        {
-            if (content == null) return string.Empty;
-            try
-            {
-                return await content.ReadAsStringAsync();
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogDebug(ex, "Could not read HTTP content for diagnostic logging");
-                return string.Empty;
-            }
-        }
-
-        private static bool TryValidateWebhookTarget(string webhookUrl, out string reason, bool allowPrivateTargets = false)
-        {
-            return OutboundRequestSecurity.TryValidateExternalHttpUrl(webhookUrl, out reason, allowPrivateTargets);
-        }
     }
 }

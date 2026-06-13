@@ -316,7 +316,7 @@ namespace Listenarr.Infrastructure.HostedServices.Audiobooks
                             }
 
                             // Calculate base path for the audiobook files
-                            var basePath = CalculateBasePath(foundFiles);
+                            var basePath = ScanPathPlanner.CalculateBasePath(foundFiles);
                             if (!string.IsNullOrEmpty(basePath))
                             {
                                 var basePathChanged = !string.Equals(audiobook.BasePath, basePath, StringComparison.OrdinalIgnoreCase);
@@ -582,103 +582,6 @@ namespace Listenarr.Infrastructure.HostedServices.Audiobooks
             }
         }
 
-        private string CalculateBasePath(List<string> filePaths)
-        {
-            if (!filePaths.Any())
-                return string.Empty;
-
-            // Convert all paths to directory paths (get parent directory for each file)
-            var directories = filePaths
-                .Select(p => FileUtils.NormalizeStoredPath(Path.GetDirectoryName(p) ?? p))
-                .Where(p => !string.IsNullOrWhiteSpace(p))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            if (directories.Count == 1)
-            {
-                // All files are in the same directory
-                return directories[0];
-            }
-
-            // Find the common ancestor directory
-            var commonPath = GetCommonPath(directories);
-
-            // Walk up the directory tree until we find a directory that has more than 1 subdirectory or file
-            var currentPath = commonPath;
-            while (!string.IsNullOrEmpty(currentPath))
-            {
-                try
-                {
-                    var parent = Directory.GetParent(currentPath)?.FullName;
-                    if (string.IsNullOrEmpty(parent))
-                        break;
-
-                    // Count subdirectories and files in parent
-                    var subDirs = Directory.GetDirectories(parent).Length;
-                    var files = Directory.GetFiles(parent).Length;
-
-                    // If parent has more than 1 thing (subdirs + files), we've found our base path
-                    if (subDirs + files > 1)
-                    {
-                        return currentPath;
-                    }
-
-                    currentPath = parent;
-                }
-                catch (Exception caughtEx_11) when (caughtEx_11 is not OperationCanceledException && caughtEx_11 is not OutOfMemoryException && caughtEx_11 is not StackOverflowException)
-                {
-                    // If we can't access the directory, stop here
-                    break;
-                }
-            }
-
-            return commonPath;
-        }
-
-        private string GetCommonPath(List<string> paths)
-        {
-            if (!paths.Any())
-                return string.Empty;
-
-            var firstPath = FileUtils.NormalizeStoredPath(paths[0]);
-            var commonPath = firstPath;
-
-            foreach (var path in paths.Skip(1).Select(rawPath => FileUtils.NormalizeStoredPath(rawPath)))
-            {
-                var minLength = Math.Min(commonPath.Length, path.Length);
-                var commonLength = 0;
-
-                for (int i = 0; i < minLength; i++)
-                {
-                    if (commonPath[i] == path[i])
-                        commonLength++;
-                    else
-                        break;
-                }
-
-                // Ensure we don't break in the middle of a directory name
-                if (commonLength < commonPath.Length)
-                {
-                    var lastSep = commonPath.LastIndexOf(Path.DirectorySeparatorChar, commonLength - 1);
-                    commonLength = lastSep >= 0 ? lastSep + 1 : 0;
-                }
-
-                commonPath = commonPath.Substring(0, commonLength);
-
-                if (string.IsNullOrEmpty(commonPath))
-                    break;
-            }
-
-            // Ensure it's a valid directory path
-            if (!string.IsNullOrEmpty(commonPath) && !Directory.Exists(commonPath))
-            {
-                var parent = Directory.GetParent(commonPath)?.FullName;
-                return parent ?? commonPath;
-            }
-
-            return commonPath;
-        }
     }
 }
-
 

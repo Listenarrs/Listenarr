@@ -16,7 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Diagnostics;
-using System.Text.Json;
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Domain.Models;
@@ -177,7 +176,7 @@ namespace Listenarr.Application.Downloads
                                 queueItem.CompletionTime = DateTime.UtcNow;
                             }
 
-                            var matchedDownload = FindBestMatchingDownload(queueItem, client, allDownloadsForMatching);
+                            var matchedDownload = DownloadQueueMetadataMatcher.FindBestMatchingDownload(queueItem, client, allDownloadsForMatching, logger);
                             if (matchedDownload != null)
                             {
                                 var originalClientId = queueItem.Id;
@@ -339,7 +338,7 @@ namespace Listenarr.Application.Downloads
                                 return false;
                             }
 
-                            if (GetKnownClientItemIds(d.Metadata).Any(allClientItemIds.Contains))
+                            if (DownloadQueueMetadataMatcher.GetKnownClientItemIds(d.Metadata).Any(allClientItemIds.Contains))
                             {
                                 return false;
                             }
@@ -734,7 +733,7 @@ namespace Listenarr.Application.Downloads
 
             matchedDownload.Metadata ??= new Dictionary<string, object>();
 
-            var existingClientDownloadId = GetMetadataString(matchedDownload.Metadata, "ClientDownloadId");
+            var existingClientDownloadId = DownloadQueueMetadataMatcher.GetMetadataString(matchedDownload.Metadata, "ClientDownloadId");
             if (!string.Equals(existingClientDownloadId, originalClientId, StringComparison.OrdinalIgnoreCase))
             {
                 matchedDownload.Metadata["ClientDownloadId"] = originalClientId;
@@ -746,89 +745,13 @@ namespace Listenarr.Application.Downloads
             if (string.Equals(client.Type, "qbittorrent", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(client.Type, "transmission", StringComparison.OrdinalIgnoreCase))
             {
-                var existingTorrentHash = GetMetadataString(matchedDownload.Metadata, "TorrentHash");
+                var existingTorrentHash = DownloadQueueMetadataMatcher.GetMetadataString(matchedDownload.Metadata, "TorrentHash");
                 if (!string.Equals(existingTorrentHash, originalClientId, StringComparison.OrdinalIgnoreCase))
                 {
                     matchedDownload.Metadata["TorrentHash"] = originalClientId;
                     await downloadRepository.UpdateMetadataAsync(matchedDownload.Id, "TorrentHash", originalClientId);
                 }
             }
-        }
-
-        private Download? FindBestMatchingDownload(
-            QueueItem queueItem,
-            DownloadClientConfiguration client,
-            IEnumerable<Download> candidateDownloads)
-        {
-            if (queueItem == null || client == null || candidateDownloads == null)
-            {
-                return null;
-            }
-
-            var matches = candidateDownloads
-                .Where(download => download.DownloadClientId == client.Id)
-                .Select(download => new
-                {
-                    Download = download,
-                    Score = queueItem.GetMatchScore(download)
-                })
-                .Where(x => x.Score > 0)
-                .OrderByDescending(x => x.Score)
-                .ThenByDescending(x => x.Download.StartedAt)
-                .ToList();
-
-            if (matches.Count == 0)
-            {
-                return null;
-            }
-
-            var bestMatch = matches[0];
-            if (bestMatch.Score == 1 && matches.Skip(1).Any(x => x.Score == bestMatch.Score))
-            {
-                logger.LogDebug(
-                    "Queue item {QueueId} '{QueueTitle}' had ambiguous title-only matches on client {ClientId}; leaving unmatched",
-                    queueItem.Id,
-                    queueItem.Title,
-                    client.Id);
-                return null;
-            }
-
-            return bestMatch.Download;
-        }
-
-        private static IEnumerable<string> GetKnownClientItemIds(Dictionary<string, object>? metadata)
-        {
-            var clientDownloadId = GetMetadataString(metadata, "ClientDownloadId");
-            if (!string.IsNullOrWhiteSpace(clientDownloadId))
-            {
-                yield return clientDownloadId;
-            }
-
-            var torrentHash = GetMetadataString(metadata, "TorrentHash");
-            if (!string.IsNullOrWhiteSpace(torrentHash))
-            {
-                yield return torrentHash;
-            }
-        }
-
-        private static string? GetMetadataString(Dictionary<string, object>? metadata, string key)
-        {
-            if (metadata == null || !metadata.TryGetValue(key, out var value) || value == null)
-            {
-                return null;
-            }
-
-            if (value is JsonElement element)
-            {
-                return element.ValueKind switch
-                {
-                    JsonValueKind.Null => null,
-                    JsonValueKind.Undefined => null,
-                    _ => element.ToString()
-                };
-            }
-
-            return value.ToString();
         }
 
         private sealed class ClientQueueFetchResult

@@ -73,7 +73,7 @@ namespace Listenarr.Infrastructure.Platform
                 var version = _applicationVersionService.Resolve();
 
                 var uptime = DateTime.UtcNow - _startTime;
-                var uptimeFormatted = FormatUptime(uptime);
+                var uptimeFormatted = SystemFormatters.FormatUptime(uptime);
 
                 var memoryInfo = GetMemoryInfo();
                 var cpuInfo = GetCpuInfo();
@@ -188,9 +188,9 @@ namespace Listenarr.Infrastructure.Platform
                 TotalBytes = totalBytes,
                 FreeBytes = freeBytes,
                 UsedPercentage = Math.Round(usedPercentage, 2),
-                UsedFormatted = FormatBytes(usedBytes),
-                TotalFormatted = FormatBytes(totalBytes),
-                FreeFormatted = FormatBytes(freeBytes),
+                UsedFormatted = SystemFormatters.FormatBytes(usedBytes),
+                TotalFormatted = SystemFormatters.FormatBytes(totalBytes),
+                FreeFormatted = SystemFormatters.FormatBytes(freeBytes),
                 Status = "available"
             };
         }
@@ -201,7 +201,7 @@ namespace Listenarr.Infrastructure.Platform
             {
                 var version = _applicationVersionService.Resolve();
                 var uptime = DateTime.UtcNow - _startTime;
-                var uptimeFormatted = FormatUptime(uptime);
+                var uptimeFormatted = SystemFormatters.FormatUptime(uptime);
 
                 // Get download client health
                 var downloadClientHealth = await GetDownloadClientHealthAsync();
@@ -374,9 +374,9 @@ namespace Listenarr.Infrastructure.Platform
                     TotalBytes = totalBytes,
                     FreeBytes = freeBytes,
                     UsedPercentage = Math.Round(usedPercentage, 2),
-                    UsedFormatted = FormatBytes(usedBytes),
-                    TotalFormatted = FormatBytes(totalBytes),
-                    FreeFormatted = FormatBytes(freeBytes)
+                    UsedFormatted = SystemFormatters.FormatBytes(usedBytes),
+                    TotalFormatted = SystemFormatters.FormatBytes(totalBytes),
+                    FreeFormatted = SystemFormatters.FormatBytes(freeBytes)
                 };
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
@@ -437,41 +437,6 @@ namespace Listenarr.Infrastructure.Platform
         {
             var framework = RuntimeInformation.FrameworkDescription;
             return framework;
-        }
-
-        private string FormatBytes(long bytes)
-        {
-            string[] sizes = { "B", "KB", "MB", "GB", "TB" };
-            double len = bytes;
-            int order = 0;
-
-            while (len >= 1024 && order < sizes.Length - 1)
-            {
-                order++;
-                len = len / 1024;
-            }
-
-            return $"{len:0.##} {sizes[order]}";
-        }
-
-        private string FormatUptime(TimeSpan uptime)
-        {
-            if (uptime.TotalDays >= 1)
-            {
-                return $"{(int)uptime.TotalDays} days, {uptime.Hours} hours";
-            }
-            else if (uptime.TotalHours >= 1)
-            {
-                return $"{(int)uptime.TotalHours} hours, {uptime.Minutes} minutes";
-            }
-            else if (uptime.TotalMinutes >= 1)
-            {
-                return $"{(int)uptime.TotalMinutes} minutes";
-            }
-            else
-            {
-                return $"{(int)uptime.TotalSeconds} seconds";
-            }
         }
 
         public List<LogEntry> GetRecentLogs(int limit = 100)
