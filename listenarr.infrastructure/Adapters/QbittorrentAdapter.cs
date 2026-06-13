@@ -626,19 +626,7 @@ namespace Listenarr.Infrastructure.Adapters
 
                 foreach (var torrent in torrents)
                 {
-                    var name = torrent.TryGetValue("name", out var nameEl) ? nameEl.GetString() ?? string.Empty : string.Empty;
-                    var progress = torrent.TryGetValue("progress", out var progressEl) ? progressEl.GetDouble() * 100 : 0;
-                    var size = torrent.TryGetValue("size", out var sizeEl) ? sizeEl.GetInt64() : 0;
-                    var downloaded = torrent.TryGetValue("downloaded", out var downloadedEl) ? downloadedEl.GetInt64() : 0;
-                    var dlspeed = torrent.TryGetValue("dlspeed", out var dlspeedEl) ? dlspeedEl.GetDouble() : 0;
-                    var eta = torrent.TryGetValue("eta", out var etaEl) ? (int?)etaEl.GetInt32() : null;
-                    var state = torrent.TryGetValue("state", out var stateEl) ? stateEl.GetString() ?? "unknown" : "unknown";
                     var hash = torrent.TryGetValue("hash", out var hashEl) ? hashEl.GetString() ?? string.Empty : string.Empty;
-                    var addedOn = torrent.TryGetValue("added_on", out var addedOnEl) ? addedOnEl.GetInt64() : 0;
-                    var numSeeds = torrent.TryGetValue("num_seeds", out var numSeedsEl) ? (int?)numSeedsEl.GetInt32() : null;
-                    var numLeechs = torrent.TryGetValue("num_leechs", out var numLeechsEl) ? (int?)numLeechsEl.GetInt32() : null;
-                    var ratio = torrent.TryGetValue("ratio", out var ratioEl) ? (double?)ratioEl.GetDouble() : null;
-                    var savePath = torrent.TryGetValue("save_path", out var savePathEl) ? savePathEl.GetString() ?? string.Empty : string.Empty;
 
                     List<Dictionary<string, JsonElement>> files = [];
                     using var filesResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/files?hash={hash}", ct);
@@ -648,62 +636,7 @@ namespace Listenarr.Infrastructure.Adapters
                         files = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(filesJson) ?? [];
                     }
 
-                    var localPath = savePath;
-                    var outputPath = ResolveTorrentContentPath(savePath, files);
-
-                    var status = state switch
-                    {
-                        "downloading" => "downloading",
-                        "metaDL" => "downloading",
-                        "forcedDL" => "downloading",
-                        "forcedMetaDL" => "downloading",
-                        "stalledDL" => "downloading",
-                        "checkingDL" => "downloading",
-                        "stoppedDL" => "paused",
-                        "stoppedUP" => "paused",
-                        "queuedDL" => "queued",
-                        "queuedUP" => "queued",
-                        "uploading" => "seeding",
-                        "stalledUP" => "seeding",
-                        "checkingUP" => "seeding",
-                        "forcedUP" => "seeding",
-                        "checkingResumeData" => "downloading",
-                        "moving" => "downloading",
-                        "error" => "failed",
-                        "missingFiles" => "failed",
-                        _ => "unknown"
-                    };
-
-                    if (progress >= 100.0 && (status == "seeding" || state == "uploading" || state == "stalledUP" || state == "checkingUP" || state == "forcedUP" || state == "stoppedUP"))
-                    {
-                        status = "completed";
-                    }
-
-                    items.Add(new QueueItem
-                    {
-                        Id = hash,
-                        Title = name,
-                        Quality = "Unknown",
-                        Status = status,
-                        Progress = progress,
-                        Size = size,
-                        Downloaded = downloaded,
-                        DownloadSpeed = dlspeed,
-                        Eta = eta >= 8640000 ? null : eta,
-                        DownloadClient = client.Name,
-                        DownloadClientId = client.Id,
-                        DownloadClientType = "qbittorrent",
-                        AddedAt = DateTimeOffset.FromUnixTimeSeconds(addedOn).DateTime,
-                        Seeders = numSeeds,
-                        Leechers = numLeechs,
-                        Ratio = ratio,
-                        CanPause = status == "downloading" || status == "queued",
-                        CanRemove = true,
-                        RemotePath = savePath,
-                        LocalPath = localPath,
-                        SourceFiles = BuildTorrentSourceFiles(savePath, files),
-                        ContentPath = outputPath
-                    });
+                    items.Add(QbittorrentResponseMapper.MapQueueItem(torrent, client, files));
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
@@ -810,98 +743,14 @@ namespace Listenarr.Infrastructure.Adapters
 
                 foreach (var torrent in torrents)
                 {
-                    var name = torrent.TryGetValue("name", out var nameEl) ? nameEl.GetString() ?? string.Empty : string.Empty;
-                    var progress = torrent.TryGetValue("progress", out var progressEl) ? progressEl.GetDouble() * 100 : 0;
-                    var size = torrent.TryGetValue("size", out var sizeEl) ? sizeEl.GetInt64() : 0;
-                    var downloaded = torrent.TryGetValue("downloaded", out var downloadedEl) ? downloadedEl.GetInt64() : 0;
-                    var dlspeed = torrent.TryGetValue("dlspeed", out var dlspeedEl) ? dlspeedEl.GetDouble() : 0;
-                    var eta = torrent.TryGetValue("eta", out var etaEl) ? (int?)etaEl.GetInt32() : null;
-                    var state = torrent.TryGetValue("state", out var stateEl) ? stateEl.GetString() ?? "unknown" : "unknown";
-                    var hash = torrent.TryGetValue("hash", out var hashEl) ? hashEl.GetString() ?? string.Empty : string.Empty;
-                    var numSeeds = torrent.TryGetValue("num_seeds", out var numSeedsEl) ? (int?)numSeedsEl.GetInt32() : null;
-                    var numLeechs = torrent.TryGetValue("num_leechs", out var numLeechsEl) ? (int?)numLeechsEl.GetInt32() : null;
-                    var ratio = torrent.TryGetValue("ratio", out var ratioEl) ? (double?)ratioEl.GetDouble() : null;
-                    // Per-torrent seed limit overrides (-1 = use global, -2 = use global, >=0 = per-torrent limit)
-                    var ratioLimit = torrent.TryGetValue("ratio_limit", out var ratioLimitEl) ? (float)ratioLimitEl.GetDouble() : -2f;
-                    var seedingTimeLimit = torrent.TryGetValue("seeding_time_limit", out var stlEl) ? stlEl.GetInt64() : -2L;
-                    var seedingTime = torrent.TryGetValue("seeding_time", out var seedTimeEl) ? (long?)seedTimeEl.GetInt64() : null;
-                    var savePath = torrent.TryGetValue("save_path", out var savePathEl) ? savePathEl.GetString() ?? string.Empty : string.Empty;
-                    var category = torrent.TryGetValue("category", out var categoryEl) ? categoryEl.GetString() ?? string.Empty : string.Empty;
-                    var contentPath = torrent.TryGetValue("content_path", out var contentPathEl) ? contentPathEl.GetString() ?? string.Empty : string.Empty;
-
-                    // ✅ Map qBittorrent status to DownloadItemStatus enum
-                    var status = state switch
-                    {
-                        "downloading" => DownloadItemStatus.Downloading,
-                        "metaDL" => DownloadItemStatus.Downloading,
-                        "forcedDL" => DownloadItemStatus.Downloading,
-                        "forcedMetaDL" => DownloadItemStatus.Downloading,
-                        "stalledDL" => DownloadItemStatus.Downloading,
-                        "checkingDL" => DownloadItemStatus.Downloading,
-                        "stoppedDL" => DownloadItemStatus.Paused,
-                        "stoppedUP" => DownloadItemStatus.Paused,
-                        "queuedDL" => DownloadItemStatus.Queued,
-                        "queuedUP" => DownloadItemStatus.Queued,
-                        "uploading" => DownloadItemStatus.Downloading, // Still seeding after completion
-                        "stalledUP" => DownloadItemStatus.Downloading,
-                        "checkingUP" => DownloadItemStatus.Downloading,
-                        "forcedUP" => DownloadItemStatus.Downloading,
-                        "checkingResumeData" => DownloadItemStatus.Downloading,
-                        "moving" => DownloadItemStatus.Downloading,
-                        "error" => DownloadItemStatus.Failed,
-                        "missingFiles" => DownloadItemStatus.Failed,
-                        _ => DownloadItemStatus.Warning
-                    };
-
-                    // If completed, override status
-                    if (progress >= 100.0 && (status == DownloadItemStatus.Downloading || state == "uploading" || state == "stalledUP" || state == "checkingUP" || state == "forcedUP" || state == "stoppedUP"))
-                    {
-                        status = DownloadItemStatus.Completed;
-                    }
-
-                    var localPath = savePath;
-
-                    var outputPath = localPath;
-
-                    TimeSpan? remainingTime = eta.HasValue && eta.Value < 8640000 ? TimeSpan.FromSeconds(eta.Value) : null;
-
-                    // qBittorrent can remove completed torrents while still seeding; file moves
-                    // still require the torrent to be stopped so we don't break the payload.
-                    var isStopped = state is "pausedUP" or "stoppedUP";
-                    var seedLimitReached = HasReachedSeedLimit(
-                        ratio ?? 0, ratioLimit, seedingTime, seedingTimeLimit,
-                        globalMaxRatioEnabled, globalMaxRatio,
-                        globalMaxSeedingTimeEnabled, globalMaxSeedingTime);
-                    var canBeRemoved = removeCompletedDownloads && seedLimitReached;
-                    var canMoveFiles = canBeRemoved && isStopped;
-
-                    items.Add(new DownloadClientItem
-                    {
-                        DownloadId = hash,
-                        Title = name,
-                        Category = category,
-                        Status = status,
-                        TotalSize = size,
-                        RemainingSize = size - downloaded,
-                        RemainingTime = remainingTime,
-                        SeedRatio = ratio,
-                        OutputPath = outputPath,
-                        Message = state,
-                        Progress = progress,
-                        DownloadSpeed = dlspeed,
-                        Seeders = numSeeds ?? 0,
-                        Leechers = numLeechs ?? 0,
-                        CanBeRemoved = canBeRemoved,
-                        CanMoveFiles = canMoveFiles,
-                        DownloadClientInfo = DownloadClientItemClientInfo.FromClient(
-                            clientId: client.Id,
-                            clientName: client.Name,
-                            clientType: "qbittorrent",
-                            protocol: DownloadProtocol.Torrent,
-                            removeCompletedDownloads: removeCompletedDownloads,
-                            hasPostImportCategory: !string.IsNullOrEmpty(client.Settings?.GetValueOrDefault("postImportCategory")?.ToString())
-                        )
-                    });
+                    items.Add(QbittorrentResponseMapper.MapDownloadClientItem(
+                        torrent,
+                        client,
+                        removeCompletedDownloads,
+                        globalMaxRatioEnabled,
+                        globalMaxRatio,
+                        globalMaxSeedingTimeEnabled,
+                        globalMaxSeedingTime));
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
@@ -910,74 +759,6 @@ namespace Listenarr.Infrastructure.Adapters
             }
 
             return items;
-        }
-
-        /// <summary>
-        /// Determines whether a qBittorrent torrent has reached its seed limit (ratio or time).
-        /// Mirrors Sonarr's HasReachedSeedLimit logic for qBittorrent.
-        /// </summary>
-        /// <param name="ratio">Current torrent ratio</param>
-        /// <param name="ratioLimit">Per-torrent ratio limit (-2 = use global, -1 = no limit, >=0 = per-torrent)</param>
-        /// <param name="seedingTime">Torrent seeding time in seconds (null if unknown)</param>
-        /// <param name="seedingTimeLimit">Per-torrent seeding time limit in minutes (-2 = use global, -1 = no limit, >=0 = per-torrent)</param>
-        /// <param name="globalMaxRatioEnabled">Whether global max ratio is enabled in qBit preferences</param>
-        /// <param name="globalMaxRatio">Global max ratio from qBit preferences</param>
-        /// <param name="globalMaxSeedingTimeEnabled">Whether global max seeding time is enabled in qBit preferences</param>
-        /// <param name="globalMaxSeedingTime">Global max seeding time from qBit preferences (in minutes)</param>
-        private static bool HasReachedSeedLimit(
-            double ratio,
-            float ratioLimit,
-            long? seedingTime,
-            long seedingTimeLimit,
-            bool globalMaxRatioEnabled,
-            float globalMaxRatio,
-            bool globalMaxSeedingTimeEnabled,
-            long globalMaxSeedingTime)
-        {
-            var hasEffectiveRatioLimit =
-                ratioLimit >= 0 ||
-                (ratioLimit <= -2 && globalMaxRatioEnabled && globalMaxRatio > 0);
-            var hasEffectiveSeedingTimeLimit =
-                seedingTimeLimit >= 0 ||
-                (seedingTimeLimit <= -2 && globalMaxSeedingTimeEnabled && globalMaxSeedingTime > 0);
-
-            if (!hasEffectiveRatioLimit && !hasEffectiveSeedingTimeLimit)
-            {
-                return true;
-            }
-
-            // Check ratio limit (per-torrent override takes precedence)
-            if (ratioLimit >= 0 && ratioLimit - ratio <= 0.001)
-            {
-                // Per-torrent ratio limit set
-                return true;
-            }
-
-            if (ratioLimit <= -2 && globalMaxRatioEnabled && globalMaxRatio - ratio <= 0.001)
-            {
-                // Use global ratio limit (-2 means inherit global)
-                return true;
-            }
-
-            // Check seeding time limit (per-torrent override takes precedence)
-            if (seedingTimeLimit >= 0 &&
-                seedingTime is long currentSeedingTime &&
-                currentSeedingTime >= seedingTimeLimit * 60)
-            {
-                // Per-torrent seeding time limit set (in minutes, convert to seconds for comparison)
-                return true;
-            }
-
-            if (seedingTimeLimit <= -2 &&
-                globalMaxSeedingTimeEnabled &&
-                seedingTime is long inheritedSeedingTime &&
-                inheritedSeedingTime >= globalMaxSeedingTime * 60)
-            {
-                // Use global seeding time limit (in minutes, convert to seconds)
-                return true;
-            }
-
-            return false;
         }
 
         /// <summary>
@@ -1417,7 +1198,7 @@ namespace Listenarr.Infrastructure.Adapters
 
                     // Sonarr parity: compute CanMoveFiles/CanBeRemoved per-torrent
                     var tIsStopped = state is "pausedUP" or "stoppedUP";
-                    var tSeedLimitReached = QBitHasReachedSeedLimit(
+                    var tSeedLimitReached = QbittorrentSeedLimitEvaluator.HasReachedSeedLimit(
                         tRatio, tRatioLimit, seedingTime, tSeedingTimeLimit,
                         qbtGlobalMaxRatioEnabled, qbtGlobalMaxRatio,
                         qbtGlobalMaxSeedingTimeEnabled, qbtGlobalMaxSeedingTime);
@@ -1598,51 +1379,5 @@ namespace Listenarr.Infrastructure.Adapters
             }
         }
 
-        /// <summary>
-        /// Determines whether a qBittorrent torrent has reached its seed limit.
-        /// Used by the qBittorrent poller to compute CanMoveFiles/CanBeRemoved per-torrent.
-        /// Mirrors Sonarr's HasReachedSeedLimit logic.
-        /// </summary>
-        private static bool QBitHasReachedSeedLimit(
-            double ratio,
-            float ratioLimit,
-            long? seedingTime,
-            long seedingTimeLimit,
-            bool globalMaxRatioEnabled,
-            float globalMaxRatio,
-            bool globalMaxSeedingTimeEnabled,
-            long globalMaxSeedingTime)
-        {
-            var hasEffectiveRatioLimit =
-                ratioLimit >= 0 ||
-                (ratioLimit <= -2 && globalMaxRatioEnabled && globalMaxRatio > 0);
-            var hasEffectiveSeedingTimeLimit =
-                seedingTimeLimit >= 0 ||
-                (seedingTimeLimit <= -2 && globalMaxSeedingTimeEnabled && globalMaxSeedingTime > 0);
-
-            if (!hasEffectiveRatioLimit && !hasEffectiveSeedingTimeLimit)
-                return true;
-
-            // Check ratio limit (per-torrent override takes precedence)
-            if (ratioLimit >= 0 && ratioLimit - ratio <= 0.001)
-                return true;
-
-            if (ratioLimit <= -2 && globalMaxRatioEnabled && globalMaxRatio - ratio <= 0.001)
-                return true;
-
-            // Check seeding time limit (per-torrent override takes precedence)
-            if (seedingTimeLimit >= 0 &&
-                seedingTime is long currentSeedingTime &&
-                currentSeedingTime >= seedingTimeLimit * 60)
-                return true;
-
-            if (seedingTimeLimit <= -2 &&
-                globalMaxSeedingTimeEnabled &&
-                seedingTime is long inheritedSeedingTime &&
-                inheritedSeedingTime >= globalMaxSeedingTime * 60)
-                return true;
-
-            return false;
-        }
     }
 }

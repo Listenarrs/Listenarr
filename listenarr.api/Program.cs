@@ -317,6 +317,9 @@ builder.Services.AddHttpClient<IAudnexusService, AudnexusService>()
 builder.Services.AddScoped<MetadataConverters>();
 builder.Services.AddScoped<MetadataMerger>();
 builder.Services.AddScoped<SearchProgressReporter>();
+builder.Services.AddScoped<IndexerAdditionalSettingsParser>();
+builder.Services.AddScoped<IndexerSearchWorkflow>();
+builder.Services.AddScoped<MetadataSourceCatalog>();
 
 // Add search result filters
 builder.Services.AddScoped<ISearchResultFilter, KindleEditionFilter>();
@@ -347,6 +350,13 @@ builder.Services.AddScoped<AsinSearchHandler>();
 builder.Services.AddScoped<Listenarr.Api.Controllers.LibraryMetadataRescanWorkflow>();
 builder.Services.AddScoped<Listenarr.Api.Controllers.LibraryScanPathResolver>();
 builder.Services.AddScoped<Listenarr.Api.Controllers.LibraryScanQueueWorkflow>();
+builder.Services.AddScoped<Listenarr.Api.Controllers.LibraryAddWorkflow>();
+builder.Services.AddScoped<Listenarr.Api.Controllers.LibraryManualScanWorkflow>();
+builder.Services.AddScoped<Listenarr.Api.Controllers.LibraryBulkEditWorkflow>();
+builder.Services.AddScoped<Listenarr.Api.Controllers.LibraryMoveWorkflow>();
+builder.Services.AddScoped<Listenarr.Api.Controllers.LibraryDeleteWorkflow>();
+builder.Services.AddScoped<Listenarr.Api.Controllers.LibraryUpdateWorkflow>();
+builder.Services.AddScoped<Listenarr.Api.Controllers.LibraryIdentifierWorkflow>();
 
 // Register named HttpClients for each adapter type so adapter implementations can request the appropriately-configured client.
 builder.Services.AddListenarrHttpClients(builder.Configuration);

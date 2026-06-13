@@ -81,5 +81,99 @@ namespace Listenarr.Tests.Features.Api.Services
             var result = AudibleService.RemoveDiacritics(null!);
             Assert.Null(result);
         }
+
+        [Fact]
+        public void AudibleLookupJsonParser_ParsesAuthorArray()
+        {
+            var items = AudibleLookupJsonParser.ParseAuthorLookupItems("""
+                [
+                  { "asin": "A1", "name": "Author One" },
+                  { "asin": "A2", "name": "Author Two" }
+                ]
+                """);
+
+            Assert.Equal(2, items.Count);
+            Assert.Equal("A1", items[0].Asin);
+            Assert.Equal("Author Two", items[1].Name);
+        }
+
+        [Fact]
+        public void AudibleLookupJsonParser_ParsesSingleAuthorEnvelope()
+        {
+            var item = AudibleLookupJsonParser.ParseSingleAuthorLookupItem("""
+                { "asin": "A1", "name": "Author One", "image": "https://example.test/a.jpg", "region": "us" }
+                """);
+
+            Assert.NotNull(item);
+            Assert.Equal("A1", item.Asin);
+            Assert.Equal("Author One", item.Name);
+            Assert.Equal("us", item.Region);
+        }
+
+        [Fact]
+        public void AudibleLookupJsonParser_ParsesSeriesResultsEnvelope()
+        {
+            var items = AudibleLookupJsonParser.ParseSeriesLookupItems("""
+                {
+                  "results": [
+                    { "asin": "S1", "name": "Series One", "position": "1" }
+                  ]
+                }
+                """);
+
+            Assert.Single(items);
+            Assert.Equal("S1", items[0].Asin);
+            Assert.Equal("Series One", items[0].Name);
+            Assert.Equal("1", items[0].Position);
+        }
+
+        [Theory]
+        [InlineData("")]
+        [InlineData("   ")]
+        public void AudibleLookupJsonParser_EmptyInput_ReturnsNoResults(string lookupJson)
+        {
+            Assert.Empty(AudibleLookupJsonParser.ParseAuthorLookupItems(lookupJson));
+            Assert.Empty(AudibleLookupJsonParser.ParseSeriesLookupItems(lookupJson));
+        }
+
+        [Fact]
+        public void AudibleAuthorCatalogMatcher_MatchesByAuthorAsin()
+        {
+            var result = new AudibleSearchResult
+            {
+                Authors = new List<AudibleAuthor>
+                {
+                    new() { Asin = "B001", Name = "Different Name" }
+                }
+            };
+
+            Assert.True(AudibleAuthorCatalogMatcher.MatchesTarget(result, "Target Author", "B001"));
+        }
+
+        [Fact]
+        public void AudibleAuthorCatalogMatcher_MatchesByNormalizedName()
+        {
+            var result = new AudibleSearchResult
+            {
+                Authors = new List<AudibleAuthor>
+                {
+                    new() { Name = "Asa Larsson" }
+                }
+            };
+
+            Assert.True(AudibleAuthorCatalogMatcher.MatchesTarget(result, "Åsa Larsson", null));
+        }
+
+        [Fact]
+        public void AudibleAuthorCatalogMatcher_BuildsStableFallbackKeyWhenAsinMissing()
+        {
+            var result = new AudibleSearchResult
+            {
+                Title = "Book",
+                Link = "https://example.test/book"
+            };
+
+            Assert.Equal("Book|https://example.test/book", AudibleAuthorCatalogMatcher.BuildSearchResultKey(result));
+        }
     }
 }

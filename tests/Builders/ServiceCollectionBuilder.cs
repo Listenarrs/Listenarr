@@ -177,6 +177,9 @@ namespace Listenarr.Tests.Builders
             services.AddSingleton<MetadataConverters>();
             services.AddSingleton<MetadataMerger>();
             services.AddSingleton<SearchProgressReporter>();
+            services.AddSingleton<IndexerAdditionalSettingsParser>();
+            services.AddSingleton<IndexerSearchWorkflow>();
+            services.AddSingleton<MetadataSourceCatalog>();
             services.AddSingleton<SearchResultFilterPipeline>();
             services.AddSingleton<MetadataStrategyCoordinator>();
             services.AddSingleton<AsinCandidateCollector>();
@@ -186,9 +189,17 @@ namespace Listenarr.Tests.Builders
             services.AddSingleton<AsinSearchHandler>();
             services.AddSingleton<DownloadTypeResolver>();
             services.AddSingleton<DownloadClientSelector>();
+            services.AddSingleton<DownloadCachedTorrentStore>();
             services.AddSingleton<LibraryMetadataRescanWorkflow>();
             services.AddSingleton<LibraryScanPathResolver>();
             services.AddSingleton<LibraryScanQueueWorkflow>();
+            services.AddSingleton<LibraryAddWorkflow>();
+            services.AddSingleton<LibraryManualScanWorkflow>();
+            services.AddSingleton<LibraryBulkEditWorkflow>();
+            services.AddSingleton<LibraryMoveWorkflow>();
+            services.AddSingleton<LibraryDeleteWorkflow>();
+            services.AddSingleton<LibraryUpdateWorkflow>();
+            services.AddSingleton<LibraryIdentifierWorkflow>();
             services.AddSingleton<DownloadService>();
             services.AddSingleton<MoveBackgroundService>();
             services.AddSingleton<MoveQueueService>();

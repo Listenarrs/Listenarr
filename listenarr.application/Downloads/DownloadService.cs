@@ -16,10 +16,8 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using Microsoft.Extensions.Caching.Memory;
 using System.Text.RegularExpressions;
 using Listenarr.Domain.Common;
-using Listenarr.Application.Common;
 using Listenarr.Application.Interfaces;
 using Listenarr.Domain.Models;
 using Listenarr.Application.Interfaces.Repositories;
@@ -38,13 +36,13 @@ namespace Listenarr.Application.Downloads
         IQualityProfileService qualityProfileService,
         ISearchService searchService,
         IDownloadClientGateway clientGateway,
-        IMemoryCache cache,
         IDownloadQueueService downloadQueueService,
         INotificationService notificationService,
         IHubBroadcaster hubBroadcaster,
         IDownloadHistoryService downloadHistoryService,
         DownloadTypeResolver downloadTypeResolver,
-        DownloadClientSelector downloadClientSelector) : IDownloadService
+        DownloadClientSelector downloadClientSelector,
+        DownloadCachedTorrentStore cachedTorrentStore) : IDownloadService
     {
         // Cache expiration constants
         private const int QueueCacheExpirationSeconds = 10;
@@ -67,10 +65,7 @@ namespace Listenarr.Application.Downloads
         /// </summary>
         public Task<(byte[]? Bytes, string? FileName)> GetCachedTorrentAsync(string downloadId)
         {
-            var cacheKey = $"mam:cachedtorrent:{downloadId}";
-            var bytes = cache.Get<byte[]>(cacheKey + ":bytes");
-            var name = cache.Get<string>(cacheKey + ":name");
-            return Task.FromResult((bytes, name));
+            return cachedTorrentStore.GetCachedTorrentAsync(downloadId);
         }
 
         /// <summary>
@@ -78,36 +73,7 @@ namespace Listenarr.Application.Downloads
         /// </summary>
         public Task<List<string>?> GetCachedAnnouncesAsync(string downloadId)
         {
-            try
-            {
-                if (string.IsNullOrEmpty(downloadId)) return Task.FromResult<List<string>?>(null);
-                var cacheKey = $"mam:cachedtorrent:{downloadId}:announces";
-                var announces = cache.Get<List<string>>(cacheKey);
-                if (announces != null && announces.Count > 0)
-                {
-                    return Task.FromResult<List<string>?>(announces);
-                }
-
-                // Fallback: if announces not cached, try to extract from cached bytes
-                var bytes = cache.Get<byte[]>($"mam:cachedtorrent:{downloadId}:bytes");
-                if (bytes != null)
-                {
-                    var extracted = MyAnonamouseHelper.ExtractAnnounceUrls(bytes);
-                    if (extracted != null && extracted.Count > 0)
-                    {
-                        // cache for future retrievals
-                        cache.Set($"mam:cachedtorrent:{downloadId}:announces", extracted, new MemoryCacheEntryOptions { SlidingExpiration = TimeSpan.FromMinutes(30) });
-                        return Task.FromResult<List<string>?>(extracted);
-                    }
-                }
-
-                return Task.FromResult<List<string>?>(null);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                logger.LogDebug(ex, "Failed to retrieve cached announces for download {DownloadId} (non-fatal)", downloadId);
-                return Task.FromResult<List<string>?>(null);
-            }
+            return cachedTorrentStore.GetCachedAnnouncesAsync(downloadId);
         }
 
         public async Task<(bool Success, string Message, DownloadClientConfiguration? Client)> TestDownloadClientAsync(DownloadClientConfiguration client)
@@ -550,432 +516,12 @@ namespace Listenarr.Application.Downloads
 
         private async Task TryPrepareMyAnonamouseTorrentAsync(SearchResult searchResult, string? downloadId = null)
         {
-            ArgumentNullException.ThrowIfNull(searchResult);
-
-            logger.LogInformation("TryPrepareMyAnonamouseTorrentAsync called for '{Title}', IndexerId: {IndexerId}, TorrentUrl: '{TorrentUrl}'",
-                searchResult.Title, searchResult.IndexerId, searchResult.TorrentUrl);
-
-            // Security: Validate all preconditions before performing sensitive operations
-            // This method downloads content using authenticated HTTP clients, so we must
-            // ensure the request is legitimate and comes from a trusted, configured source.
-
-            if (searchResult.IndexerId == null)
-            {
-                logger.LogWarning("TryPrepareMyAnonamouseTorrentAsync: No IndexerId for '{Title}' - skipping", searchResult.Title);
-                // Reject: No database-backed indexer ID provided
-                return;
-            }
-
-            if (string.IsNullOrEmpty(searchResult.TorrentUrl))
-            {
-                logger.LogDebug("Skipping MyAnonamouse cache: no TorrentUrl for '{Title}'", LogRedaction.SanitizeText(searchResult.Title));
-                return;
-            }
-
-            if (searchResult.TorrentFileContent != null && searchResult.TorrentFileContent.Length > 0)
-            {
-                logger.LogDebug("MyAnonamouse torrent already cached for '{Title}'", searchResult.Title);
-                return;
-            }
-
-            try
-            {
-                // Security: Fetch indexer from database using the validated ID
-                // Only trusted, administrator-configured indexers can trigger authenticated requests
-                var indexer = await indexerRepository.GetByIdAsync(searchResult.IndexerId.Value);
-
-                // Security: Indexer must exist in database - reject if not found
-                if (indexer == null)
-                {
-                    logger.LogWarning("Unable to cache MyAnonamouse torrent for '{Title}': indexer configuration not found", searchResult.Title);
-                    return;
-                }
-
-                // Security: Validate against database-stored indexer configuration, not user-provided search result
-                if (!string.Equals(indexer.Implementation, "MyAnonamouse", StringComparison.OrdinalIgnoreCase))
-                {
-                    logger.LogDebug("Skipping MyAnonamouse cache: indexer {IndexerName} is not MyAnonamouse (is {Implementation})",
-                        indexer.Name, indexer.Implementation);
-                    return;
-                }
-
-                // Parse and validate URLs
-                if (!Uri.TryCreate(searchResult.TorrentUrl, UriKind.Absolute, out var torrentUri) ||
-                    !Uri.TryCreate(indexer.Url, UriKind.Absolute, out var indexerUri))
-                {
-                    logger.LogWarning("Unable to cache MyAnonamouse torrent for '{Title}': invalid URL(s). Torrent={Url}, Indexer={IndexerUrl}", searchResult.Title, LogRedaction.SanitizeUrl(searchResult.TorrentUrl), indexer.Url);
-                    return;
-                }
-
-                if (!string.Equals(torrentUri.Host, indexerUri.Host, StringComparison.OrdinalIgnoreCase))
-                {
-                    logger.LogDebug("MyAnonamouse torrent host {TorrentHost} differs from indexer host {IndexerHost}. Proceeding with explicit cookie header.", torrentUri.Host, indexerUri.Host);
-                }
-
-                var mamId = MyAnonamouseHelper.TryGetMamId(indexer.AdditionalSettings);
-                if (string.IsNullOrEmpty(mamId))
-                {
-                    logger.LogWarning("Unable to cache MyAnonamouse torrent for '{Title}': mam_id missing from indexer {IndexerName}", searchResult.Title, indexer.Name);
-                    return;
-                }
-
-                // Use factory client for the initial attempt (allows test injection).
-                // If auto-redirect drops the Cookie header, a fallback retry with
-                // CreateAuthenticatedHttpClient (AllowAutoRedirect=false) handles it below.
-                var httpClientToUse = httpClientFactory.CreateClient(); // FIXME: Should use a named client
-
-                logger.LogDebug("Downloading MyAnonamouse torrent for '{Title}' from {Url}", searchResult.Title, LogRedaction.SanitizeUrl(searchResult.TorrentUrl));
-
-                // Follow redirects manually so we can re-apply cookies and Host header on each hop (mimic Prowlarr)
-                var currentUri = torrentUri;
-                HttpResponseMessage? response = null;
-                for (int redirectAttempt = 0; redirectAttempt < 6; redirectAttempt++)
-                {
-                    using var req = new HttpRequestMessage(HttpMethod.Get, currentUri);
-                    // Set common headers for MAM to mimic a browser request (some endpoints require this)
-                    req.Headers.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36");
-                    req.Headers.Referrer = new Uri("https://www.myanonamouse.net/");
-                    req.Headers.Accept.ParseAdd("application/x-bittorrent, application/octet-stream, */*; q=0.01");
-
-                    // Ensure the authenticated session is sent even if the download host differs by adding Cookie header as well
-                    if (!string.IsNullOrEmpty(mamId))
-                        req.Headers.Add("Cookie", $"mam_id={mamId}");
-
-                    // Always set Host header to the indexer host so tracker sees the expected host
-                    var hostHeader = indexerUri.IsDefaultPort ? indexerUri.Host : $"{indexerUri.Host}:{indexerUri.Port}";
-                    req.Headers.Host = hostHeader;
-
-                    logger.LogDebug("Downloading MyAnonamouse torrent for '{Title}' from {Url} (attempt {Attempt})", searchResult.Title, LogRedaction.SanitizeUrl(currentUri.ToString()), redirectAttempt + 1);
-
-                    response = await httpClientToUse.SendAsync(req);
-
-                    // Persist mam_id from intermediate responses (Set-Cookie)
-                    try
-                    {
-                        var newMam = MyAnonamouseHelper.TryExtractMamIdFromResponse(response);
-                        if (!string.IsNullOrEmpty(newMam) && !string.Equals(newMam, mamId, StringComparison.Ordinal))
-                        {
-                            logger.LogInformation("MyAnonamouse: received updated mam_id from download redirect response for indexer {Name}", indexer.Name);
-                            indexer.AdditionalSettings = MyAnonamouseHelper.UpdateMamIdInAdditionalSettings(indexer.AdditionalSettings, newMam);
-                            await indexerRepository.UpdateAsync(indexer);
-
-                            // Keep local copy in sync
-                            indexer.AdditionalSettings = MyAnonamouseHelper.UpdateMamIdInAdditionalSettings(indexer.AdditionalSettings, newMam);
-                            mamId = newMam;
-                        }
-                    }
-                    catch (Exception exMam) when (exMam is not OperationCanceledException && exMam is not OutOfMemoryException && exMam is not StackOverflowException)
-                    {
-                        logger.LogDebug(exMam, "Failed to persist updated mam_id from MyAnonamouse redirect response");
-                    }
-
-                    // Handle redirects manually
-                    if (response.StatusCode == System.Net.HttpStatusCode.MovedPermanently ||
-                        response.StatusCode == System.Net.HttpStatusCode.Found ||
-                        response.StatusCode == System.Net.HttpStatusCode.SeeOther ||
-                        response.StatusCode == System.Net.HttpStatusCode.TemporaryRedirect ||
-                        response.StatusCode == System.Net.HttpStatusCode.PermanentRedirect)
-                    {
-                        if (response.Headers.Location == null)
-                        {
-                            logger.LogWarning("MyAnonamouse torrent download redirect without Location header for '{Title}'", searchResult.Title);
-                            response.Dispose();
-                            return;
-                        }
-
-                        var next = response.Headers.Location.IsAbsoluteUri ? response.Headers.Location : new Uri(currentUri, response.Headers.Location);
-                        logger.LogDebug("Following MyAnonamouse redirect to {Next}", LogRedaction.SanitizeUrl(next.ToString()));
-                        response.Dispose();
-                        currentUri = next;
-                        continue;
-                    }
-
-                    // Not a redirect - break to process the response
-                    break;
-                }
-
-                if (response == null)
-                {
-                    logger.LogWarning("Failed to download MyAnonamouse torrent for '{Title}': no response", searchResult.Title);
-                    return;
-                }
-
-                if (!response.IsSuccessStatusCode)
-                {
-                    logger.LogWarning("MyAnonamouse torrent download failed for '{Title}' with status {Status}", searchResult.Title, response.StatusCode);
-                    response.Dispose();
-                    return;
-                }
-
-                var torrentBytes = await response.Content.ReadAsByteArrayAsync();
-                if (torrentBytes == null || torrentBytes.Length == 0)
-                {
-                    logger.LogWarning("MyAnonamouse torrent download for '{Title}' returned empty payload", searchResult.Title);
-                    response.Dispose();
-                    return;
-                }
-
-                // Quick sanity check: ensure the payload looks like a torrent (bencoded dictionary / contains 'announce'/'info')
-                var looksLikeTorrent = (torrentBytes.Length > 0 && torrentBytes[0] == (byte)'d') ||
-                                       System.Text.Encoding.ASCII.GetString(torrentBytes.Take(Math.Min(200, torrentBytes.Length)).ToArray()).IndexOf("announce", StringComparison.OrdinalIgnoreCase) >= 0;
-
-                if (!looksLikeTorrent)
-                {
-                    // The factory HttpClient may have auto-followed redirects, silently
-                    // dropping the Cookie header (AllowAutoRedirect=true is the default).
-                    // Retry with a dedicated client that disables auto-redirect so the
-                    // manual redirect loop can re-apply cookies on each hop.
-                    logger.LogDebug("Factory client returned non-torrent payload for '{Title}', retrying with authenticated MAM client", searchResult.Title);
-                    response.Dispose();
-                    response = null;
-
-                    try
-                    {
-                        using var authClient = MyAnonamouseHelper.CreateAuthenticatedHttpClient(mamId, indexer.Url);
-                        var retryUri = torrentUri;
-                        for (int retryHop = 0; retryHop < 6; retryHop++)
-                        {
-                            using var retryReq = new HttpRequestMessage(HttpMethod.Get, retryUri);
-                            retryReq.Headers.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36");
-                            retryReq.Headers.Referrer = new Uri("https://www.myanonamouse.net/");
-                            retryReq.Headers.Accept.ParseAdd("application/x-bittorrent, application/octet-stream, */*; q=0.01");
-                            if (!string.IsNullOrEmpty(mamId))
-                                retryReq.Headers.Add("Cookie", $"mam_id={mamId}");
-                            var retryHost = indexerUri.IsDefaultPort ? indexerUri.Host : $"{indexerUri.Host}:{indexerUri.Port}";
-                            retryReq.Headers.Host = retryHost;
-
-                            response = await authClient.SendAsync(retryReq);
-
-                            if ((int)response.StatusCode >= 300 && (int)response.StatusCode < 400 && response.Headers.Location != null)
-                            {
-                                retryUri = response.Headers.Location.IsAbsoluteUri
-                                    ? response.Headers.Location
-                                    : new Uri(retryUri, response.Headers.Location);
-                                response.Dispose();
-                                response = null;
-                                continue;
-                            }
-                            break;
-                        }
-
-                        if (response != null && response.IsSuccessStatusCode)
-                        {
-                            torrentBytes = await response.Content.ReadAsByteArrayAsync();
-                            looksLikeTorrent = torrentBytes != null && torrentBytes.Length > 0 &&
-                                ((torrentBytes[0] == (byte)'d') ||
-                                 System.Text.Encoding.ASCII.GetString(torrentBytes.Take(Math.Min(200, torrentBytes.Length)).ToArray())
-                                     .IndexOf("announce", StringComparison.OrdinalIgnoreCase) >= 0);
-                            if (looksLikeTorrent)
-                                logger.LogInformation("Authenticated MAM client successfully downloaded torrent for '{Title}' ({Bytes} bytes)", searchResult.Title, torrentBytes!.Length);
-                        }
-                    }
-                    catch (Exception retryEx) when (retryEx is not OperationCanceledException && retryEx is not OutOfMemoryException && retryEx is not StackOverflowException)
-                    {
-                        logger.LogDebug(retryEx, "Retry with authenticated MAM client also failed (non-fatal)");
-                    }
-                }
-
-                if (!looksLikeTorrent)
-                {
-                    var snippet = System.Text.Encoding.UTF8.GetString((torrentBytes ?? Array.Empty<byte>()).Take(Math.Min(512, torrentBytes?.Length ?? 0)).ToArray());
-                    if (System.Text.RegularExpressions.Regex.IsMatch(snippet, "Unrecognized host|PassKey|Pass Key|Unrecognized", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
-                    {
-                        logger.LogWarning("MyAnonamouse torrent download for '{Title}' returned an authorization error page from tracker: {Snippet}", searchResult.Title, LogRedaction.RedactText(snippet, LogRedaction.GetSensitiveValuesFromEnvironment()));
-                    }
-                    else
-                    {
-                        logger.LogWarning("MyAnonamouse torrent download for '{Title}' returned unexpected non-torrent payload (first 200 chars): {Snippet}", searchResult.Title, LogRedaction.RedactText(snippet, LogRedaction.GetSensitiveValuesFromEnvironment()));
-                    }
-
-                    response?.Dispose();
-                    return;
-                }
-
-                // torrentBytes is guaranteed non-null here: looksLikeTorrent check above returns early otherwise
-                if (torrentBytes == null) return;
-
-                // Additional debug info to help diagnose cases where content looks like a torrent but tracker still rejects it
-                var contentType = response?.Content.Headers.ContentType?.ToString() ?? "(none)";
-                var firstBytesHex = BitConverter.ToString(torrentBytes.Take(Math.Min(16, torrentBytes.Length)).ToArray()).Replace("-", " ");
-                var containsAnnounce = System.Text.Encoding.ASCII.GetString(torrentBytes.Take(Math.Min(512, torrentBytes.Length)).ToArray()).IndexOf("announce", StringComparison.OrdinalIgnoreCase) >= 0;
-                logger.LogDebug("MyAnonamouse torrent payload debug: ContentType={ContentType}, FirstBytes={FirstBytesHex}, ContainsAnnounce={ContainsAnnounce}", contentType, firstBytesHex, containsAnnounce);
-
-                // If the torrent references the numeric IP host, rewrite announce/tracker strings to the configured indexer host
-                try
-                {
-                    if (!string.IsNullOrEmpty(indexerUri.Host))
-                    {
-                        var ascii = System.Text.Encoding.ASCII.GetString(torrentBytes);
-
-                        // 1) If torrent references the original torrent host (often IP), replace it
-                        if (!string.IsNullOrEmpty(torrentUri.Host) && ascii.IndexOf(torrentUri.Host, StringComparison.OrdinalIgnoreCase) >= 0 &&
-                            !string.Equals(torrentUri.Host, indexerUri.Host, StringComparison.OrdinalIgnoreCase))
-                        {
-                            var replaced = MyAnonamouseHelper.ReplaceHostInTorrent(torrentBytes, torrentUri.Host, indexerUri.Host);
-                            if (replaced != null && replaced.Length > 0)
-                            {
-                                torrentBytes = replaced;
-                                logger.LogInformation("Rewrote torrent tracker host from {OldHost} to {NewHost} for '{Title}'", torrentUri.Host, indexerUri.Host, searchResult.Title);
-                                ascii = System.Text.Encoding.ASCII.GetString(torrentBytes);
-                            }
-                        }
-
-                        // 2) Heuristic: replace any bare IPv4 addresses found inside torrent with the indexer host
-                        try
-                        {
-                            var ipMatches = System.Text.RegularExpressions.Regex.Matches(ascii, @"\b\d{1,3}(?:\.\d{1,3}){3}\b");
-                            var distinctIps = ipMatches.Cast<System.Text.RegularExpressions.Match>().Select(m => m.Value).Distinct().ToList();
-                            foreach (var ip in distinctIps.Where(ip =>
-                                !ip.StartsWith("127.")
-                                && !ip.StartsWith("10.")
-                                && !ip.StartsWith("192.168.")
-                                && !ip.StartsWith("172.")
-                                && !string.Equals(ip, indexerUri.Host, StringComparison.OrdinalIgnoreCase)))
-                            {
-                                var replaced2 = MyAnonamouseHelper.ReplaceHostInTorrent(torrentBytes, ip, indexerUri.Host);
-                                if (replaced2 != null && replaced2.Length > 0)
-                                {
-                                    torrentBytes = replaced2;
-                                    logger.LogInformation("Rewrote torrent IP host {Ip} to indexer host {Host} for '{Title}'", ip, indexerUri.Host, searchResult.Title);
-                                }
-                            }
-                        }
-                        catch (Exception rex2) when (rex2 is not OperationCanceledException && rex2 is not OutOfMemoryException && rex2 is not StackOverflowException)
-                        {
-                            logger.LogDebug(rex2, "Failed to rewrite numeric IPs inside torrent (non-fatal)");
-                        }
-
-                        // 3) Log announce URLs for diagnostics — do NOT rewrite legitimate tracker subdomains
-                        //    (e.g., t.myanonamouse.net is the actual tracker and must not be changed to www.myanonamouse.net)
-                        try
-                        {
-                            var announces = MyAnonamouseHelper.ExtractAnnounceUrls(torrentBytes);
-                            if (announces != null && announces.Count > 0)
-                            {
-                                logger.LogDebug("Torrent announce URLs for '{Title}': {Announces}", searchResult.Title, string.Join(", ", announces.Distinct()));
-                            }
-                        }
-                        catch (Exception rex3) when (rex3 is not OperationCanceledException && rex3 is not OutOfMemoryException && rex3 is not StackOverflowException)
-                        {
-                            logger.LogDebug(rex3, "Failed to extract announce URLs from torrent (non-fatal)");
-                        }
-                    }
-                }
-                catch (Exception rex) when (rex is not OperationCanceledException && rex is not OutOfMemoryException && rex is not StackOverflowException)
-                {
-                    logger.LogDebug(rex, "Failed to rewrite torrent tracker hosts (non-fatal)");
-                }
-
-                // If we have a mam_id, attempt to append it to any announce URLs inside the torrent so trackers that rely on passkey in query will accept it.
-                try
-                {
-                    if (!string.IsNullOrEmpty(mamId))
-                    {
-                        var normalizedMamId = MyAnonamouseHelper.NormalizeMamId(mamId);
-                        logger.LogInformation("MyAnonamouse: normalizing mam_id from '{Raw}' to '{Normalized}' for '{Title}'", LogRedaction.RedactText(mamId, LogRedaction.GetSensitiveValuesFromEnvironment()), LogRedaction.RedactText(normalizedMamId, LogRedaction.GetSensitiveValuesFromEnvironment()), searchResult.Title);
-
-                        var currentAnnounces = MyAnonamouseHelper.ExtractAnnounceUrls(torrentBytes);
-                        var updatedAnnounces = new List<string>();
-                        var modified = false;
-
-                        foreach (var ann in (currentAnnounces ?? new List<string>())
-                            .Where(ann => !string.IsNullOrWhiteSpace(ann))
-                            .Distinct())
-                        {
-                            // Only append mam_id to actual tracker announce URLs, not file/web-seed URLs
-                            if (!ann.Contains("/announce", StringComparison.OrdinalIgnoreCase) && !ann.Contains("/tracker", StringComparison.OrdinalIgnoreCase))
-                            {
-                                logger.LogDebug("Skipping non-tracker URL for mam_id append: {Url}", ann);
-                                continue;
-                            }
-                            // don't double-append if already present
-                            if (ann.IndexOf("mam_id=", StringComparison.OrdinalIgnoreCase) >= 0)
-                            {
-                                updatedAnnounces.Add(ann);
-                                continue;
-                            }
-
-                            try
-                            {
-                                var separator = ann.Contains("?") ? "&" : "?";
-                                var newAnn = ann + separator + "mam_id=" + normalizedMamId;
-
-                                var replaced = MyAnonamouseHelper.ReplaceStringInTorrent(torrentBytes, ann, newAnn);
-                                if (replaced != null && replaced.Length > 0)
-                                {
-                                    torrentBytes = replaced;
-                                    modified = true;
-                                }
-
-                                updatedAnnounces.Add(newAnn);
-                            }
-                            catch (Exception inner) when (inner is not OperationCanceledException && inner is not OutOfMemoryException && inner is not StackOverflowException)
-                            {
-                                logger.LogDebug(inner, "Non-fatal failure while attempting to append mam_id to announce {Ann} for '{Title}'", ann, searchResult.Title);
-                                updatedAnnounces.Add(ann);
-                            }
-                        }
-
-                        if (modified)
-                            logger.LogInformation("Appended mam_id to MyAnonamouse announce URLs for '{Title}' - count={Count}", searchResult.Title, updatedAnnounces.Count);
-                    }
-                }
-                catch (Exception exAppend) when (exAppend is not OperationCanceledException && exAppend is not OutOfMemoryException && exAppend is not StackOverflowException)
-                {
-                    logger.LogDebug(exAppend, "Failed to append mam_id to MyAnonamouse announces (non-fatal)");
-                }
-
-                searchResult.TorrentFileContent = torrentBytes;
-                searchResult.TorrentFileName = response != null ? MyAnonamouseHelper.ResolveTorrentFileName(response, searchResult.TorrentUrl) : "myanonamouse.torrent";
-                logger.LogInformation("Cached MyAnonamouse torrent for '{Title}' ({Bytes} bytes)", searchResult.Title, torrentBytes.Length);
-
-                // If a downloadId was provided, store the cached torrent (bytes + filename) to the in-memory cache so it can be retrieved for diagnostics.
-                if (!string.IsNullOrEmpty(downloadId))
-                {
-                    try
-                    {
-                        var cacheKey = $"mam:cachedtorrent:{downloadId}";
-                        cache.Set(cacheKey + ":bytes", torrentBytes, new MemoryCacheEntryOptions { SlidingExpiration = TimeSpan.FromMinutes(30) });
-                        cache.Set(cacheKey + ":name", searchResult.TorrentFileName ?? "download.torrent", new MemoryCacheEntryOptions { SlidingExpiration = TimeSpan.FromMinutes(30) });
-                        logger.LogInformation("Cached MyAnonamouse torrent bytes and filename to memory for download {DownloadId}", downloadId);
-                    }
-                    catch (Exception cex) when (cex is not OperationCanceledException && cex is not OutOfMemoryException && cex is not StackOverflowException)
-                    {
-                        logger.LogDebug(cex, "Failed to place cached MyAnonamouse torrent into memory cache (non-fatal)");
-                    }
-                }
-                try
-                {
-                    var announces = MyAnonamouseHelper.ExtractAnnounceUrls(torrentBytes);
-                    var count = announces?.Count ?? 0;
-                    var unique = count > 0 ? string.Join(", ", announces?.Take(10) ?? Enumerable.Empty<string>()) : "(none)";
-                    logger.LogInformation("Cached MyAnonamouse torrent announces for '{Title}' - count={Count}: {Announces}", searchResult.Title, count, LogRedaction.RedactText(unique, LogRedaction.GetSensitiveValuesFromEnvironment()));
-
-                    // Also cache the extracted announce URLs for quick retrieval by diagnostics endpoints
-                    if (!string.IsNullOrEmpty(downloadId) && announces != null && announces.Count > 0)
-                    {
-                        try
-                        {
-                            var cacheKey = $"mam:cachedtorrent:{downloadId}";
-                            cache.Set(cacheKey + ":announces", announces, new MemoryCacheEntryOptions { SlidingExpiration = TimeSpan.FromMinutes(30) });
-                            logger.LogInformation("Cached MyAnonamouse torrent announces to memory for download {DownloadId}", downloadId);
-                        }
-                        catch (Exception cexAnn) when (cexAnn is not OperationCanceledException && cexAnn is not OutOfMemoryException && cexAnn is not StackOverflowException)
-                        {
-                            logger.LogDebug(cexAnn, "Failed to place cached MyAnonamouse announces into memory cache (non-fatal)");
-                        }
-                    }
-                }
-                catch (Exception exAnn) when (exAnn is not OperationCanceledException && exAnn is not OutOfMemoryException && exAnn is not StackOverflowException)
-                {
-                    logger.LogDebug(exAnn, "Failed to extract announce URLs from cached torrent (non-fatal)");
-                }
-                response?.Dispose();
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                logger.LogWarning(ex, "Failed to cache MyAnonamouse torrent for '{Title}'", searchResult.Title);
-            }
+            var preparationService = new MyAnonamouseTorrentPreparationService(
+                indexerRepository,
+                httpClientFactory,
+                cachedTorrentStore,
+                logger);
+            await preparationService.PrepareAsync(searchResult, downloadId);
         }
 
         private string BuildSearchQuery(Audiobook audiobook)
@@ -990,13 +536,6 @@ namespace Listenarr.Application.Downloads
                 parts.Add(audiobook.Authors.First());
 
             return string.Join(" ", parts);
-        }
-
-        // Small container for caching torrent bytes + filename in memory
-        private class CachedTorrent
-        {
-            public byte[]? Bytes { get; set; }
-            public string? FileName { get; set; }
         }
 
         public async Task<bool> RemoveFromQueueAsync(string downloadId, string? downloadClientId = null, bool force = false)

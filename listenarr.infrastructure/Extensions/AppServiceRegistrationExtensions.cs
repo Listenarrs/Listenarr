@@ -55,6 +55,9 @@ namespace Listenarr.Infrastructure.Extensions
             services.AddScoped<IIndexerSearchProvider, TorznabNewznabSearchProvider>();
             services.AddScoped<IIndexerSearchProvider, MyAnonamouseSearchProvider>();
 
+            services.AddScoped<IndexerAdditionalSettingsParser>();
+            services.AddScoped<IndexerSearchWorkflow>();
+            services.AddScoped<MetadataSourceCatalog>();
             services.AddScoped<ISearchService, SearchService>();
             services.AddScoped<IMetadataService, MetadataService>();
             services.AddScoped<IAudiobookFileService, AudiobookFileService>();
@@ -90,6 +93,7 @@ namespace Listenarr.Infrastructure.Extensions
             services.AddScoped<IDownloadService, DownloadService>();
             services.AddScoped<DownloadTypeResolver>();
             services.AddScoped<DownloadClientSelector>();
+            services.AddScoped<DownloadCachedTorrentStore>();
             // Queue service extracted from DownloadService to encapsulate queue-building and filtering
             services.AddScoped<IDownloadQueueService, DownloadQueueService>();
             services.AddScoped<IOpenLibraryService, OpenLibraryService>();

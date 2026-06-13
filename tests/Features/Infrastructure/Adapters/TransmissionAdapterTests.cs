@@ -19,6 +19,7 @@ using System.Runtime.InteropServices;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
 using Listenarr.Tests.Mocks.Api;
+using Listenarr.Infrastructure.Adapters;
 using Listenarr.Infrastructure.Torrents;
 
 namespace Listenarr.Tests.Features.Infrastructure.Adapters
@@ -158,6 +159,47 @@ namespace Listenarr.Tests.Features.Infrastructure.Adapters
             var exception = await Assert.ThrowsAsync<ArgumentException>(() => adapter.AddAsync(_client, searchResult));
 
             Assert.Contains("HTTP or HTTPS", exception.Message, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Theory]
+        [InlineData(true, false, 0.5, 2, 0, 2, 0, 0, false, 0, false, 0, true)]
+        [InlineData(true, false, 1.5, 1, 1.5, 2, 0, 0, false, 0, false, 0, true)]
+        [InlineData(false, true, 1.5, 1, 1.5, 2, 0, 0, false, 0, false, 0, false)]
+        [InlineData(true, false, 1.5, 0, 0, 2, 0, 0, true, 1.5, false, 0, true)]
+        [InlineData(true, false, 0.5, 0, 0, 2, 0, 0, true, 1.5, false, 0, false)]
+        [InlineData(false, true, 0.5, 2, 0, 1, 60, 3601, false, 0, false, 0, true)]
+        [InlineData(false, true, 0.5, 2, 0, 1, 60, 3600, false, 0, false, 0, false)]
+        [InlineData(true, false, 0.5, 2, 0, 0, 0, 0, false, 0, true, 60, true)]
+        public void HasReachedSeedLimit_EvaluatesTransmissionRatioAndIdlePolicy(
+            bool isStopped,
+            bool isSeeding,
+            double ratio,
+            int seedRatioMode,
+            double seedRatioLimit,
+            int seedIdleMode,
+            int seedIdleLimit,
+            long secondsSeeding,
+            bool sessionSeedRatioLimited,
+            double sessionSeedRatioLimit,
+            bool sessionIdleSeedingLimitEnabled,
+            int sessionIdleSeedingLimit,
+            bool expected)
+        {
+            var result = TransmissionSeedLimitEvaluator.HasReachedSeedLimit(
+                isStopped,
+                isSeeding,
+                ratio,
+                seedRatioMode,
+                seedRatioLimit,
+                seedIdleMode,
+                seedIdleLimit,
+                secondsSeeding,
+                sessionSeedRatioLimited,
+                sessionSeedRatioLimit,
+                sessionIdleSeedingLimitEnabled,
+                sessionIdleSeedingLimit);
+
+            Assert.Equal(expected, result);
         }
 
         [Fact]

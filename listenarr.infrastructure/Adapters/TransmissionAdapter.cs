@@ -361,13 +361,13 @@ namespace Listenarr.Infrastructure.Adapters
                 {
                     try
                     {
-                        var labels = ExtractLabels(torrent);
+                        var labels = TransmissionResponseMapper.ExtractLabels(torrent);
                         if (!DownloadClientCategoryFilter.MatchesAny(configuredCategory, labels))
                         {
                             continue;
                         }
 
-                        var queueItem = await MapTorrentAsync(client, torrent, ct);
+                        var queueItem = TransmissionResponseMapper.MapQueueItem(client, torrent);
                         items.Add(queueItem);
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
@@ -451,7 +451,7 @@ namespace Listenarr.Infrastructure.Adapters
                 {
                     try
                     {
-                        var labels = ExtractLabels(torrent);
+                        var labels = TransmissionResponseMapper.ExtractLabels(torrent);
                         if (!DownloadClientCategoryFilter.MatchesAny(configuredCategory, labels))
                         {
                             continue;
@@ -655,288 +655,14 @@ namespace Listenarr.Infrastructure.Adapters
             }
         }
 
-        private async Task<QueueItem> MapTorrentAsync(DownloadClientConfiguration client, JsonElement torrent, CancellationToken ct)
-        {
-            // Try snake_case (JSON-RPC 2.0 / Transmission 4.1+) first, fall back to camelCase for backwards compatibility
-            var id = torrent.TryGetProperty("hash_string", out var hashProp) || torrent.TryGetProperty("hashString", out hashProp)
-                ? hashProp.GetString() ?? string.Empty : string.Empty;
-            if (string.IsNullOrEmpty(id) && torrent.TryGetProperty("id", out var numericId))
-            {
-                id = numericId.GetInt32().ToString(CultureInfo.InvariantCulture);
-            }
-
-            var name = torrent.TryGetProperty("name", out var nameProp) ? nameProp.GetString() ?? string.Empty : string.Empty;
-            var percentDone = (torrent.TryGetProperty("percent_done", out var percentProp) || torrent.TryGetProperty("percentDone", out percentProp))
-                ? percentProp.GetDouble() * 100 : 0d;
-            var totalSize = (torrent.TryGetProperty("total_size", out var sizeProp) || torrent.TryGetProperty("totalSize", out sizeProp))
-                ? sizeProp.GetInt64() : 0L;
-            var leftUntilDone = (torrent.TryGetProperty("left_until_done", out var leftProp) || torrent.TryGetProperty("leftUntilDone", out leftProp))
-                ? leftProp.GetInt64() : 0L;
-            var rateDownload = (torrent.TryGetProperty("rate_download", out var rateProp) || torrent.TryGetProperty("rateDownload", out rateProp))
-                ? rateProp.GetDouble() : 0d;
-            var eta = torrent.TryGetProperty("eta", out var etaProp) ? etaProp.GetInt32() : -1;
-            var downloadDir = (torrent.TryGetProperty("download_dir", out var dirProp) || torrent.TryGetProperty("downloadDir", out dirProp))
-                ? dirProp.GetString() ?? string.Empty : string.Empty;
-            var statusCode = torrent.TryGetProperty("status", out var statusProp) ? statusProp.GetInt32() : 0;
-            var addedDate = (torrent.TryGetProperty("added_date", out var addedProp) || torrent.TryGetProperty("addedDate", out addedProp))
-                ? addedProp.GetInt64() : 0L;
-            var uploadRatio = (torrent.TryGetProperty("upload_ratio", out var ratioProp) || torrent.TryGetProperty("uploadRatio", out ratioProp))
-                ? ratioProp.GetDouble() : 0d;
-
-            var downloaded = Math.Max(0, totalSize - leftUntilDone);
-
-            var status = statusCode switch
-            {
-                0 => "paused",          // TR_STATUS_STOPPED
-                1 => "queued",          // TR_STATUS_CHECK_WAIT
-                2 => "downloading",     // TR_STATUS_CHECK
-                3 => "queued",          // TR_STATUS_DOWNLOAD_WAIT
-                4 => "downloading",     // TR_STATUS_DOWNLOAD
-                5 => "queued",          // TR_STATUS_SEED_WAIT
-                6 => "seeding",         // TR_STATUS_SEED
-                7 => "failed",          // TR_STATUS_ISOLATED
-                _ => "unknown"
-            };
-
-            _logger.LogDebug("Before completion check: hash={Hash}, percentDone={PercentDone}, status={Status}",
-                id, percentDone, status);
-
-            if (percentDone >= 100.0 && (status == "seeding" || status == "queued" || status == "paused"))
-            {
-                status = "completed";
-            }
-
-            _logger.LogDebug("After completion check: hash={Hash}, finalStatus={Status}", id, status);
-
-            string? localPath = downloadDir;
-            var addedAt = addedDate > 0 ? DateTimeOffset.FromUnixTimeSeconds(addedDate).UtcDateTime : DateTime.UtcNow;
-
-            // For Transmission, construct ContentPath from downloadDir + name
-            var contentPath = !string.IsNullOrEmpty(downloadDir) && !string.IsNullOrEmpty(name)
-                ? FileUtils.CombineWithOptionalBase(downloadDir, name)
-                : downloadDir;
-            var localContentPath = contentPath;
-            var primaryLabel = ExtractLabels(torrent).FirstOrDefault() ?? string.Empty;
-
-            var queueItem = new QueueItem
-            {
-                Id = id,
-                Title = name,
-                Quality = string.IsNullOrWhiteSpace(primaryLabel) ? "Unknown" : primaryLabel,
-                Status = status,
-                Progress = percentDone,
-                Size = totalSize,
-                Downloaded = downloaded,
-                DownloadSpeed = rateDownload,
-                Eta = eta >= 0 ? eta : null,
-                DownloadClient = client.Name ?? client.Id ?? "Transmission",
-                DownloadClientId = client.Id ?? string.Empty,
-                DownloadClientType = ClientType,
-                AddedAt = addedAt,
-                Ratio = uploadRatio,
-                CanPause = status is "downloading" or "queued",
-                CanRemove = true,
-                RemotePath = downloadDir,
-                LocalPath = localPath,
-                ContentPath = localContentPath
-            };
-
-            return queueItem;
-        }
-
-        private async Task<DownloadClientItem> MapToDownloadClientItemAsync(
+        private Task<DownloadClientItem> MapToDownloadClientItemAsync(
             DownloadClientConfiguration client,
             JsonElement torrent,
             (bool SeedRatioLimited, double SeedRatioLimit, bool IdleSeedingLimitEnabled, int IdleSeedingLimit) sessionConfig,
             CancellationToken ct)
         {
-            // Try snake_case (JSON-RPC 2.0 / Transmission 4.1+) first, fall back to camelCase for backwards compatibility
-            var hash = torrent.TryGetProperty("hash_string", out var hashProp) || torrent.TryGetProperty("hashString", out hashProp)
-                ? hashProp.GetString() ?? string.Empty : string.Empty;
-            var numericId = torrent.TryGetProperty("id", out var numericIdProp) ? numericIdProp.GetInt32() : 0;
-            var name = torrent.TryGetProperty("name", out var nameProp) ? nameProp.GetString() ?? string.Empty : string.Empty;
-            var percentDone = (torrent.TryGetProperty("percent_done", out var percentProp) || torrent.TryGetProperty("percentDone", out percentProp))
-                ? percentProp.GetDouble() * 100 : 0d;
-            var totalSize = (torrent.TryGetProperty("total_size", out var sizeProp) || torrent.TryGetProperty("totalSize", out sizeProp))
-                ? sizeProp.GetInt64() : 0L;
-            var leftUntilDone = (torrent.TryGetProperty("left_until_done", out var leftProp) || torrent.TryGetProperty("leftUntilDone", out leftProp))
-                ? leftProp.GetInt64() : 0L;
-            var rateDownload = (torrent.TryGetProperty("rate_download", out var rateProp) || torrent.TryGetProperty("rateDownload", out rateProp))
-                ? rateProp.GetDouble() : 0d;
-            var eta = torrent.TryGetProperty("eta", out var etaProp) ? etaProp.GetInt32() : -1;
-            var downloadDir = (torrent.TryGetProperty("download_dir", out var dirProp) || torrent.TryGetProperty("downloadDir", out dirProp))
-                ? dirProp.GetString() ?? string.Empty : string.Empty;
-            var statusCode = torrent.TryGetProperty("status", out var statusProp) ? statusProp.GetInt32() : 0;
-            var uploadRatio = (torrent.TryGetProperty("upload_ratio", out var ratioProp) || torrent.TryGetProperty("uploadRatio", out ratioProp))
-                ? ratioProp.GetDouble() : 0d;
-
-            // Seed limit fields for Sonarr-parity seed limit evaluation
-            var seedRatioMode = (torrent.TryGetProperty("seed_ratio_mode", out var srmProp) || torrent.TryGetProperty("seedRatioMode", out srmProp))
-                ? srmProp.GetInt32() : 0;
-            var seedRatioLimit = (torrent.TryGetProperty("seed_ratio_limit", out var srlProp) || torrent.TryGetProperty("seedRatioLimit", out srlProp))
-                ? srlProp.GetDouble() : 0d;
-            var seedIdleMode = (torrent.TryGetProperty("seed_idle_mode", out var simProp) || torrent.TryGetProperty("seedIdleMode", out simProp))
-                ? simProp.GetInt32() : 0;
-            var seedIdleLimit = (torrent.TryGetProperty("seed_idle_limit", out var silProp) || torrent.TryGetProperty("seedIdleLimit", out silProp))
-                ? silProp.GetInt32() : 0;
-            var secondsSeeding = (torrent.TryGetProperty("seconds_seeding", out var ssProp) || torrent.TryGetProperty("secondsSeeding", out ssProp))
-                ? ssProp.GetInt64() : 0L;
-
-            // Map Transmission status codes to DownloadItemStatus
-            var status = statusCode switch
-            {
-                0 => DownloadItemStatus.Paused,  // Stopped
-                1 => DownloadItemStatus.Queued,  // Check waiting
-                2 => DownloadItemStatus.Downloading, // Checking
-                3 => DownloadItemStatus.Queued,  // Download waiting
-                4 => DownloadItemStatus.Downloading, // Downloading
-                5 => DownloadItemStatus.Queued,  // Seed waiting
-                6 => DownloadItemStatus.Downloading, // Seeding
-                _ => DownloadItemStatus.Warning
-            };
-
-            if (percentDone >= 100.0 && (statusCode is 0 or 3 or 5 or 6))
-            {
-                status = DownloadItemStatus.Completed;
-            }
-
-            // For Transmission, construct OutputPath from downloadDir + name
-            var contentPath = !string.IsNullOrEmpty(downloadDir) && !string.IsNullOrEmpty(name)
-                ? FileUtils.CombineWithOptionalBase(downloadDir, name)
-                : downloadDir;
-            var localContentPath = contentPath;
-            var primaryLabel = ExtractLabels(torrent).FirstOrDefault() ?? string.Empty;
-
-            TimeSpan? remainingTime = eta >= 0 ? TimeSpan.FromSeconds(eta) : null;
-
-            // ✅ Use hash as DownloadId if available, otherwise fall back to numeric ID
-            var downloadId = !string.IsNullOrEmpty(hash) ? hash.ToUpperInvariant() : numericId.ToString(CultureInfo.InvariantCulture);
-
-            // Sonarr parity: CanBeRemoved = removeCompletedDownloads && HasReachedSeedLimit
-            //                 CanMoveFiles = CanBeRemoved && status == Stopped (statusCode 0)
-            // This prevents removing torrents before seed goals are met and prevents
-            // moving files from active seeders (which breaks the torrent).
-            var removeCompletedDownloads = client.Settings?.TryGetValue("removeCompletedDownloads", out var removeVal) is true &&
-                (removeVal is bool boolVal && boolVal);
-            var isStopped = statusCode == 0; // TR_STATUS_STOPPED
-            var isSeeding = statusCode == 6; // TR_STATUS_SEED
-            var seedLimitReached = HasReachedSeedLimit(
-                isStopped, isSeeding, uploadRatio,
-                seedRatioMode, seedRatioLimit,
-                seedIdleMode, seedIdleLimit, secondsSeeding,
-                sessionConfig);
-            var canBeRemoved = removeCompletedDownloads && seedLimitReached;
-            var canMoveFiles = canBeRemoved && isStopped;
-
-            return new DownloadClientItem
-            {
-                DownloadId = downloadId,
-                Title = name,
-                Category = primaryLabel,
-                Status = status,
-                TotalSize = totalSize,
-                RemainingSize = leftUntilDone,
-                RemainingTime = remainingTime,
-                SeedRatio = uploadRatio,
-                OutputPath = localContentPath,
-                Message = $"Status code: {statusCode}",
-                Progress = percentDone,
-                DownloadSpeed = rateDownload,
-                CanBeRemoved = canBeRemoved,
-                CanMoveFiles = canMoveFiles,
-                DownloadClientInfo = DownloadClientItemClientInfo.FromClient(
-                    clientId: client.Id,
-                    clientName: client.Name,
-                    clientType: "transmission",
-                    protocol: DownloadProtocol.Torrent,
-                    removeCompletedDownloads: removeCompletedDownloads,
-                    hasPostImportCategory: false // Transmission doesn't support post-import categories
-                )
-            };
-        }
-
-        /// <summary>
-        /// Determines whether a Transmission torrent has reached its seed limit (ratio or idle time).
-        /// Mirrors Sonarr's HasReachedSeedLimit logic for Transmission.
-        /// </summary>
-        private static bool HasReachedSeedLimit(
-            bool isStopped,
-            bool isSeeding,
-            double ratio,
-            int seedRatioMode,
-            double seedRatioLimit,
-            int seedIdleMode,
-            int seedIdleLimit,
-            long secondsSeeding,
-            (bool SeedRatioLimited, double SeedRatioLimit, bool IdleSeedingLimitEnabled, int IdleSeedingLimit) sessionConfig)
-        {
-            var hasEffectiveRatioLimit =
-                (seedRatioMode == 1 && seedRatioLimit > 0) ||
-                (seedRatioMode == 0 && sessionConfig.SeedRatioLimited && sessionConfig.SeedRatioLimit > 0);
-            var hasEffectiveIdleLimit =
-                (seedIdleMode == 1 && seedIdleLimit > 0) ||
-                (seedIdleMode == 0 && sessionConfig.IdleSeedingLimitEnabled && sessionConfig.IdleSeedingLimit > 0);
-
-            // With no effective seed constraints configured, honor the cleanup policy
-            // immediately instead of reporting the torrent as non-removable forever.
-            if (!hasEffectiveRatioLimit && !hasEffectiveIdleLimit)
-            {
-                return true;
-            }
-
-            // seedRatioMode: 0 = global, 1 = per-torrent, 2 = unlimited
-            if (seedRatioMode == 1 && isStopped && ratio >= seedRatioLimit)
-            {
-                // Per-torrent ratio limit
-                return true;
-            }
-
-            if (seedRatioMode == 0 && isStopped && sessionConfig.SeedRatioLimited && ratio >= sessionConfig.SeedRatioLimit)
-            {
-                // Use global ratio limit
-                return true;
-            }
-
-            // seedIdleMode: 0 = global, 1 = per-torrent, 2 = unlimited
-            // Transmission uses idle limit as a seeding time limit when set per-torrent
-            if (seedIdleMode == 1 && (isStopped || isSeeding) && secondsSeeding > seedIdleLimit * 60)
-            {
-                // Per-torrent idle/seed time limit (in minutes)
-                return true;
-            }
-
-            if (seedIdleMode == 0 && isStopped && sessionConfig.IdleSeedingLimitEnabled)
-            {
-                // The global idle limit is a real idle limit, if configured then 'Stopped' is enough
-                return true;
-            }
-
-            return false;
-        }
-
-        private static List<string> ExtractLabels(JsonElement torrent)
-        {
-            var labels = new List<string>();
-            if (!torrent.TryGetProperty("labels", out var labelsProp) || labelsProp.ValueKind != JsonValueKind.Array)
-            {
-                return labels;
-            }
-
-            foreach (var label in labelsProp.EnumerateArray())
-            {
-                if (label.ValueKind != JsonValueKind.String)
-                {
-                    continue;
-                }
-
-                var value = label.GetString();
-                if (!string.IsNullOrWhiteSpace(value))
-                {
-                    labels.Add(value.Trim());
-                }
-            }
-
-            return labels;
+            _ = ct;
+            return Task.FromResult(TransmissionResponseMapper.MapDownloadClientItem(client, torrent, sessionConfig));
         }
 
         private List<string> CollectLabels(DownloadClientConfiguration client)
@@ -1467,7 +1193,7 @@ namespace Listenarr.Infrastructure.Adapters
 
                                 var txIsStopped = statusCode == 0;
                                 var txIsSeeding = statusCode == 6;
-                                var txSeedLimitReached = TransmissionHasReachedSeedLimit(
+                                var txSeedLimitReached = TransmissionSeedLimitEvaluator.HasReachedSeedLimit(
                                     txIsStopped, txIsSeeding, txUploadRatio,
                                     txSeedRatioMode, txSeedRatioLimit,
                                     txSeedIdleMode, txSeedIdleLimit, txSecondsSeeding,
@@ -1518,55 +1244,5 @@ namespace Listenarr.Infrastructure.Adapters
             }
         }
 
-        /// <summary>
-        /// Determines whether a Transmission torrent has reached its seed limit.
-        /// Mirrors Sonarr's HasReachedSeedLimit logic for Transmission.
-        /// </summary>
-        private static bool TransmissionHasReachedSeedLimit(
-            bool isStopped,
-            bool isSeeding,
-            double ratio,
-            int seedRatioMode,
-            double seedRatioLimit,
-            int seedIdleMode,
-            int seedIdleLimit,
-            long secondsSeeding,
-            bool sessionSeedRatioLimited,
-            double sessionSeedRatioLimit,
-            bool sessionIdleSeedingLimitEnabled,
-            int sessionIdleSeedingLimit)
-        {
-            var hasEffectiveRatioLimit =
-                (seedRatioMode == 1 && seedRatioLimit > 0) ||
-                (seedRatioMode == 0 && sessionSeedRatioLimited && sessionSeedRatioLimit > 0);
-            var hasEffectiveIdleLimit =
-                (seedIdleMode == 1 && seedIdleLimit > 0) ||
-                (seedIdleMode == 0 && sessionIdleSeedingLimitEnabled && sessionIdleSeedingLimit > 0);
-
-            // If Transmission has no seed ratio or idle seeding limits configured,
-            // the user's remove policy should not defer forever. Treat the item as removable.
-            if (!hasEffectiveRatioLimit && !hasEffectiveIdleLimit)
-            {
-                return true;
-            }
-
-            // seedRatioMode: 0 = global, 1 = per-torrent, 2 = unlimited
-            if (seedRatioMode == 1 && isStopped && ratio >= seedRatioLimit)
-                return true;
-
-            bool globalRatioExceeded = seedRatioMode == 0 && isStopped && sessionSeedRatioLimited && ratio >= sessionSeedRatioLimit;
-            if (globalRatioExceeded)
-                return true;
-
-            // seedIdleMode: 0 = global, 1 = per-torrent, 2 = unlimited
-            bool perTorrentIdleExceeded = seedIdleMode == 1 && (isStopped || isSeeding) && secondsSeeding > seedIdleLimit * 60;
-            if (perTorrentIdleExceeded)
-                return true;
-
-            if (seedIdleMode == 0 && isStopped && sessionIdleSeedingLimitEnabled)
-                return true;
-
-            return false;
-        }
     }
 }

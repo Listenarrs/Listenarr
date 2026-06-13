@@ -185,6 +185,41 @@ namespace Listenarr.Tests.Features.Infrastructure.Adapters
             await Task.CompletedTask;
         }
 
+        [Theory]
+        [InlineData(0.5, -1f, null, -1, false, -1f, false, -1, true)]
+        [InlineData(1.0, 1.0f, null, -1, false, -1f, false, -1, true)]
+        [InlineData(0.9995, 1.0f, null, -1, false, -1f, false, -1, true)]
+        [InlineData(0.5, 1.0f, null, -1, false, -1f, false, -1, false)]
+        [InlineData(1.5, -2f, null, -1, true, 1.5f, false, -1, true)]
+        [InlineData(0.5, -2f, null, -1, true, 1.5f, false, -1, false)]
+        [InlineData(0.5, -1f, 3600, 60, false, -1f, false, -1, true)]
+        [InlineData(0.5, -1f, 3599, 60, false, -1f, false, -1, false)]
+        [InlineData(0.5, -1f, 7200, -2, false, -1f, true, 120, true)]
+        [InlineData(0.5, -1f, 7199, -2, false, -1f, true, 120, false)]
+        public void HasReachedSeedLimit_EvaluatesQbittorrentRatioAndSeedingTimePolicy(
+            double ratio,
+            float ratioLimit,
+            int? seedingTime,
+            long seedingTimeLimit,
+            bool globalMaxRatioEnabled,
+            float globalMaxRatio,
+            bool globalMaxSeedingTimeEnabled,
+            long globalMaxSeedingTime,
+            bool expected)
+        {
+            var result = QbittorrentSeedLimitEvaluator.HasReachedSeedLimit(
+                ratio,
+                ratioLimit,
+                seedingTime,
+                seedingTimeLimit,
+                globalMaxRatioEnabled,
+                globalMaxRatio,
+                globalMaxSeedingTimeEnabled,
+                globalMaxSeedingTime);
+
+            Assert.Equal(expected, result);
+        }
+
         [Fact]
         [Trait("Area", "QbittorrentImportPathResolution")]
         [Trait("Scenario", "LocalAutoImportKeepsExistingPath")]

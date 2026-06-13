@@ -16,13 +16,13 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using System.Text.Json;
 using Microsoft.Extensions.Caching.Memory;
 using Listenarr.Application.Interfaces;
 using Listenarr.Domain.Models.Configurations;
 using Listenarr.Domain.Models;
 using Listenarr.Application.Interfaces.Repositories;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Listenarr.Application.Notification;
 using Listenarr.Application.Metadata;
 using Listenarr.Application.Security;
@@ -31,11 +31,8 @@ namespace Listenarr.Application.Search
 {
     public class SearchService : ISearchService
     {
-        private readonly HttpClient _httpClient;
         private readonly IConfigurationService _configurationService;
         private readonly ILogger<SearchService> _logger;
-        private readonly IIndexerRepository _indexerRepository;
-        private readonly IApiConfigurationRepository _apiConfigRepository;
         private readonly AudibleService _audibleService;
         private readonly MetadataConverters _metadataConverters;
         private readonly SearchProgressReporter _searchProgressReporter;
@@ -45,9 +42,9 @@ namespace Listenarr.Application.Search
         private readonly SearchResultSortingService _searchResultSorting;
         private readonly AsinSearchHandler _asinSearchHandler;
         private readonly IMemoryCache? _cache;
-        private readonly IEnumerable<IIndexerSearchProvider> _searchProviders;
         private readonly ICoverImageProbe? _coverImageProbe;
-        private readonly IHtmlTextExtractor? _htmlTextExtractor;
+        private readonly IndexerSearchWorkflow _indexerSearchWorkflow;
+        private readonly MetadataSourceCatalog _metadataSourceCatalog;
 
         public SearchService(
             HttpClient httpClient,
@@ -66,25 +63,34 @@ namespace Listenarr.Application.Search
             IEnumerable<IIndexerSearchProvider>? searchProviders = null,
             IMemoryCache? cache = null,
             ICoverImageProbe? coverImageProbe = null,
-            IHtmlTextExtractor? htmlTextExtractor = null)
+            IHtmlTextExtractor? htmlTextExtractor = null,
+            IndexerSearchWorkflow? indexerSearchWorkflow = null,
+            MetadataSourceCatalog? metadataSourceCatalog = null)
         {
-            _httpClient = httpClient;
             _configurationService = configurationService;
             _logger = logger;
-            _indexerRepository = indexerRepository;
-            _apiConfigRepository = apiConfigRepository;
             _audibleService = audibleService;
             _metadataConverters = metadataConverters;
             _searchProgressReporter = searchProgressReporter;
             _asinCandidateCollector = asinCandidateCollector;
             _asinEnricher = asinEnricher;
-            _searchProviders = searchProviders ?? Enumerable.Empty<IIndexerSearchProvider>();
+            var resolvedSearchProviders = searchProviders ?? Enumerable.Empty<IIndexerSearchProvider>();
             _searchResultScorer = searchResultScorer;
             _searchResultSorting = searchResultSorting;
             _asinSearchHandler = asinSearchHandler;
             _cache = cache;
             _coverImageProbe = coverImageProbe;
-            _htmlTextExtractor = htmlTextExtractor;
+            _indexerSearchWorkflow = indexerSearchWorkflow ?? new IndexerSearchWorkflow(
+                httpClient,
+                configurationService,
+                indexerRepository,
+                resolvedSearchProviders,
+                new IndexerAdditionalSettingsParser(NullLogger<IndexerAdditionalSettingsParser>.Instance),
+                NullLogger<IndexerSearchWorkflow>.Instance,
+                htmlTextExtractor);
+            _metadataSourceCatalog = metadataSourceCatalog ?? new MetadataSourceCatalog(
+                apiConfigRepository,
+                NullLogger<MetadataSourceCatalog>.Instance);
         }
 
         public async Task<List<SearchResult>> SearchAsync(string query, string? category = null, List<string>? apiIds = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false)
@@ -142,59 +148,7 @@ namespace Listenarr.Application.Search
 
         public async Task<List<IndexerSearchResult>> SearchIndexersAsync(string query, string? category = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false, SearchRequest? request = null)
         {
-            var results = new List<IndexerSearchResult>();
-            var indexers = await _indexerRepository.GetEnabledAsync(isAutomaticSearch);
-
-            _logger.LogInformation("Searching {Count} enabled indexers for query: {Query}", indexers.Count, query);
-
-            // If no indexers are configured, return mock data for development
-            if (!indexers.Any())
-            {
-                _logger.LogWarning("No indexers configured, returning mock results for query: {Query}", query);
-                return GenerateMockIndexerResults(query);
-            }
-
-            // Search all enabled indexers in parallel
-            var searchTasks = indexers.Select(async indexer =>
-            {
-                try
-                {
-                    _logger.LogInformation("Searching indexer {Name} ({Type}) for query: {Query}", indexer.Name, indexer.Type, query);
-                    // Apply indexer-level MyAnonamouse options if not provided explicitly on the request
-                    var perIndexerRequest = request;
-                    if (perIndexerRequest?.MyAnonamouse == null)
-                    {
-                        var mam = ParseMamOptionsFromAdditionalSettings(indexer.AdditionalSettings);
-                        if (mam != null)
-                        {
-                            perIndexerRequest ??= new SearchRequest();
-                            perIndexerRequest.MyAnonamouse = mam;
-                        }
-                    }
-
-                    var indexerResults = await SearchIndexerAsync(indexer, query, category, perIndexerRequest);
-                    _logger.LogInformation("Found {Count} results from indexer {Name}", indexerResults.Count, indexer.Name);
-                    return indexerResults;
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                {
-                    _logger.LogError(ex, "Error searching indexer {Name} for query: {Query}", indexer.Name, query);
-                    return new List<IndexerSearchResult>();
-                }
-            }).ToList();
-
-            var indexerResults = await Task.WhenAll(searchTasks);
-
-            // Flatten all results
-            foreach (var indexerResult in indexerResults)
-            {
-                results.AddRange(indexerResult);
-            }
-
-            _logger.LogInformation("Total {Count} results from all indexers for query: {Query}", results.Count, query);
-
-            // Sort by seeders (descending) then by date - treat missing/null seeders as 0 so usenet results sort consistently
-            return results.OrderByDescending(r => r.Seeders ?? 0).ThenByDescending(r => r.PublishedDate).ToList();
+            return await _indexerSearchWorkflow.SearchIndexersAsync(query, category, sortBy, sortDirection, isAutomaticSearch, request);
         }
 
         public async Task<List<MetadataSearchResult>> IntelligentSearchAsync(string query, int candidateLimit = 200, int returnLimit = 100, string containmentMode = "Relaxed", bool requireAuthorAndPublisher = false, double fuzzyThreshold = 0.2, string region = "us", string? language = null, CancellationToken ct = default)
@@ -1039,763 +993,22 @@ namespace Listenarr.Application.Search
 
         public async Task<List<SearchResult>> SearchByApiAsync(string apiId, string query, string? category = null)
         {
-            try
-            {
-                Indexer? indexer = null;
-
-                // Try parsing apiId as numeric indexer ID first
-                indexer = int.TryParse(apiId, out var indexerId)
-                    ? await _indexerRepository.GetByIdAsync(indexerId)
-                    : await _indexerRepository.GetByNameAsync(apiId);
-
-                if (indexer == null)
-                {
-                    _logger.LogWarning("Indexer not found for apiId: {ApiId}", apiId);
-                    return new List<SearchResult>();
-                }
-
-                if (!indexer.IsEnabled)
-                {
-                    _logger.LogWarning("Indexer {IndexerName} (apiId: {ApiId}) is not enabled", indexer.Name, apiId);
-                    return new List<SearchResult>();
-                }
-
-                // By default, reuse existing SearchIndexerAsync for a SearchResult response
-                var req = new SearchRequest();
-                // If this indexer has MyAnonamouse options encoded in AdditionalSettings, apply them
-                var mamOpts = ParseMamOptionsFromAdditionalSettings(indexer.AdditionalSettings);
-                if (mamOpts != null) req.MyAnonamouse = mamOpts;
-
-                var idxResults = await SearchIndexerAsync(indexer, query, category, req);
-                return idxResults.Select(r => SearchResultConverters.ToSearchResult(r)).ToList();
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogError(ex, $"Error searching indexer {apiId} for query: {query}");
-                return new List<SearchResult>();
-            }
+            return await _indexerSearchWorkflow.SearchByApiAsync(apiId, query, category);
         }
 
         public async Task<List<IndexerSearchResult>> SearchIndexerResultsAsync(string apiId, string query, string? category = null, SearchRequest? request = null)
         {
-            try
-            {
-                Indexer? indexer = null;
-
-                indexer = int.TryParse(apiId, out var indexerId)
-                    ? await _indexerRepository.GetByIdAsync(indexerId)
-                    : await _indexerRepository.GetByNameAsync(apiId);
-
-                if (indexer == null || !indexer.IsEnabled)
-                {
-                    _logger.LogWarning("Indexer not found or disabled for apiId: {ApiId}", apiId);
-                    return new List<IndexerSearchResult>();
-                }
-
-                // Apply MyAnonamouse options from indexer if not provided explicitly
-                if (request?.MyAnonamouse == null)
-                {
-                    var mam = ParseMamOptionsFromAdditionalSettings(indexer.AdditionalSettings);
-                    if (mam != null)
-                    {
-                        request ??= new SearchRequest();
-                        request.MyAnonamouse = mam;
-                    }
-                }
-
-                var idxResults = await SearchIndexerAsync(indexer, query, category, request);
-                return idxResults;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogError(ex, $"Error searching indexer {apiId} for query: {query}");
-                return new List<IndexerSearchResult>();
-            }
-        }
-
-        private MyAnonamouseOptions? ParseMamOptionsFromAdditionalSettings(string? additional)
-        {
-            if (string.IsNullOrWhiteSpace(additional)) return null;
-            try
-            {
-                using var doc = JsonDocument.Parse(additional);
-                var root = doc.RootElement;
-                // Expect either { mam_id: '...', mam_options: { ... } } or { mam_id: '...', ...flat options... }
-                if (root.ValueKind != JsonValueKind.Object) return null;
-
-                var opts = new MyAnonamouseOptions();
-                if (root.TryGetProperty("mam_options", out var mo) && mo.ValueKind == JsonValueKind.Object)
-                {
-                    if (mo.TryGetProperty("searchInDescription", out var sid) && (sid.ValueKind == JsonValueKind.True || sid.ValueKind == JsonValueKind.False))
-                        opts.SearchInDescription = sid.GetBoolean();
-                    if (mo.TryGetProperty("searchInSeries", out var sis) && (sis.ValueKind == JsonValueKind.True || sis.ValueKind == JsonValueKind.False))
-                        opts.SearchInSeries = sis.GetBoolean();
-                    if (mo.TryGetProperty("searchInFilenames", out var sif) && (sif.ValueKind == JsonValueKind.True || sif.ValueKind == JsonValueKind.False))
-                        opts.SearchInFilenames = sif.GetBoolean();
-                    if (mo.TryGetProperty("language", out var lang) && lang.ValueKind == JsonValueKind.String)
-                        opts.SearchLanguage = lang.GetString();
-                    if (mo.TryGetProperty("filter", out var filter) &&
-                        filter.ValueKind == JsonValueKind.String &&
-                        Enum.TryParse<MamTorrentFilter>(filter.GetString() ?? string.Empty, true, out var f))
-                        opts.Filter = f;
-                    if (mo.TryGetProperty("freeleechWedge", out var wedge) &&
-                        wedge.ValueKind == JsonValueKind.String &&
-                        Enum.TryParse<MamFreeleechWedge>(wedge.GetString() ?? string.Empty, true, out var w))
-                        opts.FreeleechWedge = w;
-                    if (mo.TryGetProperty("enrichResults", out var enrich) && (enrich.ValueKind == JsonValueKind.True || enrich.ValueKind == JsonValueKind.False))
-                        opts.EnrichResults = enrich.GetBoolean();
-                    if (mo.TryGetProperty("enrichTopResults", out var enrichTop) && (enrichTop.ValueKind == JsonValueKind.Number || enrichTop.ValueKind == JsonValueKind.String))
-                    {
-                        if (enrichTop.ValueKind == JsonValueKind.Number) opts.EnrichTopResults = enrichTop.GetInt32();
-                        else if (int.TryParse(enrichTop.GetString(), out var etmp)) opts.EnrichTopResults = etmp;
-                    }
-                    return opts;
-                }
-
-                // Fallback: check for flat properties directly on root
-                if (root.TryGetProperty("searchInDescription", out var sid2) && (sid2.ValueKind == JsonValueKind.True || sid2.ValueKind == JsonValueKind.False))
-                    opts.SearchInDescription = sid2.GetBoolean();
-                if (root.TryGetProperty("searchInSeries", out var sis2) && (sis2.ValueKind == JsonValueKind.True || sis2.ValueKind == JsonValueKind.False))
-                    opts.SearchInSeries = sis2.GetBoolean();
-                if (root.TryGetProperty("searchInFilenames", out var sif2) && (sif2.ValueKind == JsonValueKind.True || sif2.ValueKind == JsonValueKind.False))
-                    opts.SearchInFilenames = sif2.GetBoolean();
-                if (root.TryGetProperty("language", out var lang2) && lang2.ValueKind == JsonValueKind.String)
-                    opts.SearchLanguage = lang2.GetString();
-                if (root.TryGetProperty("filter", out var filter2) &&
-                    filter2.ValueKind == JsonValueKind.String &&
-                    Enum.TryParse<MamTorrentFilter>(filter2.GetString() ?? string.Empty, true, out var f2))
-                    opts.Filter = f2;
-                if (root.TryGetProperty("freeleechWedge", out var wedge2) &&
-                    wedge2.ValueKind == JsonValueKind.String &&
-                    Enum.TryParse<MamFreeleechWedge>(wedge2.GetString() ?? string.Empty, true, out var w2))
-                    opts.FreeleechWedge = w2;
-                if (root.TryGetProperty("enrichResults", out var enrich2) && (enrich2.ValueKind == JsonValueKind.True || enrich2.ValueKind == JsonValueKind.False))
-                    opts.EnrichResults = enrich2.GetBoolean();
-                if (root.TryGetProperty("enrichTopResults", out var enrichTop2) && (enrichTop2.ValueKind == JsonValueKind.Number || enrichTop2.ValueKind == JsonValueKind.String))
-                {
-                    if (enrichTop2.ValueKind == JsonValueKind.Number) opts.EnrichTopResults = enrichTop2.GetInt32();
-                    else if (int.TryParse(enrichTop2.GetString(), out var etmp2)) opts.EnrichTopResults = etmp2;
-                }
-
-                // If no properties were found, return null
-                if (opts.SearchInDescription == null && opts.SearchInSeries == null && opts.SearchInFilenames == null && opts.SearchLanguage == null && opts.Filter == null && opts.FreeleechWedge == null && opts.EnrichResults == null && opts.EnrichTopResults == null)
-                    return null;
-
-                return opts;
-            }
-            catch (JsonException ex)
-            {
-                _logger.LogWarning(ex, "Failed to parse AdditionalSettings JSON for MAM options");
-                return null;
-            }
+            return await _indexerSearchWorkflow.SearchIndexerResultsAsync(apiId, query, category, request);
         }
 
         public async Task<bool> TestApiConnectionAsync(string apiId)
         {
-            try
-            {
-                var apiConfig = await _configurationService.GetApiConfigurationAsync(apiId);
-                if (apiConfig == null) return false;
-
-                // Test connection to the API
-                var response = await _httpClient.GetAsync(apiConfig.BaseUrl);
-                return response.IsSuccessStatusCode;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogError(ex, $"Error testing API connection for {apiId}");
-                return false;
-            }
-        }
-
-        private async Task<List<IndexerSearchResult>> SearchIndexerAsync(Indexer indexer, string query, string? category = null, SearchRequest? request = null)
-        {
-            try
-            {
-                // Sanitize the query for indexer searches to remove illegal characters
-                query = SanitizeIndexerQuery(query);
-                _logger.LogInformation("Searching indexer {Name} ({Implementation}) for: {Query}", indexer.Name, indexer.Implementation, query);
-
-                // Route to appropriate search method based on implementation
-
-                // Compute a single fallback name to use when indexer.Name is empty
-                string fallbackName;
-                if (!string.IsNullOrWhiteSpace(indexer.Name))
-                {
-                    fallbackName = indexer.Name;
-                }
-                else if (!string.IsNullOrWhiteSpace(indexer.Implementation))
-                {
-                    fallbackName = indexer.Implementation;
-                }
-                else
-                {
-                    try
-                    {
-                        var baseUrl = indexer.Url?.TrimEnd('/') ?? string.Empty;
-                        var baseUri = new Uri(baseUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? baseUrl : "https://" + baseUrl);
-                        fallbackName = baseUri.Host;
-                    }
-                    catch (Exception caughtEx_18) when (caughtEx_18 is not OperationCanceledException && caughtEx_18 is not OutOfMemoryException && caughtEx_18 is not StackOverflowException)
-                    {
-                        fallbackName = "Indexer";
-                    }
-                }
-
-                // Try to find a matching provider for this indexer type
-                var provider = _searchProviders.FirstOrDefault(p =>
-                    p.IndexerType.Equals(indexer.Implementation, StringComparison.OrdinalIgnoreCase) ||
-                    (p.IndexerType.Equals("Torznab", StringComparison.OrdinalIgnoreCase) && indexer.Implementation.Equals("Newznab", StringComparison.OrdinalIgnoreCase)));
-
-                if (provider != null)
-                {
-                    var providerResults = await provider.SearchAsync(indexer, query, category, request);
-                    // Ensure Source is set for all results
-                    foreach (var r in providerResults.Where(r => string.IsNullOrWhiteSpace(r.Source)))
-                    {
-                        r.Source = fallbackName;
-                    }
-                    return providerResults;
-                }
-                else
-                {
-                    // Default fallback if no provider matches
-                    _logger.LogWarning("No provider found for indexer type: {Implementation}", indexer.Implementation);
-                    return new List<IndexerSearchResult>();
-                }
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogError(ex, "Error searching indexer {Name}", indexer.Name);
-                return new List<IndexerSearchResult>();
-            }
-        }
-
-        /// <summary>
-        /// Remove illegal/unsupported characters from indexer search queries.
-        /// Strips a curated set of punctuation/symbols, smart quotes, control
-        /// and formatting Unicode categories, then collapses whitespace.
-        /// </summary>
-        private string SanitizeIndexerQuery(string query)
-        {
-            if (string.IsNullOrWhiteSpace(query)) return string.Empty;
-
-            // Characters explicitly requested to strip
-            // Added parentheses to remove '(' and ')' from queries
-            const string forbidden = "*/\\<>:?|^~`$#%&+={}[]'\"!()";
-
-            var sb = new System.Text.StringBuilder(query.Length);
-            foreach (var ch in query)
-            {
-                // Remove control and format characters
-                var uc = System.Globalization.CharUnicodeInfo.GetUnicodeCategory(ch);
-                if (char.IsControl(ch) || uc == System.Globalization.UnicodeCategory.Format)
-                    continue;
-
-                // Remove explicit forbidden ASCII symbols
-                if (forbidden.IndexOf(ch) >= 0)
-                    continue;
-
-                // Remove common smart quotes and other punctuation variants
-                // Left/right single quotation mark, left/right double quotation mark
-                if (ch == '\u2018' || ch == '\u2019' || ch == '\u201C' || ch == '\u201D')
-                    continue;
-
-                sb.Append(ch);
-            }
-
-            // Collapse runs of whitespace to single space and trim
-            var cleaned = System.Text.RegularExpressions.Regex.Replace(sb.ToString(), "\\s+", " ").Trim();
-            return cleaned;
+            return await _indexerSearchWorkflow.TestApiConnectionAsync(apiId);
         }
 
         internal async Task<List<IndexerSearchResult>> ParseTorznabResponseAsync(string xmlContent, Indexer indexer)
         {
-            var results = new List<IndexerSearchResult>();
-
-            try
-            {
-                // Log first 500 chars of XML for debugging
-                var preview = xmlContent.Length > 500 ? xmlContent.Substring(0, 500) + "..." : xmlContent;
-                _logger.LogDebug("Parsing XML from {IndexerName}: {Preview}", indexer.Name, preview);
-
-                // Parse XML with settings that are more lenient
-                var settings = new System.Xml.XmlReaderSettings
-                {
-                    DtdProcessing = System.Xml.DtdProcessing.Ignore,
-                    XmlResolver = null,
-                    IgnoreWhitespace = true,
-                    IgnoreComments = true
-                };
-
-                System.Xml.Linq.XDocument doc;
-                using (var reader = System.Xml.XmlReader.Create(new System.IO.StringReader(xmlContent), settings))
-                {
-                    doc = System.Xml.Linq.XDocument.Load(reader);
-                }
-
-                var channel = doc.Root?.Element("channel");
-                if (channel == null)
-                {
-                    _logger.LogWarning("Invalid Torznab response: no channel element");
-                    return results;
-                }
-
-                var items = channel.Elements("item");
-                var isUsenet = indexer.Type.Equals("Usenet", StringComparison.OrdinalIgnoreCase);
-
-                foreach (var item in items)
-                {
-                    try
-                    {
-                        var result = new IndexerSearchResult
-                        {
-                            Id = item.Element("guid")?.Value ?? Guid.NewGuid().ToString(),
-                            Title = item.Element("title")?.Value ?? "Unknown",
-                            Source = indexer.Name,
-                            Category = item.Element("category")?.Value ?? "Audiobook"
-                        };
-                        result.IndexerId = indexer.Id;
-                        result.IndexerImplementation = indexer.Implementation;
-
-                        // Parse published date
-                        var pubDateStr = item.Element("pubDate")?.Value;
-                        result.PublishedDate = DateTime.TryParse(pubDateStr, out var pubDate)
-                            ? pubDate.ToString("o")
-                            : string.Empty;
-
-                        // Parse Torznab/Newznab attributes (support both torznab and newznab namespaces)
-                        var torznabNs = System.Xml.Linq.XNamespace.Get("http://torznab.com/schemas/2015/feed");
-                        var newznabNs = System.Xml.Linq.XNamespace.Get("http://www.newznab.com/DTD/2010/feeds/attributes/");
-                        var attributes = item.Elements(torznabNs + "attr").Concat(item.Elements(newznabNs + "attr")).ToList();
-
-                        foreach (var attr in attributes)
-                        {
-                            var name = attr.Attribute("name")?.Value;
-                            var value = attr.Attribute("value")?.Value;
-
-                            if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(value))
-                                continue;
-
-                            switch (name.ToLower())
-                            {
-                                case "size":
-                                    var parsedSize = ParseSizeString(value);
-                                    if (parsedSize > 0)
-                                    {
-                                        result.Size = parsedSize;
-                                        _logger.LogDebug("Parsed size for {Title}: {Size} bytes from indexer {Indexer}", result.Title, parsedSize, indexer.Name);
-                                    }
-                                    else
-                                    {
-                                        _logger.LogWarning("Failed to parse size value '{Value}' for result '{Title}' from indexer {Indexer}", value, result.Title, indexer.Name);
-                                    }
-                                    break;
-                                case "seeders":
-                                    if (int.TryParse(value, out var seeders))
-                                        result.Seeders = seeders;
-                                    break;
-                                case "peers":
-                                    if (int.TryParse(value, out var peers))
-                                        result.Leechers = peers;
-                                    break;
-                                case "magneturl":
-                                    result.MagnetLink = value;
-                                    break;
-                                case "filetype":
-                                case "format":
-                                    // Prefer explicit filetype/format attributes
-                                    var normalizedFmt = value.ToLowerInvariant();
-                                    if (normalizedFmt.Contains("m4b")) result.Format = "M4B";
-                                    else if (normalizedFmt.Contains("flac")) result.Format = "FLAC";
-                                    else if (normalizedFmt.Contains("opus")) result.Format = "OPUS";
-                                    else if (normalizedFmt.Contains("aac")) result.Format = "AAC";
-                                    else if (normalizedFmt.Contains("mp3")) result.Format = "MP3";
-
-                                    // Also set Quality from format where possible
-                                    if (string.IsNullOrEmpty(result.Quality))
-                                    {
-                                        if (normalizedFmt.Contains("320")) result.Quality = "MP3 320kbps";
-                                        else if (normalizedFmt.Contains("256")) result.Quality = "MP3 256kbps";
-                                        else if (normalizedFmt.Contains("192")) result.Quality = "MP3 192kbps";
-                                        else if (normalizedFmt.Contains("128")) result.Quality = "MP3 128kbps";
-                                        else if (normalizedFmt.Contains("m4b")) result.Quality = "M4B";
-                                    }
-                                    break;
-                                case "lang_code":
-                                case "language_code":
-                                case "lang":
-                                    // Standardized language codes (e.g., ENG, FR)
-                                    try
-                                    {
-                                        var parsedLang = SearchResultAttributeParser.ParseLanguageFromText(value);
-                                        if (!string.IsNullOrEmpty(parsedLang)) result.Language = parsedLang;
-                                    }
-                                    catch (Exception caughtEx_22) when (caughtEx_22 is not OperationCanceledException && caughtEx_22 is not OutOfMemoryException && caughtEx_22 is not StackOverflowException)
-                                    {
-                                        System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
-                                    }
-                                    break;
-                                case "language":
-                                    // Some indexers use numeric language IDs (e.g., 1 -> ENG)
-                                    if (int.TryParse(value, out var langNum))
-                                    {
-                                        if (langNum == 1) result.Language = "English";
-                                        // Add other mappings if required in the future
-                                    }
-                                    else
-                                    {
-                                        try
-                                        {
-                                            var pl = SearchResultAttributeParser.ParseLanguageFromText(value);
-                                            if (!string.IsNullOrEmpty(pl)) result.Language = pl;
-                                        }
-                                        catch (Exception caughtEx_23) when (caughtEx_23 is not OperationCanceledException && caughtEx_23 is not OutOfMemoryException && caughtEx_23 is not StackOverflowException)
-                                        {
-                                            System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
-                                        }
-                                    }
-                                    break;
-                                case "grabs":
-                                    if (int.TryParse(value, out var grabs))
-                                        result.Grabs = grabs;
-                                    break;
-                                case "files":
-                                    if (int.TryParse(value, out var files))
-                                        result.Files = files;
-                                    break;
-                                case "usenetdate":
-                                    // Some indexers expose a usenet-specific date attribute; prefer it if parseable
-                                    if (long.TryParse(value, out var unixSec))
-                                    {
-                                        try
-                                        {
-                                            var dt = DateTimeOffset.FromUnixTimeSeconds(unixSec).UtcDateTime;
-                                            result.PublishedDate = dt.ToString("o");
-                                        }
-                                        catch (Exception caughtEx_24) when (caughtEx_24 is not OperationCanceledException && caughtEx_24 is not OutOfMemoryException && caughtEx_24 is not StackOverflowException)
-                                        {
-                                            System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
-                                        }
-                                    }
-                                    else if (DateTime.TryParse(value, out var udt))
-                                    {
-                                        result.PublishedDate = udt.ToString("o");
-                                    }
-                                    break;
-                            }
-                        }
-
-                        // Fallback: some indexers don't expose "grabs" as a standard torznab/newznab attr.
-                        // Attempt a few common alternate attribute names and elements (snatches, comments, etc.)
-                        if (result.Grabs == 0)
-                        {
-                            var altNames = new[] { "snatches", "snatched", "numgrabs", "num_grabs", "grab_count" };
-                            foreach (var alt in altNames)
-                            {
-                                var altAttr = attributes.FirstOrDefault(a => string.Equals(a.Attribute("name")?.Value, alt, System.StringComparison.OrdinalIgnoreCase));
-                                if (altAttr != null)
-                                {
-                                    var av = altAttr.Attribute("value")?.Value ?? altAttr.Value;
-                                    if (!string.IsNullOrEmpty(av) && int.TryParse(av, out var g2))
-                                    {
-                                        result.Grabs = g2;
-                                        _logger.LogDebug("Set grabs from alternate attr '{Alt}' for {Title}: {Grabs}", alt, result.Title, g2);
-                                        break;
-                                    }
-                                }
-                            }
-
-                            // If still zero, and a comments element points to a details URL (althub-style), attempt to scrape comment count
-                            if (result.Grabs == 0)
-                            {
-                                var commentsVal = item.Element("comments")?.Value;
-                                if (!string.IsNullOrEmpty(commentsVal))
-                                {
-                                    // If comments is a URL, try scraping the page for a numeric comments count (only for known indexers to avoid many extra requests)
-                                    if (Uri.TryCreate(commentsVal, UriKind.Absolute, out var commentsUri) && indexer.Url != null && indexer.Url.Contains("althub", StringComparison.OrdinalIgnoreCase))
-                                    {
-                                        try
-                                        {
-                                            var commentsPageUrl = new Uri(commentsUri.GetLeftPart(UriPartial.Path));
-                                            _logger.LogDebug("Fetching comments page to extract grabs for {Title}: {Url}", result.Title, commentsPageUrl);
-                                            using var resp = await _httpClient.GetAsync(commentsPageUrl);
-                                            if (resp.IsSuccessStatusCode)
-                                            {
-                                                var html = await resp.Content.ReadAsStringAsync();
-                                                // Look for common comment count patterns in page text
-                                                var text = _htmlTextExtractor?.ExtractText(html) ?? html;
-                                                var m = System.Text.RegularExpressions.Regex.Match(text, "(\\d{1,6})\\s+comments?", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                                                if (!m.Success)
-                                                {
-                                                    m = System.Text.RegularExpressions.Regex.Match(text, "Comments\\s*[:\\(]?\\s*(\\d{1,6})", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                                                }
-
-                                                if (m.Success && int.TryParse(m.Groups[1].Value, out var scrapedComments))
-                                                {
-                                                    result.Grabs = scrapedComments;
-                                                    _logger.LogDebug("Scraped comments count for {Title}: {Grabs}", result.Title, scrapedComments);
-                                                }
-                                            }
-                                        }
-                                        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                                        {
-                                            _logger.LogDebug(ex, "Failed to scrape comments page for {Title}", result.Title);
-                                        }
-                                    }
-                                    else
-                                    {
-                                        // Some feeds put a numeric comments value directly; parse that
-                                        if (int.TryParse(commentsVal, out var commVal))
-                                        {
-                                            result.Grabs = commVal;
-                                            _logger.LogDebug("Set grabs from <comments> element for {Title}: {Grabs}", result.Title, commVal);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Get enclosure/link for download URL
-                        var enclosure = item.Element("enclosure");
-                        if (enclosure != null)
-                        {
-                            var enclosureUrl = enclosure.Attribute("url")?.Value;
-                            if (!string.IsNullOrEmpty(enclosureUrl))
-                            {
-                                if (isUsenet)
-                                {
-                                    result.NzbUrl = enclosureUrl;
-                                }
-                                else
-                                {
-                                    result.TorrentUrl = enclosureUrl;
-                                }
-                            }
-
-                            // If the indexer provides an enclosure length, use it as a size fallback
-                            var lengthStr = enclosure.Attribute("length")?.Value;
-                            if (!string.IsNullOrEmpty(lengthStr) && result.Size == 0)
-                            {
-                                var parsedLen = ParseSizeString(lengthStr);
-                                if (parsedLen > 0)
-                                {
-                                    result.Size = parsedLen;
-                                    _logger.LogDebug("Set size from enclosure length for {Title}: {Size} bytes", result.Title, parsedLen);
-                                }
-                            }
-                        }
-
-                        // If no magnet link found in attributes, check link element
-                        var linkElem = item.Element("link")?.Value;
-                        if (!string.IsNullOrEmpty(linkElem))
-                        {
-                            if (linkElem.StartsWith("magnet:") && string.IsNullOrEmpty(result.MagnetLink) && !isUsenet)
-                            {
-                                result.MagnetLink = linkElem;
-                            }
-                            else
-                            {
-                                // Use the link element as the canonical indexer page when possible
-                                if (Uri.IsWellFormedUriString(linkElem, UriKind.Absolute))
-                                {
-                                    result.ResultUrl = linkElem;
-                                }
-
-                                // If torrentUrl is empty, prefer the link
-                                if (string.IsNullOrEmpty(result.TorrentUrl) && !linkElem.StartsWith("magnet:") && !isUsenet)
-                                {
-                                    result.TorrentUrl = linkElem;
-                                }
-                                else if (string.IsNullOrEmpty(result.NzbUrl) && isUsenet && !linkElem.StartsWith("magnet:"))
-                                {
-                                    result.NzbUrl = linkElem;
-                                }
-                            }
-                        }
-
-                        // Parse description for additional metadata
-                        var description = item.Element("description")?.Value;
-                        if (!string.IsNullOrEmpty(description))
-                        {
-                            result.Description = description;
-
-                            // Try to extract quality/format from description or title
-                            var titleAndDesc = $"{result.Title} {description}".ToLower();
-
-                            if (titleAndDesc.Contains("flac"))
-                                result.Quality = "FLAC";
-                            else if (titleAndDesc.Contains("320") || titleAndDesc.Contains("320kbps"))
-                                result.Quality = "MP3 320kbps";
-                            else if (titleAndDesc.Contains("256") || titleAndDesc.Contains("256kbps"))
-                                result.Quality = "MP3 256kbps";
-                            else if (titleAndDesc.Contains("192") || titleAndDesc.Contains("192kbps"))
-                                result.Quality = "MP3 192kbps";
-                            else if (titleAndDesc.Contains("128") || titleAndDesc.Contains("128kbps"))
-                                result.Quality = "MP3 128kbps";
-                            else if (titleAndDesc.Contains("64") || titleAndDesc.Contains("64kbps"))
-                                result.Quality = "MP3 64kbps";
-                            else if (titleAndDesc.Contains("m4b"))
-                                result.Quality = "M4B";
-                            else
-                                result.Quality = "Unknown";
-
-                            // Detect format
-                            if (titleAndDesc.Contains("m4b"))
-                                result.Format = "M4B";
-                            else if (titleAndDesc.Contains("flac"))
-                                result.Format = "FLAC";
-                            else if (titleAndDesc.Contains("mp3"))
-                                result.Format = "MP3";
-                            else if (titleAndDesc.Contains("opus"))
-                                result.Format = "OPUS";
-                            else if (titleAndDesc.Contains("aac"))
-                                result.Format = "AAC";
-
-                            // Detect language codes present in title or description (e.g. [ENG / M4B])
-                            try
-                            {
-                                var lang = SearchResultAttributeParser.ParseLanguageFromText(result.Title + " " + description);
-                                if (!string.IsNullOrEmpty(lang)) result.Language = lang;
-                            }
-                            catch (Exception caughtEx_25) when (caughtEx_25 is not OperationCanceledException && caughtEx_25 is not OutOfMemoryException && caughtEx_25 is not StackOverflowException)
-                            { /* Non-critical */
-                                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
-                            }
-                        }
-
-                        // Extract author from title if possible (common format: "Author - Title")
-                        var titleParts = result.Title.Split(new[] { " - ", " â€“ " }, StringSplitOptions.RemoveEmptyEntries);
-                        if (titleParts.Length >= 2)
-                        {
-                            result.Artist = titleParts[0].Trim();
-                            result.Album = string.Join(" - ", titleParts.Skip(1)).Trim();
-                        }
-                        else
-                        {
-                            result.Artist = "Unknown Author";
-                            result.Album = result.Title;
-                        }
-
-                        // Only add results that have a valid download link
-                        if (!string.IsNullOrEmpty(result.MagnetLink) ||
-                            !string.IsNullOrEmpty(result.TorrentUrl) ||
-                            !string.IsNullOrEmpty(result.NzbUrl))
-                        {
-                            // Set download type based on what's available
-                            if (!string.IsNullOrEmpty(result.NzbUrl))
-                            {
-                                result.DownloadType = "Usenet";
-                            }
-                            else if (!string.IsNullOrEmpty(result.MagnetLink) || !string.IsNullOrEmpty(result.TorrentUrl))
-                            {
-                                result.DownloadType = "Torrent";
-                            }
-
-                            results.Add(result);
-                        }
-                        else
-                        {
-                            _logger.LogWarning("Skipping result '{Title}' - no download link found", result.Title);
-                        }
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                    {
-                        _logger.LogError(ex, "Error parsing indexer result item");
-                    }
-                }
-            }
-            catch (System.Xml.XmlException xmlEx)
-            {
-                _logger.LogError(xmlEx, "XML parsing error from {IndexerName} at Line {Line}, Position {Position}: {Message}",
-                    indexer.Name, xmlEx.LineNumber, xmlEx.LinePosition, xmlEx.Message);
-
-                // Log the problematic XML content around the error
-                if (!string.IsNullOrEmpty(xmlContent))
-                {
-                    var lines = xmlContent.Split('\n');
-                    if (xmlEx.LineNumber > 0 && xmlEx.LineNumber <= lines.Length)
-                    {
-                        var startLine = Math.Max(0, xmlEx.LineNumber - 3);
-                        var endLine = Math.Min(lines.Length - 1, xmlEx.LineNumber + 2);
-                        var context = string.Join("\n", lines[startLine..(endLine + 1)]);
-                        _logger.LogError("XML context around error:\n{Context}", context);
-                    }
-                }
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogError(ex, "Error parsing Torznab XML response from {IndexerName}", indexer.Name);
-            }
-
-            return results;
-        }
-
-        private List<IndexerSearchResult> GenerateMockIndexerResults(string query)
-        {
-            // Generate multiple mock results to simulate real indexer responses
-            // Default to torrent for backwards compatibility
-            return GenerateMockIndexerResults(query, "Mock Indexer", "Torrent");
-        }
-
-        private List<IndexerSearchResult> GenerateMockIndexerResults(string query, string indexerName)
-        {
-            // Default to torrent for backwards compatibility
-            return GenerateMockIndexerResults(query, indexerName, "Torrent");
-        }
-
-        private List<IndexerSearchResult> GenerateMockIndexerResults(string query, string indexerName, string indexerType)
-        {
-            // Generate multiple mock results to simulate real indexer responses
-            var random = new Random();
-            var results = new List<IndexerSearchResult>();
-            var isUsenet = indexerType.Equals("Usenet", StringComparison.OrdinalIgnoreCase);
-
-            _logger.LogInformation("Generating {Count} mock {Type} results for indexer {IndexerName}", 5, indexerType, indexerName);
-
-            for (int i = 0; i < 5; i++)
-            {
-                var result = new IndexerSearchResult
-                {
-                    Id = Guid.NewGuid().ToString(),
-                    Title = $"{query} - Quality {i + 1}",
-                    Artist = "Various Authors",
-                    Album = $"{query} Series",
-                    Category = "Audiobook",
-                    Size = random.Next(200_000_000, 1_500_000_000), // 200 MB to 1.5 GB
-                    Seeders = isUsenet ? 0 : random.Next(5, 100), // Usenet doesn't have seeders
-                    Leechers = isUsenet ? 0 : random.Next(0, 20), // Usenet doesn't have leechers
-                    Source = indexerName,
-                    PublishedDate = DateTime.UtcNow.AddDays(-random.Next(1, 365)).ToString("o"),
-                    Quality = i switch
-                    {
-                        0 => "MP3 64kbps",
-                        1 => "MP3 128kbps",
-                        2 => "MP3 192kbps",
-                        3 => "M4B 128kbps",
-                        _ => "FLAC"
-                    },
-                    Format = i >= 3 ? "M4B" : "MP3",
-                    Language = "English"
-                };
-
-                // Set appropriate download link based on indexer type
-                if (isUsenet)
-                {
-                    result.NzbUrl = $"https://{indexerName.ToLower()}.example.com/api/nzb/{Guid.NewGuid():N}";
-                    result.MagnetLink = string.Empty;
-                    result.TorrentUrl = string.Empty;
-                }
-                else
-                {
-                    result.MagnetLink = $"magnet:?xt=urn:btih:{Guid.NewGuid():N}";
-                    result.NzbUrl = string.Empty;
-                }
-
-                results.Add(result);
-            }
-
-            return results;
+            return await _indexerSearchWorkflow.ParseTorznabResponseAsync(xmlContent, indexer);
         }
 
         private List<SearchResult> GenerateMockResults(string query, string source)
@@ -1823,76 +1036,9 @@ namespace Listenarr.Application.Search
         }
 
 
-        private long ParseSizeString(string sizeStr)
-        {
-            if (string.IsNullOrEmpty(sizeStr))
-                return 0;
-
-            // Remove any commas and extra spaces
-            sizeStr = sizeStr.Replace(",", "").Trim();
-
-            // Try to parse as direct bytes first
-            if (long.TryParse(sizeStr, out var bytes))
-                return bytes;
-
-            // Handle formats like "500 MB", "1.2 GB", "1024 KB", "3.7 GiB", "279.0 MiB", etc.
-            // Support both decimal (KB/MB/GB/TB) and binary (KiB/MiB/GiB/TiB) units
-            var match = System.Text.RegularExpressions.Regex.Match(sizeStr, @"^([\d\.]+)\s*(KiB|MiB|GiB|TiB|KB|MB|GB|TB|B)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            if (match.Success &&
-                double.TryParse(match.Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var value))
-            {
-                var unit = match.Groups[2].Value.ToUpper();
-                return unit switch
-                {
-                    "B" => (long)value,
-                    "KB" => (long)(value * 1000),
-                    "MB" => (long)(value * 1000 * 1000),
-                    "GB" => (long)(value * 1000 * 1000 * 1000),
-                    "TB" => (long)(value * 1000 * 1000 * 1000 * 1000),
-                    "KIB" => (long)(value * 1024),
-                    "MIB" => (long)(value * 1024 * 1024),
-                    "GIB" => (long)(value * 1024 * 1024 * 1024),
-                    "TIB" => (long)(value * 1024 * 1024 * 1024 * 1024),
-                    _ => (long)value
-                };
-            }
-
-            _logger.LogWarning("Unable to parse size string: '{SizeStr}'", sizeStr);
-            return 0;
-        }
-
-        // (Helper methods for containment and fuzzy scoring are implemented above.)
-
         public async Task<List<ApiConfiguration>> GetEnabledMetadataSourcesAsync()
         {
-            try
-            {
-                _logger.LogDebug("Querying database for enabled metadata sources...");
-
-                var allConfigs = await _apiConfigRepository.GetAllAsync();
-                var metadataSources = allConfigs
-                    .Where(api => api.IsEnabled && api.Type == "metadata")
-                    .OrderBy(api => api.Priority)
-                    .ToList();
-
-                if (metadataSources.Count > 0)
-                {
-                    _logger.LogInformation("Retrieved {Count} enabled metadata sources: {Sources}",
-                        metadataSources.Count,
-                        string.Join(", ", metadataSources.Select(s => $"{s.Name} (Priority: {s.Priority}, BaseUrl: {s.BaseUrl})")));
-                }
-                else
-                {
-                    _logger.LogWarning("No enabled metadata sources found in database");
-                }
-
-                return metadataSources;
-            }
-            catch (InvalidOperationException ex)
-            {
-                _logger.LogError(ex, "Invalid operation error retrieving enabled metadata sources");
-                return new List<ApiConfiguration>();
-            }
+            return await _metadataSourceCatalog.GetEnabledMetadataSourcesAsync();
         }
     }
 }
