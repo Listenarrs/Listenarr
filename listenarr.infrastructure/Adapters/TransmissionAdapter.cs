@@ -15,7 +15,6 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using System.Globalization;
 using System.Net;
 using System.Text.Encodings.Web;
 using System.Text.Json;
@@ -102,7 +101,7 @@ namespace Listenarr.Infrastructure.Adapters
             if (client == null) throw new ArgumentNullException(nameof(client));
             if (result == null) throw new ArgumentNullException(nameof(result));
 
-            var labels = CollectLabels(client);
+            var labels = TransmissionRequestPlanner.CollectLabels(client);
             var arguments = await _torrentAddPlanner.BuildArgumentsAsync(client, result, labels, ct);
 
             // Use old format for compatibility with Transmission < 4.1.0
@@ -131,14 +130,14 @@ namespace Listenarr.Infrastructure.Adapters
                 {
                     if (args.TryGetProperty("torrent-added", out var added) && added.ValueKind == JsonValueKind.Object)
                     {
-                        var torrentId = ExtractTorrentIdentifier(added);
+                        var torrentId = TransmissionRequestPlanner.ExtractTorrentIdentifier(added);
                         _logger.LogInformation("Transmission successfully added torrent '{Title}' with id/hash: {Id}", LogRedaction.SanitizeText(result.Title), LogRedaction.SanitizeText(torrentId));
                         return torrentId;
                     }
 
                     if (args.TryGetProperty("torrent-duplicate", out var duplicate) && duplicate.ValueKind == JsonValueKind.Object)
                     {
-                        var existingId = ExtractTorrentIdentifier(duplicate);
+                        var existingId = TransmissionRequestPlanner.ExtractTorrentIdentifier(duplicate);
                         _logger.LogInformation("Transmission reported duplicate torrent for '{Title}' with id/hash {Id}", LogRedaction.SanitizeText(result.Title), LogRedaction.SanitizeText(existingId));
                         return existingId;
                     }
@@ -159,7 +158,7 @@ namespace Listenarr.Infrastructure.Adapters
             if (client == null) throw new ArgumentNullException(nameof(client));
             if (string.IsNullOrWhiteSpace(id)) throw new ArgumentNullException(nameof(id));
 
-            var idsPayload = ParseTransmissionIds(id);
+            var idsPayload = TransmissionRequestPlanner.ParseTransmissionIds(id);
             var arguments = new Dictionary<string, object>
             {
                 ["ids"] = idsPayload,
@@ -370,7 +369,7 @@ namespace Listenarr.Infrastructure.Adapters
                 method = "torrent-get",
                 arguments = new
                 {
-                    ids = ParseTransmissionIds(item.DownloadId),
+                    ids = TransmissionRequestPlanner.ParseTransmissionIds(item.DownloadId),
                     fields = new[] { "id", "name", "downloadDir" }
                 },
                 tag = 5
@@ -458,7 +457,7 @@ namespace Listenarr.Infrastructure.Adapters
                 method = "torrent-get",
                 arguments = new
                 {
-                    ids = ParseTransmissionIds(queueItem.Id),
+                    ids = TransmissionRequestPlanner.ParseTransmissionIds(queueItem.Id),
                     fields = new[] { "id", "name", "downloadDir", "files" }
                 },
                 tag = 5
@@ -529,44 +528,6 @@ namespace Listenarr.Infrastructure.Adapters
             return Task.FromResult(TransmissionResponseMapper.MapDownloadClientItem(client, torrent, sessionConfig));
         }
 
-        private List<string> CollectLabels(DownloadClientConfiguration client)
-        {
-            var labels = new List<string>();
-
-            if (client.Settings != null && client.Settings.TryGetValue("category", out var categoryObj))
-            {
-                var category = categoryObj?.ToString();
-                if (!string.IsNullOrWhiteSpace(category))
-                {
-                    labels.Add(category);
-                }
-            }
-
-            if (client.Settings != null && client.Settings.TryGetValue("tags", out var tagsObj))
-            {
-                var tags = tagsObj?.ToString();
-                if (!string.IsNullOrWhiteSpace(tags))
-                {
-                    labels.AddRange(tags
-                        .Split(',', StringSplitOptions.RemoveEmptyEntries)
-                        .Select(t => t.Trim())
-                        .Where(t => !string.IsNullOrEmpty(t)));
-                }
-            }
-
-            return labels;
-        }
-
-        private object[] ParseTransmissionIds(string id)
-        {
-            if (int.TryParse(id, NumberStyles.Integer, CultureInfo.InvariantCulture, out var numericId))
-            {
-                return new object[] { numericId };
-            }
-
-            return new object[] { id };
-        }
-
         private async Task<byte[]?> PreDownloadTorrentFileAsync(string torrentUrl, CancellationToken ct)
         {
             using var downloadCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -626,31 +587,6 @@ namespace Listenarr.Infrastructure.Adapters
             }
 
             _logger.LogWarning("Pre-download exceeded maximum redirects (10) starting from {Url}", LogRedaction.SanitizeUrl(torrentUrl));
-            return null;
-        }
-
-        private static string? ExtractTorrentIdentifier(JsonElement element)
-        {
-            if (element.ValueKind != JsonValueKind.Object)
-            {
-                return null;
-            }
-
-            // Try snake_case (JSON-RPC 2.0 / Transmission 4.1+) first, fall back to camelCase
-            if ((element.TryGetProperty("hash_string", out var hashProp) || element.TryGetProperty("hashString", out hashProp)))
-            {
-                var hash = hashProp.GetString();
-                if (!string.IsNullOrWhiteSpace(hash))
-                {
-                    return hash;
-                }
-            }
-
-            if (element.TryGetProperty("id", out var idProp) && idProp.ValueKind == JsonValueKind.Number)
-            {
-                return idProp.GetInt32().ToString(CultureInfo.InvariantCulture);
-            }
-
             return null;
         }
 

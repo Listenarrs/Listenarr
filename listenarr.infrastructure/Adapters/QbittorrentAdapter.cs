@@ -190,16 +190,10 @@ namespace Listenarr.Infrastructure.Adapters
             var baseUrl = DownloadClientUriBuilder.BuildAuthority(client);
             try
             {
-                var cookieJar = new CookieContainer();
-                var handler = new HttpClientHandler { CookieContainer = cookieJar, UseCookies = true, AutomaticDecompression = DecompressionMethods.All };
-                using var httpClient = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
+                using var httpClient = QbittorrentCookieSession.CreateClient();
 
                 // Authenticate
-                using var loginData = new FormUrlEncodedContent(new[]
-                {
-                    new KeyValuePair<string, string>("username", client.Username ?? string.Empty),
-                    new KeyValuePair<string, string>("password", client.Password ?? string.Empty)
-                });
+                using var loginData = QbittorrentCookieSession.CreateLoginContent(client);
                 using (await httpClient.PostAsync($"{baseUrl}/api/v2/auth/login", loginData, ct)) { }
 
                 // Set category
@@ -235,16 +229,8 @@ namespace Listenarr.Infrastructure.Adapters
 
             try
             {
-                var cookieJar = new CookieContainer();
-                var handler = new HttpClientHandler { CookieContainer = cookieJar, UseCookies = true, AutomaticDecompression = DecompressionMethods.All };
-
-                using var httpClient = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
-
-                using var loginData = new FormUrlEncodedContent(new[]
-                {
-                    new KeyValuePair<string, string>("username", client.Username ?? string.Empty),
-                    new KeyValuePair<string, string>("password", client.Password ?? string.Empty)
-                });
+                using var httpClient = QbittorrentCookieSession.CreateClient();
+                using var loginData = QbittorrentCookieSession.CreateLoginContent(client);
 
                 using var loginResp = await httpClient.PostAsync($"{baseUrl}/api/v2/auth/login", loginData, ct);
                 if (!loginResp.IsSuccessStatusCode)
@@ -300,21 +286,8 @@ namespace Listenarr.Infrastructure.Adapters
 
             try
             {
-                var cookieJar = new CookieContainer();
-                var handler = new HttpClientHandler
-                {
-                    CookieContainer = cookieJar,
-                    UseCookies = true,
-                    AutomaticDecompression = DecompressionMethods.All
-                };
-
-                using var httpClient = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
-
-                using var loginData = new FormUrlEncodedContent(new[]
-                {
-                    new KeyValuePair<string, string>("username", client.Username ?? string.Empty),
-                    new KeyValuePair<string, string>("password", client.Password ?? string.Empty)
-                });
+                using var httpClient = QbittorrentCookieSession.CreateClient();
+                using var loginData = QbittorrentCookieSession.CreateLoginContent(client);
 
                 using var loginResp = await httpClient.PostAsync($"{baseUrl}/api/v2/auth/login", loginData, ct);
                 if (loginResp.StatusCode == HttpStatusCode.Forbidden)
@@ -394,21 +367,8 @@ namespace Listenarr.Infrastructure.Adapters
 
             try
             {
-                var cookieJar = new CookieContainer();
-                var handler = new HttpClientHandler
-                {
-                    CookieContainer = cookieJar,
-                    UseCookies = true,
-                    AutomaticDecompression = DecompressionMethods.All
-                };
-
-                using var httpClient = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
-
-                using var loginData = new FormUrlEncodedContent(new[]
-                {
-                    new KeyValuePair<string, string>("username", client.Username ?? string.Empty),
-                    new KeyValuePair<string, string>("password", client.Password ?? string.Empty)
-                });
+                using var httpClient = QbittorrentCookieSession.CreateClient();
+                using var loginData = QbittorrentCookieSession.CreateLoginContent(client);
 
                 using var loginResp = await httpClient.PostAsync($"{baseUrl}/api/v2/auth/login", loginData, ct);
                 if (loginResp.StatusCode == HttpStatusCode.Forbidden)
@@ -515,22 +475,10 @@ namespace Listenarr.Infrastructure.Adapters
 
             try
             {
-                var cookieJar = new CookieContainer();
-                var handler = new HttpClientHandler
-                {
-                    CookieContainer = cookieJar,
-                    UseCookies = true,
-                    AutomaticDecompression = DecompressionMethods.All
-                };
-
-                using var httpClient = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
+                using var httpClient = QbittorrentCookieSession.CreateClient();
 
                 // Login
-                using var loginData = new FormUrlEncodedContent(new[]
-                {
-                    new KeyValuePair<string, string>("username", client.Username ?? string.Empty),
-                    new KeyValuePair<string, string>("password", client.Password ?? string.Empty)
-                });
+                using var loginData = QbittorrentCookieSession.CreateLoginContent(client);
 
                 using var loginResp = await httpClient.PostAsync($"{baseUrl}/api/v2/auth/login", loginData, ct);
                 if (!loginResp.IsSuccessStatusCode && loginResp.StatusCode != HttpStatusCode.Forbidden)
@@ -639,22 +587,10 @@ namespace Listenarr.Infrastructure.Adapters
 
             try
             {
-                var cookieJar = new CookieContainer();
-                var handler = new HttpClientHandler
-                {
-                    CookieContainer = cookieJar,
-                    UseCookies = true,
-                    AutomaticDecompression = DecompressionMethods.All
-                };
-
-                using var httpClient = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
+                using var httpClient = QbittorrentCookieSession.CreateClient();
 
                 // Login
-                using var loginData = new FormUrlEncodedContent(new[]
-                {
-                    new KeyValuePair<string, string>("username", client.Username ?? string.Empty),
-                    new KeyValuePair<string, string>("password", client.Password ?? string.Empty)
-                });
+                using var loginData = QbittorrentCookieSession.CreateLoginContent(client);
 
                 using var loginResp = await httpClient.PostAsync($"{baseUrl}/api/v2/auth/login", loginData, ct);
                 if (!loginResp.IsSuccessStatusCode && loginResp.StatusCode != HttpStatusCode.Forbidden)

@@ -169,20 +169,8 @@ namespace Listenarr.Infrastructure.Adapters
         {
             try
             {
-                var cookieJar2 = new CookieContainer();
-                var handler2 = new HttpClientHandler
-                {
-                    CookieContainer = cookieJar2,
-                    UseCookies = true,
-                    AutomaticDecompression = DecompressionMethods.All
-                };
-
-                using var local = new HttpClient(handler2) { Timeout = TimeSpan.FromSeconds(30) };
-                using var localLoginContent = new FormUrlEncodedContent(
-                [
-                    new KeyValuePair<string, string>("username", client.Username),
-                    new KeyValuePair<string, string>("password", client.Password)
-                ]);
+                using var local = QbittorrentCookieSession.CreateClient();
+                using var localLoginContent = QbittorrentCookieSession.CreateLoginContent(client);
 
                 using var localLogin = await local.PostAsync($"{baseUrl}/api/v2/auth/login", localLoginContent, ct);
                 if (localLogin.IsSuccessStatusCode)
