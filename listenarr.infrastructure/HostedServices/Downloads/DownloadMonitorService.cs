@@ -34,10 +34,51 @@ namespace Listenarr.Infrastructure.HostedServices.Downloads
     /// CompletedDownloadProcessor handles downloads in completed status
     /// </summary>
     public class DownloadMonitorService(
+        IDownloadMonitorProcessor processor,
+        ILogger<DownloadMonitorService> logger,
+        IWorkerCycleRunner cycleRunner,
+        IServiceScopeFactory scopeFactory) : BackgroundService
+    {
+        private int _pollingInterval = 30;
+
+        public void ScheduleNextClientPoll(DownloadClientConfiguration client, double intervalSeconds) =>
+            processor.ScheduleNextClientPoll(client, intervalSeconds);
+
+        public Task RunCycleAsync(CancellationToken cancellationToken) => processor.RunCycleAsync(cancellationToken);
+
+        internal Task MonitorDownloadsAsync(CancellationToken cancellationToken) => processor.RunCycleAsync(cancellationToken);
+
+        protected override async Task ExecuteAsync(CancellationToken cancellationToken)
+        {
+            logger.LogInformation("Download Monitor Service starting");
+
+            await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+
+            using var scope = scopeFactory.CreateScope();
+            var configurationService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
+            var appSettings = await configurationService.GetApplicationSettingsAsync();
+            if (appSettings.PollingIntervalSeconds > 0)
+            {
+                _pollingInterval = appSettings.PollingIntervalSeconds;
+            }
+
+            logger.LogInformation("DownloadMonitorService polling interval set to {PollingInterval}s", _pollingInterval);
+
+            await cycleRunner.RunPeriodicAsync(
+                nameof(DownloadMonitorService),
+                initialDelay: null,
+                intervalProvider: () => TimeSpan.FromSeconds(_pollingInterval),
+                runCycle: processor.RunCycleAsync,
+                cancellationToken);
+
+            logger.LogInformation("Download Monitor Service stopping");
+        }
+    }
+
+    public class DownloadMonitorProcessor(
         IServiceScopeFactory scopeFactory,
         IDownloadPushService downloadPushService,
-        ILogger<DownloadMonitorService> logger,
-        IWorkerCycleRunner cycleRunner) : BackgroundService, IDownloadMonitorProcessor
+        ILogger<DownloadMonitorProcessor> logger) : IDownloadMonitorProcessor
     {
         private int _pollingInterval = 30;
         private DateTime _lastFullBroadcast = DateTime.MinValue;
@@ -75,33 +116,6 @@ namespace Listenarr.Infrastructure.HostedServices.Downloads
             ScheduleNextClientPoll(client, Math.Min(900, 30 * Math.Pow(2, count - 1)));
         }
 
-        protected override async Task ExecuteAsync(CancellationToken cancellationToken)
-        {
-            logger.LogInformation("Download Monitor Service starting");
-
-            // Wait a bit before starting to ensure the app is fully initialized
-            await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
-
-            // Attempt to read configured polling interval from ApplicationSettings (fallback to current default)
-            using var scope = scopeFactory.CreateScope();
-            var configurationService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
-            var appSettings = await configurationService.GetApplicationSettingsAsync();
-            if (appSettings.PollingIntervalSeconds > 0)
-            {
-                _pollingInterval = appSettings.PollingIntervalSeconds;
-            }
-            logger.LogInformation($"DownloadMonitorService polling interval set to {_pollingInterval}s");
-
-            await cycleRunner.RunPeriodicAsync(
-                nameof(DownloadMonitorService),
-                initialDelay: null,
-                intervalProvider: () => TimeSpan.FromSeconds(_pollingInterval),
-                runCycle: MonitorDownloadsAsync,
-                cancellationToken);
-
-            logger.LogInformation("Download Monitor Service stopping");
-        }
-
         public Task RunCycleAsync(CancellationToken cancellationToken) => MonitorDownloadsAsync(cancellationToken);
 
         internal async Task MonitorDownloadsAsync(CancellationToken cancellationToken)
@@ -112,6 +126,10 @@ namespace Listenarr.Infrastructure.HostedServices.Downloads
             var downloadClientGateway = scope.ServiceProvider.GetRequiredService<IDownloadClientGateway>();
 
             var appSettings = await configurationService.GetApplicationSettingsAsync();
+            if (appSettings.PollingIntervalSeconds > 0)
+            {
+                _pollingInterval = appSettings.PollingIntervalSeconds;
+            }
 
             var configuredClients = await configurationService.GetDownloadClientConfigurationsAsync();
             HashSet<string> enabledClientIds = configuredClients

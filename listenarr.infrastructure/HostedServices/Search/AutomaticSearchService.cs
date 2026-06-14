@@ -24,17 +24,38 @@ using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.HostedServices.Search
 {
-    public class AutomaticSearchService : BackgroundService, IAutomaticSearchProcessor
+    public class AutomaticSearchService(
+        ILogger<AutomaticSearchService> logger,
+        IAutomaticSearchProcessor processor,
+        IWorkerCycleRunner cycleRunner) : BackgroundService
     {
-        private readonly ILogger<AutomaticSearchService> _logger;
+        private static readonly TimeSpan SearchInterval = TimeSpan.FromHours(6);
+
+        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+        {
+            logger.LogInformation("AutomaticSearchService started. Will search monitored audiobooks every {Hours} hours", SearchInterval.TotalHours);
+
+            await cycleRunner.RunPeriodicAsync(
+                nameof(AutomaticSearchService),
+                initialDelay: TimeSpan.FromMinutes(5),
+                intervalProvider: () => SearchInterval,
+                runCycle: processor.RunCycleAsync,
+                stoppingToken);
+
+            logger.LogInformation("AutomaticSearchService stopped");
+        }
+    }
+
+    public class AutomaticSearchProcessor : IAutomaticSearchProcessor
+    {
+        private readonly ILogger<AutomaticSearchProcessor> _logger;
         private readonly IServiceScopeFactory _serviceScopeFactory;
         private readonly AutomaticSearchResultClassifier _resultClassifier;
         private readonly AutomaticSearchQualityEvaluator _qualityEvaluator;
         private readonly AutomaticSearchDownloadClientSelector _downloadClientSelector;
-        private readonly TimeSpan _searchInterval = TimeSpan.FromHours(6); // Search every 6 hours
 
-        public AutomaticSearchService(
-            ILogger<AutomaticSearchService> logger,
+        public AutomaticSearchProcessor(
+            ILogger<AutomaticSearchProcessor> logger,
             IServiceScopeFactory serviceScopeFactory)
         {
             _logger = logger;
@@ -42,55 +63,6 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             _resultClassifier = new AutomaticSearchResultClassifier(_logger);
             _qualityEvaluator = new AutomaticSearchQualityEvaluator(_logger);
             _downloadClientSelector = new AutomaticSearchDownloadClientSelector(_serviceScopeFactory, _logger);
-        }
-
-        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-        {
-            _logger.LogInformation("AutomaticSearchService started. Will search monitored audiobooks every {Hours} hours", _searchInterval.TotalHours);
-
-            // Wait for application to be fully started before first search
-            try
-            {
-                await Task.Delay(TimeSpan.FromMinutes(5), stoppingToken);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                _logger.LogInformation("AutomaticSearchService canceled before first search cycle");
-                return;
-            }
-
-            while (!stoppingToken.IsCancellationRequested)
-            {
-                try
-                {
-                    await RunCycleAsync(stoppingToken);
-                }
-                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-                {
-                    break;
-                }
-                catch (OperationCanceledException ex)
-                {
-                    _logger.LogWarning(ex, "Automatic search cycle canceled/timed out; continuing");
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                {
-                    _logger.LogError(ex, "Error during automatic search cycle");
-                }
-
-                // Wait for next search interval or cancellation
-                try
-                {
-                    await Task.Delay(_searchInterval, stoppingToken);
-                }
-                catch (OperationCanceledException)
-                {
-                    // Expected when stopping
-                    break;
-                }
-            }
-
-            _logger.LogInformation("AutomaticSearchService stopped");
         }
 
         public Task RunCycleAsync(CancellationToken cancellationToken) => PerformAutomaticSearchesAsync(cancellationToken);

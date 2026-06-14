@@ -31,7 +31,7 @@ namespace Listenarr.Tests.Features.Api.Extensions
             nameof(MoveBackgroundService),
             nameof(ImageCacheCleanupService),
             nameof(DownloadMonitorService),
-            nameof(MovedDownloadProcessor),
+            nameof(MovedDownloadCleanupService),
             nameof(QueueMonitorService),
             nameof(AutomaticSearchService),
             nameof(AuthorMonitoringBackgroundService),
@@ -40,6 +40,23 @@ namespace Listenarr.Tests.Features.Api.Extensions
             nameof(MetadataRescanService),
             nameof(DownloadProcessingJobProcessor),
             nameof(UnmatchedScanBackgroundService)
+        ];
+
+        private static readonly Type[] ExpectedProcessorTypes =
+        [
+            typeof(DownloadMonitorProcessor),
+            typeof(DownloadProcessingJobProcessor),
+            typeof(MovedDownloadCleanupProcessor),
+            typeof(ScanJobProcessor),
+            typeof(MoveJobProcessor),
+            typeof(QueueMonitorProcessor),
+            typeof(AutomaticSearchProcessor),
+            typeof(AuthorMonitoringProcessor),
+            typeof(SeriesMonitoringProcessor),
+            typeof(MetadataRescanProcessor),
+            typeof(ImageCacheCleanupProcessor),
+            typeof(FfmpegInstallProcessor),
+            typeof(UnmatchedScanProcessor)
         ];
 
         [Fact]
@@ -71,6 +88,11 @@ namespace Listenarr.Tests.Features.Api.Extensions
             Assert.Contains(services, d => d.ServiceType == typeof(IMoveQueueService) && d.Lifetime == ServiceLifetime.Singleton);
             Assert.Contains(services, d => d.ServiceType == typeof(IWorkerCycleRunner) && d.Lifetime == ServiceLifetime.Singleton);
 
+            foreach (var processorType in ExpectedProcessorTypes)
+            {
+                Assert.Contains(services, d => d.ServiceType == processorType && d.Lifetime == ServiceLifetime.Singleton);
+            }
+
             AssertProcessorRegistered<IDownloadMonitorProcessor>(services);
             AssertProcessorRegistered<IDownloadImportProcessor>(services);
             AssertProcessorRegistered<IMovedDownloadCleanupProcessor>(services);
@@ -83,6 +105,23 @@ namespace Listenarr.Tests.Features.Api.Extensions
             AssertProcessorRegistered<IImageCacheCleanupProcessor>(services);
             AssertProcessorRegistered<IFfmpegInstallProcessor>(services);
             AssertProcessorRegistered<IUnmatchedScanProcessor>(services);
+            AssertProcessorRegistered<IQueueMonitorProcessor>(services);
+        }
+
+        [Fact]
+        public void AddListenarrHostedServices_DoesNotRegisterHostedServiceTwice()
+        {
+            var services = new ServiceCollection();
+            var config = new ConfigurationBuilder().AddInMemoryCollection().Build();
+
+            services.AddListenarrHostedServices(config);
+
+            var hostedServiceNames = services
+                .Where(d => d.ServiceType == typeof(IHostedService))
+                .Select(GetHostedServiceName)
+                .ToList();
+
+            Assert.Equal(hostedServiceNames.Count, hostedServiceNames.Distinct(StringComparer.Ordinal).Count());
         }
 
         [Fact]
@@ -97,6 +136,11 @@ namespace Listenarr.Tests.Features.Api.Extensions
             foreach (var hostedServiceName in ExpectedHostedServiceNames)
             {
                 Assert.Contains($"`{hostedServiceName}`", architectureDoc);
+            }
+
+            foreach (var processorType in ExpectedProcessorTypes)
+            {
+                Assert.Contains($"`{processorType.Name}`", architectureDoc);
             }
         }
 
@@ -113,6 +157,17 @@ namespace Listenarr.Tests.Features.Api.Extensions
         private static void AssertProcessorRegistered<TProcessor>(IEnumerable<ServiceDescriptor> services)
         {
             Assert.Contains(services, d => d.ServiceType == typeof(TProcessor) && d.Lifetime == ServiceLifetime.Singleton);
+        }
+
+        private static string GetHostedServiceName(ServiceDescriptor descriptor)
+        {
+            if (descriptor.ImplementationType != null)
+            {
+                return descriptor.ImplementationType.Name;
+            }
+
+            var factoryType = descriptor.ImplementationFactory?.Method.ReturnType;
+            return factoryType?.Name ?? descriptor.ToString();
         }
 
         private static string FindRepositoryFile(string fileName)

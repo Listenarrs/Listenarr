@@ -21,75 +21,41 @@ using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.HostedServices.Audiobooks
 {
-    public class SeriesMonitoringBackgroundService : BackgroundService
-        , ISeriesMonitoringProcessor
+    public class SeriesMonitoringBackgroundService(
+        ILogger<SeriesMonitoringBackgroundService> logger,
+        ISeriesMonitoringProcessor processor,
+        IWorkerCycleRunner cycleRunner) : BackgroundService
     {
-        private readonly ILogger<SeriesMonitoringBackgroundService> _logger;
-        private readonly IServiceScopeFactory _serviceScopeFactory;
-        private readonly TimeSpan _syncInterval = TimeSpan.FromDays(1);
-
-        public SeriesMonitoringBackgroundService(
-            ILogger<SeriesMonitoringBackgroundService> logger,
-            IServiceScopeFactory serviceScopeFactory)
-        {
-            _logger = logger;
-            _serviceScopeFactory = serviceScopeFactory;
-        }
+        private static readonly TimeSpan SyncInterval = TimeSpan.FromDays(1);
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            _logger.LogInformation(
+            logger.LogInformation(
                 "SeriesMonitoringBackgroundService started. Monitored series will be checked every {Hours} hours",
-                _syncInterval.TotalHours);
+                SyncInterval.TotalHours);
 
-            try
-            {
-                await Task.Delay(TimeSpan.FromMinutes(10), stoppingToken);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                _logger.LogInformation("SeriesMonitoringBackgroundService canceled before first sync cycle");
-                return;
-            }
+            await cycleRunner.RunPeriodicAsync(
+                nameof(SeriesMonitoringBackgroundService),
+                initialDelay: TimeSpan.FromMinutes(10),
+                intervalProvider: () => SyncInterval,
+                runCycle: processor.RunCycleAsync,
+                stoppingToken);
 
-            while (!stoppingToken.IsCancellationRequested)
-            {
-                try
-                {
-                    await RunCycleAsync(stoppingToken);
-                }
-                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-                {
-                    break;
-                }
-                catch (OperationCanceledException ex)
-                {
-                    _logger.LogWarning(ex, "Series monitoring sync cycle canceled unexpectedly; continuing");
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                {
-                    _logger.LogError(ex, "Error during series monitoring sync cycle");
-                }
-
-                try
-                {
-                    await Task.Delay(_syncInterval, stoppingToken);
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
-            }
-
-            _logger.LogInformation("SeriesMonitoringBackgroundService stopped");
+            logger.LogInformation("SeriesMonitoringBackgroundService stopped");
         }
+    }
+
+    public class SeriesMonitoringProcessor(
+        ILogger<SeriesMonitoringProcessor> logger,
+        IServiceScopeFactory serviceScopeFactory) : ISeriesMonitoringProcessor
+    {
 
         public async Task RunCycleAsync(CancellationToken cancellationToken)
         {
-            using var scope = _serviceScopeFactory.CreateScope();
+            using var scope = serviceScopeFactory.CreateScope();
             var monitoringService = scope.ServiceProvider.GetRequiredService<ISeriesMonitoringService>();
             var syncedCount = await monitoringService.SyncDueSeriesAsync(cancellationToken);
-            _logger.LogInformation(
+            logger.LogInformation(
                 "SeriesMonitoringBackgroundService completed sync cycle. Synced {Count} monitored series",
                 syncedCount);
         }

@@ -26,69 +26,41 @@ namespace Listenarr.Infrastructure.HostedServices.Downloads
     /// <summary>
     /// Background service that polls external download client queues and pushes updates via SignalR
     /// </summary>
-    public class QueueMonitorService : BackgroundService
+    public class QueueMonitorService(
+        IQueueMonitorProcessor processor,
+        ILogger<QueueMonitorService> logger,
+        IAppMetricsService metrics) : BackgroundService
     {
-        private readonly IServiceScopeFactory _serviceScopeFactory;
-        private readonly IHubContext<DownloadHub> _hubContext;
-        private readonly ILogger<QueueMonitorService> _logger;
-
-        // Adaptive polling intervals - conservative since SignalR provides real-time updates
-        private readonly TimeSpan _fastPollingInterval = TimeSpan.FromSeconds(5);   // Active downloads (reduced from 2s)
-        private readonly TimeSpan _normalPollingInterval = TimeSpan.FromSeconds(15); // Idle/seeding (increased from 10s)
-        private readonly TimeSpan _slowPollingInterval = TimeSpan.FromSeconds(60);   // Only completed items (increased from 30s)
-
-        private QueueSnapshot _lastQueueSnapshot = new();
-        private TimeSpan _currentInterval;
-
-        public QueueMonitorService(
-            IServiceScopeFactory serviceScopeFactory,
-            IHubContext<DownloadHub> hubContext,
-            ILogger<QueueMonitorService> logger)
-        {
-            _serviceScopeFactory = serviceScopeFactory;
-            _hubContext = hubContext;
-            _logger = logger;
-            _currentInterval = _normalPollingInterval;
-        }
+        private TimeSpan _currentInterval = TimeSpan.FromSeconds(15);
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            _logger.LogInformation("Queue Monitor Service starting");
+            logger.LogInformation("Queue Monitor Service starting");
 
-            // Wait a bit before starting to ensure the app is fully initialized
-
-            try
-            {
-                await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                _logger.LogInformation("Queue Monitor Service cancelled before start");
-                return;
-            }
-            catch (OperationCanceledException ex)
-            {
-                _logger.LogWarning(ex, "Queue Monitor startup delay canceled/timed out; continuing");
-            }
+            await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
 
             while (!stoppingToken.IsCancellationRequested)
             {
                 try
                 {
-                    await MonitorQueueAsync(stoppingToken);
+                    metrics.Increment("worker.queuemonitorservice.cycle.started");
+                    _currentInterval = await processor.RunCycleAsync(stoppingToken);
+                    metrics.Increment("worker.queuemonitorservice.cycle.completed");
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
-                    // Cancellation requested - exit gracefully
+                    metrics.Increment("worker.queuemonitorservice.cycle.skipped");
                     break;
                 }
                 catch (OperationCanceledException ex)
                 {
-                    _logger.LogWarning(ex, "Queue monitor cycle canceled/timed out; continuing");
+                    metrics.Increment("worker.queuemonitorservice.cycle.failed");
+                    logger.LogWarning(ex, "Queue monitor cycle canceled/timed out; continuing");
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                 {
-                    _logger.LogError(ex, "Error in Queue Monitor Service");
+                    metrics.Increment("worker.queuemonitorservice.cycle.failed");
+                    logger.LogError(ex, "Error in Queue Monitor Service");
                 }
 
                 // Wait before next poll
@@ -102,13 +74,25 @@ namespace Listenarr.Infrastructure.HostedServices.Downloads
                 }
             }
 
-            _logger.LogInformation("Queue Monitor Service stopping");
+            logger.LogInformation("Queue Monitor Service stopping");
         }
+    }
 
-        private async Task MonitorQueueAsync(CancellationToken cancellationToken)
+    public class QueueMonitorProcessor(
+        IServiceScopeFactory serviceScopeFactory,
+        IHubContext<DownloadHub> hubContext,
+        ILogger<QueueMonitorProcessor> logger) : IQueueMonitorProcessor
+    {
+        private readonly TimeSpan _fastPollingInterval = TimeSpan.FromSeconds(5);
+        private readonly TimeSpan _normalPollingInterval = TimeSpan.FromSeconds(15);
+        private readonly TimeSpan _slowPollingInterval = TimeSpan.FromSeconds(60);
+        private QueueSnapshot _lastQueueSnapshot = new();
+
+        public async Task<TimeSpan> RunCycleAsync(CancellationToken cancellationToken)
         {
-            using var scope = _serviceScopeFactory.CreateScope();
+            using var scope = serviceScopeFactory.CreateScope();
             var downloadQueueService = scope.ServiceProvider.GetRequiredService<IDownloadQueueService>();
+            var nextInterval = _normalPollingInterval;
 
             try
             {
@@ -117,16 +101,16 @@ namespace Listenarr.Infrastructure.HostedServices.Downloads
                 var currentQueue = currentSnapshot.Items;
 
                 // Determine optimal polling interval based on queue activity
-                _currentInterval = DeterminePollingInterval(currentQueue);
+                nextInterval = DeterminePollingInterval(currentQueue);
 
                 // Check if queue has changed
                 if (HasQueueChanged(_lastQueueSnapshot, currentSnapshot))
                 {
-                    _logger.LogDebug("Queue changed, broadcasting update ({Count} items) [polling: {Interval}s]",
-                        currentQueue.Count, _currentInterval.TotalSeconds);
+                    logger.LogDebug("Queue changed, broadcasting update ({Count} items) [polling: {Interval}s]",
+                        currentQueue.Count, nextInterval.TotalSeconds);
 
                     // Broadcast queue update via SignalR
-                    await _hubContext.Clients.All.SendAsync(
+                    await hubContext.Clients.All.SendAsync(
                         "QueueUpdate",
                         currentSnapshot,
                         cancellationToken);
@@ -137,8 +121,10 @@ namespace Listenarr.Infrastructure.HostedServices.Downloads
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
-                _logger.LogError(ex, "Failed to monitor queue");
+                logger.LogError(ex, "Failed to monitor queue");
             }
+
+            return nextInterval;
         }
 
         private TimeSpan DeterminePollingInterval(List<QueueItem> queue)
@@ -225,4 +211,3 @@ namespace Listenarr.Infrastructure.HostedServices.Downloads
         }
     }
 }
-

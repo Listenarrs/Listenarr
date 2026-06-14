@@ -28,10 +28,11 @@ namespace Listenarr.Infrastructure.HostedServices.Downloads
     /// Background service that handles moved downloads to remove them from client
     /// Runs every 10 seconds to check for moved downloads
     /// </summary>
-    public class MovedDownloadProcessor(
-        IServiceScopeFactory scopeFactory,
-        ILogger<MovedDownloadProcessor> logger,
-        IWorkerCycleRunner cycleRunner) : BackgroundService, IMovedDownloadCleanupProcessor
+    public class MovedDownloadCleanupService(
+        IMovedDownloadCleanupProcessor processor,
+        ILogger<MovedDownloadCleanupService> logger,
+        IWorkerCycleRunner cycleRunner,
+        IServiceScopeFactory scopeFactory) : BackgroundService
     {
         private TimeSpan _pollingInterval = TimeSpan.FromSeconds(10);
 
@@ -39,7 +40,6 @@ namespace Listenarr.Infrastructure.HostedServices.Downloads
         {
             logger.LogInformation("CompletedDownloadHandlingService starting");
 
-            // Load polling interval from settings
             try
             {
                 using var scope = scopeFactory.CreateScope();
@@ -77,15 +77,20 @@ namespace Listenarr.Infrastructure.HostedServices.Downloads
             logger.LogInformation("CompletedDownloadHandlingService background task started");
 
             await cycleRunner.RunPeriodicAsync(
-                nameof(MovedDownloadProcessor),
+                nameof(MovedDownloadCleanupService),
                 initialDelay: null,
                 intervalProvider: () => _pollingInterval,
-                runCycle: RunCycleAsync,
+                runCycle: processor.RunCycleAsync,
                 cancellationToken);
 
             logger.LogInformation("CompletedDownloadHandlingService background task stopped");
         }
+    }
 
+    public class MovedDownloadCleanupProcessor(
+        IServiceScopeFactory scopeFactory,
+        ILogger<MovedDownloadCleanupProcessor> logger) : IMovedDownloadCleanupProcessor
+    {
         /// <summary>
         /// Processes deferred removals for downloads that have been imported (Status == Moved)
         /// but couldn't be removed from the client because the torrent hadn't reached its seed limit.

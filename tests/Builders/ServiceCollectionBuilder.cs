@@ -254,8 +254,9 @@ namespace Listenarr.Tests.Builders
             services.AddSingleton<IDownloadClientAdapter, DownloadCLientAdapterMock>();
 
             // Background services
-            services.AddSingleton<DownloadMonitorService>(); // FIXME: This should be a processor
-            services.AddSingleton<IDownloadMonitorProcessor>(sp => sp.GetRequiredService<DownloadMonitorService>());
+            services.AddSingleton<DownloadMonitorProcessor>();
+            services.AddSingleton<IDownloadMonitorProcessor>(sp => sp.GetRequiredService<DownloadMonitorProcessor>());
+            services.AddSingleton<DownloadMonitorService>();
             services.AddSingleton<DownloadProcessingJobProcessor>();
             services.AddSingleton<IDownloadImportProcessor>(sp => sp.GetRequiredService<DownloadProcessingJobProcessor>());
 

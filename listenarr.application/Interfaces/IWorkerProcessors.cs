@@ -82,4 +82,9 @@ namespace Listenarr.Application.Interfaces
     {
         Task ProcessJobAsync(UnmatchedScanJob job, CancellationToken cancellationToken);
     }
+
+    public interface IQueueMonitorProcessor
+    {
+        Task<TimeSpan> RunCycleAsync(CancellationToken cancellationToken);
+    }
 }

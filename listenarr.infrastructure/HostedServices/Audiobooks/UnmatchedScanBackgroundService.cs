@@ -24,45 +24,29 @@ using Listenarr.Application.Interfaces.Repositories;
 
 namespace Listenarr.Infrastructure.HostedServices.Audiobooks
 {
-    public class UnmatchedScanBackgroundService : BackgroundService, IUnmatchedScanProcessor
+    public class UnmatchedScanBackgroundService(
+        IUnmatchedScanQueueService queue,
+        IUnmatchedScanProcessor processor,
+        ILogger<UnmatchedScanBackgroundService> logger,
+        IHubContext<SettingsHub> hubContext,
+        IAppMetricsService metrics) : BackgroundService
     {
-        private static readonly string[] AudioExtensions = { ".m4b", ".mp3", ".flac", ".ogg", ".opus", ".m4a", ".aac", ".wav" };
-        private sealed record StemGroup(string Stem, List<string> Files);
-        private sealed record GroupCandidate(string FilePath, string Stem, bool IsAncillary, string TitleKey, string AuthorKey);
-
-        private readonly IUnmatchedScanQueueService _queue;
-        private readonly IServiceScopeFactory _scopeFactory;
-        private readonly ILogger<UnmatchedScanBackgroundService> _logger;
-        private readonly IHubContext<SettingsHub> _hubContext;
-        private readonly IFfmpegService _ffmpegService;
-
-        public UnmatchedScanBackgroundService(
-            IUnmatchedScanQueueService queue,
-            IServiceScopeFactory scopeFactory,
-            ILogger<UnmatchedScanBackgroundService> logger,
-            IHubContext<SettingsHub> hubContext,
-            IFfmpegService ffmpegService)
-        {
-            _queue = queue;
-            _scopeFactory = scopeFactory;
-            _logger = logger;
-            _hubContext = hubContext;
-            _ffmpegService = ffmpegService;
-        }
-
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            _logger.LogInformation("UnmatchedScanBackgroundService started");
+            logger.LogInformation("UnmatchedScanBackgroundService started");
             try
             {
-                await foreach (var job in _queue.Reader.ReadAllAsync(stoppingToken))
+                await foreach (var job in queue.Reader.ReadAllAsync(stoppingToken))
                 {
                     try
                     {
-                        await ProcessJobAsync(job, stoppingToken);
+                        metrics.Increment("worker.unmatchedscanbackgroundservice.job.started");
+                        await processor.ProcessJobAsync(job, stoppingToken);
+                        metrics.Increment("worker.unmatchedscanbackgroundservice.job.completed");
                     }
                     catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                     {
+                        metrics.Increment("worker.unmatchedscanbackgroundservice.job.skipped");
                         throw;
                     }
                     catch (IOException ex)
@@ -91,26 +75,61 @@ namespace Listenarr.Infrastructure.HostedServices.Audiobooks
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                     {
-                        _logger.LogError(ex, "Unexpected unmatched scan job {JobId} failure", job.Id);
+                        metrics.Increment("worker.unmatchedscanbackgroundservice.job.failed");
+                        logger.LogError(ex, "Unexpected unmatched scan job {JobId} failure", job.Id);
                         throw;
                     }
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
-                _logger.LogInformation("UnmatchedScanBackgroundService stopping due to host shutdown");
+                logger.LogInformation("UnmatchedScanBackgroundService stopping due to host shutdown");
             }
         }
 
         private async Task HandleJobFailureAsync(Guid jobId, Exception ex, CancellationToken stoppingToken)
         {
-            _logger.LogError(ex, "Unmatched scan job {JobId} failed", jobId);
-            _queue.UpdateJob(jobId, "Failed", error: ex.Message);
+            metrics.Increment("worker.unmatchedscanbackgroundservice.job.failed");
+            logger.LogError(ex, "Unmatched scan job {JobId} failed", jobId);
+            queue.UpdateJob(jobId, "Failed", error: ex.Message);
 
-            await _hubContext.Clients.All.SendAsync(
+            await hubContext.Clients.All.SendAsync(
                 "UnmatchedScanComplete",
                 new { jobId = jobId.ToString(), count = 0, error = ex.Message },
                 stoppingToken);
+        }
+
+        internal static List<List<string>> BuildGroupedFilesForFolder(
+            IEnumerable<string> files,
+            string folderPath,
+            IReadOnlyDictionary<string, PathParsedMetadata>? embeddedTagsByFile = null) =>
+            UnmatchedScanProcessor.BuildGroupedFilesForFolder(files, folderPath, embeddedTagsByFile);
+    }
+
+    public class UnmatchedScanProcessor : IUnmatchedScanProcessor
+    {
+        private static readonly string[] AudioExtensions = { ".m4b", ".mp3", ".flac", ".ogg", ".opus", ".m4a", ".aac", ".wav" };
+        private sealed record StemGroup(string Stem, List<string> Files);
+        private sealed record GroupCandidate(string FilePath, string Stem, bool IsAncillary, string TitleKey, string AuthorKey);
+
+        private readonly IUnmatchedScanQueueService _queue;
+        private readonly IServiceScopeFactory _scopeFactory;
+        private readonly ILogger<UnmatchedScanProcessor> _logger;
+        private readonly IHubContext<SettingsHub> _hubContext;
+        private readonly IFfmpegService _ffmpegService;
+
+        public UnmatchedScanProcessor(
+            IUnmatchedScanQueueService queue,
+            IServiceScopeFactory scopeFactory,
+            ILogger<UnmatchedScanProcessor> logger,
+            IHubContext<SettingsHub> hubContext,
+            IFfmpegService ffmpegService)
+        {
+            _queue = queue;
+            _scopeFactory = scopeFactory;
+            _logger = logger;
+            _hubContext = hubContext;
+            _ffmpegService = ffmpegService;
         }
 
         public async Task ProcessJobAsync(UnmatchedScanJob job, CancellationToken cancellationToken)

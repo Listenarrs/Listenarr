@@ -24,79 +24,74 @@ namespace Listenarr.Infrastructure.Ffmpeg
     /// Background service that ensures ffprobe is installed without blocking application startup.
     /// It will attempt installation once and broadcast a SignalR message when finished.
     /// </summary>
-    public class FfmpegInstallBackgroundService : BackgroundService, IFfmpegInstallProcessor
+    public class FfmpegInstallBackgroundService(
+        IFfmpegInstallProcessor processor,
+        IHubContext<DownloadHub> hubContext,
+        ILogger<FfmpegInstallBackgroundService> logger) : BackgroundService
     {
-        private readonly IFfmpegService _ffmpegService;
-        private readonly IHubContext<DownloadHub> _hubContext;
-        private readonly ILogger<FfmpegInstallBackgroundService> _logger;
-
-        public FfmpegInstallBackgroundService(IFfmpegService ffmpegService, IHubContext<DownloadHub> hubContext, ILogger<FfmpegInstallBackgroundService> logger)
-        {
-            _ffmpegService = ffmpegService;
-            _hubContext = hubContext;
-            _logger = logger;
-        }
-
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            // Delay a little to allow the app to finish startup wiring (optional)
             try
             {
-                _logger.LogInformation("FFmpeg installer background service started. Will attempt installation in the background if needed.");
+                logger.LogInformation("FFmpeg installer background service started. Will attempt installation in the background if needed.");
 
-                await EnsureInstalledAsync(stoppingToken);
+                await processor.EnsureInstalledAsync(stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
-                // Shutdown requested
-                _logger.LogDebug("FFmpeg installer background service canceled due to host shutdown.");
+                logger.LogDebug("FFmpeg installer background service canceled due to host shutdown.");
             }
             catch (OperationCanceledException ex)
             {
-                // Treat timeout/cancellation from installer HTTP calls as non-fatal so this hosted
-                // service cannot stop the entire application host.
-                _logger.LogWarning(ex, "FFmpeg installer background service canceled/timed out; continuing without bundled ffprobe.");
+                logger.LogWarning(ex, "FFmpeg installer background service canceled/timed out; continuing without bundled ffprobe.");
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
-                _logger.LogWarning(ex, "Error while attempting background ffprobe installation");
+                logger.LogWarning(ex, "Error while attempting background ffprobe installation");
                 try
                 {
-                    await _hubContext.Clients.All.SendAsync("FfmpegInstallStatus", new { status = "Error" });
+                    await hubContext.Clients.All.SendAsync("FfmpegInstallStatus", new { status = "Error" }, cancellationToken: stoppingToken);
                 }
-                catch (Exception caughtEx_1) when (caughtEx_1 is not OperationCanceledException && caughtEx_1 is not OutOfMemoryException && caughtEx_1 is not StackOverflowException)
+                catch (Exception caughtEx) when (caughtEx is not OperationCanceledException && caughtEx is not OutOfMemoryException && caughtEx is not StackOverflowException)
                 {
-                    System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                    logger.LogDebug(caughtEx, "Failed to broadcast ffprobe install error message");
                 }
             }
         }
+    }
+
+    public class FfmpegInstallProcessor(
+        IFfmpegService ffmpegService,
+        IHubContext<DownloadHub> hubContext,
+        ILogger<FfmpegInstallProcessor> logger) : IFfmpegInstallProcessor
+    {
 
         public async Task EnsureInstalledAsync(CancellationToken cancellationToken)
         {
-            var path = await _ffmpegService.EnsureFfprobeInstalledAsync();
+            var path = await ffmpegService.EnsureFfprobeInstalledAsync();
 
             if (!string.IsNullOrEmpty(path))
             {
-                _logger.LogInformation("ffprobe installed/available at {Path}", path);
+                logger.LogInformation("ffprobe installed/available at {Path}", path);
                 try
                 {
-                    await _hubContext.Clients.All.SendAsync("FfmpegInstallStatus", new { status = "Installed", path }, cancellationToken: cancellationToken);
+                    await hubContext.Clients.All.SendAsync("FfmpegInstallStatus", new { status = "Installed", path }, cancellationToken: cancellationToken);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                 {
-                    _logger.LogDebug(ex, "Failed to broadcast ffprobe install success message");
+                    logger.LogDebug(ex, "Failed to broadcast ffprobe install success message");
                 }
             }
             else
             {
-                _logger.LogWarning("ffprobe was not installed or auto-install disabled");
+                logger.LogWarning("ffprobe was not installed or auto-install disabled");
                 try
                 {
-                    await _hubContext.Clients.All.SendAsync("FfmpegInstallStatus", new { status = "NotInstalled" }, cancellationToken: cancellationToken);
+                    await hubContext.Clients.All.SendAsync("FfmpegInstallStatus", new { status = "NotInstalled" }, cancellationToken: cancellationToken);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                 {
-                    _logger.LogDebug(ex, "Failed to broadcast ffprobe install failure message");
+                    logger.LogDebug(ex, "Failed to broadcast ffprobe install failure message");
                 }
             }
         }
