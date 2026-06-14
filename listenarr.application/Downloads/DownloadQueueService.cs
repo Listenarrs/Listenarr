@@ -33,7 +33,7 @@ namespace Listenarr.Application.Downloads
         IMemoryCache cache,
         IConfigurationService configurationService,
         IDownloadRepository downloadRepository,
-        IDownloadProcessingJobRepository downloadProcessingJobRepository,
+        DownloadQueueCandidateLoader candidateLoader,
         IDownloadClientGateway clientGateway,
         IAppMetricsService metrics,
         ILogger<DownloadQueueService> logger) : IDownloadQueueService
@@ -57,70 +57,10 @@ namespace Listenarr.Application.Downloads
 
             var enabledClients = downloadClients.Where(c => c.IsEnabled).ToList();
 
-            List<Download> listenarrDownloads;
-            List<Download> allDownloadsForMatching;
-            var allKnownClientItemIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            {
-                var queueDisplayCandidates = await downloadRepository.GetQueueDisplayCandidatesAsync();
-                var queueMatchingCandidates = await downloadRepository.GetQueueMatchingCandidatesAsync();
-                var knownClientItemIds = await downloadRepository.GetKnownClientItemIdsAsync();
-
-                logger.LogInformation(
-                    "Loaded {DisplayCount} queue display candidates, {MatchingCount} queue matching candidates, and {KnownClientIdCount} known client IDs",
-                    queueDisplayCandidates.Count,
-                    queueMatchingCandidates.Count,
-                    knownClientItemIds.Count);
-
-                var ddlDownloads = queueDisplayCandidates.Where(d => d.DownloadClientId == "DDL").ToList();
-                var ddlToShow = new List<Download>();
-
-                if (ddlDownloads.Any())
-                {
-                    var ddlCompleted = ddlDownloads.Where(d => d.Status == DownloadStatus.Completed).ToList();
-                    if (ddlCompleted.Any())
-                    {
-                        var completedIds = ddlCompleted.Select(d => d.Id).ToList();
-                        var pendingJobs = await downloadProcessingJobRepository.GetPendingDownloadIdsAsync(completedIds);
-                        var allJobDownloads = await downloadProcessingJobRepository.GetAllJobDownloadIdsAsync(completedIds);
-
-                        var ddlCompletedToShow = ddlCompleted
-                            .Where(d => pendingJobs.Contains(d.Id) || !allJobDownloads.Contains(d.Id))
-                            .ToList();
-
-                        ddlToShow.AddRange(ddlCompletedToShow);
-                        logger.LogInformation(
-                            "DDL pending jobs count: {PendingJobs}, All job downloads count: {AllJobs}, DDL completed to show: {CompletedToShow}",
-                            pendingJobs.Count,
-                            allJobDownloads.Count,
-                            ddlCompletedToShow.Count);
-                    }
-
-                    ddlToShow.AddRange(ddlDownloads.Where(d =>
-                        d.Status != DownloadStatus.Completed &&
-                        d.Status != DownloadStatus.Moved));
-                }
-
-                var externalDownloads = queueDisplayCandidates
-                    .Where(d => d.DownloadClientId != "DDL")
-                    .ToList();
-
-                listenarrDownloads = ddlToShow.Concat(externalDownloads).ToList();
-
-                allDownloadsForMatching = queueMatchingCandidates;
-
-                foreach (var clientItemId in knownClientItemIds)
-                {
-                    allKnownClientItemIds.Add(clientItemId);
-                }
-
-                logger.LogDebug(
-                    "Final filtering result: {FinalCount} downloads to include in queue filtering ({DdlCount} DDL, {ExternalCount} external), {MatchingCount} in matching pool",
-                    listenarrDownloads.Count,
-                    ddlToShow.Count,
-                    externalDownloads.Count,
-                    allDownloadsForMatching.Count);
-            }
+            var candidateSet = await candidateLoader.LoadAsync();
+            var listenarrDownloads = candidateSet.VisibleDownloads;
+            var allDownloadsForMatching = candidateSet.MatchingDownloads;
+            var allKnownClientItemIds = candidateSet.KnownClientItemIds;
 
             ApplicationSettings? appSettings = await cache.GetOrCreateAsync("ApplicationSettings", async entry =>
             {

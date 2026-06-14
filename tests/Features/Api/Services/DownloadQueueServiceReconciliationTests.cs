@@ -45,12 +45,16 @@ namespace Listenarr.Tests.Features.Api.Services
             httpFactory.Setup(h => h.CreateClient(It.IsAny<string>())).Returns(httpClient);
             var scopeProvider = Track(new ServiceCollection().BuildServiceProvider());
             var scopeFactory = scopeProvider.GetRequiredService<IServiceScopeFactory>();
+            var candidateLoader = new DownloadQueueCandidateLoader(
+                downloadRepository,
+                processingJobRepository,
+                NullLogger<DownloadQueueCandidateLoader>.Instance);
 
             var service = new DownloadQueueService(
                 resolvedMemoryCache,
                 configurationService,
                 downloadRepository,
-                processingJobRepository,
+                candidateLoader,
                 clientGateway,
                 metrics,
                 NullLogger<DownloadQueueService>.Instance);
