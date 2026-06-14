@@ -38,6 +38,8 @@ namespace Listenarr.Infrastructure.Adapters
         private readonly SabnzbdRequestBuilder _requestBuilder;
         private readonly SabnzbdDownloadPollingWorkflow _downloadPollingWorkflow;
         private readonly SabnzbdRemovalWorkflow _removalWorkflow;
+        private readonly SabnzbdQueueFetchWorkflow _queueFetchWorkflow;
+        private readonly SabnzbdImportItemResolver _importItemResolver;
 
         public SabnzbdAdapter(
             IHttpClientFactory httpFactory,
@@ -52,6 +54,8 @@ namespace Listenarr.Infrastructure.Adapters
             _requestBuilder = new SabnzbdRequestBuilder();
             _downloadPollingWorkflow = new SabnzbdDownloadPollingWorkflow(_httpFactory, _requestBuilder, _appMetricsService, _logger, ClientType);
             _removalWorkflow = new SabnzbdRemovalWorkflow(_httpFactory, _requestBuilder, _logger, ClientType);
+            _queueFetchWorkflow = new SabnzbdQueueFetchWorkflow(_httpFactory, _requestBuilder, _logger, ClientType);
+            _importItemResolver = new SabnzbdImportItemResolver(_httpFactory, _requestBuilder, _logger, ClientType);
         }
 
         public async Task<(bool Success, string Message)> TestConnectionAsync(DownloadClientConfiguration client, CancellationToken ct = default)
@@ -185,123 +189,7 @@ namespace Listenarr.Infrastructure.Adapters
 
         public async Task<List<QueueItem>> GetQueueAsync(DownloadClientConfiguration client, CancellationToken ct = default)
         {
-            var items = new List<QueueItem>();
-            if (client == null) return items;
-
-            var configuredCategory = DownloadClientCategoryFilter.GetConfiguredCategory(client);
-
-            try
-            {
-                var requestContext = _requestBuilder.CreateContext(client);
-                if (!requestContext.HasApiKey)
-                {
-                    _logger.LogWarning("SABnzbd API key not configured for {ClientName}", client.Name);
-                    return items;
-                }
-
-                var requestUrl = _requestBuilder.BuildUrl(requestContext, new Dictionary<string, string>
-                {
-                    ["mode"] = "queue",
-                    ["output"] = "json"
-                });
-                _logger.LogDebug("SABnzbd queue request (redacted): {Url}", LogRedaction.RedactText(requestUrl, _requestBuilder.BuildSensitiveValues(requestContext)));
-
-                var http = _httpFactory.CreateClient(ClientType);
-                var response = await http.GetAsync(requestUrl, ct);
-                if (!response.IsSuccessStatusCode)
-                {
-                    _logger.LogWarning("SABnzbd queue request failed with status {Status}", response.StatusCode);
-                    return items;
-                }
-
-                var jsonContent = await response.Content.ReadAsStringAsync(ct);
-                if (string.IsNullOrWhiteSpace(jsonContent))
-                {
-                    _logger.LogWarning("SABnzbd returned empty response for client {ClientName}", LogRedaction.SanitizeText(client.Name));
-                    return items;
-                }
-
-                var doc = JsonDocument.Parse(jsonContent);
-                if (!doc.RootElement.TryGetProperty("queue", out var queue)) return items;
-                if (!queue.TryGetProperty("slots", out var slots) || slots.ValueKind != JsonValueKind.Array) return items;
-
-                var speed = 0.0;
-                if (queue.TryGetProperty("speed", out var speedProp))
-                {
-                    speed = SabnzbdResponseMapper.ParseSpeed(speedProp.GetString() ?? "0");
-                }
-
-                foreach (var slot in slots.EnumerateArray())
-                {
-                    try
-                    {
-                        var queueItem = SabnzbdResponseMapper.MapQueueSlotToQueueItem(client, slot, configuredCategory ?? string.Empty, speed);
-                        if (queueItem != null)
-                        {
-                            items.Add(queueItem);
-                        }
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                    {
-                        _logger.LogError(ex, "Error parsing SABnzbd queue item");
-                    }
-                }
-                _logger.LogInformation("Retrieved {Count} items from SABnzbd active queue", items.Count);
-
-                // Also fetch completed items from SABnzbd history — SABnzbd moves finished
-                // downloads out of the queue into history, so without this the
-                // CompletedDownloadHandlingService can never find them for import/removal.
-                var existingNzoIds = new HashSet<string>(items.Select(i => i.Id), StringComparer.OrdinalIgnoreCase);
-                try
-                {
-                    var historyUrl = _requestBuilder.BuildUrl(requestContext, new Dictionary<string, string>
-                    {
-                        ["mode"] = "history",
-                        ["output"] = "json",
-                        ["limit"] = "30"
-                    });
-                    var historyResp = await http.GetAsync(historyUrl, ct);
-                    if (historyResp.IsSuccessStatusCode)
-                    {
-                        var historyText = await historyResp.Content.ReadAsStringAsync(ct);
-                        if (!string.IsNullOrWhiteSpace(historyText))
-                        {
-                            var histDoc = JsonDocument.Parse(historyText);
-                            if (histDoc.RootElement.TryGetProperty("history", out var history) &&
-                                history.TryGetProperty("slots", out var histSlots) &&
-                                histSlots.ValueKind == JsonValueKind.Array)
-                            {
-                                foreach (var slot in histSlots.EnumerateArray())
-                                {
-                                    try
-                                    {
-                                        var historyItem = SabnzbdResponseMapper.MapHistorySlotToQueueItem(client, slot, configuredCategory ?? string.Empty, existingNzoIds);
-                                        if (historyItem != null)
-                                        {
-                                            items.Add(historyItem);
-                                        }
-                                    }
-                                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                                    {
-                                        _logger.LogDebug(ex, "Error parsing SABnzbd history item");
-                                    }
-                                }
-                                _logger.LogInformation("Retrieved {Count} total items from SABnzbd (queue + history)", items.Count);
-                            }
-                        }
-                    }
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                {
-                    _logger.LogDebug(ex, "Failed to fetch SABnzbd history for queue enrichment (non-fatal)");
-                }
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogError(ex, "Error getting SABnzbd queue");
-            }
-
-            return items;
+            return await _queueFetchWorkflow.GetQueueAsync(client, ct);
         }
 
         public async Task<List<(string Id, string Name)>> GetRecentHistoryAsync(DownloadClientConfiguration client, int limit = 100, CancellationToken ct = default)
@@ -430,94 +318,7 @@ namespace Listenarr.Infrastructure.Adapters
             DownloadClientItem? previousAttempt = null,
             CancellationToken ct = default)
         {
-            // Clone to avoid mutating the original
-            var result = item.Clone();
-
-            // If OutputPath is already set and exists, use it
-            if (!string.IsNullOrEmpty(result.OutputPath))
-            {
-                var localPath = result.OutputPath;
-                if (SabnzbdImportPathResolver.IsExistingLocalPath(localPath))
-                {
-                    result.OutputPath = localPath;
-                    return result;
-                }
-            }
-
-            try
-            {
-                // Query SABnzbd history for the download
-                var requestContext = _requestBuilder.CreateContext(client);
-                if (!requestContext.HasApiKey)
-                {
-                    _logger.LogWarning("SABnzbd API key not configured for client {ClientId}", client.Id);
-                    return result;
-                }
-
-                // Query history with nzo_id filter
-                var historyUrl = _requestBuilder.BuildUrl(requestContext, new Dictionary<string, string>
-                {
-                    ["mode"] = "history",
-                    ["output"] = "json"
-                });
-                var http = _httpFactory.CreateClient(ClientType);
-                var historyResp = await http.GetAsync(historyUrl, ct);
-
-                if (!historyResp.IsSuccessStatusCode)
-                {
-                    _logger.LogWarning("Failed to query SABnzbd history for download {NzoId}", item.DownloadId);
-                    return result;
-                }
-
-                var historyText = await historyResp.Content.ReadAsStringAsync(ct);
-                if (string.IsNullOrWhiteSpace(historyText))
-                {
-                    return result;
-                }
-
-                var doc = JsonDocument.Parse(historyText);
-                if (!doc.RootElement.TryGetProperty("history", out var history) ||
-                    !history.TryGetProperty("slots", out var slots) ||
-                    slots.ValueKind != JsonValueKind.Array)
-                {
-                    _logger.LogWarning("Invalid SABnzbd history response format");
-                    return result;
-                }
-
-                // Find matching history entry (case-insensitive comparison)
-                foreach (var slot in slots.EnumerateArray())
-                {
-                    var nzoId = slot.TryGetProperty("nzo_id", out var nzo) ? nzo.GetString() ?? string.Empty : string.Empty;
-                    if (!string.Equals(nzoId, item.DownloadId, StringComparison.OrdinalIgnoreCase)) continue;
-
-                    // Extract storage path
-                    var storage = SabnzbdImportPathResolver.GetStoragePath(slot);
-                    if (string.IsNullOrEmpty(storage))
-                    {
-                        _logger.LogWarning("No storage path found for SABnzbd download {NzoId}", item.DownloadId);
-                        return result;
-                    }
-
-                    // Apply path mapping
-                    var localContentPath = storage;
-                    result.OutputPath = localContentPath;
-
-                    _logger.LogDebug(
-                        "Resolved SABnzbd content path for {NzoId}: {ContentPath}",
-                        item.DownloadId,
-                        localContentPath);
-
-                    return result;
-                }
-
-                _logger.LogWarning("Download {NzoId} not found in SABnzbd history", item.DownloadId);
-                return result;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogWarning(ex, "Error resolving import item for SABnzbd download {NzoId}", item.DownloadId);
-                return result;
-            }
+            return await _importItemResolver.GetImportItemAsync(client, item, ct);
         }
 
         /// <summary>
@@ -532,88 +333,7 @@ namespace Listenarr.Infrastructure.Adapters
             QueueItem? previousAttempt = null,
             CancellationToken ct = default)
         {
-            // Clone to avoid mutating the original
-            var result = queueItem.Clone();
-
-            // If ContentPath is already set and exists, use it
-            if (!string.IsNullOrEmpty(result.ContentPath))
-            {
-                var localPath = result.ContentPath;
-                if (SabnzbdImportPathResolver.IsExistingLocalPath(localPath))
-                {
-                    result.ContentPath = localPath;
-                    return result;
-                }
-            }
-
-            try
-            {
-                // Query SABnzbd history for the download
-                var requestContext = _requestBuilder.CreateContext(client);
-                if (!requestContext.HasApiKey)
-                {
-                    _logger.LogWarning("SABnzbd API key not configured for client {ClientId}", client.Id);
-                    return result;
-                }
-
-                // Query history with nzo_id filter
-                var historyUrl = _requestBuilder.BuildUrl(requestContext, new Dictionary<string, string>
-                {
-                    ["mode"] = "history",
-                    ["output"] = "json"
-                });
-                var http = _httpFactory.CreateClient(ClientType);
-                var historyResp = await http.GetAsync(historyUrl, ct);
-
-                if (!historyResp.IsSuccessStatusCode)
-                {
-                    _logger.LogWarning("Failed to query SABnzbd history for download {NzoId}", queueItem.Id);
-                    return result;
-                }
-
-                var historyText = await historyResp.Content.ReadAsStringAsync(ct);
-                if (string.IsNullOrWhiteSpace(historyText))
-                {
-                    return result;
-                }
-
-                var doc = JsonDocument.Parse(historyText);
-                if (!doc.RootElement.TryGetProperty("history", out var history) ||
-                    !history.TryGetProperty("slots", out var slots) ||
-                    slots.ValueKind != JsonValueKind.Array)
-                {
-                    _logger.LogWarning("Invalid SABnzbd history response format");
-                    return result;
-                }
-
-                // Find matching history entry
-                foreach (var slot in slots.EnumerateArray())
-                {
-                    var nzoId = slot.TryGetProperty("nzo_id", out var nzo) ? nzo.GetString() ?? string.Empty : string.Empty;
-                    if (nzoId != queueItem.Id) continue;
-
-                    // Extract storage path
-                    var storage = SabnzbdImportPathResolver.GetStoragePath(slot);
-                    if (string.IsNullOrEmpty(storage))
-                    {
-                        _logger.LogWarning("No storage path found for SABnzbd download {NzoId}", queueItem.Id);
-                        return result;
-                    }
-
-                    result.ContentPath = storage;
-                    _logger.LogDebug($"Resolved SABnzbd content path for {queueItem.Id}: {result.ContentPath}");
-
-                    return result;
-                }
-
-                _logger.LogWarning("Download {NzoId} not found in SABnzbd history", queueItem.Id);
-                return result;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogWarning(ex, "Error resolving import item for SABnzbd download {NzoId}", queueItem.Id);
-                return result;
-            }
+            return await _importItemResolver.GetImportItemAsync(client, queueItem, ct);
         }
 
         public async Task<List<Download>> FetchDownloadsAsync(
