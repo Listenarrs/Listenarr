@@ -41,7 +41,8 @@ namespace Listenarr.Application.Downloads
         IDownloadHistoryService downloadHistoryService,
         DownloadTypeResolver downloadTypeResolver,
         DownloadClientSelector downloadClientSelector,
-        DownloadCachedTorrentStore cachedTorrentStore) : IDownloadService
+        DownloadCachedTorrentStore cachedTorrentStore,
+        DirectDownloadWorkflow directDownloadWorkflow) : IDownloadService
     {
         // Cache expiration constants
         private const int QueueCacheExpirationSeconds = 10;
@@ -611,41 +612,7 @@ namespace Listenarr.Application.Downloads
 
         private async Task<string> DownloadDirectlyAsync(SearchResult searchResult, int? audiobookId)
         {
-            // Create a Download record in the database so it's tracked like other downloads.
-            try
-            {
-                var id = Guid.NewGuid().ToString();
-                var download = new Download
-                {
-                    Id = id,
-                    AudiobookId = audiobookId,
-                    Title = searchResult.Title,
-                    Language = searchResult.Language,
-                    OriginalUrl = searchResult.TorrentUrl ?? searchResult.NzbUrl ?? searchResult.MagnetLink ?? string.Empty,
-                    Progress = 0,
-                    TotalSize = searchResult.Size,
-                    DownloadedSize = 0,
-                    DownloadPath = string.Empty,
-                    FinalPath = string.Empty,
-                    StartedAt = DateTime.UtcNow,
-                    DownloadClientId = "DDL",
-                    Metadata = new Dictionary<string, object>
-                    {
-                        ["Source"] = searchResult.Source ?? string.Empty,
-                        ["Quality"] = searchResult.Quality ?? string.Empty,
-                        ["Language"] = searchResult.Language ?? string.Empty,
-                        ["DownloadType"] = "DDL"
-                    }
-                };
-
-                await downloadRepository.AddAsync(download);
-                return id;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                logger.LogWarning(ex, "DownloadDirectlyAsync: failed to create DDL download record");
-                return Guid.NewGuid().ToString();
-            }
+            return await directDownloadWorkflow.CreateTrackedDownloadAsync(searchResult, audiobookId);
         }
 
         private async Task LogDownloadHistory(Audiobook audiobook, string source, SearchResult result)

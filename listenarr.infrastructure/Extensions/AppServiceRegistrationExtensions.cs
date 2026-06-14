@@ -94,6 +94,7 @@ namespace Listenarr.Infrastructure.Extensions
             services.AddScoped<DownloadTypeResolver>();
             services.AddScoped<DownloadClientSelector>();
             services.AddScoped<DownloadCachedTorrentStore>();
+            services.AddScoped<DirectDownloadWorkflow>();
             // Queue service extracted from DownloadService to encapsulate queue-building and filtering
             services.AddScoped<IDownloadQueueService, DownloadQueueService>();
             services.AddScoped<IOpenLibraryService, OpenLibraryService>();
