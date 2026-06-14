@@ -38,6 +38,7 @@ namespace Listenarr.Infrastructure.Adapters
         private readonly TransmissionRpcClient _rpcClient;
         private readonly TransmissionDownloadPollingWorkflow _downloadPollingWorkflow;
         private readonly TransmissionRemovalWorkflow _removalWorkflow;
+        private readonly TransmissionImportItemResolver _importItemResolver;
 
         public TransmissionAdapter(IHttpClientFactory httpClientFactory, ITorrentFileDownloader torrentFileDownloader, ILogger<TransmissionAdapter> logger)
         {
@@ -48,6 +49,7 @@ namespace Listenarr.Infrastructure.Adapters
             _rpcClient = new TransmissionRpcClient(_httpClientFactory, ClientType, _logger);
             _downloadPollingWorkflow = new TransmissionDownloadPollingWorkflow(_httpClientFactory, _logger, ClientType);
             _removalWorkflow = new TransmissionRemovalWorkflow(_rpcClient, _logger);
+            _importItemResolver = new TransmissionImportItemResolver(_rpcClient, _logger);
         }
 
         public async Task<(bool Success, string Message)> TestConnectionAsync(DownloadClientConfiguration client, CancellationToken ct = default)
@@ -315,79 +317,7 @@ namespace Listenarr.Infrastructure.Adapters
             DownloadClientItem? previousAttempt = null,
             CancellationToken ct = default)
         {
-            // Clone to avoid mutating the original
-            var result = item.Clone();
-
-            // If OutputPath is already set and exists, use it
-            if (!string.IsNullOrEmpty(result.OutputPath))
-            {
-                var localPath = result.OutputPath;
-                if (TransmissionImportPathResolver.IsExistingLocalPath(localPath))
-                {
-                    result.OutputPath = localPath;
-                    return result;
-                }
-            }
-
-            // Query Transmission for the torrent details
-            var payload = new
-            {
-                method = "torrent-get",
-                arguments = new
-                {
-                    ids = TransmissionRequestPlanner.ParseTransmissionIds(item.DownloadId),
-                    fields = new[] { "id", "name", "downloadDir" }
-                },
-                tag = 5
-            };
-
-            try
-            {
-                var response = await _rpcClient.InvokeAsync(client, payload, ct);
-                if (!response.TryGetProperty("arguments", out var args) ||
-                    !args.TryGetProperty("torrents", out var torrents) ||
-                    torrents.ValueKind != JsonValueKind.Array)
-                {
-                    _logger.LogWarning("Failed to query Transmission for torrent {TorrentId}", item.DownloadId);
-                    return result;
-                }
-
-                var torrent = torrents.EnumerateArray().FirstOrDefault();
-                if (torrent.ValueKind == JsonValueKind.Undefined)
-                {
-                    _logger.LogWarning("Torrent {TorrentId} not found in Transmission", item.DownloadId);
-                    return result;
-                }
-
-                var downloadDir = torrent.TryGetProperty("downloadDir", out var dirProp) ? dirProp.GetString() : null;
-                var name = torrent.TryGetProperty("name", out var nameProp) ? nameProp.GetString() : null;
-
-                if (string.IsNullOrEmpty(downloadDir) || string.IsNullOrEmpty(name))
-                {
-                    _logger.LogWarning("Missing downloadDir or name for torrent {TorrentId}", item.DownloadId);
-                    return result;
-                }
-
-                // Transmission stores files as: downloadDir/name.
-                var contentPath = TransmissionImportPathResolver.BuildContentPath(downloadDir, name)!;
-
-                // Apply path mapping
-                // FIXME: Path mapping should be the responsability of the download processors
-                var localContentPath = contentPath;
-                result.OutputPath = localContentPath;
-
-                _logger.LogDebug(
-                    "Resolved Transmission content path for {TorrentId}: {ContentPath}",
-                    item.DownloadId,
-                    localContentPath);
-
-                return result;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogWarning(ex, "Error resolving import item for Transmission torrent {TorrentId}", item.DownloadId);
-                return result;
-            }
+            return await _importItemResolver.GetImportItemAsync(client, item, ct);
         }
 
         /// <summary>
@@ -402,86 +332,7 @@ namespace Listenarr.Infrastructure.Adapters
             QueueItem? previousAttempt = null,
             CancellationToken ct = default)
         {
-            // Clone to avoid mutating the original
-            var result = queueItem.Clone();
-            string? resolvedExistingContentPath = null;
-
-            // If ContentPath is already set and exists, use it
-            if (!string.IsNullOrEmpty(result.ContentPath))
-            {
-                var localPath = result.ContentPath;
-                if (TransmissionImportPathResolver.IsExistingLocalPath(localPath))
-                {
-                    result.ContentPath = localPath;
-                    resolvedExistingContentPath = localPath;
-                }
-            }
-
-            // Query Transmission for the torrent details
-            var payload = new
-            {
-                method = "torrent-get",
-                arguments = new
-                {
-                    ids = TransmissionRequestPlanner.ParseTransmissionIds(queueItem.Id),
-                    fields = new[] { "id", "name", "downloadDir", "files" }
-                },
-                tag = 5
-            };
-
-            try
-            {
-                var response = await _rpcClient.InvokeAsync(client, payload, ct);
-                if (!response.TryGetProperty("arguments", out var args) ||
-                    !args.TryGetProperty("torrents", out var torrents) ||
-                    torrents.ValueKind != JsonValueKind.Array)
-                {
-                    _logger.LogWarning("Failed to query Transmission for torrent {TorrentId}", queueItem.Id);
-                    return result;
-                }
-
-                var torrent = torrents.EnumerateArray().FirstOrDefault();
-                if (torrent.ValueKind == JsonValueKind.Undefined)
-                {
-                    _logger.LogWarning("Torrent {TorrentId} not found in Transmission", queueItem.Id);
-                    return result;
-                }
-
-                var downloadDir = torrent.TryGetProperty("downloadDir", out var dirProp) ? dirProp.GetString() : null;
-                var name = torrent.TryGetProperty("name", out var nameProp) ? nameProp.GetString() : null;
-
-                if ((string.IsNullOrEmpty(downloadDir) || string.IsNullOrEmpty(name)) && string.IsNullOrWhiteSpace(resolvedExistingContentPath))
-                {
-                    _logger.LogWarning("Missing downloadDir or name for torrent {TorrentId}", queueItem.Id);
-                    return result;
-                }
-
-                // Transmission stores files as: downloadDir/name
-                var contentPath = TransmissionImportPathResolver.BuildContentPath(downloadDir, name, resolvedExistingContentPath);
-                string? localContentPath = resolvedExistingContentPath;
-                if (!string.IsNullOrWhiteSpace(contentPath))
-                {
-                    localContentPath = contentPath;
-                    result.ContentPath = localContentPath;
-                }
-
-                if (torrent.TryGetProperty("files", out var filesElement))
-                {
-                    result.SourceFiles = TransmissionImportPathResolver.BuildSourceFiles(downloadDir, filesElement);
-                }
-
-                _logger.LogDebug(
-                    "Resolved Transmission content path for {TorrentId}: {ContentPath}",
-                    queueItem.Id,
-                    localContentPath);
-
-                return result;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogWarning(ex, "Error resolving import item for Transmission torrent {TorrentId}", queueItem.Id);
-                return result;
-            }
+            return await _importItemResolver.GetImportItemAsync(client, queueItem, ct);
         }
 
         private Task<DownloadClientItem> MapToDownloadClientItemAsync(
