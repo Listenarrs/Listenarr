@@ -55,6 +55,7 @@ namespace Listenarr.Api.Controllers
         private readonly IStartupConfigService _startupConfigService;
         private readonly IApplicationVersionService _applicationVersionService;
         private readonly ProwlarrIndexerUpsertWorkflow _indexerUpsertWorkflow;
+        private readonly ProwlarrIndexerNotificationWorkflow _indexerNotificationWorkflow;
 
         // Preserve the existing private reflection seam used by controller tests to reset toast state.
         private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, DateTime> _lastToastTimes = ProwlarrToastThrottler.LastToastTimes;
@@ -68,7 +69,8 @@ namespace Listenarr.Api.Controllers
             IToastService toastService,
             IStartupConfigService startupConfigService,
             IApplicationVersionService applicationVersionService,
-            ProwlarrIndexerUpsertWorkflow? indexerUpsertWorkflow = null)
+            ProwlarrIndexerUpsertWorkflow? indexerUpsertWorkflow = null,
+            ProwlarrIndexerNotificationWorkflow? indexerNotificationWorkflow = null)
         {
             _logger = logger;
             _indexerRepository = indexerRepository;
@@ -80,6 +82,10 @@ namespace Listenarr.Api.Controllers
             _indexerUpsertWorkflow = indexerUpsertWorkflow ?? new ProwlarrIndexerUpsertWorkflow(
                 indexerRepository,
                 Microsoft.Extensions.Logging.Abstractions.NullLogger<ProwlarrIndexerUpsertWorkflow>.Instance);
+            _indexerNotificationWorkflow = indexerNotificationWorkflow ?? new ProwlarrIndexerNotificationWorkflow(
+                hubBroadcaster,
+                toastService,
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<ProwlarrIndexerNotificationWorkflow>.Instance);
         }
 
         private string GetApplicationVersion()
@@ -336,23 +342,7 @@ namespace Listenarr.Api.Controllers
                 {
                     await _indexerRepository.DeleteAsync(id);
                     _logger?.LogInformation("Prowlarr: Deleted indexer {Id} (name={Name})", i.Id, i.Name);
-                    try
-                    {
-                        await _hubBroadcaster.BroadcastAsync(RealtimeHubTarget.Settings, "IndexersUpdated", new { created = 0, skipped = 0, indexers = new[] { new { id = i.Id, name = i.Name, baseUrl = i.Url } } });
-                        var deleteMessage = $"Removed indexer: {i.Name}";
-                        if (ProwlarrToastThrottler.ShouldSendForIndexer(i.Id) && ProwlarrToastThrottler.ShouldSendForMessage(deleteMessage))
-                        {
-                            await _toastService.PublishNotificationAsync("Indexers", deleteMessage, icon: null, timeoutMs: 8000);
-                        }
-                        else
-                        {
-                            _logger?.LogDebug("Suppressing delete toast for indexer {Id} due to recent toast or duplicate message", i.Id);
-                        }
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                    {
-                        _logger?.LogWarning(ex, "Failed to broadcast IndexersUpdated after delete");
-                    }
+                    await _indexerNotificationWorkflow.NotifyDeletedAsync(i);
                 }
                 else
                 {
@@ -404,60 +394,8 @@ namespace Listenarr.Api.Controllers
                 var created = upsertResult.Created;
 
                 // Notify clients (compute whether the created indexer still exists after dedupe to avoid duplicate notifications)
-                try
-                {
-                    var createdForBroadcast = (created && upsertResult.StillExists) ? 1 : 0;
-                    await _hubBroadcaster.BroadcastAsync(RealtimeHubTarget.Settings, "IndexersUpdated", new { created = createdForBroadcast, skipped = 0, indexers = new[] { new { id = indexer.Id, name = indexer.Name, baseUrl = indexer.Url } } });
-
-                    // Determine toast message. If the indexer was created very recently (by a prior POST or PUT),
-                    // suppress an additional 'Updated' toast to avoid duplicate notifications for rapid import/update flows.
-                    var toastMessage = createdForBroadcast == 1 ? $"Imported indexer from PUT: {indexer.Name}" : $"Updated indexer: {indexer.Name}";
-                    var publishToast = true;
-                    try
-                    {
-                        if (createdForBroadcast == 0 && indexer.CreatedAt != default && (DateTime.UtcNow - indexer.CreatedAt).TotalSeconds < ProwlarrToastThrottler.NotificationSuppressionSeconds)
-                        {
-                            publishToast = false;
-                            _logger?.LogDebug("Suppressing update toast for indexer {Id} since it was created recently", indexer.Id);
-                        }
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                    {
-                        _logger?.LogDebug(ex, "Failed to evaluate recent-create toast suppression for Prowlarr indexer {Id}", indexer.Id);
-                    }
-
-                    if (publishToast)
-                    {
-                        // Further suppress toasts if a recent toast for this indexer was already sent OR the same message was recently sent globally
-                        bool sendByIndexer = false;
-                        bool sendByMessage = false;
-                        try
-                        {
-                            sendByIndexer = ProwlarrToastThrottler.ShouldSendForIndexer(indexer.Id);
-                        }
-                        catch (Exception caughtEx_4) when (caughtEx_4 is not OperationCanceledException && caughtEx_4 is not OutOfMemoryException && caughtEx_4 is not StackOverflowException) { sendByIndexer = true; }
-                        try
-                        {
-                            sendByMessage = ProwlarrToastThrottler.ShouldSendForMessage(toastMessage);
-                        }
-                        catch (Exception caughtEx_5) when (caughtEx_5 is not OperationCanceledException && caughtEx_5 is not OutOfMemoryException && caughtEx_5 is not StackOverflowException) { sendByMessage = true; }
-
-                        _logger?.LogDebug("Toast suppression check for indexer {Id}: byIndexer={ByIndexer}, byMessage={ByMessage}", indexer.Id, sendByIndexer, sendByMessage);
-
-                        if (sendByIndexer && sendByMessage)
-                        {
-                            await _toastService.PublishNotificationAsync("Indexers", toastMessage, icon: null, timeoutMs: 8000);
-                        }
-                        else
-                        {
-                            _logger?.LogDebug("Suppressing toast for indexer {Id} due to recent toast or duplicate message", indexer.Id);
-                        }
-                    }
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                {
-                    _logger?.LogWarning(ex, "Failed to broadcast IndexersUpdated after update");
-                }
+                var createdForBroadcast = (created && upsertResult.StillExists) ? 1 : 0;
+                await _indexerNotificationWorkflow.NotifyPutAsync(indexer, createdForBroadcast);
 
                 // Return updated DTO (consistent with GetIndexerById shape)
                 var dto = new
@@ -548,43 +486,7 @@ namespace Listenarr.Api.Controllers
                 _logger?.LogInformation("Prowlarr: Created indexer (name={Name}, url={Url}, apiKeyPresent={HasApiKey})", createdIndexer.Name, createdIndexer.Url, !string.IsNullOrEmpty(createdIndexer.ApiKey));
             }
 
-            if (created > 0)
-            {
-                // Notify connected clients that indexers changed so the UI can refresh
-                try
-                {
-                    var createdInfo = createdIndexers.Select(i => new { id = i.Id, name = i.Name, baseUrl = i.Url }).ToArray();
-
-                    _logger?.LogInformation("Broadcasting IndexersUpdated to clients: created={Created}, skipped={Skipped}, indexerCount={Count}", created, skipped, createdInfo.Length);
-
-                    await _hubBroadcaster.BroadcastAsync(RealtimeHubTarget.Settings, "IndexersUpdated", new { created, skipped, indexers = createdInfo });
-
-                    _logger?.LogInformation("IndexersUpdated broadcast complete");
-
-                    // Publish a toast + dropdown notification so the activity bell receives the update
-                    try
-                    {
-                        var names = createdIndexers.Select(i => i.Name).ToArray();
-                        var message = names.Length > 0 ? $"Imported {created} indexer(s): {string.Join(", ", names)}" : $"Imported {created} indexer(s) successfully";
-                        if (ProwlarrToastThrottler.ShouldSendForMessage(message))
-                        {
-                            await _toastService.PublishNotificationAsync("Indexers", message, icon: null, timeoutMs: 8000);
-                        }
-                        else
-                        {
-                            _logger?.LogDebug("Suppressing batch import toast due to recent identical message");
-                        }
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                    {
-                        _logger?.LogWarning(ex, "Failed to publish indexer import notification");
-                    }
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                {
-                    _logger?.LogWarning(ex, "Failed to broadcast IndexersUpdated to realtime clients");
-                }
-            }
+            await _indexerNotificationWorkflow.NotifyImportedAsync(created, skipped, createdIndexers);
 
             // Log a summary for diagnostics
             _logger?.LogInformation("Prowlarr: Indexers processed - created={Created}, skipped={Skipped}", created, skipped);
@@ -663,23 +565,7 @@ namespace Listenarr.Api.Controllers
                 indexers.Add(new { id = 999999, name = "Debug Indexer", baseUrl = "http://debug" });
             }
 
-            _logger?.LogInformation("DEBUG: Broadcasting IndexersUpdated (manual test): created={Created}", created);
-
-            await _hubBroadcaster.BroadcastAsync(RealtimeHubTarget.Settings, "IndexersUpdated", new { created, skipped = 0, indexers });
-
-            _logger?.LogInformation("DEBUG: IndexersUpdated broadcast sent");
-
-            // Also publish a toast/notification to show up in the activity dropdown
-            try
-            {
-                var names = indexers.Select(i => i.GetType().GetProperty("name")?.GetValue(i)?.ToString() ?? string.Empty).Where(s => !string.IsNullOrEmpty(s)).ToArray();
-                var message = names.Length > 0 ? $"Imported {created} indexer(s): {string.Join(", ", names)}" : $"Imported {created} indexer(s) successfully";
-                await _toastService.PublishNotificationAsync("Indexers", message, icon: null, timeoutMs: 8000);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger?.LogWarning(ex, "Failed to publish debug indexer notification");
-            }
+            await _indexerNotificationWorkflow.NotifyDebugIndexersAsync(created, indexers);
 
             return Ok(new { sent = true, created, indexers });
         }
