@@ -43,6 +43,7 @@ namespace Listenarr.Infrastructure.Adapters
         private readonly QbittorrentConnectionTester _connectionTester;
         private readonly QbittorrentDownloadPollingWorkflow _downloadPollingWorkflow;
         private readonly QbittorrentRemovalWorkflow _removalWorkflow;
+        private readonly QbittorrentImportItemResolver _importItemResolver;
 
         public QbittorrentAdapter(IHttpClientFactory httpFactory, ITorrentFileDownloader torrentFileDownloader, ILogger<QbittorrentAdapter> logger)
         {
@@ -54,6 +55,7 @@ namespace Listenarr.Infrastructure.Adapters
             _connectionTester = new QbittorrentConnectionTester(_httpClientFactory, _logger, ClientType);
             _downloadPollingWorkflow = new QbittorrentDownloadPollingWorkflow(_logger);
             _removalWorkflow = new QbittorrentRemovalWorkflow(_logger);
+            _importItemResolver = new QbittorrentImportItemResolver(_logger);
         }
 
         public async Task<(bool Success, string Message)> TestConnectionAsync(DownloadClientConfiguration client, CancellationToken ct = default)
@@ -373,89 +375,7 @@ namespace Listenarr.Infrastructure.Adapters
             DownloadClientItem? previousAttempt = null,
             CancellationToken ct = default)
         {
-            // Clone to avoid modifying original
-            var result = item.Clone();
-
-            // If OutputPath is already set, use it directly
-            if (!string.IsNullOrEmpty(result.OutputPath))
-            {
-                _logger.LogDebug("Using existing OutputPath for import: {Path}", result.OutputPath);
-                return result;
-            }
-
-            // Otherwise, resolve path from qBittorrent API
-            var hash = result.DownloadId.ToLowerInvariant();
-            var baseUrl = DownloadClientUriBuilder.BuildAuthority(client);
-
-            try
-            {
-                using var httpClient = QbittorrentCookieSession.CreateClient();
-
-                // Login
-                using var loginData = QbittorrentCookieSession.CreateLoginContent(client);
-
-                using var loginResp = await httpClient.PostAsync($"{baseUrl}/api/v2/auth/login", loginData, ct);
-                if (!loginResp.IsSuccessStatusCode && loginResp.StatusCode != HttpStatusCode.Forbidden)
-                {
-                    _logger.LogWarning("qBittorrent login failed for import resolution");
-                    return result;
-                }
-
-                // Query files API to determine base folder
-                using var filesResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/files?hash={hash}", ct);
-                if (!filesResp.IsSuccessStatusCode)
-                {
-                    _logger.LogWarning("Failed to query torrent files for hash {Hash}", hash);
-                    return result;
-                }
-
-                var filesJson = await filesResp.Content.ReadAsStringAsync(ct);
-                var files = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(filesJson);
-
-                if (files == null || !files.Any())
-                {
-                    _logger.LogDebug("No files found for torrent {Hash}", hash);
-                    return result;
-                }
-
-                // Get torrent properties to find save_path
-                using var propsResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/properties?hash={hash}", ct);
-                if (!propsResp.IsSuccessStatusCode)
-                {
-                    _logger.LogWarning("Failed to query torrent properties for hash {Hash}", hash);
-                    return result;
-                }
-
-                var propsJson = await propsResp.Content.ReadAsStringAsync(ct);
-                var props = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(propsJson);
-                var savePath = props?.TryGetValue("save_path", out var savePathEl) is true
-                    ? savePathEl.GetString() ?? string.Empty
-                    : string.Empty;
-
-                if (string.IsNullOrEmpty(savePath))
-                {
-                    _logger.LogWarning("No save_path found for torrent {Hash}", hash);
-                    return result;
-                }
-
-                var outputPath = QbittorrentImportPathResolver.ResolveContentPath(savePath, files);
-                if (string.IsNullOrEmpty(outputPath))
-                {
-                    _logger.LogWarning("Unable to resolve content path from torrent files for hash {Hash}", hash);
-                    return result;
-                }
-
-                // Apply remote path mapping
-                result.OutputPath = outputPath;
-
-                _logger.LogInformation("Resolved import path for {Hash}: {Path}", hash, result.OutputPath);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogError(ex, "Error resolving import item for torrent {Hash}", hash);
-            }
-
-            return result;
+            return await _importItemResolver.GetImportItemAsync(client, item, ct);
         }
 
         /// <summary>
@@ -469,109 +389,7 @@ namespace Listenarr.Infrastructure.Adapters
             QueueItem? previousAttempt = null,
             CancellationToken ct = default)
         {
-            // ✅ Clone to avoid modifying original
-            var result = queueItem.Clone();
-            string? resolvedExistingContentPath = null;
-
-            // On API >= 2.6.1, ContentPath/OutputPath is already set correctly from content_path field
-            if (!string.IsNullOrEmpty(result.ContentPath))
-            {
-                var localPath = result.ContentPath;
-                if (!string.IsNullOrWhiteSpace(localPath))
-                {
-                    result.ContentPath = localPath;
-                    resolvedExistingContentPath = localPath;
-                }
-
-                _logger.LogDebug("Using existing ContentPath for import: {Path}", result.ContentPath);
-            }
-
-            var hash = download.Metadata?.GetValueOrDefault("TorrentHash")?.ToString();
-            if (string.IsNullOrWhiteSpace(hash))
-            {
-                hash = queueItem.Id;
-            }
-            if (string.IsNullOrEmpty(hash))
-            {
-                _logger.LogWarning("No torrent hash found in download metadata for download {DownloadId}", download.Id);
-                return result;
-            }
-
-            var baseUrl = DownloadClientUriBuilder.BuildAuthority(client);
-
-            try
-            {
-                using var httpClient = QbittorrentCookieSession.CreateClient();
-
-                // Login
-                using var loginData = QbittorrentCookieSession.CreateLoginContent(client);
-
-                using var loginResp = await httpClient.PostAsync($"{baseUrl}/api/v2/auth/login", loginData, ct);
-                if (!loginResp.IsSuccessStatusCode && loginResp.StatusCode != HttpStatusCode.Forbidden)
-                {
-                    _logger.LogWarning("qBittorrent login failed for import resolution");
-                    return result;
-                }
-
-                // ✅ Query files API to determine base folder
-                using var filesResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/files?hash={hash}", ct);
-                if (!filesResp.IsSuccessStatusCode)
-                {
-                    _logger.LogWarning("Failed to query torrent files for hash {Hash}", hash);
-                    return result;
-                }
-
-                var filesJson = await filesResp.Content.ReadAsStringAsync(ct);
-                var files = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(filesJson);
-
-                if (files == null || !files.Any())
-                {
-                    _logger.LogDebug("No files found for torrent {Hash}", hash);
-                    return result;
-                }
-
-                // Get torrent properties to find save_path
-                using var propsResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/properties?hash={hash}", ct);
-                if (!propsResp.IsSuccessStatusCode)
-                {
-                    _logger.LogWarning("Failed to query torrent properties for hash {Hash}", hash);
-                    return result;
-                }
-
-                var propsJson = await propsResp.Content.ReadAsStringAsync(ct);
-                var props = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(propsJson);
-                var savePath = props?.TryGetValue("save_path", out var savePathEl) is true
-                    ? savePathEl.GetString() ?? string.Empty
-                    : string.Empty;
-
-                if (string.IsNullOrEmpty(savePath))
-                {
-                    _logger.LogWarning("No save_path found for torrent {Hash}", hash);
-                    return result;
-                }
-
-                var outputPath = QbittorrentImportPathResolver.ResolveContentPath(savePath, files);
-                if (string.IsNullOrEmpty(outputPath) && string.IsNullOrWhiteSpace(resolvedExistingContentPath))
-                {
-                    _logger.LogWarning("Unable to resolve content path from torrent files for hash {Hash}", hash);
-                    return result;
-                }
-
-                // ✅ Apply remote path mapping
-                result.SourceFiles = QbittorrentImportPathResolver.TranslateSourceFiles(QbittorrentImportPathResolver.BuildSourceFiles(savePath, files));
-                if (!string.IsNullOrWhiteSpace(outputPath))
-                {
-                    result.ContentPath = outputPath;
-                }
-
-                _logger.LogInformation("Resolved import path for {Hash}: {Path}", hash, result.ContentPath);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogError(ex, "Error resolving import item for torrent {Hash}", hash);
-            }
-
-            return result;
+            return await _importItemResolver.GetImportItemAsync(client, download, queueItem, ct);
         }
 
         internal static string ResolveTorrentContentPath(
