@@ -37,6 +37,7 @@ namespace Listenarr.Infrastructure.Adapters
         private readonly TransmissionTorrentAddPlanner _torrentAddPlanner;
         private readonly TransmissionRpcClient _rpcClient;
         private readonly TransmissionDownloadPollingWorkflow _downloadPollingWorkflow;
+        private readonly TransmissionRemovalWorkflow _removalWorkflow;
 
         public TransmissionAdapter(IHttpClientFactory httpClientFactory, ITorrentFileDownloader torrentFileDownloader, ILogger<TransmissionAdapter> logger)
         {
@@ -46,6 +47,7 @@ namespace Listenarr.Infrastructure.Adapters
             _torrentAddPlanner = new TransmissionTorrentAddPlanner(_torrentFileDownloader, _logger);
             _rpcClient = new TransmissionRpcClient(_httpClientFactory, ClientType, _logger);
             _downloadPollingWorkflow = new TransmissionDownloadPollingWorkflow(_httpClientFactory, _logger, ClientType);
+            _removalWorkflow = new TransmissionRemovalWorkflow(_rpcClient, _logger);
         }
 
         public async Task<(bool Success, string Message)> TestConnectionAsync(DownloadClientConfiguration client, CancellationToken ct = default)
@@ -154,42 +156,7 @@ namespace Listenarr.Infrastructure.Adapters
 
         public async Task<bool> RemoveAsync(DownloadClientConfiguration client, string id, bool deleteFiles = false, CancellationToken ct = default)
         {
-            if (client == null) throw new ArgumentNullException(nameof(client));
-            if (string.IsNullOrWhiteSpace(id)) throw new ArgumentNullException(nameof(id));
-
-            var idsPayload = TransmissionRequestPlanner.ParseTransmissionIds(id);
-            var arguments = new Dictionary<string, object>
-            {
-                ["ids"] = idsPayload,
-                ["delete-local-data"] = deleteFiles
-            };
-
-            // Use old format for compatibility with Transmission < 4.1.0
-            var payload = new
-            {
-                method = "torrent-remove",
-                arguments,
-                tag = 2
-            };
-
-            try
-            {
-                var response = await _rpcClient.InvokeAsync(client, payload, ct);
-                if (response.TryGetProperty("result", out var resultProp) && string.Equals(resultProp.GetString(), "success", StringComparison.OrdinalIgnoreCase))
-                {
-                    _logger.LogInformation("Removed torrent {Id} from Transmission (deleteFiles={DeleteFiles})", LogRedaction.SanitizeText(id), deleteFiles);
-                    return true;
-                }
-
-                var errorMsg = resultProp.ValueKind == JsonValueKind.String ? resultProp.GetString() ?? "Unknown error" : "Unknown error";
-                _logger.LogWarning("Transmission failed to remove torrent {Id}: {Message}", LogRedaction.SanitizeText(id), LogRedaction.SanitizeText(errorMsg));
-                return false;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogError(ex, "Error removing torrent {Id} from Transmission", LogRedaction.SanitizeText(id));
-                return false;
-            }
+            return await _removalWorkflow.RemoveAsync(client, id, deleteFiles, ct);
         }
 
         public async Task<List<QueueItem>> GetQueueAsync(DownloadClientConfiguration client, CancellationToken ct = default)
