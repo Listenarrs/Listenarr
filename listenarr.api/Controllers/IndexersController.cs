@@ -288,7 +288,7 @@ namespace Listenarr.Api.Controllers
                 return BadRequest(new { message = "Prowlarr API key is required" });
             }
 
-            var baseUrl = BuildProwlarrBaseUrl(effectiveUrl, effectivePort);
+            var baseUrl = ProwlarrImportUrlPlanner.BuildBaseUrl(effectiveUrl, effectivePort);
             var blockedBaseUrlReason = await ValidateOutboundUrlForCallerAsync(baseUrl);
             if (!string.IsNullOrWhiteSpace(blockedBaseUrlReason))
             {
@@ -396,11 +396,11 @@ namespace Listenarr.Api.Controllers
 
                 var implementation = protocol.Equals("usenet", StringComparison.OrdinalIgnoreCase) ? "Newznab" : "Torznab";
 
-                var proxyUrl = BuildProwlarrProxyUrl(baseUrl, indexerId);
-                var normalizedUrl = NormalizeProwlarrProxyUrl(proxyUrl);
+                var proxyUrl = ProwlarrImportUrlPlanner.BuildProxyUrl(baseUrl, indexerId);
+                var normalizedUrl = ProwlarrImportUrlPlanner.NormalizeProxyUrl(proxyUrl);
 
                 var exists = existingIndexers.FirstOrDefault(i =>
-                    NormalizeProwlarrProxyUrl(i.Url) == normalizedUrl &&
+                    ProwlarrImportUrlPlanner.NormalizeProxyUrl(i.Url) == normalizedUrl &&
                     string.Equals(i.Implementation, implementation, StringComparison.OrdinalIgnoreCase) &&
                     string.Equals(i.ApiKey ?? string.Empty, effectiveApiKey ?? string.Empty, StringComparison.Ordinal));
 
@@ -800,35 +800,6 @@ namespace Listenarr.Api.Controllers
                 .ToList();
 
             return Ok(RedactIndexersForCaller(indexers));
-        }
-
-        private string BuildProwlarrBaseUrl(string rawUrl, int? port)
-        {
-            var trimmed = rawUrl.Trim();
-            if (!trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-            {
-                trimmed = "http://" + trimmed;
-            }
-
-            var builder = new UriBuilder(trimmed);
-            if (port.HasValue && port.Value > 0)
-            {
-                builder.Port = port.Value;
-            }
-
-            return builder.Uri.ToString().TrimEnd('/');
-        }
-
-        private string BuildProwlarrProxyUrl(string baseUrl, int indexerId)
-        {
-            var root = baseUrl.TrimEnd('/');
-            return $"{root}/{indexerId}/api";
-        }
-
-        private string NormalizeProwlarrProxyUrl(string? rawUrl)
-        {
-            if (string.IsNullOrWhiteSpace(rawUrl)) return rawUrl ?? string.Empty;
-            return rawUrl.Trim().TrimEnd('/');
         }
 
         private async Task<(HttpResponseMessage Response, string Payload)> FetchProwlarrIndexersAsync(string baseUrl, string apiKey)
