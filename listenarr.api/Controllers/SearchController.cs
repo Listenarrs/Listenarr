@@ -36,9 +36,8 @@ namespace Listenarr.Api.Controllers
         private readonly AudibleService _audibleService;
         private readonly IAudiobookMetadataService _metadataService;
         private readonly IImageCacheService? _imageCacheService;
-        private readonly MetadataConverters _metadataConverters;
         private readonly SearchResponseMapper _responseMapper;
-        private readonly SearchRequestReader _requestReader;
+        private readonly StructuredSearchWorkflow _structuredSearchWorkflow;
 
         public SearchController(
             ISearchService searchService,
@@ -47,19 +46,27 @@ namespace Listenarr.Api.Controllers
             IAudiobookMetadataService metadataService,
             IImageCacheService? imageCacheService = null,
             MetadataConverters? metadataConverters = null,
-            SearchResponseMapper? responseMapper = null)
+            SearchResponseMapper? responseMapper = null,
+            StructuredSearchWorkflow? structuredSearchWorkflow = null)
         {
             _searchService = searchService;
             _logger = logger;
             _audibleService = audibleService;
             _metadataService = metadataService;
             _imageCacheService = imageCacheService;
-            _metadataConverters = metadataConverters ?? new MetadataConverters(imageCacheService, Microsoft.Extensions.Logging.Abstractions.NullLogger<MetadataConverters>.Instance);
+            var metadataConvertersInstance = metadataConverters ?? new MetadataConverters(imageCacheService, Microsoft.Extensions.Logging.Abstractions.NullLogger<MetadataConverters>.Instance);
             _responseMapper = responseMapper ?? new SearchResponseMapper(
                 metadataService,
                 Microsoft.Extensions.Logging.Abstractions.NullLogger<SearchResponseMapper>.Instance,
                 imageCacheService);
-            _requestReader = new SearchRequestReader(_logger);
+            _structuredSearchWorkflow = structuredSearchWorkflow ?? new StructuredSearchWorkflow(
+                searchService,
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<StructuredSearchWorkflow>.Instance,
+                audibleService,
+                metadataService,
+                imageCacheService,
+                metadataConvertersInstance,
+                _responseMapper);
         }
 
         private string BuildApiImagePath(string identifier, string? sourceUrl = null)
@@ -74,277 +81,8 @@ namespace Listenarr.Api.Controllers
         [HttpPost]
         public async Task<ActionResult<object>> Search([FromBody] JsonElement reqJson, [FromQuery] bool? simplified = null)
         {
-            try
-            {
-                if (reqJson.ValueKind == JsonValueKind.Undefined || reqJson.ValueKind == JsonValueKind.Null)
-                {
-                    return BadRequest("SearchRequest body is required");
-                }
-
-                var req = _requestReader.Read(reqJson);
-                if (req == null) return BadRequest("SearchRequest body is required");
-                _logger.LogDebug("[DBG] Search received mode={Mode}, query='{Query}'", req.Mode, LogRedaction.SanitizeText(req.Query ?? "<null>"));
-
-                // Default to simplified=true for both modes (user only needs metadata for Add New feature)
-                var useSimplified = simplified ?? true;
-
-                if (req.Mode == SearchMode.Simple)
-                {
-                    var q = req.Query ?? string.Empty;
-                    var region = string.IsNullOrWhiteSpace(req.Region) ? "us" : req.Region;
-                    var language = string.IsNullOrWhiteSpace(req.Language) ? null : req.Language;
-                    var results = await _searchService.IntelligentSearchAsync(q, region: region, language: language, ct: HttpContext.RequestAborted) ?? new List<MetadataSearchResult>();
-
-                    await SearchResultImageNormalizer.NormalizeMetadataResultsAsync(
-                        results,
-                        _imageCacheService,
-                        HttpContext,
-                        _logger,
-                        "metadata result",
-                        setApiPathWhenNoExternalImage: true);
-
-                    // Map metadata results into Audible-shaped objects for public API consumers
-                    var mapped = await Task.WhenAll((results ?? new List<MetadataSearchResult>()).Select(r => _responseMapper.MapMetadataResultToAudibleAsync(r, region, HttpContext))).ConfigureAwait(false);
-                    _logger.LogDebug("[DBG] Search(simple) returning {Count} metadata results", mapped?.Length ?? 0);
-                    return Ok(mapped);
-                }
-                else // Advanced
-                {
-                    var advancedValidationError = _requestReader.NormalizeAdvancedRequest(req);
-                    if (!string.IsNullOrWhiteSpace(advancedValidationError))
-                    {
-                        return BadRequest(advancedValidationError);
-                    }
-
-                    // Compose a query string from advanced parameters for unified handling
-                    var region = string.IsNullOrWhiteSpace(req.Region) ? "us" : req.Region;
-                    var language = string.IsNullOrWhiteSpace(req.Language) ? null : req.Language;
-
-                    // If no advanced search parameters were provided, signal BadRequest to caller
-                    if (string.IsNullOrWhiteSpace(req.Title)
-                        && string.IsNullOrWhiteSpace(req.Author)
-                        && string.IsNullOrWhiteSpace(req.Query)
-                        && string.IsNullOrWhiteSpace(req.Isbn)
-                        && string.IsNullOrWhiteSpace(req.Asin)
-                        && string.IsNullOrWhiteSpace(req.Series))
-                    {
-                        return BadRequest("At least one advanced search parameter (title, author, isbn, asin, series, or query) is required");
-                    }
-                    // Debug: log incoming advanced parameters for diagnostics
-                    try { _logger.LogInformation("[DBG] Advanced search request: Author='{Author}', Title='{Title}', Isbn='{Isbn}', Asin='{Asin}', Query='{Query}', Region='{Region}', Language='{Language}'", LogRedaction.SanitizeText(req.Author), LogRedaction.SanitizeText(req.Title), LogRedaction.SanitizeText(req.Isbn), LogRedaction.SanitizeText(req.Asin), LogRedaction.SanitizeText(req.Query), LogRedaction.SanitizeText(region), LogRedaction.SanitizeText(language)); }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                    {
-                        System.Diagnostics.Debug.WriteLine($"SearchController advanced-search info logging failed: {ex.Message}");
-                    }
-                    try { _logger.LogDebug("[DBG] Advanced params: Title='{Title}', Author='{Author}', Isbn='{Isbn}'", LogRedaction.SanitizeText(req.Title), LogRedaction.SanitizeText(req.Author), LogRedaction.SanitizeText(req.Isbn)); }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                    {
-                        System.Diagnostics.Debug.WriteLine($"SearchController advanced-search debug logging failed: {ex.Message}");
-                    }
-
-                    // If the advanced request contains an ASIN, prefer a direct Audible metadata
-                    // lookup and return a single enriched SearchResult. ASIN searches should
-                    // be authoritative and ignore other advanced inputs.
-                    if (!string.IsNullOrWhiteSpace(req.Asin))
-                    {
-                        try
-                        {
-                            var audible = await _audibleService.GetBookMetadataAsync(req.Asin, region, true);
-                            if (audible != null)
-                            {
-                                // Convert audible response to internal metadata then to SearchResult
-                                var metadata = _metadataConverters.ConvertAudibleToMetadata(audible, req.Asin, source: "Audible");
-                                var sr = await _metadataConverters.ConvertMetadataToSearchResultAsync(metadata, req.Asin, req.Title, req.Author, fallbackImageUrl: null, fallbackLanguage: language);
-                                _responseMapper.SanitizeResultForPublicApi(sr);
-                                // Convert to metadata result and normalize images for API response
-                                var md = SearchResultConverters.ToMetadata(sr);
-                                await SearchResultImageNormalizer.NormalizeMetadataResultAsync(
-                                    md,
-                                    _imageCacheService,
-                                    HttpContext,
-                                    _logger,
-                                    "ASIN metadata",
-                                    setApiPathWhenNoExternalImage: false);
-                                if (md != null)
-                                {
-                                    var result = SearchResultConverters.ToSearchResult(md);
-                                    var asinResults = new List<SearchResult> { result };
-                                    return Ok(useSimplified ? _responseMapper.SimplifySearchResults(asinResults) : asinResults);
-                                }
-                            }
-                            // If audible didn't return a record, fall through to unified search below
-                        }
-                        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                        {
-                            _logger.LogWarning(ex, "Audible metadata lookup failed for ASIN {Asin} in advanced search; falling back to unified search", req.Asin);
-                        }
-                    }
-
-
-
-                    // If a series name or series ASIN was provided, prefer Audible series endpoints.
-                    // If series is provided and no author is supplied, take the series-specialized path.
-                    // If an author is present, prefer the author flow and later filter by series.
-                    if (!string.IsNullOrWhiteSpace(req.Series) && string.IsNullOrWhiteSpace(req.Author))
-                    {
-                        try
-                        {
-                            string? seriesAsin = null;
-                            var seriesInput = req.Series.Trim();
-
-                            // Check if the provided value already looks like an ASIN
-                            if (seriesInput.StartsWith("B0", StringComparison.OrdinalIgnoreCase) && seriesInput.Length >= 10)
-                            {
-                                seriesAsin = seriesInput;
-                            }
-                            else
-                            {
-                                // Search by name to resolve the series ASIN
-                                var seriesSearch = await _audibleService.SearchSeriesByNameAsync(seriesInput, region);
-                                _logger.LogInformation("SearchSeriesByNameAsync returned type={Type}, isNull={IsNull}",
-                                    seriesSearch?.GetType().Name ?? "null", seriesSearch == null);
-                                if (seriesSearch is IEnumerable<SeriesLookupItem> seriesList)
-                                {
-                                    var seriesListMaterialized = seriesList.ToList();
-                                    _logger.LogInformation("Series lookup for '{SeriesName}' returned {Count} items", LogRedaction.SanitizeText(seriesInput), seriesListMaterialized.Count);
-                                    var chosenItem = seriesListMaterialized.FirstOrDefault(s =>
-                                                        !string.IsNullOrWhiteSpace(s.Asin) &&
-                                                        string.Equals(s.Region, region, StringComparison.OrdinalIgnoreCase))
-                                                    ?? seriesListMaterialized.FirstOrDefault(s => !string.IsNullOrWhiteSpace(s.Asin));
-                                    if (chosenItem != null)
-                                    {
-                                        seriesAsin = chosenItem.Asin;
-                                        _logger.LogInformation("Resolved series '{SeriesName}' to ASIN {SeriesAsin}", LogRedaction.SanitizeText(req.Series), LogRedaction.SanitizeText(seriesAsin));
-                                    }
-                                }
-
-                                if (string.IsNullOrWhiteSpace(seriesAsin))
-                                {
-                                    _logger.LogInformation("No series ASIN found for '{SeriesName}'; falling back to unified search", LogRedaction.SanitizeText(req.Series));
-                                }
-                            }
-
-                            // Fetch all books for the resolved series ASIN
-                            if (!string.IsNullOrWhiteSpace(seriesAsin))
-                            {
-                                var booksObj = await _audibleService.GetBooksBySeriesAsinAsync(seriesAsin, region);
-
-                                // Direct cast — GetBooksBySeriesAsinAsync returns List<AudibleSearchResult>
-                                var books = booksObj as List<AudibleSearchResult>;
-
-                                if (books != null && books.Any())
-                                {
-                                    // Apply language filter when a preferred language was specified
-                                    if (!string.IsNullOrWhiteSpace(language) && !string.Equals(language, "all", StringComparison.OrdinalIgnoreCase))
-                                    {
-                                        var langFilter = language.Trim();
-                                        books = books.Where(b =>
-                                            string.IsNullOrWhiteSpace(b.Language) ||
-                                            string.Equals(b.Language.Trim(), langFilter, StringComparison.OrdinalIgnoreCase))
-                                            .ToList();
-                                    }
-
-                                    _logger.LogInformation("Series ASIN {SeriesAsin} returned {Count} books (after language filter)", seriesAsin, books.Count);
-
-                                    // Return books in the same Audible-shaped format as the unified search path
-                                    var seriesResults = new List<object>();
-                                    foreach (var book in books)
-                                    {
-                                        try
-                                        {
-                                            seriesResults.Add(await _responseMapper.MapAudibleSearchResultToOutputAsync(book, region, HttpContext));
-                                        }
-                                        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                                        {
-                                            _logger.LogWarning(ex, "Failed converting series book to output for ASIN {Asin}", book.Asin);
-                                        }
-                                    }
-
-                                    if (seriesResults.Any())
-                                    {
-                                        return Ok(seriesResults);
-                                    }
-                                }
-                                else
-                                {
-                                    _logger.LogInformation("Series ASIN {SeriesAsin} returned no books", seriesAsin);
-                                }
-                            }
-                        }
-                        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                        {
-                            _logger.LogWarning(ex, "Failed to perform series lookup for '{Series}' in advanced search; falling back to unified search", LogRedaction.SanitizeText(req.Series));
-                        }
-                    }
-
-                    // Previously there was a special-case path here that handled author-only
-                    // advanced searches separately. To ensure all advanced searches (author-only,
-                    // author+title, title-only, ISBN, etc.) receive identical metadata
-                    // enrichment and conversion, route advanced requests through the
-                    // unified IntelligentSearch pipeline below. This guarantees Audible
-                    // metadata is fetched and converted consistently.
-
-                    // Compose a query string from advanced parameters for unified handling
-                    var queryParts = new List<string>();
-                    // Prefix author/title/isbn/asin tokens so IntelligentSearch parser
-                    // recognizes them and selects the correct search branch (e.g. AUTHOR_TITLE).
-                    if (!string.IsNullOrWhiteSpace(req.Author)) queryParts.Add($"AUTHOR:{req.Author}");
-                    if (!string.IsNullOrWhiteSpace(req.Title)) queryParts.Add($"TITLE:{req.Title}");
-                    if (!string.IsNullOrWhiteSpace(req.Isbn)) queryParts.Add($"ISBN:{req.Isbn}");
-                    if (!string.IsNullOrWhiteSpace(req.Asin)) queryParts.Add($"ASIN:{req.Asin}");
-                    // When only a series name was provided and the series-specific lookup above
-                    // didn't resolve, use it as a plain keyword query so the general
-                    // SearchBooksAsync branch handles it (more resilient than TITLE-specific).
-                    // The destructive series filter below ensures only matching results return.
-                    if (queryParts.Count == 0 && !string.IsNullOrWhiteSpace(req.Series))
-                        queryParts.Add(req.Series);
-                    var query = queryParts.Count > 0 ? string.Join(" ", queryParts) : (req.Query ?? string.Empty);
-                    try { _logger.LogInformation("Advanced search request composed parts={Parts} -> query='{Query}'", string.Join("|", queryParts), LogRedaction.SanitizeText(query)); }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                    {
-                        System.Diagnostics.Debug.WriteLine($"SearchController composed-query logging failed: {ex.Message}");
-                    }
-                    // Respect optional pagination/candidate caps from the client
-                    var candidateLimit = req.Cap.HasValue ? Math.Clamp(req.Cap.Value, 5, 2000) : 200;
-                    var returnLimit = req.Pagination != null && req.Pagination.Limit > 0 ? Math.Clamp(req.Pagination.Limit, 1, 1000) : 50;
-                    var results = await _searchService.IntelligentSearchAsync(query, candidateLimit, returnLimit, region: region, language: language, ct: HttpContext.RequestAborted);
-
-                    await _responseMapper.NormalizeMetadataResultImagesAsync(results, HttpContext, "result");
-
-                    // When a Series filter was provided, apply it to unified search results so only
-                    // books actually belonging to the series are returned. This covers both the
-                    // author+series path and the series-only fallback (when the series ASIN lookup
-                    // above didn't resolve and the series name was injected as TITLE:).
-                    if (!string.IsNullOrWhiteSpace(req.Series) && results != null)
-                    {
-                        try
-                        {
-                            var seriesFilter = req.Series.Trim();
-                            var ci = System.Globalization.CultureInfo.InvariantCulture.CompareInfo;
-                            const System.Globalization.CompareOptions diOpts = System.Globalization.CompareOptions.IgnoreCase | System.Globalization.CompareOptions.IgnoreNonSpace;
-                            var filtered = System.Text.RegularExpressions.Regex.IsMatch(seriesFilter, @"^B0[A-Z0-9]{8,}$", System.Text.RegularExpressions.RegexOptions.IgnoreCase)
-                                ? results.Where(r => (!string.IsNullOrWhiteSpace(r.Series) && ci.IndexOf(r.Series, seriesFilter, diOpts) >= 0)
-                                    || (!string.IsNullOrWhiteSpace(r.Asin) && string.Equals(r.Asin, seriesFilter, StringComparison.OrdinalIgnoreCase))).ToList()
-                                : results.Where(r => !string.IsNullOrWhiteSpace(r.Series) && ci.IndexOf(r.Series, seriesFilter, diOpts) >= 0).ToList();
-
-                            results = filtered;
-                        }
-                        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                        {
-                            _logger.LogDebug(ex, "Failed to apply series filter '{Series}' to advanced search results", LogRedaction.SanitizeText(req.Series));
-                        }
-                    }
-
-                    // Flatten metadata results into Audible-shaped objects for public POST /api/search response
-                    var flatMapped = await Task.WhenAll((results ?? new List<MetadataSearchResult>()).Select(r => _responseMapper.MapMetadataResultToAudibleAsync(r, region, HttpContext))).ConfigureAwait(false);
-                    return Ok(flatMapped);
-                }
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogError(ex, "Error parsing search request body");
-                return BadRequest("Invalid search request");
-            }
+            var result = await _structuredSearchWorkflow.ExecuteAsync(reqJson, simplified, HttpContext);
+            return result.Succeeded ? Ok(result.Payload) : BadRequest(result.Payload);
         }
 
         /// <summary>
