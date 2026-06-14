@@ -100,21 +100,14 @@ namespace Listenarr.Api.Controllers
         [HttpGet("{identifier}")]
         public async Task<IActionResult> GetImage(string identifier)
         {
-            if (string.IsNullOrEmpty(identifier))
+            var identifierValidation = ImageIdentifierRequestValidator.ValidateGetImageIdentifier(identifier);
+            if (identifierValidation.Failure == ImageIdentifierValidationFailure.Missing)
             {
                 return BadRequest("Identifier is required");
             }
 
-            // Strip any query parameters from the identifier (e.g., "B0CQZ5167B?access_token=..." -> "B0CQZ5167B")
-            var queryIndex = identifier.IndexOf('?');
-            if (queryIndex >= 0)
-            {
-                identifier = identifier.Substring(0, queryIndex);
-            }
-
-            // Validate identifier to prevent path traversal or overly long values.
-            // Identifiers should be simple ASINs, numeric IDs or author names—disallow path separators.
-            if (identifier.IndexOfAny(new char[] { '\\', '/', '\0' }) >= 0 || identifier.Length > 256)
+            identifier = identifierValidation.Identifier;
+            if (identifierValidation.Failure == ImageIdentifierValidationFailure.Invalid)
             {
                 _logger.LogWarning("Rejected invalid identifier: {Identifier}", LogRedaction.SanitizeText(identifier));
                 return BadRequest("Invalid identifier");
