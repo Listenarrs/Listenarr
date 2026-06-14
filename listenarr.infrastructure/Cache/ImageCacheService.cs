@@ -35,6 +35,7 @@ namespace Listenarr.Infrastructure.Cache
         private readonly string _seriesImagePath;
         private readonly string _contentRootPath;
         private readonly ImageCachePathResolver _pathResolver;
+        private readonly ImageCacheStorageLookup _storageLookup;
         private readonly AsyncKeyedLocker<string> _downloadLocks = new();
 
         public ImageCacheService(
@@ -51,6 +52,13 @@ namespace Listenarr.Infrastructure.Cache
             _authorImagePath = applicationPathService.ResolveFromConfig("cache", "images", "authors");
             _seriesImagePath = applicationPathService.ResolveFromConfig("cache", "images", "series");
             _pathResolver = new ImageCachePathResolver(_contentRootPath);
+            _storageLookup = new ImageCacheStorageLookup(
+                _pathResolver,
+                _logger,
+                _libraryImagePath,
+                _authorImagePath,
+                _seriesImagePath,
+                _tempCachePath);
 
             Directory.CreateDirectory(_tempCachePath);
             Directory.CreateDirectory(_libraryImagePath);
@@ -77,30 +85,30 @@ namespace Listenarr.Infrastructure.Cache
             try
             {
                 // Check library storage first
-                var libraryPath = GetImagePath(identifier, _libraryImagePath);
-                if (File.Exists(libraryPath) && IsValidCachedCoverFile(libraryPath, identifier, "library"))
+                var libraryPath = _storageLookup.FindLibraryPath(identifier);
+                if (!string.IsNullOrEmpty(libraryPath))
                 {
                     _logger.LogInformation("Image already in library storage: {Identifier}", LogRedaction.SanitizeText(identifier));
                     return GetRelativePath(libraryPath);
                 }
 
                 // Also check authors storage (author images may be stored separately)
-                var authorPath = GetImagePath(identifier, _authorImagePath);
-                if (File.Exists(authorPath) && IsValidCachedCoverFile(authorPath, identifier, "author"))
+                var authorPath = _storageLookup.FindAuthorPath(identifier);
+                if (!string.IsNullOrEmpty(authorPath))
                 {
                     _logger.LogInformation("Image already in author storage: {Identifier}", LogRedaction.SanitizeText(identifier));
                     return GetRelativePath(authorPath);
                 }
 
-                var seriesPath = GetImagePath(identifier, _seriesImagePath);
-                if (File.Exists(seriesPath) && IsValidCachedCoverFile(seriesPath, identifier, "series"))
+                var seriesPath = _storageLookup.FindSeriesPath(identifier);
+                if (!string.IsNullOrEmpty(seriesPath))
                 {
                     _logger.LogInformation("Image already in series storage: {Identifier}", LogRedaction.SanitizeText(identifier));
                     return GetRelativePath(seriesPath);
                 }
 
                 // Check temp cache for a valid (non-placeholder) image
-                var tempExisting = GetBestTempImagePathIfValid(identifier);
+                var tempExisting = _storageLookup.FindTempPath(identifier);
                 if (!string.IsNullOrEmpty(tempExisting))
                 {
                     _logger.LogInformation("Image already cached: {Identifier}", LogRedaction.SanitizeText(identifier));
@@ -120,29 +128,29 @@ namespace Listenarr.Infrastructure.Cache
                 using var _ = await _downloadLocks.LockAsync(identifier);
 
                 // Re-check after acquiring lock
-                libraryPath = GetImagePath(identifier, _libraryImagePath);
-                if (File.Exists(libraryPath) && IsValidCachedCoverFile(libraryPath, identifier, "library"))
+                libraryPath = _storageLookup.FindLibraryPath(identifier);
+                if (!string.IsNullOrEmpty(libraryPath))
                 {
                     _logger.LogInformation("Image already in library storage (after wait): {Identifier}", LogRedaction.SanitizeText(identifier));
                     return GetRelativePath(libraryPath);
                 }
 
                 // Also check author storage after lock
-                authorPath = GetImagePath(identifier, _authorImagePath);
-                if (File.Exists(authorPath) && IsValidCachedCoverFile(authorPath, identifier, "author"))
+                authorPath = _storageLookup.FindAuthorPath(identifier);
+                if (!string.IsNullOrEmpty(authorPath))
                 {
                     _logger.LogInformation("Image already in author storage (after wait): {Identifier}", LogRedaction.SanitizeText(identifier));
                     return GetRelativePath(authorPath);
                 }
 
-                seriesPath = GetImagePath(identifier, _seriesImagePath);
-                if (File.Exists(seriesPath) && IsValidCachedCoverFile(seriesPath, identifier, "series"))
+                seriesPath = _storageLookup.FindSeriesPath(identifier);
+                if (!string.IsNullOrEmpty(seriesPath))
                 {
                     _logger.LogInformation("Image already in series storage (after wait): {Identifier}", LogRedaction.SanitizeText(identifier));
                     return GetRelativePath(seriesPath);
                 }
 
-                tempExisting = GetBestTempImagePathIfValid(identifier);
+                tempExisting = _storageLookup.FindTempPath(identifier);
                 if (!string.IsNullOrEmpty(tempExisting))
                 {
                     _logger.LogInformation("Image already cached (after wait): {Identifier}", LogRedaction.SanitizeText(identifier));
@@ -179,7 +187,7 @@ namespace Listenarr.Infrastructure.Cache
                 }
 
                 // Read bytes first so we can reject tiny placeholder images (for example 1x1).
-                var imageBytes = await ReadContentWithLimitAsync(response.Content, MaxDownloadedImageBytes);
+                var imageBytes = await ImageCacheContentReader.ReadWithLimitAsync(response.Content, MaxDownloadedImageBytes);
                 if (ImageCacheContentValidator.IsPlaceholderImage(imageBytes, mediaType, _logger))
                 {
                     _logger.LogInformation("Skipping placeholder/tiny image for {Identifier} from {Url}", LogRedaction.SanitizeText(identifier), LogRedaction.SanitizeText(imageUrl));
@@ -286,44 +294,14 @@ namespace Listenarr.Infrastructure.Cache
 
                 if (forceRefresh && !string.IsNullOrWhiteSpace(imageUrl))
                 {
-                    string? backupAuthorPath = null;
-
-                    try
+                    var restored = await ImageCacheRefreshWorkflow.RefreshWithBackupAsync(
+                        authorPath,
+                        tempPath,
+                        () => DownloadAndCacheImageAsync(imageUrl, identifier),
+                        GetRelativePath);
+                    if (!string.IsNullOrWhiteSpace(restored))
                     {
-                        if (File.Exists(authorPath))
-                        {
-                            backupAuthorPath = authorPath + ".bak";
-                            File.Copy(authorPath, backupAuthorPath, overwrite: true);
-                            File.Delete(authorPath);
-                        }
-
-                        if (File.Exists(tempPath))
-                        {
-                            File.Delete(tempPath);
-                        }
-
-                        var refreshed = await DownloadAndCacheImageAsync(imageUrl, identifier);
-                        if (string.IsNullOrWhiteSpace(refreshed) && !string.IsNullOrWhiteSpace(backupAuthorPath))
-                        {
-                            File.Move(backupAuthorPath, authorPath, overwrite: true);
-                            return GetRelativePath(authorPath);
-                        }
-
-                        if (!string.IsNullOrWhiteSpace(backupAuthorPath) && File.Exists(backupAuthorPath))
-                        {
-                            File.Delete(backupAuthorPath);
-                        }
-                    }
-                    catch
-                    {
-                        if (!string.IsNullOrWhiteSpace(backupAuthorPath) &&
-                            File.Exists(backupAuthorPath) &&
-                            !File.Exists(authorPath))
-                        {
-                            File.Move(backupAuthorPath, authorPath, overwrite: true);
-                        }
-
-                        throw;
+                        return restored;
                     }
                 }
 
@@ -392,44 +370,14 @@ namespace Listenarr.Infrastructure.Cache
 
                 if (forceRefresh && !string.IsNullOrWhiteSpace(imageUrl))
                 {
-                    string? backupSeriesPath = null;
-
-                    try
+                    var restored = await ImageCacheRefreshWorkflow.RefreshWithBackupAsync(
+                        seriesPath,
+                        tempPath,
+                        () => DownloadAndCacheImageAsync(imageUrl, identifier),
+                        GetRelativePath);
+                    if (!string.IsNullOrWhiteSpace(restored))
                     {
-                        if (File.Exists(seriesPath))
-                        {
-                            backupSeriesPath = seriesPath + ".bak";
-                            File.Copy(seriesPath, backupSeriesPath, overwrite: true);
-                            File.Delete(seriesPath);
-                        }
-
-                        if (File.Exists(tempPath))
-                        {
-                            File.Delete(tempPath);
-                        }
-
-                        var refreshed = await DownloadAndCacheImageAsync(imageUrl, identifier);
-                        if (string.IsNullOrWhiteSpace(refreshed) && !string.IsNullOrWhiteSpace(backupSeriesPath))
-                        {
-                            File.Move(backupSeriesPath, seriesPath, overwrite: true);
-                            return GetRelativePath(seriesPath);
-                        }
-
-                        if (!string.IsNullOrWhiteSpace(backupSeriesPath) && File.Exists(backupSeriesPath))
-                        {
-                            File.Delete(backupSeriesPath);
-                        }
-                    }
-                    catch
-                    {
-                        if (!string.IsNullOrWhiteSpace(backupSeriesPath) &&
-                            File.Exists(backupSeriesPath) &&
-                            !File.Exists(seriesPath))
-                        {
-                            File.Move(backupSeriesPath, seriesPath, overwrite: true);
-                        }
-
-                        throw;
+                        return restored;
                     }
                 }
 
@@ -496,46 +444,25 @@ namespace Listenarr.Infrastructure.Cache
 
 
             // Check library storage first
-            var libraryPath = GetImagePath(identifier, _libraryImagePath);
-            if (File.Exists(libraryPath) && IsValidCachedCoverFile(libraryPath, identifier, "library"))
+            var libraryPath = _storageLookup.FindLibraryPath(identifier);
+            if (!string.IsNullOrEmpty(libraryPath))
                 return Task.FromResult<string?>(GetRelativePath(libraryPath));
 
             // Check authors storage next
-            var authorPath = GetImagePath(identifier, _authorImagePath);
-            if (File.Exists(authorPath) && IsValidCachedCoverFile(authorPath, identifier, "author"))
+            var authorPath = _storageLookup.FindAuthorPath(identifier);
+            if (!string.IsNullOrEmpty(authorPath))
                 return Task.FromResult<string?>(GetRelativePath(authorPath));
 
-            var seriesPath = GetImagePath(identifier, _seriesImagePath);
-            if (File.Exists(seriesPath) && IsValidCachedCoverFile(seriesPath, identifier, "series"))
+            var seriesPath = _storageLookup.FindSeriesPath(identifier);
+            if (!string.IsNullOrEmpty(seriesPath))
                 return Task.FromResult<string?>(GetRelativePath(seriesPath));
 
             // Check temp cache and prefer non-placeholder images
-            var tempBest = GetBestTempImagePathIfValid(identifier);
+            var tempBest = _storageLookup.FindTempPath(identifier);
             if (!string.IsNullOrEmpty(tempBest))
                 return Task.FromResult<string?>(GetRelativePath(tempBest));
 
             return Task.FromResult<string?>(null);
-        }
-
-        private string? GetBestTempImagePathIfValid(string identifier)
-        {
-            var extensions = new[] { ".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg" };
-
-            foreach (var ext in extensions)
-            {
-                var path = _pathResolver.BuildFilePath(identifier, ext, _tempCachePath);
-                if (!File.Exists(path)) continue;
-
-                // Remove placeholder images (e.g. 1x1) from temp cache so fallback can continue.
-                if (!IsValidCachedCoverFile(path, identifier, "temp"))
-                {
-                    continue;
-                }
-
-                return path;
-            }
-
-            return null;
         }
 
         /// <summary>
@@ -580,62 +507,6 @@ namespace Listenarr.Infrastructure.Cache
         private string GetRelativePath(string fullPath)
         {
             return _pathResolver.GetRelativePath(fullPath);
-        }
-
-        private static async Task<byte[]> ReadContentWithLimitAsync(HttpContent content, long maxBytes)
-        {
-            await using var contentStream = await content.ReadAsStreamAsync();
-            using var bufferStream = new MemoryStream();
-            var buffer = new byte[81920];
-            long totalBytes = 0;
-
-            while (true)
-            {
-                var read = await contentStream.ReadAsync(buffer.AsMemory(0, buffer.Length));
-                if (read == 0)
-                {
-                    break;
-                }
-
-                totalBytes += read;
-                if (totalBytes > maxBytes)
-                {
-                    throw new InvalidOperationException($"Downloaded image exceeds the {maxBytes} byte limit.");
-                }
-
-                bufferStream.Write(buffer, 0, read);
-            }
-
-            return bufferStream.ToArray();
-        }
-
-        private bool IsValidCachedCoverFile(string filePath, string identifier, string bucket)
-        {
-            try
-            {
-                if (!File.Exists(filePath)) return false;
-                var bytes = File.ReadAllBytes(filePath);
-                var mediaType = ImageCacheContentValidator.GetMediaTypeFromExtension(Path.GetExtension(filePath));
-                if (ImageCacheContentValidator.IsPlaceholderImage(bytes, mediaType, _logger))
-                {
-                    _logger.LogInformation("Deleting placeholder/tiny cached image for {Identifier} in {Bucket}: {Path}", LogRedaction.SanitizeText(identifier), bucket, LogRedaction.SanitizeText(filePath));
-                    try
-                    {
-                        File.Delete(filePath);
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                    {
-                        _logger.LogDebug(ex, "Failed deleting invalid cached image for {Identifier} in {Bucket}: {Path}", LogRedaction.SanitizeText(identifier), bucket, LogRedaction.SanitizeText(filePath));
-                    }
-                    return false;
-                }
-                return true;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogWarning(ex, "Failed validating cached image file for {Identifier}: {Path}", LogRedaction.SanitizeText(identifier), LogRedaction.SanitizeText(filePath));
-                return false;
-            }
         }
 
         public void Dispose()

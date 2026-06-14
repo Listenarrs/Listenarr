@@ -41,6 +41,7 @@ namespace Listenarr.Api.Controllers
         private readonly ImagePlaceholderResolver _placeholderResolver;
         private readonly ImageResponseBuilder _imageResponseBuilder;
         private readonly ImagePathValidator _imagePathValidator;
+        private readonly ImageCachedPathValidator _cachedPathValidator;
         private readonly string _effectiveContentRootPath;
 
         [ActivatorUtilitiesConstructor]
@@ -88,6 +89,7 @@ namespace Listenarr.Api.Controllers
             _effectiveContentRootPath = applicationPathService.ContentRootPath;
             _imageResponseBuilder = new ImageResponseBuilder(_placeholderResolver, _logger, _effectiveContentRootPath);
             _imagePathValidator = new ImagePathValidator(_effectiveContentRootPath);
+            _cachedPathValidator = new ImageCachedPathValidator(_imagePathValidator, _logger);
         }
 
         /// <summary>
@@ -179,55 +181,7 @@ namespace Listenarr.Api.Controllers
 
                 // Sanitize/validate the returned relative path to ensure it points inside
                 // known image directories. Treat any unexpected location as not-found.
-                if (!string.IsNullOrWhiteSpace(relativePath))
-                {
-                    // Defend against services returning absolute paths unexpectedly
-                    if (Path.IsPathRooted(relativePath))
-                    {
-                        _logger.LogWarning("Image service returned rooted path for identifier {Identifier}: {Path}", LogRedaction.SanitizeText(identifier), LogRedaction.SanitizeText(relativePath));
-                        relativePath = null;
-                    }
-                    else
-                    {
-                        _logger.LogDebug("ImagesController: initial relativePath for {Identifier}: {RelativePath}", LogRedaction.SanitizeText(identifier), LogRedaction.SanitizeText(relativePath));
-                        try
-                        {
-                            var candidateFull = Path.GetFullPath(ImageIdentifierHelper.ResolvePathWithOptionalBase(_effectiveContentRootPath, relativePath));
-
-                            if (!IsInsidePermittedImageRoot(candidateFull))
-                            {
-                                _logger.LogWarning("Resolved image path outside permitted directories for identifier {Identifier}: {Path}", LogRedaction.SanitizeText(identifier), LogRedaction.SanitizeText(candidateFull));
-                                relativePath = null;
-                            }
-                            else
-                            {
-                                try
-                                {
-                                    // Defend against symlink/reparse-point escapes
-                                    if (System.IO.File.Exists(candidateFull))
-                                    {
-                                        var attrs = System.IO.File.GetAttributes(candidateFull);
-                                        if ((attrs & System.IO.FileAttributes.ReparsePoint) != 0)
-                                        {
-                                            _logger.LogWarning("Rejected reparse-point (symlink) image path for identifier {Identifier}: {Path}", LogRedaction.SanitizeText(identifier), LogRedaction.SanitizeText(candidateFull));
-                                            relativePath = null;
-                                        }
-                                    }
-                                }
-                                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                                {
-                                    _logger.LogWarning(ex, "Failed to inspect candidate image attributes for identifier {Identifier}", LogRedaction.SanitizeText(identifier));
-                                    relativePath = null;
-                                }
-                            }
-                        }
-                        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                        {
-                            _logger.LogWarning(ex, "Failed to validate image path for identifier {Identifier}", LogRedaction.SanitizeText(identifier));
-                            relativePath = null;
-                        }
-                    }
-                }
+                relativePath = _cachedPathValidator.ValidateReturnedPath(identifier, relativePath);
 
                 // If we found a temp cached image but the identifier corresponds to an audiobook in the library,
                 // attempt to move it into permanent library storage so library images don't live in /temp.
@@ -248,45 +202,9 @@ namespace Listenarr.Api.Controllers
                                 {
                                     // Prefer the moved library path when serving the image
                                     // Validate moved path as well
-                                    try
+                                    if (_cachedPathValidator.IsValidMovedPath(identifier, moved))
                                     {
-                                        var movedFull = Path.GetFullPath(ImageIdentifierHelper.ResolvePathWithOptionalBase(_effectiveContentRootPath, moved));
-
-                                        if (IsInsidePermittedImageRoot(movedFull))
-                                        {
-                                            try
-                                            {
-                                                if (System.IO.File.Exists(movedFull))
-                                                {
-                                                    var matt = System.IO.File.GetAttributes(movedFull);
-                                                    if ((matt & System.IO.FileAttributes.ReparsePoint) != 0)
-                                                    {
-                                                        _logger.LogWarning("Rejected moved reparse-point (symlink) image path for identifier {Identifier}: {Path}", LogRedaction.SanitizeText(identifier), LogRedaction.SanitizeText(movedFull));
-                                                    }
-                                                    else
-                                                    {
-                                                        relativePath = moved;
-                                                    }
-                                                }
-                                                else
-                                                {
-                                                    // If file doesn't yet exist, conservatively reject the moved path
-                                                    _logger.LogWarning("Moved image file does not exist for identifier {Identifier}: {Path}", LogRedaction.SanitizeText(identifier), LogRedaction.SanitizeText(movedFull));
-                                                }
-                                            }
-                                            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                                            {
-                                                _logger.LogWarning(ex, "Failed to inspect moved image attributes for identifier {Identifier}", LogRedaction.SanitizeText(identifier));
-                                            }
-                                        }
-                                        else
-                                        {
-                                            _logger.LogWarning("Moved image path outside permitted directories for identifier {Identifier}: {Path}", LogRedaction.SanitizeText(identifier), LogRedaction.SanitizeText(movedFull));
-                                        }
-                                    }
-                                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                                    {
-                                        _logger.LogWarning(ex, "Failed to validate moved image path for identifier {Identifier}", LogRedaction.SanitizeText(identifier));
+                                        relativePath = moved;
                                     }
                                 }
                             }
@@ -943,11 +861,6 @@ namespace Listenarr.Api.Controllers
                 _logger.LogError(ex, "Error retrieving image for identifier: {Identifier}", LogRedaction.SanitizeText(identifier));
                 return StatusCode(500, new { message = "Error retrieving image" });
             }
-        }
-
-        private bool IsInsidePermittedImageRoot(string fullPath)
-        {
-            return _imagePathValidator.IsInsidePermittedImageRoot(fullPath);
         }
 
         private IActionResult CreatePlaceholderResult(string logContext, string? logValue, string notFoundMessage)
