@@ -17,7 +17,6 @@
  */
 
 using System.Text.Json;
-using Listenarr.Application.Common;
 using Listenarr.Application.Security;
 using Listenarr.Domain.Models;
 using Microsoft.Extensions.Logging;
@@ -334,30 +333,7 @@ namespace Listenarr.Application.Search
                             }
                         }
 
-                        // Build download URL (include mam_id if configured)
-                        var downloadUrl = "";
-                        if (!string.IsNullOrEmpty(dlHash))
-                        {
-                            var baseUrl = (indexer.Url ?? "https://www.myanonamouse.net").TrimEnd('/');
-                            downloadUrl = $"{baseUrl}/tor/download.php/{dlHash}";
-                            var mamIdLocal = MyAnonamouseHelper.TryGetMamId(indexer.AdditionalSettings);
-                            if (!string.IsNullOrEmpty(mamIdLocal))
-                            {
-                                // Normalize mam_id: if the stored value is already percent-encoded, unescape it first
-                                // to avoid double-encoding sequences like "%252B". Then escape once for safe query use.
-                                try
-                                {
-                                    mamIdLocal = Uri.UnescapeDataString(mamIdLocal);
-                                }
-                                catch (Exception caughtEx_19) when (caughtEx_19 is not OperationCanceledException && caughtEx_19 is not OutOfMemoryException && caughtEx_19 is not StackOverflowException)
-                                {
-                                    // If unescape fails for any reason, fall back to original value
-                                    System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
-                                }
-
-                                downloadUrl += $"?mam_id={Uri.EscapeDataString(mamIdLocal)}";
-                            }
-                        }
+                        var downloadUrl = MyAnonamouseDownloadUrlBuilder.Build(dlHash, indexer);
 
                         // Preserve raw language code for later flagging/flags list
                         string rawLangCode = string.Empty;
