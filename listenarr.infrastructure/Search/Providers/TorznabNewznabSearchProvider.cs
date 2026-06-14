@@ -53,7 +53,7 @@ public class TorznabNewznabSearchProvider : IIndexerSearchProvider
         try
         {
             // Build Torznab/Newznab API URL (redact api keys before logging)
-            var url = BuildTorznabUrl(indexer, query, category);
+            var url = TorznabNewznabRequestBuilder.BuildUrl(indexer, query, category);
             var redactedUrl = LogRedaction.RedactText(url, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { indexer.ApiKey ?? string.Empty }));
             _logger.LogDebug("Indexer API URL: {Url}", redactedUrl);
 
@@ -87,50 +87,7 @@ public class TorznabNewznabSearchProvider : IIndexerSearchProvider
 
     private string BuildTorznabUrl(Indexer indexer, string query, string? category)
     {
-        var url = indexer.Url.TrimEnd('/');
-
-        // Don't append /api if URL already ends with it (e.g., Prowlarr proxy URLs)
-        var apiPath = url.EndsWith("/api", StringComparison.OrdinalIgnoreCase)
-            ? ""
-            : indexer.Implementation.ToLower() switch
-            {
-                "torznab" => "/api",
-                "newznab" => "/api",
-                _ => "/api"
-            };
-
-        var queryParams = new List<string>
-        {
-            $"t=search",
-            $"q={Uri.EscapeDataString(query)}"
-        };
-
-        // Add API key if provided
-        if (!string.IsNullOrEmpty(indexer.ApiKey))
-        {
-            queryParams.Add($"apikey={Uri.EscapeDataString(indexer.ApiKey)}");
-        }
-
-        // Add categories if specified
-        if (!string.IsNullOrEmpty(category))
-        {
-            queryParams.Add($"cat={Uri.EscapeDataString(category)}");
-        }
-        else if (!string.IsNullOrEmpty(indexer.Categories))
-        {
-            queryParams.Add($"cat={Uri.EscapeDataString(indexer.Categories)}");
-        }
-
-        // Add limit
-        queryParams.Add("limit=100");
-
-        // Request extended info for Newznab/Torznab indexers to include grabs/snatches and other attributes when available
-        if (!string.IsNullOrEmpty(indexer.Implementation) && (indexer.Implementation.Equals("newznab", StringComparison.OrdinalIgnoreCase) || indexer.Implementation.Equals("torznab", StringComparison.OrdinalIgnoreCase)))
-        {
-            queryParams.Add("extended=1");
-        }
-
-        return $"{url}{apiPath}?{string.Join("&", queryParams)}";
+        return TorznabNewznabRequestBuilder.BuildUrl(indexer, query, category);
     }
 
     private async Task<List<IndexerSearchResult>> ParseTorznabResponseAsync(string xmlContent, Indexer indexer)
@@ -210,7 +167,7 @@ public class TorznabNewznabSearchProvider : IIndexerSearchProvider
                         switch (name.ToLower())
                         {
                             case "size":
-                                var parsedSize = ParseSizeString(value);
+                                var parsedSize = TorznabNewznabValueParser.ParseSize(value);
                                 if (parsedSize > 0)
                                 {
                                     result.Size = parsedSize;
@@ -265,7 +222,7 @@ public class TorznabNewznabSearchProvider : IIndexerSearchProvider
                                 // Standardized language codes (e.g., ENG, FR)
                                 try
                                 {
-                                    var parsedLang = ParseLanguageFromText(value);
+                                    var parsedLang = TorznabNewznabValueParser.ParseLanguageFromText(value);
                                     if (!string.IsNullOrEmpty(parsedLang)) result.Language = parsedLang;
                                 }
                                 catch (Exception caughtEx_1) when (caughtEx_1 is not OperationCanceledException && caughtEx_1 is not OutOfMemoryException && caughtEx_1 is not StackOverflowException)
@@ -284,7 +241,7 @@ public class TorznabNewznabSearchProvider : IIndexerSearchProvider
                                 {
                                     try
                                     {
-                                        var pl = ParseLanguageFromText(value);
+                                        var pl = TorznabNewznabValueParser.ParseLanguageFromText(value);
                                         if (!string.IsNullOrEmpty(pl)) result.Language = pl;
                                     }
                                     catch (Exception caughtEx_2) when (caughtEx_2 is not OperationCanceledException && caughtEx_2 is not OutOfMemoryException && caughtEx_2 is not StackOverflowException)
@@ -417,7 +374,7 @@ public class TorznabNewznabSearchProvider : IIndexerSearchProvider
                         var lengthStr = enclosure.Attribute("length")?.Value;
                         if (!string.IsNullOrEmpty(lengthStr) && result.Size == 0)
                         {
-                            var parsedLen = ParseSizeString(lengthStr);
+                            var parsedLen = TorznabNewznabValueParser.ParseSize(lengthStr);
                             if (parsedLen > 0)
                             {
                                 result.Size = parsedLen;
@@ -495,7 +452,7 @@ public class TorznabNewznabSearchProvider : IIndexerSearchProvider
                         // Detect language codes present in title or description (e.g. [ENG / M4B])
                         try
                         {
-                            var lang = ParseLanguageFromText(result.Title + " " + description);
+                            var lang = TorznabNewznabValueParser.ParseLanguageFromText(result.Title + " " + description);
                             if (!string.IsNullOrEmpty(lang)) result.Language = lang;
                         }
                         catch (Exception caughtEx_4) when (caughtEx_4 is not OperationCanceledException && caughtEx_4 is not OutOfMemoryException && caughtEx_4 is not StackOverflowException)
@@ -579,79 +536,4 @@ public class TorznabNewznabSearchProvider : IIndexerSearchProvider
         return results;
     }
 
-    private long ParseSizeString(string sizeStr)
-    {
-        if (string.IsNullOrWhiteSpace(sizeStr))
-            return 0;
-
-        // Try parsing as a plain number first (bytes)
-        if (long.TryParse(sizeStr, out var bytes))
-            return bytes;
-
-        // Parse human-readable sizes like "1.5 GB", "3.7 GiB", "500 MB", etc.
-        // Support both binary (GiB, MiB, TiB, KiB) and decimal (GB, MB, TB, KB) units
-        var match = Regex.Match(sizeStr, @"([\d\.]+)\s*([KMGT]i?B)", RegexOptions.IgnoreCase);
-        if (!match.Success)
-            return 0;
-
-        if (!double.TryParse(match.Groups[1].Value, out var size))
-            return 0;
-
-        var unit = match.Groups[2].Value.ToUpper();
-        return unit switch
-        {
-            "TIB" => (long)(size * 1024 * 1024 * 1024 * 1024),
-            "TB" => (long)(size * 1024 * 1024 * 1024 * 1024),
-            "GIB" => (long)(size * 1024 * 1024 * 1024),
-            "GB" => (long)(size * 1024 * 1024 * 1024),
-            "MIB" => (long)(size * 1024 * 1024),
-            "MB" => (long)(size * 1024 * 1024),
-            "KIB" => (long)(size * 1024),
-            "KB" => (long)(size * 1024),
-            "B" => (long)size,
-            _ => 0
-        };
-    }
-
-    private string? ParseLanguageFromText(string text)
-    {
-        if (string.IsNullOrWhiteSpace(text)) return null;
-
-        // Normalize whitespace
-        var normalized = Regex.Replace(text, "\\s+", " ", RegexOptions.Compiled | RegexOptions.IgnoreCase).Trim();
-
-        var codes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            { "ENG", "English" }, { "EN", "English" },
-            { "DUT", "Dutch" },    { "NL", "Dutch" },
-            { "GER", "German" },   { "DE", "German" },
-            { "FRE", "French" },   { "FR", "French" }
-        };
-
-        // Build a joined alternation like ENG|EN|DUT|NL|...
-        var alternation = string.Join("|", codes.Keys.Select(Regex.Escape));
-
-        // Bracketed or parenthesis forms: [ ENG / ... ] or (EN)
-        var bracketedPattern = $@"[\[\(]\s*(?:{alternation})\b";
-
-        // Standalone word boundary pattern: \b(ENG|EN|DUT|NL|...)\b
-        var standalonePattern = $@"\b(?:{alternation})\b";
-
-        // Try bracketed first (higher confidence)
-        var m = Regex.Match(normalized, bracketedPattern, RegexOptions.IgnoreCase);
-        if (m.Success)
-        {
-            var captured = Regex.Match(m.Value, $@"(?:{alternation})", RegexOptions.IgnoreCase);
-            if (captured.Success && codes.TryGetValue(captured.Value, out var lang))
-                return lang;
-        }
-
-        // Try standalone word boundary
-        m = Regex.Match(normalized, standalonePattern, RegexOptions.IgnoreCase);
-        if (m.Success && codes.TryGetValue(m.Value, out var lang2))
-            return lang2;
-
-        return null;
-    }
 }
-
