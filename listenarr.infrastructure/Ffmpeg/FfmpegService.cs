@@ -39,6 +39,7 @@ namespace Listenarr.Infrastructure.Ffmpeg
         private readonly HttpClient _httpClient;
         private readonly IStartupConfigService _startupConfigService;
         private readonly IProcessRunner _processRunner;
+        private readonly FfprobeGithubAssetDiscoverer _githubAssetDiscoverer;
         // Allow disabling auto-download via environment variable
         private readonly bool _autoInstall;
 
@@ -61,6 +62,7 @@ namespace Listenarr.Infrastructure.Ffmpeg
                 timeoutSeconds = parsedSeconds;
             }
             _httpClient.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
+            _githubAssetDiscoverer = new FfprobeGithubAssetDiscoverer(_httpClient, _logger);
             _autoInstall = Environment.GetEnvironmentVariable("LISTENARR_AUTO_INSTALL_FFPROBE")?.ToLower() != "false"; // default true
             _startupConfigService = startupConfigService;
             _processRunner = processRunner;
@@ -178,13 +180,13 @@ namespace Listenarr.Infrastructure.Ffmpeg
                         if (parts.Length == 2)
                         {
                             var repo = parts[1];
-                            var assetInfo = await TryDiscoverGithubAssetAsync(repo, cfg.Ffmpeg.ReleaseOverride, cfg.Ffmpeg.Arch);
-                            if (!string.IsNullOrEmpty(assetInfo.assetUrl))
+                            var assetInfo = await _githubAssetDiscoverer.TryDiscoverAsync(repo, cfg.Ffmpeg.ReleaseOverride, cfg.Ffmpeg.Arch);
+                            if (!string.IsNullOrEmpty(assetInfo.AssetUrl))
                             {
-                                downloadUrl = assetInfo.assetUrl;
-                                if (!string.IsNullOrEmpty(assetInfo.checksumContent))
+                                downloadUrl = assetInfo.AssetUrl;
+                                if (!string.IsNullOrEmpty(assetInfo.ChecksumContent))
                                 {
-                                    discoveredChecksum = assetInfo.checksumContent;
+                                    discoveredChecksum = assetInfo.ChecksumContent;
                                 }
                             }
                         }
@@ -546,74 +548,6 @@ namespace Listenarr.Infrastructure.Ffmpeg
             }
 
             return null;
-        }
-
-        private async Task<(string? assetUrl, string? checksumContent)> TryDiscoverGithubAssetAsync(string repo, string? releaseOverride, string? arch)
-        {
-            try
-            {
-                // Use GitHub Releases API: https://api.github.com/repos/{owner}/{repo}/releases
-                var releasesUrl = $"https://api.github.com/repos/{repo}/releases";
-                using var req = new HttpRequestMessage(HttpMethod.Get, releasesUrl);
-                req.Headers.Add("User-Agent", "Listenarr-Installer");
-                using var resp = await _httpClient.SendAsync(req);
-                resp.EnsureSuccessStatusCode();
-                var body = await resp.Content.ReadAsStringAsync();
-                var docs = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(body);
-                if (docs.ValueKind != System.Text.Json.JsonValueKind.Array) return (null, null);
-
-                foreach (var release in docs.EnumerateArray())
-                {
-                    var tag = release.GetProperty("tag_name").GetString() ?? string.Empty;
-                    if (!string.IsNullOrEmpty(releaseOverride) && !tag.Contains(releaseOverride, StringComparison.OrdinalIgnoreCase)) continue;
-                    if (release.TryGetProperty("assets", out var assets) && assets.ValueKind == System.Text.Json.JsonValueKind.Array)
-                    {
-                        string? checksumContent = null;
-                        string? chosenUrl = null;
-                        // First, attempt to find checksum asset(s)
-                        foreach (var asset in assets.EnumerateArray())
-                        {
-                            var name = asset.GetProperty("name").GetString() ?? string.Empty;
-                            var url = asset.GetProperty("browser_download_url").GetString() ?? string.Empty;
-                            if (string.IsNullOrEmpty(url)) continue;
-                            if (name.Contains("sha256", StringComparison.OrdinalIgnoreCase) || name.Contains("checksum", StringComparison.OrdinalIgnoreCase) || name.Contains("sha256sums", StringComparison.OrdinalIgnoreCase))
-                            {
-                                try
-                                {
-                                    var c = await (await _httpClient.GetAsync(url)).Content.ReadAsStringAsync();
-                                    if (!string.IsNullOrEmpty(c)) checksumContent = c;
-                                }
-                                catch (Exception caughtEx_10) when (caughtEx_10 is not OperationCanceledException && caughtEx_10 is not OutOfMemoryException && caughtEx_10 is not StackOverflowException)
-                                {
-                                    System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
-                                }
-                            }
-                        }
-
-                        // Then find a matching asset for platform/arch
-                        foreach (var asset in assets.EnumerateArray())
-                        {
-                            var name = asset.GetProperty("name").GetString() ?? string.Empty;
-                            var url = asset.GetProperty("browser_download_url").GetString() ?? string.Empty;
-                            if (string.IsNullOrEmpty(url)) continue;
-                            if (!string.IsNullOrEmpty(arch) && !name.Contains(arch, StringComparison.OrdinalIgnoreCase)) continue;
-                            if (name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".tar.xz", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".tgz", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase))
-                            {
-                                chosenUrl = url;
-                                break;
-                            }
-                        }
-
-                        if (!string.IsNullOrEmpty(chosenUrl)) return (chosenUrl, checksumContent);
-                    }
-                }
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogWarning(ex, "GitHub asset discovery failed for repo {Repo}", repo);
-            }
-
-            return (null, null);
         }
 
         public async Task<AudioMetadata> RunFfprobeAsync(string filePath)
