@@ -16,7 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Net;
-using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using Listenarr.Application.Interfaces;
@@ -99,20 +98,6 @@ namespace Listenarr.Infrastructure.Adapters
             }
         }
 
-        private static bool IsVersion25OrNewer(string version)
-        {
-            if (string.IsNullOrWhiteSpace(version)) return false;
-
-            // Version format: "25.4" or "25.4-testing"
-            var parts = version.Split(new[] { '.', '-' }, StringSplitOptions.RemoveEmptyEntries);
-            if (parts.Length > 0 && int.TryParse(parts[0], out var major))
-            {
-                return major >= 25;
-            }
-
-            return false;
-        }
-
         public async Task<string?> AddAsync(DownloadClientConfiguration client, SearchResult result, CancellationToken ct = default)
         {
             if (client == null) throw new ArgumentNullException(nameof(client));
@@ -172,7 +157,7 @@ namespace Listenarr.Infrastructure.Adapters
             };
 
             // Add Basic Auth (NZBGet v25 REST API accepts Basic Auth)
-            var authHeader = BuildAuthHeader(client);
+            var authHeader = NzbgetAuthentication.BuildAuthHeader(client);
             if (authHeader != null)
             {
                 request.Headers.Authorization = authHeader;
@@ -621,17 +606,6 @@ namespace Listenarr.Infrastructure.Adapters
             }
         }
 
-        private static AuthenticationHeaderValue? BuildAuthHeader(DownloadClientConfiguration client)
-        {
-            if (string.IsNullOrWhiteSpace(client.Username))
-            {
-                return null;
-            }
-
-            var credentials = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{client.Username}:{client.Password}"));
-            return new AuthenticationHeaderValue("Basic", credentials);
-        }
-
         /// <summary>
         /// Resolves the actual import item for a completed download.
         /// Queries NZBGet history for FinalDir or DestDir.
@@ -723,11 +697,10 @@ namespace Listenarr.Infrastructure.Adapters
                 using var http = _httpClientFactory.CreateClient(ClientType);
 
                 // Add basic auth if credentials provided
-                if (!string.IsNullOrEmpty(client.Username))
+                var authHeader = NzbgetAuthentication.BuildAuthHeader(client);
+                if (authHeader != null)
                 {
-                    var authBytes = Encoding.UTF8.GetBytes($"{client.Username}:{client.Password}");
-                    var authHeader = Convert.ToBase64String(authBytes);
-                    http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", authHeader);
+                    http.DefaultRequestHeaders.Authorization = authHeader;
                 }
 
                 // Get active downloads from status for progress updates
