@@ -16,7 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Net;
-using System.Text.Json;
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Security;
 using Listenarr.Domain.Models;
@@ -30,26 +29,27 @@ namespace Listenarr.Infrastructure.Adapters
         public string ClientType => "nzbget";
         public DownloadProtocol Protocol => DownloadProtocol.Usenet;
 
-        private readonly IHttpClientFactory _httpClientFactory;
-        private readonly INzbUrlResolver _nzbUrlResolver;
         private readonly ILogger<NzbgetAdapter> _logger;
         private readonly NzbgetXmlRpcClient _xmlRpcClient;
-        private readonly NzbgetNzbDownloader _nzbDownloader;
         private readonly NzbgetDownloadPollingWorkflow _downloadPollingWorkflow;
         private readonly NzbgetRemovalWorkflow _removalWorkflow;
+        private readonly NzbgetAddWorkflow _addWorkflow;
+        private readonly NzbgetImportItemResolver _importItemResolver;
 
         public NzbgetAdapter(
             IHttpClientFactory httpClientFactory,
             INzbUrlResolver nzbUrlResolver,
             ILogger<NzbgetAdapter> logger)
         {
-            _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
-            _nzbUrlResolver = nzbUrlResolver ?? throw new ArgumentNullException(nameof(nzbUrlResolver));
+            ArgumentNullException.ThrowIfNull(httpClientFactory);
+            ArgumentNullException.ThrowIfNull(nzbUrlResolver);
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-            _xmlRpcClient = new NzbgetXmlRpcClient(_httpClientFactory, ClientType);
-            _nzbDownloader = new NzbgetNzbDownloader(_httpClientFactory, ClientType, _logger);
-            _downloadPollingWorkflow = new NzbgetDownloadPollingWorkflow(_httpClientFactory, _logger, ClientType);
+            _xmlRpcClient = new NzbgetXmlRpcClient(httpClientFactory, ClientType);
+            var nzbDownloader = new NzbgetNzbDownloader(httpClientFactory, ClientType, _logger);
+            _downloadPollingWorkflow = new NzbgetDownloadPollingWorkflow(httpClientFactory, _logger, ClientType);
             _removalWorkflow = new NzbgetRemovalWorkflow(_xmlRpcClient, _logger);
+            _addWorkflow = new NzbgetAddWorkflow(nzbUrlResolver, _xmlRpcClient, nzbDownloader, _logger);
+            _importItemResolver = new NzbgetImportItemResolver(_xmlRpcClient, _logger);
         }
 
         public async Task<(bool Success, string Message)> TestConnectionAsync(DownloadClientConfiguration client, CancellationToken ct = default)
@@ -101,153 +101,7 @@ namespace Listenarr.Infrastructure.Adapters
 
         public async Task<string?> AddAsync(DownloadClientConfiguration client, SearchResult result, CancellationToken ct = default)
         {
-            if (client == null) throw new ArgumentNullException(nameof(client));
-            if (result == null) throw new ArgumentNullException(nameof(result));
-
-            var (nzbUrl, indexerApiKey) = await _nzbUrlResolver.ResolveAsync(result, ct);
-            if (string.IsNullOrWhiteSpace(nzbUrl))
-            {
-                throw new ArgumentException("No NZB URL available for NZBGet", nameof(result));
-            }
-
-            // Use JSON-RPC for all versions (v25+ REST API has authentication issues)
-            _logger.LogInformation("Using NZBGet JSON-RPC append method");
-            return await AddViaJsonRpcAsync(client, result, nzbUrl, indexerApiKey, ct);
-        }
-
-        private async Task<string?> AddViaRestApiAsync(
-            DownloadClientConfiguration client,
-            SearchResult result,
-            string nzbUrl,
-            string? indexerApiKey,
-            CancellationToken ct)
-        {
-            var category = NzbgetRequestPlanner.ResolveCategory(client);
-            var priority = NzbgetRequestPlanner.ResolvePriority(client);
-            var droneId = Guid.NewGuid().ToString().Replace("-", string.Empty);
-
-            // Download NZB content
-            var nzbBytes = await _nzbDownloader.DownloadAsync(nzbUrl, indexerApiKey, ct);
-            var nzbFileName = NzbgetRequestPlanner.BuildNzbFileName(result);
-
-            var uploadUrl = DownloadClientUriBuilder.BuildUri(client, "/api/v2/nzb");
-
-            using var httpClient = _httpClientFactory.CreateClient(ClientType);
-            using var content = new MultipartFormDataContent();
-
-            // Add NZB file
-            content.Add(new ByteArrayContent(nzbBytes), "file", nzbFileName);
-
-            // Add metadata
-            if (!string.IsNullOrWhiteSpace(category))
-            {
-                content.Add(new StringContent(category), "Category");
-            }
-
-            if (priority != 0)
-            {
-                content.Add(new StringContent(priority.ToString()), "Priority");
-            }
-
-            // Add drone tracking parameter
-            content.Add(new StringContent($"drone={droneId}"), "PPParameters");
-
-            using var request = new HttpRequestMessage(HttpMethod.Post, uploadUrl)
-            {
-                Content = content
-            };
-
-            // Add Basic Auth (NZBGet v25 REST API accepts Basic Auth)
-            var authHeader = NzbgetAuthentication.BuildAuthHeader(client);
-            if (authHeader != null)
-            {
-                request.Headers.Authorization = authHeader;
-            }
-
-            _logger.LogDebug("NZBGet REST API POST to {Url} with file {FileName}", LogRedaction.SanitizeUrl(uploadUrl.ToString()), LogRedaction.SanitizeText(nzbFileName));
-
-            using var response = await httpClient.SendAsync(request, ct);
-            var responseBody = await response.Content.ReadAsStringAsync(ct);
-
-            if (!response.IsSuccessStatusCode)
-            {
-                _logger.LogError("NZBGet REST API upload failed: {StatusCode} - {Body}", response.StatusCode, responseBody);
-                throw new Exception($"NZBGet REST API upload error: {response.StatusCode} - {responseBody}");
-            }
-
-            // Parse response JSON to get queue ID
-            var jsonResponse = JsonSerializer.Deserialize<JsonElement>(responseBody);
-            if (jsonResponse.TryGetProperty("nzbId", out var nzbIdProp))
-            {
-                var queueId = nzbIdProp.GetInt32();
-                _logger.LogInformation("NZBGet REST API added '{Title}' with queue ID {QueueId}", LogRedaction.SanitizeText(result.Title), queueId);
-                return queueId.ToString();
-            }
-
-            _logger.LogWarning("NZBGet REST API response missing nzbId: {Body}", responseBody);
-            return null;
-        }
-
-        private async Task<string?> AddViaJsonRpcAsync(
-            DownloadClientConfiguration client,
-            SearchResult result,
-            string nzbUrl,
-            string? indexerApiKey,
-            CancellationToken ct)
-        {
-            var category = NzbgetRequestPlanner.ResolveCategory(client);
-            var priority = NzbgetRequestPlanner.ResolvePriority(client);
-            var droneId = Guid.NewGuid().ToString().Replace("-", string.Empty);
-
-            // Download and base64-encode the NZB content
-            var nzbBytes = await _nzbDownloader.DownloadAsync(nzbUrl, indexerApiKey, ct);
-            var nzbContentBase64 = Convert.ToBase64String(nzbBytes);
-            var nzbFileName = NzbgetRequestPlanner.BuildNzbFileName(result);
-
-            // PPParameters as array of structs (key-value pairs)
-            var ppParams = new[]
-            {
-                new Dictionary<string, object>
-                {
-                    { "Name", "drone" },
-                    { "Value", droneId }
-                }
-            };
-
-            try
-            {
-                // Call append via XML-RPC
-                _logger.LogInformation("Calling NZBGet append via XML-RPC for '{Title}'", LogRedaction.SanitizeText(result.Title));
-                var appendResult = await _xmlRpcClient.CallAsync(client, "append",
-                    nzbFileName,
-                    nzbContentBase64,
-                    category ?? string.Empty,
-                    priority,
-                    false,  // addToTop
-                    false,  // addPaused
-                    string.Empty,  // dupeKey
-                    0,      // dupeScore
-                    "SCORE", // dupeMode
-                    ppParams
-                );
-
-                var queueId = int.Parse(appendResult.Element("i4")?.Value ?? appendResult.Element("int")?.Value ?? "0");
-
-                if (queueId <= 0)
-                {
-                    _logger.LogWarning("NZBGet rejected NZB '{Title}', returned ID: {QueueId}", LogRedaction.SanitizeText(result.Title), queueId);
-                    return null;
-                }
-
-                _logger.LogInformation("NZBGet XML-RPC queued '{Title}' with ID {QueueId}, droneId: {DroneId}", LogRedaction.SanitizeText(result.Title), queueId, LogRedaction.SanitizeText(droneId));
-                // Return the NZBID so it can be stored and used for removal later
-                return queueId.ToString();
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogError(ex, "Failed to add NZB via XML-RPC");
-                throw;
-            }
+            return await _addWorkflow.AddAsync(client, result, ct);
         }
 
         public async Task<bool> RemoveAsync(DownloadClientConfiguration client, string id, bool deleteFiles = false, CancellationToken ct = default)
@@ -420,64 +274,7 @@ namespace Listenarr.Infrastructure.Adapters
             DownloadClientItem? previousAttempt = null,
             CancellationToken ct = default)
         {
-            // Clone to avoid mutating the original
-            var result = item.Clone();
-
-            // If OutputPath is already set and exists, use it
-            if (!string.IsNullOrEmpty(result.OutputPath))
-            {
-                return result;
-            }
-
-            try
-            {
-                // Query NZBGet history for the download
-                var historyResult = await _xmlRpcClient.CallAsync(client, "history", false);
-                var arrayData = historyResult.Element("array")?.Element("data");
-
-                if (arrayData == null)
-                {
-                    _logger.LogWarning("Invalid NZBGet history response format");
-                    return result;
-                }
-
-                // Find matching history entry by ID
-                foreach (var members in arrayData.Elements("value")
-                    .Select(valueElement => valueElement.Element("struct"))
-                    .Where(structElement => structElement != null)
-                    .Select(structElement => structElement!.Elements("member").ToDictionary(
-                        m => m.Element("name")?.Value ?? string.Empty,
-                        m => m.Element("value")?.Elements().FirstOrDefault()?.Value ?? string.Empty)))
-                {
-                    var entryId = members.GetValueOrDefault("ID", string.Empty);
-                    if (!string.Equals(entryId, item.DownloadId, StringComparison.OrdinalIgnoreCase)) continue;
-
-                    // Extract destination directory
-                    var destDir = members.GetValueOrDefault("DestDir", string.Empty);
-                    if (string.IsNullOrEmpty(destDir))
-                    {
-                        _logger.LogWarning("No DestDir found for NZBGet download {Id}", item.DownloadId);
-                        return result;
-                    }
-
-                    result.OutputPath = destDir;
-
-                    _logger.LogDebug(
-                        "Resolved NZBGet content path for {Id}: {ContentPath}",
-                        item.DownloadId,
-                        destDir);
-
-                    return result;
-                }
-
-                _logger.LogWarning("Download {Id} not found in NZBGet history", item.DownloadId);
-                return result;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogWarning(ex, "Error resolving import item for NZBGet download {Id}", item.DownloadId);
-                return result;
-            }
+            return await _importItemResolver.GetImportItemAsync(client, item);
         }
 
         /// <summary>
@@ -492,70 +289,7 @@ namespace Listenarr.Infrastructure.Adapters
             QueueItem? previousAttempt = null,
             CancellationToken ct = default)
         {
-            // Clone to avoid mutating the original
-            var result = queueItem.Clone();
-
-            // If ContentPath is already set and exists, use it
-            if (!string.IsNullOrEmpty(result.ContentPath))
-            {
-                return result;
-            }
-
-            try
-            {
-                // Query NZBGet history for the download
-                var historyResult = await _xmlRpcClient.CallAsync(client, "history", false);
-                var arrayData = historyResult.Element("array")?.Element("data");
-
-                if (arrayData == null)
-                {
-                    _logger.LogWarning("Failed to query NZBGet history for download {NzbId}", queueItem.Id);
-                    return result;
-                }
-
-                // Find the history entry matching our download ID
-                foreach (var members in arrayData.Elements("value")
-                    .Select(valueElement => valueElement.Element("struct"))
-                    .Where(structElement => structElement != null)
-                    .Select(structElement => structElement!.Elements("member").ToDictionary(
-                        m => m.Element("name")?.Value ?? string.Empty,
-                        m => m.Element("value")?.Elements().FirstOrDefault()?.Value ?? string.Empty)))
-                {
-                    var entryId = members.GetValueOrDefault("NZBID", string.Empty);
-                    if (entryId != queueItem.Id) continue;
-
-                    // Found matching entry - extract path
-                    // FinalDir is preferred (post-processing destination), fallback to DestDir
-                    var finalDir = members.GetValueOrDefault("FinalDir", string.Empty);
-                    var destDir = members.GetValueOrDefault("DestDir", string.Empty);
-                    var contentPath = !string.IsNullOrEmpty(finalDir) ? finalDir : destDir;
-
-                    if (string.IsNullOrEmpty(contentPath))
-                    {
-                        _logger.LogWarning("No FinalDir or DestDir found for NZB {NzbId}", queueItem.Id);
-                        return result;
-                    }
-
-                    // Apply path mapping
-                    var localContentPath = contentPath;
-                    result.ContentPath = localContentPath;
-
-                    _logger.LogDebug(
-                        "Resolved NZBGet content path for {NzbId}: {ContentPath}",
-                        queueItem.Id,
-                        localContentPath);
-
-                    return result;
-                }
-
-                _logger.LogWarning("Download {NzbId} not found in NZBGet history", queueItem.Id);
-                return result;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogWarning(ex, "Error resolving import item for NZBGet download {NzbId}", queueItem.Id);
-                return result;
-            }
+            return await _importItemResolver.GetImportItemAsync(client, queueItem);
         }
 
         public async Task<List<Download>> FetchDownloadsAsync(
