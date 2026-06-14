@@ -507,47 +507,12 @@ namespace Listenarr.Infrastructure.Ffmpeg
 
         private string? GetDownloadUrlForPlatform()
         {
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
-            {
-                if (RuntimeInformation.OSArchitecture == Architecture.Arm64)
-                {
-                    return "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-arm64-static.tar.xz";
-                }
-
-                // johnvansickle static build (x86_64)
-                return "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz";
-            }
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-            {
-                // evermeet/ffmpeg provides static macOS builds (note: keep an eye on licensing)
-                return "https://evermeet.cx/ffmpeg/ffmpeg-6.0.zip";
-            }
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            {
-                // gyan.dev builds
-                return "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip";
-            }
-
-            return null;
+            return FfprobePlatformDefaults.GetDownloadUrl();
         }
 
         private string? GetChecksumForPlatform()
         {
-            // For production you should pin the checksums for each provider + archive
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
-            {
-                return null; // placeholder - add SHA256 hex string
-            }
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-            {
-                return null;
-            }
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            {
-                return null;
-            }
-
-            return null;
+            return FfprobePlatformDefaults.GetChecksum();
         }
 
         public async Task<AudioMetadata> RunFfprobeAsync(string filePath)
