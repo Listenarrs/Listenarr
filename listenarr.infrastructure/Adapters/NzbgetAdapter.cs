@@ -16,13 +16,10 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Net;
-using System.Text;
 using System.Text.Json;
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Security;
-using Listenarr.Domain.Common;
 using Listenarr.Domain.Models;
-using Listenarr.Domain.Models.Exceptions;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.Adapters
@@ -38,6 +35,7 @@ namespace Listenarr.Infrastructure.Adapters
         private readonly ILogger<NzbgetAdapter> _logger;
         private readonly NzbgetXmlRpcClient _xmlRpcClient;
         private readonly NzbgetNzbDownloader _nzbDownloader;
+        private readonly NzbgetDownloadPollingWorkflow _downloadPollingWorkflow;
 
         public NzbgetAdapter(
             IHttpClientFactory httpClientFactory,
@@ -49,6 +47,7 @@ namespace Listenarr.Infrastructure.Adapters
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _xmlRpcClient = new NzbgetXmlRpcClient(_httpClientFactory, ClientType);
             _nzbDownloader = new NzbgetNzbDownloader(_httpClientFactory, ClientType, _logger);
+            _downloadPollingWorkflow = new NzbgetDownloadPollingWorkflow(_httpClientFactory, _logger, ClientType);
         }
 
         public async Task<(bool Success, string Message)> TestConnectionAsync(DownloadClientConfiguration client, CancellationToken ct = default)
@@ -689,106 +688,7 @@ namespace Listenarr.Infrastructure.Adapters
             List<Download> downloads,
             CancellationToken cancellationToken)
         {
-            _logger.LogDebug("Polling NZBGet client {ClientName}", client.Name);
-            try
-            {
-                var baseUrl = DownloadClientUriBuilder.BuildUri(client, "/jsonrpc");
-
-                using var http = _httpClientFactory.CreateClient(ClientType);
-
-                // Add basic auth if credentials provided
-                var authHeader = NzbgetAuthentication.BuildAuthHeader(client);
-                if (authHeader != null)
-                {
-                    http.DefaultRequestHeaders.Authorization = authHeader;
-                }
-
-                // Get active downloads from status for progress updates
-                var statusRequest = new
-                {
-                    method = "status",
-                    id = 2
-                };
-
-                var statusJsonContent = JsonSerializer.Serialize(statusRequest);
-                using var statusHttpContent = new StringContent(statusJsonContent, Encoding.UTF8, "application/json");
-
-                using var statusResponse = await http.PostAsync(baseUrl, statusHttpContent, cancellationToken);
-
-                if (statusResponse.IsSuccessStatusCode)
-                {
-                    var statusJson = await statusResponse.Content.ReadAsStringAsync(cancellationToken);
-                    var statusDoc = JsonDocument.Parse(statusJson);
-
-                    if (statusDoc.RootElement.TryGetProperty("result", out var statusResult))
-                    {
-                        // Get queue for active downloads
-                        var queueRequest = new
-                        {
-                            method = "listgroups",
-                            id = 3
-                        };
-
-                        var queueJsonContent = JsonSerializer.Serialize(queueRequest);
-                        using var queueHttpContent = new StringContent(queueJsonContent, Encoding.UTF8, "application/json");
-
-                        using var queueResponse = await http.PostAsync(baseUrl, queueHttpContent, cancellationToken);
-
-                        if (queueResponse.IsSuccessStatusCode)
-                        {
-                            var queueJson = await queueResponse.Content.ReadAsStringAsync(cancellationToken);
-                            var queueDoc = JsonDocument.Parse(queueJson);
-
-                            if (queueDoc.RootElement.TryGetProperty("result", out var queueResult) && queueResult.ValueKind == JsonValueKind.Array)
-                            {
-                                foreach (var group in queueResult.EnumerateArray())
-                                {
-                                    try
-                                    {
-                                        var nzbId = group.TryGetProperty("NZBID", out var nzbIdProp) ? nzbIdProp.GetInt32() : 0;
-                                        var nzbName = group.TryGetProperty("NZBName", out var nameProp) ? nameProp.GetString() ?? "" : "";
-                                        var status = group.TryGetProperty("Status", out var statusProp) ? statusProp.GetString() ?? "" : "";
-                                        var fileSizeMB = group.TryGetProperty("FileSizeMB", out var sizeProp) ? sizeProp.GetString() ?? "" : "";
-                                        var remainingSizeMB = group.TryGetProperty("RemainingSizeMB", out var remainingSizeProp) ? remainingSizeProp.GetString() ?? "" : "";
-                                        // Find matching download by NZB ID
-                                        var matchingDownload = downloads.FirstOrDefault(dl =>
-                                        {
-                                            var clientItemId = dl.GetExternalId();
-                                            return !string.IsNullOrEmpty(clientItemId) &&
-                                                    clientItemId.Equals(nzbId.ToString(), StringComparison.OrdinalIgnoreCase);
-                                        });
-
-                                        if (matchingDownload == null && !string.IsNullOrEmpty(nzbName))
-                                        {
-                                            matchingDownload = downloads.FirstOrDefault(dl => TitleUtils.AreTitlesSimilar(dl.Title, nzbName));
-                                        }
-
-                                        if (matchingDownload != null &&
-                                            double.TryParse(fileSizeMB, out var totalMB) &&
-                                            double.TryParse(remainingSizeMB, out var remainingMB))
-                                        {
-                                            var progress = totalMB > 0 ? (totalMB - remainingMB) / totalMB : 0.0;
-                                            var amountLeft = (long)(remainingMB * 1024 * 1024); // Convert MB to bytes
-
-                                            AdapterUtils.MapDownloadProgress(matchingDownload, progress, amountLeft, status);
-                                        }
-                                    }
-                                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                                    {
-                                        _logger.LogWarning(ex, "Error updating NZBGet queue progress for group");
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                return downloads;
-            }
-            catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
-            {
-                throw new DownloadClientAdapterPollingException($"Error polling NZBGet client {client.Id}", exception);
-            }
+            return await _downloadPollingWorkflow.FetchDownloadsAsync(client, downloads, cancellationToken);
         }
     }
 }
