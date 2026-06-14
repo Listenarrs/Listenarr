@@ -588,16 +588,7 @@ namespace Listenarr.Api.Controllers
                 _logger.LogInformation("IndexersSearch called for query: {Query}, isAutomaticSearch={IsAutomatic}", LogRedaction.SanitizeText(query), isAutomaticSearch);
 
                 // Support MyAnonamouse query string toggles (mamFilter, mamSearchInDescription, mamSearchInSeries, mamSearchInFilenames, mamLanguage, mamFreeleechWedge)
-                var mamOptions = new MyAnonamouseOptions();
-                if (Request.Query.TryGetValue("mamFilter", out var queryMamFilter) && Enum.TryParse<MamTorrentFilter>(queryMamFilter.ToString() ?? string.Empty, true, out var mamFilter))
-                    mamOptions.Filter = mamFilter;
-                if (Request.Query.TryGetValue("mamSearchInDescription", out var queryMamSearchInDescription) && bool.TryParse(queryMamSearchInDescription, out var sd)) mamOptions.SearchInDescription = sd;
-                if (Request.Query.TryGetValue("mamSearchInSeries", out var queryMamSearchInSeries) && bool.TryParse(queryMamSearchInSeries, out var ss)) mamOptions.SearchInSeries = ss;
-                if (Request.Query.TryGetValue("mamSearchInFilenames", out var queryMamSearchInFilenames) && bool.TryParse(queryMamSearchInFilenames, out var sf)) mamOptions.SearchInFilenames = sf;
-                if (Request.Query.TryGetValue("mamLanguage", out var queryMamLanguage)) mamOptions.SearchLanguage = queryMamLanguage.ToString();
-                if (Request.Query.TryGetValue("mamFreeleechWedge", out var queryMamFreeleechWedge) && Enum.TryParse<MamFreeleechWedge>(queryMamFreeleechWedge.ToString() ?? string.Empty, true, out var mw)) mamOptions.FreeleechWedge = mw;
-
-                var req = new SearchRequest { MyAnonamouse = mamOptions };
+                var req = new SearchRequest { MyAnonamouse = SearchMamOptionsReader.FromQuery(Request.Query) };
                 var results = await _searchService.SearchIndexersAsync(query, category, sortBy, sortDirection, isAutomaticSearch, req);
                 _logger.LogInformation("IndexersSearch returning {Count} results for query: {Query}", results.Count, LogRedaction.SanitizeText(query));
                 return Ok(results);
@@ -851,25 +842,15 @@ namespace Listenarr.Api.Controllers
                 }
 
                 // If the caller provided explicit MyAnonamouse query params, construct a SearchRequest that will be passed to the service.
-                SearchRequest? request = null;
-                if (mamFilter != null || mamSearchInDescription.HasValue || mamSearchInSeries.HasValue || mamSearchInFilenames.HasValue || mamLanguage != null || mamFreeleechWedge != null || mamEnrichResults.HasValue || mamEnrichTopResults.HasValue)
-                {
-                    request = new SearchRequest();
-                    request.MyAnonamouse = new MyAnonamouseOptions();
-
-                    if (mamSearchInDescription.HasValue) request.MyAnonamouse.SearchInDescription = mamSearchInDescription.Value;
-                    if (mamSearchInSeries.HasValue) request.MyAnonamouse.SearchInSeries = mamSearchInSeries.Value;
-                    if (mamSearchInFilenames.HasValue) request.MyAnonamouse.SearchInFilenames = mamSearchInFilenames.Value;
-                    if (!string.IsNullOrWhiteSpace(mamLanguage)) request.MyAnonamouse.SearchLanguage = mamLanguage;
-
-                    if (!string.IsNullOrWhiteSpace(mamFilter) && Enum.TryParse<MamTorrentFilter>(mamFilter, true, out var mf))
-                        request.MyAnonamouse.Filter = mf;
-
-                    if (!string.IsNullOrWhiteSpace(mamFreeleechWedge) && Enum.TryParse<MamFreeleechWedge>(mamFreeleechWedge, true, out var fw))
-                        request.MyAnonamouse.FreeleechWedge = fw;
-                    if (mamEnrichResults.HasValue) request.MyAnonamouse.EnrichResults = mamEnrichResults.Value;
-                    if (mamEnrichTopResults.HasValue) request.MyAnonamouse.EnrichTopResults = mamEnrichTopResults.Value;
-                }
+                var request = SearchMamOptionsReader.FromBoundParameters(
+                    mamFilter,
+                    mamSearchInDescription,
+                    mamSearchInSeries,
+                    mamSearchInFilenames,
+                    mamLanguage,
+                    mamFreeleechWedge,
+                    mamEnrichResults,
+                    mamEnrichTopResults);
 
                 // Use the raw indexer results when the caller expects indexer-specific fields. SearchIndexerResultsAsync will
                 // apply any MyAnonamouse options found in the indexer's AdditionalSettings if no explicit request was supplied.
