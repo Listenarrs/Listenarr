@@ -76,9 +76,6 @@ namespace Listenarr.Api.Controllers
                 Microsoft.Extensions.Logging.Abstractions.NullLogger<SearchByTitleWorkflow>.Instance);
         }
 
-        private string BuildApiImagePath(string identifier, string? sourceUrl = null)
-            => _responseMapper.BuildApiImagePath(identifier, HttpContext, sourceUrl: sourceUrl);
-
         /// <summary>
         /// Perform a combined metadata and indexer search using a structured request body.
         /// Supports simple (metadata-only) and advanced (indexer) search modes.
@@ -144,49 +141,8 @@ namespace Listenarr.Api.Controllers
                     }
                 }
 
-                // Normalize/canonicalize images for returned search results so the
-                // frontend receives local /api/v{version}/images/{asin} URLs when possible.
                 var mdResults = response.MetadataResults;
-                var cacheService = _imageCacheService;
-
-                if (cacheService != null && mdResults != null)
-                {
-                    foreach (var r in mdResults)
-                    {
-                        try
-                        {
-                            if (r == null) continue;
-                            if (string.IsNullOrWhiteSpace(r.Asin)) continue;
-
-                            var asin = r.Asin!;
-
-                            var cached = await cacheService.GetCachedImagePathAsync(asin);
-                            if (!string.IsNullOrWhiteSpace(cached))
-                            {
-                                r.ImageUrl = BuildApiImagePath(asin);
-                                continue;
-                            }
-
-                            var imageUrl = r.ImageUrl;
-                            if (!string.IsNullOrWhiteSpace(imageUrl))
-                            {
-                                var url = imageUrl!;
-                                if (url.StartsWith("http://") || url.StartsWith("https://"))
-                                {
-                                    var downloaded = await cacheService.DownloadAndCacheImageAsync(url, asin);
-                                    if (!string.IsNullOrWhiteSpace(downloaded))
-                                    {
-                                        r.ImageUrl = BuildApiImagePath(asin);
-                                    }
-                                }
-                            }
-                        }
-                        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                        {
-                            _logger.LogWarning(ex, "Failed to ensure cached image for search result ASIN {Asin}", r.Asin);
-                        }
-                    }
-                }
+                await _responseMapper.NormalizeMetadataResultImagesAsync(mdResults, HttpContext!, "search result");
 
                 if (enrichedOnly && mdResults != null)
                 {
