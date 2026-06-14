@@ -760,32 +760,8 @@ namespace Listenarr.Infrastructure.Adapters
                                         continue;
                                     }
 
-                                    // SABnzbd sometimes returns numeric values as numbers or strings.
-                                    // Be defensive and accept either JSON number or JSON string.
-                                    double GetDoubleValue(System.Text.Json.JsonElement el)
-                                    {
-                                        try
-                                        {
-                                            if (el.ValueKind == System.Text.Json.JsonValueKind.Number)
-                                                return el.GetDouble();
-
-                                            if (el.ValueKind == System.Text.Json.JsonValueKind.String)
-                                            {
-                                                var s = el.GetString();
-                                                if (double.TryParse(s, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var v))
-                                                    return v;
-                                            }
-                                        }
-                                        catch (Exception caughtEx_10) when (caughtEx_10 is not OperationCanceledException && caughtEx_10 is not OutOfMemoryException && caughtEx_10 is not StackOverflowException)
-                                        {
-                                            System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
-                                        }
-
-                                        return 0.0;
-                                    }
-
-                                    var percentage = slot.TryGetProperty("percentage", out var percentageProp) ? GetDoubleValue(percentageProp) : 0.0;
-                                    var mbleft = slot.TryGetProperty("mbleft", out var mbleftProp) ? GetDoubleValue(mbleftProp) : 0.0;
+                                    var percentage = slot.TryGetProperty("percentage", out var percentageProp) ? SabnzbdResponseMapper.ParseJsonDouble(percentageProp) : 0.0;
+                                    var mbleft = slot.TryGetProperty("mbleft", out var mbleftProp) ? SabnzbdResponseMapper.ParseJsonDouble(mbleftProp) : 0.0;
                                     var status = slot.TryGetProperty("status", out var statusProp) ? statusProp.GetString() ?? "" : "";
 
                                     // Calculate progress and update

@@ -17,6 +17,7 @@
  */
 
 using System.Text.Json;
+using System.Globalization;
 using Listenarr.Domain.Common;
 using Listenarr.Domain.Models;
 
@@ -203,6 +204,28 @@ internal static class SabnzbdResponseMapper
         }
 
         return value;
+    }
+
+    public static double ParseJsonDouble(JsonElement element)
+    {
+        try
+        {
+            if (element.ValueKind == JsonValueKind.Number)
+                return element.GetDouble();
+
+            if (element.ValueKind == JsonValueKind.String)
+            {
+                var value = element.GetString();
+                if (double.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out var parsed))
+                    return parsed;
+            }
+        }
+        catch (Exception caughtEx) when (caughtEx is not OperationCanceledException && caughtEx is not OutOfMemoryException && caughtEx is not StackOverflowException)
+        {
+            System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+        }
+
+        return 0.0;
     }
 
     private static int ParseTimeLeft(string timeLeft)
