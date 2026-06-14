@@ -37,6 +37,7 @@ namespace Listenarr.Infrastructure.Adapters
         private readonly IAppMetricsService _appMetricsService;
         private readonly SabnzbdRequestBuilder _requestBuilder;
         private readonly SabnzbdDownloadPollingWorkflow _downloadPollingWorkflow;
+        private readonly SabnzbdRemovalWorkflow _removalWorkflow;
 
         public SabnzbdAdapter(
             IHttpClientFactory httpFactory,
@@ -50,6 +51,7 @@ namespace Listenarr.Infrastructure.Adapters
             _appMetricsService = appMetricsService;
             _requestBuilder = new SabnzbdRequestBuilder();
             _downloadPollingWorkflow = new SabnzbdDownloadPollingWorkflow(_httpFactory, _requestBuilder, _appMetricsService, _logger, ClientType);
+            _removalWorkflow = new SabnzbdRemovalWorkflow(_httpFactory, _requestBuilder, _logger, ClientType);
         }
 
         public async Task<(bool Success, string Message)> TestConnectionAsync(DownloadClientConfiguration client, CancellationToken ct = default)
@@ -178,98 +180,7 @@ namespace Listenarr.Infrastructure.Adapters
 
         public async Task<bool> RemoveAsync(DownloadClientConfiguration client, string id, bool deleteFiles = false, CancellationToken ct = default)
         {
-            if (client == null) throw new ArgumentNullException(nameof(client));
-            if (string.IsNullOrEmpty(id)) throw new ArgumentNullException(nameof(id));
-
-            try
-            {
-                var requestContext = _requestBuilder.CreateContext(client);
-                if (!requestContext.HasApiKey)
-                {
-                    _logger.LogWarning("SABnzbd API key not configured for {ClientName}", client.Name);
-                    return false;
-                }
-
-                var http = _httpFactory.CreateClient(ClientType);
-                bool removedFromQueue = false;
-                bool removedFromHistory = false;
-
-                // Try to remove from queue first (for active downloads)
-                var queueRemoveUrl = _requestBuilder.BuildUrl(requestContext, new Dictionary<string, string>
-                {
-                    ["mode"] = "queue",
-                    ["name"] = "delete",
-                    ["value"] = id,
-                    ["output"] = "json"
-                });
-                if (deleteFiles)
-                    queueRemoveUrl += "&del_files=1";
-
-                try
-                {
-                    var queueResponse = await http.GetAsync(queueRemoveUrl, ct);
-                    if (queueResponse.IsSuccessStatusCode)
-                    {
-                        var queueContent = await queueResponse.Content.ReadAsStringAsync(ct);
-                        var queueDoc = JsonDocument.Parse(queueContent);
-                        if (queueDoc.RootElement.TryGetProperty("status", out var queueStatus))
-                        {
-                            removedFromQueue = queueStatus.GetBoolean();
-                        }
-                    }
-                }
-                catch (Exception queueEx) when (queueEx is not OperationCanceledException && queueEx is not OutOfMemoryException && queueEx is not StackOverflowException)
-                {
-                    _logger.LogDebug(queueEx, "Could not remove {DownloadId} from SABnzbd queue (may not be in queue)", id);
-                }
-
-                // Try to remove from history (for completed downloads)
-                var historyRemoveUrl = _requestBuilder.BuildUrl(requestContext, new Dictionary<string, string>
-                {
-                    ["mode"] = "history",
-                    ["name"] = "delete",
-                    ["value"] = id,
-                    ["output"] = "json"
-                });
-                if (deleteFiles)
-                    historyRemoveUrl += "&del_files=1";
-
-                try
-                {
-                    var historyResponse = await http.GetAsync(historyRemoveUrl, ct);
-                    if (historyResponse.IsSuccessStatusCode)
-                    {
-                        var historyContent = await historyResponse.Content.ReadAsStringAsync(ct);
-                        var historyDoc = JsonDocument.Parse(historyContent);
-                        if (historyDoc.RootElement.TryGetProperty("status", out var historyStatus))
-                        {
-                            removedFromHistory = historyStatus.GetBoolean();
-                        }
-                    }
-                }
-                catch (Exception historyEx) when (historyEx is not OperationCanceledException && historyEx is not OutOfMemoryException && historyEx is not StackOverflowException)
-                {
-                    _logger.LogDebug(historyEx, "Could not remove {DownloadId} from SABnzbd history (may not be in history)", id);
-                }
-
-                var success = removedFromQueue || removedFromHistory;
-                if (success)
-                {
-                    _logger.LogInformation("Removed {DownloadId} from SABnzbd (queue: {Queue}, history: {History}, deleteFiles: {DeleteFiles})",
-                        LogRedaction.SanitizeText(id), removedFromQueue, removedFromHistory, deleteFiles);
-                }
-                else
-                {
-                    _logger.LogWarning("Failed to remove {DownloadId} from SABnzbd (not found in queue or history)", LogRedaction.SanitizeText(id));
-                }
-
-                return success;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogError(ex, "Error removing from SABnzbd: {DownloadId}", LogRedaction.SanitizeText(id));
-                return false;
-            }
+            return await _removalWorkflow.RemoveAsync(client, id, deleteFiles, ct);
         }
 
         public async Task<List<QueueItem>> GetQueueAsync(DownloadClientConfiguration client, CancellationToken ct = default)
