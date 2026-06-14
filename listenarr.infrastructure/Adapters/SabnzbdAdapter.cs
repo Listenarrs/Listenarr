@@ -20,9 +20,7 @@ using System.Net;
 using System.Text.Json;
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Security;
-using Listenarr.Domain.Common;
 using Listenarr.Domain.Models;
-using Listenarr.Domain.Models.Exceptions;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.Adapters
@@ -38,6 +36,7 @@ namespace Listenarr.Infrastructure.Adapters
         private readonly ILogger<SabnzbdAdapter> _logger;
         private readonly IAppMetricsService _appMetricsService;
         private readonly SabnzbdRequestBuilder _requestBuilder;
+        private readonly SabnzbdDownloadPollingWorkflow _downloadPollingWorkflow;
 
         public SabnzbdAdapter(
             IHttpClientFactory httpFactory,
@@ -50,6 +49,7 @@ namespace Listenarr.Infrastructure.Adapters
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _appMetricsService = appMetricsService;
             _requestBuilder = new SabnzbdRequestBuilder();
+            _downloadPollingWorkflow = new SabnzbdDownloadPollingWorkflow(_httpFactory, _requestBuilder, _appMetricsService, _logger, ClientType);
         }
 
         public async Task<(bool Success, string Message)> TestConnectionAsync(DownloadClientConfiguration client, CancellationToken ct = default)
@@ -710,194 +710,7 @@ namespace Listenarr.Infrastructure.Adapters
             List<Download> downloads,
             CancellationToken cancellationToken)
         {
-            _logger.LogDebug("Polling SABnzbd client {ClientName}", client.Name);
-            try
-            {
-                using var http = _httpFactory.CreateClient(ClientType);
-
-                var requestContext = _requestBuilder.CreateContext(client);
-                if (!requestContext.HasApiKey)
-                {
-                    throw new DownloadClientAdapterPollingException($"SABnzbd API key not configured for client {client.Id}");
-                }
-
-                // Poll SABnzbd queue for active downloads progress updates
-                var queueUrl = _requestBuilder.BuildUrl(requestContext, new Dictionary<string, string>
-                {
-                    ["mode"] = "queue",
-                    ["output"] = "json"
-                });
-                // Redacted queue URL for safe diagnostics
-                _logger.LogDebug("SABnzbd poll queue URL (redacted): {Url}", LogRedaction.RedactText(queueUrl, _requestBuilder.BuildSensitiveValues(requestContext)));
-                using var queueResponse = await http.GetAsync(queueUrl, cancellationToken);
-
-                if (queueResponse.IsSuccessStatusCode)
-                {
-                    var queueJson = await queueResponse.Content.ReadAsStringAsync(cancellationToken);
-                    var queueDoc = JsonDocument.Parse(queueJson);
-
-                    if (queueDoc.RootElement.TryGetProperty("queue", out var queue) &&
-                        queue.TryGetProperty("slots", out var queueSlots) &&
-                        queueSlots.ValueKind == JsonValueKind.Array)
-                    {
-                        foreach (Download download in downloads)
-                        {
-                            var clientDownloadId = download.GetExternalId();
-
-                            foreach (var slot in queueSlots.EnumerateArray())
-                            {
-                                try
-                                {
-                                    var nzoId = slot.TryGetProperty("nzo_id", out var nzoIdProp) ? nzoIdProp.GetString() ?? "" : "";
-                                    if (!string.IsNullOrEmpty(clientDownloadId) && !string.Equals(nzoId, clientDownloadId, StringComparison.OrdinalIgnoreCase))
-                                    {
-                                        continue;
-                                    }
-
-                                    var filename = slot.TryGetProperty("filename", out var filenameProp) ? filenameProp.GetString() ?? "" : "";
-                                    if (!TitleUtils.AreTitlesSimilar(download.Title, filename))
-                                    {
-                                        continue;
-                                    }
-
-                                    var percentage = slot.TryGetProperty("percentage", out var percentageProp) ? SabnzbdResponseMapper.ParseJsonDouble(percentageProp) : 0.0;
-                                    var mbleft = slot.TryGetProperty("mbleft", out var mbleftProp) ? SabnzbdResponseMapper.ParseJsonDouble(mbleftProp) : 0.0;
-                                    var status = slot.TryGetProperty("status", out var statusProp) ? statusProp.GetString() ?? "" : "";
-
-                                    // Calculate progress and update
-                                    // percentage is provided by SABnzbd as a percent (e.g. 50.0). Our UpdateDownloadProgressAsync
-                                    // expects a percentage in the 0..100 range. Use the percentage directly.
-                                    var progressPercent = percentage; // 0..100
-
-                                    // Convert sizes from MB -> bytes
-                                    var amountLeft = (long)(mbleft * 1024 * 1024);
-
-                                    // Update progress using percent and amountLeft (UpdateDownloadProgressAsync uses percent->downloaded size calculation when TotalSize is set)
-                                    AdapterUtils.MapDownloadProgress(download, progressPercent, amountLeft, status);
-                                }
-                                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                                {
-                                    _logger.LogWarning(ex, "Error updating SABnzbd queue progress for slot");
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Get completed downloads (history) - limit to recent items
-                var historyUrl = _requestBuilder.BuildUrl(requestContext, new Dictionary<string, string>
-                {
-                    ["mode"] = "history",
-                    ["limit"] = "100",
-                    ["output"] = "json"
-                });
-                // Redacted history URL for safe diagnostics
-                _logger.LogDebug("SABnzbd history URL (redacted): {Url}", LogRedaction.RedactText(historyUrl, _requestBuilder.BuildSensitiveValues(requestContext)));
-                using var historyResponse = await http.GetAsync(historyUrl, cancellationToken);
-
-                if (!historyResponse.IsSuccessStatusCode)
-                {
-                    throw new DownloadClientAdapterPollingException($"Failed to fetch SABnzbd history for {client.Id}: {historyResponse.StatusCode}");
-                }
-
-                var historyJson = await historyResponse.Content.ReadAsStringAsync(cancellationToken);
-                var historyDoc = System.Text.Json.JsonDocument.Parse(historyJson);
-
-                if (!historyDoc.RootElement.TryGetProperty("history", out var history) ||
-                    !history.TryGetProperty("slots", out var slots) ||
-                    slots.ValueKind != System.Text.Json.JsonValueKind.Array)
-                {
-                    throw new DownloadClientAdapterPollingException($"No history data found for SABnzbd client {client.Id}");
-                }
-
-                var historyLookup = SabnzbdHistoryLookupBuilder.Build(slots, _logger);
-                var completedItems = historyLookup.CompletedItems;
-                var failedItems = historyLookup.FailedItems;
-
-                _logger.LogDebug("Found {CompletedCount} completed items in SABnzbd history for client {ClientName}",
-                    completedItems.Count, client.Name);
-
-                // Check each download against completed items
-                foreach (var dl in downloads)
-                {
-                    // Skip downloads that are already being processed, awaiting import,
-                    // or fully imported to avoid duplicate finalization/notifications.
-                    if (dl.Status == DownloadStatus.Moved ||
-                        dl.Status == DownloadStatus.Processing ||
-                        dl.Status == DownloadStatus.ImportPending)
-                        continue;
-
-                    try
-                    {
-                        var failedMatch = failedItems.FirstOrDefault(item =>
-                            (!string.IsNullOrEmpty(item.NzoId) && !string.IsNullOrEmpty(dl.GetExternalId()) &&
-                                string.Equals(item.NzoId, dl.GetExternalId(), StringComparison.OrdinalIgnoreCase)) ||
-                            string.Equals(item.Name, dl.Title, StringComparison.OrdinalIgnoreCase) ||
-                            (!string.IsNullOrEmpty(dl.Title) && item.Name.Contains(dl.Title, StringComparison.OrdinalIgnoreCase))
-                        );
-
-                        if (!string.IsNullOrEmpty(failedMatch.Name))
-                        {
-                            continue;
-                        }
-
-                        // Find matching active download by NZO ID
-                        var matchingItem = completedItems.FirstOrDefault(item =>
-                            // Match by NZO ID (strongest) or fall back to name/title matching
-                            (!string.IsNullOrEmpty(item.NzoId) && !string.IsNullOrEmpty(dl.GetExternalId()) &&
-                                string.Equals(item.NzoId, dl.GetExternalId(), StringComparison.OrdinalIgnoreCase)) ||
-                            string.Equals(item.Name, dl.Title, StringComparison.OrdinalIgnoreCase) ||
-                            (!string.IsNullOrEmpty(dl.Title) && item.Name.Contains(dl.Title, StringComparison.OrdinalIgnoreCase))
-                        );
-
-                        if (!string.IsNullOrEmpty(matchingItem.Name))
-                        {
-                            AdapterUtils.MapDownloadProgress(dl, 100.0, 0, "success");
-
-                            // Populate DownloadPath from SABnzbd's storage field so the import
-                            // processor knows where the completed files are located.
-                            // Without this, DownloadProcessingJobProcessor throws "has no path set" (#631).
-                            if (!string.IsNullOrEmpty(matchingItem.Path))
-                            {
-                                dl.DownloadPath = matchingItem.Path;
-                            }
-
-                            // Record match type metrics
-                            try
-                            {
-                                if (!string.IsNullOrEmpty(matchingItem.NzoId) && !string.IsNullOrEmpty(dl.GetExternalId()) && string.Equals(matchingItem.NzoId, dl.GetExternalId(), StringComparison.OrdinalIgnoreCase))
-                                {
-                                    _appMetricsService.Increment("sabnzbd.history.match.nzo");
-                                }
-                                else if (!string.IsNullOrEmpty(matchingItem.Name) && string.Equals(matchingItem.Name, dl.Title, StringComparison.OrdinalIgnoreCase))
-                                {
-                                    _appMetricsService.Increment("sabnzbd.history.match.title_exact");
-                                }
-                                else
-                                {
-                                    _appMetricsService.Increment("sabnzbd.history.match.title_contains");
-                                }
-                            }
-                            catch (Exception caughtEx_11) when (caughtEx_11 is not OperationCanceledException && caughtEx_11 is not OutOfMemoryException && caughtEx_11 is not StackOverflowException)
-                            {
-                                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
-                            }
-                            _logger.LogInformation("Found completed SABnzbd download: {DownloadTitle} -> {CompletedName} at {Path}",
-                                dl.Title, matchingItem.Name, matchingItem.Path);
-                        }
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                    {
-                        _logger.LogWarning(ex, "Error processing download {DownloadId} while polling SABnzbd", dl.Id);
-                    }
-                }
-
-                return downloads;
-            }
-            catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
-            {
-                throw new DownloadClientAdapterPollingException($"Error polling SABnzbd client {client.Id}");
-            }
+            return await _downloadPollingWorkflow.FetchDownloadsAsync(client, downloads, cancellationToken);
         }
     }
 }
