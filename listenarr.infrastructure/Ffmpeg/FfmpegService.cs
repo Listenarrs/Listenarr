@@ -231,7 +231,7 @@ namespace Listenarr.Infrastructure.Ffmpeg
                 var expected = GetChecksumForPlatform();
                 if (string.IsNullOrEmpty(expected) && !string.IsNullOrEmpty(discoveredChecksum))
                 {
-                    var parsed = ParseChecksumFileForAsset(discoveredChecksum, Path.GetFileName(downloadUrl));
+                    var parsed = FfprobeChecksumParser.ParseForAsset(discoveredChecksum, Path.GetFileName(downloadUrl));
                     if (!string.IsNullOrEmpty(parsed)) expected = parsed;
                 }
 
@@ -246,7 +246,7 @@ namespace Listenarr.Infrastructure.Ffmpeg
                             try
                             {
                                 var content = await File.ReadAllTextAsync(cf);
-                                var parsed = ParseChecksumFileForAsset(content, Path.GetFileName(downloadUrl));
+                                var parsed = FfprobeChecksumParser.ParseForAsset(content, Path.GetFileName(downloadUrl));
                                 if (!string.IsNullOrEmpty(parsed)) { expected = parsed; break; }
                             }
                             catch (Exception caughtEx_3) when (caughtEx_3 is not OperationCanceledException && caughtEx_3 is not OutOfMemoryException && caughtEx_3 is not StackOverflowException)
@@ -614,46 +614,6 @@ namespace Listenarr.Infrastructure.Ffmpeg
             }
 
             return (null, null);
-        }
-
-        private static string? ParseChecksumFileForAsset(string checksumFileContent, string assetFileName)
-        {
-            if (string.IsNullOrEmpty(checksumFileContent) || string.IsNullOrEmpty(assetFileName)) return null;
-            using var sr = new StringReader(checksumFileContent);
-            string? line;
-            while ((line = sr.ReadLine()) != null)
-            {
-                var trimmed = line.Trim();
-                if (string.IsNullOrEmpty(trimmed)) continue;
-                // Common formats: "<checksum>  <filename>" or "<checksum>  *<filename>" or "<checksum> <filename>"
-                var parts = trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                if (parts.Length >= 2)
-                {
-                    var possibleHash = parts[0].Trim();
-                    var possibleName = parts[^1].Trim();
-                    if (possibleName.StartsWith("*")) possibleName = possibleName[1..];
-                    if (possibleName.Equals(assetFileName, StringComparison.OrdinalIgnoreCase) || possibleName.EndsWith(assetFileName, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return possibleHash;
-                    }
-                }
-                else
-                {
-                    // Some checksum files list "filename: hash" or JSON; do simple contains
-                    if (trimmed.Contains(assetFileName, StringComparison.OrdinalIgnoreCase))
-                    {
-                        var tokens = trimmed.Split(':', StringSplitOptions.RemoveEmptyEntries);
-                        if (tokens.Length >= 2)
-                        {
-                            var candidate = tokens[1].Trim();
-                            var candidateToken = candidate.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0];
-                            if (!string.IsNullOrEmpty(candidateToken)) return candidateToken;
-                        }
-                    }
-                }
-            }
-
-            return null;
         }
 
         public async Task<AudioMetadata> RunFfprobeAsync(string filePath)
