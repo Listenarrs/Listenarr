@@ -38,6 +38,7 @@ namespace Listenarr.Api.Controllers
         private readonly IImageCacheService? _imageCacheService;
         private readonly SearchResponseMapper _responseMapper;
         private readonly StructuredSearchWorkflow _structuredSearchWorkflow;
+        private readonly SearchByTitleWorkflow _searchByTitleWorkflow;
 
         public SearchController(
             ISearchService searchService,
@@ -47,7 +48,8 @@ namespace Listenarr.Api.Controllers
             IImageCacheService? imageCacheService = null,
             MetadataConverters? metadataConverters = null,
             SearchResponseMapper? responseMapper = null,
-            StructuredSearchWorkflow? structuredSearchWorkflow = null)
+            StructuredSearchWorkflow? structuredSearchWorkflow = null,
+            SearchByTitleWorkflow? searchByTitleWorkflow = null)
         {
             _searchService = searchService;
             _logger = logger;
@@ -67,6 +69,11 @@ namespace Listenarr.Api.Controllers
                 imageCacheService,
                 metadataConvertersInstance,
                 _responseMapper);
+            _searchByTitleWorkflow = searchByTitleWorkflow ?? new SearchByTitleWorkflow(
+                searchService,
+                audibleService,
+                metadataService,
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<SearchByTitleWorkflow>.Instance);
         }
 
         private string BuildApiImagePath(string identifier, string? sourceUrl = null)
@@ -429,126 +436,13 @@ namespace Listenarr.Api.Controllers
             [FromQuery] string region = "us",
             [FromQuery] int limit = 10)
         {
-            try
+            var result = await _searchByTitleWorkflow.ExecuteAsync(query, region, limit, HttpContext.RequestAborted);
+            return result.StatusCode switch
             {
-                if (string.IsNullOrWhiteSpace(query))
-                {
-                    return BadRequest("Query parameter is required");
-                }
-
-                _logger.LogInformation("Searching by title: {Query}", query);
-
-                // If the query looks like an ASIN, short-circuit to metadata lookup so we don't run
-                // a full Amazon/Audible text search that can return unrelated items.
-                bool IsAsin(string s)
-                {
-                    if (string.IsNullOrEmpty(s)) return false;
-                    if (s.Length != 10) return false;
-                    if (!(s.StartsWith("B0") || char.IsDigit(s[0]))) return false;
-                    return s.All(char.IsLetterOrDigit);
-                }
-
-                if (IsAsin(query.Trim()))
-                {
-                    var asin = query.Trim();
-                    _logger.LogInformation("Query appears to be an ASIN; attempting direct metadata lookup for: {Asin}", asin);
-
-                    // Try the Audible-backed provider first, then fall back to other configured metadata sources.
-                    try
-                    {
-                        var audible = await _audibleService.GetBookMetadataAsync(asin, region, true);
-                        if (audible != null)
-                        {
-                            var metadataObj = new
-                            {
-                                metadata = audible,
-                                source = "Audible",
-                                sourceUrl = "https://www.audible.com"
-                            };
-                            return Ok(new List<object> { metadataObj });
-                        }
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                    {
-                        _logger.LogWarning(ex, "Audible metadata lookup failed for ASIN {Asin}, trying other configured metadata sources", asin);
-                    }
-
-                    // If audible didn't return anything, try configured metadata sources directly
-                    try
-                    {
-                        var meta = await _metadataService.GetMetadataAsync(asin, region, true);
-                        if (meta != null)
-                        {
-                            return Ok(new List<object> { meta });
-                        }
-                        _logger.LogWarning("Metadata lookup returned null for ASIN {Asin}, falling back to intelligent search", asin);
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                    {
-                        _logger.LogWarning(ex, "Metadata lookup failed for ASIN {Asin}, falling back to intelligent search", asin);
-                    }
-
-                    // If no metadata found via configured sources, fall back to the generic intelligent search below
-                }
-
-                // Use intelligent search (Amazon/Audible + metadata enrichment) for Discord bot
-                // This excludes indexer results which are not suitable for bot interactions
-                // The Discord bot now sends proper prefixes (TITLE:, AUTHOR:, AUTHOR_TITLE:)
-                var searchResults = await _searchService.IntelligentSearchAsync(query, region: region, language: null, ct: HttpContext.RequestAborted);
-
-                if (searchResults == null || !searchResults.Any())
-                {
-                    _logger.LogWarning("No results found for title search: {Query}", query);
-                    return Ok(new List<object>());
-                }
-
-                // Convert SearchResult objects to the expected format for Discord bot
-                var results = new List<object>();
-                var resultsToReturn = searchResults.Take(limit).ToList();
-
-                foreach (var searchResult in resultsToReturn)
-                {
-                    try
-                    {
-                        // Create a metadata-like object from the SearchResult
-                        var metadata = new
-                        {
-                            Asin = searchResult.Asin,
-                            Title = searchResult.Title,
-                            Subtitle = searchResult.Series != null ? $"{searchResult.Series} #{searchResult.SeriesNumber}" : null,
-                            Authors = !string.IsNullOrEmpty(searchResult.Author) ? new[] { new { Name = searchResult.Author } } : null,
-                            Narrators = !string.IsNullOrEmpty(searchResult.Narrator) ? searchResult.Narrator.Split(new[] { ", " }, StringSplitOptions.RemoveEmptyEntries).Select(n => new { Name = n.Trim() }) : null,
-                            Publisher = searchResult.Publisher,
-                            Description = searchResult.Description,
-                            ImageUrl = searchResult.ImageUrl,
-                            LengthMinutes = searchResult.Runtime,
-                            Language = searchResult.Language,
-                            ReleaseDate = !string.IsNullOrWhiteSpace(searchResult.PublishedDate) ? searchResult.PublishedDate : null,
-                            Series = !string.IsNullOrEmpty(searchResult.Series) ? new[] { new { Name = searchResult.Series, Position = searchResult.SeriesNumber } } : null
-                        };
-
-                        results.Add(new
-                        {
-                            metadata = metadata,
-                            source = searchResult.MetadataSource ?? searchResult.Source ?? "Amazon/Audible",
-                            sourceUrl = "https://www.amazon.com"
-                        });
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                    {
-                        _logger.LogWarning(ex, "Failed to convert search result for title: {Title}", searchResult.Title);
-                        continue;
-                    }
-                }
-
-                _logger.LogInformation("Successfully fetched {Count} enriched results for title search: {Query}", results.Count, query);
-                return Ok(results);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogError(ex, "Error performing title search for query: {Query}", query);
-                return StatusCode(500, "Internal server error");
-            }
+                StatusCodes.Status400BadRequest => BadRequest(result.Payload),
+                StatusCodes.Status500InternalServerError => StatusCode(result.StatusCode, result.Payload),
+                _ => Ok(result.Payload)
+            };
         }
 
         // existing code continuation

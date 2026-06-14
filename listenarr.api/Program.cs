@@ -365,6 +365,7 @@ builder.Services.AddScoped<Listenarr.Api.Controllers.ProwlarrIndexerImportWorkfl
 builder.Services.AddScoped<Listenarr.Api.Controllers.ProwlarrIndexerNotificationWorkflow>();
 builder.Services.AddScoped<Listenarr.Api.Controllers.ProwlarrIndexerUpsertWorkflow>();
 builder.Services.AddScoped<Listenarr.Api.Controllers.StructuredSearchWorkflow>();
+builder.Services.AddScoped<Listenarr.Api.Controllers.SearchByTitleWorkflow>();
 builder.Services.AddScoped<Listenarr.Api.Controllers.ManualImportPathPlanner>();
 builder.Services.AddScoped<Listenarr.Api.Controllers.ManualImportCompanionImporter>();
 builder.Services.AddScoped<Listenarr.Application.Search.AudibleAuthorPageCollector>();
