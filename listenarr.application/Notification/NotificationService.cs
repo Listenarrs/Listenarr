@@ -34,20 +34,20 @@ namespace Listenarr.Application.Notification
     public class NotificationService : INotificationService
     {
         private readonly HttpClient _httpClient;
-        private readonly HttpClient _httpClientNoRedirect;
         private readonly ILogger<NotificationService> _logger;
         private readonly IConfigurationService _configurationService;
         private readonly IRequestContextAccessor? _requestContextAccessor;
         private readonly INotificationPayloadBuilder _payloadBuilder;
+        private readonly NotificationHttpSender _httpSender;
 
         public NotificationService(HttpClient httpClient, ILogger<NotificationService> logger, IConfigurationService configurationService, INotificationPayloadBuilder payloadBuilder, IRequestContextAccessor? requestContextAccessor = null)
         {
             _httpClient = httpClient;
-            _httpClientNoRedirect = httpClient;
             _logger = logger;
             _configurationService = configurationService;
             _payloadBuilder = payloadBuilder ?? throw new ArgumentNullException(nameof(payloadBuilder));
             _requestContextAccessor = requestContextAccessor;
+            _httpSender = new NotificationHttpSender(httpClient, httpClient, logger, AllowPrivateWebhookTargetsForCurrentRequest);
         }
 
         // INotificationService interface stubs — webhook dispatch goes through SendNotificationAsync;
@@ -111,99 +111,12 @@ namespace Listenarr.Application.Notification
 
         private async Task<HttpResponseMessage> PostValidatedAsync(string url, HttpContent content, CancellationToken cancellationToken = default)
         {
-            using var request = new HttpRequestMessage(HttpMethod.Post, url)
-            {
-                Content = content
-            };
-
-            return await SendValidatedAsync(request, cancellationToken);
+            return await _httpSender.PostValidatedAsync(url, content, cancellationToken);
         }
 
         private async Task<HttpResponseMessage> SendValidatedAsync(HttpRequestMessage request, CancellationToken cancellationToken = default)
         {
-            if (request.RequestUri == null)
-            {
-                throw new InvalidOperationException("Outbound notification request URI is required.");
-            }
-
-            var allowPrivateTargets = AllowPrivateWebhookTargetsForCurrentRequest();
-            if (!OutboundRequestSecurity.TryValidateExternalHttpUri(request.RequestUri, out var uriReason, allowPrivateTargets))
-            {
-                throw new InvalidOperationException($"Blocked outbound URL: {uriReason}");
-            }
-
-            if (!await OutboundRequestSecurity.TryValidateResolvedExternalHttpUriAsync(request.RequestUri, _logger, allowPrivateTargets))
-            {
-                throw new InvalidOperationException("Blocked outbound URL: DNS resolved to private or loopback address");
-            }
-
-            if (ReferenceEquals(_httpClientNoRedirect, _httpClient))
-            {
-                var directResponse = await _httpClient.SendAsync(request, cancellationToken);
-                var finalUri = directResponse.RequestMessage?.RequestUri ?? request.RequestUri;
-                if (!OutboundRequestSecurity.TryValidateExternalHttpUri(finalUri, out var finalReason, allowPrivateTargets))
-                {
-                    directResponse.Dispose();
-                    throw new InvalidOperationException($"Blocked final outbound URL: {finalReason}");
-                }
-
-                if (!await OutboundRequestSecurity.TryValidateResolvedExternalHttpUriAsync(finalUri, _logger, allowPrivateTargets))
-                {
-                    directResponse.Dispose();
-                    throw new InvalidOperationException("Blocked final outbound URL: DNS resolved to private or loopback address");
-                }
-
-                return directResponse;
-            }
-
-            var bufferedContent = request.Content != null ? await request.Content.ReadAsByteArrayAsync(cancellationToken) : null;
-            var contentHeaderSnapshot = request.Content?.Headers
-                .Select(h => new KeyValuePair<string, IEnumerable<string>>(h.Key, h.Value.ToArray()))
-                .ToList();
-            var requestHeaderSnapshot = request.Headers
-                .Select(h => new KeyValuePair<string, IEnumerable<string>>(h.Key, h.Value.ToArray()))
-                .ToList();
-            var method = request.Method;
-            var version = request.Version;
-            var versionPolicy = request.VersionPolicy;
-
-            var (response, _) = await OutboundRequestSecurity.SendWithValidatedRedirectsAsync(
-                currentUri =>
-                {
-                    var retryRequest = new HttpRequestMessage(method, currentUri)
-                    {
-                        Version = version,
-                        VersionPolicy = versionPolicy
-                    };
-
-                    foreach (var header in requestHeaderSnapshot)
-                    {
-                        retryRequest.Headers.TryAddWithoutValidation(header.Key, header.Value);
-                    }
-
-                    if (bufferedContent != null)
-                    {
-                        var retryContent = new ByteArrayContent(bufferedContent);
-                        if (contentHeaderSnapshot != null)
-                        {
-                            foreach (var header in contentHeaderSnapshot)
-                            {
-                                retryContent.Headers.TryAddWithoutValidation(header.Key, header.Value);
-                            }
-                        }
-
-                        retryRequest.Content = retryContent;
-                    }
-
-                    return retryRequest;
-                },
-                request.RequestUri,
-                _httpClientNoRedirect,
-                _logger,
-                allowPrivateTargets: allowPrivateTargets,
-                cancellationToken: cancellationToken);
-
-            return response;
+            return await _httpSender.SendValidatedAsync(request, cancellationToken);
         }
 
         /// <summary>
