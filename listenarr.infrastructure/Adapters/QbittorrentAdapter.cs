@@ -42,6 +42,7 @@ namespace Listenarr.Infrastructure.Adapters
         private readonly QbittorrentAuthSession _authSession;
         private readonly QbittorrentConnectionTester _connectionTester;
         private readonly QbittorrentDownloadPollingWorkflow _downloadPollingWorkflow;
+        private readonly QbittorrentRemovalWorkflow _removalWorkflow;
 
         public QbittorrentAdapter(IHttpClientFactory httpFactory, ITorrentFileDownloader torrentFileDownloader, ILogger<QbittorrentAdapter> logger)
         {
@@ -52,6 +53,7 @@ namespace Listenarr.Infrastructure.Adapters
             _authSession = new QbittorrentAuthSession(_logger);
             _connectionTester = new QbittorrentConnectionTester(_httpClientFactory, _logger, ClientType);
             _downloadPollingWorkflow = new QbittorrentDownloadPollingWorkflow(_logger);
+            _removalWorkflow = new QbittorrentRemovalWorkflow(_logger);
         }
 
         public async Task<(bool Success, string Message)> TestConnectionAsync(DownloadClientConfiguration client, CancellationToken ct = default)
@@ -186,59 +188,7 @@ namespace Listenarr.Infrastructure.Adapters
 
         public async Task<bool> RemoveAsync(DownloadClientConfiguration client, string id, bool deleteFiles = false, CancellationToken ct = default)
         {
-            ArgumentNullException.ThrowIfNull(client);
-            if (string.IsNullOrEmpty(id)) throw new ArgumentNullException(nameof(id));
-
-            var baseUrl = DownloadClientUriBuilder.BuildAuthority(client);
-
-            try
-            {
-                using var httpClient = QbittorrentCookieSession.CreateClient();
-                using var loginData = QbittorrentCookieSession.CreateLoginContent(client);
-
-                using var loginResp = await httpClient.PostAsync($"{baseUrl}/api/v2/auth/login", loginData, ct);
-                if (!loginResp.IsSuccessStatusCode)
-                {
-                    if (loginResp.StatusCode == HttpStatusCode.Forbidden)
-                    {
-                        // 403 may mean auth is disabled — probe a version endpoint to confirm
-                        using var testResp = await httpClient.GetAsync($"{baseUrl}/api/v2/app/version", ct);
-                        if (!testResp.IsSuccessStatusCode)
-                        {
-                            _logger.LogWarning("qBittorrent auth appears enabled and credentials are invalid for client {ClientId}", client.Id);
-                            return false;
-                        }
-                        // Auth is disabled; fall through to the delete call
-                    }
-                    else
-                    {
-                        _logger.LogWarning("qBittorrent login failed with status {Status} for client {ClientId}", loginResp.StatusCode, client.Id);
-                        return false;
-                    }
-                }
-
-                using var deleteData = new FormUrlEncodedContent(new[]
-                {
-                    new KeyValuePair<string, string>("hashes", id),
-                    new KeyValuePair<string, string>("deleteFiles", deleteFiles ? "true" : "false")
-                });
-
-                using var deleteResp = await httpClient.PostAsync($"{baseUrl}/api/v2/torrents/delete", deleteData, ct);
-                if (!deleteResp.IsSuccessStatusCode)
-                {
-                    var body = await deleteResp.Content.ReadAsStringAsync(ct);
-                    _logger.LogWarning("qBittorrent delete returned {Status}: {Body}", deleteResp.StatusCode, LogRedaction.RedactText(body, LogRedaction.GetSensitiveValuesFromEnvironment()));
-                    return false;
-                }
-
-                _logger.LogInformation("Removed torrent {Id} from qBittorrent (deleteFiles={DeleteFiles})", LogRedaction.SanitizeText(id), deleteFiles);
-                return true;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogError(ex, "Error removing torrent from qBittorrent: {Id}", LogRedaction.SanitizeText(id));
-                return false;
-            }
+            return await _removalWorkflow.RemoveAsync(client, id, deleteFiles, ct);
         }
 
         public async Task<List<QueueItem>> GetQueueAsync(DownloadClientConfiguration client, CancellationToken ct = default)
