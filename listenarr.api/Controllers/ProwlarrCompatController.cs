@@ -181,30 +181,7 @@ namespace Listenarr.Api.Controllers
             var indexers = (await _indexerRepository.GetAllAsync())
                 .OrderBy(i => i.Priority)
                 .ThenBy(i => i.Name)
-                .Select(i => new
-                {
-                    id = i.Id,
-                    name = i.Name,
-                    implementation = i.Implementation,
-                    baseUrl = i.Url,
-                    apiKey = authEnabled ? i.ApiKey : null,
-                    categories = string.IsNullOrEmpty(i.Categories) ? System.Array.Empty<string>() : i.Categories.Split(',').Select(s => s.Trim()).ToArray(),
-                    settings = new
-                    {
-                        baseUrl = i.Url,
-                        apiKey = authEnabled ? i.ApiKey : null,
-                        apiPath = string.Empty,
-                        categories = string.IsNullOrEmpty(i.Categories) ? System.Array.Empty<string>() : i.Categories.Split(',').Select(s => s.Trim()).ToArray()
-                    },
-                    fields = new[]
-                    {
-                        new FieldDto("baseUrl", i.Url ?? string.Empty),
-                        new FieldDto("apiKey", authEnabled ? i.ApiKey : null),
-                        new FieldDto("apiPath", string.Empty),
-                        new FieldDto("categories", string.IsNullOrEmpty(i.Categories) ? System.Array.Empty<string>() : i.Categories.Split(',').Select(s => s.Trim()).ToArray())
-                    },
-                    tags = System.Array.Empty<int>()
-                })
+                .Select(i => ProwlarrCompatIndexerResponseBuilder.BuildReadIndexer(i, authEnabled))
                 .ToArray();
             return Ok(indexers);
         }
@@ -224,56 +201,9 @@ namespace Listenarr.Api.Controllers
             var i = await _indexerRepository.GetByIdAsync(id);
             if (i == null)
             {
-                var fallback = new
-                {
-                    id = id,
-                    name = "Prowlarr Indexer",
-                    implementation = "Newznab",
-                    baseUrl = string.Empty,
-                    apiKey = (string?)null,
-                    categories = System.Array.Empty<string>(),
-                    settings = new
-                    {
-                        baseUrl = string.Empty,
-                        apiKey = (string?)null,
-                        apiPath = string.Empty,
-                        categories = System.Array.Empty<string>()
-                    },
-                    fields = new[]
-                    {
-                        new FieldDto("baseUrl", string.Empty),
-                        new FieldDto("apiKey", null),
-                        new FieldDto("apiPath", string.Empty),
-                        new FieldDto("categories", System.Array.Empty<string>())
-                    },
-                    tags = System.Array.Empty<int>()
-                };
-                return Ok(fallback);
+                return Ok(ProwlarrCompatIndexerResponseBuilder.BuildFallbackIndexer(id));
             }
-            var dto = new
-            {
-                id = i.Id,
-                name = i.Name,
-                implementation = i.Implementation,
-                baseUrl = i.Url,
-                apiKey = authEnabled ? i.ApiKey : null,
-                categories = string.IsNullOrEmpty(i.Categories) ? System.Array.Empty<string>() : i.Categories.Split(',').Select(s => s.Trim()).ToArray(),
-                settings = new
-                {
-                    baseUrl = i.Url,
-                    apiKey = authEnabled ? i.ApiKey : null,
-                    apiPath = string.Empty,
-                    categories = string.IsNullOrEmpty(i.Categories) ? System.Array.Empty<string>() : i.Categories.Split(',').Select(s => s.Trim()).ToArray()
-                },
-                fields = new[]
-                {
-                    new FieldDto("baseUrl", i.Url ?? string.Empty),
-                    new FieldDto("apiKey", authEnabled ? i.ApiKey : null),
-                    new FieldDto("apiPath", string.Empty),
-                    new FieldDto("categories", string.IsNullOrEmpty(i.Categories) ? System.Array.Empty<string>() : i.Categories.Split(',').Select(s => s.Trim()).ToArray())
-                },
-                tags = System.Array.Empty<int>()
-            };
+            var dto = ProwlarrCompatIndexerResponseBuilder.BuildReadIndexer(i, authEnabled);
             return Ok(dto);
         }
 
@@ -398,30 +328,7 @@ namespace Listenarr.Api.Controllers
                 await _indexerNotificationWorkflow.NotifyPutAsync(indexer, createdForBroadcast);
 
                 // Return updated DTO (consistent with GetIndexerById shape)
-                var dto = new
-                {
-                    id = indexer.Id,
-                    name = indexer.Name,
-                    implementation = indexer.Implementation,
-                    baseUrl = indexer.Url,
-                    apiKey = indexer.ApiKey,
-                    categories = string.IsNullOrEmpty(indexer.Categories) ? System.Array.Empty<string>() : indexer.Categories.Split(',').Select(s => s.Trim()).ToArray(),
-                    settings = new
-                    {
-                        baseUrl = indexer.Url,
-                        apiKey = indexer.ApiKey,
-                        apiPath = string.Empty,
-                        categories = string.IsNullOrEmpty(indexer.Categories) ? System.Array.Empty<string>() : indexer.Categories.Split(',').Select(s => s.Trim()).ToArray()
-                    },
-                    fields = new[]
-                    {
-                        new FieldDto("baseUrl", indexer.Url ?? string.Empty),
-                        new FieldDto("apiKey", indexer.ApiKey ?? string.Empty),
-                        new FieldDto("apiPath", string.Empty),
-                        new FieldDto("categories", string.IsNullOrEmpty(indexer.Categories) ? System.Array.Empty<string>() : indexer.Categories.Split(',').Select(s => s.Trim()).ToArray())
-                    },
-                    tags = System.Array.Empty<int>()
-                };
+                var dto = ProwlarrCompatIndexerResponseBuilder.BuildSavedIndexer(indexer);
 
                 if (created)
                 {
@@ -492,31 +399,9 @@ namespace Listenarr.Api.Controllers
             _logger?.LogInformation("Prowlarr: Indexers processed - created={Created}, skipped={Skipped}", created, skipped);
 
             // Include created indexers in the response (id will be populated after SaveChanges)
-            var createdDtos = createdIndexers.Select(i => new
-            {
-                id = i.Id,
-                name = i.Name,
-                implementation = i.Implementation,
-                baseUrl = i.Url,
-                apiKey = i.ApiKey,
-                categories = string.IsNullOrEmpty(i.Categories) ? System.Array.Empty<string>() : i.Categories.Split(',').Select(s => s.Trim()).ToArray(),
-                settings = new
-                {
-                    baseUrl = i.Url,
-                    apiKey = i.ApiKey,
-                    apiPath = string.Empty,
-                    categories = string.IsNullOrEmpty(i.Categories) ? System.Array.Empty<string>() : i.Categories.Split(',').Select(s => s.Trim()).ToArray()
-                },
-                fields = new object[]
-                {
-                    new FieldDto("baseUrl", i.Url ?? string.Empty),
-                    new FieldDto("apiKey", i.ApiKey ?? string.Empty),
-                    new FieldDto("apiPath", string.Empty),
-                    new FieldDto("categories", string.IsNullOrEmpty(i.Categories) ? System.Array.Empty<string>() : i.Categories.Split(',').Select(s => s.Trim()).ToArray())
-                }
-            }).ToArray();
-
-
+            var createdDtos = createdIndexers
+                .Select(ProwlarrCompatIndexerResponseBuilder.BuildSavedIndexer)
+                .ToArray();
 
             return Ok(new { accepted = true, created, skipped, indexers = createdDtos });
         }
@@ -691,8 +576,5 @@ namespace Listenarr.Api.Controllers
             public bool Required { get; init; }
             public string Description { get; init; } = string.Empty;
         }
-
-        // Simple field DTO to match Listenarr/Prowlarr field shape (Name/Value)
-        private record FieldDto(string Name, object? Value);
     }
 }
