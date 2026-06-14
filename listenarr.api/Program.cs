@@ -344,6 +344,7 @@ builder.Services.AddScoped<AsinEnricher>();
 // Add search result scorer
 builder.Services.AddScoped<SearchResultScorerService>();
 builder.Services.AddScoped<SearchResultSortingService>();
+builder.Services.AddScoped<SearchFinalDispositionLogger>();
 
 // Add ASIN search handler
 builder.Services.AddScoped<AsinSearchHandler>();

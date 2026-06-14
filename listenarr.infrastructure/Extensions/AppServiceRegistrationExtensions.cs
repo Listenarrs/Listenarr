@@ -58,6 +58,7 @@ namespace Listenarr.Infrastructure.Extensions
             services.AddScoped<IndexerAdditionalSettingsParser>();
             services.AddScoped<IndexerSearchWorkflow>();
             services.AddScoped<MetadataSourceCatalog>();
+            services.AddScoped<SearchFinalDispositionLogger>();
             services.AddScoped<ISearchService, SearchService>();
             services.AddScoped<IMetadataService, MetadataService>();
             services.AddScoped<IAudiobookFileService, AudiobookFileService>();

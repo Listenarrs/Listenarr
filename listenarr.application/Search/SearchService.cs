@@ -43,6 +43,7 @@ namespace Listenarr.Application.Search
         private readonly MetadataSourceCatalog _metadataSourceCatalog;
         private readonly AudibleSimpleLookupWorkflow _audibleSimpleLookupWorkflow;
         private readonly AudibleAuthorSearchWorkflow _audibleAuthorSearchWorkflow;
+        private readonly SearchFinalDispositionLogger _finalDispositionLogger;
 
         public SearchService(
             HttpClient httpClient,
@@ -66,7 +67,8 @@ namespace Listenarr.Application.Search
             MetadataSourceCatalog? metadataSourceCatalog = null,
             AudibleAuthorPageCollector? audibleAuthorPageCollector = null,
             AudibleSimpleLookupWorkflow? audibleSimpleLookupWorkflow = null,
-            AudibleAuthorSearchWorkflow? audibleAuthorSearchWorkflow = null)
+            AudibleAuthorSearchWorkflow? audibleAuthorSearchWorkflow = null,
+            SearchFinalDispositionLogger? finalDispositionLogger = null)
         {
             _configurationService = configurationService;
             _logger = logger;
@@ -99,6 +101,8 @@ namespace Listenarr.Application.Search
                 resolvedAudibleAuthorPageCollector,
                 metadataConverters,
                 NullLogger<AudibleAuthorSearchWorkflow>.Instance);
+            _finalDispositionLogger = finalDispositionLogger ?? new SearchFinalDispositionLogger(
+                NullLogger<SearchFinalDispositionLogger>.Instance);
         }
 
         public async Task<List<SearchResult>> SearchAsync(string query, string? category = null, List<string>? apiIds = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false)
@@ -496,126 +500,15 @@ namespace Listenarr.Application.Search
                     .ToList();
 
                 // Ensure every unified ASIN candidate has a final disposition reason for diagnostics.
-                try
-                {
-                    var finalAsinEntries = new List<string>();
-
-                    foreach (var asin in asinCandidates.Where(asin => !string.IsNullOrWhiteSpace(asin)))
-                    {
-                        // If already accepted in the final results, mark as accepted
-                        if (results.Any(r => string.Equals(r.Asin, asin, StringComparison.OrdinalIgnoreCase)))
-                        {
-                            try { candidateDropReasons[asin] = "accepted"; }
-                            catch (Exception caughtEx_9) when (caughtEx_9 is not OperationCanceledException && caughtEx_9 is not OutOfMemoryException && caughtEx_9 is not StackOverflowException)
-                            {
-                                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
-                            }
-                            finalAsinEntries.Add($"{asin}:accepted");
-                            continue;
-                        }
-
-                        // If we have an enriched version but it didn't make the final list, try to compute a specific drop reason
-                        var enrichedCandidate = enrichedList.FirstOrDefault(e => string.Equals(e.Asin, asin, StringComparison.OrdinalIgnoreCase));
-                        if (enrichedCandidate != null)
-                        {
-                            // Author/publisher requirement
-                            if (requireAuthorAndPublisher && (string.IsNullOrWhiteSpace(enrichedCandidate.Artist) || string.IsNullOrWhiteSpace(enrichedCandidate.Publisher)))
-                            {
-                                try { candidateDropReasons[asin] = "author_publisher_missing"; }
-                                catch (Exception caughtEx_10) when (caughtEx_10 is not OperationCanceledException && caughtEx_10 is not OutOfMemoryException && caughtEx_10 is not StackOverflowException)
-                                {
-                                    System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
-                                }
-                                finalAsinEntries.Add($"{asin}:author_publisher_missing");
-                                continue;
-                            }
-
-                            // Title noise or unlikely audiobook
-                            if (SearchValidation.IsTitleNoise(enrichedCandidate.Title) || !SearchValidation.IsLikelyAudiobook(enrichedCandidate))
-                            {
-                                try { candidateDropReasons[asin] = "filtered_title_or_not_likely"; }
-                                catch (Exception caughtEx_11) when (caughtEx_11 is not OperationCanceledException && caughtEx_11 is not OutOfMemoryException && caughtEx_11 is not StackOverflowException)
-                                {
-                                    System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
-                                }
-                                finalAsinEntries.Add($"{asin}:filtered_title_or_not_likely");
-                                continue;
-                            }
-
-                            // Containment / fuzzy failure
-                            var containment = 0.0;
-                            var fuzzy = 0.0;
-                            try
-                            {
-                                containment = SearchResultMatchEvaluator.ComputeContainmentScore(enrichedCandidate, query);
-                                fuzzy = SearchResultMatchEvaluator.ComputeFuzzySimilarity(enrichedCandidate.Title + " " + enrichedCandidate.Artist, query);
-                            }
-                            catch (Exception caughtEx_12) when (caughtEx_12 is not OperationCanceledException && caughtEx_12 is not OutOfMemoryException && caughtEx_12 is not StackOverflowException)
-                            {
-                                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
-                            }
-
-                            if (string.Equals(containmentMode, "Strict", StringComparison.OrdinalIgnoreCase))
-                            {
-                                // In strict mode we require direct containment
-                                var hay = string.Join(" ", new[] { enrichedCandidate.Title, enrichedCandidate.Artist, enrichedCandidate.Album, enrichedCandidate.Description, enrichedCandidate.Publisher, enrichedCandidate.Narrator, enrichedCandidate.Language, enrichedCandidate.Series }.Where(s => !string.IsNullOrEmpty(s))).ToLowerInvariant();
-                                if (string.IsNullOrEmpty(hay) || hay.IndexOf(query, StringComparison.OrdinalIgnoreCase) < 0)
-                                {
-                                    try { candidateDropReasons[asin] = "containment_failed_strict"; }
-                                    catch (Exception caughtEx_13) when (caughtEx_13 is not OperationCanceledException && caughtEx_13 is not OutOfMemoryException && caughtEx_13 is not StackOverflowException)
-                                    {
-                                        System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
-                                    }
-                                    finalAsinEntries.Add($"{asin}:containment_failed_strict");
-                                    continue;
-                                }
-                            }
-                            else
-                            {
-                                if (containment < 0.4 && fuzzy < fuzzyThreshold)
-                                {
-                                    try { candidateDropReasons[asin] = "containment_failed_relaxed"; }
-                                    catch (Exception caughtEx_14) when (caughtEx_14 is not OperationCanceledException && caughtEx_14 is not OutOfMemoryException && caughtEx_14 is not StackOverflowException)
-                                    {
-                                        System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
-                                    }
-                                    finalAsinEntries.Add($"{asin}:containment_failed_relaxed");
-                                    continue;
-                                }
-                            }
-
-                            // If none of the above matched, mark as filtered by post-scoring rules
-                            try { candidateDropReasons[asin] = "filtered_post_scoring"; }
-                            catch (Exception caughtEx_15) when (caughtEx_15 is not OperationCanceledException && caughtEx_15 is not OutOfMemoryException && caughtEx_15 is not StackOverflowException)
-                            {
-                                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
-                            }
-                            finalAsinEntries.Add($"{asin}:filtered_post_scoring");
-                            continue;
-                        }
-
-                        // If we reached here, the ASIN never got enriched nor scraped successfully
-                        if (!candidateDropReasons.ContainsKey(asin))
-                        {
-                            try { candidateDropReasons[asin] = "no_metadata_and_no_scrape"; }
-                            catch (Exception caughtEx_16) when (caughtEx_16 is not OperationCanceledException && caughtEx_16 is not OutOfMemoryException && caughtEx_16 is not StackOverflowException)
-                            {
-                                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
-                            }
-                        }
-                        finalAsinEntries.Add($"{asin}:{candidateDropReasons.GetValueOrDefault(asin)}");
-                    }
-
-                    // Emit a consolidated diagnostic log with per-ASIN dispositions
-                    if (finalAsinEntries.Any())
-                    {
-                        _logger.LogInformation("Final ASIN dispositions for query '{Query}': {Entries}", query, string.Join(", ", finalAsinEntries));
-                    }
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                {
-                    _logger.LogWarning(ex, "Failed to compute final ASIN dispositions for query: {Query}", query);
-                }
+                _finalDispositionLogger.LogFinalAsinDispositions(
+                    asinCandidates,
+                    results,
+                    enrichedList,
+                    candidateDropReasons,
+                    query,
+                    requireAuthorAndPublisher,
+                    containmentMode,
+                    fuzzyThreshold);
 
                 // Diagnostic: dump final results (title :: metadataSource :: id/asin) to help correlate
                 try
