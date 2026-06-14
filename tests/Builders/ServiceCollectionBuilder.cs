@@ -213,6 +213,10 @@ namespace Listenarr.Tests.Builders
             services.AddSingleton<AudibleSimpleLookupWorkflow>();
             services.AddSingleton<AudibleAuthorSearchWorkflow>();
             services.AddSingleton<DownloadService>();
+            services.AddSingleton<ScanJobProcessor>();
+            services.AddSingleton<IScanJobProcessor>(sp => sp.GetRequiredService<ScanJobProcessor>());
+            services.AddSingleton<MoveJobProcessor>();
+            services.AddSingleton<IMoveJobProcessor>(sp => sp.GetRequiredService<MoveJobProcessor>());
             services.AddSingleton<MoveBackgroundService>();
             services.AddSingleton<MoveQueueService>();
             services.AddSingleton<LibraryController>();

@@ -39,11 +39,15 @@ namespace Listenarr.Infrastructure.Extensions
 
             // Scan queue: enqueue folder scans to be processed in the background
             services.AddSingleton<IScanQueueService, ScanQueueService>();
+            services.AddSingleton<ScanJobProcessor>();
+            services.AddSingleton<IScanJobProcessor>(sp => sp.GetRequiredService<ScanJobProcessor>());
             // Background worker to consume scan jobs and persist audiobook files
             services.AddHostedService<ScanBackgroundService>();
 
             // Move queue: enqueue safe move operations when an audiobook BasePath changes
             services.AddSingleton<IMoveQueueService, MoveQueueService>();
+            services.AddSingleton<MoveJobProcessor>();
+            services.AddSingleton<IMoveJobProcessor>(sp => sp.GetRequiredService<MoveJobProcessor>());
             // Background worker to consume move jobs and perform safe filesystem move
             services.AddHostedService<MoveBackgroundService>();
 

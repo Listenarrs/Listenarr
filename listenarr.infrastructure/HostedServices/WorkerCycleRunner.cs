@@ -23,6 +23,7 @@ namespace Listenarr.Infrastructure.HostedServices
 {
     public sealed class WorkerCycleRunner(
         TimeProvider timeProvider,
+        IAppMetricsService metrics,
         ILogger<WorkerCycleRunner> logger) : IWorkerCycleRunner
     {
         public async Task RunPeriodicAsync(
@@ -40,6 +41,7 @@ namespace Listenarr.Infrastructure.HostedServices
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
+                    metrics.Increment(BuildMetricName(workerName, "cycle.skipped"));
                     logger.LogInformation("{WorkerName} canceled before first cycle", workerName);
                     return;
                 }
@@ -49,18 +51,23 @@ namespace Listenarr.Infrastructure.HostedServices
             {
                 try
                 {
+                    metrics.Increment(BuildMetricName(workerName, "cycle.started"));
                     await runCycle(cancellationToken);
+                    metrics.Increment(BuildMetricName(workerName, "cycle.completed"));
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
+                    metrics.Increment(BuildMetricName(workerName, "cycle.skipped"));
                     break;
                 }
                 catch (OperationCanceledException ex)
                 {
+                    metrics.Increment(BuildMetricName(workerName, "cycle.failed"));
                     logger.LogWarning(ex, "{WorkerName} cycle canceled/timed out; continuing", workerName);
                 }
                 catch (Exception ex) when (Listenarr.Application.Common.WorkerExceptionClassifier.IsNonFatal(ex))
                 {
+                    metrics.Increment(BuildMetricName(workerName, "cycle.failed"));
                     logger.LogError(ex, "Error in {WorkerName} cycle", workerName);
                 }
 
@@ -73,6 +80,15 @@ namespace Listenarr.Infrastructure.HostedServices
                     break;
                 }
             }
+        }
+
+        private static string BuildMetricName(string workerName, string suffix)
+        {
+            var normalized = new string(workerName
+                .Select(c => char.IsLetterOrDigit(c) ? char.ToLowerInvariant(c) : '.')
+                .ToArray());
+
+            return $"worker.{normalized}.{suffix}";
         }
     }
 }

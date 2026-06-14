@@ -32,7 +32,7 @@ The application layer now delegates these infrastructure-shaped concerns through
 
 Hosted workers must have one clear owner for each state transition. Queue services can dedupe, persist, or expose job status, but they should not perform the durable state transition that belongs to a worker.
 
-Background workers expose DI-facing processor contracts for deterministic cycle/job testing. Periodic workers should prefer `IWorkerCycleRunner` and `TimeProvider` for cancellation-safe loops and testable delays. Exception filters should use `WorkerExceptionClassifier.IsNonFatal` when adding or refactoring catch blocks so fatal runtime exceptions are not swallowed.
+Background workers expose DI-facing processor contracts for deterministic cycle/job testing. Periodic workers should prefer `IWorkerCycleRunner` and `TimeProvider` for cancellation-safe loops and testable delays. Queue-backed workers should keep hosted services as channel adapters and put per-job orchestration in processors such as `ScanJobProcessor` and `MoveJobProcessor`. Exception filters should use `WorkerExceptionClassifier.IsNonFatal` when adding or refactoring catch blocks so fatal runtime exceptions are not swallowed. Worker processors should emit lightweight `worker.*` metrics for started, completed, failed, skipped, and retry-scheduled outcomes where the state applies.
 
 | Worker | Owns | Retry/backoff | Idempotency |
 | --- | --- | --- | --- |

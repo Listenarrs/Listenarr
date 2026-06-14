@@ -74,6 +74,8 @@ namespace Listenarr.Tests.Features.Api.Extensions
             AssertProcessorRegistered<IDownloadMonitorProcessor>(services);
             AssertProcessorRegistered<IDownloadImportProcessor>(services);
             AssertProcessorRegistered<IMovedDownloadCleanupProcessor>(services);
+            AssertProcessorRegistered<IScanJobProcessor>(services);
+            AssertProcessorRegistered<IMoveJobProcessor>(services);
             AssertProcessorRegistered<IAutomaticSearchProcessor>(services);
             AssertProcessorRegistered<IAuthorMonitoringProcessor>(services);
             AssertProcessorRegistered<ISeriesMonitoringProcessor>(services);
