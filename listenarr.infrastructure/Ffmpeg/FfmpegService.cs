@@ -16,9 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Security.Cryptography;
-using SharpCompress.Archives;
-using SharpCompress.Common;
-using SharpCompress.Readers;
 using System.Runtime.InteropServices;
 using System.Diagnostics;
 using System.Text.Json;
@@ -88,46 +85,6 @@ namespace Listenarr.Infrastructure.Ffmpeg
                     try { await Task.Delay(delayMs, cancellationToken); } catch (OperationCanceledException) { return; }
                 }
             }
-        }
-
-        private static bool TryBuildPathUnderRoot(string rootPath, string entryPath, out string resolvedPath)
-        {
-            resolvedPath = string.Empty;
-
-            if (string.IsNullOrWhiteSpace(rootPath) || string.IsNullOrWhiteSpace(entryPath))
-            {
-                return false;
-            }
-
-            var normalizedRoot = Path.GetFullPath(rootPath)
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-
-            var normalizedEntry = entryPath
-                .Replace('\\', Path.DirectorySeparatorChar)
-                .Replace('/', Path.DirectorySeparatorChar)
-                .Trim();
-
-            if (string.IsNullOrWhiteSpace(normalizedEntry))
-            {
-                return false;
-            }
-
-            normalizedEntry = normalizedEntry.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            if (Path.IsPathRooted(normalizedEntry))
-            {
-                return false;
-            }
-
-            var candidatePath = Path.GetFullPath(
-                normalizedRoot + Path.DirectorySeparatorChar + normalizedEntry);
-            if (!candidatePath.StartsWith(normalizedRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(candidatePath, normalizedRoot, StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-
-            resolvedPath = candidatePath;
-            return true;
         }
 
         /// <summary>
@@ -270,63 +227,9 @@ namespace Listenarr.Infrastructure.Ffmpeg
                     return null;
                 }
 
-                if (downloadUrl.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) || downloadUrl.EndsWith(".ffmpeg.zip", StringComparison.OrdinalIgnoreCase))
+                if (!await FfprobeArchiveExtractor.ExtractAsync(downloadUrl, tmpFile, _baseDir, _ffprobePath, _logger))
                 {
-                    using var archive = SharpCompress.Archives.Zip.ZipArchive.OpenArchive(tmpFile, new ReaderOptions());
-                    var baseRoot = Path.GetFullPath(_baseDir);
-                    foreach (var entry in archive.Entries.Where(e => !e.IsDirectory))
-                    {
-                        var entryPath = entry.Key ?? string.Empty;
-                        if (!TryBuildPathUnderRoot(baseRoot, entryPath, out var outPath))
-                        {
-                            _logger.LogWarning("Skipping archive entry outside extraction root: {Entry}", entryPath);
-                            continue;
-                        }
-
-                        Directory.CreateDirectory(Path.GetDirectoryName(outPath) ?? _baseDir);
-                        entry.WriteToFile(outPath, new ExtractionOptions() { ExtractFullPath = true, Overwrite = true });
-                        _logger.LogDebug("Extracted archive entry to {OutPath}", outPath);
-                    }
-                    await TryDeleteFileAsync(tmpFile);
-                }
-                else if (downloadUrl.EndsWith(".tar.xz", StringComparison.OrdinalIgnoreCase) || downloadUrl.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase) || downloadUrl.EndsWith(".tgz", StringComparison.OrdinalIgnoreCase))
-                {
-                    try
-                    {
-                        using var stream = File.OpenRead(tmpFile);
-                        var readerOptions = new ReaderOptions { LeaveStreamOpen = false };
-                        using var reader = ReaderFactory.OpenReader(stream, readerOptions);
-                        var baseRoot = Path.GetFullPath(_baseDir);
-                        while (reader.MoveToNextEntry())
-                        {
-                            if (!reader.Entry.IsDirectory)
-                            {
-                                var entryPath = reader.Entry.Key ?? string.Empty;
-                                if (!TryBuildPathUnderRoot(baseRoot, entryPath, out var outPath))
-                                {
-                                    _logger.LogWarning("Skipping archive entry outside extraction root: {Entry}", entryPath);
-                                    continue;
-                                }
-
-                                Directory.CreateDirectory(Path.GetDirectoryName(outPath) ?? _baseDir);
-                                using var entryStream = reader.OpenEntryStream();
-                                await using var outFs = File.Create(outPath);
-                                await entryStream.CopyToAsync(outFs);
-                                _logger.LogDebug("Extracted archive entry to {OutPath}", outPath);
-                            }
-                        }
-                        await TryDeleteFileAsync(tmpFile);
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                    {
-                        _logger.LogWarning(ex, "Managed extraction failed for {Tmp}; skipping system tar fallback to avoid unsafe archive extraction", tmpFile);
-                        await TryDeleteFileAsync(tmpFile);
-                        return null;
-                    }
-                }
-                else
-                {
-                    File.Move(tmpFile, _ffprobePath);
+                    return null;
                 }
 
                 if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
