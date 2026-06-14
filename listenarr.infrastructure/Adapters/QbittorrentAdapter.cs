@@ -83,44 +83,8 @@ namespace Listenarr.Infrastructure.Adapters
                 return null;
             }
 
-            // Add download using torrent file
-            HttpResponseMessage addResponse;
-            if (addPlan.TorrentFileData != null)
-            {
-                using var multipart = new MultipartFormDataContent();
-                multipart.Add(new StringContent(addPlan.SavePath), "savepath");
-                if (!string.IsNullOrEmpty(addPlan.Category))
-                    multipart.Add(new StringContent(addPlan.Category), "category");
-                if (!string.IsNullOrEmpty(addPlan.Tags))
-                    multipart.Add(new StringContent(addPlan.Tags), "tags");
-
-                var torrentFileName = string.IsNullOrEmpty(result.TorrentFileName) ? "download.torrent" : result.TorrentFileName;
-                var torrentContent = new ByteArrayContent(addPlan.TorrentFileData);
-                torrentContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/x-bittorrent");
-                multipart.Add(torrentContent, "torrents", torrentFileName);
-
-                addResponse = await httpClient.PostAsync($"{baseUrl}/api/v2/torrents/add", multipart, ct);
-            }
-            // Add using magnet link or torrent url
-            else
-            {
-                var url = new[] { addPlan.MagnetLink, addPlan.HttpTorrentUrl }
-                    .FirstOrDefault(static url => !string.IsNullOrEmpty(url)) ?? string.Empty;
-
-                var formData = new List<KeyValuePair<string, string>>
-                {
-                    new("urls", url),
-                    new("savepath", addPlan.SavePath)
-                };
-
-                if (!string.IsNullOrEmpty(addPlan.Category))
-                    formData.Add(new("category", addPlan.Category));
-                if (!string.IsNullOrEmpty(addPlan.Tags))
-                    formData.Add(new("tags", addPlan.Tags));
-
-                using var addData = new FormUrlEncodedContent(formData);
-                addResponse = await httpClient.PostAsync($"{baseUrl}/api/v2/torrents/add", addData, ct);
-            }
+            using var addContent = QbittorrentAddRequestContentBuilder.Build(addPlan, result);
+            var addResponse = await httpClient.PostAsync($"{baseUrl}/api/v2/torrents/add", addContent, ct);
 
             if (!addResponse.IsSuccessStatusCode)
             {
