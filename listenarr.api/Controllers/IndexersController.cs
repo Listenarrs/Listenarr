@@ -34,10 +34,10 @@ namespace Listenarr.Api.Controllers
     {
         private readonly IIndexerRepository _indexerRepository;
         private readonly ILogger<IndexersController> _logger;
-        private readonly HttpClient _httpClient;
         private readonly IConfigurationService _configurationService;
         private readonly IndexerTestWorkflow _indexerTestWorkflow;
         private readonly ProwlarrIndexerImportWorkflow _prowlarrImportWorkflow;
+        private readonly IndexerDebugSearchWorkflow _debugSearchWorkflow;
         private readonly IndexerResponseRedactor _responseRedactor;
 
         public IndexersController(
@@ -46,11 +46,11 @@ namespace Listenarr.Api.Controllers
             HttpClient httpClient,
             IConfigurationService configurationService,
             IndexerTestWorkflow? indexerTestWorkflow = null,
-            ProwlarrIndexerImportWorkflow? prowlarrImportWorkflow = null)
+            ProwlarrIndexerImportWorkflow? prowlarrImportWorkflow = null,
+            IndexerDebugSearchWorkflow? debugSearchWorkflow = null)
         {
             _indexerRepository = indexerRepository;
             _logger = logger;
-            _httpClient = httpClient;
             _configurationService = configurationService;
             _indexerTestWorkflow = indexerTestWorkflow ?? new IndexerTestWorkflow(
                 indexerRepository,
@@ -61,6 +61,9 @@ namespace Listenarr.Api.Controllers
                 configurationService,
                 httpClient,
                 Microsoft.Extensions.Logging.Abstractions.NullLogger<ProwlarrIndexerImportWorkflow>.Instance);
+            _debugSearchWorkflow = debugSearchWorkflow ?? new IndexerDebugSearchWorkflow(
+                httpClient,
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<IndexerDebugSearchWorkflow>.Instance);
             _responseRedactor = new IndexerResponseRedactor();
         }
 
@@ -418,162 +421,8 @@ namespace Listenarr.Api.Controllers
             var indexer = await _indexerRepository.GetByIdAsync(id);
             if (indexer == null) return NotFound(new { message = "Indexer not found" });
 
-            try
-            {
-                string query = "test";
-                if (body.ValueKind == JsonValueKind.Object && body.TryGetProperty("query", out var q))
-                {
-                    query = q.GetString() ?? "test";
-                }
-
-                // Parse mam_id from AdditionalSettings
-                string mamId = string.Empty;
-                if (!string.IsNullOrEmpty(indexer.AdditionalSettings))
-                {
-                    try
-                    {
-                        using var doc = JsonDocument.Parse(indexer.AdditionalSettings);
-                        if (doc.RootElement.TryGetProperty("mam_id", out var mamIdProperty))
-                            mamId = mamIdProperty.GetString() ?? string.Empty;
-                    }
-                    catch (JsonException ex)
-                    {
-                        _logger.LogDebug(ex, "Failed parsing AdditionalSettings JSON for indexer {Id} during debug search", id);
-                    }
-                }
-
-                if (string.IsNullOrEmpty(mamId))
-                    return BadRequest(new { success = false, message = "MAM ID missing in indexer settings" });
-
-                var testUrl = $"{indexer.Url.TrimEnd('/')}/tor/js/loadSearchJSONbasic.php";
-
-                var formData = new Dictionary<string, string>
-                {
-                    ["tor[text]"] = query,
-                    ["tor[srchIn][]"] = "title",
-                    ["tor[searchType]"] = "all",
-                    ["tor[searchIn]"] = "torrents",
-                    ["tor[cat][]"] = "0",
-                    ["tor[browseFlagsHideVsShow]"] = "0",
-                    ["tor[startDate]"] = "",
-                    ["tor[endDate]"] = "",
-                    ["tor[hash]"] = "",
-                    ["tor[sortType]"] = "default",
-                    ["tor[startNumber]"] = "0",
-                    ["perpage"] = "100",
-                    ["thumbnail"] = "false",
-                    ["dlLink"] = "",
-                    ["description"] = ""
-                };
-
-                using var request = new HttpRequestMessage(HttpMethod.Post, testUrl)
-                {
-                    Content = new FormUrlEncodedContent(formData)
-                };
-
-                request.Headers.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
-                request.Headers.Accept.ParseAdd("application/json, text/javascript, */*; q=0.01");
-                request.Headers.AcceptLanguage.ParseAdd("en-US,en;q=0.9");
-                request.Headers.Referrer = new Uri("https://www.myanonamouse.net/");
-
-                var cookieContainer = new System.Net.CookieContainer();
-                var baseUrl = indexer.Url.TrimEnd('/');
-                var baseUri = new Uri(baseUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? baseUrl : "https://" + baseUrl);
-                cookieContainer.Add(baseUri, new System.Net.Cookie("mam_id", mamId));
-                try
-                {
-                    var host = baseUri.Host;
-                    if (!host.StartsWith("www.", StringComparison.OrdinalIgnoreCase))
-                    {
-                        var wwwUri = new Uri($"{baseUri.Scheme}://www.{host}");
-                        cookieContainer.Add(wwwUri, new System.Net.Cookie("mam_id", mamId));
-                    }
-                }
-                catch (UriFormatException ex)
-                {
-                    _logger.LogDebug(ex, "Failed to add www host alias cookie for MyAnonamouse debug search request to {Host}", baseUri.Host);
-                }
-                catch (System.Net.CookieException ex)
-                {
-                    _logger.LogDebug(ex, "Failed to add www host alias cookie for MyAnonamouse debug search request to {Host}", baseUri.Host);
-                }
-
-                var handler = new HttpClientHandler { CookieContainer = cookieContainer, UseCookies = true };
-                using var client = new HttpClient(handler);
-                client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
-                client.DefaultRequestHeaders.Accept.ParseAdd("application/json, text/javascript, */*; q=0.01");
-                client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("en-US,en;q=0.9");
-                client.DefaultRequestHeaders.Referrer = new Uri("https://www.myanonamouse.net/");
-
-                using var response = await client.SendAsync(request);
-                var raw = await response.Content.ReadAsStringAsync();
-
-                // Get parsed results via the Search API on this host
-                var parsed = new List<SearchResult>();
-                try
-                {
-                    var scheme = Request.Scheme;
-                    var hostVal = Request.Host.Value;
-                    var localSearchUrl = $"{scheme}://{hostVal}{HttpApiVersionUtils.BuildApiPath($"/search/{id}", HttpContext)}?query={Uri.EscapeDataString(query)}";
-                    using var localResp = await _httpClient.GetAsync(localSearchUrl);
-                    if (localResp.IsSuccessStatusCode)
-                    {
-                        var json = await localResp.Content.ReadAsStringAsync();
-                        var options = new System.Text.Json.JsonSerializerOptions
-                        {
-                            PropertyNameCaseInsensitive = true
-                        };
-                        parsed = System.Text.Json.JsonSerializer.Deserialize<List<SearchResult>>(json, options) ?? new List<SearchResult>();
-                    }
-                }
-                catch (HttpRequestException ex)
-                {
-                    _logger.LogDebug(ex, "Failed to evaluate local parsed search results for indexer {Id}", indexer.Id);
-                }
-                catch (TaskCanceledException ex)
-                {
-                    _logger.LogDebug(ex, "Failed to evaluate local parsed search results for indexer {Id}", indexer.Id);
-                }
-                catch (JsonException ex)
-                {
-                    _logger.LogDebug(ex, "Failed to evaluate local parsed search results for indexer {Id}", indexer.Id);
-                }
-                catch (UriFormatException ex)
-                {
-                    _logger.LogDebug(ex, "Failed to evaluate local parsed search results for indexer {Id}", indexer.Id);
-                }
-                catch (InvalidOperationException ex)
-                {
-                    _logger.LogDebug(ex, "Failed to evaluate local parsed search results for indexer {Id}", indexer.Id);
-                }
-
-                return Ok(new { success = true, status = (int)response.StatusCode, raw, parsedCount = parsed.Count, parsed });
-            }
-            catch (HttpRequestException ex)
-            {
-                _logger.LogWarning(ex, "MyAnonamouse debug search failed for indexer {Id}", id);
-                return BadRequest(new { success = false, error = ex.Message });
-            }
-            catch (TaskCanceledException ex)
-            {
-                _logger.LogWarning(ex, "MyAnonamouse debug search failed for indexer {Id}", id);
-                return BadRequest(new { success = false, error = ex.Message });
-            }
-            catch (JsonException ex)
-            {
-                _logger.LogWarning(ex, "MyAnonamouse debug search failed for indexer {Id}", id);
-                return BadRequest(new { success = false, error = ex.Message });
-            }
-            catch (UriFormatException ex)
-            {
-                _logger.LogWarning(ex, "MyAnonamouse debug search failed for indexer {Id}", id);
-                return BadRequest(new { success = false, error = ex.Message });
-            }
-            catch (InvalidOperationException ex)
-            {
-                _logger.LogWarning(ex, "MyAnonamouse debug search failed for indexer {Id}", id);
-                return BadRequest(new { success = false, error = ex.Message });
-            }
+            var result = await _debugSearchWorkflow.ExecuteMyAnonamouseAsync(indexer, id, body, Request, HttpContext);
+            return StatusCode(result.StatusCode, result.Payload);
         }
 
         /// <summary>
