@@ -49,13 +49,18 @@ namespace Listenarr.Tests.Features.Api.Services
                 downloadRepository,
                 processingJobRepository,
                 NullLogger<DownloadQueueCandidateLoader>.Instance);
+            var clientQueuePoller = new DownloadClientQueuePoller(
+                resolvedMemoryCache,
+                clientGateway,
+                metrics,
+                NullLogger<DownloadClientQueuePoller>.Instance);
 
             var service = new DownloadQueueService(
                 resolvedMemoryCache,
                 configurationService,
                 downloadRepository,
                 candidateLoader,
-                clientGateway,
+                clientQueuePoller,
                 metrics,
                 NullLogger<DownloadQueueService>.Instance);
 

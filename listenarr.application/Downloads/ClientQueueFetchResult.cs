@@ -19,7 +19,7 @@ using Listenarr.Domain.Models;
 
 namespace Listenarr.Application.Downloads
 {
-    internal sealed class ClientQueueFetchResult
+    public sealed class ClientQueueFetchResult
     {
         public ClientQueueFetchResult(
             DownloadClientConfiguration client,

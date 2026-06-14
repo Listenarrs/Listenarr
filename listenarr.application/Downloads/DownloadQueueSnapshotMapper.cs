@@ -19,7 +19,7 @@ using Listenarr.Domain.Models;
 
 namespace Listenarr.Application.Downloads
 {
-    internal static class DownloadQueueSnapshotMapper
+    public static class DownloadQueueSnapshotMapper
     {
         public static string GetClientQueueSnapshotCacheKey(DownloadClientConfiguration client)
         {

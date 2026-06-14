@@ -97,6 +97,7 @@ namespace Listenarr.Infrastructure.Extensions
             services.AddScoped<DirectDownloadWorkflow>();
             services.AddScoped<DownloadRemovalWorkflow>();
             services.AddScoped<DownloadQueueCandidateLoader>();
+            services.AddScoped<DownloadClientQueuePoller>();
             // Queue service extracted from DownloadService to encapsulate queue-building and filtering
             services.AddScoped<IDownloadQueueService, DownloadQueueService>();
             services.AddScoped<IOpenLibraryService, OpenLibraryService>();
