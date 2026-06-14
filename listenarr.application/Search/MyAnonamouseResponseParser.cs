@@ -685,44 +685,5 @@ namespace Listenarr.Application.Search
             return results;
         }
 
-        // Recursively search a JsonElement for a mam_id-like property (case-insensitive)
-        private static string? FindMamIdInJson(JsonElement element)
-        {
-            // Keys to look for
-            var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "mam_id", "mamid", "mamId", "mamID", "mam" };
-
-            if (element.ValueKind == JsonValueKind.Object)
-            {
-                foreach (var prop in element.EnumerateObject())
-                {
-                    try
-                    {
-                        if (keys.Contains(prop.Name) && prop.Value.ValueKind == JsonValueKind.String)
-                            return prop.Value.GetString();
-
-                        // Recurse into objects and arrays
-                        if (prop.Value.ValueKind == JsonValueKind.Object || prop.Value.ValueKind == JsonValueKind.Array)
-                        {
-                            var found = FindMamIdInJson(prop.Value);
-                            if (!string.IsNullOrEmpty(found)) return found;
-                        }
-                    }
-                    catch (Exception caughtEx_20) when (caughtEx_20 is not OperationCanceledException && caughtEx_20 is not OutOfMemoryException && caughtEx_20 is not StackOverflowException)
-                    { /* ignore malformed inner values */
-                        System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
-                    }
-                }
-            }
-            else if (element.ValueKind == JsonValueKind.Array)
-            {
-                var found = element.EnumerateArray()
-                    .Select(FindMamIdInJson)
-                    .FirstOrDefault(value => !string.IsNullOrEmpty(value));
-                if (!string.IsNullOrEmpty(found)) return found;
-            }
-
-            return null;
-        }
-
     }
 }
