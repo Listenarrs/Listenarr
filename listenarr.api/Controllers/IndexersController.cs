@@ -21,7 +21,6 @@ using Listenarr.Api.Dtos;
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Application.Security;
-using Listenarr.Application.Search;
 using Listenarr.Domain.Models;
 using Microsoft.AspNetCore.Mvc;
 using System.Text.Json;
@@ -36,9 +35,9 @@ namespace Listenarr.Api.Controllers
         private readonly IIndexerRepository _indexerRepository;
         private readonly ILogger<IndexersController> _logger;
         private readonly HttpClient _httpClient;
-        private readonly HttpClient _httpClientNoRedirect;
         private readonly IConfigurationService _configurationService;
         private readonly IndexerTestWorkflow _indexerTestWorkflow;
+        private readonly ProwlarrIndexerImportWorkflow _prowlarrImportWorkflow;
         private readonly IndexerResponseRedactor _responseRedactor;
 
         public IndexersController(
@@ -46,17 +45,22 @@ namespace Listenarr.Api.Controllers
             ILogger<IndexersController> logger,
             HttpClient httpClient,
             IConfigurationService configurationService,
-            IndexerTestWorkflow? indexerTestWorkflow = null)
+            IndexerTestWorkflow? indexerTestWorkflow = null,
+            ProwlarrIndexerImportWorkflow? prowlarrImportWorkflow = null)
         {
             _indexerRepository = indexerRepository;
             _logger = logger;
             _httpClient = httpClient;
-            _httpClientNoRedirect = httpClient;
             _configurationService = configurationService;
             _indexerTestWorkflow = indexerTestWorkflow ?? new IndexerTestWorkflow(
                 indexerRepository,
                 httpClient,
                 Microsoft.Extensions.Logging.Abstractions.NullLogger<IndexerTestWorkflow>.Instance);
+            _prowlarrImportWorkflow = prowlarrImportWorkflow ?? new ProwlarrIndexerImportWorkflow(
+                indexerRepository,
+                configurationService,
+                httpClient,
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<ProwlarrIndexerImportWorkflow>.Instance);
             _responseRedactor = new IndexerResponseRedactor();
         }
 
@@ -71,37 +75,6 @@ namespace Listenarr.Api.Controllers
 
         private string? RedactMamIdForCaller(string? mamId)
             => _responseRedactor.RedactMamIdForCaller(mamId, HttpContext);
-
-        private Task<string?> ValidateOutboundUrlForCallerAsync(string url)
-        {
-            // *Arr standard behavior: allow private/loopback destinations for indexer connectivity
-            // tests/imports, but still enforce absolute HTTP(S) URLs and block embedded credentials.
-            if (!OutboundRequestSecurity.TryValidateExternalHttpUrl(url, out var reason, allowPrivateTargets: true))
-            {
-                return Task.FromResult<string?>(reason);
-            }
-
-            return Task.FromResult<string?>(null);
-        }
-
-        private async Task<HttpResponseMessage> SendValidatedAsync(
-            Func<Uri, HttpRequestMessage> requestFactory,
-            string url,
-            HttpCompletionOption completionOption = HttpCompletionOption.ResponseContentRead,
-            CancellationToken cancellationToken = default)
-        {
-            var uri = new Uri(url);
-            var (response, _) = await OutboundRequestSecurity.SendWithValidatedRedirectsAsync(
-                requestFactory,
-                uri,
-                _httpClientNoRedirect,
-                _logger,
-                // *Arr standard behavior for indexers: allow private/loopback destinations.
-                allowPrivateTargets: true,
-                completionOption: completionOption,
-                cancellationToken: cancellationToken);
-            return response;
-        }
 
         private async Task SaveTestResultAsync(Indexer indexer, bool persist, bool success, string? error)
         {
@@ -265,189 +238,28 @@ namespace Listenarr.Api.Controllers
         [HttpPost("prowlarr/import")]
         public async Task<IActionResult> ImportFromProwlarr([FromBody] ProwlarrImportRequestDto request)
         {
-            if (request == null)
+            var result = await _prowlarrImportWorkflow.ImportAsync(request);
+            if (result.Kind == ProwlarrIndexerImportWorkflowResultKind.BadRequest)
             {
-                return BadRequest(new { message = "Request body is required" });
+                return BadRequest(new { message = result.Message });
             }
 
-            var savedConnection = await _configurationService.GetProwlarrImportSettingsAsync(includeSecret: true);
-            var effectiveUrl = string.IsNullOrWhiteSpace(request.Url) ? savedConnection.Url : request.Url.Trim();
-            var effectivePort = request.ClearPort ? null : request.Port ?? savedConnection.Port;
-            var effectiveApiKey = string.IsNullOrWhiteSpace(request.ApiKey) ? savedConnection.ApiKey : request.ApiKey.Trim();
-            var effectiveTagFilter = request.TagFilter == null
-                ? savedConnection.TagFilter?.Trim()
-                : request.TagFilter.Trim();
-
-            if (string.IsNullOrWhiteSpace(effectiveUrl))
+            if (result.Kind == ProwlarrIndexerImportWorkflowResultKind.UpstreamError)
             {
-                return BadRequest(new { message = "Prowlarr URL is required" });
-            }
-
-            if (string.IsNullOrWhiteSpace(effectiveApiKey))
-            {
-                return BadRequest(new { message = "Prowlarr API key is required" });
-            }
-
-            var baseUrl = ProwlarrImportUrlPlanner.BuildBaseUrl(effectiveUrl, effectivePort);
-            var blockedBaseUrlReason = await ValidateOutboundUrlForCallerAsync(baseUrl);
-            if (!string.IsNullOrWhiteSpace(blockedBaseUrlReason))
-            {
-                return BadRequest(new { message = $"Blocked Prowlarr target: {blockedBaseUrlReason}" });
-            }
-
-            HttpResponseMessage response;
-            string payload;
-            try
-            {
-                (response, payload) = await FetchProwlarrIndexersAsync(baseUrl, effectiveApiKey.Trim());
-            }
-            catch (HttpRequestException ex)
-            {
-                _logger.LogWarning(ex, "Failed to reach Prowlarr at {Url}", LogRedaction.SanitizeUrl(baseUrl));
-                return StatusCode(502, new { message = "Failed to reach Prowlarr API" });
-            }
-            catch (TaskCanceledException ex)
-            {
-                _logger.LogWarning(ex, "Failed to reach Prowlarr at {Url}", LogRedaction.SanitizeUrl(baseUrl));
-                return StatusCode(502, new { message = "Failed to reach Prowlarr API" });
-            }
-            catch (UriFormatException ex)
-            {
-                _logger.LogWarning(ex, "Failed to reach Prowlarr at {Url}", LogRedaction.SanitizeUrl(baseUrl));
-                return StatusCode(502, new { message = "Failed to reach Prowlarr API" });
-            }
-            catch (InvalidOperationException ex)
-            {
-                _logger.LogWarning(ex, "Failed to reach Prowlarr at {Url}", LogRedaction.SanitizeUrl(baseUrl));
-                return StatusCode(502, new { message = "Failed to reach Prowlarr API" });
-            }
-
-            using (response)
-            {
-                if (!response.IsSuccessStatusCode)
+                if (result.UpstreamStatus.HasValue)
                 {
-                    _logger.LogWarning("Prowlarr API returned {StatusCode}: {Body}", (int)response.StatusCode, LogRedaction.SanitizeText(payload));
-                    return StatusCode((int)response.StatusCode, new { message = "Prowlarr API error", status = (int)response.StatusCode });
-                }
-            }
-            using var doc = JsonDocument.Parse(payload);
-            if (doc.RootElement.ValueKind != JsonValueKind.Array)
-            {
-                return StatusCode(502, new { message = "Unexpected Prowlarr API response" });
-            }
-
-            await _configurationService.SaveProwlarrImportSettingsAsync(new ProwlarrImportConnectionSettings
-            {
-                Url = effectiveUrl,
-                Port = effectivePort,
-                ApiKey = string.IsNullOrWhiteSpace(request.ApiKey) ? null : request.ApiKey.Trim(),
-                TagFilter = effectiveTagFilter,
-            });
-
-            var existingIndexers = await _indexerRepository.GetAllAsync();
-            var createdIndexers = new List<Indexer>();
-            var skipped = 0;
-            Dictionary<string, string>? tagMap = null;
-
-            if (!string.IsNullOrWhiteSpace(effectiveTagFilter))
-            {
-                tagMap = await TryFetchProwlarrTagMapAsync(baseUrl, effectiveApiKey.Trim());
-                if ((tagMap == null || tagMap.Count == 0) && ProwlarrIndexerPayloadParser.PayloadRequiresTagMap(doc.RootElement))
-                {
-                    _logger.LogWarning(
-                        "Prowlarr tag-filtered import for {Url} requires tag label lookup, but tags could not be loaded",
-                        LogRedaction.SanitizeUrl(baseUrl));
-                    return StatusCode(502, new { message = "Failed to load Prowlarr tags required for tag-filtered import" });
-                }
-            }
-
-            foreach (var element in doc.RootElement.EnumerateArray())
-            {
-                if (!element.TryGetProperty("id", out var idProp) || idProp.ValueKind != JsonValueKind.Number)
-                {
-                    skipped++;
-                    continue;
+                    return StatusCode(result.StatusCode ?? StatusCodes.Status502BadGateway, new { message = result.Message, status = result.UpstreamStatus.Value });
                 }
 
-                var indexerId = idProp.GetInt32();
-                var categoryIds = ProwlarrIndexerPayloadParser.GetCategoryIds(element);
-                var prowlarrTags = ProwlarrIndexerPayloadParser.GetTagValues(element, tagMap);
-                var matchesImportFilter = string.IsNullOrWhiteSpace(effectiveTagFilter)
-                    ? categoryIds.Contains(3000) || categoryIds.Contains(3030)
-                    : prowlarrTags.Any(tag => string.Equals(tag, effectiveTagFilter, StringComparison.OrdinalIgnoreCase));
-
-                if (!matchesImportFilter)
-                {
-                    skipped++;
-                    continue;
-                }
-
-                var name = element.TryGetProperty("name", out var nameProp) && nameProp.ValueKind == JsonValueKind.String
-                    ? nameProp.GetString() ?? "Prowlarr Indexer"
-                    : "Prowlarr Indexer";
-                if (!name.EndsWith(" (Prowlarr)", StringComparison.OrdinalIgnoreCase))
-                {
-                    name = $"{name} (Prowlarr)";
-                }
-
-                var protocol = element.TryGetProperty("protocol", out var protocolProp) && protocolProp.ValueKind == JsonValueKind.String
-                    ? protocolProp.GetString() ?? string.Empty
-                    : string.Empty;
-
-                var implementation = protocol.Equals("usenet", StringComparison.OrdinalIgnoreCase) ? "Newznab" : "Torznab";
-
-                var proxyUrl = ProwlarrImportUrlPlanner.BuildProxyUrl(baseUrl, indexerId);
-                var normalizedUrl = ProwlarrImportUrlPlanner.NormalizeProxyUrl(proxyUrl);
-
-                var exists = existingIndexers.FirstOrDefault(i =>
-                    ProwlarrImportUrlPlanner.NormalizeProxyUrl(i.Url) == normalizedUrl &&
-                    string.Equals(i.Implementation, implementation, StringComparison.OrdinalIgnoreCase) &&
-                    string.Equals(i.ApiKey ?? string.Empty, effectiveApiKey ?? string.Empty, StringComparison.Ordinal));
-
-                if (exists != null)
-                {
-                    skipped++;
-                    continue;
-                }
-
-                var type = protocol.Equals("usenet", StringComparison.OrdinalIgnoreCase) ? "Usenet" : "Torrent";
-                var categories = string.Join(',', categoryIds.Where(c => c == 3000 || c == 3030).OrderBy(c => c));
-
-                var isEnabled = true;
-                if (element.TryGetProperty("enable", out var enableProp))
-                {
-                    isEnabled = enableProp.ValueKind == JsonValueKind.True;
-                }
-                else if (element.TryGetProperty("enabled", out var enabledProp))
-                {
-                    isEnabled = enabledProp.ValueKind == JsonValueKind.True;
-                }
-
-                var indexer = new Indexer
-                {
-                    Name = name,
-                    Type = type,
-                    Implementation = implementation,
-                    Url = normalizedUrl,
-                    ApiKey = string.IsNullOrWhiteSpace(effectiveApiKey) ? null : effectiveApiKey.Trim(),
-                    Categories = categories,
-                    EnableRss = true,
-                    EnableAutomaticSearch = true,
-                    EnableInteractiveSearch = true,
-                    IsEnabled = isEnabled,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
-                };
-
-                createdIndexers.Add(await _indexerRepository.AddAsync(indexer));
+                return StatusCode(result.StatusCode ?? StatusCodes.Status502BadGateway, new { message = result.Message });
             }
 
             return Ok(new
             {
-                addedCount = createdIndexers.Count,
-                skippedCount = skipped,
-                total = createdIndexers.Count + skipped,
-                indexers = createdIndexers.Select(i => new { id = i.Id, name = i.Name, url = i.Url, implementation = i.Implementation })
+                addedCount = result.AddedCount,
+                skippedCount = result.SkippedCount,
+                total = result.Total,
+                indexers = result.CreatedIndexers.Select(i => new { id = i.Id, name = i.Name, url = i.Url, implementation = i.Implementation })
             });
         }
 
@@ -800,122 +612,6 @@ namespace Listenarr.Api.Controllers
                 .ToList();
 
             return Ok(RedactIndexersForCaller(indexers));
-        }
-
-        private async Task<(HttpResponseMessage Response, string Payload)> FetchProwlarrIndexersAsync(string baseUrl, string apiKey)
-        {
-            var encodedKey = System.Net.WebUtility.UrlEncode(apiKey);
-            // NOTE: This targets external Prowlarr instances, whose API path is /api/v1.
-            // It is intentionally independent from Listenarr's own API version segment.
-            var endpoints = new List<string>
-            {
-                $"{baseUrl}/api/v1/indexer",
-                $"{baseUrl}/api/v1/indexer?apikey={encodedKey}"
-            };
-
-            HttpResponseMessage? lastResponse = null;
-            string lastPayload = string.Empty;
-
-            foreach (var endpoint in endpoints)
-            {
-                var response = await SendValidatedAsync(currentUri =>
-                {
-                    var retryRequest = new HttpRequestMessage(HttpMethod.Get, currentUri);
-                    retryRequest.Headers.Add("X-Api-Key", apiKey);
-                    return retryRequest;
-                }, endpoint);
-                var body = await response.Content.ReadAsStringAsync();
-
-                if (response.IsSuccessStatusCode)
-                {
-                    return (response, body);
-                }
-
-                lastResponse?.Dispose();
-                lastResponse = response;
-                lastPayload = body;
-
-                if (response.StatusCode != System.Net.HttpStatusCode.MethodNotAllowed &&
-                    response.StatusCode != System.Net.HttpStatusCode.Unauthorized &&
-                    response.StatusCode != System.Net.HttpStatusCode.Forbidden)
-                {
-                    break;
-                }
-            }
-
-            return (lastResponse ?? new HttpResponseMessage(System.Net.HttpStatusCode.BadGateway), lastPayload);
-        }
-
-        private async Task<Dictionary<string, string>?> TryFetchProwlarrTagMapAsync(string baseUrl, string apiKey)
-        {
-            try
-            {
-                var encodedKey = System.Net.WebUtility.UrlEncode(apiKey);
-                var endpoints = new List<string>
-                {
-                    $"{baseUrl}/api/v1/tag",
-                    $"{baseUrl}/api/v1/tag?apikey={encodedKey}"
-                };
-
-                foreach (var endpoint in endpoints)
-                {
-                    using var response = await SendValidatedAsync(currentUri =>
-                    {
-                        var retryRequest = new HttpRequestMessage(HttpMethod.Get, currentUri);
-                        retryRequest.Headers.Add("X-Api-Key", apiKey);
-                        return retryRequest;
-                    }, endpoint);
-
-                    var body = await response.Content.ReadAsStringAsync();
-                    if (!response.IsSuccessStatusCode)
-                    {
-                        if (response.StatusCode != System.Net.HttpStatusCode.MethodNotAllowed &&
-                            response.StatusCode != System.Net.HttpStatusCode.Unauthorized &&
-                            response.StatusCode != System.Net.HttpStatusCode.Forbidden)
-                        {
-                            break;
-                        }
-
-                        continue;
-                    }
-
-                    using var doc = JsonDocument.Parse(body);
-                    if (doc.RootElement.ValueKind != JsonValueKind.Array)
-                    {
-                        return null;
-                    }
-
-                    var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                    foreach (var tag in doc.RootElement.EnumerateArray())
-                    {
-                        if (!tag.TryGetProperty("id", out var idProp) || idProp.ValueKind != JsonValueKind.Number)
-                        {
-                            continue;
-                        }
-
-                        var id = idProp.GetInt32().ToString();
-                        var label =
-                            tag.TryGetProperty("label", out var labelProp) && labelProp.ValueKind == JsonValueKind.String
-                                ? labelProp.GetString()
-                                : tag.TryGetProperty("name", out var nameProp) && nameProp.ValueKind == JsonValueKind.String
-                                    ? nameProp.GetString()
-                                    : null;
-
-                        if (!string.IsNullOrWhiteSpace(label))
-                        {
-                            result[id] = label.Trim();
-                        }
-                    }
-
-                    return result;
-                }
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogWarning(ex, "Failed to load Prowlarr tags from {Url}", LogRedaction.SanitizeUrl(baseUrl));
-            }
-
-            return null;
         }
 
     }

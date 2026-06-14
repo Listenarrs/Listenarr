@@ -360,6 +360,7 @@ builder.Services.AddScoped<Listenarr.Api.Controllers.LibraryIdentifierWorkflow>(
 builder.Services.AddScoped<Listenarr.Api.Controllers.SearchResponseMapper>();
 builder.Services.AddScoped<Listenarr.Api.Controllers.ImagePlaceholderResolver>();
 builder.Services.AddScoped<Listenarr.Api.Controllers.IndexerTestWorkflow>();
+builder.Services.AddScoped<Listenarr.Api.Controllers.ProwlarrIndexerImportWorkflow>();
 builder.Services.AddScoped<Listenarr.Api.Controllers.ProwlarrIndexerUpsertWorkflow>();
 builder.Services.AddScoped<Listenarr.Api.Controllers.ManualImportPathPlanner>();
 builder.Services.AddScoped<Listenarr.Api.Controllers.ManualImportCompanionImporter>();
