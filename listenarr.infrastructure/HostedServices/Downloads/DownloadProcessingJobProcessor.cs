@@ -31,7 +31,7 @@ namespace Listenarr.Infrastructure.HostedServices.Downloads
         IServiceScopeFactory scopeFactory,
         ILogger<DownloadProcessingJobProcessor> logger,
         IAppMetricsService metrics,
-        IScanQueueService scanQueueService) : BackgroundService
+        IScanQueueService scanQueueService) : BackgroundService, IDownloadImportProcessor
     {
         private readonly TimeSpan _processingInterval = TimeSpan.FromSeconds(10); // Check every 10 seconds
 
@@ -91,7 +91,7 @@ namespace Listenarr.Infrastructure.HostedServices.Downloads
             logger.LogInformation("Download Processing Background Service stopped");
         }
 
-        internal async Task ProcessQueueAsync(CancellationToken cancellationToken)
+        public async Task ProcessQueueAsync(CancellationToken cancellationToken)
         {
             using var scope = scopeFactory.CreateScope();
             var downloadProcessingJobService = scope.ServiceProvider.GetRequiredService<IDownloadProcessingJobService>();
@@ -137,16 +137,24 @@ namespace Listenarr.Infrastructure.HostedServices.Downloads
         /// <param name="cancellationToken"></param>
         /// <returns></returns>
         /// <exception cref="DownloadProcessingException"></exception>
-        private async Task ProcessJobAsync(DownloadProcessingJob job, CancellationToken cancellationToken)
+        public async Task ProcessJobAsync(DownloadProcessingJob job, CancellationToken cancellationToken)
         {
             logger.LogInformation($"Processing job {job.Id} for download {job.DownloadId}: {job.JobType}");
 
             using var scope = scopeFactory.CreateScope();
             var downloadRepository = scope.ServiceProvider.GetRequiredService<IDownloadRepository>();
+            var downloadProcessingJobService = scope.ServiceProvider.GetRequiredService<IDownloadProcessingJobService>();
             var download = await downloadRepository.GetByIdAsync(job.DownloadId);
             if (download == null)
             {
                 throw new DownloadProcessingException($"The download {job.DownloadId} does not exist anymore");
+            }
+
+            if (download.Status == DownloadStatus.Moved)
+            {
+                job.AddLogEntry($"Download {download.Id} is already imported; completing stale import job without work");
+                await downloadProcessingJobService.UpdateJobAsync(job.MarkAsCompleted());
+                return;
             }
 
             if (!download.AwaitsImportation())
@@ -184,7 +192,6 @@ namespace Listenarr.Infrastructure.HostedServices.Downloads
             }
 
             var downloadService = scope.ServiceProvider.GetRequiredService<IDownloadService>();
-            var downloadProcessingJobService = scope.ServiceProvider.GetRequiredService<IDownloadProcessingJobService>();
 
             await downloadService.UpdateAsync(download.Importing());
             await downloadProcessingJobService.UpdateJobAsync(job.MarkAsProcessing());

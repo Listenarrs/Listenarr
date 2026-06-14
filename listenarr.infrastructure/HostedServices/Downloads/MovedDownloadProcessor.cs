@@ -30,13 +30,10 @@ namespace Listenarr.Infrastructure.HostedServices.Downloads
     /// </summary>
     public class MovedDownloadProcessor(
         IServiceScopeFactory scopeFactory,
-        ILogger<MovedDownloadProcessor> logger) : BackgroundService
+        ILogger<MovedDownloadProcessor> logger,
+        IWorkerCycleRunner cycleRunner) : BackgroundService, IMovedDownloadCleanupProcessor
     {
         private TimeSpan _pollingInterval = TimeSpan.FromSeconds(10);
-
-        // Track downloads that are in the completion pipeline to avoid duplicate processing
-        private readonly Dictionary<string, DateTime> _processingDownloads = new();
-        private readonly Lock _processingLock = new();
 
         public override async Task StartAsync(CancellationToken cancellationToken)
         {
@@ -79,35 +76,12 @@ namespace Listenarr.Infrastructure.HostedServices.Downloads
         {
             logger.LogInformation("CompletedDownloadHandlingService background task started");
 
-            while (!cancellationToken.IsCancellationRequested)
-            {
-                try
-                {
-                    await ProcessDeferredRemovalsAsync(cancellationToken);
-                }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    break;
-                }
-                catch (OperationCanceledException ex)
-                {
-                    logger.LogWarning(ex, "CompletedDownloadHandlingService cycle canceled/timed out; continuing");
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                {
-                    logger.LogError(ex, "Error in CompletedDownloadHandlingService");
-                }
-
-                // Wait before next poll
-                try
-                {
-                    await Task.Delay(_pollingInterval, cancellationToken);
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
-            }
+            await cycleRunner.RunPeriodicAsync(
+                nameof(MovedDownloadProcessor),
+                initialDelay: null,
+                intervalProvider: () => _pollingInterval,
+                runCycle: RunCycleAsync,
+                cancellationToken);
 
             logger.LogInformation("CompletedDownloadHandlingService background task stopped");
         }
@@ -122,8 +96,7 @@ namespace Listenarr.Infrastructure.HostedServices.Downloads
         /// - Primary client removal fails (cross-client fallback using TorrentHash)
         /// - All removal attempts fail (stale DB record cleanup after grace period)
         /// </summary>
-        private async Task ProcessDeferredRemovalsAsync(
-            CancellationToken cancellationToken)
+        public async Task RunCycleAsync(CancellationToken cancellationToken)
         {
             using var scope = scopeFactory.CreateScope();
             var downloadRepository = scope.ServiceProvider.GetRequiredService<IDownloadRepository>();

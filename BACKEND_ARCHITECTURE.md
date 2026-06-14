@@ -28,6 +28,35 @@ The application layer now delegates these infrastructure-shaped concerns through
 - Secret protection is exposed through `ISecretProtector`, with Data Protection implemented in infrastructure.
 - `listenarr.application` no longer has an ASP.NET Core framework reference. It may reference general `Microsoft.Extensions.*` abstractions for logging, options, caching, dependency-factory access, and HTTP client factories, but it should not reference host/web implementation packages.
 
+## Background Worker Ownership
+
+Hosted workers must have one clear owner for each state transition. Queue services can dedupe, persist, or expose job status, but they should not perform the durable state transition that belongs to a worker.
+
+Background workers expose DI-facing processor contracts for deterministic cycle/job testing. Periodic workers should prefer `IWorkerCycleRunner` and `TimeProvider` for cancellation-safe loops and testable delays. Exception filters should use `WorkerExceptionClassifier.IsNonFatal` when adding or refactoring catch blocks so fatal runtime exceptions are not swallowed.
+
+| Worker | Owns | Retry/backoff | Idempotency |
+| --- | --- | --- | --- |
+| `DownloadMonitorService` | Polls enabled clients, updates active download progress, transitions client-reported failures to `Failed`, and enqueues an import job only when a download transitions to `Completed`. | Per-client exponential polling backoff, capped at 15 minutes. | Does not import, move, scan, or clean up files. Duplicate import enqueue is delegated to `DownloadProcessingJobService`. |
+| `DownloadProcessingJobProcessor` | Owns import execution: `Completed -> ImportPending -> Moved` on success and `Completed/ImportPending -> ImportBlocked` after job retries are exhausted. It also enqueues the post-import library scan. | Job-level retry via `DownloadProcessingJob.ScheduleRetry`; pending retry jobs are ignored until `NextRetryAt`. | Active/recent completed jobs dedupe in `DownloadProcessingJobService`. A stale job for an already `Moved` download completes as a no-op. |
+| `ScanBackgroundService` | Consumes scan jobs and reconciles audiobook files/metadata for the audiobook library path. | In-memory scan jobs can be requeued from failed/completed/queued status. | `ScanQueueService` dedupes queued/processing jobs by audiobook and path; explicit rescans are allowed after completion/failure. |
+| `MoveBackgroundService` | Owns audiobook filesystem relocation and move-job status transitions `Queued -> Processing -> Completed/Failed`. | Failed jobs keep `AttemptCount` and can be requeued through `MoveQueueService`. | `MoveQueueService` dedupes active jobs by audiobook and requested path, including persisted jobs. |
+| `MovedDownloadProcessor` | Owns deferred download-client cleanup after import has already reached `Moved`. | Polls on the configured interval; retries cleanup until the client allows removal, then removes the DB queue record. | Never imports files or changes a download back out of `Moved`; stale removal records are cleaned after grace periods. |
+| `QueueMonitorService` | Owns SignalR queue snapshots for UI/activity surfaces. | Adaptive polling interval based on queue activity. | Read-only with respect to durable download/import state. |
+| `AutomaticSearchService` | Owns periodic wanted-item search and download submission decisions. | Runs on its configured polling cadence. | Duplicate/download guards live in download submission services. |
+| `AuthorMonitoringBackgroundService` and `SeriesMonitoringBackgroundService` | Own periodic metadata catalog sync for monitored authors/series. | Fixed periodic cadence with cancellation-safe cycles. | Sync operations should upsert/cache provider state rather than create duplicate monitored entries. |
+| `MetadataRescanService` | Owns background metadata enrichment for files missing metadata. | Periodic scan cadence. | Should update missing or stale metadata only; file ownership remains with scan/import services. |
+| `ImageCacheCleanupService` | Owns image cache expiration cleanup. | Daily cleanup cadence. | Files missing or already deleted are treated as successful cleanup. |
+| `FfmpegInstallBackgroundService` | Owns non-blocking ffprobe/ffmpeg availability checks and install attempts. | Runs outside request startup; failures are reported without blocking the host. | Rechecks installed binaries before downloading/installing. |
+| `UnmatchedScanBackgroundService` | Owns Library Import unmatched-file scan jobs and their cached results. | Queue-driven; failed/finished jobs can be superseded by a new explicit scan. | Groups files deterministically and clears stale unmatched results for the scanned root. |
+
+The main download handoff is:
+
+1. `DownloadMonitorService` observes the external client and persists `Completed`.
+2. `DownloadProcessingJobService` creates or returns the single active/recent import job for that download.
+3. `DownloadProcessingJobProcessor` performs the import, marks the download `Moved`, marks the client item imported, and enqueues a scan for the audiobook library path.
+4. `ScanBackgroundService` reconciles the library files.
+5. `MovedDownloadProcessor` performs deferred client cleanup for `Moved` downloads according to the client removal policy.
+
 ## Migration Direction
 
 Use this pattern when moving a concern out of application:

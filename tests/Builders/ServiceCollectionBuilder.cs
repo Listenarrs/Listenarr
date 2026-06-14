@@ -7,6 +7,7 @@ using Listenarr.Application.Search.Filters;
 using Listenarr.Application.Search.Strategies;
 using Listenarr.Infrastructure.Extensions;
 using Listenarr.Infrastructure.FileSystem;
+using Listenarr.Infrastructure.HostedServices;
 using Listenarr.Tests.Mocks;
 using Listenarr.Tests.Mocks.Api;
 using Microsoft.AspNetCore.DataProtection;
@@ -141,6 +142,8 @@ namespace Listenarr.Tests.Builders
             var services = new ServiceCollection();
             services.AddLogging();
             services.AddMemoryCache();
+            services.AddSingleton(TimeProvider.System);
+            services.AddSingleton<IWorkerCycleRunner, WorkerCycleRunner>();
             services.AddListenarrAppServices(configuration);
             services.AddListenarrAdapters(configuration);
             services.AddListenarrHttpClients(configuration);
@@ -248,7 +251,9 @@ namespace Listenarr.Tests.Builders
 
             // Background services
             services.AddSingleton<DownloadMonitorService>(); // FIXME: This should be a processor
+            services.AddSingleton<IDownloadMonitorProcessor>(sp => sp.GetRequiredService<DownloadMonitorService>());
             services.AddSingleton<DownloadProcessingJobProcessor>();
+            services.AddSingleton<IDownloadImportProcessor>(sp => sp.GetRequiredService<DownloadProcessingJobProcessor>());
 
             return services;
         }

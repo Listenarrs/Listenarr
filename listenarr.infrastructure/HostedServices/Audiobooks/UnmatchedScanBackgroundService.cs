@@ -24,7 +24,7 @@ using Listenarr.Application.Interfaces.Repositories;
 
 namespace Listenarr.Infrastructure.HostedServices.Audiobooks
 {
-    public class UnmatchedScanBackgroundService : BackgroundService
+    public class UnmatchedScanBackgroundService : BackgroundService, IUnmatchedScanProcessor
     {
         private static readonly string[] AudioExtensions = { ".m4b", ".mp3", ".flac", ".ogg", ".opus", ".m4a", ".aac", ".wav" };
         private sealed record StemGroup(string Stem, List<string> Files);
@@ -59,18 +59,7 @@ namespace Listenarr.Infrastructure.HostedServices.Audiobooks
                 {
                     try
                     {
-                        _logger.LogInformation("Processing unmatched scan job {JobId} for {Path}", job.Id, job.RootFolderPath);
-                        _queue.UpdateJob(job.Id, "Processing");
-
-                        var results = await ScanAsync(job.RootFolderPath, stoppingToken);
-
-                        _queue.UpdateJob(job.Id, "Completed", results);
-                        _logger.LogInformation("Unmatched scan job {JobId} completed: {Count} unmatched items", job.Id, results.Count);
-
-                        await _hubContext.Clients.All.SendAsync(
-                            "UnmatchedScanComplete",
-                            new { jobId = job.Id.ToString(), count = results.Count },
-                            stoppingToken);
+                        await ProcessJobAsync(job, stoppingToken);
                     }
                     catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                     {
@@ -122,6 +111,22 @@ namespace Listenarr.Infrastructure.HostedServices.Audiobooks
                 "UnmatchedScanComplete",
                 new { jobId = jobId.ToString(), count = 0, error = ex.Message },
                 stoppingToken);
+        }
+
+        public async Task ProcessJobAsync(UnmatchedScanJob job, CancellationToken cancellationToken)
+        {
+            _logger.LogInformation("Processing unmatched scan job {JobId} for {Path}", job.Id, job.RootFolderPath);
+            _queue.UpdateJob(job.Id, "Processing");
+
+            var results = await ScanAsync(job.RootFolderPath, cancellationToken);
+
+            _queue.UpdateJob(job.Id, "Completed", results);
+            _logger.LogInformation("Unmatched scan job {JobId} completed: {Count} unmatched items", job.Id, results.Count);
+
+            await _hubContext.Clients.All.SendAsync(
+                "UnmatchedScanComplete",
+                new { jobId = job.Id.ToString(), count = results.Count },
+                cancellationToken);
         }
 
         private async Task<List<UnmatchedFileResult>> ScanAsync(string rootFolderPath, CancellationToken ct)

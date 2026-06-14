@@ -22,6 +22,7 @@ using Microsoft.Extensions.Logging;
 namespace Listenarr.Infrastructure.HostedServices.Audiobooks
 {
     public class SeriesMonitoringBackgroundService : BackgroundService
+        , ISeriesMonitoringProcessor
     {
         private readonly ILogger<SeriesMonitoringBackgroundService> _logger;
         private readonly IServiceScopeFactory _serviceScopeFactory;
@@ -55,12 +56,7 @@ namespace Listenarr.Infrastructure.HostedServices.Audiobooks
             {
                 try
                 {
-                    using var scope = _serviceScopeFactory.CreateScope();
-                    var monitoringService = scope.ServiceProvider.GetRequiredService<ISeriesMonitoringService>();
-                    var syncedCount = await monitoringService.SyncDueSeriesAsync(stoppingToken);
-                    _logger.LogInformation(
-                        "SeriesMonitoringBackgroundService completed sync cycle. Synced {Count} monitored series",
-                        syncedCount);
+                    await RunCycleAsync(stoppingToken);
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
@@ -86,6 +82,16 @@ namespace Listenarr.Infrastructure.HostedServices.Audiobooks
             }
 
             _logger.LogInformation("SeriesMonitoringBackgroundService stopped");
+        }
+
+        public async Task RunCycleAsync(CancellationToken cancellationToken)
+        {
+            using var scope = _serviceScopeFactory.CreateScope();
+            var monitoringService = scope.ServiceProvider.GetRequiredService<ISeriesMonitoringService>();
+            var syncedCount = await monitoringService.SyncDueSeriesAsync(cancellationToken);
+            _logger.LogInformation(
+                "SeriesMonitoringBackgroundService completed sync cycle. Synced {Count} monitored series",
+                syncedCount);
         }
     }
 }

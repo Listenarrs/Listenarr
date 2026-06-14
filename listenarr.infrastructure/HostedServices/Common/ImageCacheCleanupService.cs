@@ -24,7 +24,7 @@ namespace Listenarr.Infrastructure.HostedServices.Common
     /// <summary>
     /// Background service that runs daily to clean up temporary image cache
     /// </summary>
-    public class ImageCacheCleanupService : BackgroundService
+    public class ImageCacheCleanupService : BackgroundService, IImageCacheCleanupProcessor
     {
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly ILogger<ImageCacheCleanupService> _logger;
@@ -49,13 +49,7 @@ namespace Listenarr.Infrastructure.HostedServices.Common
                 {
                     _logger.LogInformation("Running daily image cache cleanup at {Time}", DateTime.Now);
 
-                    // Create a scope to resolve scoped services
-                    using (var scope = _scopeFactory.CreateScope())
-                    {
-                        var imageCacheService = scope.ServiceProvider.GetRequiredService<IImageCacheService>();
-                        await imageCacheService.ClearTempCacheAsync();
-                        _logger.LogInformation("Daily image cache cleanup completed successfully");
-                    }
+                    await RunCycleAsync(stoppingToken);
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
@@ -114,6 +108,14 @@ namespace Listenarr.Infrastructure.HostedServices.Common
         {
             _logger.LogInformation("Image Cache Cleanup Service is stopping");
             await base.StopAsync(cancellationToken);
+        }
+
+        public async Task RunCycleAsync(CancellationToken cancellationToken)
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var imageCacheService = scope.ServiceProvider.GetRequiredService<IImageCacheService>();
+            await imageCacheService.ClearTempCacheAsync();
+            _logger.LogInformation("Daily image cache cleanup completed successfully");
         }
     }
 }

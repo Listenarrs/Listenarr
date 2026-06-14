@@ -1,3 +1,4 @@
+using Listenarr.Application.Audiobooks;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
 using Listenarr.Tests.Mocks;
@@ -133,6 +134,83 @@ namespace Listenarr.Tests.Features.Application.Downloads
             download = await _downloadRepository.GetByIdAsync(download.Id);
             Assert.NotNull(download);
             Assert.True(download.Status == DownloadStatus.Moved, $"Expected Moved, got {download.Status}");
+        }
+
+        [Fact]
+        [Trait("Scenario", "ImportSuccessEnqueuesLibraryScan")]
+        public async Task Import_Success_EnqueuesScanForAudiobookLibraryPath()
+        {
+            // Arrange
+            var source = FileService.GetTempDirectory("source");
+            var filePath = await FileService.GetFileAsync(source, "audiobook.mp3");
+
+            downloadClientGatewayMock.SourceFiles = [filePath];
+
+            var audiobook = await CreateAudiobook();
+            var download = await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithCompletedStatus(at: DateTime.UtcNow)
+                .WithDownloadClientConfiguration(await CreateDownloadClientConfiguration())
+                .WithAudiobook(audiobook)
+                .WithPath(source)
+                .Build());
+
+            await _downloadProcessingJobRepository.AddAsync(new DownloadProcessingJobBuilder()
+                .WithDownload(download)
+                .Build());
+
+            // Act
+            var processor = _provider.GetRequiredService<DownloadProcessingJobProcessor>();
+            await processor.ProcessQueueAsync(CancellationToken.None);
+
+            // Assert
+            var scanQueue = Assert.IsType<ScanQueueService>(_provider.GetRequiredService<IScanQueueService>());
+            Assert.True(scanQueue.Reader.TryRead(out var scanJob));
+            Assert.Equal(audiobook.Id, scanJob.AudiobookId);
+            Assert.Null(scanJob.Path);
+        }
+
+        [Fact]
+        [Trait("Scenario", "StaleMovedImportJobIsIdempotent")]
+        public async Task ProcessQueue_AlreadyMovedDownload_CompletesJobWithoutImportOrScan()
+        {
+            // Arrange
+            var source = FileService.GetTempDirectory("source");
+            await FileService.GetFileAsync(source, "audiobook.mp3");
+
+            var download = await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithStatus(DownloadStatus.Moved)
+                .WithDownloadClientConfiguration(await CreateDownloadClientConfiguration())
+                .WithAudiobook(await CreateAudiobook())
+                .WithPath(source)
+                .Build());
+
+            var job = await _downloadProcessingJobRepository.AddAsync(new DownloadProcessingJobBuilder()
+                .WithDownload(download)
+                .Build());
+
+            // Act
+            var processor = _provider.GetRequiredService<DownloadProcessingJobProcessor>();
+            await processor.ProcessQueueAsync(CancellationToken.None);
+
+            // Assert
+            job = await _downloadProcessingJobRepository.GetByIdAsync(job.Id);
+            Assert.NotNull(job);
+            Assert.Equal(ProcessingJobStatus.Completed, job.Status);
+            Assert.Contains(job.ProcessingLog, m => m.Contains("already imported", StringComparison.OrdinalIgnoreCase));
+
+            download = await _downloadRepository.GetByIdAsync(download.Id);
+            Assert.NotNull(download);
+            Assert.Equal(DownloadStatus.Moved, download.Status);
+
+            downloadImportServiceMock.Verify(m => m.ImportDownloadFilesAsync(
+                    It.IsAny<Audiobook>(),
+                    It.IsAny<List<string>>(),
+                    It.IsAny<CancellationToken>()),
+                Times.Never);
+
+            Assert.Equal(0, downloadClientGatewayMock.GetCallCount(nameof(downloadClientGatewayMock.GetQueueItemAsync)));
+            var scanQueue = Assert.IsType<ScanQueueService>(_provider.GetRequiredService<IScanQueueService>());
+            Assert.False(scanQueue.Reader.TryRead(out _));
         }
 
         [Fact]

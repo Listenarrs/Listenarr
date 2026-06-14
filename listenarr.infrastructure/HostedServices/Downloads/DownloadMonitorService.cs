@@ -36,7 +36,8 @@ namespace Listenarr.Infrastructure.HostedServices.Downloads
     public class DownloadMonitorService(
         IServiceScopeFactory scopeFactory,
         IDownloadPushService downloadPushService,
-        ILogger<DownloadMonitorService> logger) : BackgroundService
+        ILogger<DownloadMonitorService> logger,
+        IWorkerCycleRunner cycleRunner) : BackgroundService, IDownloadMonitorProcessor
     {
         private int _pollingInterval = 30;
         private DateTime _lastFullBroadcast = DateTime.MinValue;
@@ -45,7 +46,7 @@ namespace Listenarr.Infrastructure.HostedServices.Downloads
         internal readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> _nextClientPoll = new();
         private readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> _clientFailureCounts = new();
 
-        internal void ScheduleNextClientPoll(DownloadClientConfiguration client, double interval)
+        public void ScheduleNextClientPoll(DownloadClientConfiguration client, double interval)
         {
             // Add small jitter to avoid synchronized polls: +/- 5s
             var jitter = (int)(new Random().NextDouble() * 10 - 5);
@@ -91,22 +92,17 @@ namespace Listenarr.Infrastructure.HostedServices.Downloads
             }
             logger.LogInformation($"DownloadMonitorService polling interval set to {_pollingInterval}s");
 
-            while (!cancellationToken.IsCancellationRequested)
-            {
-                try
-                {
-                    await MonitorDownloadsAsync(cancellationToken);
-
-                    await Task.Delay(TimeSpan.FromSeconds(_pollingInterval), cancellationToken);
-                }
-                catch (OperationCanceledException)
-                {
-                    // Those exceptions are expected, service should stop gracefully
-                }
-            }
+            await cycleRunner.RunPeriodicAsync(
+                nameof(DownloadMonitorService),
+                initialDelay: null,
+                intervalProvider: () => TimeSpan.FromSeconds(_pollingInterval),
+                runCycle: MonitorDownloadsAsync,
+                cancellationToken);
 
             logger.LogInformation("Download Monitor Service stopping");
         }
+
+        public Task RunCycleAsync(CancellationToken cancellationToken) => MonitorDownloadsAsync(cancellationToken);
 
         internal async Task MonitorDownloadsAsync(CancellationToken cancellationToken)
         {

@@ -24,7 +24,7 @@ namespace Listenarr.Infrastructure.Ffmpeg
     /// Background service that ensures ffprobe is installed without blocking application startup.
     /// It will attempt installation once and broadcast a SignalR message when finished.
     /// </summary>
-    public class FfmpegInstallBackgroundService : BackgroundService
+    public class FfmpegInstallBackgroundService : BackgroundService, IFfmpegInstallProcessor
     {
         private readonly IFfmpegService _ffmpegService;
         private readonly IHubContext<DownloadHub> _hubContext;
@@ -44,34 +44,7 @@ namespace Listenarr.Infrastructure.Ffmpeg
             {
                 _logger.LogInformation("FFmpeg installer background service started. Will attempt installation in the background if needed.");
 
-                // Attempt installation once; don't block startup.
-                var path = await _ffmpegService.EnsureFfprobeInstalledAsync();
-
-                if (!string.IsNullOrEmpty(path))
-                {
-                    _logger.LogInformation("ffprobe installed/available at {Path}", path);
-                    // Notify connected clients that ffprobe is now available
-                    try
-                    {
-                        await _hubContext.Clients.All.SendAsync("FfmpegInstallStatus", new { status = "Installed", path }, cancellationToken: stoppingToken);
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                    {
-                        _logger.LogDebug(ex, "Failed to broadcast ffprobe install success message");
-                    }
-                }
-                else
-                {
-                    _logger.LogWarning("ffprobe was not installed or auto-install disabled");
-                    try
-                    {
-                        await _hubContext.Clients.All.SendAsync("FfmpegInstallStatus", new { status = "NotInstalled" }, cancellationToken: stoppingToken);
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                    {
-                        _logger.LogDebug(ex, "Failed to broadcast ffprobe install failure message");
-                    }
-                }
+                await EnsureInstalledAsync(stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -97,6 +70,35 @@ namespace Listenarr.Infrastructure.Ffmpeg
                 }
             }
         }
+
+        public async Task EnsureInstalledAsync(CancellationToken cancellationToken)
+        {
+            var path = await _ffmpegService.EnsureFfprobeInstalledAsync();
+
+            if (!string.IsNullOrEmpty(path))
+            {
+                _logger.LogInformation("ffprobe installed/available at {Path}", path);
+                try
+                {
+                    await _hubContext.Clients.All.SendAsync("FfmpegInstallStatus", new { status = "Installed", path }, cancellationToken: cancellationToken);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                {
+                    _logger.LogDebug(ex, "Failed to broadcast ffprobe install success message");
+                }
+            }
+            else
+            {
+                _logger.LogWarning("ffprobe was not installed or auto-install disabled");
+                try
+                {
+                    await _hubContext.Clients.All.SendAsync("FfmpegInstallStatus", new { status = "NotInstalled" }, cancellationToken: cancellationToken);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                {
+                    _logger.LogDebug(ex, "Failed to broadcast ffprobe install failure message");
+                }
+            }
+        }
     }
 }
-

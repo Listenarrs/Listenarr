@@ -26,7 +26,7 @@ using Microsoft.Extensions.Logging;
 namespace Listenarr.Infrastructure.HostedServices.Metadata
 {
     // Background hosted service to rescan files missing metadata and populate DB fields
-    public class MetadataRescanService : BackgroundService
+    public class MetadataRescanService : BackgroundService, IMetadataRescanProcessor
     {
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly ILogger<MetadataRescanService> _logger;
@@ -46,89 +46,7 @@ namespace Listenarr.Infrastructure.HostedServices.Metadata
             {
                 try
                 {
-                    using var scope = _scopeFactory.CreateScope();
-                    var fileRepository = scope.ServiceProvider.GetRequiredService<IAudiobookFileRepository>();
-                    var candidates = await fileRepository.GetMissingMetadataAsync(20, stoppingToken);
-
-                    if (candidates.Any())
-                    {
-                        _logger.LogInformation("Found {Count} files missing metadata to rescan", candidates.Count);
-                    }
-
-                    var tasks = new List<Task>();
-                    foreach (var candidate in candidates.Select(f => new { f.Id, f.Path }))
-                    {
-                        // Start work without passing the stopping token into Task.Run to avoid
-                        // TaskCanceledException bubbling up from the runtime; handle cancellation inside.
-                        tasks.Add(Task.Run(async () =>
-                        {
-                            using var releaser = await _sem.LockAsync(stoppingToken);
-                            try
-                            {
-                                using var taskScope = _scopeFactory.CreateScope();
-                                var taskFileRepository = taskScope.ServiceProvider.GetRequiredService<IAudiobookFileRepository>();
-                                var taskAudiobookRepository = taskScope.ServiceProvider.GetRequiredService<IAudiobookRepository>();
-                                var taskMetadataService = taskScope.ServiceProvider.GetRequiredService<IMetadataService>();
-
-                                var file = await taskFileRepository.GetByIdAsync(candidate.Id, stoppingToken);
-                                if (file == null)
-                                {
-                                    _logger.LogDebug("Skipping metadata rescan for missing file id={Id}", candidate.Id);
-                                    return;
-                                }
-
-                                if (!FileUtils.IsAudioFile(file.Path ?? string.Empty))
-                                {
-                                    var audiobook = await taskAudiobookRepository.GetByIdAsync(file.AudiobookId);
-                                    if (audiobook != null && string.Equals(audiobook.FilePath, file.Path, StringComparison.OrdinalIgnoreCase))
-                                    {
-                                        audiobook.FilePath = null;
-                                        audiobook.FileSize = null;
-                                        await taskAudiobookRepository.UpdateAsync(audiobook);
-                                    }
-
-                                    await taskFileRepository.DeleteAsync(file.Id, stoppingToken);
-                                    _logger.LogInformation("Removed non-audio AudiobookFile entry id={Id} path={Path}", file.Id, LogRedaction.SanitizeFilePath(file.Path));
-                                    return;
-                                }
-
-                                _logger.LogInformation("Re-extracting metadata for file id={Id} path={Path}", file.Id, LogRedaction.SanitizeFilePath(file.Path));
-
-                                // Bail early if cancellation requested
-                                if (stoppingToken.IsCancellationRequested)
-                                {
-                                    _logger.LogDebug("Cancellation requested before extracting metadata for file id={Id}", file.Id);
-                                    return;
-                                }
-
-                                var meta = await taskMetadataService.ExtractFileMetadataAsync(file.Path ?? string.Empty);
-                                if (meta != null)
-                                {
-                                    var fi = new System.IO.FileInfo(file.Path ?? string.Empty);
-                                    file.Size = fi.Exists ? fi.Length : file.Size;
-                                    file.DurationSeconds = meta.Duration.TotalSeconds != 0 ? meta.Duration.TotalSeconds : file.DurationSeconds;
-                                    file.Format = !string.IsNullOrEmpty(meta.Format) ? meta.Format : file.Format;
-                                    file.Bitrate = meta.BitRate != 0 ? meta.BitRate : file.Bitrate;
-                                    file.SampleRate = meta.SampleRate != 0 ? meta.SampleRate : file.SampleRate;
-                                    file.Channels = meta.Channels != 0 ? meta.Channels : file.Channels;
-
-                                    await taskFileRepository.UpdateAsync(file, stoppingToken);
-                                    _logger.LogInformation("Updated metadata for file id={Id}", file.Id);
-                                }
-                            }
-                            catch (OperationCanceledException)
-                            {
-                                // Cancellation requested - ignore and let the service shutdown gracefully
-                                _logger.LogDebug("Metadata rescan cancelled for file id={Id}", candidate.Id);
-                            }
-                            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                            {
-                                _logger.LogWarning(ex, "Failed to rescan metadata for file id={Id} path={Path}", candidate.Id, LogRedaction.SanitizeFilePath(candidate.Path));
-                            }
-                        }));
-                    }
-
-                    await Task.WhenAll(tasks);
+                    await RunCycleAsync(stoppingToken);
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
@@ -153,6 +71,89 @@ namespace Listenarr.Infrastructure.HostedServices.Metadata
                 }
             }
             _logger.LogInformation("MetadataRescanService stopping");
+        }
+
+        public async Task RunCycleAsync(CancellationToken cancellationToken)
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var fileRepository = scope.ServiceProvider.GetRequiredService<IAudiobookFileRepository>();
+            var candidates = await fileRepository.GetMissingMetadataAsync(20, cancellationToken);
+
+            if (candidates.Any())
+            {
+                _logger.LogInformation("Found {Count} files missing metadata to rescan", candidates.Count);
+            }
+
+            var tasks = new List<Task>();
+            foreach (var candidate in candidates.Select(f => new { f.Id, f.Path }))
+            {
+                tasks.Add(Task.Run(async () =>
+                {
+                    using var releaser = await _sem.LockAsync(cancellationToken);
+                    try
+                    {
+                        using var taskScope = _scopeFactory.CreateScope();
+                        var taskFileRepository = taskScope.ServiceProvider.GetRequiredService<IAudiobookFileRepository>();
+                        var taskAudiobookRepository = taskScope.ServiceProvider.GetRequiredService<IAudiobookRepository>();
+                        var taskMetadataService = taskScope.ServiceProvider.GetRequiredService<IMetadataService>();
+
+                        var file = await taskFileRepository.GetByIdAsync(candidate.Id, cancellationToken);
+                        if (file == null)
+                        {
+                            _logger.LogDebug("Skipping metadata rescan for missing file id={Id}", candidate.Id);
+                            return;
+                        }
+
+                        if (!FileUtils.IsAudioFile(file.Path ?? string.Empty))
+                        {
+                            var audiobook = await taskAudiobookRepository.GetByIdAsync(file.AudiobookId);
+                            if (audiobook != null && string.Equals(audiobook.FilePath, file.Path, StringComparison.OrdinalIgnoreCase))
+                            {
+                                audiobook.FilePath = null;
+                                audiobook.FileSize = null;
+                                await taskAudiobookRepository.UpdateAsync(audiobook);
+                            }
+
+                            await taskFileRepository.DeleteAsync(file.Id, cancellationToken);
+                            _logger.LogInformation("Removed non-audio AudiobookFile entry id={Id} path={Path}", file.Id, LogRedaction.SanitizeFilePath(file.Path));
+                            return;
+                        }
+
+                        _logger.LogInformation("Re-extracting metadata for file id={Id} path={Path}", file.Id, LogRedaction.SanitizeFilePath(file.Path));
+
+                        if (cancellationToken.IsCancellationRequested)
+                        {
+                            _logger.LogDebug("Cancellation requested before extracting metadata for file id={Id}", file.Id);
+                            return;
+                        }
+
+                        var meta = await taskMetadataService.ExtractFileMetadataAsync(file.Path ?? string.Empty);
+                        if (meta != null)
+                        {
+                            var fi = new System.IO.FileInfo(file.Path ?? string.Empty);
+                            file.Size = fi.Exists ? fi.Length : file.Size;
+                            file.DurationSeconds = meta.Duration.TotalSeconds != 0 ? meta.Duration.TotalSeconds : file.DurationSeconds;
+                            file.Format = !string.IsNullOrEmpty(meta.Format) ? meta.Format : file.Format;
+                            file.Bitrate = meta.BitRate != 0 ? meta.BitRate : file.Bitrate;
+                            file.SampleRate = meta.SampleRate != 0 ? meta.SampleRate : file.SampleRate;
+                            file.Channels = meta.Channels != 0 ? meta.Channels : file.Channels;
+
+                            await taskFileRepository.UpdateAsync(file, cancellationToken);
+                            _logger.LogInformation("Updated metadata for file id={Id}", file.Id);
+                        }
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        _logger.LogDebug("Metadata rescan cancelled for file id={Id}", candidate.Id);
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                    {
+                        _logger.LogWarning(ex, "Failed to rescan metadata for file id={Id} path={Path}", candidate.Id, LogRedaction.SanitizeFilePath(candidate.Path));
+                    }
+                }));
+            }
+
+            await Task.WhenAll(tasks);
         }
     }
 }

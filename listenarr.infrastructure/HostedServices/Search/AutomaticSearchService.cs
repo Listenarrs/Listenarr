@@ -24,7 +24,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.HostedServices.Search
 {
-    public class AutomaticSearchService : BackgroundService
+    public class AutomaticSearchService : BackgroundService, IAutomaticSearchProcessor
     {
         private readonly ILogger<AutomaticSearchService> _logger;
         private readonly IServiceScopeFactory _serviceScopeFactory;
@@ -63,7 +63,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             {
                 try
                 {
-                    await PerformAutomaticSearchesAsync(stoppingToken);
+                    await RunCycleAsync(stoppingToken);
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
@@ -92,6 +92,8 @@ namespace Listenarr.Infrastructure.HostedServices.Search
 
             _logger.LogInformation("AutomaticSearchService stopped");
         }
+
+        public Task RunCycleAsync(CancellationToken cancellationToken) => PerformAutomaticSearchesAsync(cancellationToken);
 
         private async Task PerformAutomaticSearchesAsync(CancellationToken stoppingToken)
         {

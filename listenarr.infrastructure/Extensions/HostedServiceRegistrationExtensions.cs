@@ -19,6 +19,7 @@
 using Listenarr.Application.Interfaces;
 using Listenarr.Infrastructure.Ffmpeg;
 using Listenarr.Infrastructure.FileSystem;
+using Listenarr.Infrastructure.HostedServices;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -33,6 +34,9 @@ namespace Listenarr.Infrastructure.Extensions
     {
         public static IServiceCollection AddListenarrHostedServices(this IServiceCollection services, IConfiguration config)
         {
+            services.AddSingleton(TimeProvider.System);
+            services.AddSingleton<IWorkerCycleRunner, WorkerCycleRunner>();
+
             // Scan queue: enqueue folder scans to be processed in the background
             services.AddSingleton<IScanQueueService, ScanQueueService>();
             // Background worker to consume scan jobs and persist audiobook files
@@ -44,38 +48,58 @@ namespace Listenarr.Infrastructure.Extensions
             services.AddHostedService<MoveBackgroundService>();
 
             // Register background service for daily cache cleanup
-            services.AddHostedService<ImageCacheCleanupService>();
+            services.AddSingleton<ImageCacheCleanupService>();
+            services.AddSingleton<IImageCacheCleanupProcessor>(sp => sp.GetRequiredService<ImageCacheCleanupService>());
+            services.AddHostedService(sp => sp.GetRequiredService<ImageCacheCleanupService>());
 
             // Register background service for download monitoring and real-time updates
-            services.AddHostedService<DownloadMonitorService>();
+            services.AddSingleton<DownloadMonitorService>();
+            services.AddSingleton<IDownloadMonitorProcessor>(sp => sp.GetRequiredService<DownloadMonitorService>());
+            services.AddHostedService(sp => sp.GetRequiredService<DownloadMonitorService>());
 
             // Register background service for completed download handling (import pipeline)
             // Implements CompletedDownloadService pattern for stability window validation
-            services.AddHostedService<MovedDownloadProcessor>();
+            services.AddSingleton<MovedDownloadProcessor>();
+            services.AddSingleton<IMovedDownloadCleanupProcessor>(sp => sp.GetRequiredService<MovedDownloadProcessor>());
+            services.AddHostedService(sp => sp.GetRequiredService<MovedDownloadProcessor>());
 
             // Register background service for queue monitoring (external clients) and real-time updates
             services.AddHostedService<QueueMonitorService>();
 
             // Register background service for automatic audiobook searching
-            services.AddHostedService<AutomaticSearchService>();
+            services.AddSingleton<AutomaticSearchService>();
+            services.AddSingleton<IAutomaticSearchProcessor>(sp => sp.GetRequiredService<AutomaticSearchService>());
+            services.AddHostedService(sp => sp.GetRequiredService<AutomaticSearchService>());
 
             // Register background service for syncing monitored author catalogs
-            services.AddHostedService<AuthorMonitoringBackgroundService>();
+            services.AddSingleton<AuthorMonitoringBackgroundService>();
+            services.AddSingleton<IAuthorMonitoringProcessor>(sp => sp.GetRequiredService<AuthorMonitoringBackgroundService>());
+            services.AddHostedService(sp => sp.GetRequiredService<AuthorMonitoringBackgroundService>());
 
             // Register background service for syncing monitored series catalogs
-            services.AddHostedService<SeriesMonitoringBackgroundService>();
+            services.AddSingleton<SeriesMonitoringBackgroundService>();
+            services.AddSingleton<ISeriesMonitoringProcessor>(sp => sp.GetRequiredService<SeriesMonitoringBackgroundService>());
+            services.AddHostedService(sp => sp.GetRequiredService<SeriesMonitoringBackgroundService>());
 
             // Background installer for ffprobe - run in background so startup isn't blocked
-            services.AddHostedService<FfmpegInstallBackgroundService>();
+            services.AddSingleton<FfmpegInstallBackgroundService>();
+            services.AddSingleton<IFfmpegInstallProcessor>(sp => sp.GetRequiredService<FfmpegInstallBackgroundService>());
+            services.AddHostedService(sp => sp.GetRequiredService<FfmpegInstallBackgroundService>());
 
             // Background service to rescan files missing metadata
-            services.AddHostedService<MetadataRescanService>();
+            services.AddSingleton<MetadataRescanService>();
+            services.AddSingleton<IMetadataRescanProcessor>(sp => sp.GetRequiredService<MetadataRescanService>());
+            services.AddHostedService(sp => sp.GetRequiredService<MetadataRescanService>());
 
             // Register background service for download processing queue
-            services.AddHostedService<DownloadProcessingJobProcessor>();
+            services.AddSingleton<DownloadProcessingJobProcessor>();
+            services.AddSingleton<IDownloadImportProcessor>(sp => sp.GetRequiredService<DownloadProcessingJobProcessor>());
+            services.AddHostedService(sp => sp.GetRequiredService<DownloadProcessingJobProcessor>());
 
             // Background worker that processes unmatched-file scan jobs
-            services.AddHostedService<UnmatchedScanBackgroundService>();
+            services.AddSingleton<UnmatchedScanBackgroundService>();
+            services.AddSingleton<IUnmatchedScanProcessor>(sp => sp.GetRequiredService<UnmatchedScanBackgroundService>());
+            services.AddHostedService(sp => sp.GetRequiredService<UnmatchedScanBackgroundService>());
 
             return services;
         }

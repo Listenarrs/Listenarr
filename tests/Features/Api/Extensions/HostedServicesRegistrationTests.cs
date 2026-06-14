@@ -25,6 +25,23 @@ namespace Listenarr.Tests.Features.Api.Extensions
 {
     public class HostedServicesRegistrationTests
     {
+        private static readonly string[] ExpectedHostedServiceNames =
+        [
+            nameof(ScanBackgroundService),
+            nameof(MoveBackgroundService),
+            nameof(ImageCacheCleanupService),
+            nameof(DownloadMonitorService),
+            nameof(MovedDownloadProcessor),
+            nameof(QueueMonitorService),
+            nameof(AutomaticSearchService),
+            nameof(AuthorMonitoringBackgroundService),
+            nameof(SeriesMonitoringBackgroundService),
+            nameof(FfmpegInstallBackgroundService),
+            nameof(MetadataRescanService),
+            nameof(DownloadProcessingJobProcessor),
+            nameof(UnmatchedScanBackgroundService)
+        ];
+
         [Fact]
         public void AddListenarrHostedServices_RegistersHostedServicesAndSingletons()
         {
@@ -38,18 +55,79 @@ namespace Listenarr.Tests.Features.Api.Extensions
             // Assert - hosted services registered
             Assert.Contains(services, d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(ScanBackgroundService));
             Assert.Contains(services, d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(MoveBackgroundService));
-            Assert.Contains(services, d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(ImageCacheCleanupService));
-            Assert.Contains(services, d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(DownloadMonitorService));
+            AssertHostedServiceRegistered<ImageCacheCleanupService>(services);
+            AssertHostedServiceRegistered<DownloadMonitorService>(services);
             Assert.Contains(services, d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(QueueMonitorService));
-            Assert.Contains(services, d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(AutomaticSearchService));
-            Assert.Contains(services, d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(AuthorMonitoringBackgroundService));
-            Assert.Contains(services, d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(SeriesMonitoringBackgroundService));
-            Assert.Contains(services, d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(FfmpegInstallBackgroundService));
-            Assert.Contains(services, d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(MetadataRescanService));
+            AssertHostedServiceRegistered<AutomaticSearchService>(services);
+            AssertHostedServiceRegistered<AuthorMonitoringBackgroundService>(services);
+            AssertHostedServiceRegistered<SeriesMonitoringBackgroundService>(services);
+            AssertHostedServiceRegistered<FfmpegInstallBackgroundService>(services);
+            AssertHostedServiceRegistered<MetadataRescanService>(services);
+            AssertHostedServiceRegistered<DownloadProcessingJobProcessor>(services);
+            AssertHostedServiceRegistered<UnmatchedScanBackgroundService>(services);
 
             // Assert - singletons / supporting services registered
             Assert.Contains(services, d => d.ServiceType == typeof(IScanQueueService) && d.Lifetime == ServiceLifetime.Singleton);
             Assert.Contains(services, d => d.ServiceType == typeof(IMoveQueueService) && d.Lifetime == ServiceLifetime.Singleton);
+            Assert.Contains(services, d => d.ServiceType == typeof(IWorkerCycleRunner) && d.Lifetime == ServiceLifetime.Singleton);
+
+            AssertProcessorRegistered<IDownloadMonitorProcessor>(services);
+            AssertProcessorRegistered<IDownloadImportProcessor>(services);
+            AssertProcessorRegistered<IMovedDownloadCleanupProcessor>(services);
+            AssertProcessorRegistered<IAutomaticSearchProcessor>(services);
+            AssertProcessorRegistered<IAuthorMonitoringProcessor>(services);
+            AssertProcessorRegistered<ISeriesMonitoringProcessor>(services);
+            AssertProcessorRegistered<IMetadataRescanProcessor>(services);
+            AssertProcessorRegistered<IImageCacheCleanupProcessor>(services);
+            AssertProcessorRegistered<IFfmpegInstallProcessor>(services);
+            AssertProcessorRegistered<IUnmatchedScanProcessor>(services);
+        }
+
+        [Fact]
+        public void BackgroundWorkerOwnership_DocumentsEveryHostedService()
+        {
+            var services = new ServiceCollection();
+            var config = new ConfigurationBuilder().AddInMemoryCollection().Build();
+
+            services.AddListenarrHostedServices(config);
+
+            var architectureDoc = File.ReadAllText(FindRepositoryFile("BACKEND_ARCHITECTURE.md"));
+            foreach (var hostedServiceName in ExpectedHostedServiceNames)
+            {
+                Assert.Contains($"`{hostedServiceName}`", architectureDoc);
+            }
+        }
+
+        private static void AssertHostedServiceRegistered<TImplementation>(IEnumerable<ServiceDescriptor> services)
+            where TImplementation : IHostedService
+        {
+            Assert.Contains(services, d =>
+                d.ServiceType == typeof(IHostedService) &&
+                (d.ImplementationType == typeof(TImplementation) || d.ImplementationFactory != null));
+            Assert.Contains(services, d =>
+                d.ServiceType == typeof(TImplementation) && d.Lifetime == ServiceLifetime.Singleton);
+        }
+
+        private static void AssertProcessorRegistered<TProcessor>(IEnumerable<ServiceDescriptor> services)
+        {
+            Assert.Contains(services, d => d.ServiceType == typeof(TProcessor) && d.Lifetime == ServiceLifetime.Singleton);
+        }
+
+        private static string FindRepositoryFile(string fileName)
+        {
+            var directory = new DirectoryInfo(AppContext.BaseDirectory);
+            while (directory != null)
+            {
+                var candidate = Path.Join(directory.FullName, fileName);
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+
+                directory = directory.Parent;
+            }
+
+            throw new FileNotFoundException($"Could not find {fileName} from {AppContext.BaseDirectory}");
         }
     }
 }

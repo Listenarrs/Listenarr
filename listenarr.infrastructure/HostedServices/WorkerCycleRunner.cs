@@ -1,0 +1,78 @@
+/*
+ * Listenarr - Audiobook Management System
+ * Copyright (C) 2024-2026 Listenarr Contributors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published
+ * by the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
+using Listenarr.Application.Interfaces;
+using Microsoft.Extensions.Logging;
+
+namespace Listenarr.Infrastructure.HostedServices
+{
+    public sealed class WorkerCycleRunner(
+        TimeProvider timeProvider,
+        ILogger<WorkerCycleRunner> logger) : IWorkerCycleRunner
+    {
+        public async Task RunPeriodicAsync(
+            string workerName,
+            TimeSpan? initialDelay,
+            Func<TimeSpan> intervalProvider,
+            Func<CancellationToken, Task> runCycle,
+            CancellationToken cancellationToken)
+        {
+            if (initialDelay is { } delay && delay > TimeSpan.Zero)
+            {
+                try
+                {
+                    await Task.Delay(delay, timeProvider, cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    logger.LogInformation("{WorkerName} canceled before first cycle", workerName);
+                    return;
+                }
+            }
+
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                try
+                {
+                    await runCycle(cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (OperationCanceledException ex)
+                {
+                    logger.LogWarning(ex, "{WorkerName} cycle canceled/timed out; continuing", workerName);
+                }
+                catch (Exception ex) when (Listenarr.Application.Common.WorkerExceptionClassifier.IsNonFatal(ex))
+                {
+                    logger.LogError(ex, "Error in {WorkerName} cycle", workerName);
+                }
+
+                try
+                {
+                    await Task.Delay(intervalProvider(), timeProvider, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+            }
+        }
+    }
+}
