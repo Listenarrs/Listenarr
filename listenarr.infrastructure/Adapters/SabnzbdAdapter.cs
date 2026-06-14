@@ -810,43 +810,9 @@ namespace Listenarr.Infrastructure.Adapters
                     throw new DownloadClientAdapterPollingException($"No history data found for SABnzbd client {client.Id}");
                 }
 
-                // Build a lookup of completed items for faster matching
-                // Include nzo_id when available so we can match downloads by ID as well
-                var completedItems = new List<(string Name, string Status, string Path, DateTime CompletedTime, string NzoId)>();
-                var failedItems = new List<(string Name, string Status, string Path, DateTime CompletedTime, string NzoId, string Error)>();
-
-                foreach (var slot in slots.EnumerateArray())
-                {
-                    var name = slot.TryGetProperty("name", out var nameProp) ? nameProp.GetString() ?? "" : "";
-                    var status = slot.TryGetProperty("status", out var statusProp) ? statusProp.GetString() ?? "" : "";
-                    var path = slot.TryGetProperty("storage", out var pathProp) ? pathProp.GetString() ?? "" : "";
-                    var nzoId = slot.TryGetProperty("nzo_id", out var nzoIdProp) ? nzoIdProp.GetString() ?? "" : "";
-
-                    // Parse completion time
-                    var completedTime = DateTime.MinValue;
-                    if (slot.TryGetProperty("completed", out var completedProp))
-                    {
-                        var completedTimestamp = completedProp.GetInt64();
-                        completedTime = DateTimeOffset.FromUnixTimeSeconds(completedTimestamp).DateTime;
-                    }
-
-                    if (!string.IsNullOrEmpty(name) &&
-                        (status.Equals("Completed", StringComparison.OrdinalIgnoreCase) ||
-                            status.Equals("Complete", StringComparison.OrdinalIgnoreCase)))
-                    {
-                        _logger.LogInformation("SABnzbd history slot parsed: nzo_id={NzoId}, name={Name}, status={Status}, path={Path}, completed={Completed}", nzoId, LogRedaction.SanitizeText(name), LogRedaction.SanitizeText(status), LogRedaction.SanitizeFilePath(path), completedTime);
-
-                        completedItems.Add((name, status, path, completedTime, nzoId));
-                    }
-                    else if (!string.IsNullOrEmpty(name) && status.Equals("Failed", StringComparison.OrdinalIgnoreCase))
-                    {
-                        var failMessage = slot.TryGetProperty("fail_message", out var failProp)
-                            ? failProp.GetString() ?? string.Empty
-                            : status;
-
-                        failedItems.Add((name, status, path, completedTime, nzoId, failMessage));
-                    }
-                }
+                var historyLookup = SabnzbdHistoryLookupBuilder.Build(slots, _logger);
+                var completedItems = historyLookup.CompletedItems;
+                var failedItems = historyLookup.FailedItems;
 
                 _logger.LogDebug("Found {CompletedCount} completed items in SABnzbd history for client {ClientName}",
                     completedItems.Count, client.Name);

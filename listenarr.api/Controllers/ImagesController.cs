@@ -42,6 +42,7 @@ namespace Listenarr.Api.Controllers
         private readonly ImageResponseBuilder _imageResponseBuilder;
         private readonly ImagePathValidator _imagePathValidator;
         private readonly ImageCachedPathValidator _cachedPathValidator;
+        private readonly ImageFallbackDownloadWorkflow _fallbackDownloadWorkflow;
         private readonly string _effectiveContentRootPath;
 
         [ActivatorUtilitiesConstructor]
@@ -90,6 +91,7 @@ namespace Listenarr.Api.Controllers
             _imageResponseBuilder = new ImageResponseBuilder(_placeholderResolver, _logger, _effectiveContentRootPath);
             _imagePathValidator = new ImagePathValidator(_effectiveContentRootPath);
             _cachedPathValidator = new ImageCachedPathValidator(_imagePathValidator, _logger);
+            _fallbackDownloadWorkflow = new ImageFallbackDownloadWorkflow(_imageCacheService, _logger);
         }
 
         /// <summary>
@@ -778,33 +780,7 @@ namespace Listenarr.Api.Controllers
 
                             if (candidateUrls.Count > 0)
                             {
-                                foreach (var urlCandidate in candidateUrls)
-                                {
-                                    _logger.LogInformation("Attempting metadata-driven image download for identifier {Identifier} from {Url}", LogRedaction.SanitizeText(identifier), LogRedaction.SanitizeText(urlCandidate));
-                                    try
-                                    {
-                                        _logger.LogDebug("Calling DownloadAndCacheImageAsync for {Identifier} from {Url}", LogRedaction.SanitizeText(identifier), LogRedaction.SanitizeText(urlCandidate));
-                                        var downloaded = await _imageCacheService.DownloadAndCacheImageAsync(urlCandidate, identifier!);
-                                        if (!string.IsNullOrWhiteSpace(downloaded))
-                                        {
-                                            _logger.LogInformation("Downloaded metadata image for identifier: {Identifier}", LogRedaction.SanitizeText(identifier));
-                                            // Re-check cache
-                                            relativePath = await _imageCacheService.GetCachedImagePathAsync(identifier!);
-                                            if (!string.IsNullOrWhiteSpace(relativePath))
-                                            {
-                                                break;
-                                            }
-                                        }
-                                    }
-                                    catch (OperationCanceledException)
-                                    {
-                                        throw;
-                                    }
-                                    catch (Exception ex) when (ImageIdentifierHelper.IsRecoverableImageLookupException(ex))
-                                    {
-                                        _logger.LogWarning(ex, "Failed to download metadata-driven image for {Identifier} from {Url}", LogRedaction.SanitizeText(identifier), LogRedaction.SanitizeText(urlCandidate));
-                                    }
-                                }
+                                relativePath = await _fallbackDownloadWorkflow.TryDownloadFirstCachedAsync(identifier!, candidateUrls);
                             }
                         }
                     }

@@ -41,6 +41,8 @@ namespace Listenarr.Api.Controllers
         private readonly MetadataImageCacheWorkflow _imageCacheWorkflow;
         private readonly MetadataLookupCacheWorkflow _lookupCacheWorkflow;
         private readonly MetadataLookupResponseCache _lookupResponseCache;
+        private readonly MetadataAuthorLookupWorkflow _authorLookupWorkflow;
+        private readonly MetadataSeriesLookupWorkflow _seriesLookupWorkflow;
 
         public MetadataController(
             IAudiobookMetadataService metadataService,
@@ -67,6 +69,24 @@ namespace Listenarr.Api.Controllers
             _imageCacheWorkflow = new MetadataImageCacheWorkflow(_audiobookRepository, _imageCacheService, _logger);
             _lookupCacheWorkflow = new MetadataLookupCacheWorkflow(_audiobookRepository, _imageCacheService, _imageCacheWorkflow, _logger);
             _lookupResponseCache = new MetadataLookupResponseCache(_cache);
+            _authorLookupWorkflow = new MetadataAuthorLookupWorkflow(
+                _audibleService,
+                _audnexusService,
+                _imageCacheService,
+                _cache,
+                _imageCacheWorkflow,
+                _lookupCacheWorkflow,
+                _lookupResponseCache,
+                _logger);
+            _seriesLookupWorkflow = new MetadataSeriesLookupWorkflow(
+                _audibleService,
+                _imageCacheService,
+                _seriesCatalogService,
+                _cache,
+                _imageCacheWorkflow,
+                _lookupCacheWorkflow,
+                _lookupResponseCache,
+                _logger);
         }
 
         /// <summary>
@@ -195,302 +215,14 @@ namespace Listenarr.Api.Controllers
             string? asin,
             bool refresh)
         {
-            try
+            var result = await _authorLookupWorkflow.LookupAsync(name, region, asin, refresh);
+            return result.Status switch
             {
-                if (string.IsNullOrWhiteSpace(name)) return BadRequest("Author name is required");
-
-                var normalizedName = name.Trim();
-                var normalizedAsin = string.IsNullOrWhiteSpace(asin) ? null : asin.Trim();
-                var cacheKey = MetadataCacheKeys.BuildAuthorLookupCacheKey(region, normalizedName, normalizedAsin);
-                string? seededName = null;
-                string? seededImage = null;
-                string? seededDescription = null;
-                string? seededCachedPath = null;
-                var seededSimilarAuthors = new List<RelatedAuthorItem>();
-
-                if (refresh)
-                {
-                    _cache.Remove(cacheKey);
-                }
-                else if (_cache.TryGetValue(cacheKey, out MetadataAuthorLookupCacheEntry? cachedEntry) && cachedEntry != null)
-                {
-                    cachedEntry.Asin ??= normalizedAsin;
-
-                    // If previously marked NotFound, try to resolve an ASIN from the DB and check cache by ASIN
-                    if (cachedEntry.NotFound)
-                    {
-                        var notFoundCacheProbe = await _imageCacheWorkflow.ProbeAuthorImageCacheAsync(normalizedName, region, cachedEntry.Asin);
-                        if (!string.IsNullOrWhiteSpace(notFoundCacheProbe.CachedPath))
-                        {
-                            cachedEntry.Asin = notFoundCacheProbe.Asin ?? cachedEntry.Asin;
-                            cachedEntry.CachedPath = notFoundCacheProbe.CachedPath;
-                            cachedEntry.Name ??= normalizedName;
-                            cachedEntry.NotFound = false;
-                            _cache.Set(cacheKey, cachedEntry, new MemoryCacheEntryOptions { SlidingExpiration = TimeSpan.FromHours(12) });
-
-                            return Ok(_lookupResponseCache.MapAuthorLookupResponse(cachedEntry, normalizedName));
-                        }
-
-                        return NotFound("Author not found");
-                    }
-
-                    string? cachedPath = cachedEntry.CachedPath;
-                    if (!string.IsNullOrWhiteSpace(cachedEntry.Asin))
-                    {
-                        cachedPath = await _imageCacheWorkflow.ResolveCachedImagePathAsync(cachedEntry.Asin) ?? cachedPath;
-                    }
-
-                    cachedEntry.CachedPath = cachedPath;
-
-                    if (MetadataResponseMapper.HasCompleteAuthorLookupData(cachedEntry.CachedPath, cachedEntry.Description, cachedEntry.SimilarAuthors))
-                    {
-                        return Ok(_lookupResponseCache.MapAuthorLookupResponse(cachedEntry, normalizedName));
-                    }
-
-                    normalizedAsin ??= cachedEntry.Asin;
-                    seededName = cachedEntry.Name;
-                    seededImage = cachedEntry.Image;
-                    seededDescription = cachedEntry.Description;
-                    seededCachedPath = cachedPath;
-                    seededSimilarAuthors = cachedEntry.SimilarAuthors?
-                        .Where(author => !string.IsNullOrWhiteSpace(author.Name))
-                        .ToList() ?? new List<RelatedAuthorItem>();
-                }
-
-                var persistedEntry = await _lookupCacheWorkflow.ResolvePersistedAuthorCacheAsync(normalizedName, region, normalizedAsin);
-                if (persistedEntry != null)
-                {
-                    var persistedResponse = await _lookupCacheWorkflow.MapPersistedAuthorLookupResponseAsync(persistedEntry, normalizedName);
-                    if (!refresh &&
-                        MetadataResponseMapper.HasCompleteAuthorLookupData(persistedResponse.CachedPath, persistedResponse.Description, persistedResponse.SimilarAuthors))
-                    {
-                        _lookupResponseCache.CacheAuthorLookupResponse(cacheKey, persistedResponse);
-                        return Ok(persistedResponse);
-                    }
-
-                    normalizedAsin ??= persistedResponse.Asin;
-                    seededName ??= persistedResponse.Name;
-                    seededImage ??= persistedResponse.Image;
-                    seededDescription ??= persistedResponse.Description;
-                    seededCachedPath ??= persistedResponse.CachedPath;
-                    if (seededSimilarAuthors.Count == 0 && persistedResponse.SimilarAuthors.Count > 0)
-                    {
-                        seededSimilarAuthors = persistedResponse.SimilarAuthors
-                            .Where(author => !string.IsNullOrWhiteSpace(author.Name))
-                            .ToList();
-                    }
-                }
-
-                var cacheHint = await _imageCacheWorkflow.ProbeAuthorImageCacheAsync(normalizedName, region, normalizedAsin);
-                var resolvedAsin = normalizedAsin ?? cacheHint.Asin;
-                var cached = seededCachedPath ?? cacheHint.CachedPath;
-                var needsDescription = refresh || string.IsNullOrWhiteSpace(seededDescription);
-                var needsSimilarAuthors = refresh || seededSimilarAuthors.Count == 0;
-                var needsCachedImage = refresh || string.IsNullOrWhiteSpace(cached);
-                var needsAuthorDetails = string.IsNullOrWhiteSpace(resolvedAsin) ||
-                    string.IsNullOrWhiteSpace(seededName) ||
-                    string.IsNullOrWhiteSpace(seededImage) ||
-                    needsDescription ||
-                    needsCachedImage ||
-                    refresh;
-
-                AuthorLookupItem? info = null;
-                AuthorLookupItem? authorDetails = null;
-                string? resolvedName = seededName;
-                string? resolvedImage = seededImage;
-                string? resolvedDescription = seededDescription;
-
-                if (!string.IsNullOrWhiteSpace(resolvedAsin) && needsAuthorDetails)
-                {
-                    authorDetails = await _audibleService.GetAuthorByAsinAsync(resolvedAsin, region);
-                }
-
-                if (authorDetails == null && needsAuthorDetails)
-                {
-                    info = await _audibleService.LookupAuthorAsync(normalizedName, region);
-                }
-
-                resolvedAsin ??= authorDetails?.Asin ?? info?.Asin;
-
-                if (authorDetails == null && !string.IsNullOrWhiteSpace(resolvedAsin) && needsAuthorDetails)
-                {
-                    authorDetails = await _audibleService.GetAuthorByAsinAsync(resolvedAsin, region);
-                }
-
-                resolvedName ??= authorDetails?.Name ?? info?.Name;
-
-                var audibleImage = authorDetails?.Image ?? info?.Image;
-                if (!string.IsNullOrWhiteSpace(audibleImage) &&
-                    (string.IsNullOrWhiteSpace(resolvedImage) || needsCachedImage))
-                {
-                    resolvedImage = audibleImage;
-                }
-
-                var audibleDescription = authorDetails?.Description ?? info?.Description;
-                if (!string.IsNullOrWhiteSpace(audibleDescription))
-                {
-                    resolvedDescription = audibleDescription;
-                }
-
-                AudnexusAuthorSearchResult? audnexusSearchAuthor = null;
-                AudnexusAuthorResponse? audnexusAuthor = null;
-                var shouldQueryAudnexus =
-                    refresh ||
-                    string.IsNullOrWhiteSpace(resolvedAsin) ||
-                    string.IsNullOrWhiteSpace(resolvedName) ||
-                    string.IsNullOrWhiteSpace(resolvedDescription) ||
-                    string.IsNullOrWhiteSpace(resolvedImage) ||
-                    needsSimilarAuthors ||
-                    (needsCachedImage && string.IsNullOrWhiteSpace(audibleImage));
-
-                if (!string.IsNullOrWhiteSpace(resolvedAsin) && shouldQueryAudnexus)
-                {
-                    try
-                    {
-                        audnexusAuthor = await _audnexusService.GetAuthorAsync(resolvedAsin, region, update: false);
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                    {
-                        _logger.LogWarning(ex, "Audnexus author details fallback failed for '{Author}'", normalizedName);
-                    }
-                }
-
-                if (shouldQueryAudnexus && (authorDetails == null || audnexusAuthor == null || string.IsNullOrWhiteSpace(resolvedDescription)))
-                {
-                    // Audible returned nothing — try Audnexus as fallback
-                    try
-                    {
-                        var audnexResults = await _audnexusService.SearchAuthorsAsync(normalizedName, region);
-                        audnexusSearchAuthor = audnexResults?.FirstOrDefault(a =>
-                            !string.IsNullOrWhiteSpace(a.Name) &&
-                            a.Name.Equals(normalizedName, StringComparison.OrdinalIgnoreCase))
-                            ?? audnexResults?.FirstOrDefault(a =>
-                                !string.IsNullOrWhiteSpace(a.Asin) &&
-                                string.Equals(a.Asin, resolvedAsin, StringComparison.OrdinalIgnoreCase))
-                            ?? audnexResults?.FirstOrDefault();
-
-                        if (audnexusSearchAuthor != null)
-                        {
-                            resolvedAsin ??= audnexusSearchAuthor.Asin;
-                            resolvedName ??= audnexusSearchAuthor.Name;
-                            resolvedImage ??= audnexusSearchAuthor.Image;
-                            resolvedDescription ??= audnexusSearchAuthor.Description;
-
-                            if (audnexusAuthor == null && !string.IsNullOrWhiteSpace(audnexusSearchAuthor.Asin))
-                            {
-                                audnexusAuthor = await _audnexusService.GetAuthorAsync(audnexusSearchAuthor.Asin, region, update: false);
-                            }
-                        }
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                    {
-                        _logger.LogWarning(ex, "Audnexus author fallback failed for '{Author}'", normalizedName);
-                    }
-
-                }
-
-                if (audnexusAuthor != null)
-                {
-                    resolvedAsin ??= audnexusAuthor.Asin;
-                    resolvedName ??= audnexusAuthor.Name;
-                    resolvedDescription ??= audnexusAuthor.Description;
-                }
-
-                var audnexusImage = audnexusAuthor?.Image ?? audnexusSearchAuthor?.Image;
-                if (!string.IsNullOrWhiteSpace(audnexusImage) &&
-                    (string.IsNullOrWhiteSpace(resolvedImage) ||
-                        (needsCachedImage && string.IsNullOrWhiteSpace(audibleImage))))
-                {
-                    resolvedImage = audnexusImage;
-                }
-
-                var hasResolvedAuthorIdentity =
-                    !string.IsNullOrWhiteSpace(resolvedAsin) ||
-                    !string.IsNullOrWhiteSpace(authorDetails?.Name) ||
-                    !string.IsNullOrWhiteSpace(info?.Name) ||
-                    !string.IsNullOrWhiteSpace(audnexusAuthor?.Name) ||
-                    !string.IsNullOrWhiteSpace(audnexusSearchAuthor?.Name);
-
-                if (!hasResolvedAuthorIdentity)
-                {
-                    _lookupResponseCache.CacheAuthorNotFound(cacheKey, normalizedName);
-
-                    return NotFound("Author not found");
-                }
-
-                resolvedName ??=
-                    authorDetails?.Name ??
-                    info?.Name ??
-                    audnexusAuthor?.Name ??
-                    audnexusSearchAuthor?.Name ??
-                    normalizedName;
-
-                try
-                {
-                    if (!refresh &&
-                        string.IsNullOrWhiteSpace(cached) &&
-                        !string.IsNullOrWhiteSpace(resolvedAsin))
-                    {
-                        cached = await _imageCacheWorkflow.ResolveCachedImagePathAsync(resolvedAsin);
-                    }
-
-                    if ((refresh || string.IsNullOrWhiteSpace(cached)) &&
-                        !string.IsNullOrWhiteSpace(resolvedAsin))
-                    {
-                        var preferredImageForCaching =
-                            authorDetails?.Image ??
-                            info?.Image ??
-                            audnexusAuthor?.Image ??
-                            audnexusSearchAuthor?.Image ??
-                            resolvedImage;
-
-                        // Attempt to ensure author image is cached under authors storage.
-                        cached = await _imageCacheService.MoveToAuthorLibraryStorageAsync(
-                            resolvedAsin,
-                            preferredImageForCaching,
-                            forceRefresh: refresh);
-                        if (!string.IsNullOrWhiteSpace(cached)) cached = "/" + cached.TrimStart('/');
-                    }
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                {
-                    _logger.LogWarning(ex, "Failed to cache author image for {Author}", name);
-                }
-
-                var similarAuthors = MetadataResponseMapper.MapSimilarAuthors(
-                    audnexusAuthor?.Similar ?? audnexusSearchAuthor?.Similar,
-                    normalizedName);
-                if (similarAuthors.Count == 0 && seededSimilarAuthors.Count > 0)
-                {
-                    similarAuthors = seededSimilarAuthors;
-                }
-
-                var result = new AuthorLookupResponse
-                {
-                    Asin = resolvedAsin,
-                    Name = resolvedName,
-                    Image = resolvedImage,
-                    CachedPath = cached,
-                    Description = resolvedDescription,
-                    SimilarAuthors = similarAuthors
-                };
-
-                await _lookupCacheWorkflow.PersistAuthorLookupAsync(
-                    persistedEntry,
-                    normalizedName,
-                    region,
-                    result);
-
-                _lookupResponseCache.CacheAuthorLookupResponse(cacheKey, result);
-                _lookupResponseCache.CacheAuthorLookupResponse(MetadataCacheKeys.BuildAuthorLookupCacheKey(region, normalizedName, result.Asin), result);
-
-                return Ok(result);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogError(ex, "Error looking up author: {Name}", name);
-                return StatusCode(500, "Internal server error");
-            }
+                MetadataAuthorLookupStatus.Ok => Ok(result.Response!),
+                MetadataAuthorLookupStatus.BadRequest => BadRequest(result.Message),
+                MetadataAuthorLookupStatus.NotFound => NotFound(result.Message),
+                _ => StatusCode(500, result.Message)
+            };
         }
 
         /// <summary>
@@ -607,118 +339,14 @@ namespace Listenarr.Api.Controllers
             string? asin,
             bool refresh)
         {
-            try
+            var result = await _seriesLookupWorkflow.LookupAsync(name, region, asin, refresh);
+            return result.Status switch
             {
-                if (string.IsNullOrWhiteSpace(name)) return BadRequest("Series name is required");
-
-                var normalizedName = name.Trim();
-                var normalizedAsin = string.IsNullOrWhiteSpace(asin) ? null : asin.Trim();
-                var cacheKey = $"series-lookup:{region}:{normalizedName.ToLowerInvariant()}";
-
-                if (refresh)
-                {
-                    _cache.Remove(cacheKey);
-                }
-                else if (_cache.TryGetValue(cacheKey, out MetadataSeriesLookupCacheEntry? cachedEntry) && cachedEntry != null)
-                {
-                    cachedEntry.Asin ??= normalizedAsin;
-                    return Ok(_lookupResponseCache.MapSeriesLookupResponse(cachedEntry, normalizedName));
-                }
-
-                var persistedEntry = await _lookupCacheWorkflow.ResolvePersistedSeriesCacheAsync(normalizedName, region, normalizedAsin);
-                if (!refresh && persistedEntry != null)
-                {
-                    var persistedResponse = await _lookupCacheWorkflow.MapPersistedSeriesLookupResponseAsync(persistedEntry, normalizedName);
-                    _lookupResponseCache.CacheSeriesLookupResponse(cacheKey, persistedResponse);
-                    return Ok(persistedResponse);
-                }
-
-                normalizedAsin ??= persistedEntry?.SeriesAsin;
-
-                var resolvedSeries = !string.IsNullOrWhiteSpace(normalizedAsin)
-                    ? await _audibleService.GetSeriesByAsinAsync(normalizedAsin, region)
-                    : null;
-
-                resolvedSeries ??= await _audibleService.LookupSeriesAsync(normalizedName, region);
-                normalizedAsin ??= resolvedSeries?.Asin;
-
-                if (resolvedSeries == null && !string.IsNullOrWhiteSpace(normalizedAsin))
-                {
-                    resolvedSeries = await _audibleService.GetSeriesByAsinAsync(normalizedAsin, region);
-                }
-
-                if (resolvedSeries == null)
-                {
-                    return NotFound("Series not found");
-                }
-
-                var resolvedSeriesName = string.IsNullOrWhiteSpace(resolvedSeries.Name)
-                    ? normalizedName
-                    : resolvedSeries.Name;
-
-                var catalog = await _seriesCatalogService.GetCatalogAsync(
-                    resolvedSeriesName,
-                    region,
-                    limit: 250,
-                    language: null,
-                    forceRefresh: refresh);
-
-                var imageUrl =
-                    resolvedSeries.Image ??
-                    catalog?.Books.FirstOrDefault(book => !string.IsNullOrWhiteSpace(book.ImageUrl))?.ImageUrl ??
-                    persistedEntry?.ImageUrl;
-
-                string? cachedPath = null;
-                if (!string.IsNullOrWhiteSpace(resolvedSeries.Asin))
-                {
-                    cachedPath = await _imageCacheWorkflow.ResolveCachedImagePathAsync(resolvedSeries.Asin);
-
-                    if ((refresh || string.IsNullOrWhiteSpace(cachedPath)) && !string.IsNullOrWhiteSpace(imageUrl))
-                    {
-                        try
-                        {
-                            cachedPath = await _imageCacheService.MoveToSeriesLibraryStorageAsync(
-                                resolvedSeries.Asin,
-                                imageUrl,
-                                forceRefresh: refresh);
-                            if (!string.IsNullOrWhiteSpace(cachedPath))
-                            {
-                                cachedPath = "/" + cachedPath.TrimStart('/');
-                            }
-                        }
-                        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                        {
-                            _logger.LogWarning(ex, "Failed to cache series image for {Series}", normalizedName);
-                        }
-                    }
-                }
-
-                var result = new SeriesLookupResponse
-                {
-                    Asin = resolvedSeries.Asin,
-                    Name = resolvedSeriesName,
-                    Image = imageUrl,
-                    CachedPath = cachedPath,
-                    Description = resolvedSeries.Description ?? persistedEntry?.Description,
-                    TotalBooks = catalog?.TotalBooks ?? persistedEntry?.CatalogBooks?.Count ?? 0
-                };
-
-                await _lookupCacheWorkflow.PersistSeriesLookupAsync(
-                    persistedEntry,
-                    normalizedName,
-                    region,
-                    result,
-                    catalog?.Books);
-
-                _lookupResponseCache.CacheSeriesLookupResponse(cacheKey, result);
-
-                return Ok(result);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogError(ex, "Error looking up series: {Name}", name);
-                return StatusCode(500, "Internal server error");
-            }
+                MetadataSeriesLookupStatus.Ok => Ok(result.Response!),
+                MetadataSeriesLookupStatus.BadRequest => BadRequest(result.Message),
+                MetadataSeriesLookupStatus.NotFound => NotFound(result.Message),
+                _ => StatusCode(500, result.Message)
+            };
         }
 
         /// <summary>

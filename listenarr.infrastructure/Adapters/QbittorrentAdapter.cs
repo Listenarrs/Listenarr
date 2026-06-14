@@ -785,36 +785,13 @@ namespace Listenarr.Infrastructure.Adapters
                     }
                 }
 
-                // Build comprehensive lookup with all torrent info we need from single API call
-                var torrentLookup = new List<(string Hash, string Name, string SavePath, string ContentPath, double Progress, long AmountLeft, string State, long Size, string Category, long? SeedingTime, double Ratio, float RatioLimit, long SeedingTimeLimit, bool CanMoveFiles, bool CanBeRemoved)>();
-                foreach (var t in allTorrents)
-                {
-                    var hash = t.TryGetValue("hash", out var hashElement) ? hashElement.GetString() ?? "" : "";
-                    var name = t.TryGetValue("name", out var nameElement) ? nameElement.GetString() ?? "" : "";
-                    var savePath = t.TryGetValue("save_path", out var savePathElement) ? savePathElement.GetString() ?? "" : "";
-                    var contentPath = t.TryGetValue("content_path", out var contentPathElement) ? contentPathElement.GetString() ?? "" : "";
-                    var progress = t.TryGetValue("progress", out var progressElement) ? progressElement.GetDouble() : 0.0;
-                    var amountLeft = t.TryGetValue("amount_left", out var amountLeftElement) ? amountLeftElement.GetInt64() : 0L;
-                    var state = t.TryGetValue("state", out var stateElement) ? stateElement.GetString() ?? "" : "";
-                    var size = t.TryGetValue("size", out var sizeElement) ? sizeElement.GetInt64() : 0L;
-                    var category = t.TryGetValue("category", out var categoryElement) ? categoryElement.GetString() ?? "" : "";
-                    var seedingTime = t.TryGetValue("seeding_time", out var seedingTimeElement) ? seedingTimeElement.GetInt64() : (long?)null;
-                    var tRatio = t.TryGetValue("ratio", out var ratioElement) ? ratioElement.GetDouble() : 0.0;
-                    var tRatioLimit = t.TryGetValue("ratio_limit", out var ratioLimitElement) ? (float)ratioLimitElement.GetDouble() : -2f;
-                    var tSeedingTimeLimit = t.TryGetValue("seeding_time_limit", out var seedingTimeLimitElement) ? seedingTimeLimitElement.GetInt64() : -2L;
-
-                    // Sonarr parity: compute CanMoveFiles/CanBeRemoved per-torrent
-                    var tIsStopped = state is "pausedUP" or "stoppedUP";
-                    var tSeedLimitReached = QbittorrentSeedLimitEvaluator.HasReachedSeedLimit(
-                        tRatio, tRatioLimit, seedingTime, tSeedingTimeLimit,
-                        qbtGlobalMaxRatioEnabled, qbtGlobalMaxRatio,
-                        qbtGlobalMaxSeedingTimeEnabled, qbtGlobalMaxSeedingTime);
-                    var tCanBeRemoved = qbtRemoveCompletedDownloads && tSeedLimitReached;
-                    var tCanMoveFiles = tCanBeRemoved && tIsStopped;
-
-                    torrentLookup.Add((hash, name, savePath, contentPath, progress, amountLeft, state, size, category, seedingTime, tRatio, tRatioLimit, tSeedingTimeLimit, tCanMoveFiles, tCanBeRemoved));
-                }
-
+                var torrentLookup = QbittorrentTorrentLookupBuilder.Build(
+                    allTorrents,
+                    qbtRemoveCompletedDownloads,
+                    qbtGlobalMaxRatioEnabled,
+                    qbtGlobalMaxRatio,
+                    qbtGlobalMaxSeedingTimeEnabled,
+                    qbtGlobalMaxSeedingTime);
 
                 _logger.LogDebug("Found {TorrentCount} torrents in qBittorrent for client {ClientName}", torrentLookup.Count, client.Name);
 
