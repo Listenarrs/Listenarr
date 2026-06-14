@@ -29,6 +29,8 @@ namespace Listenarr.Infrastructure.HostedServices.Search
         private readonly ILogger<AutomaticSearchService> _logger;
         private readonly IServiceScopeFactory _serviceScopeFactory;
         private readonly AutomaticSearchResultClassifier _resultClassifier;
+        private readonly AutomaticSearchQualityEvaluator _qualityEvaluator;
+        private readonly AutomaticSearchDownloadClientSelector _downloadClientSelector;
         private readonly TimeSpan _searchInterval = TimeSpan.FromHours(6); // Search every 6 hours
 
         public AutomaticSearchService(
@@ -38,6 +40,8 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             _logger = logger;
             _serviceScopeFactory = serviceScopeFactory;
             _resultClassifier = new AutomaticSearchResultClassifier(_logger);
+            _qualityEvaluator = new AutomaticSearchQualityEvaluator(_logger);
+            _downloadClientSelector = new AutomaticSearchDownloadClientSelector(_serviceScopeFactory, _logger);
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -188,7 +192,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             }
 
             // Check existing quality and decide whether to search
-            var (cutoffMet, bestExistingQuality) = await GetExistingQualityAsync(audiobook, qualityProfileService, downloadRepository, fileRepository, stoppingToken);
+            var (cutoffMet, bestExistingQuality) = await _qualityEvaluator.GetExistingQualityAsync(audiobook, downloadRepository, fileRepository, stoppingToken);
             _logger.LogInformation("Audiobook '{Title}': cutoff met={CutoffMet}, best existing quality={BestQuality}",
                 audiobook.Title, cutoffMet, bestExistingQuality ?? "none");
 
@@ -298,7 +302,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             // Check if the found result is better quality than what we already have
             if (!string.IsNullOrEmpty(bestExistingQuality))
             {
-                var resultIsBetter = IsQualityBetter(topResult.SearchResult.Quality, bestExistingQuality, audiobook.QualityProfile);
+                var resultIsBetter = _qualityEvaluator.IsQualityBetter(topResult.SearchResult.Quality, bestExistingQuality, audiobook.QualityProfile);
                 if (!resultIsBetter)
                 {
                     _logger.LogInformation("Top result quality '{ResultQuality}' is not better than existing quality '{ExistingQuality}' for audiobook '{Title}', skipping download",
@@ -322,7 +326,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             {
                 // Determine appropriate download client for this result
                 var isTorrent = _resultClassifier.IsTorrentResult(topResult.SearchResult);
-                var downloadClientId = await GetAppropriateDownloadClientAsync(topResult.SearchResult, isTorrent);
+                var downloadClientId = await _downloadClientSelector.GetAppropriateDownloadClientAsync(topResult.SearchResult, isTorrent);
 
                 if (string.IsNullOrEmpty(downloadClientId))
                 {
@@ -345,271 +349,5 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             return downloadsQueued;
         }
 
-        private async Task<bool> IsQualityCutoffMetAsync(
-            Audiobook audiobook,
-            IQualityProfileService qualityProfileService,
-            IDownloadRepository downloadRepository,
-            IAudiobookFileRepository fileRepository,
-            CancellationToken ct = default)
-        {
-            if (audiobook.QualityProfile == null)
-                return false;
-
-            // Get existing downloads for this audiobook
-            var allDownloads = await downloadRepository.GetByAudiobookIdAsync(audiobook.Id, ct);
-            var existingDownloads = allDownloads.Where(d =>
-                d.Status == DownloadStatus.Completed ||
-                d.Status == DownloadStatus.Downloading ||
-                d.Status == DownloadStatus.ImportPending).ToList();
-
-            // Get existing files for this audiobook
-            var existingFiles = await fileRepository.GetByAudiobookIdAsync(audiobook.Id, ct);
-
-            if (!existingDownloads.Any() && !existingFiles.Any())
-                return false;
-
-            // Check if any existing download meets or exceeds the cutoff quality
-            var cutoffQuality = audiobook.QualityProfile.Qualities
-                .FirstOrDefault(q => q.Quality == audiobook.QualityProfile.CutoffQuality);
-
-            if (cutoffQuality == null)
-                return false;
-
-            // Check downloads first
-            foreach (var download in existingDownloads)
-            {
-                // For completed downloads, check if the file quality meets cutoff
-                if (download.Status == DownloadStatus.Completed && !string.IsNullOrEmpty(download.Metadata?.GetValueOrDefault("Quality")?.ToString()))
-                {
-                    var downloadQuality = download.Metadata["Quality"].ToString();
-                    var downloadQualityDefinition = audiobook.QualityProfile.Qualities
-                        .FirstOrDefault(q => q.Quality == downloadQuality);
-
-                    if (downloadQualityDefinition != null && downloadQualityDefinition.Priority >= cutoffQuality.Priority)
-                    {
-                        _logger.LogDebug("Quality cutoff met for audiobook '{Title}' by completed download (Quality: {Quality})",
-                            audiobook.Title, downloadQuality);
-                        return true;
-                    }
-                }
-                // For active downloads, assume they will meet quality requirements
-                else if (download.Status == DownloadStatus.Downloading || download.Status == DownloadStatus.ImportPending)
-                {
-                    _logger.LogDebug("Quality cutoff assumed met for audiobook '{Title}' due to active download", audiobook.Title);
-                    return true;
-                }
-            }
-
-            // Check existing files
-            foreach (var file in existingFiles)
-            {
-                var fileQuality = DetermineFileQuality(file);
-                if (!string.IsNullOrEmpty(fileQuality))
-                {
-                    var fileQualityDefinition = audiobook.QualityProfile.Qualities
-                        .FirstOrDefault(q => q.Quality == fileQuality);
-
-                    if (fileQualityDefinition != null && fileQualityDefinition.Priority >= cutoffQuality.Priority)
-                    {
-                        _logger.LogDebug("Quality cutoff met for audiobook '{Title}' by existing file (Quality: {Quality}, File: {FileName})",
-                            audiobook.Title, fileQuality, Path.GetFileName(file.Path));
-                        return true;
-                    }
-                }
-            }
-
-            return false;
-        }
-
-        private string? DetermineFileQuality(AudiobookFile file)
-        {
-            // Determine quality based on file properties
-            // This mirrors the logic in QualityProfileService.GetQualityScore but works with file metadata
-
-            // Check format/container first
-            if (!string.IsNullOrEmpty(file.Container))
-            {
-                var container = file.Container.ToLower();
-                if (container.Contains("flac")) return "FLAC";
-                if (container.Contains("m4b") || container.Contains("m4a")) return "M4B";
-            }
-
-            if (!string.IsNullOrEmpty(file.Format))
-            {
-                var format = file.Format.ToLower();
-                if (format.Contains("flac")) return "FLAC";
-                if (format.Contains("m4b") || format.Contains("m4a")) return "M4B";
-                if (format.Contains("aac")) return "M4B"; // AAC in M4B container
-            }
-
-            // Check bitrate for MP3 quality determination
-            if (file.Bitrate.HasValue)
-            {
-                var bitrate = file.Bitrate.Value;
-
-                // Convert bits per second to kilobits per second for easier comparison
-                var kbps = bitrate / 1000;
-
-                if (kbps >= 320) return "MP3 320kbps";
-                if (kbps >= 256) return "MP3 256kbps";
-                if (kbps >= 192) return "MP3 192kbps";
-                if (kbps >= 128) return "MP3 128kbps";
-                if (kbps >= 64) return "MP3 64kbps";
-
-                // For very low bitrates, still classify as MP3
-                return "MP3 64kbps";
-            }
-
-            // Check codec
-            if (!string.IsNullOrEmpty(file.Codec))
-            {
-                var codec = file.Codec.ToLower();
-                if (codec.Contains("flac")) return "FLAC";
-                if (codec.Contains("aac")) return "M4B";
-                if (codec.Contains("mp3")) return "MP3 128kbps"; // Default MP3 quality if no bitrate info
-                if (codec.Contains("opus")) return "M4B"; // Opus is often in M4B containers
-            }
-
-            // If we can't determine quality from metadata, try to infer from file extension
-            if (!string.IsNullOrEmpty(file.Path))
-            {
-                var extension = Path.GetExtension(file.Path).ToLower();
-                switch (extension)
-                {
-                    case ".flac":
-                        return "FLAC";
-                    case ".m4b":
-                    case ".m4a":
-                        return "M4B";
-                    case ".mp3":
-                        return "MP3 128kbps"; // Conservative default for MP3
-                    case ".aac":
-                        return "M4B";
-                    case ".opus":
-                        return "M4B";
-                }
-            }
-
-            return null; // Unable to determine quality
-        }
-
-        /// <summary>
-        /// Determine whether the audiobook already meets the quality cutoff and return the best existing quality string (if any).
-        /// </summary>
-        private async Task<(bool cutoffMet, string? bestExistingQuality)> GetExistingQualityAsync(
-            Audiobook audiobook,
-            IQualityProfileService qualityProfileService,
-            IDownloadRepository downloadRepository,
-            IAudiobookFileRepository fileRepository,
-            CancellationToken ct = default)
-        {
-            // Reuse existing cutoff logic
-            var cutoffMet = await IsQualityCutoffMetAsync(audiobook, qualityProfileService, downloadRepository, fileRepository, ct);
-
-            // Find the best quality among existing files and completed downloads (if any)
-            string? bestQuality = null;
-
-            var allDownloads = await downloadRepository.GetByAudiobookIdAsync(audiobook.Id, ct);
-            var existingDownloads = allDownloads.Where(d => d.Status == DownloadStatus.Completed).ToList();
-
-            foreach (var dl in existingDownloads.Where(dl => dl.Metadata != null))
-            {
-                if (dl.Metadata!.TryGetValue("Quality", out var qobj) && qobj != null)
-                {
-                    var q = qobj.ToString();
-                    if (!string.IsNullOrEmpty(q))
-                    {
-                        if (bestQuality == null) bestQuality = q;
-                        else if (IsQualityBetter(q, bestQuality, audiobook.QualityProfile)) bestQuality = q;
-                    }
-                }
-            }
-
-            var existingFiles = await fileRepository.GetByAudiobookIdAsync(audiobook.Id, ct);
-
-            foreach (var fq in existingFiles.Select(DetermineFileQuality).Where(fq => !string.IsNullOrEmpty(fq)))
-            {
-                if (bestQuality == null) bestQuality = fq;
-                else if (IsQualityBetter(fq, bestQuality, audiobook.QualityProfile)) bestQuality = fq;
-            }
-
-            return (cutoffMet, bestQuality);
-        }
-
-        /// <summary>
-        /// Compare two quality strings using the quality profile priorities.
-        /// Returns true if candidateQuality is better (higher priority) than existingQuality.
-        /// </summary>
-        private bool IsQualityBetter(string? candidateQuality, string? existingQuality, QualityProfile? profile)
-        {
-            if (string.IsNullOrEmpty(candidateQuality)) return false;
-            if (string.IsNullOrEmpty(existingQuality)) return true;
-            if (profile == null) return false;
-
-            var cand = profile.Qualities.FirstOrDefault(q => q.Quality == candidateQuality);
-            var exist = profile.Qualities.FirstOrDefault(q => q.Quality == existingQuality);
-
-            if (cand == null) return false;
-            if (exist == null) return true; // unknown existing quality -> treat candidate as better
-
-            return cand.Priority > exist.Priority;
-        }
-
-        private async Task<string> GetAppropriateDownloadClientAsync(SearchResult searchResult, bool isTorrent)
-        {
-            using var scope = _serviceScopeFactory.CreateScope();
-            var configurationService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
-
-            // Special handling for DDL downloads - they don't use external clients
-            if (searchResult.DownloadType?.Equals("DDL", StringComparison.OrdinalIgnoreCase) == true)
-            {
-                _logger.LogInformation("DDL download detected, using internal DDL client");
-                return "DDL";
-            }
-
-            // Get all configured download clients
-            var clients = await configurationService.GetDownloadClientConfigurationsAsync();
-            var enabledClients = clients.Where(c => c.IsEnabled).ToList();
-
-            _logger.LogInformation("Looking for {ClientType} client. Found {Count} enabled download clients: {Clients}",
-                isTorrent ? "torrent" : "NZB",
-                enabledClients.Count,
-                string.Join(", ", enabledClients.Select(c => $"{c.Name} ({c.Type})")));
-
-            if (isTorrent)
-            {
-                // Prefer qBittorrent, then Transmission
-                var client = enabledClients.FirstOrDefault(c => c.Type.Equals("qbittorrent", StringComparison.OrdinalIgnoreCase))
-                          ?? enabledClients.FirstOrDefault(c => c.Type.Equals("transmission", StringComparison.OrdinalIgnoreCase));
-
-                if (client != null)
-                {
-                    _logger.LogInformation("Selected torrent client: {ClientName} ({ClientType})", client.Name, client.Type);
-                }
-                else
-                {
-                    _logger.LogWarning("No torrent client (qBittorrent or Transmission) found among enabled clients");
-                }
-
-                return client?.Id ?? string.Empty;
-            }
-            else
-            {
-                // Prefer SABnzbd, then NZBGet
-                var client = enabledClients.FirstOrDefault(c => c.Type.Equals("sabnzbd", StringComparison.OrdinalIgnoreCase))
-                          ?? enabledClients.FirstOrDefault(c => c.Type.Equals("nzbget", StringComparison.OrdinalIgnoreCase));
-
-                if (client != null)
-                {
-                    _logger.LogInformation("Selected NZB client: {ClientName} ({ClientType})", client.Name, client.Type);
-                }
-                else
-                {
-                    _logger.LogWarning("No NZB client (SABnzbd or NZBGet) found among enabled clients");
-                }
-
-                return client?.Id ?? string.Empty;
-            }
-        }
     }
 }
