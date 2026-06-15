@@ -19,6 +19,7 @@ using System.Text.Json;
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Application.Mapping;
+using Listenarr.Application.Metadata;
 using Listenarr.Application.Notification;
 using Listenarr.Application.Security;
 using Listenarr.Domain.Common;
@@ -79,6 +80,8 @@ namespace Listenarr.Application.Audiobooks
                             var audiobookRepository = scope.ServiceProvider.GetRequiredService<IAudiobookRepository>();
                             var fileRepository = scope.ServiceProvider.GetRequiredService<IAudiobookFileRepository>();
                             var historyRepository = scope.ServiceProvider.GetRequiredService<IHistoryRepository>();
+                            // Optional: used by the embedded-tag confirmation fallback below.
+                            var ffmpegService = scope.ServiceProvider.GetService<IFfmpegService>();
                             var audiobook = await audiobookRepository.GetByIdAsync(job.AudiobookId);
                             if (audiobook == null)
                             {
@@ -312,6 +315,56 @@ namespace Listenarr.Application.Audiobooks
                                                     && f.IndexOf(authorToken, StringComparison.OrdinalIgnoreCase) >= 0;
                                                 if ((matchesTitle || matchesAuthor) && unique.Add(f)) foundFiles.Add(f);
                                             }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Embedded-tag confirmation fallback: any audio candidates that the
+                            // path/name heuristics above could not attribute to this audiobook are
+                            // re-checked against their embedded tags (ID3/MP4). This rescues layouts
+                            // where the folder/filename does not carry the title/author (e.g.
+                            // AudioBookShelf-style series folders or numbered episode filenames) but
+                            // the files are tagged correctly. The embedded ASIN is a definitive,
+                            // layout-independent match; title+author tags are a softer fallback.
+                            var unconfirmed = candidates.Where(f => !unique.Contains(f)).ToList();
+                            if (unconfirmed.Count > 0)
+                            {
+                                var ffprobePath = ffmpegService != null ? await ffmpegService.GetFfprobePathAsync() : null;
+                                if (string.IsNullOrEmpty(ffprobePath))
+                                {
+                                    _logger.LogDebug("Scan job {JobId}: {Count} candidate(s) unmatched by path heuristics but ffprobe is unavailable; skipping tag confirmation", job.Id, unconfirmed.Count);
+                                }
+                                else
+                                {
+                                    // Read embedded tags concurrently (ffprobe is process/IO-bound) with a
+                                    // bounded degree of parallelism, then apply matches sequentially so the
+                                    // shared foundFiles/unique state is mutated on a single thread.
+                                    var tagsByFile = new System.Collections.Concurrent.ConcurrentDictionary<string, PathParsedMetadata>(StringComparer.OrdinalIgnoreCase);
+                                    var maxDop = Math.Max(1, Math.Min(4, Environment.ProcessorCount));
+                                    await Parallel.ForEachAsync(unconfirmed,
+                                        new ParallelOptions { MaxDegreeOfParallelism = maxDop, CancellationToken = stoppingToken },
+                                        async (f, token) =>
+                                        {
+                                            try
+                                            {
+                                                var tags = await PathMetadataParser.ReadEmbeddedTagsAsync(f, ffprobePath, token);
+                                                if (tags != null) tagsByFile[f] = tags;
+                                            }
+                                            catch (Exception tagEx) when (tagEx is not OperationCanceledException && tagEx is not OutOfMemoryException && tagEx is not StackOverflowException)
+                                            {
+                                                _logger.LogDebug(tagEx, "Scan job {JobId}: failed reading embedded tags for {File}", job.Id, LogRedaction.SanitizeFilePath(f));
+                                            }
+                                        });
+
+                                    foreach (var f in unconfirmed)
+                                    {
+                                        if (!tagsByFile.TryGetValue(f, out var tags)) continue;
+                                        var reason = MatchEmbeddedTags(audiobook, tags);
+                                        if (reason != TagMatchReason.None && unique.Add(f))
+                                        {
+                                            foundFiles.Add(f);
+                                            _logger.LogInformation("Scan job {JobId}: confirmed '{File}' for audiobook {AudiobookId} via embedded tags ({Reason})", job.Id, LogRedaction.SanitizeFilePath(f), audiobook.Id, reason == TagMatchReason.Asin ? "ASIN" : "title+author");
                                         }
                                     }
                                 }
@@ -582,6 +635,62 @@ namespace Listenarr.Application.Audiobooks
                     _logger.LogError(ex, "Unhandled error in ScanBackgroundService loop");
                 }
             }
+        }
+
+        /// <summary>Why an audio file was attributed to an audiobook via its embedded tags.</summary>
+        internal enum TagMatchReason
+        {
+            None = 0,
+            Asin,
+            TitleAndAuthor,
+        }
+
+        /// <summary>
+        /// Decides whether an audio file's embedded tags identify it as belonging to
+        /// <paramref name="audiobook"/>. A matching ASIN is definitive; otherwise both the
+        /// title and the author must agree (after normalization) so that a shared author or
+        /// a generic title alone cannot produce a false match.
+        /// </summary>
+        internal static TagMatchReason MatchEmbeddedTags(Audiobook audiobook, PathParsedMetadata? tags)
+        {
+            if (audiobook == null || tags == null) return TagMatchReason.None;
+
+            var wantAsin = audiobook.Asin?.Trim();
+            if (!string.IsNullOrWhiteSpace(wantAsin)
+                && !string.IsNullOrWhiteSpace(tags.Asin)
+                && string.Equals(tags.Asin.Trim(), wantAsin, StringComparison.OrdinalIgnoreCase))
+            {
+                return TagMatchReason.Asin;
+            }
+
+            var wantTitle = NormalizeTagToken(audiobook.Title);
+            var tagTitle = NormalizeTagToken(tags.Title);
+            var titleMatch = wantTitle.Length > 0 && tagTitle.Length > 0
+                && (tagTitle.Contains(wantTitle, StringComparison.Ordinal)
+                    || wantTitle.Contains(tagTitle, StringComparison.Ordinal));
+
+            var tagAuthor = NormalizeTagToken(tags.Author);
+            var authorMatch = tagAuthor.Length > 0
+                && (audiobook.Authors ?? new List<string>())
+                    .Select(NormalizeTagToken)
+                    .Where(a => a.Length > 0)
+                    .Any(a => tagAuthor.Contains(a, StringComparison.Ordinal) || a.Contains(tagAuthor, StringComparison.Ordinal));
+
+            return titleMatch && authorMatch ? TagMatchReason.TitleAndAuthor : TagMatchReason.None;
+        }
+
+        /// <summary>Lowercase and collapse runs of non-alphanumeric characters to a single space.</summary>
+        private static string NormalizeTagToken(string? s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return string.Empty;
+            var sb = new System.Text.StringBuilder(s.Length);
+            var lastWasSpace = false;
+            foreach (var ch in s.ToLowerInvariant())
+            {
+                if (char.IsLetterOrDigit(ch)) { sb.Append(ch); lastWasSpace = false; }
+                else if (!lastWasSpace) { sb.Append(' '); lastWasSpace = true; }
+            }
+            return sb.ToString().Trim();
         }
 
         private string CalculateBasePath(List<string> filePaths)
