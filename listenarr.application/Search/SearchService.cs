@@ -567,7 +567,9 @@ namespace Listenarr.Application.Search
                         // Aggregate multiple pages from Audible until we reach candidateLimit
                         var aggregated = new List<AudibleSearchResult>();
                         int page = 1;
-                        int pageSize = Math.Min(50, Math.Max(10, candidateLimit));
+                        // Page at Audible's maximum page size to minimise round-trips (see the
+                        // author+title branch for the rationale); the result cap is applied later.
+                        int pageSize = 50;
                         // For Audible author listings, do not artificially cap aggregation
                         // by the Amazon candidateLimit. Instead, fetch pages until a
                         // page returns fewer than pageSize results (natural end).
@@ -652,7 +654,11 @@ namespace Listenarr.Application.Search
                         // Aggregate author pages up to candidateLimit to enrich matching
                         var aggregated = new List<AudibleSearchResult>();
                         int page = 1;
-                        int pageSize = Math.Min(50, Math.Max(10, candidateLimit));
+                        // Page at Audible's maximum page size to minimise round-trips. The result
+                        // cap (candidateLimit) bounds what we ultimately return, not how many items
+                        // we request per page; coupling the two made a small cap (e.g. cap=5) fetch
+                        // the whole catalogue in tiny 10-item pages (many sequential API calls).
+                        int pageSize = 50;
                         // For Audible author/title combined flows, allow full aggregation
                         // across available pages; we will narrow/return a bounded set later.
                         int maxPages = int.MaxValue;
