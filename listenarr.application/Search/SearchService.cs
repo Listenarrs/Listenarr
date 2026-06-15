@@ -567,7 +567,9 @@ namespace Listenarr.Application.Search
                         // Aggregate multiple pages from Audible until we reach candidateLimit
                         var aggregated = new List<AudibleSearchResult>();
                         int page = 1;
-                        int pageSize = Math.Min(50, Math.Max(10, candidateLimit));
+                        // Page at Audible's maximum page size to minimise round-trips (see the
+                        // author+title branch for the rationale); the result cap is applied later.
+                        int pageSize = 50;
                         // For Audible author listings, do not artificially cap aggregation
                         // by the Amazon candidateLimit. Instead, fetch pages until a
                         // page returns fewer than pageSize results (natural end).
@@ -652,7 +654,11 @@ namespace Listenarr.Application.Search
                         // Aggregate author pages up to candidateLimit to enrich matching
                         var aggregated = new List<AudibleSearchResult>();
                         int page = 1;
-                        int pageSize = Math.Min(50, Math.Max(10, candidateLimit));
+                        // Page at Audible's maximum page size to minimise round-trips. The result
+                        // cap (candidateLimit) bounds what we ultimately return, not how many items
+                        // we request per page; coupling the two made a small cap (e.g. cap=5) fetch
+                        // the whole catalogue in tiny 10-item pages (many sequential API calls).
+                        int pageSize = 50;
                         // For Audible author/title combined flows, allow full aggregation
                         // across available pages; we will narrow/return a bounded set later.
                         int maxPages = int.MaxValue;
@@ -707,13 +713,46 @@ namespace Listenarr.Application.Search
                             var authorFiltered = deduplicated.AsEnumerable();
                             if (!string.IsNullOrWhiteSpace(language)) authorFiltered = authorFiltered.Where(b => !string.IsNullOrWhiteSpace(b.Language) && string.Equals(b.Language, language, StringComparison.OrdinalIgnoreCase));
 
-                            // Title-based filtering can be done directly against the author results
+                            // Title-based filtering can be done directly against the author results.
+                            // Audible splits a book name across Title + Subtitle (e.g. Title="A Dance
+                            // with Dragons", Subtitle="A Song of Ice and Fire, Book 5"), while callers
+                            // (and Library Import) often pass the combined "Title: Subtitle" string.
+                            // Match against Title, Subtitle AND the combined form, after normalizing
+                            // punctuation/whitespace, so a combined query still matches.
                             if (!string.IsNullOrEmpty(titleVal))
                             {
+                                // Lowercase; collapse any run of non-alphanumeric chars to one space.
+                                static string NormalizeForTitleMatch(string? s)
+                                {
+                                    if (string.IsNullOrWhiteSpace(s)) return string.Empty;
+                                    var sb = new System.Text.StringBuilder(s.Length);
+                                    var lastWasSpace = false;
+                                    foreach (var ch in s.ToLowerInvariant())
+                                    {
+                                        if (char.IsLetterOrDigit(ch)) { sb.Append(ch); lastWasSpace = false; }
+                                        else if (!lastWasSpace) { sb.Append(' '); lastWasSpace = true; }
+                                    }
+                                    return sb.ToString().Trim();
+                                }
+
+                                var queryNorm = NormalizeForTitleMatch(titleVal);
                                 authorFiltered = authorFiltered.Where(b =>
-                                    (!string.IsNullOrWhiteSpace(b.Title) && b.Title.IndexOf(titleVal, StringComparison.OrdinalIgnoreCase) >= 0) ||
-                                    (!string.IsNullOrWhiteSpace(b.Subtitle) && b.Subtitle.IndexOf(titleVal, StringComparison.OrdinalIgnoreCase) >= 0)
-                                );
+                                {
+                                    var titleNorm = NormalizeForTitleMatch(b.Title);
+                                    var subtitleNorm = NormalizeForTitleMatch(b.Subtitle);
+                                    if (titleNorm.Length == 0 && subtitleNorm.Length == 0) return false;
+                                    var combinedNorm = subtitleNorm.Length == 0
+                                        ? titleNorm
+                                        : titleNorm + " " + subtitleNorm;
+
+                                    return titleNorm.Contains(queryNorm, StringComparison.Ordinal)
+                                        || subtitleNorm.Contains(queryNorm, StringComparison.Ordinal)
+                                        || combinedNorm.Contains(queryNorm, StringComparison.Ordinal)
+                                        || queryNorm.Contains(combinedNorm, StringComparison.Ordinal)
+                                        // Combined "Title: Subtitle" query vs split fields where the
+                                        // subtitle differs slightly: still match on the title portion.
+                                        || (titleNorm.Length >= 5 && queryNorm.Contains(titleNorm, StringComparison.Ordinal));
+                                });
                             }
 
                             // If an ISBN was provided we must match against detailed metadata;
