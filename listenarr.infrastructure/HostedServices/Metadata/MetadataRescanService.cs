@@ -111,7 +111,7 @@ namespace Listenarr.Infrastructure.HostedServices.Metadata
                         {
                             var fi = new System.IO.FileInfo(file.Path ?? string.Empty);
                             file.Size = fi.Exists ? fi.Length : file.Size;
-                            file.DurationSeconds = meta.Duration.TotalSeconds != 0 ? meta.Duration.TotalSeconds : file.DurationSeconds;
+                            file.DurationSeconds = Math.Abs(meta.Duration.TotalSeconds) > double.Epsilon ? meta.Duration.TotalSeconds : file.DurationSeconds;
                             file.Format = !string.IsNullOrEmpty(meta.Format) ? meta.Format : file.Format;
                             file.Bitrate = meta.BitRate != 0 ? meta.BitRate : file.Bitrate;
                             file.SampleRate = meta.SampleRate != 0 ? meta.SampleRate : file.SampleRate;

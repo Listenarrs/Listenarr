@@ -121,7 +121,7 @@ namespace Listenarr.Api.Controllers
                     {
                         var fi = new System.IO.FileInfo(f.Path ?? string.Empty);
                         f.Size = fi.Exists ? fi.Length : f.Size;
-                        f.DurationSeconds = meta.Duration.TotalSeconds != 0 ? meta.Duration.TotalSeconds : f.DurationSeconds;
+                        f.DurationSeconds = Math.Abs(meta.Duration.TotalSeconds) > double.Epsilon ? meta.Duration.TotalSeconds : f.DurationSeconds;
                         f.Format = !string.IsNullOrEmpty(meta.Format) ? meta.Format : f.Format;
                         f.Bitrate = meta.BitRate != 0 ? meta.BitRate : f.Bitrate;
                         f.SampleRate = meta.SampleRate != 0 ? meta.SampleRate : f.SampleRate;

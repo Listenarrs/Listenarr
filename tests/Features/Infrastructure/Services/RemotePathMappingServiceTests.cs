@@ -102,7 +102,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Services
                 .WithLocalPath(localPath)
                 .Build());
 
-            Assert.Equal(FileUtils.NormalizeStoredPath(localPath), await remotePathMappingService.TranslatePathAsync(client, remotePath));
+            Assert.Equal(FileUtils.EnsureTrailingSeparator(FileUtils.NormalizeStoredPath(localPath)), await remotePathMappingService.TranslatePathAsync(client, remotePath));
             Assert.Equal(Path.Join(localPath, "book.m4b"), await remotePathMappingService.TranslatePathAsync(client, childPath));
         }
     }

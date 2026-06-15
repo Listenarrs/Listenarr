@@ -146,8 +146,7 @@ namespace Listenarr.Infrastructure.Services
                     var relativePath = Path.GetRelativePath(mapping.RemotePath, currentRemotePath);
                     if (string.Equals(relativePath, ".", StringComparison.Ordinal))
                     {
-                        return FileUtils.NormalizeStoredPath(mapping.LocalPath)
-                            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                        return FileUtils.NormalizeStoredPath(mapping.LocalPath);
                     }
 
                     if (FileUtils.TryResolveRelativePathWithinBase(mapping.LocalPath, relativePath, out var mappedPath))
