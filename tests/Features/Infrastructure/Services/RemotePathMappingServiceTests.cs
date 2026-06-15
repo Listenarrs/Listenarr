@@ -25,7 +25,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Services
 
                 if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
                 {
-                    AddRaw("/downloads .  ", "/media/drive  1  ", "/downloads .  ", "/media/drive  1  ");
+                    AddRaw("/downloads .  ", "/media/drive  1  ", "/downloads .  ", "/media/drive  1  /");
                     AddRaw("/downloads .  ", "/media/drive  1  ", "/downloads .  / test ", "/media/drive  1  / test ");
                 }
             }
