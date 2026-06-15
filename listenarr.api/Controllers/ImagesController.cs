@@ -20,6 +20,7 @@ using Listenarr.Application.Interfaces;
 using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Application.Metadata;
 using Listenarr.Application.Security;
+using Listenarr.Domain.Common;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Api.Controllers
@@ -305,7 +306,16 @@ namespace Listenarr.Api.Controllers
 
                 if (System.IO.File.Exists(fullPath))
                 {
-                    System.IO.File.Delete(fullPath);
+                    if (!FileUtils.TryValidateMutationTarget(fullPath, [_effectiveContentRootPath], out var safePath, out var reason))
+                    {
+                        _logger.LogWarning(
+                            "Blocked image delete for identifier {Identifier}: {Reason}",
+                            LogRedaction.SanitizeText(identifier),
+                            LogRedaction.SanitizeText(reason));
+                        return BadRequest(new { message = "Image path is outside the allowed cache root" });
+                    }
+
+                    System.IO.File.Delete(safePath);
                     _logger.LogInformation("Deleted cached image for identifier: {Identifier}", LogRedaction.SanitizeText(identifier));
                     return Ok(new { message = "Image deleted successfully" });
                 }

@@ -84,6 +84,7 @@ namespace Listenarr.Application.Downloads
                 var chapterNumbersForNaming = MultiFileImportPlanner.BuildStableNamingNumbers(plannedAudioFiles, p => p.ChapterNumberHint);
                 var isMultiFileBatch = plannedAudioFiles.Count > 1;
                 var sourceRootPath = FileUtils.GetCommonDirectory(sourceFiles);
+                var usedDestinations = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
                 // Order audio files before companion files
                 var orderedFiles = plannedAudioFiles.Select(p => p.FullPath)
@@ -144,12 +145,20 @@ namespace Listenarr.Application.Downloads
                                 var relativePath = !string.IsNullOrWhiteSpace(sourceRootPath)
                                     ? Path.GetRelativePath(sourceRootPath, file)
                                     : Path.GetFileName(file);
-                                if (relativePath.StartsWith("..", StringComparison.Ordinal))
+
+                                if (!TryResolveImportDestination(audiobook.BasePath, relativePath, out var destination))
                                 {
-                                    relativePath = Path.GetFileName(file);
+                                    results.Add(ImportResult.ImportFailure(completedFileAction, file, audiobook.BasePath));
+                                    logger.LogWarning(
+                                        "Blocked companion import outside audiobook base path. Audiobook {AudiobookId}, Source {Source}, Relative {Relative}, BasePath {BasePath}",
+                                        audiobook.Id,
+                                        file,
+                                        relativePath,
+                                        audiobook.BasePath);
+                                    continue;
                                 }
 
-                                var destination = CombineWithOptionalBase(audiobook.BasePath, relativePath);
+                                destination = await ResolveIdempotentOrUniqueDestinationAsync(file, destination, usedDestinations);
 
                                 if (!await fileMover.PerformActionOn(completedFileAction, file, destination))
                                 {
@@ -231,7 +240,17 @@ namespace Listenarr.Application.Downloads
                             var folderRelative = fileNamingService.ApplyNamingPattern(folderPattern, variablesForFile, treatAsFilename: false);
                             if (string.IsNullOrEmpty(audiobook.BasePath) && !string.IsNullOrWhiteSpace(folderRelative))
                             {
-                                destDirForFile = CombineWithOptionalBase(destDirForFile, folderRelative);
+                                if (!TryResolveImportDestination(destDirForFile, folderRelative, out destDirForFile))
+                                {
+                                    results.Add(ImportResult.ImportFailure(completedFileAction, file, audiobook.BasePath));
+                                    logger.LogWarning(
+                                        "Blocked folder pattern outside audiobook base path. Audiobook {AudiobookId}, Source {Source}, FolderRelative {FolderRelative}, BasePath {BasePath}",
+                                        audiobook.Id,
+                                        file,
+                                        folderRelative,
+                                        audiobook.BasePath);
+                                    continue;
+                                }
                             }
 
                             var baseFilePattern = isMultiFileBatch ? settings.MultiFileNamingPattern : settings.FileNamingPattern;
@@ -269,9 +288,24 @@ namespace Listenarr.Application.Downloads
                                 }
                             }
 
-                            var destination = CombineWithOptionalBase(destDirForFile, filename);
+                            if (!TryResolveImportDestination(destDirForFile, filename, out var destination))
+                            {
+                                results.Add(ImportResult.ImportFailure(completedFileAction, file, destDirForFile));
+                                logger.LogWarning(
+                                    "Blocked audio import outside audiobook base path. Audiobook {AudiobookId}, Source {Source}, Filename {Filename}, BasePath {BasePath}",
+                                    audiobook.Id,
+                                    file,
+                                    filename,
+                                    destDirForFile);
+                                continue;
+                            }
 
-                            if (!await fileMover.PerformActionOn(completedFileAction, file, destination))
+                            destination = await ResolveIdempotentOrUniqueDestinationAsync(file, destination, usedDestinations);
+                            var destinationAlreadyMatchedSource = File.Exists(destination)
+                                && await FileUtils.FilesHaveSameContentAsync(file, destination, ct);
+
+                            if (!(destinationAlreadyMatchedSource && completedFileAction != FileAction.Move)
+                                && !await fileMover.PerformActionOn(completedFileAction, file, destination))
                             {
                                 results.Add(ImportResult.ImportFailure(completedFileAction, file, destination));
                                 continue;
@@ -418,30 +452,33 @@ namespace Listenarr.Application.Downloads
             return trimmedCandidate;
         }
 
-        private static string CombineWithOptionalBase(string? basePath, string candidatePath)
+        private static bool TryResolveImportDestination(string? basePath, string candidatePath, out string destination)
         {
-            var normalizedPath = candidatePath.Trim();
+            destination = string.Empty;
 
-            if (string.IsNullOrEmpty(normalizedPath))
+            if (string.IsNullOrWhiteSpace(basePath) || string.IsNullOrWhiteSpace(candidatePath))
             {
-                return normalizedPath;
+                return false;
             }
 
-            if (Path.IsPathRooted(normalizedPath) || string.IsNullOrWhiteSpace(basePath))
+            return FileUtils.TryResolveRelativePathWithinBase(basePath, candidatePath.Trim(), out destination);
+        }
+
+        private static async Task<string> ResolveIdempotentOrUniqueDestinationAsync(
+            string sourcePath,
+            string destination,
+            ISet<string> usedDestinations)
+        {
+            if (File.Exists(destination)
+                && await FileUtils.FilesHaveSameContentAsync(sourcePath, destination))
             {
-                return normalizedPath;
+                usedDestinations.Add(destination);
+                return destination;
             }
 
-            var relativePath = normalizedPath.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            if (Path.IsPathRooted(relativePath))
-            {
-                return relativePath;
-            }
-
-            var normalizedBasePath = basePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            return string.IsNullOrEmpty(normalizedBasePath)
-                ? relativePath
-                : normalizedBasePath + Path.DirectorySeparatorChar + relativePath;
+            var uniqueDestination = FileUtils.GetUniqueDestinationPath(destination, File.Exists, usedDestinations);
+            usedDestinations.Add(uniqueDestination);
+            return uniqueDestination;
         }
 
         // Local helpers - aligned with DownloadService helper behavior

@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using Listenarr.Domain.Models;
@@ -386,13 +387,276 @@ namespace Listenarr.Domain.Common
                     return false;
 
                 var normalizedChild = NormalizeStoredPath(childPath);
-                var normalizedRoot = NormalizeStoredPath(parentPath)
-                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-                    + Path.DirectorySeparatorChar;
+                var normalizedRoot = NormalizeStoredPath(parentPath);
 
-                return normalizedChild.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase);
+                return IsPathSameOrInside(normalizedChild, normalizedRoot)
+                    && !string.Equals(
+                        TrimTrailingPathSeparators(normalizedChild),
+                        TrimTrailingPathSeparators(normalizedRoot),
+                        GetPathComparison());
             }
             catch (Exception caughtEx_3) when (caughtEx_3 is not OperationCanceledException && caughtEx_3 is not OutOfMemoryException && caughtEx_3 is not StackOverflowException)
+            {
+                return false;
+            }
+        }
+
+        public static bool TryResolveRelativePathWithinBase(string basePath, string relativePath, out string resolvedPath)
+        {
+            resolvedPath = string.Empty;
+
+            try
+            {
+                if (string.IsNullOrWhiteSpace(basePath) || string.IsNullOrWhiteSpace(relativePath))
+                {
+                    return false;
+                }
+
+                if (ContainsRootedPathSegment(relativePath))
+                {
+                    return false;
+                }
+
+                var normalizedBase = Path.GetFullPath(basePath);
+                var candidate = Path.GetFullPath(Path.Join(normalizedBase, NormalizePathSegmentForCombine(relativePath)));
+                if (!IsPathSameOrInside(candidate, normalizedBase))
+                {
+                    return false;
+                }
+
+                resolvedPath = candidate;
+                return true;
+            }
+            catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
+            {
+                resolvedPath = string.Empty;
+                return false;
+            }
+        }
+
+        public static bool IsPathSameOrInside(string candidatePath, string basePath)
+        {
+            if (string.IsNullOrWhiteSpace(candidatePath) || string.IsNullOrWhiteSpace(basePath))
+            {
+                return false;
+            }
+
+            var comparison = GetPathComparison();
+            var normalizedCandidate = NormalizeFullPathForBoundary(candidatePath);
+            var normalizedBase = NormalizeFullPathForBoundary(basePath);
+
+            if (string.Equals(normalizedCandidate, normalizedBase, comparison))
+            {
+                return true;
+            }
+
+            var baseWithSeparator = normalizedBase.EndsWith(Path.DirectorySeparatorChar)
+                || normalizedBase.EndsWith(Path.AltDirectorySeparatorChar)
+                    ? normalizedBase
+                    : normalizedBase + Path.DirectorySeparatorChar;
+
+            return normalizedCandidate.StartsWith(baseWithSeparator, comparison);
+        }
+
+        public static bool TryValidateMutationTarget(
+            string targetPath,
+            IEnumerable<string?> allowedRoots,
+            out string normalizedPath,
+            out string reason)
+        {
+            normalizedPath = string.Empty;
+            reason = string.Empty;
+
+            try
+            {
+                if (string.IsNullOrWhiteSpace(targetPath))
+                {
+                    reason = "Target path is empty.";
+                    return false;
+                }
+
+                normalizedPath = Path.GetFullPath(targetPath);
+                var target = normalizedPath;
+                var normalizedRoots = allowedRoots
+                    .Where(root => !string.IsNullOrWhiteSpace(root))
+                    .Select(root => Path.GetFullPath(root!))
+                    .Distinct(GetPathStringComparer())
+                    .ToList();
+
+                if (normalizedRoots.Count == 0)
+                {
+                    reason = "No allowed mutation roots were provided.";
+                    return false;
+                }
+
+                if (!normalizedRoots.Any(root => IsPathSameOrInside(target, root)))
+                {
+                    reason = "Target path is outside all allowed mutation roots.";
+                    return false;
+                }
+
+                if (!IsResolvedMutationTargetInsideRoots(target, normalizedRoots, out reason))
+                {
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
+            {
+                normalizedPath = string.Empty;
+                reason = "Target path could not be normalized.";
+                return false;
+            }
+        }
+
+        private static bool IsResolvedMutationTargetInsideRoots(
+            string normalizedTargetPath,
+            IReadOnlyCollection<string> normalizedRoots,
+            out string reason)
+        {
+            reason = string.Empty;
+
+            var resolvedRoots = normalizedRoots
+                .Select(root => TryResolveAllowedMutationRoot(root, out var resolvedRoot)
+                    ? resolvedRoot
+                    : string.Empty)
+                .Where(root => !string.IsNullOrWhiteSpace(root))
+                .Distinct(GetPathStringComparer())
+                .ToList();
+
+            if (resolvedRoots.Count == 0)
+            {
+                reason = "Allowed mutation roots could not be resolved safely.";
+                return false;
+            }
+
+            if (!TryGetNearestExistingPath(normalizedTargetPath, out var existingTargetPath))
+            {
+                reason = "Target path has no existing parent under an allowed mutation root.";
+                return false;
+            }
+
+            if (!TryResolveExistingFinalPath(existingTargetPath, out var resolvedExistingTargetPath))
+            {
+                reason = "Target path could not be resolved safely.";
+                return false;
+            }
+
+            if (resolvedRoots.Any(root => IsPathSameOrInside(resolvedExistingTargetPath, root)))
+            {
+                return true;
+            }
+
+            reason = "Target path resolves outside all allowed mutation roots.";
+            return false;
+        }
+
+        private static bool TryResolveAllowedMutationRoot(string rootPath, out string resolvedPath)
+        {
+            resolvedPath = string.Empty;
+
+            if (TryResolveExistingFinalPath(rootPath, out resolvedPath))
+            {
+                return true;
+            }
+
+            if (!TryGetNearestExistingPath(rootPath, out var existingRootAncestor))
+            {
+                return false;
+            }
+
+            return TryResolveExistingFinalPath(existingRootAncestor, out resolvedPath);
+        }
+
+        private static bool TryGetNearestExistingPath(string path, out string existingPath)
+        {
+            existingPath = string.Empty;
+
+            try
+            {
+                var current = Path.GetFullPath(path);
+                while (!string.IsNullOrWhiteSpace(current))
+                {
+                    if (File.Exists(current) || Directory.Exists(current))
+                    {
+                        existingPath = current;
+                        return true;
+                    }
+
+                    var parent = Directory.GetParent(current);
+                    if (parent == null)
+                    {
+                        return false;
+                    }
+
+                    current = parent.FullName;
+                }
+
+                return false;
+            }
+            catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
+            {
+                existingPath = string.Empty;
+                return false;
+            }
+        }
+
+        private static bool TryResolveExistingFinalPath(string path, out string resolvedPath)
+        {
+            resolvedPath = string.Empty;
+
+            try
+            {
+                var fullPath = Path.GetFullPath(path);
+                if (Directory.Exists(fullPath))
+                {
+                    var directoryInfo = new DirectoryInfo(fullPath);
+                    var resolvedTarget = directoryInfo.ResolveLinkTarget(returnFinalTarget: true);
+                    resolvedPath = Path.GetFullPath(resolvedTarget?.FullName ?? directoryInfo.FullName);
+                    return true;
+                }
+
+                if (File.Exists(fullPath))
+                {
+                    var fileInfo = new FileInfo(fullPath);
+                    var resolvedTarget = fileInfo.ResolveLinkTarget(returnFinalTarget: true);
+                    resolvedPath = Path.GetFullPath(resolvedTarget?.FullName ?? fileInfo.FullName);
+                    return true;
+                }
+
+                return false;
+            }
+            catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
+            {
+                resolvedPath = string.Empty;
+                return false;
+            }
+        }
+
+        public static async Task<bool> FilesHaveSameContentAsync(string firstPath, string secondPath, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                if (!File.Exists(firstPath) || !File.Exists(secondPath))
+                {
+                    return false;
+                }
+
+                var firstInfo = new FileInfo(firstPath);
+                var secondInfo = new FileInfo(secondPath);
+                if (firstInfo.Length != secondInfo.Length)
+                {
+                    return false;
+                }
+
+                await using var firstStream = File.Open(firstPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+                await using var secondStream = File.Open(secondPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+                var firstHash = await SHA256.HashDataAsync(firstStream, cancellationToken);
+                var secondHash = await SHA256.HashDataAsync(secondStream, cancellationToken);
+                return firstHash.SequenceEqual(secondHash);
+            }
+            catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
             {
                 return false;
             }
@@ -716,11 +980,48 @@ namespace Listenarr.Domain.Common
                 .Replace('\\', Path.DirectorySeparatorChar);
         }
 
+        private static bool ContainsRootedPathSegment(string path)
+        {
+            if (Path.IsPathRooted(path) || path.StartsWith(@"\\", StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            var segments = path.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
+            return segments.Any(segment => Regex.IsMatch(segment, @"^[A-Za-z]:$"));
+        }
+
         private static string TrimLeadingPathSeparators(string path)
             => path.TrimStart('/', '\\');
 
         private static string TrimTrailingPathSeparators(string path)
             => path.TrimEnd('/', '\\');
+
+        private static StringComparison GetPathComparison()
+            => OperatingSystem.IsWindows()
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal;
+
+        private static StringComparer GetPathStringComparer()
+            => OperatingSystem.IsWindows()
+                ? StringComparer.OrdinalIgnoreCase
+                : StringComparer.Ordinal;
+
+        private static string NormalizeFullPathForBoundary(string path)
+        {
+            var fullPath = Path.GetFullPath(path);
+            var root = Path.GetPathRoot(fullPath);
+            if (!string.IsNullOrEmpty(root)
+                && string.Equals(
+                    fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                    root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                    GetPathComparison()))
+            {
+                return root;
+            }
+
+            return fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
 
         private static bool HasInvalidWindowsPathWhitespace(string path)
         {

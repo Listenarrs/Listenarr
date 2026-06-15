@@ -65,8 +65,20 @@ namespace Listenarr.Api.Controllers
                 var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
                 var settings = await configService.GetApplicationSettingsAsync();
 
+                var destinationIsRooted = Path.IsPathRooted(request.DestinationPath!);
                 var final = FileUtils.CombineWithOptionalBase(settings.OutputPath, request.DestinationPath!);
                 final = FileUtils.NormalizeStoredPath(final);
+                if (!destinationIsRooted
+                    && !string.IsNullOrWhiteSpace(settings.OutputPath)
+                    && !FileUtils.TryValidateMutationTarget(final, [settings.OutputPath], out final, out var finalReason))
+                {
+                    _logger.LogWarning(
+                        "Blocked move destination for audiobook {AudiobookId}: {Destination}. Reason: {Reason}",
+                        id,
+                        final,
+                        finalReason);
+                    return new BadRequestObjectResult(new { message = "DestinationPath must be inside the configured output path" });
+                }
 
                 if (request.MoveFiles == false)
                 {

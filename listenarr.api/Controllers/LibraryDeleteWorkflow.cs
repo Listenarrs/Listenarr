@@ -118,7 +118,17 @@ namespace Listenarr.Api.Controllers
             var fullPath = FileUtils.CombineWithOptionalBase(_contentRootPath, imagePath);
             if (File.Exists(fullPath))
             {
-                File.Delete(fullPath);
+                if (!FileUtils.TryValidateMutationTarget(fullPath, [_contentRootPath], out var safePath, out var reason))
+                {
+                    _logger.LogWarning(
+                        "Blocked cached image delete for {Source} {Identifier}: {Reason}",
+                        source,
+                        LogRedaction.SanitizeText(identifier),
+                        LogRedaction.SanitizeText(reason));
+                    return;
+                }
+
+                File.Delete(safePath);
                 _logger.LogInformation("Deleted cached image for {Source} {Identifier}", source, LogRedaction.SanitizeText(identifier));
             }
         }

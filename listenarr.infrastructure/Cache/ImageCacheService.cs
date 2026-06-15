@@ -19,6 +19,7 @@
 using AsyncKeyedLock;
 using Listenarr.Application.Security;
 using Listenarr.Application.Interfaces;
+using Listenarr.Domain.Common;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.Cache
@@ -199,6 +200,12 @@ namespace Listenarr.Infrastructure.Cache
                 var filePath = _pathResolver.BuildTempFilePath(identifier, extension, _tempCachePath);
 
                 // Save to temp cache
+                if (!FileUtils.TryValidateMutationTarget(filePath, [_tempCachePath], out filePath, out var tempReason))
+                {
+                    _logger.LogWarning("Blocked image cache write for {Identifier}: {Reason}", LogRedaction.SanitizeText(identifier), LogRedaction.SanitizeText(tempReason));
+                    return null;
+                }
+
                 await File.WriteAllBytesAsync(filePath, imageBytes);
 
                 _logger.LogInformation("Image cached successfully: {FilePath}", LogRedaction.SanitizeText(filePath));
@@ -264,6 +271,11 @@ namespace Listenarr.Infrastructure.Cache
 
                 // Move to library storage
                 Directory.CreateDirectory(_libraryImagePath);
+                if (!TryValidateCacheMove(tempPath, _tempCachePath, libraryPath, _libraryImagePath, identifier, out tempPath, out libraryPath))
+                {
+                    return null;
+                }
+
                 File.Move(tempPath, libraryPath, overwrite: true);
 
                 _logger.LogInformation("Image moved to library storage: {Identifier}", LogRedaction.SanitizeText(identifier));
@@ -297,6 +309,8 @@ namespace Listenarr.Infrastructure.Cache
                     var restored = await ImageCacheRefreshWorkflow.RefreshWithBackupAsync(
                         authorPath,
                         tempPath,
+                        _authorImagePath,
+                        _tempCachePath,
                         () => DownloadAndCacheImageAsync(imageUrl, identifier),
                         GetRelativePath);
                     if (!string.IsNullOrWhiteSpace(restored))
@@ -343,6 +357,11 @@ namespace Listenarr.Infrastructure.Cache
 
                 // Move to author storage
                 Directory.CreateDirectory(_authorImagePath);
+                if (!TryValidateCacheMove(tempPath, _tempCachePath, authorPath, _authorImagePath, identifier, out tempPath, out authorPath))
+                {
+                    return null;
+                }
+
                 File.Move(tempPath, authorPath, overwrite: true);
 
                 _logger.LogInformation("Author image moved to author storage: {Identifier}", LogRedaction.SanitizeText(identifier));
@@ -373,6 +392,8 @@ namespace Listenarr.Infrastructure.Cache
                     var restored = await ImageCacheRefreshWorkflow.RefreshWithBackupAsync(
                         seriesPath,
                         tempPath,
+                        _seriesImagePath,
+                        _tempCachePath,
                         () => DownloadAndCacheImageAsync(imageUrl, identifier),
                         GetRelativePath);
                     if (!string.IsNullOrWhiteSpace(restored))
@@ -414,6 +435,11 @@ namespace Listenarr.Infrastructure.Cache
                 }
 
                 Directory.CreateDirectory(_seriesImagePath);
+                if (!TryValidateCacheMove(tempPath, _tempCachePath, seriesPath, _seriesImagePath, identifier, out tempPath, out seriesPath))
+                {
+                    return null;
+                }
+
                 File.Move(tempPath, seriesPath, overwrite: true);
 
                 _logger.LogInformation("Series image moved to series storage: {Identifier}", LogRedaction.SanitizeText(identifier));
@@ -481,7 +507,13 @@ namespace Listenarr.Infrastructure.Cache
                     {
                         try
                         {
-                            File.Delete(file);
+                            if (!FileUtils.TryValidateMutationTarget(file, [_tempCachePath], out var safeFile, out var reason))
+                            {
+                                _logger.LogWarning("Blocked temp cache delete for {File}: {Reason}", LogRedaction.SanitizeFilePath(file), LogRedaction.SanitizeText(reason));
+                                continue;
+                            }
+
+                            File.Delete(safeFile);
                         }
                         catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                         {
@@ -507,6 +539,33 @@ namespace Listenarr.Infrastructure.Cache
         private string GetRelativePath(string fullPath)
         {
             return _pathResolver.GetRelativePath(fullPath);
+        }
+
+        private bool TryValidateCacheMove(
+            string sourcePath,
+            string sourceRoot,
+            string destinationPath,
+            string destinationRoot,
+            string identifier,
+            out string safeSourcePath,
+            out string safeDestinationPath)
+        {
+            safeSourcePath = sourcePath;
+            safeDestinationPath = destinationPath;
+
+            if (!FileUtils.TryValidateMutationTarget(sourcePath, [sourceRoot], out safeSourcePath, out var sourceReason))
+            {
+                _logger.LogWarning("Blocked cached image move for {Identifier}: source invalid: {Reason}", LogRedaction.SanitizeText(identifier), LogRedaction.SanitizeText(sourceReason));
+                return false;
+            }
+
+            if (!FileUtils.TryValidateMutationTarget(destinationPath, [destinationRoot], out safeDestinationPath, out var destinationReason))
+            {
+                _logger.LogWarning("Blocked cached image move for {Identifier}: destination invalid: {Reason}", LogRedaction.SanitizeText(identifier), LogRedaction.SanitizeText(destinationReason));
+                return false;
+            }
+
+            return true;
         }
 
         public void Dispose()

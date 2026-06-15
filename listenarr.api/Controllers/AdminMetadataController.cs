@@ -18,6 +18,7 @@
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Domain.Models;
+using Listenarr.Domain.Common;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Api.Controllers
@@ -57,6 +58,10 @@ namespace Listenarr.Api.Controllers
             var path = file.Path ?? string.Empty;
             if (string.IsNullOrWhiteSpace(path))
                 return BadRequest(new { message = "AudiobookFile has no path" });
+            if (!System.IO.File.Exists(path))
+                return NotFound(new { message = "AudiobookFile path does not exist" });
+            if (!FileUtils.IsAudioFile(path))
+                return BadRequest(new { message = "AudiobookFile path is not a supported audio file" });
 
             AudioMetadata? meta = null;
             try
@@ -105,7 +110,13 @@ namespace Listenarr.Api.Controllers
             {
                 try
                 {
-                    var meta = await metadataService.ExtractFileMetadataAsync(f.Path ?? string.Empty);
+                    var path = f.Path ?? string.Empty;
+                    if (string.IsNullOrWhiteSpace(path) || !System.IO.File.Exists(path) || !FileUtils.IsAudioFile(path))
+                    {
+                        continue;
+                    }
+
+                    var meta = await metadataService.ExtractFileMetadataAsync(path);
                     if (meta != null)
                     {
                         var fi = new System.IO.FileInfo(f.Path ?? string.Empty);

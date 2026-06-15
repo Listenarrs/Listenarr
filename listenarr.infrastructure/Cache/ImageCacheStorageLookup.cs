@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Listenarr.Application.Security;
+using Listenarr.Domain.Common;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.Cache
@@ -108,7 +109,26 @@ namespace Listenarr.Infrastructure.Cache
                     _logger.LogInformation("Deleting placeholder/tiny cached image for {Identifier} in {Bucket}: {Path}", LogRedaction.SanitizeText(identifier), bucket, LogRedaction.SanitizeText(filePath));
                     try
                     {
-                        File.Delete(filePath);
+                        var root = bucket switch
+                        {
+                            "library" => _libraryImagePath,
+                            "author" => _authorImagePath,
+                            "series" => _seriesImagePath,
+                            _ => _tempCachePath
+                        };
+
+                        if (FileUtils.TryValidateMutationTarget(filePath, [root], out var safePath, out var reason))
+                        {
+                            File.Delete(safePath);
+                        }
+                        else
+                        {
+                            _logger.LogWarning(
+                                "Blocked cached image delete for {Identifier} in {Bucket}: {Reason}",
+                                LogRedaction.SanitizeText(identifier),
+                                bucket,
+                                LogRedaction.SanitizeText(reason));
+                        }
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                     {

@@ -19,6 +19,7 @@ using Listenarr.Application.Interfaces;
 using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Application.Mapping;
 using Listenarr.Application.Security;
+using Listenarr.Domain.Common;
 using Listenarr.Domain.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -90,11 +91,35 @@ namespace Listenarr.Infrastructure.FileSystem
                 target = Path.GetFullPath(target);
                 source = Path.GetFullPath(source);
 
+                if (IsFilesystemRoot(source) || IsFilesystemRoot(target))
+                {
+                    moveQueueService.UpdateJobStatus(job.Id, "Failed", "Refused to move a filesystem root");
+                    metrics.Increment("worker.move.job.failed");
+                    logger.LogWarning(
+                        "Blocked move job {JobId}: source or target is a filesystem root. Source={Source}, Target={Target}",
+                        job.Id,
+                        LogRedaction.SanitizeFilePath(source),
+                        LogRedaction.SanitizeFilePath(target));
+                    return;
+                }
+
                 // If source == target, nothing to do
                 if (string.Equals(source.TrimEnd(Path.DirectorySeparatorChar), target.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
                 {
                     moveQueueService.UpdateJobStatus(job.Id, "Completed");
                     metrics.Increment("worker.move.job.skipped");
+                    return;
+                }
+
+                if (FileUtils.IsPathInsideOf(target, source) || FileUtils.IsPathInsideOf(source, target))
+                {
+                    moveQueueService.UpdateJobStatus(job.Id, "Failed", "Source and target paths overlap");
+                    metrics.Increment("worker.move.job.failed");
+                    logger.LogWarning(
+                        "Blocked overlapping move job {JobId}: {Source} -> {Target}",
+                        job.Id,
+                        LogRedaction.SanitizeFilePath(source),
+                        LogRedaction.SanitizeFilePath(target));
                     return;
                 }
 
@@ -125,6 +150,13 @@ namespace Listenarr.Infrastructure.FileSystem
 
                 // Create a temporary directory under the target parent
                 var tempName = Path.Join(targetParent, Path.GetFileName(target) + ".tmp-" + job.Id.ToString("N"));
+                if (!FileUtils.TryValidateMutationTarget(tempName, [targetParent], out tempName, out var tempReason))
+                {
+                    moveQueueService.UpdateJobStatus(job.Id, "Failed", tempReason);
+                    metrics.Increment("worker.move.job.failed");
+                    logger.LogWarning("Blocked move temp path for job {JobId}: {Reason}", job.Id, tempReason);
+                    return;
+                }
 
                 // Copy recursively with retries per file
                 try
@@ -139,7 +171,10 @@ namespace Listenarr.Infrastructure.FileSystem
                     foreach (var entry in entries)
                     {
                         var rel = Path.GetRelativePath(source, entry);
-                        var destPath = CombineWithOptionalBase(copyDest, rel);
+                        if (!FileUtils.TryResolveRelativePathWithinBase(copyDest, rel, out var destPath))
+                        {
+                            throw new IOException($"Move entry destination escaped target root: {rel}");
+                        }
 
                         if (Directory.Exists(entry))
                         {
@@ -158,6 +193,16 @@ namespace Listenarr.Infrastructure.FileSystem
                         {
                             try
                             {
+                                if (File.Exists(destPath) && await FileUtils.FilesHaveSameContentAsync(entry, destPath, stoppingToken))
+                                {
+                                    logger.LogInformation(
+                                        "Skipping copy for move job {JobId}; destination already has identical content: {Dest}",
+                                        job.Id,
+                                        LogRedaction.SanitizeFilePath(destPath));
+                                    succeeded = true;
+                                    break;
+                                }
+
                                 File.Copy(entry, destPath, false);
 
                                 // Preserve file attributes and timestamps
@@ -219,6 +264,11 @@ namespace Listenarr.Infrastructure.FileSystem
                     // If we copied directly to target, it's already in place
 
                     // Delete source directory
+                    if (!Directory.Exists(source) || IsFilesystemRoot(source))
+                    {
+                        throw new IOException("Source path became invalid before cleanup.");
+                    }
+
                     Directory.Delete(source, true);
 
                     // Preserve local image path if it pointed inside the source directory
@@ -236,14 +286,13 @@ namespace Listenarr.Infrastructure.FileSystem
                                 {
                                     var fullImagePath = Path.IsPathRooted(imageUrl)
                                         ? Path.GetFullPath(imageUrl)
-                                        : Path.GetFullPath(CombineWithOptionalBase(source, imageUrl));
-                                    if (fullImagePath.StartsWith(source, StringComparison.OrdinalIgnoreCase))
+                                        : Path.GetFullPath(Path.Join(source, imageUrl));
+                                    if (FileUtils.IsPathSameOrInside(fullImagePath, source))
                                     {
                                         var rel = Path.GetRelativePath(source, fullImagePath);
-                                        var newImagePath = Path.GetFullPath(CombineWithOptionalBase(target, rel));
-
                                         // Only update if the new file actually exists after move
-                                        if (System.IO.File.Exists(newImagePath))
+                                        if (FileUtils.TryResolveRelativePathWithinBase(target, rel, out var newImagePath)
+                                            && System.IO.File.Exists(newImagePath))
                                         {
                                             audiobook.ImageUrl = newImagePath;
                                             await audiobookRepository.UpdateAsync(audiobook);
@@ -270,15 +319,14 @@ namespace Listenarr.Infrastructure.FileSystem
                         {
                             var fullFilePath = Path.IsPathRooted(audiobook.FilePath)
                                 ? Path.GetFullPath(audiobook.FilePath)
-                                : Path.GetFullPath(CombineWithOptionalBase(source, audiobook.FilePath));
+                                : Path.GetFullPath(Path.Join(source, audiobook.FilePath));
 
-                            if (fullFilePath.StartsWith(source, StringComparison.OrdinalIgnoreCase))
+                            if (FileUtils.IsPathSameOrInside(fullFilePath, source))
                             {
                                 var rel = Path.GetRelativePath(source, fullFilePath);
-                                var newFilePath = Path.GetFullPath(CombineWithOptionalBase(target, rel));
-
                                 // Only update if the new file actually exists after move
-                                if (File.Exists(newFilePath))
+                                if (FileUtils.TryResolveRelativePathWithinBase(target, rel, out var newFilePath)
+                                    && File.Exists(newFilePath))
                                 {
                                     audiobook.FilePath = newFilePath;
                                     await audiobookRepository.UpdateAsync(audiobook);
@@ -408,7 +456,14 @@ namespace Listenarr.Infrastructure.FileSystem
                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                 {
                     // Cleanup any temp dir
-                    try { if (Directory.Exists(tempName)) Directory.Delete(tempName, true); }
+                    try
+                    {
+                        if (Directory.Exists(tempName)
+                            && FileUtils.TryValidateMutationTarget(tempName, [targetParent], out var safeTempName, out _))
+                        {
+                            Directory.Delete(safeTempName, true);
+                        }
+                    }
                     catch (Exception caughtEx_1) when (caughtEx_1 is not OperationCanceledException && caughtEx_1 is not OutOfMemoryException && caughtEx_1 is not StackOverflowException)
                     {
                         System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
@@ -493,30 +548,18 @@ namespace Listenarr.Infrastructure.FileSystem
             }
         }
 
-        private static string CombineWithOptionalBase(string? basePath, string candidatePath)
+        private static bool IsFilesystemRoot(string path)
         {
-            var normalizedPath = candidatePath.Trim();
-
-            if (string.IsNullOrEmpty(normalizedPath))
+            if (string.IsNullOrWhiteSpace(path))
             {
-                return normalizedPath;
+                return false;
             }
 
-            if (Path.IsPathRooted(normalizedPath) || string.IsNullOrWhiteSpace(basePath))
-            {
-                return normalizedPath;
-            }
-
-            var relativePath = normalizedPath.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            if (Path.IsPathRooted(relativePath))
-            {
-                return relativePath;
-            }
-
-            var normalizedBasePath = basePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            return string.IsNullOrEmpty(normalizedBasePath)
-                ? relativePath
-                : normalizedBasePath + Path.DirectorySeparatorChar + relativePath;
+            var fullPath = Path.GetFullPath(path)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var root = Path.GetPathRoot(fullPath)?.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            return !string.IsNullOrWhiteSpace(root)
+                && string.Equals(fullPath, root, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
         }
     }
 }

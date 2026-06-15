@@ -68,5 +68,42 @@ namespace Listenarr.Tests.Features.Infrastructure.Services
             Assert.Equal(expected, await remotePathMappingService.TranslatePathAsync(client, given));
             Assert.Equal(given, await remotePathMappingService.TranslatePathAsync(randomClient, given));
         }
+
+        [Fact]
+        [Trait("Method", "TranslatePathAsync")]
+        public async Task TranslatePathAsync_DoesNotMapSiblingPrefixPath()
+        {
+            var remotePath = FileUtils.GetAbsolutePath("downloads");
+            var localPath = FileUtils.GetAbsolutePath("imports");
+            var siblingPath = FileUtils.GetAbsolutePath("downloads2", "book.m4b");
+
+            await _remotePathMappingRepository.SaveAsync(new RemotePathMappingBuilder()
+                .WithDownloadClientConfiguration(client)
+                .WithRemotePath(remotePath)
+                .WithLocalPath(localPath)
+                .Build());
+
+            var translated = await remotePathMappingService.TranslatePathAsync(client, siblingPath);
+
+            Assert.Equal(siblingPath, translated);
+        }
+
+        [Fact]
+        [Trait("Method", "TranslatePathAsync")]
+        public async Task TranslatePathAsync_MapsExactRootAndSeparatorBoundChild()
+        {
+            var remotePath = FileUtils.GetAbsolutePath("downloads");
+            var localPath = FileUtils.GetAbsolutePath("imports");
+            var childPath = Path.Join(remotePath, "book.m4b");
+
+            await _remotePathMappingRepository.SaveAsync(new RemotePathMappingBuilder()
+                .WithDownloadClientConfiguration(client)
+                .WithRemotePath(remotePath)
+                .WithLocalPath(localPath)
+                .Build());
+
+            Assert.Equal(FileUtils.NormalizeStoredPath(localPath), await remotePathMappingService.TranslatePathAsync(client, remotePath));
+            Assert.Equal(Path.Join(localPath, "book.m4b"), await remotePathMappingService.TranslatePathAsync(client, childPath));
+        }
     }
 }

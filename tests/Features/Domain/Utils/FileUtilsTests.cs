@@ -365,5 +365,141 @@ namespace Listenarr.Tests.Features.Domain.Utils
 
             Assert.Throws<ArgumentException>(() => FileUtils.CombineRelativePath("root", @"C:\escape"));
         }
+
+        [Fact]
+        public void TryResolveRelativePathWithinBase_AllowsNestedTempFile()
+        {
+            var root = Path.Join(Path.GetTempPath(), "fu-contain-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+
+            try
+            {
+                var ok = FileUtils.TryResolveRelativePathWithinBase(
+                    root,
+                    Path.Join("author", "book.m4b"),
+                    out var resolved);
+
+                Assert.True(ok);
+                Assert.True(FileUtils.IsPathSameOrInside(resolved, root));
+                Assert.Equal(Path.GetFullPath(Path.Join(root, "author", "book.m4b")), resolved);
+            }
+            finally
+            {
+                try { Directory.Delete(root, true); } catch (IOException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); } catch (UnauthorizedAccessException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); }
+            }
+        }
+
+        [Theory]
+        [InlineData("../escape.m4b")]
+        [InlineData("author/../../escape.m4b")]
+        [InlineData("C:/escape.m4b")]
+        [InlineData("C:\\escape.m4b")]
+        public void TryResolveRelativePathWithinBase_BlocksTraversalAndRootedSegments(string relativePath)
+        {
+            var root = Path.Join(Path.GetTempPath(), "fu-contain-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+
+            try
+            {
+                var ok = FileUtils.TryResolveRelativePathWithinBase(root, relativePath, out var resolved);
+
+                Assert.False(ok);
+                Assert.Equal(string.Empty, resolved);
+            }
+            finally
+            {
+                try { Directory.Delete(root, true); } catch (IOException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); } catch (UnauthorizedAccessException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); }
+            }
+        }
+
+        [Fact]
+        public void TryValidateMutationTarget_AllowsOnlyConfiguredRoots()
+        {
+            var root = Path.Join(Path.GetTempPath(), "fu-mutation-" + Guid.NewGuid().ToString("N"));
+            var sibling = root + "-sibling";
+            Directory.CreateDirectory(root);
+            Directory.CreateDirectory(sibling);
+
+            try
+            {
+                var allowedTarget = Path.Join(root, "book.m4b");
+                var siblingTarget = Path.Join(sibling, "book.m4b");
+
+                Assert.True(FileUtils.TryValidateMutationTarget(allowedTarget, [root], out var normalized, out var reason));
+                Assert.Equal(Path.GetFullPath(allowedTarget), normalized);
+                Assert.Equal(string.Empty, reason);
+
+                Assert.False(FileUtils.TryValidateMutationTarget(siblingTarget, [root], out _, out reason));
+                Assert.Contains("outside", reason, StringComparison.OrdinalIgnoreCase);
+            }
+            finally
+            {
+                try { Directory.Delete(root, true); } catch (IOException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); } catch (UnauthorizedAccessException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); }
+                try { Directory.Delete(sibling, true); } catch (IOException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); } catch (UnauthorizedAccessException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); }
+            }
+        }
+
+        [Fact]
+        public void TryValidateMutationTarget_BlocksDirectorySymlinkEscape()
+        {
+            var root = Path.Join(Path.GetTempPath(), "fu-mutation-" + Guid.NewGuid().ToString("N"));
+            var outside = root + "-outside";
+            Directory.CreateDirectory(root);
+            Directory.CreateDirectory(outside);
+
+            var linkPath = Path.Join(root, "linked-outside");
+            try
+            {
+                try
+                {
+                    Directory.CreateSymbolicLink(linkPath, outside);
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+                {
+                    return;
+                }
+
+                if (!Directory.Exists(linkPath))
+                {
+                    return;
+                }
+
+                var target = Path.Join(linkPath, "escape.mp3");
+                var ok = FileUtils.TryValidateMutationTarget(target, [root], out _, out var reason);
+
+                Assert.False(ok);
+                Assert.Contains("resolves outside", reason, StringComparison.OrdinalIgnoreCase);
+            }
+            finally
+            {
+                try { if (Directory.Exists(linkPath)) Directory.Delete(linkPath); } catch (IOException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); } catch (UnauthorizedAccessException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); }
+                try { Directory.Delete(root, true); } catch (IOException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); } catch (UnauthorizedAccessException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); }
+                try { Directory.Delete(outside, true); } catch (IOException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); } catch (UnauthorizedAccessException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); }
+            }
+        }
+
+        [Fact]
+        public async Task FilesHaveSameContentAsync_UsesSizeAndHash()
+        {
+            var root = Path.Join(Path.GetTempPath(), "fu-hash-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+
+            try
+            {
+                var first = Path.Join(root, "first.mp3");
+                var second = Path.Join(root, "second.mp3");
+                var third = Path.Join(root, "third.mp3");
+                await File.WriteAllTextAsync(first, "same");
+                await File.WriteAllTextAsync(second, "same");
+                await File.WriteAllTextAsync(third, "diff");
+
+                Assert.True(await FileUtils.FilesHaveSameContentAsync(first, second));
+                Assert.False(await FileUtils.FilesHaveSameContentAsync(first, third));
+            }
+            finally
+            {
+                try { Directory.Delete(root, true); } catch (IOException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); } catch (UnauthorizedAccessException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); }
+            }
+        }
     }
 }

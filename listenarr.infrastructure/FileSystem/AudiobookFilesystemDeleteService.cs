@@ -65,9 +65,14 @@ namespace Listenarr.Infrastructure.FileSystem
             }
             else
             {
+                var protectedRoots = await GetProtectedRootPathsAsync();
+                var fallbackFolderRoot = ResolveAudiobookFolderPath(audiobook, trackedFilePaths);
+                var allowedRoots = protectedRoots
+                    .Concat(string.IsNullOrWhiteSpace(fallbackFolderRoot) ? [] : [fallbackFolderRoot])
+                    .ToList();
                 foreach (var trackedFilePath in trackedFilePaths)
                 {
-                    TryDeleteFile(trackedFilePath, result);
+                    TryDeleteFile(trackedFilePath, result, allowedRoots);
                 }
             }
 
@@ -106,12 +111,24 @@ namespace Listenarr.Infrastructure.FileSystem
             return paths.ToList();
         }
 
-        private void TryDeleteFile(string path, AudiobookFilesystemDeleteResult result)
+        private void TryDeleteFile(string path, AudiobookFilesystemDeleteResult result, IEnumerable<string>? allowedRoots = null)
         {
             try
             {
                 if (!File.Exists(path))
                 {
+                    return;
+                }
+
+                var originalPath = path;
+                if (allowedRoots != null
+                    && !FileUtils.TryValidateMutationTarget(path, allowedRoots, out path, out var reason))
+                {
+                    result.Warnings.Add("Refused to delete a file outside the allowed library roots.");
+                    _logger.LogWarning(
+                        "Blocked audiobook file delete for {Path}: {Reason}",
+                        LogRedaction.SanitizeFilePath(originalPath),
+                        LogRedaction.SanitizeText(reason));
                     return;
                 }
 
@@ -148,7 +165,7 @@ namespace Listenarr.Infrastructure.FileSystem
 
             foreach (var filePath in files)
             {
-                TryDeleteFile(filePath, result);
+                TryDeleteFile(filePath, result, [folderPath]);
             }
 
             string[] directories;
@@ -520,9 +537,7 @@ namespace Listenarr.Infrastructure.FileSystem
         }
 
         private static bool IsSamePathOrWithin(string path, string rootPath)
-        {
-            return PathsEqual(path, rootPath) || FileUtils.IsPathInsideOf(path, rootPath);
-        }
+            => FileUtils.IsPathSameOrInside(path, rootPath);
 
         private static bool IsFilesystemRoot(string? path)
         {

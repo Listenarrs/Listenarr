@@ -17,6 +17,7 @@
  */
 
 using Microsoft.Extensions.Logging;
+using Listenarr.Domain.Common;
 using SharpCompress.Archives;
 using SharpCompress.Common;
 using SharpCompress.Readers;
@@ -39,7 +40,7 @@ namespace Listenarr.Infrastructure.Ffmpeg
                 foreach (var entry in archive.Entries.Where(e => !e.IsDirectory))
                 {
                     var entryPath = entry.Key ?? string.Empty;
-                    if (!TryBuildPathUnderRoot(baseRoot, entryPath, out var outPath))
+                    if (!FileUtils.TryResolveRelativePathWithinBase(baseRoot, entryPath, out var outPath))
                     {
                         logger.LogWarning("Skipping archive entry outside extraction root: {Entry}", entryPath);
                         continue;
@@ -70,7 +71,7 @@ namespace Listenarr.Infrastructure.Ffmpeg
                         }
 
                         var entryPath = reader.Entry.Key ?? string.Empty;
-                        if (!TryBuildPathUnderRoot(baseRoot, entryPath, out var outPath))
+                        if (!FileUtils.TryResolveRelativePathWithinBase(baseRoot, entryPath, out var outPath))
                         {
                             logger.LogWarning("Skipping archive entry outside extraction root: {Entry}", entryPath);
                             continue;
@@ -94,7 +95,14 @@ namespace Listenarr.Infrastructure.Ffmpeg
                 }
             }
 
-            File.Move(tmpFile, ffprobePath);
+            if (!FileUtils.TryValidateMutationTarget(ffprobePath, [baseDir], out var safeFfprobePath, out var reason))
+            {
+                logger.LogWarning("Blocked ffprobe install target outside base directory: {Reason}", reason);
+                await TryDeleteFileAsync(tmpFile);
+                return false;
+            }
+
+            File.Move(tmpFile, safeFfprobePath);
             return true;
         }
 
@@ -119,44 +127,5 @@ namespace Listenarr.Infrastructure.Ffmpeg
             }
         }
 
-        private static bool TryBuildPathUnderRoot(string rootPath, string entryPath, out string resolvedPath)
-        {
-            resolvedPath = string.Empty;
-
-            if (string.IsNullOrWhiteSpace(rootPath) || string.IsNullOrWhiteSpace(entryPath))
-            {
-                return false;
-            }
-
-            var normalizedRoot = Path.GetFullPath(rootPath)
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-
-            var normalizedEntry = entryPath
-                .Replace('\\', Path.DirectorySeparatorChar)
-                .Replace('/', Path.DirectorySeparatorChar)
-                .Trim();
-
-            if (string.IsNullOrWhiteSpace(normalizedEntry))
-            {
-                return false;
-            }
-
-            normalizedEntry = normalizedEntry.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            if (Path.IsPathRooted(normalizedEntry))
-            {
-                return false;
-            }
-
-            var candidatePath = Path.GetFullPath(
-                normalizedRoot + Path.DirectorySeparatorChar + normalizedEntry);
-            if (!candidatePath.StartsWith(normalizedRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(candidatePath, normalizedRoot, StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-
-            resolvedPath = candidatePath;
-            return true;
-        }
     }
 }

@@ -17,6 +17,7 @@
  */
 
 using Listenarr.Application.Security;
+using Listenarr.Domain.Common;
 using Microsoft.AspNetCore.Mvc;
 using System.Runtime.InteropServices;
 
@@ -152,9 +153,16 @@ public class FileSystemController : ControllerBase
                 {
                     // Try to create a temporary file to check write permissions
                     var testFile = Path.Join(normalizedPath, $".listenarr_test_{Guid.NewGuid()}.tmp");
-                    System.IO.File.WriteAllText(testFile, "test");
-                    System.IO.File.Delete(testFile);
-                    isWritable = true;
+                    if (!FileUtils.TryValidateMutationTarget(testFile, [normalizedPath], out var safeTestFile, out _))
+                    {
+                        isWritable = false;
+                    }
+                    else
+                    {
+                        System.IO.File.WriteAllText(safeTestFile, "test");
+                        System.IO.File.Delete(safeTestFile);
+                        isWritable = true;
+                    }
                 }
                 catch (Exception caughtEx_1) when (caughtEx_1 is not OperationCanceledException && caughtEx_1 is not OutOfMemoryException && caughtEx_1 is not StackOverflowException)
                 {

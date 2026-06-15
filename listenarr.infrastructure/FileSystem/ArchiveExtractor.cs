@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Listenarr.Application.Interfaces;
+using Listenarr.Domain.Common;
 using Microsoft.Extensions.Logging;
 using SharpCompress.Archives;
 using SharpCompress.Common;
@@ -66,22 +67,7 @@ namespace Listenarr.Infrastructure.FileSystem
                             continue;
                         }
 
-                        var relativeEntryPath = entryPath.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                        if (Path.IsPathRooted(relativeEntryPath))
-                        {
-                            _logger.LogWarning(
-                                "ArchiveExtractor: skipping rooted entry path {Entry} in archive {Archive}",
-                                entry.Key,
-                                archivePath);
-                            continue;
-                        }
-
-                        var combinedPath = tmpRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-                            + Path.DirectorySeparatorChar
-                            + relativeEntryPath;
-                        var destPath = Path.GetFullPath(combinedPath);
-                        if (!destPath.StartsWith(tmpRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
-                            && !string.Equals(destPath, tmpRoot, StringComparison.OrdinalIgnoreCase))
+                        if (!FileUtils.TryResolveRelativePathWithinBase(tmpRoot, entryPath, out var destPath))
                         {
                             _logger.LogWarning(
                                 "ArchiveExtractor: skipping out-of-root entry {Entry} in archive {Archive}",
@@ -110,8 +96,6 @@ namespace Listenarr.Infrastructure.FileSystem
         }
     }
 }
-
-
 
 
 

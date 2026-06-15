@@ -39,6 +39,7 @@ using Listenarr.Application.Notification;
 using Listenarr.Application.Search.Strategies;
 using Listenarr.Infrastructure.Services;
 using Listenarr.Domain.Models.Configurations;
+using Listenarr.Domain.Common;
 using Listenarr.Application.Audiobooks;
 using Listenarr.Infrastructure.Persistence.Repositories;
 using Listenarr.Api.Middleware;
@@ -123,11 +124,16 @@ try
 
     if (!File.Exists(externalConfigAbsolute))
     {
+        if (!FileUtils.TryValidateMutationTarget(externalConfigAbsolute, [dir], out var safeExternalConfigAbsolute, out var reason))
+        {
+            throw new IOException($"External config path is outside the resolved config directory: {reason}");
+        }
+
         // Minimal, safe default configuration (non-sensitive)
         var defaultJson = "{\n  \"Serilog\": {\n    \"MinimumLevel\": {\n      \"Default\": \"Information\",\n      \"Override\": {\n        \"Microsoft\": \"Warning\",\n        \"System\": \"Warning\"\n      }\n    }\n  }\n}";
-        File.WriteAllText(externalConfigAbsolute, defaultJson);
+        File.WriteAllText(safeExternalConfigAbsolute, defaultJson);
         // Log the absolute path so it's clear where the file was created
-        Console.WriteLine($"[Listenarr] Created default configuration at '{externalConfigAbsolute}'. Edit this file to customize app settings.");
+        Console.WriteLine($"[Listenarr] Created default configuration at '{safeExternalConfigAbsolute}'. Edit this file to customize app settings.");
     }
 }
 catch (Exception ex) when (

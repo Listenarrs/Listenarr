@@ -329,6 +329,16 @@ namespace Listenarr.Application.Common
 
             // Ensure the config directory exists
             var configDir = Path.GetDirectoryName(_configPath);
+            if (string.IsNullOrWhiteSpace(configDir))
+            {
+                throw new IOException("Startup config path has no resolved config directory.");
+            }
+
+            if (!FileUtils.TryValidateMutationTarget(_configPath, [configDir], out var safeConfigPath, out var reason))
+            {
+                throw new IOException($"Startup config path is outside the resolved config directory: {reason}");
+            }
+
             if (!string.IsNullOrEmpty(configDir) && !Directory.Exists(configDir))
             {
                 _logger.LogWarning("[StartupConfigService] Config directory did not exist. Creating: {Dir}", configDir);
@@ -339,8 +349,8 @@ namespace Listenarr.Application.Common
             var json = JsonSerializer.Serialize(config, options);
             try
             {
-                File.WriteAllText(_configPath, json);
-                _logger.LogInformation("[StartupConfigService] File.WriteAllText succeeded for {Path}", _configPath);
+                File.WriteAllText(safeConfigPath, json);
+                _logger.LogInformation("[StartupConfigService] File.WriteAllText succeeded for {Path}", safeConfigPath);
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {

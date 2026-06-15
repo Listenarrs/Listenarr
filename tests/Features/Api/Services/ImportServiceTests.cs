@@ -549,6 +549,86 @@ namespace Listenarr.Tests.Features.Api.Services
         }
 
         [Fact]
+        public async Task ImportSingleFile_WhenDestinationHasSameContent_ReusesDestinationAndRegistersMissingFile()
+        {
+            var outputRoot = FileService.GetTempDirectory("import-out");
+            var sourceDir = FileService.GetTempDirectory("import-src");
+            var firstSourceFile = await FileService.GetFileAsync(sourceDir, "first.mp3", "same audio");
+            var secondSourceFile = await FileService.GetFileAsync(sourceDir, "second.mp3", "same audio");
+
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettings
+            {
+                OutputPath = outputRoot,
+                CompletedFileAction = FileAction.Copy,
+                EnableMetadataProcessing = false,
+                FolderNamingPattern = "",
+                FileNamingPattern = "{Title}"
+            });
+
+            var audiobook = await _audiobookRepository.AddAsync(new Audiobook
+            {
+                Id = 991,
+                Title = "Replay Book",
+                Authors = ["Replay Author"],
+                BasePath = outputRoot
+            });
+
+            var downloadImportService = _provider.GetRequiredService<IDownloadImportService>();
+            var firstResults = await downloadImportService.ImportDownloadFilesAsync(audiobook, [firstSourceFile]);
+            var first = Assert.Single(firstResults);
+            Assert.True(first.Success);
+            Assert.NotNull(first.FinalPath);
+
+            await _audiobookFileRepository.DeleteByAudiobookIdAsync(audiobook.Id);
+
+            var secondResults = await downloadImportService.ImportDownloadFilesAsync(audiobook, [secondSourceFile]);
+            var second = Assert.Single(secondResults);
+
+            Assert.True(second.Success);
+            Assert.Equal(first.FinalPath, second.FinalPath);
+            Assert.True(File.Exists(secondSourceFile));
+            var registeredFiles = await _audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id);
+            Assert.Contains(registeredFiles, file => string.Equals(file.Path, first.FinalPath, StringComparison.OrdinalIgnoreCase));
+        }
+
+        [Fact]
+        public async Task ImportSingleFile_WhenDestinationContentDiffers_UsesUniqueDestination()
+        {
+            var outputRoot = FileService.GetTempDirectory("import-out");
+            var sourceDir = FileService.GetTempDirectory("import-src");
+            var firstSourceFile = await FileService.GetFileAsync(sourceDir, "first.mp3", "old audio");
+            var secondSourceFile = await FileService.GetFileAsync(sourceDir, "second.mp3", "new audio");
+
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettings
+            {
+                OutputPath = outputRoot,
+                CompletedFileAction = FileAction.Copy,
+                EnableMetadataProcessing = false,
+                FolderNamingPattern = "",
+                FileNamingPattern = "{Title}"
+            });
+
+            var audiobook = await _audiobookRepository.AddAsync(new Audiobook
+            {
+                Id = 992,
+                Title = "Collision Book",
+                Authors = ["Collision Author"],
+                BasePath = outputRoot
+            });
+
+            var downloadImportService = _provider.GetRequiredService<IDownloadImportService>();
+            var first = Assert.Single(await downloadImportService.ImportDownloadFilesAsync(audiobook, [firstSourceFile]));
+            var second = Assert.Single(await downloadImportService.ImportDownloadFilesAsync(audiobook, [secondSourceFile]));
+
+            Assert.True(first.Success);
+            Assert.True(second.Success);
+            Assert.NotEqual(first.FinalPath, second.FinalPath);
+            Assert.Equal("old audio", await File.ReadAllTextAsync(first.FinalPath!));
+            Assert.Equal("new audio", await File.ReadAllTextAsync(second.FinalPath!));
+            Assert.Contains(" (1)", second.FinalPath);
+        }
+
+        [Fact]
         public async Task ImportFilesFromDirectory_WithAudiobookMetadata_SupportsEditionSubtitlePublisherLanguageAndAsinTokens()
         {
             var outputRoot = FileService.GetTempDirectory("import-out");

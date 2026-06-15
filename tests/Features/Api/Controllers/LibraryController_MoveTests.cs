@@ -150,5 +150,35 @@ namespace Listenarr.Tests.Features.Api.Controllers
             Assert.Equal(FileUtils.NormalizeStoredPath(Path.Join(outputPath, relativeTarget)), updated.BasePath);
             Assert.StartsWith("  listenarr-move-dst-", Path.GetFileName(updated.BasePath), StringComparison.Ordinal);
         }
+
+        [Fact]
+        [Trait("Method", "EnqueueMove")]
+        [Trait("Scenario", "RejectsRelativeDestinationOutsideOutputPath")]
+        public async Task MoveAudiobook_RejectsRelativeDestinationOutsideOutputPath()
+        {
+            var outputPath = FileService.GetTempDirectory("listenarr-move-output");
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
+                .WithOutputPath(outputPath)
+                .Build());
+
+            var sourcePath = FileService.GetTempDirectory("listenarr-move-src");
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Test")
+                .WithBasePath(sourcePath)
+                .Build());
+
+            var controller = _provider.GetRequiredService<LibraryController>();
+            var request = new LibraryController.MoveRequest
+            {
+                DestinationPath = Path.Join("..", "escape"),
+                MoveFiles = false
+            };
+
+            var result = await controller.EnqueueMove(audiobook.Id, request);
+
+            var badObj = Assert.IsAssignableFrom<ObjectResult>(result);
+            Assert.Equal(400, badObj.StatusCode);
+            Assert.Contains("DestinationPath", badObj.Value?.ToString() ?? string.Empty);
+        }
     }
 }

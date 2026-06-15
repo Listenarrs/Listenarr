@@ -18,11 +18,15 @@
 
 namespace Listenarr.Infrastructure.Cache
 {
+    using Listenarr.Domain.Common;
+
     internal static class ImageCacheRefreshWorkflow
     {
         public static async Task<string?> RefreshWithBackupAsync(
             string destinationPath,
             string tempPath,
+            string destinationRoot,
+            string tempRoot,
             Func<Task<string?>> downloadAsync,
             Func<string, string> getRelativePath)
         {
@@ -30,9 +34,24 @@ namespace Listenarr.Infrastructure.Cache
 
             try
             {
+                if (!FileUtils.TryValidateMutationTarget(destinationPath, [destinationRoot], out destinationPath, out var destinationReason))
+                {
+                    throw new IOException($"Blocked image refresh destination: {destinationReason}");
+                }
+
+                if (!FileUtils.TryValidateMutationTarget(tempPath, [tempRoot], out tempPath, out var tempReason))
+                {
+                    throw new IOException($"Blocked image refresh temp path: {tempReason}");
+                }
+
                 if (File.Exists(destinationPath))
                 {
                     backupPath = destinationPath + ".bak";
+                    if (!FileUtils.TryValidateMutationTarget(backupPath, [destinationRoot], out backupPath, out var backupReason))
+                    {
+                        throw new IOException($"Blocked image refresh backup path: {backupReason}");
+                    }
+
                     File.Copy(destinationPath, backupPath, overwrite: true);
                     File.Delete(destinationPath);
                 }

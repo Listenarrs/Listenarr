@@ -138,10 +138,27 @@ namespace Listenarr.Infrastructure.Services
                 var mappings = await GetPathMappingByClientAsync(client);
                 foreach (var mapping in mappings)
                 {
-                    if (currentRemotePath.StartsWith(mapping.RemotePath, StringComparison.OrdinalIgnoreCase))
+                    if (!FileUtils.IsPathSameOrInside(currentRemotePath, mapping.RemotePath))
                     {
-                        return currentRemotePath.Replace(mapping.RemotePath, mapping.LocalPath, StringComparison.OrdinalIgnoreCase);
+                        continue;
                     }
+
+                    var relativePath = Path.GetRelativePath(mapping.RemotePath, currentRemotePath);
+                    if (string.Equals(relativePath, ".", StringComparison.Ordinal))
+                    {
+                        return FileUtils.NormalizeStoredPath(mapping.LocalPath)
+                            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                    }
+
+                    if (FileUtils.TryResolveRelativePathWithinBase(mapping.LocalPath, relativePath, out var mappedPath))
+                    {
+                        return mappedPath;
+                    }
+
+                    logger.LogWarning(
+                        "Remote path mapping {MappingId} produced an unsafe mapped path for client {ClientId}",
+                        mapping.Id,
+                        client.Id);
                 }
             }
 

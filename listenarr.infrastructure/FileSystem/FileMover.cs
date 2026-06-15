@@ -29,6 +29,21 @@ using Listenarr.Application.Security;
 
 namespace Listenarr.Infrastructure.FileSystem
 {
+    internal enum FileMutationOutcome
+    {
+        Success,
+        Skipped,
+        Blocked,
+        Failed
+    }
+
+    internal sealed record FileMutationResult(
+        FileMutationOutcome Outcome,
+        FileAction Action,
+        string SourcePath,
+        string? DestinationPath,
+        string? Reason = null);
+
     public partial class FileMover : IFileMover
     {
         // .NET has no managed BCL equivalent for hardlink creation.
@@ -65,6 +80,7 @@ namespace Listenarr.Infrastructure.FileSystem
                 try
                 {
                     Directory.Move(sourceDir, destDir);
+                    LogMutation(FileMutationOutcome.Success, FileAction.Move, sourceDir, destDir);
                     return true;
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
@@ -111,6 +127,7 @@ namespace Listenarr.Infrastructure.FileSystem
                 {
                     _logger.LogDebug(deleteEx, "Failed deleting source directory after copy fallback for {Source}", sourceDir);
                 }
+                LogMutation(FileMutationOutcome.Success, FileAction.Move, sourceDir, destDir);
                 return true;
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
@@ -159,11 +176,17 @@ namespace Listenarr.Infrastructure.FileSystem
             var attempt = 0;
             var delay = 1000;
 
+            if (await TryCompleteIdempotentFileMoveAsync(sourceFile, destFile))
+            {
+                return true;
+            }
+
             for (; attempt < _options.MaxRetries; attempt++)
             {
                 try
                 {
                     File.Move(sourceFile, destFile, true);
+                    LogMutation(FileMutationOutcome.Success, FileAction.Move, sourceFile, destFile);
                     return true;
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
@@ -210,6 +233,7 @@ namespace Listenarr.Infrastructure.FileSystem
                 {
                     _logger.LogDebug(deleteEx, "Failed deleting source file after copy fallback for {Source}", sourceFile);
                 }
+                LogMutation(FileMutationOutcome.Success, FileAction.Move, sourceFile, destFile);
                 return true;
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
@@ -262,6 +286,7 @@ namespace Listenarr.Infrastructure.FileSystem
             try
             {
                 CopyDirRecursive(sourceDir, destDir);
+                LogMutation(FileMutationOutcome.Success, FileAction.Copy, sourceDir, destDir);
                 return Task.FromResult(true);
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
@@ -275,7 +300,13 @@ namespace Listenarr.Infrastructure.FileSystem
         {
             try
             {
+                if (await TrySkipSameContentAsync(FileAction.Copy, sourceFile, destFile))
+                {
+                    return true;
+                }
+
                 File.Copy(sourceFile, destFile, true);
+                LogMutation(FileMutationOutcome.Success, FileAction.Copy, sourceFile, destFile);
                 return true;
             }
             catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
@@ -285,7 +316,7 @@ namespace Listenarr.Infrastructure.FileSystem
             }
         }
 
-        public Task<bool> HardlinkFileAsync(string sourceFile, string destFile)
+        public async Task<bool> HardlinkFileAsync(string sourceFile, string destFile)
         {
             try
             {
@@ -294,6 +325,11 @@ namespace Listenarr.Infrastructure.FileSystem
                 if (!string.IsNullOrEmpty(destDir) && !Directory.Exists(destDir))
                 {
                     Directory.CreateDirectory(destDir);
+                }
+
+                if (await TrySkipSameContentAsync(FileAction.HardlinkCopy, sourceFile, destFile))
+                {
+                    return true;
                 }
 
                 // Safe ordering: hardlink/copy to a temp path first, then atomically rename
@@ -326,8 +362,8 @@ namespace Listenarr.Infrastructure.FileSystem
 
                     // Hardlink succeeded — atomically replace destination
                     File.Move(tempDest, destFile, overwrite: true);
-                    _logger.LogInformation("Hardlinked file: {Source} -> {Dest}", sourceFile, destFile);
-                    return Task.FromResult(true);
+                    LogMutation(FileMutationOutcome.Success, FileAction.HardlinkCopy, sourceFile, destFile);
+                    return true;
                 }
                 catch (Exception linkEx) when (linkEx is not OperationCanceledException && linkEx is not OutOfMemoryException && linkEx is not StackOverflowException)
                 {
@@ -360,8 +396,8 @@ namespace Listenarr.Infrastructure.FileSystem
                     {
                         File.Copy(sourceFile, tempCopyPath, overwrite: true);
                         File.Move(tempCopyPath, destFile, overwrite: true);
-                        _logger.LogInformation("Copied file (hardlink fallback): {Source} -> {Dest}", sourceFile, destFile);
-                        return Task.FromResult(true);
+                        LogMutation(FileMutationOutcome.Success, FileAction.HardlinkCopy, sourceFile, destFile, "Copied after hardlink failure");
+                        return true;
                     }
                     finally
                     {
@@ -379,7 +415,7 @@ namespace Listenarr.Infrastructure.FileSystem
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
                 _logger.LogError(ex, "Hardlink/Copy failed: {Source} -> {Dest}", sourceFile, destFile);
-                return Task.FromResult(false);
+                return false;
             }
         }
 
@@ -388,14 +424,31 @@ namespace Listenarr.Infrastructure.FileSystem
             Directory.CreateDirectory(dst);
             foreach (var dir in Directory.GetDirectories(src, "*", SearchOption.TopDirectoryOnly))
             {
-                var sub = Path.Join(dst, Path.GetFileName(dir));
+                var relative = Path.GetRelativePath(src, dir);
+                if (!FileUtils.TryResolveRelativePathWithinBase(dst, relative, out var sub))
+                {
+                    throw new IOException($"Directory copy destination escaped root: {relative}");
+                }
+
                 CopyDirRecursive(dir, sub);
             }
 
             foreach (var file in Directory.GetFiles(src, "*.*", SearchOption.TopDirectoryOnly))
             {
-                var destFile = Path.Join(dst, Path.GetFileName(file));
+                var relative = Path.GetRelativePath(src, file);
+                if (!FileUtils.TryResolveRelativePathWithinBase(dst, relative, out var destFile))
+                {
+                    throw new IOException($"File copy destination escaped root: {relative}");
+                }
+
+                if (File.Exists(destFile) && FileUtils.FilesHaveSameContentAsync(file, destFile).GetAwaiter().GetResult())
+                {
+                    LogMutation(FileMutationOutcome.Skipped, FileAction.Copy, file, destFile, "Destination already has identical content");
+                    continue;
+                }
+
                 File.Copy(file, destFile, true);
+                LogMutation(FileMutationOutcome.Success, FileAction.Copy, file, destFile);
             }
         }
 
@@ -462,9 +515,62 @@ namespace Listenarr.Infrastructure.FileSystem
             }
             catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
             {
+                LogMutation(FileMutationOutcome.Failed, action, source, destination, exception.Message);
                 throw new InvalidOperationException($"Unable to perform {action} on {source} to {destination}", exception);
             }
         }
+
+        private async Task<bool> TryCompleteIdempotentFileMoveAsync(string sourceFile, string destFile)
+        {
+            if (!File.Exists(sourceFile) || !File.Exists(destFile))
+            {
+                return false;
+            }
+
+            if (!await FileUtils.FilesHaveSameContentAsync(sourceFile, destFile))
+            {
+                return false;
+            }
+
+            try
+            {
+                File.Delete(sourceFile);
+                LogMutation(FileMutationOutcome.Skipped, FileAction.Move, sourceFile, destFile, "Destination already has identical content; source removed");
+                return true;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
+                _logger.LogWarning(ex, "Failed to remove idempotent move source {Source}", LogRedaction.SanitizeFilePath(sourceFile));
+                return false;
+            }
+        }
+
+        private async Task<bool> TrySkipSameContentAsync(FileAction action, string sourceFile, string destFile)
+        {
+            if (!File.Exists(sourceFile) || !File.Exists(destFile))
+            {
+                return false;
+            }
+
+            if (!await FileUtils.FilesHaveSameContentAsync(sourceFile, destFile))
+            {
+                return false;
+            }
+
+            LogMutation(FileMutationOutcome.Skipped, action, sourceFile, destFile, "Destination already has identical content");
+            return true;
+        }
+
+        private void LogMutation(FileMutationOutcome outcome, FileAction action, string source, string? destination, string? reason = null)
+        {
+            var result = new FileMutationResult(outcome, action, source, destination, reason);
+            _logger.LogInformation(
+                "File mutation {Outcome}: {Action} {Source} -> {Destination}. Reason: {Reason}",
+                result.Outcome,
+                result.Action,
+                LogRedaction.SanitizeFilePath(result.SourcePath),
+                LogRedaction.SanitizeFilePath(result.DestinationPath ?? string.Empty),
+                LogRedaction.SanitizeText(result.Reason ?? string.Empty));
+        }
     }
 }
-

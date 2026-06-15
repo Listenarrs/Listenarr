@@ -22,6 +22,7 @@ using System.Text.Json;
 using Listenarr.Application.Interfaces;
 using Microsoft.Extensions.Logging;
 using Listenarr.Domain.Models;
+using Listenarr.Domain.Common;
 using Listenarr.Application.Security;
 using Listenarr.Domain.Models.Exceptions;
 
@@ -166,6 +167,12 @@ namespace Listenarr.Infrastructure.Ffmpeg
                 resp.EnsureSuccessStatusCode();
 
                 var tmpFile = Path.Join(_baseDir, "ffprobe-download.tmp");
+                if (!FileUtils.TryValidateMutationTarget(tmpFile, [_baseDir], out tmpFile, out var tmpReason))
+                {
+                    _logger.LogWarning("Blocked ffprobe download temp path: {Reason}", LogRedaction.SanitizeText(tmpReason));
+                    return null;
+                }
+
                 await using (var fs = new FileStream(tmpFile, FileMode.Create, FileAccess.Write))
                 {
                     await resp.Content.CopyToAsync(fs);
@@ -304,6 +311,23 @@ namespace Listenarr.Infrastructure.Ffmpeg
 
                             var chosenFull = Path.GetFullPath(chosen);
                             var destFull = Path.GetFullPath(dest);
+                            if (!FileUtils.TryValidateMutationTarget(chosenFull, [_baseDir], out chosenFull, out var chosenReason))
+                            {
+                                _logger.LogWarning(
+                                    "Blocked ffprobe candidate move. Candidate reason: {CandidateReason}",
+                                    LogRedaction.SanitizeText(chosenReason));
+                                return null;
+                            }
+
+                            if (!FileUtils.TryValidateMutationTarget(destFull, [_baseDir], out destFull, out var destReason))
+                            {
+                                _logger.LogWarning(
+                                    "Blocked ffprobe candidate move. Destination reason: {DestinationReason}",
+                                    LogRedaction.SanitizeText(destReason));
+                                return null;
+                            }
+                            chosen = chosenFull;
+                            dest = destFull;
 
                             if (string.Equals(chosenFull, destFull, StringComparison.OrdinalIgnoreCase))
                             {
@@ -324,15 +348,15 @@ namespace Listenarr.Infrastructure.Ffmpeg
                                 // Attempt to move the file into the baseDir root. If move fails (cross-volume), fall back to copy.
                                 try
                                 {
-                                    File.Move(chosen, dest);
-                                    _logger.LogInformation("Moved ffprobe from {Src} to {Dest}", chosen, dest);
+                                    File.Move(chosenFull, destFull);
+                                    _logger.LogInformation("Moved ffprobe from {Src} to {Dest}", chosenFull, destFull);
                                 }
                                 catch (Exception mvEx) when (mvEx is not OperationCanceledException && mvEx is not OutOfMemoryException && mvEx is not StackOverflowException)
                                 {
                                     try
                                     {
-                                        File.Copy(chosen, dest, overwrite: true);
-                                        _logger.LogInformation("Copied ffprobe from {Src} to {Dest} (move failed: {Err})", chosen, dest, mvEx.Message);
+                                        File.Copy(chosenFull, destFull, overwrite: true);
+                                        _logger.LogInformation("Copied ffprobe from {Src} to {Dest} (move failed: {Err})", chosenFull, destFull, mvEx.Message);
                                     }
                                     catch (Exception cpEx) when (cpEx is not OperationCanceledException && cpEx is not OutOfMemoryException && cpEx is not StackOverflowException)
                                     {
@@ -424,11 +448,32 @@ namespace Listenarr.Infrastructure.Ffmpeg
             JsonElement ffprobeData;
             try
             {
-                _logger.LogInformation("Running bundled ffprobe at {Path} against file {File}", _ffprobePath, filePath);
+                if (!File.Exists(_ffprobePath))
+                {
+                    throw new FfmpegException("ffprobe binary is unavailable.");
+                }
+
+                if (!FileUtils.TryValidateMutationTarget(_ffprobePath, [_baseDir], out var safeFfprobePath, out var ffprobeReason))
+                {
+                    throw new FfmpegException($"ffprobe binary is unavailable or outside configured root: {LogRedaction.SanitizeText(ffprobeReason)}");
+                }
+
+                if (!File.Exists(filePath))
+                {
+                    throw new FfmpegException($"ffprobe target does not exist: {sanitizedFilePath}");
+                }
+
+                if (!FileUtils.IsAudioFile(filePath))
+                {
+                    throw new FfmpegException($"ffprobe target is not a supported audio file: {sanitizedFilePath}");
+                }
+
+                var safeFilePath = Path.GetFullPath(filePath);
+                _logger.LogInformation("Running bundled ffprobe at {Path} against file {File}", safeFfprobePath, LogRedaction.SanitizeFilePath(safeFilePath));
 
                 var startInfo = new ProcessStartInfo
                 {
-                    FileName = _ffprobePath,
+                    FileName = safeFfprobePath,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     UseShellExecute = false,
@@ -440,7 +485,7 @@ namespace Listenarr.Infrastructure.Ffmpeg
                 startInfo.ArgumentList.Add("json");
                 startInfo.ArgumentList.Add("-show_format");
                 startInfo.ArgumentList.Add("-show_streams");
-                startInfo.ArgumentList.Add(filePath);
+                startInfo.ArgumentList.Add(safeFilePath);
 
                 var pr = await _processRunner.RunAsync(startInfo, 10000);
                 _logger.LogInformation("ffprobe exit code {Code} for file {File}; stderr length={Len}", pr.ExitCode, sanitizedFilePath, pr.Stderr?.Length ?? 0);
