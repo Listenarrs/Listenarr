@@ -73,6 +73,8 @@ import Checkbox from '@/components/form/Checkbox.vue'
 import { apiService } from '@/services/api'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { parseAuthRequiredFromConfig } from '@/utils/authConfig'
+import { normalizeRedirect, redirectLocationFromPath } from '@/utils/redirect'
 // Vite static import for the logo so bundler resolves the asset reliably
 
 export default defineComponent({
@@ -96,17 +98,8 @@ export default defineComponent({
       if (startupConfigChecked.value) return
       try {
         const sc = await apiService.getBootstrapConfig()
-        const rawAuth =
-          sc?.authenticationRequired ??
-          (sc as unknown as Record<string, unknown>)?.AuthenticationRequired
-        const authEnabled =
-          typeof rawAuth === 'boolean'
-            ? rawAuth
-            : typeof rawAuth === 'string'
-              ? rawAuth.toLowerCase() === 'enabled' || rawAuth.toLowerCase() === 'true'
-              : false
         startupConfigChecked.value = true
-        if (!authEnabled) {
+        if (!(parseAuthRequiredFromConfig(sc) ?? false)) {
           await router.replace({ name: 'home' })
         }
       } catch {
@@ -119,19 +112,13 @@ export default defineComponent({
       retrySeconds.value = null
       loading.value = true
 
-      // Fetch CSRF token
-      const token = await apiService.fetchAntiforgeryToken()
-
       try {
+        // Fetch CSRF token
+        const token = await apiService.fetchAntiforgeryToken()
         await auth.login(username.value, password.value, rememberMe.value, token ?? undefined)
 
-        // On success, prefer query param redirect (survives reload); fallback to store, then home
-        // Prefer explicit query param redirect (survives reload). If missing, try the
-        // fallback stored in sessionStorage by the ApiService when it had to perform
-        // a full-page redirect. Always sanitize the redirect target.
         const rawQueryRedirect =
           (router.currentRoute.value.query?.redirect as string | undefined) ?? undefined
-        const { normalizeRedirect } = await import('@/utils/redirect')
         let queryRedirect = normalizeRedirect(rawQueryRedirect)
 
         if (!queryRedirect || queryRedirect === '/') {
@@ -144,12 +131,7 @@ export default defineComponent({
           } catch {}
         }
 
-        const dest =
-          queryRedirect && queryRedirect !== '/'
-            ? { path: queryRedirect }
-            : (auth.redirectTo ?? { name: 'home' })
-        auth.redirectTo = null
-        await router.push(dest)
+        await router.push(redirectLocationFromPath(queryRedirect))
       } catch (err) {
         interface LoginError {
           status?: number

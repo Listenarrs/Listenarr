@@ -574,6 +574,7 @@ import GlobalToast from '@/components/ui/GlobalToast.vue'
 import { useToast } from '@/services/toastService'
 import { logger } from '@/utils/logger'
 import BrandLogo from '@/components/base/BrandLogo.vue'
+import { parseAuthRequiredFromConfig } from '@/utils/authConfig'
 import {
   SECURITY_WARNING_BANNER_PREF_EVENT,
   SECURITY_WARNING_BANNER_PREF_KEY,
@@ -1051,28 +1052,6 @@ watch(
   },
 )
 
-const parseAuthEnabledFromStartupConfig = (raw: unknown): boolean | null => {
-  if (typeof raw === 'boolean') return raw
-  if (typeof raw === 'string') {
-    const normalized = raw.toLowerCase().trim()
-    if (
-      normalized === 'enabled' ||
-      normalized === 'true' ||
-      normalized === 'yes' ||
-      normalized === '1'
-    )
-      return true
-    if (
-      normalized === 'disabled' ||
-      normalized === 'false' ||
-      normalized === 'no' ||
-      normalized === '0'
-    )
-      return false
-  }
-  return null
-}
-
 const refreshAuthPresentationFromStartupConfig = async (force: boolean = false) => {
   try {
     // Use cached startup-config helper so unauthenticated 401 is interpreted as
@@ -1087,9 +1066,7 @@ const refreshAuthPresentationFromStartupConfig = async (force: boolean = false) 
         throw err
       }
     }
-    const obj = cfg as Record<string, unknown> | null
-    const raw = obj ? (obj['authenticationRequired'] ?? obj['AuthenticationRequired']) : undefined
-    const parsedAuthEnabled = parseAuthEnabledFromStartupConfig(raw)
+    const parsedAuthEnabled = parseAuthRequiredFromConfig(cfg)
     // Only show the "auth disabled" banner when startup config explicitly says auth is off.
     // Unknown/missing/transient states should not be treated as disabled.
     authEnabled.value = parsedAuthEnabled ?? true
@@ -1102,10 +1079,25 @@ const refreshAuthPresentationFromStartupConfig = async (force: boolean = false) 
   }
 }
 
+const redirectToLoginIfCurrentRouteRequiresAuth = async () => {
+  if (!startupConfigLoaded.value || !authEnabled.value || auth.user.authenticated) {
+    return
+  }
+
+  if (route.name === 'login' || !(route.meta as Record<string, unknown>)?.requiresAuth) {
+    return
+  }
+
+  const redirect = route.fullPath || '/'
+  logger.debug('[App] Auth state changed on protected route, redirecting to login', { redirect })
+  await router.replace({ name: 'login', query: { redirect } })
+}
+
 watch(
   () => auth.user.authenticated,
-  () => {
-    void refreshAuthPresentationFromStartupConfig(true)
+  async () => {
+    await refreshAuthPresentationFromStartupConfig(true)
+    await redirectToLoginIfCurrentRouteRequiresAuth()
   },
 )
 
@@ -1350,13 +1342,11 @@ const logout = async () => {
   try {
     logger.debug('Logout button clicked')
     await auth.logout()
-    logger.debug('Auth logout completed, redirecting to login')
-    // Instead of reloading, redirect to login - the router guard will handle authentication
-    await router.push({ name: 'login' })
+    logger.debug('Auth logout completed')
+    await redirectToLoginIfCurrentRouteRequiresAuth()
   } catch (error) {
     logger.error('Error during logout:', error)
-    // Force redirect to login even if logout fails
-    await router.push({ name: 'login' })
+    await redirectToLoginIfCurrentRouteRequiresAuth()
   }
 }
 

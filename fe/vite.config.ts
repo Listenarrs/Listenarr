@@ -28,6 +28,23 @@ export default defineConfig(({ mode }) => {
     ],
     build: {
       sourcemap: analyzeBundle,
+      minify: 'oxc',
+      ...(mode === 'production'
+        ? {
+            rolldownOptions: {
+              output: {
+                minify: {
+                  compress: {
+                    dropConsole: true,
+                    dropDebugger: true,
+                  },
+                  mangle: true,
+                  codegen: true,
+                },
+              },
+            },
+          }
+        : {}),
     },
     resolve: {
       alias: {

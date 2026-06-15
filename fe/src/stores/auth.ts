@@ -21,69 +21,12 @@ import { apiService } from '@/services/api'
 import { sessionTokenManager } from '@/utils/sessionToken'
 import { clearAllAuthData } from '@/utils/sessionDebug'
 import { errorTracking } from '@/services/errorTracking'
-import { getStartupConfigCached } from '@/services/startupConfigCache'
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<{ authenticated: boolean; name?: string }>({ authenticated: false })
   // Whether we've attempted to load the current user at least once
   const loaded = ref<boolean>(false)
-  const redirectTo = ref<string | null>(null)
   let currentUserLoadPromise: Promise<void> | null = null
-
-  const isAuthRequired = async (): Promise<boolean> => {
-    try {
-      const cfg = await getStartupConfigCached(0)
-      const raw =
-        cfg?.authenticationRequired ??
-        (cfg as { AuthenticationRequired?: string | boolean } | null)?.AuthenticationRequired
-
-      if (typeof raw === 'boolean') {
-        return raw
-      }
-
-      if (typeof raw === 'string') {
-        const normalized = raw.toLowerCase().trim()
-        return (
-          normalized === 'enabled' ||
-          normalized === 'true' ||
-          normalized === 'yes' ||
-          normalized === '1'
-        )
-      }
-    } catch {}
-
-    return false
-  }
-
-  const redirectToLoginIfRequired = async () => {
-    if (!(await isAuthRequired())) {
-      return
-    }
-
-    const current = window.location.pathname + window.location.search + window.location.hash
-    if (current.startsWith('/login')) {
-      return
-    }
-
-    try {
-      const routerModule = await import('@/router')
-      const router = routerModule.getRouter()
-      const route = router.currentRoute.value
-      const redirect = route.fullPath || current
-
-      if (route.name === 'login') {
-        return
-      }
-
-      await router.replace({ name: 'login', query: { redirect } })
-    } catch {
-      try {
-        window.location.href = `/login?redirect=${encodeURIComponent(current)}`
-      } catch {
-        window.location.href = '/login'
-      }
-    }
-  }
 
   const loadCurrentUser = async () => {
     if (currentUserLoadPromise) {
@@ -112,7 +55,6 @@ export const useAuthStore = defineStore('auth', () => {
             : 0
         if (status === 401 || status === 403) {
           console.log('[AuthStore] Authentication error - clearing session')
-          // Clear any stale cross-tab auth marker when we get auth errors.
           try {
             if (sessionTokenManager.hasToken()) {
               sessionTokenManager.clearToken()
@@ -142,6 +84,10 @@ export const useAuthStore = defineStore('auth', () => {
   // React to browser auth marker changes from other tabs (cross-tab login/logout).
   try {
     sessionTokenManager.onTokenChange((token, context) => {
+      if (context?.source === 'initial') {
+        return
+      }
+
       if (token) {
         if (!user.value.authenticated) {
           void loadCurrentUser()
@@ -149,19 +95,29 @@ export const useAuthStore = defineStore('auth', () => {
         return
       }
 
-      if (!token) {
-        if (context?.source === 'initial') {
-          return
-        }
-
-        console.log('[AuthStore] Auth marker removed in another tab - clearing auth state')
-        user.value = { authenticated: false }
-        loaded.value = true
-
-        void redirectToLoginIfRequired()
-      }
+      console.log('[AuthStore] Auth marker removed in another tab - clearing auth state')
+      user.value = { authenticated: false }
+      loaded.value = true
     })
   } catch {}
+
+  const clearClientAuthState = () => {
+    try {
+      sessionTokenManager.clearToken()
+    } catch (e) {
+      console.warn('[AuthStore] Failed to clear sessionTokenManager:', e)
+    }
+
+    try {
+      // Comprehensive cleanup (removes any lingering storage keys)
+      clearAllAuthData()
+    } catch (e) {
+      console.warn('[AuthStore] Failed to run clearAllAuthData:', e)
+    }
+
+    user.value = { authenticated: false }
+    loaded.value = true
+  }
 
   const logout = async () => {
     try {
@@ -176,23 +132,10 @@ export const useAuthStore = defineStore('auth', () => {
       // Continue with local logout even if API call fails
     } finally {
       // Ensure all client-side auth data is cleared even if the API call failed
-      try {
-        sessionTokenManager.clearToken()
-      } catch (e) {
-        console.warn('[AuthStore] Failed to clear sessionTokenManager:', e)
-      }
-
-      try {
-        // Comprehensive cleanup (removes any lingering storage keys)
-        clearAllAuthData()
-      } catch (e) {
-        console.warn('[AuthStore] Failed to run clearAllAuthData:', e)
-      }
-
-      user.value = { authenticated: false }
+      clearClientAuthState()
       console.log('[AuthStore] Local user state cleared and auth data removed')
     }
   }
 
-  return { user, redirectTo, loadCurrentUser, login, logout, loaded }
+  return { user, loadCurrentUser, login, logout, loaded }
 })

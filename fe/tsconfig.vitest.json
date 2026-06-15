@@ -1,11 +1,11 @@
 {
   "extends": "./tsconfig.app.json",
-  "include": ["src/**/__tests__/*", "env.d.ts"],
+  "include": ["src/**/test/**/*", "env.d.ts"],
   "exclude": [],
   "compilerOptions": {
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.vitest.tsbuildinfo",
 
-    "lib": [],
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
     // Include vitest globals so test files can use describe/test/expect without
     // requiring additional @types packages during build-time typechecking.
     "types": ["vitest/globals", "node", "jsdom"],

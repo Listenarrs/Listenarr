@@ -34,3 +34,21 @@ export function isSafeRedirect(path: string | undefined | null): boolean {
 export function normalizeRedirect(path: string | undefined | null): string {
   return isSafeRedirect(path) ? (path as string) : '/'
 }
+
+export function redirectLocationFromPath(path: string | undefined | null) {
+  const safeRedirect = normalizeRedirect(path)
+  if (safeRedirect === '/') {
+    return { name: 'home' }
+  }
+
+  try {
+    const url = new URL(safeRedirect, window.location.origin)
+    return {
+      path: url.pathname,
+      query: Object.fromEntries(url.searchParams),
+      hash: url.hash,
+    }
+  } catch {
+    return { path: safeRedirect }
+  }
+}

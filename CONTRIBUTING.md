@@ -145,7 +145,7 @@ This project follows a layered pattern: domain models in `listenarr.domain`, EF 
 **Testing:**
 - Run backend tests: `dotnet test`
 - Run frontend tests: `cd fe && npm run test:unit`
-- Run frontend type checks: `cd fe && npm run type-check`
+- Run the full frontend gate: `npm run verify:frontend`
 - Ensure all tests pass before submitting PR
 
 ### Branching Model

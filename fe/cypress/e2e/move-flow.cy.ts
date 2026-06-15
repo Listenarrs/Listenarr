@@ -1,24 +1,29 @@
+import { apiPath } from '../support/api'
+
 /* eslint-disable cypress/unsafe-to-chain-command */
 describe('Edit -> Move flow (E2E)', () => {
   beforeEach(() => {
     // Stub startup config and account checks (no auth)
-    cy.intercept('GET', '/api/configuration/startupconfig', {
+    cy.intercept('GET', apiPath('/configuration/startupconfig'), {
       statusCode: 200,
-      body: { authenticationRequired: false, apiKey: null, baseUrl: '/' }
+      body: { authenticationRequired: false, apiKey: null, baseUrl: '/' },
     }).as('getStartupConfig')
 
-    cy.intercept('GET', '/api/account/me', { statusCode: 200, body: { authenticated: false } }).as('getCurrentUser')
+    cy.intercept('GET', apiPath('/account/me'), {
+      statusCode: 200,
+      body: { authenticated: false },
+    }).as('getCurrentUser')
 
     // App settings with outputPath configured
-    cy.intercept('GET', '/api/configuration/settings', {
+    cy.intercept('GET', apiPath('/configuration/settings'), {
       statusCode: 200,
       body: {
-        outputPath: '/mnt/audiobooks'
-      }
+        outputPath: '/mnt/audiobooks',
+      },
     }).as('getSettings')
 
     // Stub library endpoint to return a single audiobook
-    cy.intercept('GET', '/api/library', {
+    cy.intercept('GET', apiPath('/library'), {
       statusCode: 200,
       body: [
         {
@@ -30,25 +35,28 @@ describe('Edit -> Move flow (E2E)', () => {
           qualityProfileId: null,
           tags: [],
           abridged: false,
-          explicit: false
-        }
-      ]
+          explicit: false,
+        },
+      ],
     }).as('getLibrary')
 
     // Stub quality profiles / other endpoints minimally
-    cy.intercept('GET', '/api/qualityprofile', { statusCode: 200, body: [] }).as('getProfiles')
+    cy.intercept('GET', apiPath('/qualityprofile'), { statusCode: 200, body: [] }).as('getProfiles')
 
     // Capture the PUT update request for assertions
-    cy.intercept('PUT', '/api/library/1', (req) => {
+    cy.intercept('PUT', apiPath('/library/1'), (req) => {
       req.reply((res) => {
         // Respond with updated audiobook by echoing payload
-        const updated = Object.assign({ id: 1, title: 'Test Book', author: 'Test Author' }, req.body)
+        const updated = Object.assign(
+          { id: 1, title: 'Test Book', author: 'Test Author' },
+          req.body,
+        )
         res.send({ statusCode: 200, body: { message: 'ok', audiobook: updated } })
       })
     }).as('updateAudiobook')
 
     // Capture move request and return job id
-    cy.intercept('POST', '/api/library/1/move', (req) => {
+    cy.intercept('POST', apiPath('/library/1/move'), (req) => {
       req.reply({ statusCode: 200, body: { message: 'queued', jobId: 'job-test-1' } })
     }).as('moveAudiobook')
   })
@@ -95,7 +103,7 @@ describe('Edit -> Move flow (E2E)', () => {
 
   it('edits destination and chooses "Change without moving" to update DB only', () => {
     // Override move intercept to fail the test if called
-    cy.intercept('POST', '/api/library/1/move', () => {
+    cy.intercept('POST', apiPath('/library/1/move'), () => {
       throw new Error('Move API should not be called when user selects Change without moving')
     }).as('moveShouldNotBeCalled')
 
@@ -121,9 +129,11 @@ describe('Edit -> Move flow (E2E)', () => {
     cy.get('.confirm-dialog .btn').contains('Change without moving').click()
 
     // Ensure update endpoint was called with expected payload
-    cy.wait('@updateAudiobook').its('request.body').then((body) => {
-      expect(body.basePath).to.equal('/mnt/audiobooks/New Author/New Book')
-    })
+    cy.wait('@updateAudiobook')
+      .its('request.body')
+      .then((body) => {
+        expect(body.basePath).to.equal('/mnt/audiobooks/New Author/New Book')
+      })
 
     // Expect a toast informing destination updated without moving
     cy.contains('Destination updated', { timeout: 5000 }).should('exist')

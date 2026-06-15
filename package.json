@@ -21,6 +21,7 @@
     "install:all": "cd fe && npm install",
     "lint": "npm run lint:frontend",
     "lint:frontend": "cd fe && npm run lint:check",
+    "verify:frontend": "cd fe && npm run verify",
     "lint:staged": "node scripts/lint-staged.mjs",
     "lint:fix": "cd fe && npm run lint:fix",
     "format": "npm run format:backend && npm run format:frontend",

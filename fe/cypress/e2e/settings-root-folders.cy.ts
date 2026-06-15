@@ -1,13 +1,17 @@
+import { apiPath } from '../support/api'
+
 /* eslint-disable cypress/unsafe-to-chain-command */
 describe('Root Folders Settings', () => {
   beforeEach(() => {
-    cy.intercept('GET', '/api/rootfolders', { body: [ { id: 1, name: 'Root1', path: 'C:\\root' } ] }).as('getRoots')
+    cy.intercept('GET', apiPath('/rootfolders'), {
+      body: [{ id: 1, name: 'Root1', path: 'C:\\root' }],
+    }).as('getRoots')
     cy.visit('/settings')
     cy.wait('@getRoots')
   })
 
   it('renames root without moving (DB-only)', () => {
-    cy.intercept('PUT', '/api/rootfolders/1*', (req) => {
+    cy.intercept('PUT', apiPath('/rootfolders/1*'), (req) => {
       req.reply({ statusCode: 200, body: { id: 1, name: 'Root1', path: 'D:\\newroot' } })
     }).as('putRoot')
 
@@ -30,7 +34,7 @@ describe('Root Folders Settings', () => {
   })
 
   it('renames root and queues moves when Move selected', () => {
-    cy.intercept('PUT', '/api/rootfolders/1*', (req) => {
+    cy.intercept('PUT', apiPath('/rootfolders/1*'), (req) => {
       // Simulate backend accepting move request
       req.reply({ statusCode: 200, body: { id: 1, name: 'Root1', path: 'E:\\moved' } })
     }).as('putRootMove')
@@ -47,6 +51,8 @@ describe('Root Folders Settings', () => {
     cy.contains('Move').click()
 
     cy.wait('@putRootMove').its('request.url').should('contain', 'moveFiles=true')
-    cy.wait('@putRootMove').its('request.body').should('include', { name: 'Root1', path: 'E\\moved' })
+    cy.wait('@putRootMove')
+      .its('request.body')
+      .should('include', { name: 'Root1', path: 'E\\moved' })
   })
 })

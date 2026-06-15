@@ -128,7 +128,7 @@ coverage/
 /cypress/videos/
 /cypress/screenshots/
 test-results/
-playwright-report/
+eslint-report.json
 .codeql-db*/
 
 # Vite
@@ -277,5 +277,9 @@ listenarr.api/wwwroot/assets/
 listenarr.api/wwwroot/index.html
 listenarr.api/wwwroot/*.map
 listenarr.api/wwwroot/assets/**
+listenarr.api/wwwroot/large-logo.png
+listenarr.api/wwwroot/stats.html
+listenarr.api/wwwroot/fonts/.gitkeep
+listenarr.api/wwwroot/fonts/README.md
 listenarr.api/config/appsettings/appsettings.json
 /listenarr.api/config
