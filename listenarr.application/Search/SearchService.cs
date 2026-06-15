@@ -707,13 +707,46 @@ namespace Listenarr.Application.Search
                             var authorFiltered = deduplicated.AsEnumerable();
                             if (!string.IsNullOrWhiteSpace(language)) authorFiltered = authorFiltered.Where(b => !string.IsNullOrWhiteSpace(b.Language) && string.Equals(b.Language, language, StringComparison.OrdinalIgnoreCase));
 
-                            // Title-based filtering can be done directly against the author results
+                            // Title-based filtering can be done directly against the author results.
+                            // Audible splits a book name across Title + Subtitle (e.g. Title="A Dance
+                            // with Dragons", Subtitle="A Song of Ice and Fire, Book 5"), while callers
+                            // (and Library Import) often pass the combined "Title: Subtitle" string.
+                            // Match against Title, Subtitle AND the combined form, after normalizing
+                            // punctuation/whitespace, so a combined query still matches.
                             if (!string.IsNullOrEmpty(titleVal))
                             {
+                                // Lowercase; collapse any run of non-alphanumeric chars to one space.
+                                static string NormalizeForTitleMatch(string? s)
+                                {
+                                    if (string.IsNullOrWhiteSpace(s)) return string.Empty;
+                                    var sb = new System.Text.StringBuilder(s.Length);
+                                    var lastWasSpace = false;
+                                    foreach (var ch in s.ToLowerInvariant())
+                                    {
+                                        if (char.IsLetterOrDigit(ch)) { sb.Append(ch); lastWasSpace = false; }
+                                        else if (!lastWasSpace) { sb.Append(' '); lastWasSpace = true; }
+                                    }
+                                    return sb.ToString().Trim();
+                                }
+
+                                var queryNorm = NormalizeForTitleMatch(titleVal);
                                 authorFiltered = authorFiltered.Where(b =>
-                                    (!string.IsNullOrWhiteSpace(b.Title) && b.Title.IndexOf(titleVal, StringComparison.OrdinalIgnoreCase) >= 0) ||
-                                    (!string.IsNullOrWhiteSpace(b.Subtitle) && b.Subtitle.IndexOf(titleVal, StringComparison.OrdinalIgnoreCase) >= 0)
-                                );
+                                {
+                                    var titleNorm = NormalizeForTitleMatch(b.Title);
+                                    var subtitleNorm = NormalizeForTitleMatch(b.Subtitle);
+                                    if (titleNorm.Length == 0 && subtitleNorm.Length == 0) return false;
+                                    var combinedNorm = subtitleNorm.Length == 0
+                                        ? titleNorm
+                                        : titleNorm + " " + subtitleNorm;
+
+                                    return titleNorm.Contains(queryNorm, StringComparison.Ordinal)
+                                        || subtitleNorm.Contains(queryNorm, StringComparison.Ordinal)
+                                        || combinedNorm.Contains(queryNorm, StringComparison.Ordinal)
+                                        || queryNorm.Contains(combinedNorm, StringComparison.Ordinal)
+                                        // Combined "Title: Subtitle" query vs split fields where the
+                                        // subtitle differs slightly: still match on the title portion.
+                                        || (titleNorm.Length >= 5 && queryNorm.Contains(titleNorm, StringComparison.Ordinal));
+                                });
                             }
 
                             // If an ISBN was provided we must match against detailed metadata;
