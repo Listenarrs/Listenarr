@@ -3,7 +3,7 @@
 // registrations as the real app (including IDbContextFactory).
 public partial class Program
 {
-    static partial void ApplyTestHostPatches(WebApplicationBuilder builder)
+    internal static partial void ApplyTestHostPatches(WebApplicationBuilder builder)
     {
         // In test environment, force an isolated temp SQLite DB by default to prevent
         // writes to the developer's real config/database/listenarr.db.

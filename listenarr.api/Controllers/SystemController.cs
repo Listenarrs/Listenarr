@@ -58,12 +58,6 @@ namespace Listenarr.Api.Controllers
         {
             try
             {
-                var cfg = _systemService.GetStartupConfig();
-                var authEnabled = cfg?.IsAuthenticationEnabled() == true;
-                if (authEnabled && !(User?.Identity?.IsAuthenticated ?? false))
-                {
-                    return Unauthorized();
-                }
                 var systemInfo = _systemService.GetSystemInfo();
                 // Optionally redact sensitive fields here if needed
                 return Ok(systemInfo);
@@ -83,12 +77,6 @@ namespace Listenarr.Api.Controllers
         {
             try
             {
-                var cfg = _systemService.GetStartupConfig();
-                var authEnabled = cfg?.IsAuthenticationEnabled() == true;
-                if (authEnabled && !(User?.Identity?.IsAuthenticated ?? false))
-                {
-                    return Unauthorized();
-                }
                 var storageInfo = await _systemService.GetStorageInfoAsync();
                 return Ok(storageInfo);
             }
@@ -107,12 +95,6 @@ namespace Listenarr.Api.Controllers
         {
             try
             {
-                var cfg = _systemService.GetStartupConfig();
-                var authEnabled = cfg?.IsAuthenticationEnabled() == true;
-                if (authEnabled && !(User?.Identity?.IsAuthenticated ?? false))
-                {
-                    return Unauthorized();
-                }
                 var serviceHealth = await _systemService.GetServiceHealthAsync();
                 return Ok(serviceHealth);
             }
@@ -132,12 +114,6 @@ namespace Listenarr.Api.Controllers
         {
             try
             {
-                var cfg = _systemService.GetStartupConfig();
-                var authEnabled = cfg?.IsAuthenticationEnabled() == true;
-                if (authEnabled && !(User?.Identity?.IsAuthenticated ?? false))
-                {
-                    return Unauthorized();
-                }
                 var logs = _systemService.GetRecentLogs(limit);
                 // Optionally redact sensitive log entries here if needed
                 return Ok(logs);
@@ -157,12 +133,6 @@ namespace Listenarr.Api.Controllers
         {
             try
             {
-                var cfg = _systemService.GetStartupConfig();
-                var authEnabled = cfg?.IsAuthenticationEnabled() == true;
-                if (authEnabled && !(User?.Identity?.IsAuthenticated ?? false))
-                {
-                    return Unauthorized();
-                }
                 _logger.LogInformation("Test Info log generated from API");
                 _logger.LogWarning("Test Warning log generated from API");
                 _logger.LogError("Test Error log generated from API");
@@ -183,12 +153,6 @@ namespace Listenarr.Api.Controllers
         {
             try
             {
-                var cfg = _systemService.GetStartupConfig();
-                var authEnabled = cfg?.IsAuthenticationEnabled() == true;
-                if (authEnabled && !(User?.Identity?.IsAuthenticated ?? false))
-                {
-                    return Unauthorized();
-                }
                 var logFilePath = _systemService.GetLogFilePath();
 
                 // If log file exists, return it

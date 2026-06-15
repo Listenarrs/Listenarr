@@ -28,6 +28,24 @@ The application layer now delegates these infrastructure-shaped concerns through
 - Secret protection is exposed through `ISecretProtector`, with Data Protection implemented in infrastructure.
 - `listenarr.application` no longer has an ASP.NET Core framework reference. It may reference general `Microsoft.Extensions.*` abstractions for logging, options, caching, dependency-factory access, and HTTP client factories, but it should not reference host/web implementation packages.
 
+## API Startup Composition
+
+`listenarr.api/Program.cs` should stay as the host orchestration layer only: create the builder, register services, build the app, run startup tasks, initialize realtime logging, map the request pipeline, and run. Detailed startup behavior belongs in `listenarr.api/Startup`.
+
+Startup modules are grouped by concern:
+
+- `ListenarrBuilderFactory` resolves content root/environment, external config, Serilog, default URLs, and the realtime log sink.
+- `ListenarrServiceRegistration` coordinates service registration and owns API versioning setup.
+- `ListenarrPlatformRegistration` owns reverse-proxy headers, development CORS, and SignalR JSON protocol setup.
+- `ListenarrWorkflowRegistration` owns explicit application/API workflow registrations.
+- `ListenarrSecurityStartup` owns antiforgery, Data Protection, and the security middleware order.
+- `ListenarrStaticAssetsStartup` owns frontend static files, placeholder fallback, and cached-image static files.
+- `ListenarrSwaggerRegistration`, `ListenarrStartupTasks`, and `ListenarrPipeline` own Swagger metadata, startup-time tasks, and the top-level request pipeline respectively.
+
+Infrastructure-specific composition remains behind `listenarr.infrastructure/Extensions/InfrastructureStartupCompositionExtensions.cs` and is invoked by `Program.cs`, the allowed composition root for cross-project infrastructure wiring.
+
+Security middleware order is part of the contract and should remain easy to audit: session cookie authentication, API key authentication, authentication enforcement, CSRF validation, then ASP.NET Core authorization. `UseForwardedHeaders()` must run before security middleware so forwarded scheme/host information is available for cookie and request handling.
+
 ## Background Worker Ownership
 
 Hosted workers must have one clear owner for each state transition. Queue services can dedupe, persist, or expose job status, but they should not perform the durable state transition that belongs to a worker.

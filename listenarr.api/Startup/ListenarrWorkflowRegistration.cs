@@ -1,0 +1,115 @@
+/*
+ * Listenarr - Audiobook Management System
+ * Copyright (C) 2024-2026 Listenarr Contributors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published
+ * by the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
+using Listenarr.Application.Common;
+using Listenarr.Application.Downloads;
+using Listenarr.Application.Interfaces;
+using Listenarr.Application.Metadata;
+using Listenarr.Application.Notification;
+using Listenarr.Application.Search;
+using Listenarr.Application.Search.Filters;
+using Listenarr.Application.Search.Strategies;
+
+namespace Listenarr.Api.Startup;
+
+public static class ListenarrWorkflowRegistration
+{
+    public static IServiceCollection AddListenarrDomainWorkflows(this IServiceCollection services)
+    {
+        services.AddScoped<IRootFolderService, RootFolderService>();
+        services.AddScoped<ILegacyOutputPathMigrator, LegacyOutputPathMigrator>();
+        services.AddMemoryCache();
+
+        services.AddHttpClient<AudibleService>()
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+            {
+                AutomaticDecompression = System.Net.DecompressionMethods.All
+            });
+
+        services.AddHttpClient<IAudnexusService, AudnexusService>()
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+            {
+                AutomaticDecompression = System.Net.DecompressionMethods.All
+            });
+
+        services.AddListenarrMetadataWorkflows();
+        services.AddListenarrSearchWorkflows();
+        services.AddListenarrControllerWorkflows();
+
+        return services;
+    }
+
+    private static IServiceCollection AddListenarrMetadataWorkflows(this IServiceCollection services)
+    {
+        services.AddScoped<MetadataConverters>();
+        services.AddScoped<MetadataMerger>();
+        services.AddScoped<MetadataSourceCatalog>();
+        services.AddScoped<IMetadataStrategy, AudibleMetadataStrategy>();
+        services.AddScoped<IMetadataStrategy, AudnexusStrategy>();
+        services.AddScoped<MetadataStrategyCoordinator>();
+        services.AddScoped<AudibleAuthorPageCollector>();
+        services.AddScoped<AudibleSimpleLookupWorkflow>();
+        services.AddScoped<AudibleAuthorSearchWorkflow>();
+        return services;
+    }
+
+    private static IServiceCollection AddListenarrSearchWorkflows(this IServiceCollection services)
+    {
+        services.AddScoped<SearchProgressReporter>();
+        services.AddScoped<IndexerAdditionalSettingsParser>();
+        services.AddScoped<IndexerSearchWorkflow>();
+        services.AddScoped<ISearchResultFilter, KindleEditionFilter>();
+        services.AddScoped<ISearchResultFilter, AudiobookOnlyFilter>();
+        services.AddScoped<ISearchResultFilter, PromotionalTitleFilter>();
+        services.AddScoped<ISearchResultFilter, ProductLikeTitleFilter>();
+        services.AddScoped<ISearchResultFilter, MissingInformationFilter>();
+        services.AddScoped<SearchResultFilterPipeline>();
+        services.AddScoped<AsinCandidateCollector>();
+        services.AddScoped<AsinEnricher>();
+        services.AddScoped<SearchResultScorerService>();
+        services.AddScoped<SearchResultSortingService>();
+        services.AddScoped<SearchFinalDispositionLogger>();
+        services.AddScoped<AsinSearchHandler>();
+        return services;
+    }
+
+    private static IServiceCollection AddListenarrControllerWorkflows(this IServiceCollection services)
+    {
+        services.AddScoped<Listenarr.Api.Controllers.LibraryMetadataRescanWorkflow>();
+        services.AddScoped<Listenarr.Api.Controllers.LibraryScanPathResolver>();
+        services.AddScoped<Listenarr.Api.Controllers.LibraryScanQueueWorkflow>();
+        services.AddScoped<Listenarr.Api.Controllers.LibraryAddWorkflow>();
+        services.AddScoped<Listenarr.Api.Controllers.LibraryManualScanWorkflow>();
+        services.AddScoped<Listenarr.Api.Controllers.LibraryBulkEditWorkflow>();
+        services.AddScoped<Listenarr.Api.Controllers.LibraryMoveWorkflow>();
+        services.AddScoped<Listenarr.Api.Controllers.LibraryDeleteWorkflow>();
+        services.AddScoped<Listenarr.Api.Controllers.LibraryUpdateWorkflow>();
+        services.AddScoped<Listenarr.Api.Controllers.LibraryIdentifierWorkflow>();
+        services.AddScoped<Listenarr.Api.Controllers.SearchResponseMapper>();
+        services.AddScoped<Listenarr.Api.Controllers.ImagePlaceholderResolver>();
+        services.AddScoped<Listenarr.Api.Controllers.IndexerTestWorkflow>();
+        services.AddScoped<Listenarr.Api.Controllers.ProwlarrIndexerImportWorkflow>();
+        services.AddScoped<Listenarr.Api.Controllers.ProwlarrIndexerNotificationWorkflow>();
+        services.AddScoped<Listenarr.Api.Controllers.ProwlarrIndexerUpsertWorkflow>();
+        services.AddScoped<Listenarr.Api.Controllers.StructuredSearchWorkflow>();
+        services.AddScoped<Listenarr.Api.Controllers.SearchByTitleWorkflow>();
+        services.AddScoped<Listenarr.Api.Controllers.ManualImportPathPlanner>();
+        services.AddScoped<Listenarr.Api.Controllers.ManualImportCompanionImporter>();
+        return services;
+    }
+}
