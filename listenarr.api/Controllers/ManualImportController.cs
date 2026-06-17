@@ -427,6 +427,7 @@ public class ManualImportController : ControllerBase
             {
                 var baseFull = FileUtils.NormalizeStoredPath(basePath);
                 var configuredFull = string.IsNullOrWhiteSpace(configuredOutput) ? string.Empty : Path.GetFullPath(configuredOutput);
+                configuredFull = FileUtils.EnsureTrailingSeparator(configuredFull);
                 isCustomBasePath = !string.Equals(baseFull, configuredFull, StringComparison.OrdinalIgnoreCase);
 
                 // Even if it differs from OutputPath, don't treat it as custom when it

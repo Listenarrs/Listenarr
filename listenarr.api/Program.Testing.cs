@@ -22,7 +22,6 @@ public partial class Program
         var inMemory = new Dictionary<string, string?>()
         {
             ["Listenarr:SqliteDbPath"] = sqliteDbPath,
-            ["Listenarr:DisableHostedServices"] = "true"
         };
         builder.Configuration.AddInMemoryCollection(inMemory);
     }

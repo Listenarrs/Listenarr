@@ -115,7 +115,7 @@ namespace Listenarr.Application.Audiobooks
                 });
             }
 
-            preview.NewFolderPath = ComputeCommonBasePath(expectedPaths);
+            preview.NewFolderPath = FileUtils.EnsureTrailingSeparator(ComputeCommonBasePath(expectedPaths));
             preview.FolderChanged = !PathsEqual(preview.CurrentFolderPath, preview.NewFolderPath);
             preview.HasChanges = preview.FolderChanged || preview.FileRenames.Any(f => f.Changed);
             return preview;

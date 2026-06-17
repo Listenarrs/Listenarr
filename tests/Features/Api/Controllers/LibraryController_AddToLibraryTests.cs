@@ -24,6 +24,7 @@ using Listenarr.Domain.Models;
 using Listenarr.Tests.Common;
 using Listenarr.Tests.Builders;
 using Listenarr.Application.Interfaces;
+using Listenarr.Domain.Common;
 
 namespace Listenarr.Tests.Features.Api.Controllers
 {
@@ -83,7 +84,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
             Assert.NotNull(stored);
             Assert.NotNull(stored.Authors);
             Assert.Contains("Legacy Author", stored.Authors);
-            Assert.Equal(Path.Join(tempRoot, "Legacy Author"), stored.BasePath);
+            Assert.Equal(FileUtils.GetAbsoluteDirectoryPath(tempRoot, "Legacy Author"), stored.BasePath);
         }
 
         [Fact]
@@ -228,7 +229,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
             Assert.NotNull(stored);
             // NormalizeStoredPath calls Path.GetFullPath which is platform-dependent:
             // on Windows "/custom/..." becomes "C:\custom\...", on Linux it stays "/custom/..."
-            var expectedPath = Path.GetFullPath(customPath);
+            var expectedPath = FileUtils.EnsureTrailingSeparator(Path.GetFullPath(customPath));
             Assert.Equal(expectedPath, stored.BasePath);
         }
 
@@ -260,7 +261,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
             var stored = (await _audiobookRepository.GetAllAsync()).First();
             Assert.NotNull(stored);
             // Uses fallback logic with folder naming pattern
-            Assert.Equal(Path.Join(tempRoot, "Custom Author"), stored.BasePath);
+            Assert.Equal(FileUtils.GetAbsoluteDirectoryPath(tempRoot, "Custom Author"), stored.BasePath);
         }
     }
 }

@@ -33,7 +33,6 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
         {
             // Omits Include(Files) — use when file data is fetched separately
             return await _db.Audiobooks
-                .AsNoTracking()
                 .OrderBy(a => a.Title)
                 .ToListAsync();
         }
@@ -136,7 +135,6 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
                 System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
             }
 
-            _db.Audiobooks.Update(audiobook);
             await _db.SaveChangesAsync();
             return true;
         }

@@ -63,7 +63,6 @@ namespace Listenarr.Tests.Mocks
                 var overrides = new Dictionary<string, string?>
                 {
                     ["Listenarr:SqliteDbPath"] = _sqliteDbPath,
-                    ["Listenarr:DisableHostedServices"] = "true"
                 };
 
                 config.AddInMemoryCollection(overrides);

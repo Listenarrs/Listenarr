@@ -26,6 +26,7 @@ using Listenarr.Application.Interfaces;
 using Listenarr.Tests.Builders;
 using Listenarr.Domain.Models.Configurations;
 using Listenarr.Domain.Models.Enumerations;
+using Listenarr.Domain.Common;
 
 namespace Listenarr.Tests.Features.Api.Services
 {
@@ -398,7 +399,7 @@ namespace Listenarr.Tests.Features.Api.Services
 
             var stored = await _audiobookRepository.GetByIdAsync(321);
             Assert.NotNull(stored);
-            Assert.Equal(longBasePath, stored!.BasePath);
+            Assert.Equal(FileUtils.EnsureTrailingSeparator(longBasePath), stored!.BasePath);
         }
 
         [Fact]
