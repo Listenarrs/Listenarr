@@ -297,6 +297,62 @@ namespace Listenarr.Tests.Features.Application.Downloads.Import
             Assert.Single(files);
         }
 
+        // Reproduction for issue #582 - "Quality filters: Flaws in the current logic".
+        // The numeric path (MP3 320 vs MP3 128) above happens to work, but DownloadImportService.IsQualityBetter
+        // ignores the QualityProfile entirely and only compares regex-extracted bitrates. For a non-numeric
+        // format such as FLAC, the parse fails and the method falls through to `return true`, so a lossy MP3
+        // download is treated as "better" than an existing lossless FLAC and gets imported on top of it.
+        //
+        // This test asserts the INTENDED behaviour (the lossy download is skipped, leaving only the existing
+        // FLAC) and therefore FAILS against the current logic - that failure is the reproduction of #582.
+        [Fact]
+        public async Task QualityGating_LosslessExisting_SkipsLossyDownload()
+        {
+            var library = FileService.GetTempDirectory("library");
+            var existingFlac = await FileService.GetFileAsync(library, "existing.flac");
+
+            // Profile that clearly ranks lossless FLAC above lossy MP3.
+            var profile = new QualityProfileBuilder()
+                .WithName("Lossless Preferred")
+                .Build();
+            profile.Qualities =
+            [
+                new QualityDefinition { Quality = "flac", Codec = "FLAC", IsLossless = true, Priority = 2 },
+                new QualityDefinition { Quality = "mp3", Codec = "MP3", Bitrate = 320, Priority = 1 },
+            ];
+            var qualityProfile = await _qualityProfileRepository.AddAsync(profile);
+
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("The Lossless Book")
+                .WithBasePath(library)
+                .WithQualityProfile(qualityProfile)
+                .Build());
+
+            // Existing lossless FLAC file in the library. No bitrate is set so that "best existing quality"
+            // stays the format string "flac" (a non-numeric quality) - which is what triggers the flaw.
+            await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
+                .WithAudiobook(audiobook)
+                .WithPath(existingFlac)
+                .WithFormat("flac")
+                .Build());
+
+            // Incoming completed download is a lower-quality lossy MP3.
+            var lossyMp3 = await FileService.GetTempFileAsync("lossy.mp3");
+            metadataServiceMock.AddMetadata(@"lossy\.mp3$", new AudioMetadata { Title = "Lossy Download", Format = "mp3", BitRate = 320000 });
+
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettings { OutputPath = Path.GetTempPath(), EnableMetadataProcessing = true, CompletedFileAction = FileAction.Move });
+
+            // Act - process the lossy completed download against the audiobook that already has a FLAC.
+            var downloadImportService = _provider.GetRequiredService<IDownloadImportService>();
+            await downloadImportService.ImportDownloadFilesAsync(audiobook, [lossyMp3]);
+
+            // Assert: the lossy MP3 must NOT be imported over the existing lossless FLAC.
+            // Currently fails (#582): two files end up associated with the audiobook.
+            var files = await _audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id);
+            Assert.Single(files);
+            Assert.Equal("flac", files.First().Format);
+        }
+
         [Fact]
         public async Task MultiFileImport_ImportsAllFiles_WithUniqueNames()
         {
