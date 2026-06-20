@@ -1,6 +1,5 @@
 using Listenarr.Api.Controllers;
 using Listenarr.Application.Audiobooks;
-using Listenarr.Application.Downloads;
 using Listenarr.Application.Metadata;
 using Listenarr.Application.Search;
 using Listenarr.Application.Search.Filters;

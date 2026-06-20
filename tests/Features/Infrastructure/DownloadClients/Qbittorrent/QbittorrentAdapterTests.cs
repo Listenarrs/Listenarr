@@ -20,9 +20,7 @@ using Listenarr.Tests.Common;
 
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Mocks.Api;
-using Listenarr.Application.Downloads;
 using Listenarr.Infrastructure.Torrents;
-using Listenarr.Infrastructure.Downloads;
 
 namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
 {

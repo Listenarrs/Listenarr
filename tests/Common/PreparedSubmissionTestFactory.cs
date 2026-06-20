@@ -1,6 +1,3 @@
-using Listenarr.Application.Downloads;
-using Listenarr.Infrastructure.Downloads;
-
 namespace Listenarr.Tests.Common;
 
 public static class PreparedSubmissionTestFactory

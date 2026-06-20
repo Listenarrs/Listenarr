@@ -21,8 +21,6 @@ using Listenarr.Tests.Common;
 using Listenarr.Tests.Mocks.Api;
 
 using Listenarr.Infrastructure.Torrents;
-using Listenarr.Infrastructure.Downloads;
-using Listenarr.Application.Downloads;
 
 namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Transmission
 {

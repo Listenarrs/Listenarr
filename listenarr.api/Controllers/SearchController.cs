@@ -23,7 +23,6 @@ using Listenarr.Application.Metadata;
 using Listenarr.Application.Search;
 using Listenarr.Domain.Models;
 using Listenarr.Application.Security;
-using Listenarr.Application.Downloads;
 
 namespace Listenarr.Api.Controllers
 {

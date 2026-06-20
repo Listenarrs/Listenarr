@@ -24,7 +24,6 @@ using Listenarr.Infrastructure.Persistence.Repositories;
 using Listenarr.Infrastructure.Cache;
 using Listenarr.Infrastructure.Platform;
 using Listenarr.Infrastructure.Services;
-using Listenarr.Infrastructure.Downloads;
 using Listenarr.Infrastructure.Security;
 
 namespace Listenarr.Infrastructure.Extensions

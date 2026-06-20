@@ -8,8 +8,6 @@
  * (at your option) any later version.
  */
 
-using Listenarr.Application.Downloads;
-
 namespace Listenarr.Application.Interfaces;
 
 public interface IDownloadReferenceService

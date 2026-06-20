@@ -1,5 +1,4 @@
 using Listenarr.Domain.Models;
-using Listenarr.Application.Downloads;
 
 namespace Listenarr.Application.Interfaces
 {
