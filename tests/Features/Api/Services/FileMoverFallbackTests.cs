@@ -17,7 +17,6 @@
  */
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using Listenarr.Infrastructure.FileSystem;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 

@@ -30,6 +30,7 @@ namespace Listenarr.Application.Downloads.Common
     public class DownloadClientGateway(
         IRemotePathMappingService remotePathMappingService,
         IDownloadClientAdapterFactory factory,
+        IFileSystem fileSystem,
         ILogger<DownloadClientGateway> logger) : IDownloadClientGateway
     {
         internal IDownloadClientAdapter ResolveAdapter(DownloadClientConfiguration client)
@@ -195,7 +196,7 @@ namespace Listenarr.Application.Downloads.Common
             {
                 // Scan content path: Some clients are not able to tell if they have a file or a directory downloaded
                 // So we make sure it's either one or the other and log if it's not
-                if (File.Exists(item.ContentPath))
+                if (fileSystem.FileExists(item.ContentPath))
                 {
                     item.SourceFiles = [item.ContentPath];
                 }

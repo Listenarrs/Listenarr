@@ -2,15 +2,15 @@ namespace Listenarr.Application.Common
 {
     public sealed class TempDirectory : IDisposable
     {
-        public string Path { get; }
-        public TempDirectory(string path) => Path = path;
+        private readonly Action<string> _cleanup;
 
-        public void Dispose()
+        public string Path { get; }
+        public TempDirectory(string path, Action<string> cleanup)
         {
-            if (Directory.Exists(Path))
-            {
-                Directory.Delete(Path, recursive: true);
-            }
+            Path = path;
+            _cleanup = cleanup;
         }
+
+        public void Dispose() => _cleanup(Path);
     }
 }

@@ -27,14 +27,16 @@ namespace Listenarr.Application.Metadata.Extraction
         private readonly IConfigurationService _configurationService;
         private readonly IFfmpegService _ffmpegService;
         private readonly IAudioTagWriter _audioTagWriter;
+        private readonly IFileSystem _fileSystem;
         private readonly ILogger<MetadataService> _logger;
 
-        public MetadataService(HttpClient httpClient, IConfigurationService configurationService, ILogger<MetadataService> logger, IFfmpegService ffmpegService, IAudioTagWriter audioTagWriter)
+        public MetadataService(HttpClient httpClient, IConfigurationService configurationService, ILogger<MetadataService> logger, IFfmpegService ffmpegService, IAudioTagWriter audioTagWriter, IFileSystem fileSystem)
         {
             _httpClient = httpClient;
             _configurationService = configurationService;
             _ffmpegService = ffmpegService;
             _audioTagWriter = audioTagWriter;
+            _fileSystem = fileSystem;
             _logger = logger;
         }
 
@@ -64,9 +66,9 @@ namespace Listenarr.Application.Metadata.Extraction
             try
             {
                 // Log source state immediately before attempting the file operation for diagnostics
-                var exists = File.Exists(sourcePath);
-                var size = exists ? new FileInfo(sourcePath).Length : (long?)null;
-                var last = exists ? File.GetLastWriteTimeUtc(sourcePath).ToString("o") : "(not found)";
+                var exists = _fileSystem.FileExists(sourcePath);
+                var size = exists ? _fileSystem.GetFileLength(sourcePath) : (long?)null;
+                var last = exists ? _fileSystem.GetLastWriteTimeUtc(sourcePath).ToString("o") : "(not found)";
                 job.AddLogEntry($"Operation pre-check: sourceExists={exists}, size={(size.HasValue ? size.ToString() : "(n/a)")}, lastWriteUtc={last}");
 
                 var extractedMetadata = await ExtractFileMetadataAsync(sourcePath);
@@ -155,7 +157,7 @@ namespace Listenarr.Application.Metadata.Extraction
             try
             {
                 // If the file doesn't exist, skip running ffprobe and return basic metadata from filename
-                if (!File.Exists(filePath))
+                if (!_fileSystem.FileExists(filePath))
                 {
                     _logger.LogWarning("File not found when attempting metadata extraction: {File}", LogRedaction.SanitizeFilePath(filePath));
                     var fallbackMissingFile = new AudioMetadata
@@ -169,7 +171,7 @@ namespace Listenarr.Application.Metadata.Extraction
 
                 // Ask the ffmpeg installer/service for the bundled ffprobe path
                 var ffprobePathService = await _ffmpegService.GetFfprobePathAsync();
-                if (string.IsNullOrEmpty(ffprobePathService) || !File.Exists(ffprobePathService))
+                if (string.IsNullOrEmpty(ffprobePathService) || !_fileSystem.FileExists(ffprobePathService))
                 {
                     _logger.LogInformation("No bundled ffprobe available at configured location; skipping ffprobe for file: {File}", LogRedaction.SanitizeFilePath(filePath));
                     // Let the outer method fall back to filename-based metadata

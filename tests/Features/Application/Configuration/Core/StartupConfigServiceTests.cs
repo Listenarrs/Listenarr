@@ -38,7 +38,7 @@ namespace Listenarr.Tests.Features.Application.Configuration.Core
                     Directory.Delete(cfgDir, recursive: true);
                 }
 
-                var svc = new StartupConfigService(logger, pathServiceMock.Object);
+                var svc = new StartupConfigService(logger, pathServiceMock.Object, new LocalFileSystem());
 
                 // default config should exist and have false auth
                 var original = svc.GetConfig();

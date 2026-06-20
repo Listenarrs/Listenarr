@@ -213,6 +213,7 @@ namespace Listenarr.Infrastructure.DependencyInjection
 
             // File storage abstraction used throughout services to isolate System.IO for testing
             services.AddSingleton<IFileStorage, FileStorage>();
+            services.AddSingleton<IFileSystem, LocalFileSystem>();
 
             // SignalR broadcaster abstraction used to centralize broadcast logic and simplify testing
             services.AddSingleton<IHubBroadcaster, SignalRHubBroadcaster>();

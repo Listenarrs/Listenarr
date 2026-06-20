@@ -45,7 +45,7 @@ namespace Listenarr.Tests.Features.Application.Downloads.Import
             _stateMachine = new DownloadStateMachine(_mockStateMachineLogger.Object, _historyRepository);
             _mockLogger = new Mock<ILogger<DownloadValidationPipeline>>();
 
-            _pipeline = new DownloadValidationPipeline(_mockLogger.Object, _stateMachine, _historyRepository);
+            _pipeline = new DownloadValidationPipeline(_mockLogger.Object, _stateMachine, _historyRepository, new LocalFileSystem());
 
             // Create test directory
             _testDirectory = Path.Join(Path.GetTempPath(), "listenarr_pipeline_test_" + Guid.NewGuid().ToString("N"));

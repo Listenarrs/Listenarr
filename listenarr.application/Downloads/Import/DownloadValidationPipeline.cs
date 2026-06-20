@@ -46,15 +46,18 @@ namespace Listenarr.Application.Downloads.Import
         private readonly ILogger<DownloadValidationPipeline> _logger;
         private readonly DownloadStateMachine _stateMachine;
         private readonly IDownloadHistoryRepository _historyRepository;
+        private readonly IFileSystem _fileSystem;
 
         public DownloadValidationPipeline(
             ILogger<DownloadValidationPipeline> logger,
             DownloadStateMachine stateMachine,
-            IDownloadHistoryRepository historyRepository)
+            IDownloadHistoryRepository historyRepository,
+            IFileSystem fileSystem)
         {
             _logger = logger;
             _stateMachine = stateMachine;
             _historyRepository = historyRepository;
+            _fileSystem = fileSystem;
         }
 
         /// <summary>
@@ -156,7 +159,7 @@ namespace Listenarr.Application.Downloads.Import
                 }
 
                 // Check 3: Output path must exist
-                if (!Directory.Exists(download.OutputPath) && !File.Exists(download.OutputPath))
+                if (!_fileSystem.DirectoryExists(download.OutputPath) && !_fileSystem.FileExists(download.OutputPath))
                 {
                     result.ErrorMessage = $"Output path does not exist: {download.OutputPath}";
                     return result;
@@ -273,7 +276,7 @@ namespace Listenarr.Application.Downloads.Import
                 }
 
                 // Verify 2: Imported path must still exist
-                if (!Directory.Exists(importedPath) && !File.Exists(importedPath))
+                if (!_fileSystem.DirectoryExists(importedPath) && !_fileSystem.FileExists(importedPath))
                 {
                     result.ErrorMessage = $"Imported path does not exist: {importedPath}";
                     return result;
@@ -347,4 +350,3 @@ namespace Listenarr.Application.Downloads.Import
         public string? ImportedPath { get; set; }
     }
 }
-

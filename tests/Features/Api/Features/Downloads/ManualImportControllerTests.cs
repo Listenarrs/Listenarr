@@ -16,7 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Microsoft.Extensions.Logging.Abstractions;
-using Listenarr.Infrastructure.FileSystem;
 using Listenarr.Api.Dtos.ManualImport;
 
 namespace Listenarr.Tests.Features.Api.Features.Downloads

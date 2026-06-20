@@ -28,6 +28,7 @@ namespace Listenarr.Application.Downloads.Import
         IAudiobookFileService audiobookFileService,
         IArchiveExtractor archiveExtractor,
         IConfigurationService configurationService,
+        IFileSystem fileSystem,
         ILogger<DownloadImportService> logger) : IDownloadImportService
     {
         private List<TempDirectory> archiveDirectories = [];
@@ -298,8 +299,8 @@ namespace Listenarr.Application.Downloads.Import
                             }
 
                             destination = await ResolveIdempotentOrUniqueDestinationAsync(file, destination, usedDestinations);
-                            var destinationAlreadyMatchedSource = File.Exists(destination)
-                                && await FileUtils.FilesHaveSameContentAsync(file, destination, ct);
+                            var destinationAlreadyMatchedSource = fileSystem.FileExists(destination)
+                                && await fileSystem.FilesHaveSameContentAsync(file, destination, ct);
 
                             if (!(destinationAlreadyMatchedSource && completedFileAction != FileAction.Move)
                                 && !await fileMover.PerformActionOn(completedFileAction, file, destination))
@@ -461,19 +462,19 @@ namespace Listenarr.Application.Downloads.Import
             return FileUtils.TryResolveRelativePathWithinBase(basePath, candidatePath.Trim(), out destination);
         }
 
-        private static async Task<string> ResolveIdempotentOrUniqueDestinationAsync(
+        private async Task<string> ResolveIdempotentOrUniqueDestinationAsync(
             string sourcePath,
             string destination,
             ISet<string> usedDestinations)
         {
-            if (File.Exists(destination)
-                && await FileUtils.FilesHaveSameContentAsync(sourcePath, destination))
+            if (fileSystem.FileExists(destination)
+                && await fileSystem.FilesHaveSameContentAsync(sourcePath, destination))
             {
                 usedDestinations.Add(destination);
                 return destination;
             }
 
-            var uniqueDestination = FileUtils.GetUniqueDestinationPath(destination, File.Exists, usedDestinations);
+            var uniqueDestination = FileUtils.GetUniqueDestinationPath(destination, fileSystem.FileExists, usedDestinations);
             usedDestinations.Add(uniqueDestination);
             return uniqueDestination;
         }
@@ -584,7 +585,7 @@ namespace Listenarr.Application.Downloads.Import
                         archiveDirectories.Add(archiveDirectory);
 
                         var tempDirExtracted = archiveDirectory.Path;
-                        var extractedFiles = Directory.GetFiles(tempDirExtracted, "*", SearchOption.AllDirectories).ToArray();
+                        var extractedFiles = fileSystem.GetFiles(tempDirExtracted, "*", SearchOption.AllDirectories);
                         if (extractedFiles != null)
                         {
                             files.AddRange([.. extractedFiles.Select(file => FileUtils.NormalizeStoredPath(file))]);

@@ -18,7 +18,7 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
-namespace Listenarr.Application.Metadata.Extraction
+namespace Listenarr.Infrastructure.Metadata.Parsing
 {
     public class PathParsedMetadata
     {

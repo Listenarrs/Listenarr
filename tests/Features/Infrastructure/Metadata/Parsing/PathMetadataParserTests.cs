@@ -17,7 +17,7 @@
  */
 using System.Text.Json;
 
-namespace Listenarr.Tests.Features.Application.Metadata.Extraction
+namespace Listenarr.Tests.Features.Infrastructure.Metadata.Parsing
 {
     public class PathMetadataParserTests
     {

@@ -31,11 +31,12 @@ namespace Listenarr.Application.Audiobooks.Files
         IMetadataService metadataService,
         IToastService toastService,
         IFfmpegService ffmpegService,
+        IFileSystem fileSystem,
         ILogger<AudiobookFileService> logger) : IAudiobookFileService
     {
         public async Task<bool> EnsureAudiobookFileAsync(Audiobook audiobook, string filePath, string? source = "scan")
         {
-            if (!File.Exists(filePath))
+            if (!fileSystem.FileExists(filePath))
             {
                 return false;
             }

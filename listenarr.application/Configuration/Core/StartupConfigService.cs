@@ -24,12 +24,14 @@ namespace Listenarr.Application.Configuration.Core
     public class StartupConfigService : IStartupConfigService
     {
         private readonly ILogger<StartupConfigService> _logger;
+        private readonly IFileSystem _fileSystem;
         private readonly string _configPath;
         private StartupConfig? _config;
 
-        public StartupConfigService(ILogger<StartupConfigService> logger, IApplicationPathService applicationPathService)
+        public StartupConfigService(ILogger<StartupConfigService> logger, IApplicationPathService applicationPathService, IFileSystem fileSystem)
         {
             _logger = logger;
+            _fileSystem = fileSystem;
 
             // Determine config.json path. Prefer the repository copy at
             // <repoRoot>/listenarr.api/config/config.json for local development
@@ -46,21 +48,21 @@ namespace Listenarr.Application.Configuration.Core
                 try
                 {
                     // Search upward from the current working directory for listenarr.sln
-                    var cwd = Directory.GetCurrentDirectory();
+                    var cwd = _fileSystem.CurrentDirectory;
                     string? repoRootFromCwd = null;
                     try
                     {
-                        var dir = new DirectoryInfo(cwd);
+                        var dir = cwd;
                         const int maxDepth2 = 8;
                         int depth2 = 0;
-                        while (dir != null && depth2++ < maxDepth2)
+                        while (!string.IsNullOrWhiteSpace(dir) && depth2++ < maxDepth2)
                         {
-                            if (File.Exists(Path.Join(dir.FullName, "listenarr.sln")))
+                            if (_fileSystem.FileExists(Path.Join(dir, "listenarr.sln")))
                             {
-                                repoRootFromCwd = dir.FullName;
+                                repoRootFromCwd = dir;
                                 break;
                             }
-                            dir = dir.Parent;
+                            dir = _fileSystem.GetParentDirectory(dir);
                         }
                     }
                     catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
@@ -78,7 +80,7 @@ namespace Listenarr.Application.Configuration.Core
                         ? Path.Join(devRepoRoot, "config", "config.json")
                         : Path.Join(devRepoRoot, "listenarr.api", "config", "config.json");
 
-                    if (File.Exists(devRepoConfig) || Directory.Exists(Path.GetDirectoryName(devRepoConfig)!))
+                    if (_fileSystem.FileExists(devRepoConfig) || _fileSystem.DirectoryExists(Path.GetDirectoryName(devRepoConfig)!))
                     {
                         _configPath = devRepoConfig;
                         _logger.LogInformation("[StartupConfigService] Development mode detected - forcing startup config to repo path: {DevRepoConfig}", devRepoConfig);
@@ -106,41 +108,41 @@ namespace Listenarr.Application.Configuration.Core
                 }
                 else
                 {
-                    var dirInfo = new DirectoryInfo(contentRoot);
+                    var dirInfo = contentRoot;
 
                     // First pass: search ancestors for any local config at
                     // <ancestor>/config/config.json. This ensures local/test folders
                     // are preferred for isolation and determinism.
                     const int maxDepth = 8;
                     int depth = 0;
-                    while (dirInfo != null && depth++ < maxDepth)
+                    while (!string.IsNullOrWhiteSpace(dirInfo) && depth++ < maxDepth)
                     {
-                        var candidateLocal = Path.Join(dirInfo.FullName, "config", "config.json");
-                        if (File.Exists(candidateLocal))
+                        var candidateLocal = Path.Join(dirInfo, "config", "config.json");
+                        if (_fileSystem.FileExists(candidateLocal))
                         {
                             _configPath = candidateLocal;
                             break;
                         }
 
-                        dirInfo = dirInfo.Parent;
+                        dirInfo = _fileSystem.GetParentDirectory(dirInfo);
                     }
 
                     // Second pass (only if local not found): search for a repository-style
                     // config at <ancestor>/listenarr.api/config/config.json and prefer that.
                     if (string.IsNullOrEmpty(_configPath))
                     {
-                        dirInfo = new DirectoryInfo(contentRoot);
+                        dirInfo = contentRoot;
                         depth = 0;
-                        while (dirInfo != null && depth++ < maxDepth)
+                        while (!string.IsNullOrWhiteSpace(dirInfo) && depth++ < maxDepth)
                         {
-                            var candidateConfigPath = Path.Join(dirInfo.FullName, "listenarr.api", "config", "config.json");
-                            if (File.Exists(candidateConfigPath))
+                            var candidateConfigPath = Path.Join(dirInfo, "listenarr.api", "config", "config.json");
+                            if (_fileSystem.FileExists(candidateConfigPath))
                             {
                                 _configPath = candidateConfigPath;
                                 break;
                             }
 
-                            dirInfo = dirInfo.Parent;
+                            dirInfo = _fileSystem.GetParentDirectory(dirInfo);
                         }
                     }
                 }
@@ -169,7 +171,7 @@ namespace Listenarr.Application.Configuration.Core
         {
             try
             {
-                if (!File.Exists(_configPath))
+                if (!_fileSystem.FileExists(_configPath))
                 {
                     _logger.LogInformation("Startup config not found at {Path}, creating default config", _configPath);
                     _config = CreateDefaultConfig();
@@ -177,7 +179,7 @@ namespace Listenarr.Application.Configuration.Core
                     return;
                 }
 
-                var json = File.ReadAllText(_configPath);
+                var json = _fileSystem.ReadAllText(_configPath);
                 _config = JsonSerializer.Deserialize<StartupConfig>(json, new JsonSerializerOptions
                 {
                     PropertyNameCaseInsensitive = true
@@ -336,22 +338,22 @@ namespace Listenarr.Application.Configuration.Core
                 throw new IOException($"Startup config path is outside the resolved config directory: {reason}");
             }
 
-            if (!string.IsNullOrEmpty(configDir) && !Directory.Exists(configDir))
+            if (!string.IsNullOrEmpty(configDir) && !_fileSystem.DirectoryExists(configDir))
             {
                 _logger.LogWarning("[StartupConfigService] Config directory did not exist. Creating: {Dir}", configDir);
-                Directory.CreateDirectory(configDir);
+                _fileSystem.CreateDirectory(configDir);
             }
 
             var options = new JsonSerializerOptions { WriteIndented = true };
             var json = JsonSerializer.Serialize(config, options);
             try
             {
-                File.WriteAllText(safeConfigPath, json);
-                _logger.LogInformation("[StartupConfigService] File.WriteAllText succeeded for {Path}", safeConfigPath);
+                _fileSystem.WriteAllText(safeConfigPath, json);
+                _logger.LogInformation("[StartupConfigService] Config write succeeded for {Path}", safeConfigPath);
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
-                _logger.LogError(ex, "[StartupConfigService] File.WriteAllText failed for {Path}", _configPath);
+                _logger.LogError(ex, "[StartupConfigService] Config write failed for {Path}", _configPath);
                 throw;
             }
         }

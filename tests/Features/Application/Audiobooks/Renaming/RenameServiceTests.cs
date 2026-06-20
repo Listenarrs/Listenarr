@@ -532,6 +532,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
                 fileNaming,
                 fileMover.Object,
                 repo,
+                new LocalFileSystem(),
                 NullLogger<RenameService>.Instance);
 
             return (service, db, dbName);

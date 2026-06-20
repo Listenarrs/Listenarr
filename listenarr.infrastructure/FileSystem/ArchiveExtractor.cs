@@ -85,7 +85,15 @@ namespace Listenarr.Infrastructure.FileSystem
                     }
                 }
 
-                return await Task.FromResult(new TempDirectory(tmp));
+                return await Task.FromResult(new TempDirectory(
+                    tmp,
+                    path =>
+                    {
+                        if (Directory.Exists(path))
+                        {
+                            Directory.Delete(path, recursive: true);
+                        }
+                    }));
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
@@ -95,7 +103,6 @@ namespace Listenarr.Infrastructure.FileSystem
         }
     }
 }
-
 
 
 

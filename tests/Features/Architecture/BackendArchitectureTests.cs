@@ -118,6 +118,24 @@ public sealed class BackendArchitectureTests
     }
 
     [Fact]
+    public void Application_DoesNotImplementFilesystemAccess()
+    {
+        var applicationRoot = Path.Join(RepositoryRoot, "listenarr.application");
+        var filesystemPattern = new Regex(
+            @"\b(?:System\.IO\.)?(?:File|Directory)\.(?:Exists|Read|Write|Delete|Move|Copy|Create|Enumerate|GetFiles|GetDirectories|GetCurrentDirectory|GetParent)",
+            RegexOptions.Compiled);
+
+        var violations = Directory
+            .EnumerateFiles(applicationRoot, "*.cs", SearchOption.AllDirectories)
+            .Where(file => !IsBuildArtifact(file))
+            .Where(file => filesystemPattern.IsMatch(File.ReadAllText(file)))
+            .Select(file => Normalize(Path.GetRelativePath(applicationRoot, file)))
+            .ToList();
+
+        Assert.Empty(violations);
+    }
+
+    [Fact]
     public void ExternalHttpClients_HaveOneRegistrationOwner()
     {
         var registrationFiles = new[]

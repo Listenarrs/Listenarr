@@ -28,6 +28,7 @@ namespace Listenarr.Application.Audiobooks.Renaming
         private readonly IFileNamingService _fileNamingService;
         private readonly IFileMover _fileMover;
         private readonly IAudiobookRepository _audiobookRepository;
+        private readonly IFileSystem _fileSystem;
         private readonly ILogger<RenameService> _logger;
         private readonly IRootFolderService? _rootFolderService;
         private readonly IHistoryRepository? _historyRepository;
@@ -37,6 +38,7 @@ namespace Listenarr.Application.Audiobooks.Renaming
             IFileNamingService fileNamingService,
             IFileMover fileMover,
             IAudiobookRepository audiobookRepository,
+            IFileSystem fileSystem,
             ILogger<RenameService> logger,
             IRootFolderService? rootFolderService = null,
             IHistoryRepository? historyRepository = null)
@@ -45,6 +47,7 @@ namespace Listenarr.Application.Audiobooks.Renaming
             _fileNamingService = fileNamingService;
             _fileMover = fileMover;
             _audiobookRepository = audiobookRepository;
+            _fileSystem = fileSystem;
             _logger = logger;
             _rootFolderService = rootFolderService;
             _historyRepository = historyRepository;
@@ -241,14 +244,14 @@ namespace Listenarr.Application.Audiobooks.Renaming
                 return item;
             }
 
-            if (!File.Exists(source))
+            if (!_fileSystem.FileExists(source))
             {
                 item.Success = false;
                 item.Error = "Source file not found.";
                 return item;
             }
 
-            if (File.Exists(dest) && !PathsEqual(source, dest))
+            if (_fileSystem.FileExists(dest) && !PathsEqual(source, dest))
             {
                 item.Success = false;
                 item.Error = "Target file already exists.";
@@ -258,7 +261,7 @@ namespace Listenarr.Application.Audiobooks.Renaming
             try
             {
                 var targetDir = Path.GetDirectoryName(dest);
-                if (!string.IsNullOrWhiteSpace(targetDir)) Directory.CreateDirectory(targetDir);
+                if (!string.IsNullOrWhiteSpace(targetDir)) _fileSystem.CreateDirectory(targetDir);
 
                 if (!PathsEqual(source, dest))
                 {
@@ -299,16 +302,16 @@ namespace Listenarr.Application.Audiobooks.Renaming
             var normalizedNew = NormalizePath(newFolderPath);
             if (!IsPathWithinAllowedRoots(normalizedCurrent, allowedRoots) || !IsPathWithinAllowedRoots(normalizedNew, allowedRoots))
                 return (false, "Destination path is outside the allowed library roots.");
-            if (!Directory.Exists(normalizedCurrent))
+            if (!_fileSystem.DirectoryExists(normalizedCurrent))
             {
                 audiobook.BasePath = normalizedNew;
                 return (true, null);
             }
-            if (Directory.Exists(normalizedNew) && Directory.EnumerateFileSystemEntries(normalizedNew).Any())
+            if (_fileSystem.DirectoryExists(normalizedNew) && _fileSystem.EnumerateFileSystemEntries(normalizedNew).Any())
                 return (false, "Target folder already exists and is not empty.");
 
             var parent = Path.GetDirectoryName(normalizedNew);
-            if (!string.IsNullOrWhiteSpace(parent)) Directory.CreateDirectory(parent);
+            if (!string.IsNullOrWhiteSpace(parent)) _fileSystem.CreateDirectory(parent);
 
             var moved = await _fileMover.MoveDirectoryAsync(normalizedCurrent, normalizedNew);
             if (!moved) return (false, "Folder move operation failed.");
@@ -500,7 +503,7 @@ namespace Listenarr.Application.Audiobooks.Renaming
         private static bool IsPathWithinAllowedRoots(string path, IReadOnlyCollection<string> allowedRoots)
             => !string.IsNullOrWhiteSpace(path) && allowedRoots.Any(root => IsSamePathOrWithin(path, root));
 
-        private static string ComputeCurrentBasePath(Audiobook audiobook)
+        private string ComputeCurrentBasePath(Audiobook audiobook)
         {
             if (!string.IsNullOrWhiteSpace(audiobook.BasePath)) return NormalizePath(audiobook.BasePath);
             var filePaths = audiobook.Files?.Where(f => !string.IsNullOrWhiteSpace(f.Path)).Select(f => f.Path!).ToList() ?? new();
@@ -508,14 +511,14 @@ namespace Listenarr.Application.Audiobooks.Renaming
             return ComputeCommonBasePath(filePaths);
         }
 
-        private static string ComputeCommonBasePath(IEnumerable<string> paths)
+        private string ComputeCommonBasePath(IEnumerable<string> paths)
         {
             var normalized = paths.Where(p => !string.IsNullOrWhiteSpace(p)).Select(NormalizePath).ToList();
             if (normalized.Count == 0) return string.Empty;
             if (normalized.Count == 1)
             {
                 var single = normalized[0];
-                return Directory.Exists(single) ? single : NormalizePath(Path.GetDirectoryName(single) ?? single);
+                return _fileSystem.DirectoryExists(single) ? single : NormalizePath(Path.GetDirectoryName(single) ?? single);
             }
 
             var common = FileUtils.GetCommonDirectory(normalized);

@@ -1,4 +1,3 @@
-using Listenarr.Infrastructure.FileSystem;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Listenarr.Tests.Features.Infrastructure.FileSystem
