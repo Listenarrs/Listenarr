@@ -24,15 +24,8 @@ namespace Listenarr.Api.Features.Library
     [ApiController]
     [Route("api/v{version:apiVersion}/library")]
     [Tags("Library")]
-    public class LibraryController : ControllerBase
+    public partial class LibraryController : ControllerBase
     {
-        private readonly IAudiobookRepository _repo;
-        private readonly ILogger<LibraryController> _logger;
-        private readonly IServiceScopeFactory _scopeFactory;
-        private readonly IAudiobookFileRepository _audioFileRepository;
-        private readonly IMoveQueueService? _moveQueueService;
-        private readonly IFileNamingService _fileNamingService;
-        private readonly IRenameService? _renameService;
         private readonly ILibraryListService _libraryListService;
         private readonly LibraryAddWorkflow _addWorkflow;
         private readonly LibraryMetadataRescanWorkflow _metadataRescanWorkflow;
@@ -44,31 +37,11 @@ namespace Listenarr.Api.Features.Library
         private readonly LibraryDeleteWorkflow _deleteWorkflow;
         private readonly LibraryUpdateWorkflow _updateWorkflow;
         private readonly LibraryIdentifierWorkflow _identifierWorkflow;
-        /// <summary>Initializes a new instance of <see cref="LibraryController"/>.</summary>
-        /// <param name="repo">Repository for audiobook persistence and queries.</param>
-        /// <param name="logger">Logger instance for diagnostic messages.</param>
-        /// <param name="scopeFactory">Service scope factory used to create scoped services when required.</param>
-        /// <param name="audioFileRepository">Repository for audiobook file records.</param>
-        /// <param name="fileNamingService">Service responsible for applying file naming patterns.</param>
-        /// <param name="moveQueueService">Optional background move queue service for processing move requests.</param>
-        /// <param name="renameService">Optional organize/rename service used for previewing and executing library file organization.</param>
-        /// <param name="libraryListService">Application service that builds the slim library list payload.</param>
-        /// <param name="addWorkflow">API workflow for add-to-library requests.</param>
-        /// <param name="metadataRescanWorkflow">API workflow for on-demand audiobook metadata rescans.</param>
-        /// <param name="scanPathResolver">API workflow for resolving and validating scan roots.</param>
-        /// <param name="scanQueueWorkflow">API workflow for background scan queue operations.</param>
-        /// <param name="manualScanWorkflow">API workflow for inline scan execution and reconciliation.</param>
-        /// <param name="bulkEditWorkflow">API workflow for bulk update and delete operations.</param>
-        /// <param name="moveWorkflow">API workflow for move queue operations.</param>
-        /// <param name="deleteWorkflow">API workflow for single audiobook delete operations.</param>
-        /// <param name="updateWorkflow">API workflow for single audiobook update operations.</param>
-        /// <param name="identifierWorkflow">API workflow for audiobook identifier operations.</param>
+        private readonly LibraryPreviewPathWorkflow _previewPathWorkflow;
+        private readonly LibraryQueryWorkflow _queryWorkflow;
+        private readonly LibraryRenameWorkflow _renameWorkflow;
+        /// <summary>Initializes the library transport façade.</summary>
         public LibraryController(
-            IAudiobookRepository repo,
-            ILogger<LibraryController> logger,
-            IServiceScopeFactory scopeFactory,
-            IAudiobookFileRepository audioFileRepository,
-            IFileNamingService fileNamingService,
             ILibraryListService libraryListService,
             LibraryAddWorkflow addWorkflow,
             LibraryMetadataRescanWorkflow metadataRescanWorkflow,
@@ -80,16 +53,10 @@ namespace Listenarr.Api.Features.Library
             LibraryDeleteWorkflow deleteWorkflow,
             LibraryUpdateWorkflow updateWorkflow,
             LibraryIdentifierWorkflow identifierWorkflow,
-            IMoveQueueService? moveQueueService = null,
-            IRenameService? renameService = null)
+            LibraryPreviewPathWorkflow previewPathWorkflow,
+            LibraryQueryWorkflow queryWorkflow,
+            LibraryRenameWorkflow renameWorkflow)
         {
-            _repo = repo;
-            _logger = logger;
-            _scopeFactory = scopeFactory;
-            _audioFileRepository = audioFileRepository;
-            _fileNamingService = fileNamingService;
-            _moveQueueService = moveQueueService;
-            _renameService = renameService;
             _libraryListService = libraryListService;
             _addWorkflow = addWorkflow;
             _metadataRescanWorkflow = metadataRescanWorkflow;
@@ -101,11 +68,9 @@ namespace Listenarr.Api.Features.Library
             _deleteWorkflow = deleteWorkflow;
             _updateWorkflow = updateWorkflow;
             _identifierWorkflow = identifierWorkflow;
-        }
-
-        public class ScanRequest
-        {
-            public string? Path { get; set; }
+            _previewPathWorkflow = previewPathWorkflow;
+            _queryWorkflow = queryWorkflow;
+            _renameWorkflow = renameWorkflow;
         }
 
         /// <summary>
@@ -127,41 +92,7 @@ namespace Listenarr.Api.Features.Library
         [HttpPost("preview-path")]
         public async Task<IActionResult> PreviewPath([FromBody] PreviewPathRequest request)
         {
-            try
-            {
-                using var scope = _scopeFactory.CreateScope();
-                var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
-                var settings = await configService.GetApplicationSettingsAsync();
-
-                var root = !string.IsNullOrEmpty(request.DestinationRoot) ? request.DestinationRoot : settings.OutputPath;
-
-                // Build a temporary Audiobook to feed naming pattern logic
-                var temp = request.Metadata.ToAudiobook();
-
-                AudiobookSeriesMembershipHelper.ApplyToAudiobook(
-                    temp,
-                    request.Metadata.SeriesMemberships,
-                    request.Metadata.Series,
-                    request.Metadata.SeriesNumber);
-
-                var namingPattern = !string.IsNullOrWhiteSpace(settings.FolderNamingPattern)
-                    ? settings.FolderNamingPattern
-                    : settings.FileNamingPattern;
-                var full = LibraryPathPlanner.ComputeAudiobookBaseDirectoryFromPattern(temp, root ?? string.Empty, namingPattern, _fileNamingService);
-
-                var relative = full;
-                if (!string.IsNullOrEmpty(root) && full.StartsWith(root, StringComparison.OrdinalIgnoreCase))
-                {
-                    relative = full.Substring(root.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                }
-
-                return Ok(new { fullPath = full, relativePath = relative, root = root });
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogWarning(ex, "Failed to compute preview path");
-                return StatusCode(500, new { message = "Failed to compute preview path" });
-            }
+            return await _previewPathWorkflow.PreviewAsync(request);
         }
 
         /// <summary>
@@ -180,9 +111,7 @@ namespace Listenarr.Api.Features.Library
         [HttpGet("by-asin/{asin}")]
         public async Task<IActionResult> GetByAsin(string asin)
         {
-            var book = await _repo.GetByAsinAsync(asin);
-            if (book == null) return NotFound();
-            return Ok(book);
+            return await _queryWorkflow.GetByAsinAsync(asin);
         }
 
         /// <summary>
@@ -192,9 +121,7 @@ namespace Listenarr.Api.Features.Library
         [HttpGet("by-isbn/{isbn}")]
         public async Task<IActionResult> GetByIsbn(string isbn)
         {
-            var book = await _repo.GetByIsbnAsync(isbn);
-            if (book == null) return NotFound();
-            return Ok(book);
+            return await _queryWorkflow.GetByIsbnAsync(isbn);
         }
 
         /// <summary>
@@ -204,79 +131,7 @@ namespace Listenarr.Api.Features.Library
         [HttpGet("{id}")]
         public async Task<ActionResult<Audiobook>> GetAudiobook(int id)
         {
-            var updated = await _repo.GetByIdAsync(id);
-
-            if (updated == null)
-                return NotFound(new { message = "Audiobook not found" });
-
-            var audiobookDto = new
-            {
-                id = updated.Id,
-                title = updated.Title,
-                subtitle = updated.Subtitle,
-                authors = updated.Authors,
-                narrators = updated.Narrators,
-                description = updated.Description,
-                genres = updated.Genres,
-                isbn = updated.Isbn != null ? updated.Isbn.FirstOrDefault() : null,
-                isbns = updated.Isbn,
-                asin = updated.Asin,
-                openLibraryId = updated.OpenLibraryId,
-                identifiers = AudiobookIdentifierMapper.GetEffectiveIdentifiers(updated)
-                    .Select(AudiobookIdentifierMapper.ToIdentifierResponse)
-                    .ToList(),
-                imageUrl = updated.ImageUrl,
-                publishYear = updated.PublishYear,
-                publisher = updated.Publisher,
-                language = updated.Language,
-                filePath = updated.FilePath,
-                fileSize = updated.FileSize,
-                basePath = updated.BasePath,
-                runtime = updated.Runtime,
-                edition = updated.Edition,
-                version = updated.Version,
-                @explicit = updated.Explicit,
-                abridged = updated.Abridged,
-                monitored = updated.Monitored,
-                quality = updated.Quality,
-                qualityProfileId = updated.QualityProfileId,
-                authorAsins = updated.AuthorAsins,
-                series = updated.Series,
-                seriesNumber = updated.SeriesNumber,
-                publishedDate = updated.PublishedDate,
-                seriesMemberships = updated.SeriesMemberships?
-                    .OrderByDescending(m => m.IsPrimary)
-                    .ThenBy(m => m.SortOrder)
-                    .Select(m => new
-                    {
-                        id = m.Id,
-                        seriesName = m.SeriesName,
-                        seriesNumber = m.SeriesNumber,
-                        seriesAsin = m.SeriesAsin,
-                        isPrimary = m.IsPrimary,
-                        sortOrder = m.SortOrder
-                    })
-                    .ToList(),
-                tags = updated.Tags,
-                files = updated.Files?.Select(f => new
-                {
-                    id = f.Id,
-                    path = f.Path,
-                    size = f.Size,
-                    durationSeconds = f.DurationSeconds,
-                    format = f.Format,
-                    container = f.Container,
-                    codec = f.Codec,
-                    bitrate = f.Bitrate,
-                    sampleRate = f.SampleRate,
-                    channels = f.Channels,
-                    source = f.Source,
-                    createdAt = f.CreatedAt
-                }).ToList(),
-                wanted = AudiobookWantedEvaluator.Compute(updated)
-            };
-
-            return Ok(audiobookDto);
+            return await _queryWorkflow.GetByIdAsync(id);
         }
 
         /// <summary>
@@ -320,8 +175,7 @@ namespace Listenarr.Api.Features.Library
         [LocalOrAdmin]
         public async Task<IActionResult> GetAudiobookFilesDebug(int id)
         {
-            var files = await _audioFileRepository.GetByAudiobookIdAsync(id);
-            return Ok(files);
+            return await _queryWorkflow.GetFilesDebugAsync(id);
         }
 
         /// <summary>
@@ -431,128 +285,28 @@ namespace Listenarr.Api.Features.Library
             return await _scanQueueWorkflow.RequeueAsync(jobId);
         }
 
-        public class BulkDeleteRequest
-        {
-            public List<int> Ids { get; set; } = new List<int>();
-        }
-
-        public class BulkUpdateRequest
-        {
-            public List<int> Ids { get; set; } = new List<int>();
-            public Dictionary<string, object> Updates { get; set; } = new Dictionary<string, object>();
-        }
-
         [HttpPost("rename/preview")]
         public async Task<IActionResult> PreviewRename([FromBody] BulkRenameRequest request, CancellationToken ct)
         {
-            if (_renameService == null)
-            {
-                return StatusCode(503, new { message = "Rename service not available" });
-            }
-
-            if (request?.AudiobookIds == null || request.AudiobookIds.Length == 0)
-            {
-                return BadRequest(new { message = "At least one audiobook ID is required" });
-            }
-
-            if (request.AudiobookIds.Length > 500)
-            {
-                return BadRequest(new { message = "Cannot preview more than 500 audiobooks at once" });
-            }
-
-            var previews = await _renameService.PreviewRenameAsync(request.AudiobookIds, ct);
-            return Ok(previews);
+            return await _renameWorkflow.PreviewAsync(request, ct);
         }
 
         [HttpPost("rename")]
         public async Task<IActionResult> ExecuteRename([FromBody] ExecuteRenameRequest request, CancellationToken ct)
         {
-            if (_renameService == null)
-            {
-                return StatusCode(503, new { message = "Rename service not available" });
-            }
-
-            if (request?.Operations == null || request.Operations.Count == 0)
-            {
-                return BadRequest(new { message = "At least one rename operation is required" });
-            }
-
-            if (request.Operations.Count > 500)
-            {
-                return BadRequest(new { message = "Cannot execute more than 500 rename operations at once" });
-            }
-
-            var results = await _renameService.ExecuteRenameAsync(request.Operations, ct);
-            return Ok(results);
+            return await _renameWorkflow.ExecuteAsync(request, ct);
         }
 
         [HttpPost("{id}/rename/preview")]
         public async Task<IActionResult> PreviewRenameSingle(int id, CancellationToken ct)
         {
-            if (_renameService == null)
-            {
-                return StatusCode(503, new { message = "Rename service not available" });
-            }
-
-            var previews = await _renameService.PreviewRenameAsync(new[] { id }, ct);
-            var preview = previews.FirstOrDefault();
-            if (preview == null)
-            {
-                return NotFound(new { message = "Audiobook not found" });
-            }
-
-            return Ok(preview);
+            return await _renameWorkflow.PreviewSingleAsync(id, ct);
         }
 
         [HttpPost("{id}/rename")]
         public async Task<IActionResult> ExecuteRenameSingle(int id, [FromBody] RenameOperation operation, CancellationToken ct)
         {
-            if (_renameService == null)
-            {
-                return StatusCode(503, new { message = "Rename service not available" });
-            }
-
-            if (operation == null)
-            {
-                return BadRequest(new { message = "Rename operation is required" });
-            }
-
-            operation.AudiobookId = id;
-            var results = await _renameService.ExecuteRenameAsync(new List<RenameOperation> { operation }, ct);
-            var result = results.FirstOrDefault();
-            if (result == null)
-            {
-                return NotFound(new { message = "Audiobook not found" });
-            }
-
-            return Ok(result);
-        }
-
-        public class AddToLibraryRequest
-        {
-            public AudibleBookMetadata Metadata { get; set; } = new();
-            public bool Monitored { get; set; } = true;
-            public int? QualityProfileId { get; set; }
-            public bool AutoSearch { get; set; } = false;
-            // Optional destination override for placing the audiobook base directory
-            public string? DestinationPath { get; set; }
-            public SearchResult? SearchResult { get; set; }
-        }
-
-        public class PreviewPathRequest
-        {
-            public AudibleBookMetadata Metadata { get; set; } = new();
-            public string? DestinationRoot { get; set; }
-        }
-
-        public class MoveRequest
-        {
-            public string? DestinationPath { get; set; }
-            public string? SourcePath { get; set; }
-            // If provided and false, update DB only and do not enqueue a move job
-            public bool? MoveFiles { get; set; }
-            // When moving files, whether to delete the original folder if empty after the move
-            public bool? DeleteEmptySource { get; set; }
+            return await _renameWorkflow.ExecuteSingleAsync(id, operation, ct);
         }
 
     }
