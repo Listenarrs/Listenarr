@@ -19,7 +19,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.EntityFrameworkCore;
 using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Infrastructure.Persistence.Repositories;
-using Listenarr.Infrastructure.Persistence;
 using Listenarr.Application.Audiobooks;
 
 namespace Listenarr.Tests.Features.Api.Services

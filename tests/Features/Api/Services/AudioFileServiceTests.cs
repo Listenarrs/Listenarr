@@ -18,7 +18,6 @@
 using Microsoft.EntityFrameworkCore;
 using Listenarr.Tests.Common;
 using Listenarr.Tests.Builders;
-using Listenarr.Infrastructure.Persistence;
 
 namespace Listenarr.Tests.Features.Api.Services
 {

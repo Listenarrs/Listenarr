@@ -7,11 +7,9 @@
  * by the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  */
-using Listenarr.Infrastructure.Persistence;
-using Listenarr.Infrastructure.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
 
-namespace Listenarr.Tests.Features.Infrastructure.Repositories
+namespace Listenarr.Tests.Features.Infrastructure.ActivityHistory.Persistence
 {
     public sealed class HistoryQueryRepositoryTests : IDisposable
     {

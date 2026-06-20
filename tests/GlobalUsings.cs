@@ -29,3 +29,6 @@ global using Listenarr.Infrastructure.DownloadClients.Nzbget;
 global using Listenarr.Infrastructure.DownloadClients.Qbittorrent;
 global using Listenarr.Infrastructure.DownloadClients.Sabnzbd;
 global using Listenarr.Infrastructure.DownloadClients.Transmission;
+global using Listenarr.Infrastructure.ActivityHistory.Persistence;
+global using Listenarr.Infrastructure.ActivityHistory.Services;
+global using Listenarr.Infrastructure.Persistence;

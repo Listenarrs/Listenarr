@@ -17,7 +17,6 @@
  */
 using Listenarr.Application.Audiobooks;
 using Listenarr.Domain.Models.Enumerations;
-using Listenarr.Infrastructure.Persistence;
 using Listenarr.Infrastructure.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;

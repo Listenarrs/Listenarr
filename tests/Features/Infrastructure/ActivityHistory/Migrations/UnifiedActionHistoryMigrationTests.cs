@@ -7,13 +7,12 @@
  * by the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  */
-using Listenarr.Infrastructure.Persistence;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
-namespace Listenarr.Tests.Features.Infrastructure.Migrations
+namespace Listenarr.Tests.Features.Infrastructure.ActivityHistory.Migrations
 {
     public sealed class UnifiedActionHistoryMigrationTests
     {

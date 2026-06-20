@@ -17,7 +17,6 @@
  */
 using System.Net;
 using Listenarr.Api.Controllers;
-using Listenarr.Infrastructure.Persistence;
 using Listenarr.Tests.Common;
 using Microsoft.EntityFrameworkCore;
 

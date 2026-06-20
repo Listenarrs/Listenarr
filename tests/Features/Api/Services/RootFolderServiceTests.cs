@@ -18,7 +18,6 @@
 using Microsoft.EntityFrameworkCore;
 using Xunit.Abstractions;
 using Listenarr.Infrastructure.Persistence.Repositories;
-using Listenarr.Infrastructure.Persistence;
 
 namespace Listenarr.Tests.Features.Api.Services
 {

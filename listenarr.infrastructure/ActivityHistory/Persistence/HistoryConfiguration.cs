@@ -11,7 +11,7 @@ using Listenarr.Domain.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
-namespace Listenarr.Infrastructure.Persistence.Configurations
+namespace Listenarr.Infrastructure.ActivityHistory.Persistence
 {
     public sealed class HistoryConfiguration : IEntityTypeConfiguration<History>
     {

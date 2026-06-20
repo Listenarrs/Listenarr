@@ -17,7 +17,6 @@
  */
 using System.Net;
 using Asp.Versioning.ApiExplorer;
-using Listenarr.Infrastructure.Persistence;
 using Listenarr.Tests.Mocks;
 using Microsoft.EntityFrameworkCore;
 

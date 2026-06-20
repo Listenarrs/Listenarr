@@ -1,4 +1,3 @@
-using Listenarr.Infrastructure.Persistence;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
 using Microsoft.Data.Sqlite;

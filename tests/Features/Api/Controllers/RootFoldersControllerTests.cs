@@ -17,7 +17,6 @@
  */
 using Listenarr.Api.Controllers;
 using Microsoft.EntityFrameworkCore;
-using Listenarr.Infrastructure.Persistence;
 using Listenarr.Application.Audiobooks;
 using Listenarr.Infrastructure.Persistence.Repositories;
 

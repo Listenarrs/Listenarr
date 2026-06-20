@@ -7,11 +7,9 @@
  * by the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  */
-using Listenarr.Infrastructure.Persistence;
-using Listenarr.Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
 
-namespace Listenarr.Tests.Features.Infrastructure.Services
+namespace Listenarr.Tests.Features.Infrastructure.ActivityHistory.Services
 {
     public class DownloadHistoryServiceTests : IDisposable
     {

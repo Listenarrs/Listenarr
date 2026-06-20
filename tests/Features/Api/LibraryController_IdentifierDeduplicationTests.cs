@@ -17,7 +17,6 @@
  */
 using System.Text;
 using System.Text.Json;
-using Listenarr.Infrastructure.Persistence;
 using Listenarr.Tests.Mocks;
 
 namespace Listenarr.Tests.Features.Api

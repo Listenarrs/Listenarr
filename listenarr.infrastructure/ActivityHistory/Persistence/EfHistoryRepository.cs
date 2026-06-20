@@ -17,9 +17,10 @@
  */
 using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Domain.Models;
+using Listenarr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
-namespace Listenarr.Infrastructure.Persistence.Repositories
+namespace Listenarr.Infrastructure.ActivityHistory.Persistence
 {
     public class EfHistoryRepository : IHistoryRepository
     {

@@ -20,7 +20,6 @@ using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 using System.Reflection;
 using Listenarr.Infrastructure.Persistence.Repositories;
-using Listenarr.Infrastructure.Persistence;
 
 namespace Listenarr.Tests.Features.Api.Controllers
 {

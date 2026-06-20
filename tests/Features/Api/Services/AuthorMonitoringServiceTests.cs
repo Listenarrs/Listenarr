@@ -17,7 +17,6 @@
  */
 using Listenarr.Application.Audiobooks;
 using Listenarr.Application.Metadata;
-using Listenarr.Infrastructure.Persistence;
 using Listenarr.Infrastructure.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
 

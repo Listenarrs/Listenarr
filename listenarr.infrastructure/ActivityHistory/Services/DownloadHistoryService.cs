@@ -22,7 +22,7 @@ using Listenarr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
-namespace Listenarr.Infrastructure.Services
+namespace Listenarr.Infrastructure.ActivityHistory.Services
 {
     /// <summary>
     /// Implementation of download history service.
