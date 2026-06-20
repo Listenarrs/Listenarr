@@ -1,0 +1,58 @@
+/*
+ * Listenarr - Audiobook Management System
+ * Copyright (C) 2024-2026 Listenarr Contributors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published
+ * by the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging.Abstractions;
+
+namespace Listenarr.Tests.Features.Api.Features.Configuration
+{
+    public class ConfigurationControllerSettingsTests
+    {
+        [Fact]
+        public async Task GetApplicationSettings_DoesNotReturnEncryptedProwlarrApiKey()
+        {
+            var configurationService = new Mock<IConfigurationService>(MockBehavior.Strict);
+            configurationService
+                .Setup(x => x.GetApplicationSettingsAsync())
+                .ReturnsAsync(new ApplicationSettings
+                {
+                    Id = 1,
+                    ProwlarrUrl = "http://localhost",
+                    ProwlarrPort = 9696,
+                    ProwlarrApiKeyEncrypted = "ciphertext",
+                    ProwlarrTagFilter = "audiobooks"
+                });
+
+            var controller = new SettingsController(
+                configurationService.Object,
+                NullLogger<SettingsController>.Instance,
+                Mock.Of<IHubBroadcaster>());
+
+            var result = await controller.GetApplicationSettings();
+            var ok = Assert.IsType<OkObjectResult>(result.Result);
+            var settings = Assert.IsType<ApplicationSettings>(ok.Value);
+
+            Assert.Equal("http://localhost", settings.ProwlarrUrl);
+            Assert.Equal(9696, settings.ProwlarrPort);
+            Assert.Equal("audiobooks", settings.ProwlarrTagFilter);
+            Assert.Null(settings.ProwlarrApiKeyEncrypted);
+
+            configurationService.Verify(x => x.GetApplicationSettingsAsync(), Times.Once);
+            configurationService.VerifyNoOtherCalls();
+        }
+    }
+}

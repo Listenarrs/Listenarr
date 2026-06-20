@@ -1,6 +1,12 @@
 global using Microsoft.Extensions.Hosting;
 global using Listenarr.Api.Security;
 global using Listenarr.Api.Common;
+global using Listenarr.Api.Features.Downloads;
+global using Listenarr.Api.Features.Images;
+global using Listenarr.Api.Features.Indexers;
+global using Listenarr.Api.Features.Library;
+global using Listenarr.Api.Features.Prowlarr;
+global using Listenarr.Api.Features.Search;
 global using Listenarr.Application.Downloads.Submission;
 global using Listenarr.Application.Audiobooks.Files;
 global using Listenarr.Application.Audiobooks.Identifiers;

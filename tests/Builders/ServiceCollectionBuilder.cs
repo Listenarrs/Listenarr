@@ -1,4 +1,3 @@
-using Listenarr.Api.Controllers;
 using Listenarr.Application.Search.Filters;
 using Listenarr.Application.Search.Strategies;
 using Listenarr.Infrastructure.Extensions;

@@ -18,7 +18,6 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
-using Listenarr.Api.Controllers;
 using Listenarr.Tests.Common;
 using Listenarr.Tests.Mocks;
 using Microsoft.AspNetCore.Http;

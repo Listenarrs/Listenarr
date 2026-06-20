@@ -1,6 +1,5 @@
 using System.Net;
 using System.Text;
-using Listenarr.Api.Controllers;
 using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Domain.Models.Enumerations;
 

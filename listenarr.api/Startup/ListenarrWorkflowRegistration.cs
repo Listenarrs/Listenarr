@@ -74,26 +74,26 @@ public static class ListenarrWorkflowRegistration
 
     private static IServiceCollection AddListenarrControllerWorkflows(this IServiceCollection services)
     {
-        services.AddScoped<Listenarr.Api.Controllers.LibraryMetadataRescanWorkflow>();
-        services.AddScoped<Listenarr.Api.Controllers.LibraryScanPathResolver>();
-        services.AddScoped<Listenarr.Api.Controllers.LibraryScanQueueWorkflow>();
-        services.AddScoped<Listenarr.Api.Controllers.LibraryAddWorkflow>();
-        services.AddScoped<Listenarr.Api.Controllers.LibraryManualScanWorkflow>();
-        services.AddScoped<Listenarr.Api.Controllers.LibraryBulkEditWorkflow>();
-        services.AddScoped<Listenarr.Api.Controllers.LibraryMoveWorkflow>();
-        services.AddScoped<Listenarr.Api.Controllers.LibraryDeleteWorkflow>();
-        services.AddScoped<Listenarr.Api.Controllers.LibraryUpdateWorkflow>();
-        services.AddScoped<Listenarr.Api.Controllers.LibraryIdentifierWorkflow>();
-        services.AddScoped<Listenarr.Api.Controllers.SearchResponseMapper>();
-        services.AddScoped<Listenarr.Api.Controllers.ImagePlaceholderResolver>();
-        services.AddScoped<Listenarr.Api.Controllers.IndexerTestWorkflow>();
-        services.AddScoped<Listenarr.Api.Controllers.ProwlarrIndexerImportWorkflow>();
-        services.AddScoped<Listenarr.Api.Controllers.ProwlarrIndexerNotificationWorkflow>();
-        services.AddScoped<Listenarr.Api.Controllers.ProwlarrIndexerUpsertWorkflow>();
-        services.AddScoped<Listenarr.Api.Controllers.StructuredSearchWorkflow>();
-        services.AddScoped<Listenarr.Api.Controllers.SearchByTitleWorkflow>();
-        services.AddScoped<Listenarr.Api.Controllers.ManualImportPathPlanner>();
-        services.AddScoped<Listenarr.Api.Controllers.ManualImportCompanionImporter>();
+        services.AddScoped<LibraryMetadataRescanWorkflow>();
+        services.AddScoped<LibraryScanPathResolver>();
+        services.AddScoped<LibraryScanQueueWorkflow>();
+        services.AddScoped<LibraryAddWorkflow>();
+        services.AddScoped<LibraryManualScanWorkflow>();
+        services.AddScoped<LibraryBulkEditWorkflow>();
+        services.AddScoped<LibraryMoveWorkflow>();
+        services.AddScoped<LibraryDeleteWorkflow>();
+        services.AddScoped<LibraryUpdateWorkflow>();
+        services.AddScoped<LibraryIdentifierWorkflow>();
+        services.AddScoped<SearchResponseMapper>();
+        services.AddScoped<ImagePlaceholderResolver>();
+        services.AddScoped<IndexerTestWorkflow>();
+        services.AddScoped<ProwlarrIndexerImportWorkflow>();
+        services.AddScoped<ProwlarrIndexerNotificationWorkflow>();
+        services.AddScoped<ProwlarrIndexerUpsertWorkflow>();
+        services.AddScoped<StructuredSearchWorkflow>();
+        services.AddScoped<SearchByTitleWorkflow>();
+        services.AddScoped<ManualImportPathPlanner>();
+        services.AddScoped<ManualImportCompanionImporter>();
         return services;
     }
 }

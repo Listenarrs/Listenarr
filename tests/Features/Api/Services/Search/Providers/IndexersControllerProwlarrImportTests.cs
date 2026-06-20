@@ -17,7 +17,6 @@
  */
 using System.Net;
 using System.Text;
-using Listenarr.Api.Controllers;
 using Listenarr.Api.Dtos;
 using Listenarr.Tests.Common;
 using Microsoft.AspNetCore.Mvc;
