@@ -64,7 +64,6 @@ namespace Listenarr.Infrastructure.Search.Providers.MyAnonamouse
                     ? MyAnonamouseHelper.CreateAuthenticatedHttpClient(mamId, indexer.Url)
                     : null;
                 HttpClient httpClientToUse = disposableClient ?? _httpClient;
-                List<IndexerSearchResult> results = new List<IndexerSearchResult>();
                 var addCookieHeader = _httpClient.BaseAddress != null;
 
                 _logger.LogDebug(
@@ -111,7 +110,7 @@ namespace Listenarr.Infrastructure.Search.Providers.MyAnonamouse
 
                 var jsonResponse = await response.Content.ReadAsStringAsync();
                 _logger.LogDebug("MyAnonamouse raw response: {Response}", jsonResponse);
-                results = MyAnonamouseResponseParser.Parse(jsonResponse, indexer, _logger);
+                var results = MyAnonamouseResponseParser.Parse(jsonResponse, indexer, _logger);
 
                 // Optional per-result enrichment: fetch individual item pages to populate missing fields
                 try

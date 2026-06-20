@@ -157,7 +157,6 @@ public class ManualImportController : ControllerBase
             // Fetch root folders once for the whole batch (used for path containment validation)
             var rootFolders = await _rootFolderService.GetAllAsync();
             var appSettings = await _configService.GetApplicationSettingsAsync();
-            var importBlacklist = appSettings.ImportBlacklistExtensions;
             var orderedItems = ManualImportPathPlanner.BuildOrderedItems(request.Items);
             var selectedAudioProfiles = request.IncludeCompanionFiles
                 ? await _companionImporter.BuildAudioMatchProfilesAsync(
@@ -281,10 +280,8 @@ public class ManualImportController : ControllerBase
                 return ManualImportResultDto.FailureResult("Failed to extract metadata from file", item.FullPath);
             }
 
-            var destinationPath = item.FullPath;
-
             // Generate destination path using appropriate naming pattern
-            destinationPath = await _pathPlanner.GeneratePathAsync(audiobook, metadata, item, rootFolders, settings, hasMultipleFile);
+            var destinationPath = await _pathPlanner.GeneratePathAsync(audiobook, metadata, item, rootFolders, settings, hasMultipleFile);
 
             var success = await _fileMover.PerformActionOn(action, item.FullPath, destinationPath);
             if (success)
