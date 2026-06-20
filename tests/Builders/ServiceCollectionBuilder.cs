@@ -1,11 +1,9 @@
 using Listenarr.Api.Controllers;
-using Listenarr.Application.Audiobooks;
 using Listenarr.Application.Metadata;
 using Listenarr.Application.Search;
 using Listenarr.Application.Search.Filters;
 using Listenarr.Application.Search.Strategies;
 using Listenarr.Infrastructure.Extensions;
-using Listenarr.Infrastructure.FileSystem;
 using Listenarr.Infrastructure.HostedServices;
 using Listenarr.Tests.Mocks;
 using Listenarr.Tests.Mocks.Api;

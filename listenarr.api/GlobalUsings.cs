@@ -3,3 +3,8 @@ global using Listenarr.Api.Security;
 global using Listenarr.Api.Common;
 global using Listenarr.Application.Downloads.Common;
 global using Listenarr.Application.Downloads.Submission;
+global using Listenarr.Application.Audiobooks.Files;
+global using Listenarr.Application.Audiobooks.Identifiers;
+global using Listenarr.Application.Audiobooks.Jobs;
+global using Listenarr.Application.Audiobooks.Matching;
+global using Listenarr.Application.Audiobooks.Renaming;

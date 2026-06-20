@@ -18,7 +18,6 @@
 
 using System.Security.Cryptography;
 using System.Text;
-using Listenarr.Application.Audiobooks;
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Application.Metadata;

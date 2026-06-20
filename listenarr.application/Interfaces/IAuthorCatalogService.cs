@@ -15,8 +15,6 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Listenarr.Application.Audiobooks;
-
 namespace Listenarr.Application.Interfaces
 {
     public interface IAuthorCatalogService

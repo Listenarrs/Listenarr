@@ -17,7 +17,6 @@
  */
 
 using System.Text.RegularExpressions;
-using Listenarr.Application.Audiobooks;
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Application.Security;

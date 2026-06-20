@@ -21,7 +21,6 @@ using Listenarr.Domain.Models;
 using Listenarr.Domain.Common;
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Interfaces.Repositories;
-using Listenarr.Application.Audiobooks;
 using Listenarr.Api.Attributes;
 
 namespace Listenarr.Api.Controllers
