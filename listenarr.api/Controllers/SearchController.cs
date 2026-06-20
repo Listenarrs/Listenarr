@@ -23,6 +23,7 @@ using Listenarr.Application.Metadata;
 using Listenarr.Application.Search;
 using Listenarr.Domain.Models;
 using Listenarr.Application.Security;
+using Listenarr.Application.Downloads;
 
 namespace Listenarr.Api.Controllers
 {
@@ -39,6 +40,7 @@ namespace Listenarr.Api.Controllers
         private readonly SearchResponseMapper _responseMapper;
         private readonly StructuredSearchWorkflow _structuredSearchWorkflow;
         private readonly SearchByTitleWorkflow _searchByTitleWorkflow;
+        private readonly IDownloadReferenceService? _downloadReferenceService;
 
         public SearchController(
             ISearchService searchService,
@@ -49,7 +51,8 @@ namespace Listenarr.Api.Controllers
             MetadataConverters? metadataConverters = null,
             SearchResponseMapper? responseMapper = null,
             StructuredSearchWorkflow? structuredSearchWorkflow = null,
-            SearchByTitleWorkflow? searchByTitleWorkflow = null)
+            SearchByTitleWorkflow? searchByTitleWorkflow = null,
+            IDownloadReferenceService? downloadReferenceService = null)
         {
             _searchService = searchService;
             _logger = logger;
@@ -74,6 +77,7 @@ namespace Listenarr.Api.Controllers
                 audibleService,
                 metadataService,
                 Microsoft.Extensions.Logging.Abstractions.NullLogger<SearchByTitleWorkflow>.Instance);
+            _downloadReferenceService = downloadReferenceService;
         }
 
         /// <summary>
@@ -133,7 +137,10 @@ namespace Listenarr.Api.Controllers
                     if (result.Size > 0 || (result.Seeders ?? 0) > 0 || !string.IsNullOrEmpty(result.MagnetLink) || !string.IsNullOrEmpty(result.TorrentUrl) || !string.IsNullOrEmpty(result.NzbUrl))
                     {
                         var idx = SearchResultConverters.ToIndexerSearchResult(result);
-                        response.IndexerResults.Add(SearchResultConverters.ToIndexerResultDto(idx));
+                        AttachDownloadReference(idx);
+                        var dto = SearchResultConverters.ToIndexerResultDto(idx);
+                        dto.DownloadUrl = null;
+                        response.IndexerResults.Add(dto);
                     }
                     else
                     {
@@ -291,6 +298,11 @@ namespace Listenarr.Api.Controllers
                 // Support MyAnonamouse query string toggles (mamFilter, mamSearchInDescription, mamSearchInSeries, mamSearchInFilenames, mamLanguage, mamFreeleechWedge)
                 var req = new SearchRequest { MyAnonamouse = SearchMamOptionsReader.FromQuery(Request.Query) };
                 var results = await _searchService.SearchIndexersAsync(query, category, sortBy, sortDirection, isAutomaticSearch, req);
+                foreach (var result in results)
+                {
+                    AttachDownloadReference(result);
+                    ClearExecutableLocators(result);
+                }
                 _logger.LogInformation("IndexersSearch returning {Count} results for query: {Query}", results.Count, LogRedaction.SanitizeText(query));
                 return Ok(results);
             }
@@ -447,12 +459,27 @@ namespace Listenarr.Api.Controllers
                 // If the underlying indexer implementation indicates MyAnonamouse (set on results by SearchIndexerAsync), return Prowlarr-like DTO shape
                 if (idxResults.Count > 0 && !string.IsNullOrWhiteSpace(idxResults[0].IndexerImplementation) && string.Equals(idxResults[0].IndexerImplementation, "MyAnonamouse", StringComparison.OrdinalIgnoreCase))
                 {
-                    var dtos = idxResults.Select(r => SearchResultConverters.ToIndexerResultDto(r)).ToList();
+                    foreach (var result in idxResults)
+                    {
+                        AttachDownloadReference(result);
+                    }
+                    var dtos = idxResults.Select(r =>
+                    {
+                        var dto = SearchResultConverters.ToIndexerResultDto(r);
+                        dto.DownloadUrl = null;
+                        return dto;
+                    }).ToList();
                     return Ok(dtos);
                 }
 
                 // Otherwise, return the legacy SearchResult shape
-                var results = idxResults.Select(r => SearchResultConverters.ToSearchResult(r)).ToList();
+                var results = idxResults.Select(r =>
+                {
+                    AttachDownloadReference(r);
+                    var mapped = SearchResultConverters.ToSearchResult(r);
+                    ClearExecutableLocators(mapped);
+                    return mapped;
+                }).ToList();
                 _logger.LogInformation("SearchByApi returning {Count} results for apiId: {ApiId}", results.Count, apiId);
                 return Ok(results);
             }
@@ -461,6 +488,42 @@ namespace Listenarr.Api.Controllers
                 _logger.LogError(ex, "Error searching API {ApiId} for query: {Query}", apiId, query);
                 return StatusCode(500, "Internal server error");
             }
+        }
+
+        private void AttachDownloadReference(IndexerSearchResult result)
+        {
+            if (_downloadReferenceService == null)
+            {
+                return;
+            }
+
+            result.DownloadReference = _downloadReferenceService.Create(
+                TrustedDownloadCandidateFactory.Create(SearchResultConverters.ToSearchResult(result)));
+        }
+
+        private void AttachDownloadReference(SearchResult result)
+        {
+            if (_downloadReferenceService == null)
+            {
+                return;
+            }
+
+            result.DownloadReference = _downloadReferenceService.Create(
+                TrustedDownloadCandidateFactory.Create(result));
+        }
+
+        private static void ClearExecutableLocators(SearchResult result)
+        {
+            result.MagnetLink = string.Empty;
+            result.TorrentUrl = string.Empty;
+            result.NzbUrl = string.Empty;
+        }
+
+        private static void ClearExecutableLocators(IndexerSearchResult result)
+        {
+            result.MagnetLink = string.Empty;
+            result.TorrentUrl = string.Empty;
+            result.NzbUrl = string.Empty;
         }
     }
 }

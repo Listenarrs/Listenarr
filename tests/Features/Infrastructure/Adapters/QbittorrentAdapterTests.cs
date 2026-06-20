@@ -22,6 +22,7 @@ using Listenarr.Tests.Builders;
 using Listenarr.Tests.Mocks.Api;
 using Listenarr.Application.Downloads;
 using Listenarr.Infrastructure.Torrents;
+using Listenarr.Infrastructure.Downloads;
 
 namespace Listenarr.Tests.Features.Infrastructure.Adapters
 {
@@ -97,14 +98,9 @@ namespace Listenarr.Tests.Features.Infrastructure.Adapters
         }
 
         [Fact]
-        public async Task AddAsync_WhenMagnetAndTorrentUrlAreProvided_PredownloadsTorrentUrlFirst()
+        public async Task AddAsync_WhenMagnetAndTorrentUrlAreProvided_UsesVerifiedMagnetHashWithoutDownloading()
         {
-            string? requestedTorrentUrl = null;
             var downloader = new Mock<ITorrentFileDownloader>(MockBehavior.Strict);
-            downloader
-                .Setup(x => x.DownloadAsync("https://indexer.example.com/book.torrent", It.IsAny<CancellationToken>()))
-                .Callback<string, CancellationToken>((url, _) => requestedTorrentUrl = url)
-                .ReturnsAsync(TorrentDownloadResult.Empty);
             _services.AddSingleton(downloader.Object);
             Init();
 
@@ -119,16 +115,145 @@ namespace Listenarr.Tests.Features.Infrastructure.Adapters
             var searchResult = new SearchResult
             {
                 Title = "Book",
-                MagnetLink = "magnet:?xt=urn:btih:ABCDEF1234567890",
+                MagnetLink = "magnet:?xt=urn:btih:ABCDEF1234567890ABCDEF1234567890ABCDEF12",
                 TorrentUrl = "https://indexer.example.com/book.torrent"
             };
 
             var adapter = _provider.GetRequiredService<IDownloadClientGateway>();
-            var hash = await adapter.AddAsync(client, searchResult);
+            var submissionResult = await adapter.AddAsync(
+                client,
+                PreparedSubmissionTestFactory.Torrent(searchResult));
 
-            Assert.Equal("ABCDEF1234567890".ToLowerInvariant(), hash);
-            Assert.Equal("https://indexer.example.com/book.torrent", requestedTorrentUrl);
-            downloader.Verify(x => x.DownloadAsync("https://indexer.example.com/book.torrent", It.IsAny<CancellationToken>()), Times.Once);
+            Assert.Equal("ABCDEF1234567890ABCDEF1234567890ABCDEF12", submissionResult.ExternalId);
+            downloader.Verify(
+                x => x.DownloadAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+                Times.Never);
+        }
+
+        [Fact]
+        public async Task AddAsync_WhenMagnetUsesBase32Hash_ReturnsNormalizedHexHash()
+        {
+            var client = await _downloadClientConfigurationRepository.SaveAsync(new DownloadClientConfigurationBuilder()
+                .WithHost("localhost")
+                .WithPort(8080)
+                .WithUsername("admin")
+                .WithPassword("admin")
+                .WithType("qbittorrent")
+                .Build());
+
+            var searchResult = new SearchResult
+            {
+                Title = "Book",
+                MagnetLink = "magnet:?xt=urn:btih:AERUKZ4JVPG66AJDIVTYTK6N54ASGRLH"
+            };
+
+            var adapter = _provider.GetRequiredService<IDownloadClientGateway>();
+            var submissionResult = await adapter.AddAsync(
+                client,
+                PreparedSubmissionTestFactory.Torrent(searchResult));
+
+            Assert.Equal("0123456789ABCDEF0123456789ABCDEF01234567", submissionResult.ExternalId);
+        }
+
+        [Fact]
+        public async Task AddAsync_WhenTorrentDownloadFails_DoesNotCallQbittorrentAdd()
+        {
+            var downloader = new Mock<ITorrentFileDownloader>(MockBehavior.Strict);
+            downloader
+                .Setup(x => x.DownloadAsync("https://indexer.example.com/book.torrent", It.IsAny<CancellationToken>()))
+                .ReturnsAsync(TorrentDownloadResult.Failed("Torrent metadata download failed with HTTP 500."));
+            _services.AddSingleton(downloader.Object);
+            Init();
+
+            var client = await _downloadClientConfigurationRepository.SaveAsync(new DownloadClientConfigurationBuilder()
+                .WithHost("localhost")
+                .WithPort(8080)
+                .WithUsername("admin")
+                .WithPassword("admin")
+                .WithType("qbittorrent")
+                .Build());
+
+            var searchResult = new SearchResult
+            {
+                Title = "Book",
+                TorrentUrl = "https://indexer.example.com/book.torrent"
+            };
+
+            var exception = await Assert.ThrowsAsync<DownloadClientSubmissionException>(
+                () => new GenericTorrentSourceResolver(downloader.Object, new TorrentMetadataService())
+                    .ResolveAsync(
+                        TrustedDownloadCandidateFactory.Create(searchResult),
+                        null,
+                        CancellationToken.None));
+
+            Assert.Contains("HTTP 500", exception.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(0, _provider.GetRequiredService<QbittorrentApiMock>().GetCallCount());
+        }
+
+        [Fact]
+        public async Task AddAsync_WhenTorrentUrlReturnsBytes_ComputesHashBeforeSubmission()
+        {
+            var content = await File.ReadAllBytesAsync(TestUtils.GetDataPath("big-buck-bunny.torrent"));
+            var downloader = new Mock<ITorrentFileDownloader>(MockBehavior.Strict);
+            downloader
+                .Setup(x => x.DownloadAsync("https://indexer.example.com/book.torrent", It.IsAny<CancellationToken>()))
+                .ReturnsAsync(TorrentDownloadResult.FromBytes(content));
+            _services.AddSingleton(downloader.Object);
+            Init();
+
+            var client = await _downloadClientConfigurationRepository.SaveAsync(new DownloadClientConfigurationBuilder()
+                .WithHost("localhost")
+                .WithPort(8080)
+                .WithUsername("admin")
+                .WithPassword("admin")
+                .WithType("qbittorrent")
+                .Build());
+
+            var searchResult = new SearchResult
+            {
+                Title = "Book",
+                TorrentUrl = "https://indexer.example.com/book.torrent"
+            };
+
+            var prepared = await new GenericTorrentSourceResolver(downloader.Object, new TorrentMetadataService())
+                .ResolveAsync(TrustedDownloadCandidateFactory.Create(searchResult), null, CancellationToken.None);
+            var adapter = _provider.GetRequiredService<IDownloadClientGateway>();
+            var submissionResult = await adapter.AddAsync(client, prepared);
+
+            Assert.Equal("DD8255ECDC7CA55FB0BBF81323D87062DB1F6D1C", submissionResult.ExternalId);
+            Assert.True(_provider.GetRequiredService<QbittorrentApiMock>().GetCallCount() >= 2);
+        }
+
+        [Fact]
+        public async Task AddAsync_WhenTorrentBytesAreInvalid_DoesNotCallQbittorrentAdd()
+        {
+            var downloader = new Mock<ITorrentFileDownloader>(MockBehavior.Strict);
+            downloader
+                .Setup(x => x.DownloadAsync("https://indexer.example.com/book.torrent", It.IsAny<CancellationToken>()))
+                .ReturnsAsync(TorrentDownloadResult.FromBytes("d3:foo3:bar"u8.ToArray()));
+            _services.AddSingleton(downloader.Object);
+            Init();
+
+            var client = await _downloadClientConfigurationRepository.SaveAsync(new DownloadClientConfigurationBuilder()
+                .WithHost("localhost")
+                .WithPort(8080)
+                .WithUsername("admin")
+                .WithPassword("admin")
+                .WithType("qbittorrent")
+                .Build());
+
+            await Assert.ThrowsAsync<DownloadClientSubmissionException>(
+                () => new GenericTorrentSourceResolver(downloader.Object, new TorrentMetadataService())
+                    .ResolveAsync(
+                        TrustedDownloadCandidateFactory.Create(new SearchResult
+                        {
+                            Title = "Book",
+                            TorrentUrl = "https://indexer.example.com/book.torrent"
+                        }),
+                        null,
+                        CancellationToken.None));
+
+            Assert.Equal(0, _provider.GetRequiredService<QbittorrentApiMock>().GetCallCount());
         }
 
         [Fact]
@@ -148,10 +273,17 @@ namespace Listenarr.Tests.Features.Infrastructure.Adapters
                 TorrentUrl = "ftp://indexer.example.com/book.torrent"
             };
 
-            var adapter = _provider.GetRequiredService<IDownloadClientGateway>();
-            var exception = await Assert.ThrowsAsync<ArgumentException>(() => adapter.AddAsync(client, searchResult));
+            var downloader = new Mock<ITorrentFileDownloader>();
+            downloader.Setup(value => value.DownloadAsync(searchResult.TorrentUrl, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(TorrentDownloadResult.Failed("The torrent URL was rejected by outbound request validation."));
+            var exception = await Assert.ThrowsAsync<DownloadClientSubmissionException>(() =>
+                new GenericTorrentSourceResolver(downloader.Object, new TorrentMetadataService())
+                    .ResolveAsync(
+                        TrustedDownloadCandidateFactory.Create(searchResult),
+                        null,
+                        CancellationToken.None));
 
-            Assert.Contains("HTTP or HTTPS", exception.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("rejected", exception.Message, StringComparison.OrdinalIgnoreCase);
         }
 
         [Fact]
@@ -283,9 +415,62 @@ namespace Listenarr.Tests.Features.Infrastructure.Adapters
                 .Build();
 
             var adapter = _provider.GetRequiredService<IDownloadClientGateway>();
-            var hash = await adapter.AddAsync(_client, searchResult);
+            var submissionResult = await adapter.AddAsync(
+                _client,
+                PreparedSubmissionTestFactory.Torrent(searchResult));
 
-            Assert.Equal("DD8255ECDC7CA55FB0BBF81323D87062DB1F6D1C", hash);
+            Assert.Equal("DD8255ECDC7CA55FB0BBF81323D87062DB1F6D1C", submissionResult.ExternalId);
+        }
+
+        [Fact]
+        public async Task MarkItemAsImportedAsync_SetsConfiguredPostImportCategory()
+        {
+            _client.Settings = new Dictionary<string, object>
+            {
+                ["postImportCategory"] = "listenarr-imported"
+            };
+            await _downloadClientConfigurationRepository.SaveAsync(_client);
+            var download = new DownloadBuilder()
+                .WithDownloadClientConfiguration(_client)
+                .WithClientDownloadId("ABCDEF123456")
+                .Build();
+
+            var gateway = _provider.GetRequiredService<IDownloadClientGateway>();
+            var result = await gateway.MarkItemAsImportedAsync(_client, download);
+
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            Assert.True(result, $"Last request: {apiMock.GetLastRequest().RequestUri}; content: {apiMock.GetLastContent()}");
+            var form = apiMock.LastCategoryForm;
+            Assert.NotNull(form);
+            Assert.Equal("abcdef123456", form!["hashes"]);
+            Assert.Equal("listenarr-imported", form["category"]);
+        }
+
+        [Theory]
+        [InlineData(false, "false")]
+        [InlineData(true, "true")]
+        public async Task RemoveAsync_PreservesDeleteFilesPolicy(bool deleteFiles, string expected)
+        {
+            var gateway = _provider.GetRequiredService<IDownloadClientGateway>();
+
+            var result = await gateway.RemoveAsync(_client, "ABCDEF123456", deleteFiles);
+
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            Assert.True(result, $"Last request: {apiMock.GetLastRequest().RequestUri}; content: {apiMock.GetLastContent()}");
+            var form = apiMock.LastDeleteForm;
+            Assert.NotNull(form);
+            Assert.Equal("ABCDEF123456", form!["hashes"]);
+            Assert.Equal(expected, form["deleteFiles"]);
+        }
+
+        [Theory]
+        [InlineData("uploading")]
+        [InlineData("stalledUP")]
+        [InlineData("stoppedUP")]
+        public void CompletedTorrentStates_MapToCompleted(string state)
+        {
+            Assert.Equal(DownloadItemStatus.Completed, QbittorrentResponseMapper.MapDownloadItemStatus(state, 100));
+            Assert.Equal("completed", QbittorrentResponseMapper.MapQueueStatus(state, 100));
         }
     }
 }

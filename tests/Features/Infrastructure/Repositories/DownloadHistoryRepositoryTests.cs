@@ -189,7 +189,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Repositories
         }
 
         [Fact]
-        public async Task MarkAsImportedAsync_UpdatesAllEventsForDownload()
+        public async Task MarkAsImportedAsync_AppendsImportedEventWithoutRewritingEarlierEvents()
         {
             // Arrange
             var downloadId = "MARK123";
@@ -219,11 +219,9 @@ namespace Listenarr.Tests.Features.Infrastructure.Repositories
 
             // Assert
             var events = await _repository.GetByDownloadIdAsync(downloadId);
-            Assert.All(events, e =>
-            {
-                Assert.True(e.WasImported);
-                Assert.NotNull(e.ImportedAt);
-            });
+            Assert.Equal(3, events.Count);
+            Assert.Single(events, e => e.EventType == DownloadHistoryEventType.Imported && e.WasImported);
+            Assert.Equal(2, events.Count(e => !e.WasImported));
         }
 
         [Fact]
@@ -246,6 +244,17 @@ namespace Listenarr.Tests.Features.Infrastructure.Repositories
                 DownloadId = "PENDING2",
                 EventType = DownloadHistoryEventType.Grabbed,
                 Status = DownloadItemStatus.Queued,
+                WasImported = true,
+                DownloadClient = "Test",
+                DownloadClientId = "test-1",
+                Protocol = DownloadProtocol.Torrent,
+                Title = "Test2"
+            });
+            await _repository.AddAsync(new DownloadHistory
+            {
+                DownloadId = "PENDING2",
+                EventType = DownloadHistoryEventType.Imported,
+                Status = DownloadItemStatus.Imported,
                 WasImported = true,
                 DownloadClient = "Test",
                 DownloadClientId = "test-1",

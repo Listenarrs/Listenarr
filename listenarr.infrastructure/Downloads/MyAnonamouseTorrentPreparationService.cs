@@ -17,26 +17,25 @@
  */
 
 using System.Text.RegularExpressions;
-using Listenarr.Application.Common;
 using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Application.Security;
 using Listenarr.Domain.Models;
 using Microsoft.Extensions.Logging;
 
-namespace Listenarr.Application.Downloads
+namespace Listenarr.Infrastructure.Downloads
 {
     public sealed class MyAnonamouseTorrentPreparationService
     {
         private readonly IIndexerRepository _indexerRepository;
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly DownloadCachedTorrentStore _cachedTorrentStore;
-        private readonly ILogger _logger;
+        private readonly ILogger<MyAnonamouseTorrentPreparationService> _logger;
 
         public MyAnonamouseTorrentPreparationService(
             IIndexerRepository indexerRepository,
             IHttpClientFactory httpClientFactory,
             DownloadCachedTorrentStore cachedTorrentStore,
-            ILogger logger)
+            ILogger<MyAnonamouseTorrentPreparationService> logger)
         {
             _indexerRepository = indexerRepository;
             _httpClientFactory = httpClientFactory;
@@ -44,12 +43,15 @@ namespace Listenarr.Application.Downloads
             _logger = logger;
         }
 
-        public async Task PrepareAsync(SearchResult searchResult, string? downloadId = null)
+        public async Task PrepareAsync(
+            SearchResult searchResult,
+            string? downloadId = null,
+            CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(searchResult);
 
             _logger.LogInformation("TryPrepareMyAnonamouseTorrentAsync called for '{Title}', IndexerId: {IndexerId}, TorrentUrl: '{TorrentUrl}'",
-                searchResult.Title, searchResult.IndexerId, searchResult.TorrentUrl);
+                LogRedaction.SanitizeText(searchResult.Title), searchResult.IndexerId, LogRedaction.SanitizeUrl(searchResult.TorrentUrl));
 
             if (searchResult.IndexerId == null)
             {
@@ -116,7 +118,7 @@ namespace Listenarr.Application.Downloads
 
                     _logger.LogDebug("Downloading MyAnonamouse torrent for '{Title}' from {Url} (attempt {Attempt})", searchResult.Title, LogRedaction.SanitizeUrl(currentUri.ToString()), redirectAttempt + 1);
 
-                    response = await httpClientToUse.SendAsync(req);
+                    response = await httpClientToUse.SendAsync(req, cancellationToken);
                     mamId = await PersistUpdatedMamIdAsync(response, indexer, mamId);
 
                     if (IsRedirect(response))
@@ -151,7 +153,7 @@ namespace Listenarr.Application.Downloads
                     return;
                 }
 
-                var torrentBytes = await response.Content.ReadAsByteArrayAsync();
+                var torrentBytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
                 if (torrentBytes == null || torrentBytes.Length == 0)
                 {
                     _logger.LogWarning("MyAnonamouse torrent download for '{Title}' returned empty payload", searchResult.Title);
@@ -173,7 +175,7 @@ namespace Listenarr.Application.Downloads
                         for (int retryHop = 0; retryHop < 6; retryHop++)
                         {
                             using var retryReq = BuildTorrentRequest(retryUri, indexerUri, mamId);
-                            response = await authClient.SendAsync(retryReq);
+                            response = await authClient.SendAsync(retryReq, cancellationToken);
 
                             if (IsRedirect(response) && response.Headers.Location != null)
                             {
@@ -190,7 +192,7 @@ namespace Listenarr.Application.Downloads
 
                         if (response != null && response.IsSuccessStatusCode)
                         {
-                            torrentBytes = await response.Content.ReadAsByteArrayAsync();
+                            torrentBytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
                             looksLikeTorrent = torrentBytes != null && torrentBytes.Length > 0 && LooksLikeTorrent(torrentBytes);
                             if (looksLikeTorrent)
                             {

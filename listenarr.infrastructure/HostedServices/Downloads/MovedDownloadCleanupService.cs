@@ -21,6 +21,7 @@ using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Domain.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using System.Text.Json;
 
 namespace Listenarr.Infrastructure.HostedServices.Downloads
 {
@@ -107,6 +108,8 @@ namespace Listenarr.Infrastructure.HostedServices.Downloads
             var downloadRepository = scope.ServiceProvider.GetRequiredService<IDownloadRepository>();
             var configurationService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
             var downloadClientGateway = scope.ServiceProvider.GetRequiredService<IDownloadClientGateway>();
+            var processingJobRepository = scope.ServiceProvider.GetRequiredService<IDownloadProcessingJobRepository>();
+            var historyRepository = scope.ServiceProvider.GetRequiredService<IHistoryRepository>();
 
             var movedDownloads = (await downloadRepository.GetActiveAsync())
                 .Where(d => d.Status == DownloadStatus.Moved)
@@ -131,6 +134,20 @@ namespace Listenarr.Infrastructure.HostedServices.Downloads
             {
                 try
                 {
+                    var completedJob = (await processingJobRepository.GetByDownloadIdAsync(download.Id))
+                        .Where(job => job.Status == ProcessingJobStatus.Completed)
+                        .OrderByDescending(job => job.CompletedAt)
+                        .FirstOrDefault();
+                    if (completedJob == null)
+                    {
+                        logger.LogWarning(
+                            "Deferred removal: Download {DownloadId} is Moved without a completed import job; cleanup is blocked",
+                            download.Id);
+                        continue;
+                    }
+
+                    var correlationId = completedJob.GetOrCreateCorrelationId();
+
                     // Check if CanBeRemoved is now true (updated by DownloadMonitorService)
                     bool canBeRemoved = false;
                     if (download.Metadata != null && download.Metadata.TryGetValue("CanBeRemoved", out var canRemoveObj))
@@ -172,17 +189,9 @@ namespace Listenarr.Infrastructure.HostedServices.Downloads
                     var removalPolicy = clientConfig?.RemoveCompletedDownloads;
                     if (string.IsNullOrEmpty(removalPolicy) || removalPolicy == "none")
                     {
-                        // Check if ANY enabled client has removal configured (for cross-client scenarios)
-                        var anyRemovalClient = allEnabledClients
-                            .FirstOrDefault(c => !string.IsNullOrEmpty(c.RemoveCompletedDownloads) && c.RemoveCompletedDownloads != "none");
-                        if (anyRemovalClient == null)
-                        {
-                            // Removal not configured on any client, just delete the DB record
-                            await downloadRepository.RemoveAsync(download.Id);
-                            logger.LogInformation("Deferred removal: Cleaned up DB record for {DownloadId} (removal not configured)", download.Id);
-                            continue;
-                        }
-                        removalPolicy = anyRemovalClient.RemoveCompletedDownloads;
+                        // "None" means retain both the client item and the durable imported record.
+                        logger.LogDebug("Deferred removal: Retaining imported download {DownloadId}; client action is none", download.Id);
+                        continue;
                     }
 
                     bool deleteFiles = removalPolicy == "remove_and_delete";
@@ -204,6 +213,20 @@ namespace Listenarr.Infrastructure.HostedServices.Downloads
 
                     // Attempt 1: Try primary client
                     bool removed = false;
+                    await AddCleanupHistoryAsync(
+                        historyRepository,
+                        download,
+                        HistoryEvents.CleanupRequested,
+                        HistoryOutcome.Requested,
+                        correlationId,
+                        $"Client cleanup requested ({removalPolicy})",
+                        new Dictionary<string, object>
+                        {
+                            ["ProcessingJobId"] = completedJob.Id,
+                            ["RemovalPolicy"] = removalPolicy,
+                            ["DeleteFiles"] = deleteFiles
+                        },
+                        cancellationToken);
                     if (clientConfig != null)
                     {
                         try
@@ -256,23 +279,59 @@ namespace Listenarr.Infrastructure.HostedServices.Downloads
                     {
                         logger.LogInformation("Deferred removal: Successfully removed {DownloadId} (deleteFiles={DeleteFiles})",
                             download.Id, deleteFiles);
+                        await AddCleanupHistoryAsync(
+                            historyRepository,
+                            download,
+                            HistoryEvents.CleanupSucceeded,
+                            HistoryOutcome.Succeeded,
+                            correlationId,
+                            "Client cleanup completed",
+                            new Dictionary<string, object>
+                            {
+                                ["ProcessingJobId"] = completedJob.Id,
+                                ["RemovalPolicy"] = removalPolicy,
+                                ["DeleteFiles"] = deleteFiles
+                            },
+                            cancellationToken);
                         await downloadRepository.RemoveAsync(download.Id);
                     }
                     else if (timeSinceCompleted.HasValue && timeSinceCompleted.Value > TimeSpan.FromHours(24))
                     {
-                        // All removal attempts failed and the download has been Moved for > 24h.
-                        // The item was likely already removed from the client manually, or the
-                        // DownloadClientId is wrong and the torrent is unrecoverable.
-                        // Clean up the DB record to stop the endless polling loop.
                         logger.LogWarning(
                             "Deferred removal: All removal attempts failed for {DownloadId} after {Hours:F1}h — " +
-                            "cleaning up stale DB record (import already completed)",
+                            "retaining the operational record for a future retry",
                             download.Id, timeSinceCompleted.Value.TotalHours);
-                        await downloadRepository.RemoveAsync(download.Id);
+                        await AddCleanupHistoryAsync(
+                            historyRepository,
+                            download,
+                            HistoryEvents.CleanupFailed,
+                            HistoryOutcome.Failed,
+                            correlationId,
+                            "Client cleanup failed after the grace period; operational record retained",
+                            new Dictionary<string, object>
+                            {
+                                ["ProcessingJobId"] = completedJob.Id,
+                                ["RemovalPolicy"] = removalPolicy,
+                                ["OperationalRecordRemoved"] = false
+                            },
+                            cancellationToken);
                     }
                     else
                     {
                         logger.LogDebug("Deferred removal: Failed to remove {DownloadId}, will retry next cycle", download.Id);
+                        await AddCleanupHistoryAsync(
+                            historyRepository,
+                            download,
+                            HistoryEvents.CleanupFailed,
+                            HistoryOutcome.Retrying,
+                            correlationId,
+                            "Client cleanup failed and will be retried",
+                            new Dictionary<string, object>
+                            {
+                                ["ProcessingJobId"] = completedJob.Id,
+                                ["RemovalPolicy"] = removalPolicy
+                            },
+                            cancellationToken);
                     }
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
@@ -281,5 +340,31 @@ namespace Listenarr.Infrastructure.HostedServices.Downloads
                 }
             }
         }
+
+        private static Task AddCleanupHistoryAsync(
+            IHistoryRepository historyRepository,
+            Download download,
+            string eventType,
+            HistoryOutcome outcome,
+            string correlationId,
+            string message,
+            Dictionary<string, object> details,
+            CancellationToken ct) =>
+            historyRepository.AddAsync(new History
+            {
+                AudiobookId = download.AudiobookId,
+                AudiobookTitle = download.Title,
+                SourceTitle = download.Title,
+                DownloadId = download.Id.ToUpperInvariant(),
+                DownloadClientId = download.DownloadClientId,
+                EventType = eventType,
+                Outcome = outcome,
+                Source = "DownloadCleanup",
+                Message = message,
+                Error = outcome == HistoryOutcome.Failed ? message : null,
+                Timestamp = DateTime.UtcNow,
+                CorrelationId = correlationId,
+                Data = JsonSerializer.Serialize(details)
+            }, ct);
     }
 }

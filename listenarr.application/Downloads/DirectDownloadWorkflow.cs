@@ -18,7 +18,9 @@ namespace Listenarr.Application.Downloads
         IDownloadRepository downloadRepository,
         ILogger<DirectDownloadWorkflow> logger)
     {
-        public async Task<string> CreateTrackedDownloadAsync(SearchResult searchResult, int? audiobookId)
+        public async Task<string> CreateTrackedDownloadAsync(
+            PreparedDirectDownloadSubmission submission,
+            int? audiobookId)
         {
             try
             {
@@ -27,11 +29,13 @@ namespace Listenarr.Application.Downloads
                 {
                     Id = id,
                     AudiobookId = audiobookId,
-                    Title = searchResult.Title,
-                    Language = searchResult.Language,
-                    OriginalUrl = searchResult.TorrentUrl ?? searchResult.NzbUrl ?? searchResult.MagnetLink ?? string.Empty,
+                    Title = submission.Title,
+                    Artist = submission.Artist,
+                    Album = submission.Album,
+                    Language = submission.Language,
+                    OriginalUrl = submission.DownloadUri.ToString(),
                     Progress = 0,
-                    TotalSize = searchResult.Size,
+                    TotalSize = submission.Size,
                     DownloadedSize = 0,
                     DownloadPath = string.Empty,
                     FinalPath = string.Empty,
@@ -39,9 +43,9 @@ namespace Listenarr.Application.Downloads
                     DownloadClientId = "DDL",
                     Metadata = new Dictionary<string, object>
                     {
-                        ["Source"] = searchResult.Source ?? string.Empty,
-                        ["Quality"] = searchResult.Quality ?? string.Empty,
-                        ["Language"] = searchResult.Language ?? string.Empty,
+                        ["Source"] = submission.Source,
+                        ["Quality"] = submission.Quality ?? string.Empty,
+                        ["Language"] = submission.Language ?? string.Empty,
                         ["DownloadType"] = "DDL"
                     }
                 };

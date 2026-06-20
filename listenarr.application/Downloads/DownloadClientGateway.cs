@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Listenarr.Application.Interfaces;
+using Listenarr.Application.Common;
 using Listenarr.Application.Security;
 using Listenarr.Domain.Common;
 using Listenarr.Domain.Models;
@@ -75,12 +76,19 @@ namespace Listenarr.Application.Downloads
             return adapter.TestConnectionAsync(client, ct);
         }
 
-        public async Task<string?> AddAsync(DownloadClientConfiguration client, SearchResult result, CancellationToken ct = default)
+        public async Task<DownloadClientSubmissionResult> AddAsync(
+            DownloadClientConfiguration client,
+            PreparedDownloadSubmission submission,
+            CancellationToken ct = default)
         {
             var adapter = ResolveAdapter(client);
-            return await adapter.AddAsync(client, result, ct);
+            if (adapter.Protocol != submission.Protocol)
+            {
+                throw new DownloadClientSubmissionException(
+                    $"Download client {client.Name ?? client.Type} does not support the prepared {submission.Protocol} submission.");
+            }
 
-            // TODO: Handle download persistence here instead of DownloadService
+            return await adapter.AddAsync(client, submission, ct);
         }
 
         public Task<bool> RemoveAsync(DownloadClientConfiguration client, string id, bool deleteFiles = false, CancellationToken ct = default)

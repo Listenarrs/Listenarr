@@ -547,6 +547,26 @@ namespace Listenarr.Infrastructure.HostedServices.Audiobooks
                     {
                         System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
                     }
+                    await historyRepository.AddAsync(new History
+                    {
+                        AudiobookId = audiobook.Id,
+                        AudiobookTitle = audiobook.Title,
+                        SourceTitle = audiobook.Title,
+                        DownloadId = job.DownloadId,
+                        EventType = HistoryEvents.ScanCompleted,
+                        Outcome = HistoryOutcome.Succeeded,
+                        Source = "LibraryScan",
+                        Message = $"Library scan completed: {foundFiles.Count} found, {createdFiles} created",
+                        Timestamp = DateTime.UtcNow,
+                        CorrelationId = job.CorrelationId ?? job.Id.ToString("N"),
+                        Data = JsonSerializer.Serialize(new
+                        {
+                            ScanJobId = job.Id,
+                            Found = foundFiles.Count,
+                            Created = createdFiles,
+                            Path = scanRoot
+                        })
+                    }, stoppingToken);
                     _metrics.Increment("worker.scan.job.completed");
                 }
             }
@@ -564,6 +584,32 @@ namespace Listenarr.Infrastructure.HostedServices.Audiobooks
                     System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
                 }
                 _metrics.Increment("worker.scan.job.failed");
+                try
+                {
+                    using var historyScope = _scopeFactory.CreateScope();
+                    var historyRepository = historyScope.ServiceProvider.GetRequiredService<IHistoryRepository>();
+                    var audiobookRepository = historyScope.ServiceProvider.GetRequiredService<IAudiobookRepository>();
+                    var audiobook = await audiobookRepository.GetByIdAsync(job.AudiobookId);
+                    await historyRepository.AddAsync(new History
+                    {
+                        AudiobookId = job.AudiobookId,
+                        AudiobookTitle = audiobook?.Title,
+                        SourceTitle = audiobook?.Title,
+                        DownloadId = job.DownloadId,
+                        EventType = HistoryEvents.ScanFailed,
+                        Outcome = HistoryOutcome.Failed,
+                        Source = "LibraryScan",
+                        Message = "Library scan failed",
+                        Error = ex.Message,
+                        Timestamp = DateTime.UtcNow,
+                        CorrelationId = job.CorrelationId ?? job.Id.ToString("N"),
+                        Data = JsonSerializer.Serialize(new { ScanJobId = job.Id, job.Path })
+                    }, stoppingToken);
+                }
+                catch (Exception historyException) when (historyException is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
+                {
+                    _logger.LogDebug(historyException, "Unable to record failed scan history for job {JobId}", job.Id);
+                }
             }
         }
 

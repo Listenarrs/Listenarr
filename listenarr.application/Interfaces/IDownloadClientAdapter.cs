@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Listenarr.Domain.Models;
+using Listenarr.Application.Downloads;
 
 namespace Listenarr.Application.Interfaces
 {
@@ -36,10 +37,13 @@ namespace Listenarr.Application.Interfaces
         /// Returns an identifier for the download
         /// </summary>
         /// <param name="client"></param>
-        /// <param name="result"></param>
+        /// <param name="submission"></param>
         /// <param name="ct"></param>
         /// <returns></returns>
-        Task<string?> AddAsync(DownloadClientConfiguration client, SearchResult result, CancellationToken ct = default);
+        Task<DownloadClientSubmissionResult> AddAsync(
+            DownloadClientConfiguration client,
+            PreparedDownloadSubmission submission,
+            CancellationToken ct = default);
 
         Task<bool> RemoveAsync(DownloadClientConfiguration client, string id, bool deleteFiles = false, CancellationToken ct = default);
 

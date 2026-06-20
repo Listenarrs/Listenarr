@@ -23,6 +23,10 @@ namespace Listenarr.Tests.Features.Api.Services
             Assert.False(Directory.Exists(src));
             Assert.True(File.Exists(Path.Join(dst, "book.m4b")));
 
+            var history = await _historyRepository.GetByAudiobookIdAsync(audiobook.Id);
+            var moveEvent = Assert.Single(history, entry => entry.EventType == "Moved");
+            Assert.True(moveEvent.NotificationSent);
+
             var metricsMock = _provider.GetRequiredService<Mock<IAppMetricsService>>();
             metricsMock.Verify(m => m.Increment("worker.move.job.started", It.IsAny<double>()), Times.Once);
             metricsMock.Verify(m => m.Increment("worker.move.job.completed", It.IsAny<double>()), Times.Once);

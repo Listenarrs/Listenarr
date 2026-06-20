@@ -17,11 +17,18 @@ namespace Listenarr.Infrastructure.Adapters
 {
     internal sealed class QbittorrentRemovalWorkflow
     {
+        private readonly IHttpClientFactory _httpClientFactory;
         private readonly ILogger _logger;
+        private readonly string _clientType;
 
-        public QbittorrentRemovalWorkflow(ILogger logger)
+        public QbittorrentRemovalWorkflow(
+            IHttpClientFactory httpClientFactory,
+            ILogger logger,
+            string clientType)
         {
+            _httpClientFactory = httpClientFactory;
             _logger = logger;
+            _clientType = clientType;
         }
 
         public async Task<bool> RemoveAsync(DownloadClientConfiguration client, string id, bool deleteFiles = false, CancellationToken ct = default)
@@ -33,7 +40,7 @@ namespace Listenarr.Infrastructure.Adapters
 
             try
             {
-                using var httpClient = QbittorrentCookieSession.CreateClient();
+                using var httpClient = _httpClientFactory.CreateClient(_clientType);
                 using var loginData = QbittorrentCookieSession.CreateLoginContent(client);
 
                 using var loginResp = await httpClient.PostAsync($"{baseUrl}/api/v2/auth/login", loginData, ct);

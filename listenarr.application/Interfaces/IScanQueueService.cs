@@ -22,7 +22,11 @@ namespace Listenarr.Application.Interfaces
 {
     public interface IScanQueueService
     {
-        Task<Guid> EnqueueScanAsync(Audiobook audiobook, string? path = null);
+        Task<Guid> EnqueueScanAsync(
+            Audiobook audiobook,
+            string? path = null,
+            string? correlationId = null,
+            string? downloadId = null);
         Task<Guid?> RequeueScanAsync(Guid jobId);
         bool TryGetJob(Guid id, out ScanJob? job);
         void UpdateJobStatus(Guid id, string status, string? error = null, int? found = null, int? created = null);

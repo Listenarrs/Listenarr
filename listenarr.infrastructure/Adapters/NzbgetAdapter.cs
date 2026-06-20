@@ -45,10 +45,9 @@ namespace Listenarr.Infrastructure.Adapters
             ArgumentNullException.ThrowIfNull(nzbUrlResolver);
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _xmlRpcClient = new NzbgetXmlRpcClient(httpClientFactory, ClientType);
-            var nzbDownloader = new NzbgetNzbDownloader(httpClientFactory, ClientType, _logger);
             _downloadPollingWorkflow = new NzbgetDownloadPollingWorkflow(httpClientFactory, _logger, ClientType);
             _removalWorkflow = new NzbgetRemovalWorkflow(_xmlRpcClient, _logger);
-            _addWorkflow = new NzbgetAddWorkflow(nzbUrlResolver, _xmlRpcClient, nzbDownloader, _logger);
+            _addWorkflow = new NzbgetAddWorkflow(_xmlRpcClient, _logger);
             _importItemResolver = new NzbgetImportItemResolver(_xmlRpcClient, _logger);
         }
 
@@ -99,9 +98,14 @@ namespace Listenarr.Infrastructure.Adapters
             }
         }
 
-        public async Task<string?> AddAsync(DownloadClientConfiguration client, SearchResult result, CancellationToken ct = default)
+        public async Task<DownloadClientSubmissionResult> AddAsync(
+            DownloadClientConfiguration client,
+            PreparedDownloadSubmission submission,
+            CancellationToken ct = default)
         {
-            return await _addWorkflow.AddAsync(client, result, ct);
+            if (submission is not PreparedUsenetSubmission usenet)
+                throw new DownloadClientSubmissionException("NZBGet requires a prepared Usenet submission.");
+            return await _addWorkflow.AddAsync(client, usenet, ct);
         }
 
         public async Task<bool> RemoveAsync(DownloadClientConfiguration client, string id, bool deleteFiles = false, CancellationToken ct = default)

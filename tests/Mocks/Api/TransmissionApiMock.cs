@@ -108,6 +108,16 @@ namespace Listenarr.Tests.Mocks.Api
                     }
                     """);
                 }
+                else if (string.Equals("torrent-remove", method, StringComparison.OrdinalIgnoreCase))
+                {
+                    return MockUtils.GetCannedResponse("""
+                    {
+                        "result": "success",
+                        "arguments": {},
+                        "tag": 2
+                    }
+                    """);
+                }
             }
 
             return new HttpResponseMessage(System.Net.HttpStatusCode.NotFound);

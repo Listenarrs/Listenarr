@@ -21,6 +21,8 @@ using Listenarr.Tests.Common;
 using Listenarr.Tests.Mocks.Api;
 using Listenarr.Infrastructure.Adapters;
 using Listenarr.Infrastructure.Torrents;
+using Listenarr.Infrastructure.Downloads;
+using Listenarr.Application.Downloads;
 
 namespace Listenarr.Tests.Features.Infrastructure.Adapters
 {
@@ -62,14 +64,19 @@ namespace Listenarr.Tests.Features.Infrastructure.Adapters
             };
 
             var adapter = MockUtils.CreateTransmissionAdapter(_provider);
-            var addedId = await adapter.AddAsync(_client, searchResult);
+            var added = await adapter.AddAsync(
+                _client,
+                PreparedSubmissionTestFactory.Torrent(
+                    searchResult.Title,
+                    "ABCDEF1234567890ABCDEF1234567890ABCDEF12",
+                    magnet: searchResult.MagnetLink));
 
             var transmissionApiMock = _provider.GetRequiredService<TransmissionApiMock>();
             using var document = transmissionApiMock.GetLastJsonContent();
             Assert.NotNull(document);
             var postedFilename = document.RootElement.GetProperty("arguments").GetProperty("filename").GetString();
 
-            Assert.Equal("HASH1", addedId);
+            Assert.Equal("HASH1", added.ExternalId);
             Assert.Equal(
                 "magnet:?xt=urn:btih:ABCDEF1234567890&tr=http%3A%2F%2Ftracker.example.com%2Fannounce%3Ffoo%3D1%26bar%3D2&dn=Book Title",
                 postedFilename);
@@ -125,11 +132,17 @@ namespace Listenarr.Tests.Features.Infrastructure.Adapters
             };
 
             var adapter = MockUtils.CreateTransmissionAdapter(_provider, downloader);
-            var addedId = await adapter.AddAsync(_client, searchResult);
+            var added = await adapter.AddAsync(
+                _client,
+                PreparedSubmissionTestFactory.Torrent(
+                    searchResult.Title,
+                    "ABCDEF1234567890ABCDEF1234567890ABCDEF12",
+                    bytes: "de"u8.ToArray(),
+                    magnet: searchResult.MagnetLink));
 
-            Assert.Equal("HASH1", addedId);
-            Assert.Equal("https://indexer.example.com/book.torrent", downloadedUrl);
-            downloader.Verify(x => x.DownloadAsync("https://indexer.example.com/book.torrent", It.IsAny<CancellationToken>()), Times.Once);
+            Assert.Equal("HASH1", added.ExternalId);
+            Assert.Null(downloadedUrl);
+            downloader.Verify(x => x.DownloadAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
 
             var transmissionApiMock = _provider.GetRequiredService<TransmissionApiMock>();
             using var document = transmissionApiMock.GetLastJsonContent();
@@ -155,10 +168,17 @@ namespace Listenarr.Tests.Features.Infrastructure.Adapters
                 TorrentUrl = "ftp://indexer.example.com/book.torrent"
             };
 
-            var adapter = MockUtils.CreateTransmissionAdapter(_provider);
-            var exception = await Assert.ThrowsAsync<ArgumentException>(() => adapter.AddAsync(_client, searchResult));
+            var downloader = new Mock<ITorrentFileDownloader>();
+            downloader.Setup(value => value.DownloadAsync(searchResult.TorrentUrl, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(TorrentDownloadResult.Failed("The torrent URL was rejected by outbound request validation."));
+            var exception = await Assert.ThrowsAsync<DownloadClientSubmissionException>(() =>
+                new GenericTorrentSourceResolver(downloader.Object, new TorrentMetadataService())
+                    .ResolveAsync(
+                        TrustedDownloadCandidateFactory.Create(searchResult),
+                        null,
+                        CancellationToken.None));
 
-            Assert.Contains("HTTP or HTTPS", exception.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("rejected", exception.Message, StringComparison.OrdinalIgnoreCase);
         }
 
         [Theory]
@@ -247,6 +267,35 @@ namespace Listenarr.Tests.Features.Infrastructure.Adapters
                 Assert.Equal(FileUtils.GetAbsolutePath("downloads", "complete", "audiobooks", "Isaac Asimov - Le Cycle de Fondation - Tome 3 - Seconde Fondation "), retrievedQeue.ContentPath);
                 Assert.EndsWith(" ", retrievedQeue.ContentPath);
             }
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public async Task RemoveAsync_PreservesDeleteLocalDataPolicy(bool deleteFiles)
+        {
+            var adapter = MockUtils.CreateTransmissionAdapter(_provider);
+
+            var result = await adapter.RemoveAsync(_client!, "42", deleteFiles);
+
+            Assert.True(result);
+            using var request = _provider.GetRequiredService<TransmissionApiMock>().GetLastJsonContent();
+            Assert.NotNull(request);
+            Assert.Equal("torrent-remove", request!.RootElement.GetProperty("method").GetString());
+            var arguments = request.RootElement.GetProperty("arguments");
+            Assert.Equal(deleteFiles, arguments.GetProperty("delete-local-data").GetBoolean());
+            Assert.Equal(42, arguments.GetProperty("ids")[0].GetInt32());
+        }
+
+        [Theory]
+        [InlineData(0)]
+        [InlineData(3)]
+        [InlineData(5)]
+        [InlineData(6)]
+        public void CompletedTorrentStates_MapToCompleted(int status)
+        {
+            Assert.Equal(DownloadItemStatus.Completed, TransmissionResponseMapper.MapDownloadItemStatus(status, 100));
+            Assert.Equal("completed", TransmissionResponseMapper.MapQueueStatus(status, 100));
         }
     }
 }

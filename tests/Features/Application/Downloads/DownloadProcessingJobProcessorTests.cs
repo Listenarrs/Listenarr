@@ -376,5 +376,41 @@ namespace Listenarr.Tests.Features.Application.Downloads
 
             Assert.Equal(1, downloadClientGatewayMock.GetCallCount(nameof(downloadClientGatewayMock.MarkItemAsImportedAsync)));
         }
+
+        [Fact]
+        public async Task FinalizationRetry_DoesNotRepeatCompletedFileImport()
+        {
+            var sourceDirectory = FileService.GetTempDirectory("checkpoint-source");
+            var file = await FileService.GetFileAsync(sourceDirectory, "Checkpoint Book.m4b");
+            downloadClientGatewayMock.SourceFiles = [file];
+            downloadClientGatewayMock.MarkImportedResult = false;
+
+            var download = await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithAudiobook(await CreateAudiobook())
+                .WithDownloadClientConfiguration(await CreateDownloadClientConfiguration())
+                .WithPath(sourceDirectory)
+                .WithCompletedStatus(DateTime.UtcNow)
+                .Build());
+            var job = await _downloadProcessingJobRepository.AddAsync(new DownloadProcessingJobBuilder()
+                .WithDownload(download)
+                .Build());
+
+            var processor = _provider.GetRequiredService<DownloadProcessingJobProcessor>();
+            await processor.ProcessQueueAsync(CancellationToken.None);
+
+            job = (await _downloadProcessingJobRepository.GetByIdAsync(job.Id))!;
+            Assert.True(job.HasCheckpoint("FilesImported"));
+            Assert.False(job.HasCheckpoint("ClientMarkedImported"));
+            Assert.Equal(DownloadStatus.ImportPending, (await _downloadRepository.GetByIdAsync(download.Id))!.Status);
+            Assert.Equal(1, downloadClientGatewayMock.GetCallCount(nameof(downloadClientGatewayMock.GetQueueItemAsync)));
+
+            downloadClientGatewayMock.MarkImportedResult = true;
+            await TestUtils.CancelJobRetryWait(_downloadProcessingJobRepository, job);
+            await processor.ProcessQueueAsync(CancellationToken.None);
+
+            Assert.Equal(DownloadStatus.Moved, (await _downloadRepository.GetByIdAsync(download.Id))!.Status);
+            Assert.Equal(1, downloadClientGatewayMock.GetCallCount(nameof(downloadClientGatewayMock.GetQueueItemAsync)));
+            Assert.Equal(2, downloadClientGatewayMock.GetCallCount(nameof(downloadClientGatewayMock.MarkItemAsImportedAsync)));
+        }
     }
 }

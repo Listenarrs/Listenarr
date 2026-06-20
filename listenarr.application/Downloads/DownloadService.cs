@@ -19,6 +19,7 @@
 using Listenarr.Application.Interfaces;
 using Listenarr.Domain.Models;
 using Listenarr.Application.Interfaces.Repositories;
+using Listenarr.Application.Common;
 using Microsoft.Extensions.Logging;
 using Listenarr.Application.Security;
 
@@ -28,9 +29,7 @@ namespace Listenarr.Application.Downloads
         IAudiobookRepository audiobookRepository,
         IConfigurationService configurationService,
         IDownloadRepository downloadRepository,
-        IIndexerRepository indexerRepository,
         ILogger<DownloadService> logger,
-        IHttpClientFactory httpClientFactory,
         IQualityProfileService qualityProfileService,
         ISearchService searchService,
         IDownloadClientGateway clientGateway,
@@ -38,9 +37,9 @@ namespace Listenarr.Application.Downloads
         INotificationService notificationService,
         IHubBroadcaster hubBroadcaster,
         IDownloadHistoryService downloadHistoryService,
-        DownloadTypeResolver downloadTypeResolver,
         DownloadClientSelector downloadClientSelector,
         DownloadCachedTorrentStore cachedTorrentStore,
+        IDownloadSubmissionPreparer submissionPreparer,
         DirectDownloadWorkflow directDownloadWorkflow,
         DownloadRemovalWorkflow downloadRemovalWorkflow) : IDownloadService
     {
@@ -54,8 +53,6 @@ namespace Listenarr.Application.Downloads
 
         // Track qBittorrent torrent cache for merging incremental updates (clientId -> (torrentHash -> QueueItem))
         private readonly Dictionary<string, Dictionary<string, QueueItem>> _qbittorrentTorrentCache = new();
-        private readonly DownloadClientIdFallbackResolver _clientIdFallbackResolver = new(downloadTypeResolver, logger);
-
         public async Task<string> StartDownloadAsync(SearchResult searchResult, string downloadClientId, int? audiobookId = null)
         {
             return await SendToDownloadClientAsync(searchResult, downloadClientId, audiobookId);
@@ -201,40 +198,8 @@ namespace Listenarr.Application.Downloads
             // Assign score to SearchResult
             topResult.SearchResult.Score = topResult.TotalScore;
 
-            var effectiveDownloadType = await downloadTypeResolver.ResolveAsync(topResult.SearchResult);
-            topResult.SearchResult.DownloadType = DownloadTypeResolver.GetLabel(effectiveDownloadType);
-
-            if (effectiveDownloadType == EffectiveDownloadType.Unknown)
-            {
-                logger.LogWarning(
-                    "Top search result for audiobook '{Title}' could not be mapped to a trusted download type",
-                    audiobook.Title);
-                return new SearchAndDownloadResult
-                {
-                    Success = false,
-                    Message = "Top search result could not be mapped to a valid download target"
-                };
-            }
-
-            // Handle trusted direct-download results directly
-            if (effectiveDownloadType == EffectiveDownloadType.DirectDownload)
-            {
-                logger.LogInformation("Top result is DDL, processing directly for: {Title}", topResult.SearchResult.Title);
-                var downloadId = await DownloadDirectlyAsync(topResult.SearchResult, audiobookId);
-                await LogDownloadHistory(audiobook, "Search", topResult.SearchResult);
-                return new SearchAndDownloadResult
-                {
-                    Success = true,
-                    Message = $"Successfully processed DDL download",
-                    DownloadId = downloadId,
-                    IndexerUsed = "Search",
-                    DownloadClientUsed = "DDL",
-                    SearchResult = topResult.SearchResult
-                };
-            }
-
-            // Use topResult.SearchResult for torrent/nzb download
-            var isTorrent = effectiveDownloadType == EffectiveDownloadType.Torrent;
+            var candidate = TrustedDownloadCandidateFactory.Create(topResult.SearchResult);
+            var isTorrent = candidate.SourceDescriptor.Protocol == DownloadProtocol.Torrent;
             var downloadClientId = await downloadClientSelector.GetAppropriateDownloadClientAsync(isTorrent);
 
             if (downloadClientId == null)
@@ -248,7 +213,7 @@ namespace Listenarr.Application.Downloads
             }
 
             // Send to download client with audiobookId for proper metadata linking
-            var downloadId2 = await SendToDownloadClientAsync(topResult.SearchResult, downloadClientId, audiobookId);
+            var downloadId2 = await SendToDownloadClientAsync(candidate, downloadClientId, audiobookId);
 
             // Log to history
             await LogDownloadHistory(audiobook, "Search", topResult.SearchResult);
@@ -266,33 +231,62 @@ namespace Listenarr.Application.Downloads
 
         public async Task<string> SendToDownloadClientAsync(SearchResult searchResult, string? downloadClientId = null, int? audiobookId = null)
         {
-            logger.LogInformation("SendToDownloadClientAsync called - Title: {Title}, DownloadType: '{DownloadType}', TorrentUrl: {TorrentUrl}, AudiobookId: {AudiobookId}",
-                searchResult.Title,
-                searchResult.DownloadType ?? "(null)",
-                searchResult.TorrentUrl ?? "(null)",
+            return await SendToDownloadClientAsync(
+                TrustedDownloadCandidateFactory.Create(searchResult),
+                downloadClientId,
+                audiobookId);
+        }
+
+        public async Task<string> SendToDownloadClientAsync(
+            TrustedDownloadCandidate candidate,
+            string? downloadClientId = null,
+            int? audiobookId = null)
+        {
+            logger.LogInformation(
+                "Preparing trusted download '{Title}' using protocol {Protocol}, AudiobookId: {AudiobookId}",
+                LogRedaction.SanitizeText(candidate.Title),
+                candidate.SourceDescriptor.Protocol,
                 audiobookId);
 
-            var effectiveDownloadType = await downloadTypeResolver.ResolveAsync(searchResult);
-            searchResult.DownloadType = DownloadTypeResolver.GetLabel(effectiveDownloadType);
-
-            if (effectiveDownloadType == EffectiveDownloadType.Unknown)
+            var downloadId = Guid.NewGuid().ToString();
+            if (audiobookId is int audiobookIdValue && audiobookIdValue > 0)
             {
-                throw new InvalidOperationException("Unable to determine a trusted download type from the selected search result.");
+                try
+                {
+                    if (await DownloadDuplicateGuard.HasActiveDownloadAsync(
+                            audiobookIdValue,
+                            configurationService,
+                            downloadRepository))
+                    {
+                        logger.LogInformation(
+                            "Skipping duplicate download for audiobook {AudiobookId} — an active download already exists. Title: '{Title}'",
+                            audiobookIdValue,
+                            candidate.Title);
+                        return string.Empty;
+                    }
+                }
+                catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
+                {
+                    logger.LogDebug(
+                        exception,
+                        "Failed to check for duplicate downloads for audiobook {AudiobookId} (non-blocking)",
+                        audiobookIdValue);
+                }
             }
 
-            // Check if this is a trusted direct download and handle it differently
-            if (effectiveDownloadType == EffectiveDownloadType.DirectDownload)
+            var prepared = await submissionPreparer.PrepareAsync(candidate, downloadId);
+            if (prepared is PreparedDirectDownloadSubmission directDownload)
             {
-                logger.LogInformation("Processing DDL for: {Title}, AudiobookId: {AudiobookId}", searchResult.Title, audiobookId);
-                return await DownloadDirectlyAsync(searchResult, audiobookId);
+                logger.LogInformation("Processing trusted direct download for: {Title}", candidate.Title);
+                return await directDownloadWorkflow.CreateTrackedDownloadAsync(directDownload, audiobookId);
             }
 
-            var isTorrent = effectiveDownloadType == EffectiveDownloadType.Torrent;
+            var isTorrent = prepared.Protocol == DownloadProtocol.Torrent;
 
             logger.LogInformation(
                 "Processing as {DownloadType} after server-side validation for '{Title}'",
-                searchResult.DownloadType,
-                searchResult.Title);
+                prepared.Protocol,
+                candidate.Title);
 
             if (downloadClientId == null)
             {
@@ -316,51 +310,54 @@ namespace Listenarr.Application.Downloads
 
             logger.LogInformation("Sending to {ClientType} download client: {ClientName}", downloadClient.Type, downloadClient.Name);
 
-            var downloadId = Guid.NewGuid().ToString();
-
             // Ensure downloadClientId is non-null before assignment into model
             var downloadClientIdForModel = downloadClientId ?? string.Empty;
-
-            // Guard against duplicate downloads for the same audiobook.
-            // Only block when a truly active download exists (Queued/Downloading/ImportPending)
-            // for an enabled download client. Completed downloads don't block — ImportPending
-            // covers the "waiting for import" window, and stale records from deleted/reconfigured
-            // clients are excluded so they can't silently phantom-block re-downloads.
-            if (audiobookId is int audiobookIdValue && audiobookIdValue > 0)
-            {
-                try
-                {
-                    var existingActive = await DownloadDuplicateGuard.HasActiveDownloadAsync(
-                        audiobookIdValue,
-                        configurationService,
-                        downloadRepository);
-
-                    if (existingActive)
-                    {
-                        logger.LogInformation(
-                            "Skipping duplicate download for audiobook {AudiobookId} — an active download already exists. Title: '{Title}'",
-                            audiobookIdValue, searchResult.Title);
-                        return string.Empty;
-                    }
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                {
-                    logger.LogDebug(ex, "Failed to check for duplicate downloads for audiobook {AudiobookId} (non-blocking)", audiobookIdValue);
-                }
-            }
 
             // Create Download record in database before sending to client
             var download = DownloadRecordFactory.CreateQueuedDownload(
                 downloadId,
-                searchResult,
+                candidate,
+                prepared,
                 downloadClient,
                 downloadClientIdForModel,
                 audiobookId);
 
             await downloadRepository.AddAsync(download);
-            logger.LogInformation("Created download record in database: {DownloadId} for '{Title}'", downloadId, searchResult.Title);
+            logger.LogInformation("Created download record in database: {DownloadId} for '{Title}'", downloadId, candidate.Title);
 
-            // Record in download history for idempotency tracking
+            DownloadClientSubmissionResult submissionResult;
+            try
+            {
+                submissionResult = await clientGateway.AddAsync(downloadClient, prepared);
+                if (submissionResult == null || string.IsNullOrWhiteSpace(submissionResult.ExternalId))
+                    throw new DownloadClientSubmissionException("The download client did not return a verified download identifier.");
+            }
+            catch (OperationCanceledException)
+            {
+                await RemoveProvisionalDownloadAsync(downloadId);
+                throw;
+            }
+            catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
+            {
+                await RemoveProvisionalDownloadAsync(downloadId);
+
+                if (exception is DownloadClientSubmissionException)
+                {
+                    throw;
+                }
+
+                throw new DownloadClientSubmissionException("Failed to send the torrent to the download client.", exception);
+            }
+
+            var downloadToUpdate = await downloadRepository.FindAsync(downloadId);
+            if (downloadToUpdate != null)
+            {
+                DownloadClientMetadataUpdater.ApplyClientSpecificId(downloadToUpdate, downloadClient, submissionResult.ExternalId);
+                await UpdateAsync(downloadToUpdate);
+                logger.LogInformation("Updated download {DownloadId} with client-specific ID: {ClientId}", downloadId, submissionResult.ExternalId);
+            }
+
+            // Record history only after the external client accepted the download.
             if (!string.IsNullOrEmpty(downloadClientIdForModel))
             {
                 try
@@ -369,7 +366,7 @@ namespace Listenarr.Application.Downloads
                     await downloadHistoryService.RecordGrabbedAsync(
                         downloadId,
                         downloadClientIdForModel,
-                        searchResult.Title ?? "Unknown",
+                        candidate.Title,
                         protocol);
                     logger.LogInformation("Recorded grabbed event in history for download {DownloadId}", downloadId);
                 }
@@ -379,36 +376,12 @@ namespace Listenarr.Application.Downloads
                 }
             }
 
-            // Attempt to cache MyAnonamouse torrents ahead of handing off to qBittorrent
-            await TryPrepareMyAnonamouseTorrentAsync(searchResult, downloadId);
-
-            if (clientGateway == null)
-            {
-                throw new InvalidOperationException("Download client gateway is not registered. Ensure AddListenarrAdapters() is invoked during startup.");
-            }
-
-            // Route to appropriate client handler via adapter and capture client-specific IDs when provided
-            string? clientSpecificId = await clientGateway.AddAsync(downloadClient, searchResult);
-            clientSpecificId ??= _clientIdFallbackResolver.TryResolve(downloadClient, searchResult);
-
-            // Update download record with client-specific ID if available
-            if (!string.IsNullOrEmpty(clientSpecificId))
-            {
-                var downloadToUpdate = await downloadRepository.FindAsync(downloadId);
-                if (downloadToUpdate != null)
-                {
-                    DownloadClientMetadataUpdater.ApplyClientSpecificId(downloadToUpdate, downloadClient, clientSpecificId);
-                    await UpdateAsync(downloadToUpdate);
-                    logger.LogInformation("Updated download {DownloadId} with client-specific ID: {ClientId}", downloadId, clientSpecificId);
-                }
-            }
-
             var settings = await configurationService.GetApplicationSettingsAsync();
             var notificationData = await DownloadNotificationPayloadBuilder.BuildBookDownloadingPayloadAsync(
                 audiobookRepository,
                 audiobookId,
                 downloadId,
-                searchResult,
+                ToSearchResult(candidate, prepared),
                 downloadClient);
 
             await notificationService.SendNotificationAsync("book-downloading", notificationData, settings.WebhookUrl, settings.EnabledNotificationTriggers);
@@ -433,14 +406,17 @@ namespace Listenarr.Application.Downloads
             return downloadId;
         }
 
-        private async Task TryPrepareMyAnonamouseTorrentAsync(SearchResult searchResult, string? downloadId = null)
+        private async Task RemoveProvisionalDownloadAsync(string downloadId)
         {
-            var preparationService = new MyAnonamouseTorrentPreparationService(
-                indexerRepository,
-                httpClientFactory,
-                cachedTorrentStore,
-                logger);
-            await preparationService.PrepareAsync(searchResult, downloadId);
+            try
+            {
+                await downloadRepository.RemoveAsync(downloadId);
+                logger.LogInformation("Removed provisional download {DownloadId} after client submission failed", downloadId);
+            }
+            catch (Exception cleanupException) when (cleanupException is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
+            {
+                logger.LogError(cleanupException, "Failed to remove provisional download {DownloadId} after client submission failure", downloadId);
+            }
         }
 
         public async Task<bool> RemoveFromQueueAsync(string downloadId, string? downloadClientId = null, bool force = false)
@@ -453,10 +429,22 @@ namespace Listenarr.Application.Downloads
         // These are conservative, safe no-op / simple implementations.
         //
 
-        private async Task<string> DownloadDirectlyAsync(SearchResult searchResult, int? audiobookId)
-        {
-            return await directDownloadWorkflow.CreateTrackedDownloadAsync(searchResult, audiobookId);
-        }
+        private static SearchResult ToSearchResult(
+            TrustedDownloadCandidate candidate,
+            PreparedDownloadSubmission prepared)
+            => new()
+            {
+                Id = candidate.Id,
+                Title = candidate.Title,
+                Artist = candidate.Artist,
+                Album = candidate.Album,
+                Source = candidate.Source,
+                Quality = candidate.Quality,
+                Language = candidate.Language,
+                Size = candidate.Size,
+                Seeders = candidate.Seeders,
+                DownloadType = prepared.Protocol.ToString()
+            };
 
         private async Task LogDownloadHistory(Audiobook audiobook, string source, SearchResult result)
         {

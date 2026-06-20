@@ -17,6 +17,9 @@
  */
 
 using Listenarr.Application.Interfaces.Repositories;
+using Listenarr.Application.Interfaces;
+using Listenarr.Api.Attributes;
+using Listenarr.Domain.Models;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Api.Controllers
@@ -28,10 +31,15 @@ namespace Listenarr.Api.Controllers
     {
         private readonly IHistoryRepository _history;
         private readonly ILogger<HistoryController> _logger;
+        private readonly IConfigurationService _configuration;
 
-        public HistoryController(IHistoryRepository history, ILogger<HistoryController> logger)
+        public HistoryController(
+            IHistoryRepository history,
+            IConfigurationService configuration,
+            ILogger<HistoryController> logger)
         {
             _history = history;
+            _configuration = configuration;
             _logger = logger;
         }
 
@@ -40,20 +48,67 @@ namespace Listenarr.Api.Controllers
         /// </summary>
         /// <param name="limit">Maximum number of entries to return.</param>
         /// <param name="offset">Number of entries to skip for pagination.</param>
+        /// <param name="sortBy">Sortable field: timestamp, eventType, outcome, or source.</param>
+        /// <param name="sortDirection">Sort direction: asc or desc.</param>
+        /// <param name="eventType">Optional event-type filter.</param>
+        /// <param name="outcome">Optional outcome filter.</param>
+        /// <param name="from">Optional inclusive UTC start date.</param>
+        /// <param name="to">Optional inclusive UTC end date.</param>
+        /// <param name="audiobookId">Optional audiobook filter.</param>
+        /// <param name="downloadId">Optional download filter.</param>
+        /// <param name="downloadClientId">Optional download-client filter.</param>
+        /// <param name="correlationId">Optional workflow-correlation filter.</param>
         [HttpGet]
-        public async Task<IActionResult> GetAll([FromQuery] int? limit = null, [FromQuery] int? offset = null)
+        public async Task<IActionResult> GetAll(
+            [FromQuery] int limit = 50,
+            [FromQuery] int offset = 0,
+            [FromQuery] string sortBy = "timestamp",
+            [FromQuery] string sortDirection = "desc",
+            [FromQuery] string? eventType = null,
+            [FromQuery] HistoryOutcome? outcome = null,
+            [FromQuery] DateTime? from = null,
+            [FromQuery] DateTime? to = null,
+            [FromQuery] int? audiobookId = null,
+            [FromQuery] string? downloadId = null,
+            [FromQuery] string? downloadClientId = null,
+            [FromQuery] string? correlationId = null)
         {
-            var total = await _history.CountAsync();
-            var pageLimit = limit ?? total;
-            var history = await _history.GetPagedAsync(pageLimit, offset ?? 0);
+            var page = await _history.QueryAsync(new HistoryQuery
+            {
+                Limit = limit,
+                Offset = offset,
+                SortBy = sortBy,
+                SortDirection = sortDirection,
+                EventType = eventType,
+                Outcome = outcome,
+                From = from,
+                To = to,
+                AudiobookId = audiobookId,
+                DownloadId = downloadId,
+                DownloadClientId = downloadClientId,
+                CorrelationId = correlationId
+            });
 
             return Ok(new
             {
-                history,
-                total,
-                limit = pageLimit,
-                offset = offset ?? 0
+                history = page.Records,
+                total = page.Total,
+                limit = page.Limit,
+                offset = page.Offset
             });
+        }
+
+        /// <summary>
+        /// Get one history event and every attempt in the same workflow.
+        /// </summary>
+        [HttpGet("{id:int}/details")]
+        public async Task<IActionResult> GetDetails(int id)
+        {
+            var entry = await _history.GetByIdAsync(id);
+            if (entry == null) return NotFound(new { message = "History entry not found" });
+
+            var related = await _history.GetByCorrelationIdAsync(entry.CorrelationId);
+            return Ok(new { entry, related });
         }
 
         /// <summary>
@@ -111,6 +166,7 @@ namespace Listenarr.Api.Controllers
         /// </summary>
         /// <param name="id">History entry ID.</param>
         [HttpDelete("{id}")]
+        [RequireAdministratorSession]
         public async Task<IActionResult> Delete(int id)
         {
             var deleted = await _history.DeleteAsync(id);
@@ -128,6 +184,7 @@ namespace Listenarr.Api.Controllers
         /// Delete all history entries.
         /// </summary>
         [HttpDelete("clear")]
+        [RequireAdministratorSession]
         public async Task<IActionResult> ClearAll()
         {
             var count = await _history.CountAsync();
@@ -141,19 +198,29 @@ namespace Listenarr.Api.Controllers
         /// <summary>
         /// Delete history entries older than a specified number of days.
         /// </summary>
-        /// <param name="days">Age threshold in days (default 90). Entries older than this are deleted.</param>
+        /// <param name="days">Optional age threshold. When omitted, the configured retention is used; zero means unlimited.</param>
         [HttpDelete("cleanup")]
-        public async Task<IActionResult> CleanupOld([FromQuery] int days = 90)
+        [RequireAdministratorSession]
+        public async Task<IActionResult> CleanupOld([FromQuery] int? days = null)
         {
-            var cutoffDate = DateTime.UtcNow.AddDays(-days);
+            var retentionDays = days ?? (await _configuration.GetApplicationSettingsAsync()).HistoryRetentionDays;
+            if (retentionDays == 0)
+            {
+                return Ok(new { message = "History retention is unlimited; no entries were deleted", deletedCount = 0 });
+            }
+            if (retentionDays < 0)
+            {
+                return BadRequest(new { message = "days cannot be negative; retention value 0 means unlimited" });
+            }
+            var cutoffDate = DateTime.UtcNow.AddDays(-retentionDays);
             var deletedCount = await _history.DeleteOlderThanAsync(cutoffDate);
 
             _logger.LogInformation("Cleaned up {Count} history entries older than {Days} days",
-                deletedCount, days);
+                deletedCount, retentionDays);
 
             return Ok(new
             {
-                message = $"Cleaned up history entries older than {days} days",
+                message = $"Cleaned up history entries older than {retentionDays} days",
                 deletedCount
             });
         }

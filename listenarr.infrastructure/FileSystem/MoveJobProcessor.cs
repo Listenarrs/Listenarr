@@ -343,6 +343,7 @@ namespace Listenarr.Infrastructure.FileSystem
                     // Add history entry and send notifications for the move
                     try
                     {
+                        var notificationSent = false;
                         var historyEntry = new History
                         {
                             AudiobookId = audiobook.Id,
@@ -361,8 +362,6 @@ namespace Listenarr.Infrastructure.FileSystem
                         };
 
                         var historyRepository = scope.ServiceProvider.GetRequiredService<IHistoryRepository>();
-                        await historyRepository.AddAsync(historyEntry);
-                        logger.LogInformation("Added history entry for move job {JobId}", job.Id);
 
                         // Send webhook notifications if configured
                         try
@@ -387,14 +386,16 @@ namespace Listenarr.Infrastructure.FileSystem
                                 );
                             }
 
-                            // Mark notification as sent
-                            historyEntry.NotificationSent = true;
-                            await historyRepository.UpdateAsync(historyEntry);
+                            notificationSent = true;
                         }
                         catch (Exception notifyEx) when (notifyEx is not OperationCanceledException && notifyEx is not OutOfMemoryException && notifyEx is not StackOverflowException)
                         {
                             logger.LogWarning(notifyEx, "Failed to send move notification for {JobId}", job.Id);
                         }
+
+                        historyEntry.NotificationSent = notificationSent;
+                        await historyRepository.AddAsync(historyEntry);
+                        logger.LogInformation("Added history entry for move job {JobId}", job.Id);
 
                         // Send toast notification
                         try

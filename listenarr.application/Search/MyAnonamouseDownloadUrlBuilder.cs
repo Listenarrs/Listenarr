@@ -22,15 +22,17 @@ namespace Listenarr.Application.Search
 {
     internal static class MyAnonamouseDownloadUrlBuilder
     {
-        public static string Build(string dlHash, Indexer indexer)
+        public static string Build(string dlHash, string torrentId, Indexer indexer)
         {
-            if (string.IsNullOrEmpty(dlHash))
+            if (string.IsNullOrWhiteSpace(dlHash) && string.IsNullOrWhiteSpace(torrentId))
             {
                 return string.Empty;
             }
 
             var baseUrl = (indexer.Url ?? "https://www.myanonamouse.net").TrimEnd('/');
-            var downloadUrl = $"{baseUrl}/tor/download.php/{dlHash}";
+            var downloadUrl = !string.IsNullOrWhiteSpace(dlHash)
+                ? $"{baseUrl}/tor/download.php/{Uri.EscapeDataString(dlHash)}"
+                : $"{baseUrl}/tor/download.php?tid={Uri.EscapeDataString(torrentId)}";
             var mamIdLocal = MyAnonamouseHelper.TryGetMamId(indexer.AdditionalSettings);
             if (!string.IsNullOrEmpty(mamIdLocal))
             {
@@ -43,7 +45,8 @@ namespace Listenarr.Application.Search
                     System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
                 }
 
-                downloadUrl += $"?mam_id={Uri.EscapeDataString(mamIdLocal)}";
+                var separator = downloadUrl.Contains('?') ? '&' : '?';
+                downloadUrl += $"{separator}mam_id={Uri.EscapeDataString(mamIdLocal)}";
             }
 
             return downloadUrl;

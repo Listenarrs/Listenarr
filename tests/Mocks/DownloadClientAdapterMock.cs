@@ -1,4 +1,5 @@
 using Listenarr.Application.Interfaces.Repositories;
+using Listenarr.Application.Downloads;
 using Listenarr.Tests.Builders;
 
 namespace Listenarr.Tests.Mocks
@@ -14,7 +15,10 @@ namespace Listenarr.Tests.Mocks
         public DownloadProtocol Protocol => DownloadProtocol.Torrent;
         public QueueItem QueueItemMock { get; set; } = null;
 
-        public async Task<string?> AddAsync(DownloadClientConfiguration client, SearchResult result, CancellationToken ct = default)
+        public async Task<DownloadClientSubmissionResult> AddAsync(
+            DownloadClientConfiguration client,
+            PreparedDownloadSubmission submission,
+            CancellationToken ct = default)
         {
             var download = await downloadRepository.AddAsync(new DownloadBuilder()
                 .WithDownloadClientConfiguration(client)
@@ -22,7 +26,7 @@ namespace Listenarr.Tests.Mocks
                 .Build());
 
             // FIXME: Currently, the IDownloadClientAdapter returns specific client ID's, this should change to return uniformized Download instead
-            return download.Id;
+            return new DownloadClientSubmissionResult(download.Id);
         }
 
         public Task<DownloadClientItem> GetImportItemAsync(DownloadClientConfiguration client, DownloadClientItem item, DownloadClientItem? previousAttempt = null, CancellationToken ct = default)

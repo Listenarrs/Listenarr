@@ -120,10 +120,10 @@ namespace Listenarr.Application.Interfaces
 
         /// <summary>
         /// Clean up old history entries (older than the specified days).
-        /// Should be called periodically to prevent database bloat.
+        /// This compatibility method must only be invoked by an explicit administrator operation.
         /// </summary>
-        /// <param name="retentionDays">Keep events from the last N days (default: 90)</param>
+        /// <param name="retentionDays">Keep events from the last N days. Zero means unlimited retention.</param>
         /// <returns>Number of entries deleted</returns>
-        Task<int> CleanupOldEntriesAsync(int retentionDays = 90);
+        Task<int> CleanupOldEntriesAsync(int retentionDays = 0);
     }
 }

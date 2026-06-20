@@ -50,6 +50,7 @@ export interface OpenLibraryBook {
 }
 
 export interface IndexerSearchResult extends BaseSearchResult {
+  downloadReference?: string
   size: number
   seeders?: number
   leechers?: number
@@ -91,6 +92,7 @@ export interface MetadataSearchResult extends BaseSearchResult {
 // Legacy SearchResult interface - kept for backwards compatibility
 // Combines both indexer and metadata properties
 export interface SearchResult extends BaseSearchResult {
+  downloadReference?: string
   // Indexer-specific properties
   thumbnailRetentionDays?: number
   size: number

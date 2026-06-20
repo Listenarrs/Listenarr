@@ -18,6 +18,7 @@
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
 using Listenarr.Tests.Mocks.Api;
+using Listenarr.Infrastructure.Adapters;
 
 namespace Listenarr.Tests.Features.Infrastructure.Adapters
 {
@@ -227,6 +228,45 @@ namespace Listenarr.Tests.Features.Infrastructure.Adapters
             job = await _downloadProcessingJobRepository.GetByIdAsync(jobId);
             Assert.NotNull(job);
             Assert.Equal(ProcessingJobStatus.Completed, job.Status);
+        }
+
+        [Theory]
+        [InlineData(false, false)]
+        [InlineData(true, true)]
+        public async Task RemoveAsync_DeletesQueueAndHistoryWithConfiguredFilePolicy(
+            bool deleteFiles,
+            bool expectDeleteFilesParameter)
+        {
+            var gateway = _provider.GetRequiredService<IDownloadClientGateway>();
+
+            var result = await gateway.RemoveAsync(_client, "SABnzbd_nzo_remove", deleteFiles);
+
+            Assert.True(result);
+            Assert.Equal(2, sabnzbdApiMock.RemovalRequests.Count);
+            Assert.All(sabnzbdApiMock.RemovalRequests, uri =>
+            {
+                Assert.Contains("name=delete", uri.Query, StringComparison.Ordinal);
+                Assert.Contains("value=SABnzbd_nzo_remove", uri.Query, StringComparison.Ordinal);
+                Assert.Equal(expectDeleteFilesParameter, uri.Query.Contains("del_files=1", StringComparison.Ordinal));
+            });
+        }
+
+        [Theory]
+        [InlineData("Completed", "completed")]
+        [InlineData("Failed", "failed")]
+        public void HistoryStatus_IsMappedWithoutBehaviorDrift(string status, string expected)
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(
+                $$"""{"nzo_id":"sab-1","name":"Book","status":"{{status}}","storage":"/downloads/book"}""");
+
+            var item = SabnzbdResponseMapper.MapHistorySlotToQueueItem(
+                _client,
+                document.RootElement,
+                string.Empty,
+                new HashSet<string>());
+
+            Assert.NotNull(item);
+            Assert.Equal(expected, item!.Status);
         }
     }
 }

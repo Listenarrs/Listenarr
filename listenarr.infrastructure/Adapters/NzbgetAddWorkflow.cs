@@ -16,47 +16,37 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Listenarr.Application.Security;
-using Listenarr.Application.Interfaces;
 using Listenarr.Domain.Models;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.Adapters
 {
     internal sealed class NzbgetAddWorkflow(
-        INzbUrlResolver nzbUrlResolver,
         NzbgetXmlRpcClient xmlRpcClient,
-        NzbgetNzbDownloader nzbDownloader,
         ILogger logger)
     {
-        public async Task<string?> AddAsync(DownloadClientConfiguration client, SearchResult result, CancellationToken ct = default)
+        public async Task<DownloadClientSubmissionResult> AddAsync(
+            DownloadClientConfiguration client,
+            PreparedUsenetSubmission submission,
+            CancellationToken ct = default)
         {
             if (client == null) throw new ArgumentNullException(nameof(client));
-            if (result == null) throw new ArgumentNullException(nameof(result));
-
-            var (nzbUrl, indexerApiKey) = await nzbUrlResolver.ResolveAsync(result, ct);
-            if (string.IsNullOrWhiteSpace(nzbUrl))
-            {
-                throw new ArgumentException("No NZB URL available for NZBGet", nameof(result));
-            }
 
             logger.LogInformation("Using NZBGet JSON-RPC append method");
-            return await AddViaJsonRpcAsync(client, result, nzbUrl, indexerApiKey, ct);
+            return await AddViaJsonRpcAsync(client, submission, ct);
         }
 
-        private async Task<string?> AddViaJsonRpcAsync(
+        private async Task<DownloadClientSubmissionResult> AddViaJsonRpcAsync(
             DownloadClientConfiguration client,
-            SearchResult result,
-            string nzbUrl,
-            string? indexerApiKey,
+            PreparedUsenetSubmission submission,
             CancellationToken ct)
         {
             var category = NzbgetRequestPlanner.ResolveCategory(client);
             var priority = NzbgetRequestPlanner.ResolvePriority(client);
             var droneId = Guid.NewGuid().ToString().Replace("-", string.Empty);
 
-            var nzbBytes = await nzbDownloader.DownloadAsync(nzbUrl, indexerApiKey, ct);
-            var nzbContentBase64 = Convert.ToBase64String(nzbBytes);
-            var nzbFileName = NzbgetRequestPlanner.BuildNzbFileName(result);
+            var nzbContentBase64 = Convert.ToBase64String(submission.NzbBytes);
+            var nzbFileName = submission.FileName;
 
             var ppParams = new[]
             {
@@ -69,7 +59,7 @@ namespace Listenarr.Infrastructure.Adapters
 
             try
             {
-                logger.LogInformation("Calling NZBGet append via XML-RPC for '{Title}'", LogRedaction.SanitizeText(result.Title));
+                logger.LogInformation("Calling NZBGet append via XML-RPC for '{Title}'", LogRedaction.SanitizeText(submission.Title));
                 var appendResult = await xmlRpcClient.CallAsync(client, "append",
                     nzbFileName,
                     nzbContentBase64,
@@ -87,12 +77,11 @@ namespace Listenarr.Infrastructure.Adapters
 
                 if (queueId <= 0)
                 {
-                    logger.LogWarning("NZBGet rejected NZB '{Title}', returned ID: {QueueId}", LogRedaction.SanitizeText(result.Title), queueId);
-                    return null;
+                    throw new DownloadClientSubmissionException("NZBGet rejected the prepared NZB.");
                 }
 
-                logger.LogInformation("NZBGet XML-RPC queued '{Title}' with ID {QueueId}, droneId: {DroneId}", LogRedaction.SanitizeText(result.Title), queueId, LogRedaction.SanitizeText(droneId));
-                return queueId.ToString();
+                logger.LogInformation("NZBGet XML-RPC queued '{Title}' with ID {QueueId}, droneId: {DroneId}", LogRedaction.SanitizeText(submission.Title), queueId, LogRedaction.SanitizeText(droneId));
+                return new DownloadClientSubmissionResult(queueId.ToString(), droneId);
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {

@@ -131,6 +131,12 @@ namespace Listenarr.Infrastructure.Persistence
             modelBuilder.Entity<SeriesCacheEntry>().HasIndex(s => new { s.SeriesAsin, s.Region });
 
             modelBuilder.Entity<History>().HasIndex(h => h.Timestamp);
+            modelBuilder.Entity<History>().HasIndex(h => h.EventType);
+            modelBuilder.Entity<History>().HasIndex(h => h.Outcome);
+            modelBuilder.Entity<History>().HasIndex(h => h.AudiobookExternalId);
+            modelBuilder.Entity<History>().HasIndex(h => h.DownloadId);
+            modelBuilder.Entity<History>().HasIndex(h => h.DownloadClientId);
+            modelBuilder.Entity<History>().HasIndex(h => h.CorrelationId);
 
             modelBuilder.Entity<MoveJob>().HasIndex(m => new { m.AudiobookId, m.Status });
 

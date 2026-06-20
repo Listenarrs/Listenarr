@@ -17,6 +17,7 @@
  */
 
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json;
 
 namespace Listenarr.Domain.Models
 {
@@ -126,6 +127,44 @@ namespace Listenarr.Domain.Models
         /// Processing log entries
         /// </summary>
         public List<string> ProcessingLog { get; set; } = new();
+
+        public string GetOrCreateCorrelationId()
+        {
+            if (TryGetJobDataString("CorrelationId", out var existing))
+            {
+                return existing;
+            }
+
+            var correlationId = Guid.NewGuid().ToString("N");
+            JobData["CorrelationId"] = correlationId;
+            return correlationId;
+        }
+
+        public bool HasCheckpoint(string checkpoint)
+        {
+            if (!JobData.TryGetValue(checkpoint, out var value) || value == null) return false;
+            return value switch
+            {
+                bool boolean => boolean,
+                JsonElement element when element.ValueKind is JsonValueKind.True or JsonValueKind.False => element.GetBoolean(),
+                _ => bool.TryParse(value.ToString(), out var parsed) && parsed
+            };
+        }
+
+        public void SetCheckpoint(string checkpoint, object? detail = null)
+        {
+            JobData[checkpoint] = true;
+            if (detail != null) JobData[$"{checkpoint}Detail"] = detail;
+            AddLogEntry($"Checkpoint completed: {checkpoint}");
+        }
+
+        public bool TryGetJobDataString(string key, out string value)
+        {
+            value = string.Empty;
+            if (!JobData.TryGetValue(key, out var raw) || raw == null) return false;
+            value = raw is JsonElement element ? element.ToString() : raw.ToString() ?? string.Empty;
+            return !string.IsNullOrWhiteSpace(value);
+        }
 
         /// <summary>
         /// Add a log entry with timestamp

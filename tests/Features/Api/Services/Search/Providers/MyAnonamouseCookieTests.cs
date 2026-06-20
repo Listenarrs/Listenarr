@@ -15,12 +15,12 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using System.Reflection;
 using System.Text;
 using Listenarr.Tests.Common;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Mocks.Api;
 using Listenarr.Application.Downloads;
+using Listenarr.Infrastructure.Downloads;
 
 namespace Listenarr.Tests.Features.Api.Services.Search.Providers
 {
@@ -91,14 +91,8 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
                 TorrentFileContent = null
             };
 
-            // Call the non-public TryPrepareMyAnonamouseTorrentAsync via reflection
-            var method = typeof(DownloadService)
-                .GetMethod("TryPrepareMyAnonamouseTorrentAsync", BindingFlags.NonPublic | BindingFlags.Instance);
-            Assert.NotNull(method);
-
-            var downloadService = _provider.GetRequiredService<DownloadService>();
-            var task = (Task)method!.Invoke(downloadService, [searchResult, null])!;
-            await task;
+            await _provider.GetRequiredService<MyAnonamouseTorrentPreparationService>()
+                .PrepareAsync(searchResult);
 
             var handler = _provider.GetRequiredService<MyAnonamouseApiMock>();
             var capturedRequest = handler.GetLastRequest();
@@ -124,14 +118,8 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
                 TorrentFileContent = null
             };
 
-            // Call the non-public TryPrepareMyAnonamouseTorrentAsync via reflection
-            var method = typeof(DownloadService)
-                .GetMethod("TryPrepareMyAnonamouseTorrentAsync", BindingFlags.NonPublic | BindingFlags.Instance);
-            Assert.NotNull(method);
-
-            var downloadService = _provider.GetRequiredService<DownloadService>();
-            var task = (Task)method!.Invoke(downloadService, new object[] { sr, null })!;
-            await task;
+            await _provider.GetRequiredService<MyAnonamouseTorrentPreparationService>()
+                .PrepareAsync(sr);
 
             var handler = _provider.GetRequiredService<MyAnonamouseApiMock>();
             var capturedRequest = handler.GetLastRequest();
@@ -152,13 +140,8 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
                 TorrentFileContent = null
             };
 
-            var method = typeof(DownloadService)
-                .GetMethod("TryPrepareMyAnonamouseTorrentAsync", BindingFlags.NonPublic | BindingFlags.Instance);
-            Assert.NotNull(method);
-
-            var downloadService = _provider.GetRequiredService<DownloadService>();
-            var task = (Task)method!.Invoke(downloadService, new object[] { sr, null })!;
-            await task;
+            await _provider.GetRequiredService<MyAnonamouseTorrentPreparationService>()
+                .PrepareAsync(sr);
 
             var handler = _provider.GetRequiredService<MyAnonamouseApiMock>();
             var capturedRequest = handler.GetLastRequest();
@@ -186,13 +169,8 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
                 TorrentFileContent = null
             };
 
-            var method = typeof(DownloadService)
-                .GetMethod("TryPrepareMyAnonamouseTorrentAsync", BindingFlags.NonPublic | BindingFlags.Instance);
-            Assert.NotNull(method);
-
-            var downloadService = _provider.GetRequiredService<DownloadService>();
-            var task = (Task)method!.Invoke(downloadService, new object[] { sr, null })!;
-            await task;
+            await _provider.GetRequiredService<MyAnonamouseTorrentPreparationService>()
+                .PrepareAsync(sr);
 
             // Since the tracker returned an error HTML page, the torrent should not be cached/uploaded
             Assert.Null(sr.TorrentFileContent);
@@ -216,14 +194,9 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
 
             var downloadId = Guid.NewGuid().ToString();
 
-            // Call the non-public TryPrepareMyAnonamouseTorrentAsync with downloadId via reflection
-            var method = typeof(DownloadService)
-                .GetMethod("TryPrepareMyAnonamouseTorrentAsync", BindingFlags.NonPublic | BindingFlags.Instance);
-            Assert.NotNull(method);
-
             var downloadService = _provider.GetRequiredService<DownloadService>();
-            var task = (Task)method!.Invoke(downloadService, [sr, downloadId])!;
-            await task;
+            await _provider.GetRequiredService<MyAnonamouseTorrentPreparationService>()
+                .PrepareAsync(sr, downloadId);
 
             // Now create a DownloadsController and request the cached torrent
             var downloadsController = MockUtils.CreateDownloadsController(_provider);
@@ -249,14 +222,9 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
 
             var downloadId = Guid.NewGuid().ToString();
 
-            // Call the non-public TryPrepareMyAnonamouseTorrentAsync with downloadId via reflection
-            var method = typeof(DownloadService)
-                .GetMethod("TryPrepareMyAnonamouseTorrentAsync", BindingFlags.NonPublic | BindingFlags.Instance);
-            Assert.NotNull(method);
-
             var downloadService = _provider.GetRequiredService<DownloadService>();
-            var task = (Task)method!.Invoke(downloadService, new object[] { sr, downloadId })!;
-            await task;
+            await _provider.GetRequiredService<MyAnonamouseTorrentPreparationService>()
+                .PrepareAsync(sr, downloadId);
 
             // Now request announces from the sync DownloadsController helper
             var downloadsController = MockUtils.CreateDownloadsController(_provider);

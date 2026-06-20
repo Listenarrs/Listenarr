@@ -17,13 +17,12 @@
  */
 
 using System.Net.Http.Headers;
-using Listenarr.Domain.Models;
 
 namespace Listenarr.Infrastructure.Adapters
 {
     internal static class QbittorrentAddRequestContentBuilder
     {
-        public static HttpContent Build(QbittorrentTorrentAddPlan addPlan, SearchResult result)
+        public static HttpContent Build(QbittorrentTorrentAddPlan addPlan)
         {
             if (addPlan.TorrentFileData != null)
             {
@@ -34,15 +33,14 @@ namespace Listenarr.Infrastructure.Adapters
                 if (!string.IsNullOrEmpty(addPlan.Tags))
                     multipart.Add(new StringContent(addPlan.Tags), "tags");
 
-                var torrentFileName = string.IsNullOrEmpty(result.TorrentFileName) ? "download.torrent" : result.TorrentFileName;
+                var torrentFileName = string.IsNullOrEmpty(addPlan.FileName) ? "download.torrent" : addPlan.FileName;
                 var torrentContent = new ByteArrayContent(addPlan.TorrentFileData);
                 torrentContent.Headers.ContentType = new MediaTypeHeaderValue("application/x-bittorrent");
                 multipart.Add(torrentContent, "torrents", torrentFileName);
                 return multipart;
             }
 
-            var url = new[] { addPlan.MagnetLink, addPlan.HttpTorrentUrl }
-                .FirstOrDefault(static url => !string.IsNullOrEmpty(url)) ?? string.Empty;
+            var url = addPlan.MagnetLink ?? string.Empty;
 
             var formData = new List<KeyValuePair<string, string>>
             {

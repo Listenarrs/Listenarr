@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Listenarr.Domain.Models;
+using Listenarr.Application.Downloads;
 
 namespace Listenarr.Application.Interfaces
 {
@@ -27,8 +28,10 @@ namespace Listenarr.Application.Interfaces
     {
         Task<(bool Success, string Message)> TestConnectionAsync(DownloadClientConfiguration client, CancellationToken ct = default);
 
-        // FIXME: Should return Download object (not yet persisted)
-        Task<string?> AddAsync(DownloadClientConfiguration client, SearchResult result, CancellationToken ct = default);
+        Task<DownloadClientSubmissionResult> AddAsync(
+            DownloadClientConfiguration client,
+            PreparedDownloadSubmission submission,
+            CancellationToken ct = default);
 
         Task<bool> RemoveAsync(DownloadClientConfiguration client, string id, bool deleteFiles = false, CancellationToken ct = default);
 

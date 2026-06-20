@@ -246,8 +246,14 @@
                     <button
                       class="btn-icon btn-download"
                       @click="downloadResult(result)"
-                      :disabled="downloading[result.id]"
-                      :title="downloading[result.id] ? 'Sending to download client...' : 'Download'"
+                      :disabled="downloading[result.id] || !result.downloadReference"
+                      :title="
+                        !result.downloadReference
+                          ? 'Run the search again to refresh this download'
+                          : downloading[result.id]
+                            ? 'Sending to download client...'
+                            : 'Download'
+                      "
                     >
                       <span v-if="!downloading[result.id]"><PhDownloadSimple /></span>
                       <span v-else><PhSpinner class="ph-spin" /></span>
@@ -537,6 +543,7 @@ async function search() {
             torrentUrl: String(dto.downloadUrl ?? ''),
             nzbUrl: '',
             downloadType: String(dto.protocol ?? ''),
+            downloadReference: String(dto.downloadReference ?? ''),
             quality: undefined,
             indexerId: String(dto.indexerId ?? indexer.id),
             indexerImplementation: String(dto.indexer ?? indexer.name),

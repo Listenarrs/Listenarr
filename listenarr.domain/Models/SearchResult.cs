@@ -65,6 +65,7 @@ namespace Listenarr.Domain.Models
 
         // Link to the indexer page for this result
         public string? ResultUrl { get; set; }
+        public string? DownloadReference { get; set; }
 
         // Lightweight metadata occasionally parsed from indexer responses
         public string? Description { get; set; }
@@ -134,6 +135,7 @@ namespace Listenarr.Domain.Models
 
         // Link to the indexer page for this result
         public string? ResultUrl { get; set; }
+        public string? DownloadReference { get; set; }
 
         // Metadata-specific properties
         public string? Description { get; set; }
@@ -198,6 +200,7 @@ namespace Listenarr.Domain.Models
         public int? Leechers { get; set; }
         public string? Protocol { get; set; }
         public string? FileName { get; set; }
+        public string? DownloadReference { get; set; }
         // Filetype as provided/derived from indexer (e.g., MP3, M4B)
         [System.Text.Json.Serialization.JsonPropertyName("filetype")]
         public string? FileType { get; set; }
@@ -310,6 +313,7 @@ namespace Listenarr.Domain.Models
                 // Only attempt lightweight detection for Torrent results; do not infer language for Usenet/DDL results.
                 Language = NormalizeLanguage(result.Language) ?? (string.Equals(result.DownloadType, "Torrent", System.StringComparison.OrdinalIgnoreCase) ? DetectLanguageFromText(result.Title + " " + (result.Description ?? string.Empty)) : null),
                 ResultUrl = result.ResultUrl,
+                DownloadReference = result.DownloadReference,
                 Grabs = result.Grabs,
                 Files = result.Files,
                 // Copy indexer metadata for MAM server-side downloads
@@ -341,6 +345,7 @@ namespace Listenarr.Domain.Models
                 DownloadType = result.DownloadType,
                 Quality = result.Quality,
                 ResultUrl = result.ResultUrl,
+                DownloadReference = result.DownloadReference,
                 Grabs = result.Grabs,
                 Files = result.Files,
                 TorrentFileName = result.TorrentFileName
@@ -366,6 +371,7 @@ namespace Listenarr.Domain.Models
                 Leechers = result.Leechers,
                 Protocol = !string.IsNullOrWhiteSpace(result.DownloadType) ? result.DownloadType.ToLowerInvariant() : null,
                 FileName = result.TorrentFileName,
+                DownloadReference = result.DownloadReference,
                 FileType = string.IsNullOrWhiteSpace(result.Format) ? null : result.Format,
                 Language = NormalizeLanguage(result.Language)
             };

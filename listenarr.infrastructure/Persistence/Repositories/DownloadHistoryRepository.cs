@@ -42,8 +42,10 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
         {
             if (history == null) throw new ArgumentNullException(nameof(history));
 
-            _context.DownloadHistories.Add(history);
+            var entry = ToUnifiedHistory(history);
+            _context.History.Add(entry);
             await _context.SaveChangesAsync(ct);
+            history.Id = entry.Id;
             return history;
         }
 
@@ -56,10 +58,13 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
             if (string.IsNullOrEmpty(downloadId)) return new List<DownloadHistory>();
 
             var normalizedId = downloadId.ToUpperInvariant();
-            return await _context.DownloadHistories
-                .Where(dh => dh.DownloadId.ToUpper() == normalizedId)
-                .OrderByDescending(dh => dh.EventDate)
-                .ToListAsync(ct);
+            return (await _context.History
+                    .AsNoTracking()
+                    .Where(h => h.DownloadId != null && h.DownloadId.ToUpper() == normalizedId)
+                    .OrderByDescending(h => h.Timestamp)
+                    .ToListAsync(ct))
+                .Select(ToLegacyDownloadHistory)
+                .ToList();
         }
 
         /// <summary>
@@ -68,10 +73,14 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
         /// </summary>
         public async Task<List<DownloadHistory>> GetByAudiobookIdAsync(Guid audiobookId, CancellationToken ct = default)
         {
-            return await _context.DownloadHistories
-                .Where(dh => dh.AudiobookId == audiobookId)
-                .OrderByDescending(dh => dh.EventDate)
-                .ToListAsync(ct);
+            var externalId = audiobookId.ToString();
+            return (await _context.History
+                    .AsNoTracking()
+                    .Where(h => h.AudiobookExternalId == externalId)
+                    .OrderByDescending(h => h.Timestamp)
+                    .ToListAsync(ct))
+                .Select(ToLegacyDownloadHistory)
+                .ToList();
         }
 
         /// <summary>
@@ -82,10 +91,12 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
             if (string.IsNullOrEmpty(downloadId)) return null;
 
             var normalizedId = downloadId.ToUpperInvariant();
-            return await _context.DownloadHistories
-                .Where(dh => dh.DownloadId.ToUpper() == normalizedId)
-                .OrderByDescending(dh => dh.EventDate)
+            var entry = await _context.History
+                .AsNoTracking()
+                .Where(h => h.DownloadId != null && h.DownloadId.ToUpper() == normalizedId)
+                .OrderByDescending(h => h.Timestamp)
                 .FirstOrDefaultAsync(ct);
+            return entry == null ? null : ToLegacyDownloadHistory(entry);
         }
 
         /// <summary>
@@ -96,8 +107,11 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
         {
             if (string.IsNullOrEmpty(downloadId)) return false;
 
-            return await _context.DownloadHistories
-                .AnyAsync(dh => dh.DownloadId == downloadId.ToUpperInvariant() && dh.WasImported, ct);
+            return await _context.History
+                .AnyAsync(h => h.DownloadId != null &&
+                               h.DownloadId.ToUpper() == downloadId.ToUpperInvariant() &&
+                               h.EventType == HistoryEvents.Imported &&
+                               h.Outcome == HistoryOutcome.Succeeded, ct);
         }
 
         /// <summary>
@@ -105,10 +119,16 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
         /// </summary>
         public async Task<List<DownloadHistory>> GetPendingImportsAsync(CancellationToken ct = default)
         {
-            return await _context.DownloadHistories
-                .Where(dh => !dh.WasImported && dh.EventType == DownloadHistoryEventType.Grabbed)
-                .OrderBy(dh => dh.EventDate)
-                .ToListAsync(ct);
+            var importedIds = _context.History
+                .Where(h => h.EventType == HistoryEvents.Imported && h.Outcome == HistoryOutcome.Succeeded)
+                .Select(h => h.DownloadId);
+            return (await _context.History
+                    .AsNoTracking()
+                    .Where(h => h.EventType == HistoryEvents.Grabbed && !importedIds.Contains(h.DownloadId))
+                    .OrderBy(h => h.Timestamp)
+                    .ToListAsync(ct))
+                .Select(ToLegacyDownloadHistory)
+                .ToList();
         }
 
         /// <summary>
@@ -116,10 +136,14 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
         /// </summary>
         public async Task<List<DownloadHistory>> GetRecentAsync(int count = 100, CancellationToken ct = default)
         {
-            return await _context.DownloadHistories
-                .OrderByDescending(dh => dh.EventDate)
-                .Take(count)
-                .ToListAsync(ct);
+            return (await _context.History
+                    .AsNoTracking()
+                    .Where(h => h.DownloadId != null)
+                    .OrderByDescending(h => h.Timestamp)
+                    .Take(count)
+                    .ToListAsync(ct))
+                .Select(ToLegacyDownloadHistory)
+                .ToList();
         }
 
         /// <summary>
@@ -127,10 +151,13 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
         /// </summary>
         public async Task<List<DownloadHistory>> GetFailedDownloadsAsync(DateTime since, CancellationToken ct = default)
         {
-            return await _context.DownloadHistories
-                .Where(dh => dh.EventType == DownloadHistoryEventType.DownloadFailed && dh.EventDate >= since)
-                .OrderByDescending(dh => dh.EventDate)
-                .ToListAsync(ct);
+            return (await _context.History
+                    .AsNoTracking()
+                    .Where(h => h.EventType == HistoryEvents.DownloadFailed && h.Timestamp >= since)
+                    .OrderByDescending(h => h.Timestamp)
+                    .ToListAsync(ct))
+                .Select(ToLegacyDownloadHistory)
+                .ToList();
         }
 
         /// <summary>
@@ -141,16 +168,26 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
             if (string.IsNullOrEmpty(downloadId)) return;
 
             var normalizedId = downloadId.ToUpperInvariant();
-            var events = await _context.DownloadHistories
-                .Where(dh => dh.DownloadId.ToUpper() == normalizedId)
-                .ToListAsync(ct);
-
-            foreach (var evt in events)
+            var latest = await _context.History
+                .AsNoTracking()
+                .Where(h => h.DownloadId != null && h.DownloadId.ToUpper() == normalizedId)
+                .OrderByDescending(h => h.Timestamp)
+                .FirstOrDefaultAsync(ct);
+            _context.History.Add(new History
             {
-                evt.WasImported = true;
-                evt.ImportedAt = DateTime.UtcNow;
-            }
-
+                DownloadId = normalizedId,
+                DownloadClientId = latest?.DownloadClientId,
+                AudiobookId = latest?.AudiobookId,
+                AudiobookExternalId = latest?.AudiobookExternalId,
+                AudiobookTitle = latest?.AudiobookTitle,
+                SourceTitle = latest?.SourceTitle,
+                EventType = HistoryEvents.Imported,
+                Outcome = HistoryOutcome.Succeeded,
+                Source = "DownloadHistoryCompatibility",
+                Message = "Download imported",
+                Timestamp = DateTime.UtcNow,
+                CorrelationId = latest?.CorrelationId ?? Guid.NewGuid().ToString("N")
+            });
             await _context.SaveChangesAsync(ct);
         }
 
@@ -159,11 +196,11 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
         /// </summary>
         public async Task<int> DeleteOlderThanAsync(DateTime cutoffDate, CancellationToken ct = default)
         {
-            var oldEntries = await _context.DownloadHistories
-                .Where(dh => dh.EventDate < cutoffDate)
+            var oldEntries = await _context.History
+                .Where(h => h.DownloadId != null && h.Timestamp < cutoffDate)
                 .ToListAsync(ct);
 
-            _context.DownloadHistories.RemoveRange(oldEntries);
+            _context.History.RemoveRange(oldEntries);
             await _context.SaveChangesAsync(ct);
 
             return oldEntries.Count;
@@ -174,7 +211,115 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
         /// </summary>
         public async Task<int> GetCountAsync(CancellationToken ct = default)
         {
-            return await _context.DownloadHistories.CountAsync(ct);
+            return await _context.History.CountAsync(h => h.DownloadId != null, ct);
+        }
+
+        private static History ToUnifiedHistory(DownloadHistory history)
+        {
+            var normalizedId = history.DownloadId.ToUpperInvariant();
+            return new History
+            {
+                DownloadId = history.DownloadId,
+                DownloadClientId = history.DownloadClientId,
+                AudiobookExternalId = history.AudiobookId?.ToString(),
+                SourceTitle = history.Title,
+                AudiobookTitle = history.Title,
+                EventType = HistoryEvents.FromDownloadEvent(history.EventType),
+                Outcome = history.EventType is DownloadHistoryEventType.DownloadFailed or DownloadHistoryEventType.ImportFailed
+                    ? HistoryOutcome.Failed
+                    : HistoryOutcome.Succeeded,
+                Timestamp = history.EventDate,
+                Source = string.IsNullOrWhiteSpace(history.DownloadClient) ? "Download" : history.DownloadClient,
+                Message = history.ErrorMessage,
+                Error = history.ErrorMessage,
+                Data = history.Data == null ? null : System.Text.Json.JsonSerializer.Serialize(history.Data),
+                CorrelationId = GetCorrelationId(history.Data, normalizedId)
+            };
+        }
+
+        private static DownloadHistory ToLegacyDownloadHistory(History history)
+        {
+            Dictionary<string, object>? data = null;
+            if (!string.IsNullOrWhiteSpace(history.Data))
+            {
+                try
+                {
+                    data = NormalizeData(System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(history.Data));
+                }
+                catch (System.Text.Json.JsonException)
+                {
+                    data = new Dictionary<string, object> { ["RawData"] = history.Data };
+                }
+            }
+
+            return new DownloadHistory
+            {
+                Id = history.Id,
+                DownloadId = history.DownloadId ?? string.Empty,
+                EventType = HistoryEvents.ToDownloadEvent(history.EventType),
+                Status = MapStatus(history.EventType, history.Outcome),
+                EventDate = history.Timestamp,
+                DownloadClient = history.Source ?? "Unknown",
+                DownloadClientId = history.DownloadClientId ?? string.Empty,
+                AudiobookId = Guid.TryParse(history.AudiobookExternalId, out var audiobookId) ? audiobookId : null,
+                Title = history.SourceTitle ?? history.AudiobookTitle ?? string.Empty,
+                Data = data,
+                ErrorMessage = history.Error,
+                WasImported = history.EventType == HistoryEvents.Imported && history.Outcome == HistoryOutcome.Succeeded,
+                ImportedAt = history.EventType == HistoryEvents.Imported && history.Outcome == HistoryOutcome.Succeeded
+                    ? history.Timestamp
+                    : null
+            };
+        }
+
+        private static string GetCorrelationId(Dictionary<string, object>? data, string fallback)
+        {
+            if (data != null &&
+                data.TryGetValue("CorrelationId", out var value) &&
+                !string.IsNullOrWhiteSpace(value?.ToString()))
+            {
+                return value!.ToString()!;
+            }
+            return fallback;
+        }
+
+        private static Dictionary<string, object>? NormalizeData(Dictionary<string, object>? data)
+        {
+            if (data == null) return null;
+            return data.ToDictionary(pair => pair.Key, pair => NormalizeJsonValue(pair.Value));
+        }
+
+        private static object NormalizeJsonValue(object value)
+        {
+            if (value is not System.Text.Json.JsonElement element) return value;
+            return element.ValueKind switch
+            {
+                System.Text.Json.JsonValueKind.String => element.GetString() ?? string.Empty,
+                System.Text.Json.JsonValueKind.Number when element.TryGetInt32(out var intValue) => intValue,
+                System.Text.Json.JsonValueKind.Number when element.TryGetInt64(out var longValue) => longValue,
+                System.Text.Json.JsonValueKind.Number => element.GetDouble(),
+                System.Text.Json.JsonValueKind.True => true,
+                System.Text.Json.JsonValueKind.False => false,
+                System.Text.Json.JsonValueKind.Null => string.Empty,
+                _ => element.ToString()
+            };
+        }
+
+        private static DownloadItemStatus MapStatus(string eventType, HistoryOutcome outcome)
+        {
+            if (outcome == HistoryOutcome.Failed)
+                return eventType == HistoryEvents.ImportFailed ? DownloadItemStatus.ImportFailed : DownloadItemStatus.Failed;
+            return eventType switch
+            {
+                HistoryEvents.Grabbed => DownloadItemStatus.Queued,
+                HistoryEvents.Downloading => DownloadItemStatus.Downloading,
+                HistoryEvents.DownloadCompleted => DownloadItemStatus.Completed,
+                HistoryEvents.Imported => DownloadItemStatus.Imported,
+                HistoryEvents.Paused => DownloadItemStatus.Paused,
+                HistoryEvents.Removed => DownloadItemStatus.Removed,
+                HistoryEvents.Checking => DownloadItemStatus.Checking,
+                _ => DownloadItemStatus.Unknown
+            };
         }
     }
 }

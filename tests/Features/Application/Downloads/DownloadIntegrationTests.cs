@@ -81,10 +81,45 @@ namespace Listenarr.Tests.Features.Application.Downloads
                 });
             _services.AddSingleton(metadataMock.Object);
 
+            var preparerMock = new Mock<IDownloadSubmissionPreparer>();
+            preparerMock
+                .Setup(value => value.PrepareAsync(
+                    It.IsAny<TrustedDownloadCandidate>(),
+                    It.IsAny<string?>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync((TrustedDownloadCandidate candidate, string? _, CancellationToken _) =>
+                    downloadType == "Torrent"
+                        ? new PreparedTorrentSubmission(
+                            candidate.Title,
+                            candidate.Artist,
+                            candidate.Album,
+                            candidate.Source,
+                            candidate.Quality,
+                            candidate.Language,
+                            candidate.Size,
+                            "magnet:?xt=urn:btih:ABCDEF1234567890ABCDEF1234567890ABCDEF12",
+                            "ABCDEF1234567890ABCDEF1234567890ABCDEF12",
+                            null,
+                            "magnet:?xt=urn:btih:ABCDEF1234567890ABCDEF1234567890ABCDEF12",
+                            null,
+                            [])
+                        : new PreparedUsenetSubmission(
+                            candidate.Title,
+                            candidate.Artist,
+                            candidate.Album,
+                            candidate.Source,
+                            candidate.Quality,
+                            candidate.Language,
+                            candidate.Size,
+                            "https://indexer.local/file.nzb",
+                            "<nzb />"u8.ToArray(),
+                            "book.nzb"));
+            _services.AddSingleton(preparerMock.Object);
+
             var gatewayMock = new Mock<IDownloadClientGateway>();
             gatewayMock
-                .Setup(g => g.AddAsync(downloadClient, It.IsAny<SearchResult>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync($"{downloadType}-client-item-1");
+                .Setup(g => g.AddAsync(downloadClient, It.IsAny<PreparedDownloadSubmission>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new DownloadClientSubmissionResult($"{downloadType}-client-item-1"));
             gatewayMock
                 .Setup(g => g.GetQueueItemAsync(downloadClient, It.IsAny<Download>(), It.IsAny<QueueItem>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new QueueItem { SourceFiles = files });
@@ -104,6 +139,12 @@ namespace Listenarr.Tests.Features.Application.Downloads
                         return download;
                     })];
                 });
+            gatewayMock
+                .Setup(g => g.MarkItemAsImportedAsync(
+                    It.IsAny<DownloadClientConfiguration>(),
+                    It.IsAny<Download>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(true);
             _services.AddSingleton(gatewayMock.Object);
 
             Init();

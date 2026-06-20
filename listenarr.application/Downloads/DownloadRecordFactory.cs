@@ -23,7 +23,8 @@ namespace Listenarr.Application.Downloads
     {
         public static Download CreateQueuedDownload(
             string downloadId,
-            SearchResult searchResult,
+            TrustedDownloadCandidate candidate,
+            PreparedDownloadSubmission submission,
             DownloadClientConfiguration downloadClient,
             string downloadClientId,
             int? audiobookId)
@@ -32,13 +33,13 @@ namespace Listenarr.Application.Downloads
             {
                 Id = downloadId,
                 AudiobookId = audiobookId,
-                Title = searchResult.Title ?? string.Empty,
-                Artist = searchResult.Artist ?? string.Empty,
-                Album = searchResult.Album ?? string.Empty,
-                Language = searchResult.Language,
-                OriginalUrl = !string.IsNullOrEmpty(searchResult.MagnetLink) ? searchResult.MagnetLink : (searchResult.TorrentUrl ?? searchResult.NzbUrl ?? string.Empty),
+                Title = candidate.Title,
+                Artist = candidate.Artist,
+                Album = candidate.Album,
+                Language = candidate.Language,
+                OriginalUrl = submission.OriginalLocator,
                 Progress = 0,
-                TotalSize = searchResult.Size,
+                TotalSize = candidate.Size,
                 DownloadedSize = 0,
                 DownloadPath = downloadClient.DownloadPath ?? string.Empty,
                 FinalPath = string.Empty,
@@ -46,11 +47,11 @@ namespace Listenarr.Application.Downloads
                 DownloadClientId = downloadClientId,
                 Metadata = new Dictionary<string, object>
                 {
-                    ["Source"] = searchResult.Source ?? string.Empty,
-                    ["Seeders"] = searchResult.Seeders ?? 0,
-                    ["Quality"] = searchResult.Quality ?? string.Empty,
-                    ["Language"] = searchResult.Language ?? string.Empty,
-                    ["DownloadType"] = searchResult.DownloadType
+                    ["Source"] = candidate.Source,
+                    ["Seeders"] = candidate.Seeders ?? 0,
+                    ["Quality"] = candidate.Quality ?? string.Empty,
+                    ["Language"] = candidate.Language ?? string.Empty,
+                    ["DownloadType"] = submission.Protocol.ToString()
                 }
             };
         }

@@ -52,10 +52,11 @@ namespace Listenarr.Infrastructure.Services
 
             var normalizedId = downloadId.ToUpperInvariant();
 
-            var imported = await _context.Set<DownloadHistory>()
+            var imported = await _context.History
                 .Where(h => h.DownloadId == normalizedId &&
                            h.DownloadClientId == clientId &&
-                           h.EventType == DownloadHistoryEventType.Imported)
+                           h.EventType == HistoryEvents.Imported &&
+                           h.Outcome == HistoryOutcome.Succeeded)
                 .AnyAsync();
 
             if (imported)
@@ -78,11 +79,11 @@ namespace Listenarr.Infrastructure.Services
             var normalizedId = downloadId.ToUpperInvariant();
             var cutoffTime = DateTime.UtcNow.AddSeconds(-withinSeconds);
 
-            var recentGrab = await _context.Set<DownloadHistory>()
+            var recentGrab = await _context.History
                 .Where(h => h.DownloadId == normalizedId &&
                            h.DownloadClientId == clientId &&
-                           h.EventType == DownloadHistoryEventType.Grabbed &&
-                           h.EventDate >= cutoffTime)
+                           h.EventType == HistoryEvents.Grabbed &&
+                           h.Timestamp >= cutoffTime)
                 .AnyAsync();
 
             return recentGrab;
@@ -105,8 +106,7 @@ namespace Listenarr.Infrastructure.Services
                 WasImported = false
             };
 
-            _context.Set<DownloadHistory>().Add(history);
-            await _context.SaveChangesAsync();
+            await AddUnifiedAsync(history);
 
             _logger.LogInformation(
                 "Recorded Grabbed event for {DownloadId} ({Title}) from client {ClientId}",
@@ -130,8 +130,7 @@ namespace Listenarr.Infrastructure.Services
                 WasImported = false
             };
 
-            _context.Set<DownloadHistory>().Add(history);
-            await _context.SaveChangesAsync();
+            await AddUnifiedAsync(history);
 
             _logger.LogInformation(
                 "Recorded DownloadCompleted event for {DownloadId} ({Title})",
@@ -155,8 +154,7 @@ namespace Listenarr.Infrastructure.Services
                 WasImported = false
             };
 
-            _context.Set<DownloadHistory>().Add(history);
-            await _context.SaveChangesAsync();
+            await AddUnifiedAsync(history);
 
             _logger.LogWarning(
                 "Recorded DownloadFailed event for {DownloadId} ({Title}): {Error}",
@@ -181,8 +179,7 @@ namespace Listenarr.Infrastructure.Services
                 ImportedAt = DateTime.UtcNow
             };
 
-            _context.Set<DownloadHistory>().Add(history);
-            await _context.SaveChangesAsync();
+            await AddUnifiedAsync(history);
 
             _logger.LogInformation(
                 "Recorded Imported event for {DownloadId} ({Title}) audiobook {AudiobookId}",
@@ -206,8 +203,7 @@ namespace Listenarr.Infrastructure.Services
                 WasImported = false
             };
 
-            _context.Set<DownloadHistory>().Add(history);
-            await _context.SaveChangesAsync();
+            await AddUnifiedAsync(history);
 
             _logger.LogWarning(
                 "Recorded ImportFailed event for {DownloadId} ({Title}): {Error}",
@@ -229,8 +225,7 @@ namespace Listenarr.Infrastructure.Services
                 WasImported = false
             };
 
-            _context.Set<DownloadHistory>().Add(history);
-            await _context.SaveChangesAsync();
+            await AddUnifiedAsync(history);
 
             _logger.LogInformation("Recorded Paused event for {DownloadId} ({Title})", downloadId, title);
         }
@@ -250,8 +245,7 @@ namespace Listenarr.Infrastructure.Services
                 WasImported = false
             };
 
-            _context.Set<DownloadHistory>().Add(history);
-            await _context.SaveChangesAsync();
+            await AddUnifiedAsync(history);
 
             _logger.LogInformation("Recorded Resumed event for {DownloadId} ({Title})", downloadId, title);
         }
@@ -271,8 +265,7 @@ namespace Listenarr.Infrastructure.Services
                 WasImported = false
             };
 
-            _context.Set<DownloadHistory>().Add(history);
-            await _context.SaveChangesAsync();
+            await AddUnifiedAsync(history);
 
             _logger.LogInformation("Recorded Removed event for {DownloadId} ({Title})", downloadId, title);
         }
@@ -284,10 +277,13 @@ namespace Listenarr.Infrastructure.Services
 
             var normalizedId = downloadId.ToUpperInvariant();
 
-            return await _context.Set<DownloadHistory>()
-                .Where(h => h.DownloadId == normalizedId && h.DownloadClientId == clientId)
-                .OrderBy(h => h.EventDate)
-                .ToListAsync();
+            return (await _context.History
+                    .AsNoTracking()
+                    .Where(h => h.DownloadId == normalizedId && h.DownloadClientId == clientId)
+                    .OrderBy(h => h.Timestamp)
+                    .ToListAsync())
+                .Select(ToLegacy)
+                .ToList();
         }
 
         public async Task<DownloadHistory?> GetLatestEventAsync(string downloadId, string clientId)
@@ -297,22 +293,32 @@ namespace Listenarr.Infrastructure.Services
 
             var normalizedId = downloadId.ToUpperInvariant();
 
-            return await _context.Set<DownloadHistory>()
+            var entry = await _context.History
+                .AsNoTracking()
                 .Where(h => h.DownloadId == normalizedId && h.DownloadClientId == clientId)
-                .OrderByDescending(h => h.EventDate)
+                .OrderByDescending(h => h.Timestamp)
                 .FirstOrDefaultAsync();
+            return entry == null ? null : ToLegacy(entry);
         }
 
-        public async Task<int> CleanupOldEntriesAsync(int retentionDays = 90)
+        public async Task<int> CleanupOldEntriesAsync(int retentionDays = 0)
         {
+            if (retentionDays < 0)
+                throw new ArgumentOutOfRangeException(nameof(retentionDays), "Retention days cannot be negative.");
+            if (retentionDays == 0)
+            {
+                _logger.LogInformation("Download history retention is unlimited; no entries were deleted");
+                return 0;
+            }
+
             var cutoffDate = DateTime.UtcNow.AddDays(-retentionDays);
 
             // Use ToList() first for in-memory DB compatibility, then delete
-            var oldEntries = await _context.Set<DownloadHistory>()
-                .Where(h => h.EventDate < cutoffDate)
+            var oldEntries = await _context.History
+                .Where(h => h.DownloadId != null && h.Timestamp < cutoffDate)
                 .ToListAsync();
 
-            _context.Set<DownloadHistory>().RemoveRange(oldEntries);
+            _context.History.RemoveRange(oldEntries);
             await _context.SaveChangesAsync();
 
             _logger.LogInformation(
@@ -321,5 +327,50 @@ namespace Listenarr.Infrastructure.Services
 
             return oldEntries.Count;
         }
+
+        private async Task AddUnifiedAsync(DownloadHistory history)
+        {
+            var normalizedId = history.DownloadId.ToUpperInvariant();
+            _context.History.Add(new History
+            {
+                DownloadId = normalizedId,
+                DownloadClientId = history.DownloadClientId,
+                AudiobookExternalId = history.AudiobookId?.ToString(),
+                SourceTitle = history.Title,
+                AudiobookTitle = history.Title,
+                EventType = HistoryEvents.FromDownloadEvent(history.EventType),
+                Outcome = history.EventType is DownloadHistoryEventType.DownloadFailed or DownloadHistoryEventType.ImportFailed
+                    ? HistoryOutcome.Failed
+                    : HistoryOutcome.Succeeded,
+                Timestamp = history.EventDate,
+                Source = string.IsNullOrWhiteSpace(history.DownloadClient) ? "Download" : history.DownloadClient,
+                Message = history.ErrorMessage,
+                Error = history.ErrorMessage,
+                Data = history.Data == null ? null : System.Text.Json.JsonSerializer.Serialize(history.Data),
+                CorrelationId = normalizedId
+            });
+            await _context.SaveChangesAsync();
+        }
+
+        private static DownloadHistory ToLegacy(History history) => new()
+        {
+            Id = history.Id,
+            DownloadId = history.DownloadId ?? string.Empty,
+            DownloadClientId = history.DownloadClientId ?? string.Empty,
+            DownloadClient = history.Source ?? "Unknown",
+            EventType = HistoryEvents.ToDownloadEvent(history.EventType),
+            Status = history.EventType == HistoryEvents.Imported
+                ? DownloadItemStatus.Imported
+                : history.Outcome == HistoryOutcome.Failed
+                    ? DownloadItemStatus.Failed
+                    : DownloadItemStatus.Unknown,
+            EventDate = history.Timestamp,
+            Title = history.SourceTitle ?? history.AudiobookTitle ?? string.Empty,
+            ErrorMessage = history.Error,
+            WasImported = history.EventType == HistoryEvents.Imported && history.Outcome == HistoryOutcome.Succeeded,
+            ImportedAt = history.EventType == HistoryEvents.Imported && history.Outcome == HistoryOutcome.Succeeded
+                ? history.Timestamp
+                : null
+        };
     }
 }

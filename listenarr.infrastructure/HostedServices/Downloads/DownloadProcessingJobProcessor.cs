@@ -21,6 +21,7 @@ using Microsoft.Extensions.Logging;
 using Listenarr.Domain.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Listenarr.Application.Interfaces.Repositories;
+using System.Text.Json;
 
 namespace Listenarr.Infrastructure.HostedServices.Downloads
 {
@@ -192,118 +193,271 @@ namespace Listenarr.Infrastructure.HostedServices.Downloads
             }
 
             var downloadService = scope.ServiceProvider.GetRequiredService<IDownloadService>();
+            var historyRepository = scope.ServiceProvider.GetRequiredService<IHistoryRepository>();
+            var correlationId = job.GetOrCreateCorrelationId();
 
             await downloadService.UpdateAsync(download.Importing());
             await downloadProcessingJobService.UpdateJobAsync(job.MarkAsProcessing());
+            await RecordHistoryAsync(
+                historyRepository,
+                download,
+                audiobook,
+                HistoryEvents.ImportStarted,
+                HistoryOutcome.Requested,
+                correlationId,
+                $"Import attempt {job.RetryCount + 1} started",
+                new Dictionary<string, object> { ["JobId"] = job.Id, ["Attempt"] = job.RetryCount + 1 },
+                cancellationToken);
 
-            if (string.IsNullOrEmpty(download.DownloadPath) || (!File.Exists(download.DownloadPath) && !Directory.Exists(download.DownloadPath)))
+            if (!job.HasCheckpoint("FilesImported"))
             {
-                // Source missing at processing-time. Schedule a retry instead of throwing so transient
-                // races (file still being moved by another process) don't permanently fail the job.
-                metrics.Increment("processing.source_missing");
-                await downloadProcessingJobService.UpdateJobAsync(job.ScheduleRetry($"Source path not found at processing time: {job.SourcePath}"));
-                return;
-            }
-
-            QueueItem queueItem;
-            List<string> files = [];
-            try
-            {
-                var downloadItemService = scope.ServiceProvider.GetRequiredService<IDownloadItemService>();
-                queueItem = await downloadItemService.GetImportItemAsync(download, cancellationToken);
-                if (queueItem == null || queueItem.SourceFiles == null)
+                if (string.IsNullOrEmpty(download.DownloadPath) || (!File.Exists(download.DownloadPath) && !Directory.Exists(download.DownloadPath)))
                 {
-                    await downloadProcessingJobService.UpdateJobAsync(job.ScheduleRetry($"Unable to fetch the download from the download client"));
+                    metrics.Increment("processing.source_missing");
+                    await ScheduleRetryAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
+                        correlationId, $"Source path not found at processing time: {job.SourcePath}", cancellationToken);
                     return;
                 }
 
-                job.AddLogEntry($"Download client reported {queueItem.SourceFiles.Count} file(s) downloaded");
+                QueueItem queueItem;
+                List<string> files;
+                try
+                {
+                    var downloadItemService = scope.ServiceProvider.GetRequiredService<IDownloadItemService>();
+                    queueItem = await downloadItemService.GetImportItemAsync(download, cancellationToken);
+                    if (queueItem?.SourceFiles == null)
+                    {
+                        await ScheduleRetryAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
+                            correlationId, "Unable to fetch the download from the download client", cancellationToken);
+                        return;
+                    }
 
-                files = [.. queueItem.SourceFiles.Where(f => File.Exists(f))];
+                    job.AddLogEntry($"Download client reported {queueItem.SourceFiles.Count} file(s) downloaded");
+                    files = [.. queueItem.SourceFiles.Where(File.Exists)];
+                    job.AddLogEntry($"{files.Count} file(s) remaining after checking which ones are effectively on disk");
+                }
+                catch (DownloadProcessingException exception)
+                {
+                    await ScheduleRetryAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
+                        correlationId, exception.Message, cancellationToken);
+                    return;
+                }
 
-                job.AddLogEntry($"{files.Count} file(s) remaining after checking which ones are effectively on disk");
+                if (files.Count == 0 || files.Count != queueItem.SourceFiles.Count)
+                {
+                    var reason = files.Count == 0
+                        ? "No importable files found"
+                        : "Files reported by the download client and files on disk do not match";
+                    await ScheduleRetryAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
+                        correlationId, reason, cancellationToken);
+                    return;
+                }
+
+                List<ImportResult> results;
+                try
+                {
+                    var downloadImportService = scope.ServiceProvider.GetRequiredService<IDownloadImportService>();
+                    results = await downloadImportService.ImportDownloadFilesAsync(audiobook, files, cancellationToken);
+                }
+                catch (InvalidOperationException exception)
+                {
+                    await FailImportAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
+                        correlationId, exception.Message, cancellationToken);
+                    return;
+                }
+
+                foreach (var result in results)
+                {
+                    if (!string.IsNullOrEmpty(result.Message)) job.AddLogEntry(result.Message);
+                }
+
+                if (results.Any(result => !result.Success))
+                {
+                    await FailImportAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
+                        correlationId, "Unable to import at least one file for the job (see the log entries)", cancellationToken);
+                    return;
+                }
+
+                var wasRegisteredToAudiobook = results.Any(result => result.WasRegisteredToAudiobook);
+                if (!wasRegisteredToAudiobook)
+                {
+                    var audiobookFileRepository = scope.ServiceProvider.GetRequiredService<IAudiobookFileRepository>();
+                    var existingAudiobookFiles = await audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id, cancellationToken);
+                    if (existingAudiobookFiles.Count <= 0)
+                    {
+                        await FailImportAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
+                            correlationId, "No audio files were registered after file import", cancellationToken);
+                        return;
+                    }
+                }
+
+                foreach (var result in results)
+                {
+                    var outcome = string.IsNullOrWhiteSpace(result.SourcePath) || string.IsNullOrWhiteSpace(result.FinalPath)
+                        ? HistoryOutcome.Skipped
+                        : HistoryOutcome.Succeeded;
+                    var eventType = outcome == HistoryOutcome.Skipped
+                        ? HistoryEvents.FileSkipped
+                        : result.Action == Listenarr.Domain.Models.Enumerations.FileAction.Move
+                            ? HistoryEvents.FileMoved
+                            : HistoryEvents.FileCopied;
+                    await historyRepository.AddAsync(new History
+                    {
+                        AudiobookId = audiobook.Id,
+                        AudiobookTitle = audiobook.Title,
+                        SourceTitle = Path.GetFileName(result.FinalPath ?? result.SourcePath ?? download.Title),
+                        DownloadId = download.Id.ToUpperInvariant(),
+                        DownloadClientId = download.DownloadClientId,
+                        EventType = eventType,
+                        Outcome = outcome,
+                        Source = "DownloadImport",
+                        Message = result.Message ?? $"{result.Action} completed",
+                        Timestamp = DateTime.UtcNow,
+                        CorrelationId = correlationId,
+                        Data = JsonSerializer.Serialize(new
+                        {
+                            JobId = job.Id,
+                            result.Action,
+                            result.SourcePath,
+                            result.FinalPath,
+                            result.WasRegisteredToAudiobook
+                        })
+                    }, cancellationToken);
+                }
+
+                job.SetCheckpoint("FilesImported", results.Count);
+                await downloadProcessingJobService.UpdateJobAsync(job);
             }
-            catch (DownloadProcessingException exception)
+
+            if (!job.HasCheckpoint("ClientMarkedImported"))
             {
-                await downloadProcessingJobService.UpdateJobAsync(job.ScheduleRetry(exception.Message));
-                return;
+                var downloadClientGateway = scope.ServiceProvider.GetRequiredService<IDownloadClientGateway>();
+                if (!await downloadClientGateway.MarkItemAsImportedAsync(client, download, cancellationToken))
+                {
+                    await ScheduleRetryAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
+                        correlationId, $"Unable to mark the item imported in client {client.Id}", cancellationToken);
+                    return;
+                }
+
+                job.SetCheckpoint("ClientMarkedImported");
+                await downloadProcessingJobService.UpdateJobAsync(job);
             }
 
-            if (files.Count == 0)
+            if (!job.HasCheckpoint("ScanEnqueued"))
             {
-                await downloadProcessingJobService.UpdateJobAsync(job.ScheduleRetry("No importable files found"));
-                return;
-            }
-            else if (files.Count != queueItem.SourceFiles.Count)
-            {
-                await downloadProcessingJobService.UpdateJobAsync(job.ScheduleRetry($"Files reported by the download client and files on disk do not match"));
-                return;
+                Guid scanJobId;
+                try
+                {
+                    scanJobId = await scanQueueService.EnqueueScanAsync(
+                        audiobook,
+                        correlationId: correlationId,
+                        downloadId: download.Id);
+                }
+                catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
+                {
+                    await ScheduleRetryAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
+                        correlationId, $"Unable to enqueue the post-import library scan: {exception.Message}", cancellationToken);
+                    return;
+                }
+                job.SetCheckpoint("ScanEnqueued", scanJobId.ToString());
+                job.AddLogEntry($"Enqueued scan job {scanJobId} for audiobook {audiobook.Id}");
+                await downloadProcessingJobService.UpdateJobAsync(job);
+                await RecordHistoryAsync(
+                    historyRepository,
+                    download,
+                    audiobook,
+                    HistoryEvents.ScanQueued,
+                    HistoryOutcome.Succeeded,
+                    correlationId,
+                    $"Library scan {scanJobId} queued",
+                    new Dictionary<string, object> { ["JobId"] = job.Id, ["ScanJobId"] = scanJobId },
+                    cancellationToken);
             }
 
-            List<ImportResult> results = [];
+            var finalizationService = scope.ServiceProvider.GetRequiredService<IImportFinalizationService>();
             try
             {
-                var downloadImportService = scope.ServiceProvider.GetRequiredService<IDownloadImportService>();
-                results = await downloadImportService.ImportDownloadFilesAsync(audiobook, files, cancellationToken);
+                await finalizationService.FinalizeAsync(
+                    job.Id,
+                    download.Id,
+                    audiobook.Id,
+                    audiobook.Title ?? download.Title,
+                    client.Id,
+                    correlationId,
+                    new Dictionary<string, object>
+                    {
+                        ["JobId"] = job.Id,
+                        ["ScanJobId"] = job.TryGetJobDataString("ScanEnqueuedDetail", out var scanId) ? scanId : string.Empty
+                    },
+                    cancellationToken);
             }
             catch (InvalidOperationException exception)
             {
-                await downloadProcessingJobService.UpdateJobAsync(job.MarkAsFailed(exception.Message));
-                return;
+                await ScheduleRetryAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
+                    correlationId, $"Unable to commit import finalization: {exception.Message}", cancellationToken);
             }
-
-            // Create the report on the job log
-            foreach (var result in results)
-            {
-                if (!string.IsNullOrEmpty(result.Message))
-                {
-                    job.AddLogEntry(result.Message);
-                }
-            }
-
-            // Create the report on the job log
-            bool wasRegisteredToAudiobook = false;
-            foreach (var result in results)
-            {
-                if (!result.Success)
-                {
-                    await downloadProcessingJobService.UpdateJobAsync(job.MarkAsFailed($"Unable to import at least one file for the job (see the log entries)"));
-                    return;
-                }
-
-                wasRegisteredToAudiobook |= result.WasRegisteredToAudiobook;
-            }
-
-            if (!wasRegisteredToAudiobook)
-            {
-                // If the audiobook already had some audiobook file, this download has probably been skipped
-                // FIXME: We should improve ImportResult to be able to report skipped files so we don't rely on DB check here
-                var audiobookFileRepository = scope.ServiceProvider.GetRequiredService<IAudiobookFileRepository>();
-                var existingAudiobookFiles = await audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id, cancellationToken);
-                if (existingAudiobookFiles.Count <= 0)
-                {
-                    await downloadProcessingJobService.UpdateJobAsync(job.MarkAsFailed($"Unexpected issue: No audio files were registered to the audiobook but files have been imported"));
-                    return;
-                }
-            }
-
-            await downloadService.UpdateAsync(download.Imported());
-
-            var downloadClientGateway = scope.ServiceProvider.GetRequiredService<IDownloadClientGateway>();
-            if (!await downloadClientGateway.MarkItemAsImportedAsync(client, download))
-            {
-                logger.LogWarning($"Unable to mark download {download.Id} as imported in the client {client.Id}");
-            }
-
-            // Enqueue a scan using the audiobook's configured library path. The import process already
-            // hardlinks/copies files into the library folder, so the scanner should
-            // verify the library location and not the download directory, which would
-            // trigger spurious "Refusing to associate file outside audiobook folder"
-            // warnings from AudioFileService.
-            var jobId = await scanQueueService.EnqueueScanAsync(audiobook);
-            job.AddLogEntry($"Enqueued scan job {jobId} for audiobook {audiobook.Id}");
-
-            await downloadProcessingJobService.UpdateJobAsync(job.MarkAsCompleted());
         }
+
+        private static async Task ScheduleRetryAsync(
+            DownloadProcessingJob job,
+            IDownloadProcessingJobService jobService,
+            IHistoryRepository historyRepository,
+            Download download,
+            Audiobook audiobook,
+            string correlationId,
+            string reason,
+            CancellationToken ct)
+        {
+            job.ScheduleRetry(reason);
+            await jobService.UpdateJobAsync(job);
+            var exhausted = job.Status == ProcessingJobStatus.Failed;
+            await RecordHistoryAsync(historyRepository, download, audiobook,
+                exhausted ? HistoryEvents.ImportFailed : HistoryEvents.ImportRetry,
+                exhausted ? HistoryOutcome.Failed : HistoryOutcome.Retrying, correlationId, reason,
+                new Dictionary<string, object> { ["JobId"] = job.Id, ["RetryCount"] = job.RetryCount }, ct);
+        }
+
+        private static async Task FailImportAsync(
+            DownloadProcessingJob job,
+            IDownloadProcessingJobService jobService,
+            IHistoryRepository historyRepository,
+            Download download,
+            Audiobook audiobook,
+            string correlationId,
+            string reason,
+            CancellationToken ct)
+        {
+            await jobService.UpdateJobAsync(job.MarkAsFailed(reason));
+            await RecordHistoryAsync(historyRepository, download, audiobook, HistoryEvents.ImportFailed,
+                HistoryOutcome.Failed, correlationId, reason,
+                new Dictionary<string, object> { ["JobId"] = job.Id, ["RetryCount"] = job.RetryCount }, ct);
+        }
+
+        private static Task RecordHistoryAsync(
+            IHistoryRepository historyRepository,
+            Download download,
+            Audiobook audiobook,
+            string eventType,
+            HistoryOutcome outcome,
+            string correlationId,
+            string message,
+            Dictionary<string, object> details,
+            CancellationToken ct) =>
+            historyRepository.AddAsync(new History
+            {
+                AudiobookId = audiobook.Id,
+                AudiobookTitle = audiobook.Title,
+                SourceTitle = download.Title,
+                DownloadId = download.Id.ToUpperInvariant(),
+                DownloadClientId = download.DownloadClientId,
+                EventType = eventType,
+                Outcome = outcome,
+                Source = "DownloadImport",
+                Message = message,
+                Error = outcome == HistoryOutcome.Failed ? message : null,
+                Timestamp = DateTime.UtcNow,
+                CorrelationId = correlationId,
+                Data = JsonSerializer.Serialize(details)
+            }, ct);
     }
 }

@@ -19,6 +19,7 @@ using System.Net;
 using Listenarr.Infrastructure.Adapters;
 using Listenarr.Tests.Common;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Xml.Linq;
 
 namespace Listenarr.Tests.Features.Infrastructure.Adapters
 {
@@ -154,6 +155,83 @@ namespace Listenarr.Tests.Features.Infrastructure.Adapters
             Assert.Equal("192.168.50.111", capturedUri.Host);
             Assert.Equal(6789, capturedUri.Port);
             Assert.Equal("/xmlrpc", capturedUri.AbsolutePath);
+        }
+
+        [Theory]
+        [InlineData(false, "GroupDelete")]
+        [InlineData(true, "GroupDeleteFinal")]
+        public async Task RemoveAsync_FallsBackToQueueWithConfiguredFilePolicy(
+            bool deleteFiles,
+            string expectedCommand)
+        {
+            var requests = new List<string>();
+            var handler = new DelegatingHandlerMock(async (request, ct) =>
+            {
+                var body = await request.Content!.ReadAsStringAsync(ct);
+                requests.Add(body);
+                var command = XDocument.Parse(body)
+                    .Descendants("param")
+                    .First()
+                    .Value;
+                var succeeded = command == expectedCommand;
+                return MockUtils.GetCannedResponse(
+                    $"<?xml version=\"1.0\"?><methodResponse><params><param><value><boolean>{(succeeded ? "1" : "0")}</boolean></value></param></params></methodResponse>",
+                    "text/xml");
+            });
+
+            using var http = new HttpClient(handler);
+            var adapter = new NzbgetAdapter(
+                new TestHttpClientFactory(http),
+                Mock.Of<INzbUrlResolver>(),
+                NullLogger<NzbgetAdapter>.Instance);
+            var client = new DownloadClientConfiguration
+            {
+                Host = "localhost",
+                Port = 6789
+            };
+
+            var result = await adapter.RemoveAsync(client, "123", deleteFiles);
+
+            Assert.True(result);
+            Assert.Equal(2, requests.Count);
+            Assert.Contains("HistoryDelete", requests[0], StringComparison.Ordinal);
+            Assert.Contains(expectedCommand, requests[1], StringComparison.Ordinal);
+            Assert.All(requests, body => Assert.Contains("<i4>123</i4>", body, StringComparison.Ordinal));
+        }
+
+        [Theory]
+        [InlineData("SUCCESS", DownloadItemStatus.Completed, "completed")]
+        [InlineData("SUCCESS/UNPACK", DownloadItemStatus.Completed, "completed")]
+        [InlineData("FAILURE", DownloadItemStatus.Failed, "failed")]
+        public void GroupStatus_IsMappedWithoutBehaviorDrift(
+            string status,
+            DownloadItemStatus expectedItemStatus,
+            string expectedQueueStatus)
+        {
+            var client = new DownloadClientConfiguration
+            {
+                Id = "nzbget-1",
+                Name = "NZBGet",
+                Type = "nzbget"
+            };
+            var structElement = XElement.Parse(
+                $$"""
+                <struct>
+                  <member><name>GroupID</name><value><i4>123</i4></value></member>
+                  <member><name>NZBName</name><value><string>Book</string></value></member>
+                  <member><name>Status</name><value><string>{{status}}</string></value></member>
+                  <member><name>FileSizeMB</name><value><string>100</string></value></member>
+                  <member><name>RemainingSizeMB</name><value><string>0</string></value></member>
+                  <member><name>DestDir</name><value><string>/downloads</string></value></member>
+                </struct>
+                """);
+
+            var clientItem = NzbgetResponseMapper.MapGroupToDownloadClientItem(client, structElement);
+            var queueItem = NzbgetResponseMapper.MapGroup(client, structElement);
+
+            Assert.Equal(expectedItemStatus, clientItem.Status);
+            Assert.Equal(expectedQueueStatus, queueItem.Status);
+            Assert.Equal(0, clientItem.RemainingSize);
         }
     }
 }

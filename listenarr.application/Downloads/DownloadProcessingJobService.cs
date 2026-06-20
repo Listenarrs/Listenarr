@@ -61,7 +61,11 @@ namespace Listenarr.Application.Downloads
                 SourcePath = download.DownloadPath,
                 DownloadClientId = download.DownloadClientId,
                 Priority = 5,
-                Status = ProcessingJobStatus.Pending
+                Status = ProcessingJobStatus.Pending,
+                JobData = new Dictionary<string, object>
+                {
+                    ["CorrelationId"] = download.Id.ToUpperInvariant()
+                }
             };
 
             job = await jobRepository.AddAsync(job);

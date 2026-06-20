@@ -15,7 +15,7 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "10.0.7");
+            modelBuilder.HasAnnotation("ProductVersion", "10.0.8");
 
             modelBuilder.Entity("Listenarr.Domain.Models.Audiobook", b =>
                 {
@@ -468,6 +468,9 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("HistoryRetentionDays")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("ImportBlacklistExtensions")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -834,17 +837,39 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("AudiobookExternalId")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
                     b.Property<int?>("AudiobookId")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("AudiobookTitle")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("CorrelationId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Data")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DownloadClientId")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DownloadId")
+                        .HasMaxLength(150)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(4000)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("EventType")
                         .IsRequired()
+                        .HasMaxLength(100)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Message")
@@ -853,13 +878,36 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.Property<bool>("NotificationSent")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int>("Outcome")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("ParentEventId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Source")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceTitle")
+                        .HasMaxLength(500)
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("Timestamp")
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("AudiobookExternalId");
+
+                    b.HasIndex("CorrelationId");
+
+                    b.HasIndex("DownloadClientId");
+
+                    b.HasIndex("DownloadId");
+
+                    b.HasIndex("EventType");
+
+                    b.HasIndex("Outcome");
 
                     b.HasIndex("Timestamp");
 

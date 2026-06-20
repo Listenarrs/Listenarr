@@ -1,4 +1,5 @@
 using Listenarr.Domain.Models;
+using Listenarr.Application.Downloads;
 
 namespace Listenarr.Application.Interfaces
 {
@@ -31,6 +32,11 @@ namespace Listenarr.Application.Interfaces
         /// <param name="audiobookId">Optional audiobook ID to associate</param>
         /// <returns>Download ID</returns>
         Task<string> SendToDownloadClientAsync(SearchResult searchResult, string? downloadClientId = null, int? audiobookId = null);
+
+        Task<string> SendToDownloadClientAsync(
+            TrustedDownloadCandidate candidate,
+            string? downloadClientId = null,
+            int? audiobookId = null);
 
         /// <summary>
         /// Removes a download from the queue

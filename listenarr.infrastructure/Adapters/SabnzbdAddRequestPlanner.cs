@@ -51,6 +51,33 @@ namespace Listenarr.Infrastructure.Adapters
             return queryParams;
         }
 
+        public static Dictionary<string, string> BuildFileQueryParams(
+            DownloadClientConfiguration client,
+            string title)
+        {
+            var queryParams = new Dictionary<string, string>
+            {
+                ["mode"] = "addfile",
+                ["output"] = "json",
+                ["nzbname"] = title,
+                ["cat"] = ResolveCategory(client)
+            };
+
+            if (client.Settings != null &&
+                client.Settings.TryGetValue("recentPriority", out var priorityValue))
+            {
+                queryParams["priority"] = priorityValue?.ToString()?.ToLowerInvariant() switch
+                {
+                    "force" => "2",
+                    "high" => "1",
+                    "low" => "-1",
+                    _ => "0"
+                };
+            }
+
+            return queryParams;
+        }
+
         private static string ResolveCategory(DownloadClientConfiguration client)
         {
             var category = "audiobooks";

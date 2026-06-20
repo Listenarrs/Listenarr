@@ -26,7 +26,7 @@ namespace Listenarr.Tests.Mocks.Api
 
         public async Task<HttpResponseMessage> GetSearch(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            return AddCookies(MockUtils.GetCannedResponse("[]"), cookieValue);
+            return AddCookies(MockUtils.GetCannedResponse("""{"data":[]}"""), cookieValue);
         }
 
         public async Task<HttpResponseMessage> GetDummyDownload(HttpRequestMessage request, CancellationToken cancellationToken)

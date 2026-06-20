@@ -435,6 +435,38 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
         }
 
         [Fact]
+        public void ParseMyAnonamouse_Builds_Tid_DownloadUrl_When_Dl_Is_Missing()
+        {
+            var json = """
+            [
+              {
+                "id": "1246262",
+                "title": "A Parade of Horribles",
+                "size": "1.1 GiB",
+                "seeders": 2196,
+                "leechers": 6
+              }
+            ]
+            """;
+            var indexer = new Indexer
+            {
+                Name = "MyAnonamouse",
+                Url = "https://www.myanonamouse.net",
+                Type = "Torrent",
+                Implementation = "MyAnonamouse",
+                AdditionalSettings = """{"mam_id":"test_mam"}"""
+            };
+
+            var results = MyAnonamouseResponseParser.Parse(json, indexer, NullLogger.Instance);
+
+            var result = Assert.Single(results);
+            Assert.Equal(
+                "https://www.myanonamouse.net/tor/download.php?tid=1246262&mam_id=test_mam",
+                result.TorrentUrl);
+            Assert.Equal("Torrent", result.DownloadType);
+        }
+
+        [Fact]
         public void ParseMyAnonamouse_Normalizes_And_Encodes_MamId_Once()
         {
             var json = @"[

@@ -35,7 +35,11 @@ namespace Listenarr.Application.Audiobooks
             _logger = logger;
         }
 
-        public async Task<Guid> EnqueueScanAsync(Audiobook audiobook, string? path = null)
+        public async Task<Guid> EnqueueScanAsync(
+            Audiobook audiobook,
+            string? path = null,
+            string? correlationId = null,
+            string? downloadId = null)
         {
             // Deduplicate: if there's already a job for the same audiobook and path that is
             // queued/processing/completed, return that job id instead of creating a duplicate.
@@ -66,7 +70,13 @@ namespace Listenarr.Application.Audiobooks
                 _logger.LogWarning(ex, "Failed while checking existing scan jobs for dedupe; will enqueue new job");
             }
 
-            var job = new ScanJob { AudiobookId = audiobook.Id, Path = path };
+            var job = new ScanJob
+            {
+                AudiobookId = audiobook.Id,
+                Path = path,
+                CorrelationId = correlationId,
+                DownloadId = downloadId
+            };
             _jobs[job.Id] = job;
             _logger.LogInformation("Enqueueing scan job {JobId} for audiobook {AudiobookId} (path: {Path})", job.Id, audiobook.Id, LogRedaction.SanitizeFilePath(path));
             await _channel.Writer.WriteAsync(job);
@@ -109,7 +119,13 @@ namespace Listenarr.Application.Audiobooks
                 return null;
             }
 
-            var newJob = new ScanJob { AudiobookId = job.AudiobookId, Path = job.Path };
+            var newJob = new ScanJob
+            {
+                AudiobookId = job.AudiobookId,
+                Path = job.Path,
+                CorrelationId = job.CorrelationId,
+                DownloadId = job.DownloadId
+            };
             _jobs[newJob.Id] = newJob;
             _logger.LogInformation("Requeueing scan job {OldJobId} as new job {NewJobId} for audiobook {AudiobookId}", jobId, newJob.Id, job.AudiobookId);
             await _channel.Writer.WriteAsync(newJob);
@@ -127,4 +143,3 @@ namespace Listenarr.Application.Audiobooks
         }
     }
 }
-

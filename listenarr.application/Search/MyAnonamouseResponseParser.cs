@@ -333,7 +333,7 @@ namespace Listenarr.Application.Search
                             }
                         }
 
-                        var downloadUrl = MyAnonamouseDownloadUrlBuilder.Build(dlHash, indexer);
+                        var downloadUrl = MyAnonamouseDownloadUrlBuilder.Build(dlHash, id, indexer);
 
                         // Preserve raw language code for later flagging/flags list
                         string rawLangCode = string.Empty;

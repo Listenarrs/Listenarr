@@ -8,6 +8,8 @@ namespace Listenarr.Tests.Mocks.Api
     public class QbittorrentApiMock : BaseApiMock
     {
         public bool Authenticated { get; set; } = false;
+        public NameValueCollection? LastDeleteForm { get; private set; }
+        public NameValueCollection? LastCategoryForm { get; private set; }
 
         public QbittorrentApiMock()
         {
@@ -15,6 +17,8 @@ namespace Listenarr.Tests.Mocks.Api
             AddRoute("api/v2/torrents/add", DoAdd, HttpMethod.Post);
             AddRoute("api/v2/app/version", GetVersion, HttpMethod.Get);
             AddRoute("api/v2/torrents/info", GetInfo, HttpMethod.Get);
+            AddRoute("api/v2/torrents/delete", DoDelete, HttpMethod.Post);
+            AddRoute("api/v2/torrents/setCategory", SetCategory, HttpMethod.Post);
         }
 
         private async Task<HttpResponseMessage> DoLogin(HttpRequestMessage request, CancellationToken ct)
@@ -72,6 +76,20 @@ namespace Listenarr.Tests.Mocks.Api
             }
 
             return MockUtils.GetCannedResponse("v5.0.2");
+        }
+
+        private async Task<HttpResponseMessage> DoDelete(HttpRequestMessage request, CancellationToken ct)
+        {
+            if (!Authenticated) return new HttpResponseMessage(HttpStatusCode.Forbidden);
+            LastDeleteForm = HttpUtility.ParseQueryString(await request.Content!.ReadAsStringAsync(ct));
+            return MockUtils.GetCannedResponse("Ok");
+        }
+
+        private async Task<HttpResponseMessage> SetCategory(HttpRequestMessage request, CancellationToken ct)
+        {
+            if (!Authenticated) return new HttpResponseMessage(HttpStatusCode.Forbidden);
+            LastCategoryForm = HttpUtility.ParseQueryString(await request.Content!.ReadAsStringAsync(ct));
+            return MockUtils.GetCannedResponse("Ok");
         }
     }
 }

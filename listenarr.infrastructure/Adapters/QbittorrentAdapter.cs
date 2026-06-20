@@ -37,8 +37,6 @@ namespace Listenarr.Infrastructure.Adapters
 
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly ILogger<QbittorrentAdapter> _logger;
-        private readonly ITorrentFileDownloader _torrentFileDownloader;
-        private readonly QbittorrentTorrentAddPlanner _torrentAddPlanner;
         private readonly QbittorrentAuthSession _authSession;
         private readonly QbittorrentConnectionTester _connectionTester;
         private readonly QbittorrentDownloadPollingWorkflow _downloadPollingWorkflow;
@@ -48,13 +46,12 @@ namespace Listenarr.Infrastructure.Adapters
         public QbittorrentAdapter(IHttpClientFactory httpFactory, ITorrentFileDownloader torrentFileDownloader, ILogger<QbittorrentAdapter> logger)
         {
             _httpClientFactory = httpFactory ?? throw new ArgumentNullException(nameof(httpFactory));
-            _torrentFileDownloader = torrentFileDownloader ?? throw new ArgumentNullException(nameof(torrentFileDownloader));
+            _ = torrentFileDownloader ?? throw new ArgumentNullException(nameof(torrentFileDownloader));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-            _torrentAddPlanner = new QbittorrentTorrentAddPlanner(_torrentFileDownloader, _logger);
             _authSession = new QbittorrentAuthSession(_logger);
             _connectionTester = new QbittorrentConnectionTester(_httpClientFactory, _logger, ClientType);
             _downloadPollingWorkflow = new QbittorrentDownloadPollingWorkflow(_logger);
-            _removalWorkflow = new QbittorrentRemovalWorkflow(_logger);
+            _removalWorkflow = new QbittorrentRemovalWorkflow(_httpClientFactory, _logger, ClientType);
             _importItemResolver = new QbittorrentImportItemResolver(_logger);
         }
 
@@ -63,10 +60,16 @@ namespace Listenarr.Infrastructure.Adapters
             return await _connectionTester.TestConnectionAsync(client, ct);
         }
 
-        public async Task<string?> AddAsync(DownloadClientConfiguration client, SearchResult result, CancellationToken ct = default)
+        public async Task<DownloadClientSubmissionResult> AddAsync(
+            DownloadClientConfiguration client,
+            PreparedDownloadSubmission submission,
+            CancellationToken ct = default)
         {
             ArgumentNullException.ThrowIfNull(client);
-            ArgumentNullException.ThrowIfNull(result);
+            if (submission is not PreparedTorrentSubmission torrent)
+            {
+                throw new DownloadClientSubmissionException("qBittorrent requires a prepared torrent submission.");
+            }
 
             var baseUrl = DownloadClientUriBuilder.BuildAuthority(client);
             using var httpClient = _httpClientFactory.CreateClient(ClientType);
@@ -77,18 +80,14 @@ namespace Listenarr.Infrastructure.Adapters
             }
             catch (QbittorrentException exception)
             {
-                _logger.LogError(exception.Message);
-                return null;
+                _logger.LogError(exception, "qBittorrent authentication failed for client {ClientId}", LogRedaction.SanitizeText(client.Id));
+                throw new DownloadClientSubmissionException("qBittorrent authentication failed.", exception);
             }
 
-            var addPlan = await _torrentAddPlanner.CreateAsync(client, result, ct);
-            if (addPlan == null)
-            {
-                return null;
-            }
+            var addPlan = QbittorrentTorrentAddPlanner.Create(client, torrent);
 
-            using var addContent = QbittorrentAddRequestContentBuilder.Build(addPlan, result);
-            var addResponse = await httpClient.PostAsync($"{baseUrl}/api/v2/torrents/add", addContent, ct);
+            using var addContent = QbittorrentAddRequestContentBuilder.Build(addPlan);
+            using var addResponse = await httpClient.PostAsync($"{baseUrl}/api/v2/torrents/add", addContent, ct);
 
             if (!addResponse.IsSuccessStatusCode)
             {
@@ -96,7 +95,7 @@ namespace Listenarr.Infrastructure.Adapters
                 var redacted = LogRedaction.RedactText(responseContent, LogRedaction.GetSensitiveValuesFromEnvironment().Concat([client.Password ?? string.Empty]));
 
                 _logger.LogError($"Failed to add torrent to qBittorrent. Status: {addResponse.StatusCode}, Response: {redacted}");
-                return null;
+                throw new DownloadClientSubmissionException($"qBittorrent rejected the torrent with HTTP {(int)addResponse.StatusCode}.");
             }
 
             _logger.LogInformation("Successfully sent torrent to qBittorrent");
@@ -109,9 +108,7 @@ namespace Listenarr.Infrastructure.Adapters
             {
                 try
                 {
-                    var announces = MyAnonamouseHelper.ExtractAnnounceUrls(addPlan.TorrentFileData);
-                    // Filter to only actual tracker announce URLs — exclude file/web-seed URLs
-                    var trackerAnnounces = announces?.Where(a =>
+                    var trackerAnnounces = torrent.TrackerUrls.Where(a =>
                         a.Contains("/announce", StringComparison.OrdinalIgnoreCase) ||
                         a.Contains("/tracker", StringComparison.OrdinalIgnoreCase)).ToList();
                     if (trackerAnnounces != null && trackerAnnounces.Count > 0)
@@ -135,7 +132,7 @@ namespace Listenarr.Infrastructure.Adapters
                 }
             }
 
-            return addPlan.Hash;
+            return new DownloadClientSubmissionResult(addPlan.Hash, addPlan.Hash);
         }
 
         /// <summary>
@@ -158,7 +155,7 @@ namespace Listenarr.Infrastructure.Adapters
             var baseUrl = DownloadClientUriBuilder.BuildAuthority(client);
             try
             {
-                using var httpClient = QbittorrentCookieSession.CreateClient();
+                using var httpClient = _httpClientFactory.CreateClient(ClientType);
 
                 // Authenticate
                 using var loginData = QbittorrentCookieSession.CreateLoginContent(client);

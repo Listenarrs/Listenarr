@@ -30,6 +30,57 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
             _db = db ?? throw new ArgumentNullException(nameof(db));
         }
 
+        public async Task<HistoryPage> QueryAsync(HistoryQuery query, CancellationToken ct = default)
+        {
+            var limit = Math.Clamp(query.Limit, 1, 500);
+            var offset = Math.Max(0, query.Offset);
+            IQueryable<History> filtered = _db.History.AsNoTracking();
+
+            if (!string.IsNullOrWhiteSpace(query.EventType))
+                filtered = filtered.Where(h => h.EventType == query.EventType);
+            if (query.Outcome.HasValue)
+                filtered = filtered.Where(h => h.Outcome == query.Outcome.Value);
+            if (query.From.HasValue)
+                filtered = filtered.Where(h => h.Timestamp >= query.From.Value);
+            if (query.To.HasValue)
+                filtered = filtered.Where(h => h.Timestamp <= query.To.Value);
+            if (query.AudiobookId.HasValue)
+                filtered = filtered.Where(h => h.AudiobookId == query.AudiobookId.Value);
+            if (!string.IsNullOrWhiteSpace(query.DownloadId))
+                filtered = filtered.Where(h => h.DownloadId == query.DownloadId);
+            if (!string.IsNullOrWhiteSpace(query.DownloadClientId))
+                filtered = filtered.Where(h => h.DownloadClientId == query.DownloadClientId);
+            if (!string.IsNullOrWhiteSpace(query.CorrelationId))
+                filtered = filtered.Where(h => h.CorrelationId == query.CorrelationId);
+
+            var total = await filtered.CountAsync(ct);
+            var ascending = string.Equals(query.SortDirection, "asc", StringComparison.OrdinalIgnoreCase);
+            filtered = query.SortBy.ToLowerInvariant() switch
+            {
+                "eventtype" => ascending ? filtered.OrderBy(h => h.EventType) : filtered.OrderByDescending(h => h.EventType),
+                "outcome" => ascending ? filtered.OrderBy(h => h.Outcome) : filtered.OrderByDescending(h => h.Outcome),
+                "source" => ascending ? filtered.OrderBy(h => h.Source) : filtered.OrderByDescending(h => h.Source),
+                _ => ascending ? filtered.OrderBy(h => h.Timestamp) : filtered.OrderByDescending(h => h.Timestamp)
+            };
+
+            var records = await filtered.Skip(offset).Take(limit).ToListAsync(ct);
+            return new HistoryPage(records, total, limit, offset);
+        }
+
+        public Task<History?> GetByIdAsync(int id, CancellationToken ct = default) =>
+            _db.History.AsNoTracking().FirstOrDefaultAsync(h => h.Id == id, ct);
+
+        public async Task<List<History>> GetByCorrelationIdAsync(string correlationId, CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(correlationId)) return [];
+            return await _db.History
+                .AsNoTracking()
+                .Where(h => h.CorrelationId == correlationId)
+                .OrderBy(h => h.Timestamp)
+                .ThenBy(h => h.Id)
+                .ToListAsync(ct);
+        }
+
         public async Task<List<History>> GetPagedAsync(int limit, int offset, CancellationToken ct = default)
         {
             return await _db.History
@@ -92,12 +143,6 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
             _db.History.Add(entry);
             await _db.SaveChangesAsync(ct);
             return entry;
-        }
-
-        public async Task UpdateAsync(History entry, CancellationToken ct = default)
-        {
-            _db.History.Update(entry);
-            await _db.SaveChangesAsync(ct);
         }
 
         public async Task<bool> DeleteAsync(int id, CancellationToken ct = default)

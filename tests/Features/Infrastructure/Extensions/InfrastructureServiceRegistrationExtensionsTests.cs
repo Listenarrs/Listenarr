@@ -18,6 +18,8 @@
 using Listenarr.Infrastructure.Extensions;
 using Listenarr.Infrastructure.Cache;
 using Listenarr.Infrastructure.Platform;
+using Listenarr.Infrastructure.Search.Providers;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Http;
 using Microsoft.Extensions.Options;
 
@@ -54,6 +56,21 @@ namespace Listenarr.Tests.Features.Infrastructure.Extensions
                 .Get(typeof(ImageCacheService).Name);
 
             Assert.NotEmpty(httpClientOptions.HttpMessageHandlerBuilderActions);
+        }
+
+        [Fact]
+        public void AddListenarrAppServices_RegistersMyAnonamouseConnectionTester()
+        {
+            var services = new ServiceCollection();
+
+            services.AddListenarrAppServices(new ConfigurationManager());
+
+            Assert.Contains(
+                services,
+                descriptor =>
+                    descriptor.ServiceType == typeof(IMyAnonamouseConnectionTester) &&
+                    descriptor.ImplementationType == typeof(MyAnonamouseConnectionTester) &&
+                    descriptor.Lifetime == ServiceLifetime.Scoped);
         }
     }
 }

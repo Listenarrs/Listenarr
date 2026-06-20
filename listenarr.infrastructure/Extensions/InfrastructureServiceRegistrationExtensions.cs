@@ -24,6 +24,8 @@ using Listenarr.Infrastructure.Persistence.Repositories;
 using Listenarr.Infrastructure.Cache;
 using Listenarr.Infrastructure.Platform;
 using Listenarr.Infrastructure.Services;
+using Listenarr.Infrastructure.Downloads;
+using Listenarr.Infrastructure.Security;
 
 namespace Listenarr.Infrastructure.Extensions
 {
@@ -73,6 +75,7 @@ namespace Listenarr.Infrastructure.Extensions
             services.AddScoped<IDownloadProcessingJobRepository, EfDownloadProcessingJobRepository>();
             services.AddScoped<IRootFolderRepository, EfRootFolderRepository>();
             services.AddScoped<IDownloadHistoryRepository, DownloadHistoryRepository>();
+            services.AddScoped<IImportFinalizationService, ImportFinalizationService>();
             services.AddSingleton<IApplicationPathService>(_ => new ApplicationPathService(contentRootPath));
             services.AddScoped<IAudioTagWriter, TagLibAudioTagWriter>();
             services.AddSingleton<IHtmlTextExtractor, HtmlAgilityPackTextExtractor>();
@@ -86,6 +89,15 @@ namespace Listenarr.Infrastructure.Extensions
                 });
             services.AddSingleton<IImageCacheService, ImageCacheService>();
             services.AddScoped<IApplicationVersionService, ApplicationVersionService>();
+            services.AddSingleton<IDownloadReferenceProtector, DataProtectionDownloadReferenceProtector>();
+            services.AddScoped<IDownloadSubmissionPreparer, DownloadSubmissionPreparer>();
+            services.AddScoped<ITorrentMetadataService, TorrentMetadataService>();
+            services.AddScoped<INzbFileDownloader, NzbFileDownloader>();
+            services.AddScoped<MyAnonamouseTorrentPreparationService>();
+            services.AddScoped<IDownloadSourceResolver, MyAnonamouseSourceResolver>();
+            services.AddScoped<IDownloadSourceResolver, GenericTorrentSourceResolver>();
+            services.AddScoped<IDownloadSourceResolver, GenericUsenetSourceResolver>();
+            services.AddScoped<IDownloadSourceResolver, DirectDownloadSourceResolver>();
 
             return services;
         }

@@ -32,9 +32,7 @@ namespace Listenarr.Infrastructure.Adapters
         public DownloadProtocol Protocol => DownloadProtocol.Torrent;
 
         private readonly IHttpClientFactory _httpClientFactory;
-        private readonly ITorrentFileDownloader _torrentFileDownloader;
         private readonly ILogger<TransmissionAdapter> _logger;
-        private readonly TransmissionTorrentAddPlanner _torrentAddPlanner;
         private readonly TransmissionRpcClient _rpcClient;
         private readonly TransmissionDownloadPollingWorkflow _downloadPollingWorkflow;
         private readonly TransmissionRemovalWorkflow _removalWorkflow;
@@ -43,9 +41,8 @@ namespace Listenarr.Infrastructure.Adapters
         public TransmissionAdapter(IHttpClientFactory httpClientFactory, ITorrentFileDownloader torrentFileDownloader, ILogger<TransmissionAdapter> logger)
         {
             _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
-            _torrentFileDownloader = torrentFileDownloader ?? throw new ArgumentNullException(nameof(torrentFileDownloader));
+            _ = torrentFileDownloader ?? throw new ArgumentNullException(nameof(torrentFileDownloader));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-            _torrentAddPlanner = new TransmissionTorrentAddPlanner(_torrentFileDownloader, _logger);
             _rpcClient = new TransmissionRpcClient(_httpClientFactory, ClientType, _logger);
             _downloadPollingWorkflow = new TransmissionDownloadPollingWorkflow(_httpClientFactory, _logger, ClientType);
             _removalWorkflow = new TransmissionRemovalWorkflow(_rpcClient, _logger);
@@ -99,13 +96,17 @@ namespace Listenarr.Infrastructure.Adapters
             }
         }
 
-        public async Task<string?> AddAsync(DownloadClientConfiguration client, SearchResult result, CancellationToken ct = default)
+        public async Task<DownloadClientSubmissionResult> AddAsync(
+            DownloadClientConfiguration client,
+            PreparedDownloadSubmission submission,
+            CancellationToken ct = default)
         {
             if (client == null) throw new ArgumentNullException(nameof(client));
-            if (result == null) throw new ArgumentNullException(nameof(result));
+            if (submission is not PreparedTorrentSubmission torrent)
+                throw new DownloadClientSubmissionException("Transmission requires a prepared torrent submission.");
 
             var labels = TransmissionRequestPlanner.CollectLabels(client);
-            var arguments = await _torrentAddPlanner.BuildArgumentsAsync(client, result, labels, ct);
+            var arguments = TransmissionTorrentAddPlanner.BuildArguments(client, torrent, labels);
 
             // Use old format for compatibility with Transmission < 4.1.0
             var payload = new
@@ -134,20 +135,24 @@ namespace Listenarr.Infrastructure.Adapters
                     if (args.TryGetProperty("torrent-added", out var added) && added.ValueKind == JsonValueKind.Object)
                     {
                         var torrentId = TransmissionRequestPlanner.ExtractTorrentIdentifier(added);
-                        _logger.LogInformation("Transmission successfully added torrent '{Title}' with id/hash: {Id}", LogRedaction.SanitizeText(result.Title), LogRedaction.SanitizeText(torrentId));
-                        return torrentId;
+                        if (string.IsNullOrWhiteSpace(torrentId))
+                            throw new DownloadClientSubmissionException("Transmission did not return a verified torrent identifier.");
+                        _logger.LogInformation("Transmission successfully added torrent '{Title}' with id/hash: {Id}", LogRedaction.SanitizeText(torrent.Title), LogRedaction.SanitizeText(torrentId));
+                        return new DownloadClientSubmissionResult(torrentId, torrent.InfoHash);
                     }
 
                     if (args.TryGetProperty("torrent-duplicate", out var duplicate) && duplicate.ValueKind == JsonValueKind.Object)
                     {
                         var existingId = TransmissionRequestPlanner.ExtractTorrentIdentifier(duplicate);
-                        _logger.LogInformation("Transmission reported duplicate torrent for '{Title}' with id/hash {Id}", LogRedaction.SanitizeText(result.Title), LogRedaction.SanitizeText(existingId));
-                        return existingId;
+                        if (string.IsNullOrWhiteSpace(existingId))
+                            throw new DownloadClientSubmissionException("Transmission did not return a verified duplicate torrent identifier.");
+                        _logger.LogInformation("Transmission reported duplicate torrent for '{Title}' with id/hash {Id}", LogRedaction.SanitizeText(torrent.Title), LogRedaction.SanitizeText(existingId));
+                        return new DownloadClientSubmissionResult(existingId, torrent.InfoHash, WasDuplicate: true);
                     }
                 }
 
-                _logger.LogWarning("Transmission AddAsync returning null - torrent may not have been added");
-                return null;
+                throw new DownloadClientSubmissionException(
+                    "Transmission did not return a verified torrent identifier.");
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {

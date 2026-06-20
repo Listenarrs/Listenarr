@@ -265,6 +265,26 @@ namespace Listenarr.Infrastructure.HostedServices.Downloads
             {
                 using var scope = scopeFactory.CreateScope();
                 var downloadProcessingJobService = scope.ServiceProvider.GetRequiredService<IDownloadProcessingJobService>();
+                var historyRepository = scope.ServiceProvider.GetRequiredService<IHistoryRepository>();
+                await historyRepository.AddAsync(new History
+                {
+                    AudiobookId = download.AudiobookId,
+                    AudiobookTitle = download.Title,
+                    SourceTitle = download.Title,
+                    DownloadId = download.Id.ToUpperInvariant(),
+                    DownloadClientId = download.DownloadClientId,
+                    EventType = HistoryEvents.DownloadCompleted,
+                    Outcome = HistoryOutcome.Succeeded,
+                    Source = "DownloadMonitor",
+                    Message = "Download client reported completion",
+                    Timestamp = DateTime.UtcNow,
+                    CorrelationId = download.Id.ToUpperInvariant(),
+                    Data = System.Text.Json.JsonSerializer.Serialize(new
+                    {
+                        download.DownloadPath,
+                        download.CompletedAt
+                    })
+                });
                 await downloadProcessingJobService.EnqueueAsync(download);
             }
             catch (InvalidOperationException exception)

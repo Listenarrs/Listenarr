@@ -270,7 +270,7 @@ namespace Listenarr.Tests.Features.Api.Controllers
             bool hasInfo = first2.TryGetProperty("infoUrl", out i2) || first2.TryGetProperty("InfoUrl", out i2);
             Assert.True(hasInfo, "Result did not contain 'infoUrl' or 'InfoUrl'");
             Assert.Equal("https://www.myanonamouse.net/t/28972", i2.GetString());
-            Assert.Equal("https://prowlarr.example/download.torrent", d2.GetString());
+            Assert.Equal(JsonValueKind.Null, d2.ValueKind);
 
             // New test: when caller provides MAM query params, they are passed into SearchIndexerResultsAsync as a SearchRequest
             var mockService3 = new Mock<ISearchService>();
@@ -679,5 +679,4 @@ namespace Listenarr.Tests.Features.Api.Controllers
         }
     }
 }
-
 

@@ -110,10 +110,14 @@ namespace Listenarr.Infrastructure.Adapters
             }
         }
 
-        public async Task<string?> AddAsync(DownloadClientConfiguration client, SearchResult result, CancellationToken ct = default)
+        public async Task<DownloadClientSubmissionResult> AddAsync(
+            DownloadClientConfiguration client,
+            PreparedDownloadSubmission submission,
+            CancellationToken ct = default)
         {
             if (client == null) throw new ArgumentNullException(nameof(client));
-            if (result == null) throw new ArgumentNullException(nameof(result));
+            if (submission is not PreparedUsenetSubmission usenet)
+                throw new DownloadClientSubmissionException("SABnzbd requires a prepared Usenet submission.");
 
             try
             {
@@ -121,21 +125,20 @@ namespace Listenarr.Infrastructure.Adapters
                 if (!requestContext.HasApiKey)
                     throw new Exception("SABnzbd API key not configured");
 
-                var (nzbUrl, indexerApiKey) = await _nzbUrlResolver.ResolveAsync(result, ct);
-                if (string.IsNullOrEmpty(nzbUrl))
-                    throw new Exception("No NZB URL found in search result");
+                _logger.LogInformation("Sending prepared NZB to SABnzbd: {Title} from {Source}", LogRedaction.SanitizeText(usenet.Title), LogRedaction.SanitizeText(usenet.Source));
 
-                _logger.LogInformation("Sending NZB to SABnzbd: {Title} from {Source}", LogRedaction.SanitizeText(result.Title), LogRedaction.SanitizeText(result.Source));
-
-                var sensitiveValues = _requestBuilder.BuildSensitiveValues(requestContext, indexerApiKey);
-
-                var queryParams = SabnzbdAddRequestPlanner.BuildQueryParams(client, result, nzbUrl);
+                var sensitiveValues = _requestBuilder.BuildSensitiveValues(requestContext);
+                var queryParams = SabnzbdAddRequestPlanner.BuildFileQueryParams(client, usenet.Title);
                 var requestUrl = _requestBuilder.BuildUrl(requestContext, queryParams);
 
                 _logger.LogDebug("SABnzbd request URL: {Url}", LogRedaction.RedactText(requestUrl, sensitiveValues));
 
                 var http = _httpFactory.CreateClient(ClientType);
-                var response = await http.GetAsync(requestUrl, ct);
+                using var multipart = new MultipartFormDataContent();
+                var fileContent = new ByteArrayContent(usenet.NzbBytes);
+                fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/x-nzb");
+                multipart.Add(fileContent, "name", usenet.FileName);
+                var response = await http.PostAsync(requestUrl, multipart, ct);
                 var responseContent = await response.Content.ReadAsStringAsync(ct);
 
                 if (!response.IsSuccessStatusCode)
@@ -148,7 +151,7 @@ namespace Listenarr.Infrastructure.Adapters
                 if (string.IsNullOrWhiteSpace(responseContent))
                 {
                     _logger.LogWarning("SABnzbd returned empty response body when adding NZB: {Url}", LogRedaction.RedactText(requestUrl, sensitiveValues));
-                    return null;
+                    throw new DownloadClientSubmissionException("SABnzbd returned an empty submission response.");
                 }
 
                 var jsonDoc = JsonDocument.Parse(responseContent);
@@ -161,7 +164,7 @@ namespace Listenarr.Infrastructure.Adapters
                         throw new Exception($"SABnzbd error: {errorMsg}");
                 }
 
-                string downloadId = "";
+                string downloadId;
                 if (root.TryGetProperty("nzo_ids", out var nzoIds) && nzoIds.ValueKind == JsonValueKind.Array)
                 {
                     var firstId = nzoIds.EnumerateArray().FirstOrDefault();
@@ -169,11 +172,11 @@ namespace Listenarr.Infrastructure.Adapters
                 }
                 else
                 {
-                    downloadId = Guid.NewGuid().ToString();
+                    throw new DownloadClientSubmissionException("SABnzbd did not return a verified queue identifier.");
                 }
 
                 _logger.LogInformation("Successfully added NZB to SABnzbd with ID: {DownloadId}", LogRedaction.SanitizeText(downloadId));
-                return downloadId;
+                return new DownloadClientSubmissionResult(downloadId);
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {

@@ -17,6 +17,8 @@
  */
 
 using Listenarr.Application.Interfaces;
+using Listenarr.Application.Common;
+using Listenarr.Application.Downloads;
 using Listenarr.Application.Security;
 using Listenarr.Domain.Models;
 using Microsoft.AspNetCore.Mvc;
@@ -32,17 +34,20 @@ namespace Listenarr.Api.Controllers
         private readonly IDownloadQueueService _downloadQueueService;
         private readonly IDownloadProcessingJobService _downloadProcessingJobService;
         private readonly ILogger<DownloadController> _logger;
+        private readonly IDownloadReferenceService? _downloadReferenceService;
 
         public DownloadController(
             IDownloadService downloadService,
             IDownloadQueueService downloadQueueService,
             IDownloadProcessingJobService downloadProcessingJobService,
-            ILogger<DownloadController> logger)
+            ILogger<DownloadController> logger,
+            IDownloadReferenceService? downloadReferenceService = null)
         {
             _downloadService = downloadService;
             _downloadQueueService = downloadQueueService;
             _downloadProcessingJobService = downloadProcessingJobService;
             _logger = logger;
+            _downloadReferenceService = downloadReferenceService;
         }
 
         /// <summary>
@@ -74,21 +79,20 @@ namespace Listenarr.Api.Controllers
             try
             {
                 _logger.LogInformation("=== SendToDownloadClient RECEIVED REQUEST ===");
-                _logger.LogInformation("Title: {Title}", LogRedaction.SanitizeText(request.SearchResult?.Title));
-                _logger.LogInformation("DownloadType: '{DownloadType}'", LogRedaction.SanitizeText(request.SearchResult?.DownloadType));
-                _logger.LogInformation("TorrentUrl: {TorrentUrl}", LogRedaction.SanitizeUrl(request.SearchResult?.TorrentUrl));
-                _logger.LogInformation("NzbUrl: {NzbUrl}", LogRedaction.SanitizeUrl(request.SearchResult?.NzbUrl));
-                _logger.LogInformation("MagnetLink: {MagnetLink}", LogRedaction.SanitizeUrl(request.SearchResult?.MagnetLink));
-                _logger.LogInformation("Source: {Source}", LogRedaction.SanitizeText(request.SearchResult?.Source));
-                _logger.LogInformation("==========================================");
-
-                if (request.SearchResult == null)
+                if (_downloadReferenceService == null)
                 {
-                    return BadRequest(new { message = "SearchResult is required" });
+                    return StatusCode(
+                        StatusCodes.Status503ServiceUnavailable,
+                        new { message = "Download reference service is unavailable" });
                 }
 
+                var candidate = _downloadReferenceService.Read(request.DownloadReference);
+                _logger.LogInformation("Title: {Title}", LogRedaction.SanitizeText(candidate.Title));
+                _logger.LogInformation("Protocol: {Protocol}", candidate.SourceDescriptor.Protocol);
+                _logger.LogInformation("Source: {Source}", LogRedaction.SanitizeText(candidate.Source));
+
                 var downloadId = await _downloadService.SendToDownloadClientAsync(
-                    request.SearchResult,
+                    candidate,
                     request.DownloadClientId,
                     request.AudiobookId
                 );
@@ -99,6 +103,22 @@ namespace Listenarr.Api.Controllers
                 }
 
                 return Ok(new { downloadId, message = "Sent to download client successfully" });
+            }
+            catch (DownloadReferenceException ex)
+            {
+                _logger.LogWarning("Rejected download reference: {Message}", ex.Message);
+                return StatusCode(
+                    ex.IsExpired ? StatusCodes.Status410Gone : StatusCodes.Status400BadRequest,
+                    new { message = "Unable to use download reference", error = ex.Message });
+            }
+            catch (DownloadClientSubmissionException ex)
+            {
+                _logger.LogWarning(ex, "Download client submission failed");
+                return StatusCode(StatusCodes.Status502BadGateway, new
+                {
+                    message = "Failed to send torrent to download client",
+                    error = ex.Message
+                });
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
@@ -324,7 +344,7 @@ namespace Listenarr.Api.Controllers
 
     public class SendDownloadRequest
     {
-        public SearchResult SearchResult { get; set; } = new();
+        public string DownloadReference { get; set; } = string.Empty;
         public string? DownloadClientId { get; set; }
         public int? AudiobookId { get; set; }
     }

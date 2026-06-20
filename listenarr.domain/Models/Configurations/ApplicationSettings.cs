@@ -106,6 +106,9 @@ namespace Listenarr.Domain.Models.Configurations
         // Whether to show completed downloads from external clients in the Activity view
         public bool ShowCompletedExternalDownloads { get; set; } = false;
 
+        // Number of days to retain action history. Zero keeps history indefinitely.
+        public int HistoryRetentionDays { get; set; } = 0;
+
         // Failed download handling settings
         public bool FailedDownloadHandlingEnabled { get; set; } = true;
         public bool FailedDownloadAutoSearch { get; set; } = false;

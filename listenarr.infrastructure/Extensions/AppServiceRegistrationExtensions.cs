@@ -54,6 +54,7 @@ namespace Listenarr.Infrastructure.Extensions
             services.AddScoped<IIndexerSearchProvider, InternetArchiveSearchProvider>();
             services.AddScoped<IIndexerSearchProvider, TorznabNewznabSearchProvider>();
             services.AddScoped<IIndexerSearchProvider, MyAnonamouseSearchProvider>();
+            services.AddScoped<IMyAnonamouseConnectionTester, MyAnonamouseConnectionTester>();
 
             services.AddScoped<IndexerAdditionalSettingsParser>();
             services.AddScoped<IndexerSearchWorkflow>();
@@ -95,6 +96,7 @@ namespace Listenarr.Infrastructure.Extensions
             services.AddScoped<DownloadTypeResolver>();
             services.AddScoped<DownloadClientSelector>();
             services.AddScoped<DownloadCachedTorrentStore>();
+            services.AddSingleton<IDownloadReferenceService, DownloadReferenceService>();
             services.AddScoped<DirectDownloadWorkflow>();
             services.AddScoped<DownloadRemovalWorkflow>();
             services.AddScoped<DownloadQueueCandidateLoader>();

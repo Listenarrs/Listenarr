@@ -51,8 +51,8 @@ namespace Listenarr.Tests.Features.Application.Downloads
         {
             var gatewayMock = new Mock<IDownloadClientGateway>();
             gatewayMock
-                .Setup(g => g.AddAsync(_client, It.IsAny<SearchResult>(), It.IsAny<System.Threading.CancellationToken>()))
-                .ReturnsAsync((string?)null);
+                .Setup(g => g.AddAsync(It.IsAny<DownloadClientConfiguration>(), It.IsAny<PreparedDownloadSubmission>(), It.IsAny<System.Threading.CancellationToken>()))
+                .ReturnsAsync(new DownloadClientSubmissionResult("ABCDEF1234567890ABCDEF1234567890ABCDEF12"));
             _services.AddSingleton(gatewayMock.Object);
 
             var queueServiceMock = new Mock<IDownloadQueueService>();
@@ -94,12 +94,51 @@ namespace Listenarr.Tests.Features.Application.Downloads
         }
 
         [Fact]
+        public async Task SendToDownloadClientAsync_WhenClientSubmissionFails_RemovesProvisionalDownloadAndDoesNotRecordGrab()
+        {
+            var gatewayMock = new Mock<IDownloadClientGateway>(MockBehavior.Strict);
+            gatewayMock
+                .Setup(g => g.AddAsync(
+                    It.Is<DownloadClientConfiguration>(client => client.Id == "qb-1"),
+                    It.IsAny<PreparedDownloadSubmission>(),
+                    It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new DownloadClientSubmissionException("Unable to obtain a verified hash from the torrent metadata."));
+
+            var historyMock = new Mock<IDownloadHistoryService>(MockBehavior.Strict);
+            var notificationMock = new Mock<INotificationService>(MockBehavior.Strict);
+            _services.AddSingleton(gatewayMock.Object);
+            _services.AddSingleton(historyMock.Object);
+            _services.AddSingleton(notificationMock.Object);
+
+            Init();
+            await InitData();
+            var initialDownloadCount = (await _downloadRepository.GetAllAsync()).Count;
+            var downloadService = _provider.GetRequiredService<DownloadService>();
+            var searchResult = new SearchResult
+            {
+                Title = "Artemis",
+                Artist = "Andy Weir",
+                DownloadType = "Torrent",
+                MagnetLink = "magnet:?xt=urn:btih:ABCDEF1234567890ABCDEF1234567890ABCDEF12",
+                Size = 123456789
+            };
+
+            await Assert.ThrowsAsync<DownloadClientSubmissionException>(
+                () => downloadService.SendToDownloadClientAsync(searchResult, _client.Id));
+
+            Assert.Equal(initialDownloadCount, (await _downloadRepository.GetAllAsync()).Count);
+            gatewayMock.VerifyAll();
+            historyMock.VerifyNoOtherCalls();
+            notificationMock.VerifyNoOtherCalls();
+        }
+
+        [Fact]
         public async Task SendToDownloadClientAsync_DerivesTorrent_WhenRequestSpoofsDdl()
         {
             var gatewayMock = new Mock<IDownloadClientGateway>();
             gatewayMock
-                .Setup(g => g.AddAsync(_client, It.IsAny<SearchResult>(), It.IsAny<System.Threading.CancellationToken>()))
-                .ReturnsAsync("client-download-123");
+                .Setup(g => g.AddAsync(It.IsAny<DownloadClientConfiguration>(), It.IsAny<PreparedDownloadSubmission>(), It.IsAny<System.Threading.CancellationToken>()))
+                .ReturnsAsync(new DownloadClientSubmissionResult("client-download-123"));
             _services.AddSingleton(gatewayMock.Object);
 
             Init();
@@ -125,7 +164,7 @@ namespace Listenarr.Tests.Features.Application.Downloads
             gatewayMock.Verify(
                 g => g.AddAsync(
                     _client,
-                    It.Is<SearchResult>(r => r.DownloadType == "Torrent" && r.MagnetLink.Contains("magnet:?xt=urn:btih:", StringComparison.OrdinalIgnoreCase)),
+                    It.Is<PreparedDownloadSubmission>(submission => submission is PreparedTorrentSubmission),
                     It.IsAny<CancellationToken>()),
                 Times.Once);
         }
@@ -155,8 +194,9 @@ namespace Listenarr.Tests.Features.Application.Downloads
             {
                 Title = "Artemis",
                 Artist = "Andy Weir",
-                DownloadType = "Torrent",
+                DownloadType = "DDL",
                 IndexerId = 42,
+                IndexerImplementation = "InternetArchive",
                 TorrentUrl = "https://archive.org/download/artemis_book/artemis.m4b",
                 Size = 123456789,
                 Source = "Internet Archive"
@@ -169,7 +209,7 @@ namespace Listenarr.Tests.Features.Application.Downloads
             Assert.Equal("DDL", persisted!.DownloadClientId);
             Assert.Equal("DDL", persisted.Metadata["DownloadType"]?.ToString());
             gatewayMock.Verify(
-                g => g.AddAsync(It.IsAny<DownloadClientConfiguration>(), It.IsAny<SearchResult>(), It.IsAny<System.Threading.CancellationToken>()),
+                g => g.AddAsync(It.IsAny<DownloadClientConfiguration>(), It.IsAny<PreparedDownloadSubmission>(), It.IsAny<System.Threading.CancellationToken>()),
                 Times.Never);
         }
 

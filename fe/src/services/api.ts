@@ -751,12 +751,22 @@ class ApiService {
     downloadId: string
     message: string
   }> {
+    if (!searchResult.downloadReference) {
+      throw new Error(
+        'This search result has expired or is not downloadable. Run the search again.',
+      )
+    }
+
     return this.request<{
       downloadId: string
       message: string
     }>('/download/send', {
       method: 'POST',
-      body: JSON.stringify({ searchResult, downloadClientId, audiobookId }),
+      body: JSON.stringify({
+        downloadReference: searchResult.downloadReference,
+        downloadClientId,
+        audiobookId,
+      }),
     })
   }
 
