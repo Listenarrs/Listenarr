@@ -15,7 +15,6 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Listenarr.Application.Common;
 using Listenarr.Domain.Common;
 using Microsoft.Extensions.Logging;
 
@@ -28,11 +27,10 @@ namespace Listenarr.Application.Downloads.Import
         IAudiobookFileService audiobookFileService,
         IArchiveExtractor archiveExtractor,
         IConfigurationService configurationService,
-        IFileSystem fileSystem,
+        ImportDestinationPlanner destinationPlanner,
+        ArchiveImportExtractor archiveImportExtractor,
         ILogger<DownloadImportService> logger) : IDownloadImportService
     {
-        private List<TempDirectory> archiveDirectories = [];
-
         public async Task<List<ImportResult>> ImportDownloadFilesAsync(Audiobook audiobook, List<string> files, CancellationToken ct = default)
         {
             if (string.IsNullOrEmpty(audiobook.BasePath))
@@ -57,7 +55,7 @@ namespace Listenarr.Application.Downloads.Import
                     // Remove archives from the files to import
                     files = [.. files.Where(file => !archives.Contains(file))];
 
-                    files.AddRange(await ExtractArchives(archives));
+                    files.AddRange(await archiveImportExtractor.ExtractAsync(archives));
 
                     // We cannot hardlink to temporary files
                     if (archives.Count > 0 && completedFileAction == FileAction.HardlinkCopy)
@@ -111,10 +109,10 @@ namespace Listenarr.Application.Downloads.Import
                                 else if (kb >= 192) q = "MP3 192kbps";
                                 else if (kb >= 128) q = "MP3 128kbps";
                             }
-                            if (string.IsNullOrEmpty(q) && !string.IsNullOrEmpty(f.Path)) q = DetermineQualityFromMetadata(null, f.Path);
+                            if (string.IsNullOrEmpty(q) && !string.IsNullOrEmpty(f.Path)) q = ImportQualityEvaluator.Determine(null, f.Path);
 
                             if (string.IsNullOrEmpty(bestExisting)) bestExisting = q;
-                            else if (!string.IsNullOrEmpty(q) && !string.IsNullOrEmpty(bestExisting) && abProfile != null && IsQualityBetter(q, bestExisting, abProfile))
+                            else if (!string.IsNullOrEmpty(q) && !string.IsNullOrEmpty(bestExisting) && abProfile != null && ImportQualityEvaluator.IsAcceptable(q, bestExisting, abProfile))
                             {
                                 bestExisting = q;
                             }
@@ -144,7 +142,7 @@ namespace Listenarr.Application.Downloads.Import
                                     ? Path.GetRelativePath(sourceRootPath, file)
                                     : Path.GetFileName(file);
 
-                                if (!TryResolveImportDestination(audiobook.BasePath, relativePath, out var destination))
+                                if (!destinationPlanner.TryResolve(audiobook.BasePath, relativePath, out var destination))
                                 {
                                     results.Add(ImportResult.ImportFailure(completedFileAction, file, audiobook.BasePath));
                                     logger.LogWarning(
@@ -156,7 +154,7 @@ namespace Listenarr.Application.Downloads.Import
                                     continue;
                                 }
 
-                                destination = await ResolveIdempotentOrUniqueDestinationAsync(file, destination, usedDestinations);
+                                destination = await destinationPlanner.ResolveIdempotentOrUniqueAsync(file, destination, usedDestinations);
 
                                 if (!await fileMover.PerformActionOn(completedFileAction, file, destination))
                                 {
@@ -186,11 +184,11 @@ namespace Listenarr.Application.Downloads.Import
                                 candidateMetadata = await metadataService.ExtractFileMetadataAsync(file);
                             }
 
-                            var candidateQuality = DetermineQualityFromMetadata(candidateMetadata, file);
+                            var candidateQuality = ImportQualityEvaluator.Determine(candidateMetadata, file);
 
                             try
                             {
-                                if (audiobook.Files != null && audiobook.Files.Count != 0 && !IsQualityBetter(candidateQuality, bestExisting, abProfile))
+                                if (audiobook.Files != null && audiobook.Files.Count != 0 && !ImportQualityEvaluator.IsAcceptable(candidateQuality, bestExisting, abProfile))
                                 {
                                     results.Add(ImportResult.Skipped($"candidate quality '{candidateQuality}' is not better than existing '{bestExisting}'"));
                                     logger.LogInformation($"Skipping import of file {file} for audiobook {audiobook.Id} because candidate quality '{candidateQuality}' is not better than existing '{bestExisting}'");
@@ -238,7 +236,7 @@ namespace Listenarr.Application.Downloads.Import
                             var folderRelative = fileNamingService.ApplyNamingPattern(folderPattern, variablesForFile, treatAsFilename: false);
                             if (string.IsNullOrEmpty(audiobook.BasePath) && !string.IsNullOrWhiteSpace(folderRelative))
                             {
-                                if (!TryResolveImportDestination(destDirForFile, folderRelative, out destDirForFile))
+                                if (!destinationPlanner.TryResolve(destDirForFile, folderRelative, out destDirForFile))
                                 {
                                     results.Add(ImportResult.ImportFailure(completedFileAction, file, audiobook.BasePath));
                                     logger.LogWarning(
@@ -286,7 +284,7 @@ namespace Listenarr.Application.Downloads.Import
                                 }
                             }
 
-                            if (!TryResolveImportDestination(destDirForFile, filename, out var destination))
+                            if (!destinationPlanner.TryResolve(destDirForFile, filename, out var destination))
                             {
                                 results.Add(ImportResult.ImportFailure(completedFileAction, file, destDirForFile));
                                 logger.LogWarning(
@@ -298,9 +296,9 @@ namespace Listenarr.Application.Downloads.Import
                                 continue;
                             }
 
-                            destination = await ResolveIdempotentOrUniqueDestinationAsync(file, destination, usedDestinations);
-                            var destinationAlreadyMatchedSource = fileSystem.FileExists(destination)
-                                && await fileSystem.FilesHaveSameContentAsync(file, destination, ct);
+                            destination = await destinationPlanner.ResolveIdempotentOrUniqueAsync(file, destination, usedDestinations);
+                            var destinationAlreadyMatchedSource =
+                                await destinationPlanner.IsExistingEquivalentAsync(file, destination, ct);
 
                             if (!(destinationAlreadyMatchedSource && completedFileAction != FileAction.Move)
                                 && !await fileMover.PerformActionOn(completedFileAction, file, destination))
@@ -339,7 +337,7 @@ namespace Listenarr.Application.Downloads.Import
             }
             finally
             {
-                await DisposeOfExtractedFiles();
+                archiveImportExtractor.DisposeTemporaryDirectories();
             }
         }
 
@@ -450,110 +448,6 @@ namespace Listenarr.Application.Downloads.Import
             return trimmedCandidate;
         }
 
-        private static bool TryResolveImportDestination(string? basePath, string candidatePath, out string destination)
-        {
-            destination = string.Empty;
-
-            if (string.IsNullOrWhiteSpace(basePath) || string.IsNullOrWhiteSpace(candidatePath))
-            {
-                return false;
-            }
-
-            return FileUtils.TryResolveRelativePathWithinBase(basePath, candidatePath.Trim(), out destination);
-        }
-
-        private async Task<string> ResolveIdempotentOrUniqueDestinationAsync(
-            string sourcePath,
-            string destination,
-            ISet<string> usedDestinations)
-        {
-            if (fileSystem.FileExists(destination)
-                && await fileSystem.FilesHaveSameContentAsync(sourcePath, destination))
-            {
-                usedDestinations.Add(destination);
-                return destination;
-            }
-
-            var uniqueDestination = FileUtils.GetUniqueDestinationPath(destination, fileSystem.FileExists, usedDestinations);
-            usedDestinations.Add(uniqueDestination);
-            return uniqueDestination;
-        }
-
-        // Local helpers - aligned with DownloadService helper behavior
-        private static string DetermineQualityFromMetadata(AudioMetadata? metadata, string path)
-        {
-            if (metadata != null)
-            {
-                if (!string.IsNullOrEmpty(metadata.Format)) return metadata.Format;
-                if (metadata.BitRate.HasValue) return (metadata.BitRate.Value / 1000) + "kbps";
-            }
-
-            // Best-effort from filename (bitrate patterns)
-            var name = Path.GetFileName(path) ?? string.Empty;
-            if (name.IndexOf("320", StringComparison.OrdinalIgnoreCase) >= 0) return "MP3 320kbps";
-            if (name.IndexOf("256", StringComparison.OrdinalIgnoreCase) >= 0) return "MP3 256kbps";
-            if (name.IndexOf("192", StringComparison.OrdinalIgnoreCase) >= 0) return "MP3 192kbps";
-            if (name.IndexOf("128", StringComparison.OrdinalIgnoreCase) >= 0) return "MP3 128kbps";
-
-            // Fallback: determine format from file extension
-            var ext = Path.GetExtension(path);
-            if (!string.IsNullOrEmpty(ext))
-            {
-                switch (ext.TrimStart('.').ToUpperInvariant())
-                {
-                    case "M4B": return "M4B";
-                    case "M4A": return "M4A";
-                    case "MP3": return "MP3";
-                    case "FLAC": return "FLAC";
-                    case "OGG": return "OGG";
-                    case "OPUS": return "OPUS";
-                    case "WMA": return "WMA";
-                    case "AAC": return "AAC";
-                    case "WV": return "WV";
-                    default: break;
-                }
-            }
-
-            return string.Empty;
-        }
-
-        /// <summary>
-        /// Returns true if the candidate quality is acceptable (not a confirmed downgrade).
-        /// Only blocks import when both qualities have numeric bitrates and the candidate is strictly lower.
-        /// Same quality, unknown quality, or non-comparable formats are all allowed.
-        /// </summary>
-        private static bool IsQualityBetter(string? candidate, string? existing, QualityProfile? profile)
-        {
-            // When candidate or existing quality is unknown, allow the import rather than blocking
-            if (string.IsNullOrWhiteSpace(candidate) || string.IsNullOrWhiteSpace(existing) || profile == null) return true;
-
-            // Extract numeric bitrate if present.
-            // Look for groups of 2+ consecutive digits to avoid picking up single
-            // digits embedded in format names (e.g. "4" from M4B, "3" from MP3).
-            bool TryParse(string q, out int kb)
-            {
-                kb = 0;
-                var match = System.Text.RegularExpressions.Regex.Match(q, @"\d{2,}");
-                if (match.Success && int.TryParse(match.Value, out var d))
-                {
-                    kb = d;
-                    return true;
-                }
-                return false;
-            }
-
-            // When both have numeric bitrates, only block if candidate is strictly lower
-            if (TryParse(candidate, out var candKb) && TryParse(existing, out var exKb))
-            {
-                return candKb >= exKb;
-            }
-
-            // For non-numeric formats (M4B, FLAC, etc.): allow the import.
-            // Same format is a reimport (not a downgrade), and we can't reliably
-            // rank different format names against each other.
-            return true;
-        }
-
         private static string FirstNonEmpty(params string?[] candidates)
         {
             foreach (var candidate in candidates.Where(candidate => !string.IsNullOrWhiteSpace(candidate)))
@@ -564,52 +458,5 @@ namespace Listenarr.Application.Downloads.Import
             return string.Empty;
         }
 
-        /// <summary>
-        /// Given a list of archives, extracts the files and give a list of extracted files
-        /// </summary>
-        /// <param name="archives">List of archives to extract</param>
-        /// <returns>List of all files from all extracted archives</returns>
-        /// <exception cref="IOException">Thrown if we are unable to process one archive</exception>
-        private async Task<List<string>> ExtractArchives(List<string> archives)
-        {
-            List<string> files = [];
-
-            foreach (var archive in archives)
-            {
-                try
-                {
-                    var archiveDirectory = await archiveExtractor.ExtractArchiveToTempDirAsync(archive);
-                    if (archiveDirectory != null)
-                    {
-                        // Store the disposable directory
-                        archiveDirectories.Add(archiveDirectory);
-
-                        var tempDirExtracted = archiveDirectory.Path;
-                        var extractedFiles = fileSystem.GetFiles(tempDirExtracted, "*", SearchOption.AllDirectories);
-                        if (extractedFiles != null)
-                        {
-                            files.AddRange([.. extractedFiles.Select(file => FileUtils.NormalizeStoredPath(file))]);
-                        }
-                    }
-                }
-                catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
-                {
-                    throw new IOException($"Unable to extract {archive}");
-                }
-            }
-
-            return files;
-        }
-
-        /// <summary>
-        /// Removes temporary files created while extracting files
-        /// </summary>
-        private async Task DisposeOfExtractedFiles()
-        {
-            foreach (var directory in archiveDirectories)
-            {
-                directory.Dispose();
-            }
-        }
     }
 }

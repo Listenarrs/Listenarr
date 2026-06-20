@@ -96,6 +96,8 @@ namespace Listenarr.Infrastructure.DependencyInjection
             services.AddScoped<IOpenLibraryService, OpenLibraryService>();
             services.AddScoped<IFileNamingService, FileNamingService>();
             services.AddScoped<IRenameService, RenameService>();
+            services.AddScoped<ImportDestinationPlanner>();
+            services.AddScoped<ArchiveImportExtractor>();
             // Centralized import service: handles moving/copying, naming and audiobook registration
             services.AddScoped<IDownloadImportService, DownloadImportService>();
             // Centralized file mover for robust move/copy with retries and diagnostics
