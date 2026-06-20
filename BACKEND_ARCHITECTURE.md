@@ -7,6 +7,29 @@ Listenarr is moving toward a layered backend where each project has a clear job:
 - `listenarr.infrastructure` owns concrete adapters for technical concerns: EF Core and SQLite persistence, filesystem work, external HTTP clients, metadata/tagging libraries, HTML scraping/parsing, image inspection, cache implementations, SignalR infrastructure, and downloader integrations.
 - `listenarr.api` is the composition and hosting layer. It wires dependency injection, controllers, middleware, Swagger/OpenAPI, auth policy, and request pipeline behavior.
 
+## Vertical Feature Structure
+
+Active backend code is organized first by feature ownership and then by technical role:
+
+```text
+listenarr.domain/<Feature>/
+listenarr.application/<Feature>/{Contracts,Models,Services}/
+listenarr.infrastructure/<Feature>/{Persistence,Providers,Workers}/
+listenarr.api/Features/<Feature>/{Controllers,Models,Mapping}/
+tests/Features/<Layer>/<Feature>/
+```
+
+The primary feature groups are Library, Downloads, DownloadClients, Search, Metadata,
+History, Notifications, Images, Configuration, Identity, Security, and System.
+Cross-cutting technical infrastructure is limited to Persistence, Platform, Realtime,
+BackgroundJobs, and DependencyInjection.
+
+Namespaces must follow physical folders for active code. EF migrations are immutable
+historical artifacts and remain under `Listenarr.Infrastructure.Persistence.Migrations`.
+Controllers own HTTP concerns only; reusable workflows belong to application services,
+while filesystem, network, persistence, process, and provider implementations belong to
+infrastructure.
+
 ## Current Decision
 
 The diagram describes the intended boundary: application is business/use-case logic and infrastructure is persistence, files, and external adapters. The codebase is still in transition, but implementation-specific packages should be kept out of `listenarr.application` unless there is a documented reason to do otherwise.

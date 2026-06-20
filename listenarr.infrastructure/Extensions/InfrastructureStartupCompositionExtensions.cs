@@ -99,10 +99,6 @@ public static class InfrastructureStartupCompositionExtensions
     private static IServiceCollection AddListenarrExternalRequests(this IServiceCollection services, IConfiguration configuration)
     {
         services.Configure<ExternalRequestOptions>(configuration.GetSection("ExternalRequests"));
-        services.AddHttpClient("us").ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
-        {
-            AutomaticDecompression = System.Net.DecompressionMethods.All
-        });
 
         return services;
     }

@@ -19,7 +19,6 @@
 using Listenarr.Application.Common;
 using Listenarr.Application.Downloads;
 using Listenarr.Application.Interfaces;
-using Listenarr.Application.Metadata;
 using Listenarr.Application.Notification;
 using Listenarr.Application.Search;
 using Listenarr.Application.Search.Filters;
@@ -34,18 +33,6 @@ public static class ListenarrWorkflowRegistration
         services.AddScoped<IRootFolderService, RootFolderService>();
         services.AddScoped<ILegacyOutputPathMigrator, LegacyOutputPathMigrator>();
         services.AddMemoryCache();
-
-        services.AddHttpClient<AudibleService>()
-            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
-            {
-                AutomaticDecompression = System.Net.DecompressionMethods.All
-            });
-
-        services.AddHttpClient<IAudnexusService, AudnexusService>()
-            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
-            {
-                AutomaticDecompression = System.Net.DecompressionMethods.All
-            });
 
         services.AddListenarrMetadataWorkflows();
         services.AddListenarrSearchWorkflows();
