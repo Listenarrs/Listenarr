@@ -61,5 +61,27 @@ namespace Listenarr.Tests.Common
 
             return Path.Combine(folder, filename);
         }
+
+        public static string GetTorrentDataPath(string filename)
+        {
+            var directory = new DirectoryInfo(AppContext.BaseDirectory);
+            while (directory != null)
+            {
+                if (File.Exists(Path.Join(directory.FullName, "listenarr.slnx")))
+                {
+                    return Path.Join(
+                        directory.FullName,
+                        "tests",
+                        "Data",
+                        "Infrastructure",
+                        "Torrents",
+                        filename);
+                }
+
+                directory = directory.Parent;
+            }
+
+            throw new DirectoryNotFoundException($"Unable to locate repository root from {AppContext.BaseDirectory}");
+        }
     }
 }

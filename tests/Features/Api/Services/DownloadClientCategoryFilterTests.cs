@@ -18,7 +18,7 @@
 using System.Net;
 using System.Text;
 using Listenarr.Application.Downloads;
-using Listenarr.Infrastructure.Adapters;
+
 using Listenarr.Infrastructure.Torrents;
 using Listenarr.Tests.Common;
 using Microsoft.Extensions.Logging.Abstractions;

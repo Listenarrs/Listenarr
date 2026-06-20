@@ -19,7 +19,7 @@
 using System.Net;
 using Listenarr.Application.Interfaces;
 using Listenarr.Infrastructure.Factories;
-using Listenarr.Infrastructure.Adapters;
+
 using Listenarr.Domain.Models.Configurations;
 using Listenarr.Application.Notification;
 using Listenarr.Infrastructure.FileSystem;
@@ -163,7 +163,7 @@ namespace Listenarr.Infrastructure.Extensions
                 .ConfigurePrimaryHttpMessageHandler(() => CreateExternalHandler(config))
                 .AddPolicyHandler(retryPolicy);
 
-            services.AddHttpClient<AudnexusService>()
+            services.AddHttpClient<IAudnexusService, AudnexusService>()
                 .ConfigurePrimaryHttpMessageHandler(() => CreateExternalHandler(config))
                 .AddPolicyHandler(retryPolicy);
 

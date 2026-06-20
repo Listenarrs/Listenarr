@@ -3,7 +3,7 @@ using System.Text;
 using Listenarr.Api.Controllers;
 using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Domain.Models.Enumerations;
-using Listenarr.Infrastructure.Adapters;
+
 using Listenarr.Infrastructure.Search.Providers;
 using Listenarr.Infrastructure.Torrents;
 using Listenarr.Tests.Builders;

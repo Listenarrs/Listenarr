@@ -13,3 +13,8 @@ global using Listenarr.Infrastructure.HostedServices.Common;
 global using Listenarr.Infrastructure.HostedServices.Downloads;
 global using Listenarr.Infrastructure.HostedServices.Metadata;
 global using Listenarr.Infrastructure.HostedServices.Search;
+global using Listenarr.Infrastructure.DownloadClients.Common;
+global using Listenarr.Infrastructure.DownloadClients.Nzbget;
+global using Listenarr.Infrastructure.DownloadClients.Qbittorrent;
+global using Listenarr.Infrastructure.DownloadClients.Sabnzbd;
+global using Listenarr.Infrastructure.DownloadClients.Transmission;

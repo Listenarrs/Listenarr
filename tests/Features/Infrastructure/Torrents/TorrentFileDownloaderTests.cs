@@ -166,10 +166,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Torrents
                 delay ?? ((_, _) => Task.CompletedTask));
         }
 
-        private static string GetTorrentDataPath([System.Runtime.CompilerServices.CallerFilePath] string callerPath = "")
-        {
-            var torrentsDataDirectory = Path.GetDirectoryName(TestUtils.GetDataPath("placeholder", callerPath))!;
-            return Path.GetFullPath(Path.Combine(torrentsDataDirectory, "..", "Adapters", "big-buck-bunny.torrent"));
-        }
+        private static string GetTorrentDataPath() =>
+            TestUtils.GetTorrentDataPath("big-buck-bunny.torrent");
     }
 }
