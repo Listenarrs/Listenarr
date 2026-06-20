@@ -18,7 +18,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Listenarr.Application.Interfaces;
-using Listenarr.Application.Security;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.Notifications.Discord

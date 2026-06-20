@@ -22,3 +22,5 @@ global using Listenarr.Application.Search.Metadata;
 global using Listenarr.Application.Search.Models;
 global using Listenarr.Application.Search.Parsing;
 global using Listenarr.Application.Search.Scoring;
+global using Listenarr.Application.Security.Outbound;
+global using Listenarr.Application.Security.Redaction;

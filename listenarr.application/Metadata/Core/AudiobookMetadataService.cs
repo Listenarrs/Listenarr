@@ -16,7 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Listenarr.Application.Interfaces;
-using Listenarr.Application.Security;
 using Listenarr.Domain.Models.Configurations;
 using Microsoft.Extensions.Logging;
 

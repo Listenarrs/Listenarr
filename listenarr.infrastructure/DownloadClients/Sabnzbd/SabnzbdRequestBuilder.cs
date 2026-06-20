@@ -8,7 +8,6 @@
  * (at your option) any later version.
  */
 
-using Listenarr.Application.Security;
 using Listenarr.Domain.Models;
 
 namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd

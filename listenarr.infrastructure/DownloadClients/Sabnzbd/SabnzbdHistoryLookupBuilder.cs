@@ -9,7 +9,6 @@
  */
 
 using System.Text.Json;
-using Listenarr.Application.Security;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd

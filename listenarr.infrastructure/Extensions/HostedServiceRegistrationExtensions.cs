@@ -17,7 +17,6 @@
  */
 // csharp
 using Listenarr.Application.Interfaces;
-using Listenarr.Infrastructure.Ffmpeg;
 using Listenarr.Infrastructure.HostedServices;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;

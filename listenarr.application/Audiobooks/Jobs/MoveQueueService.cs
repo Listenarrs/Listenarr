@@ -19,7 +19,6 @@ using System.Collections.Concurrent;
 using System.Threading.Channels;
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Interfaces.Repositories;
-using Listenarr.Application.Security;
 using Listenarr.Domain.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;

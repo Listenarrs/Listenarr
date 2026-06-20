@@ -18,7 +18,6 @@
 using System.Globalization;
 using System.Text.Json;
 using Listenarr.Application.Interfaces;
-using Listenarr.Application.Security;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 

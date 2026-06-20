@@ -19,7 +19,6 @@ using Listenarr.Application.Interfaces;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
-using Listenarr.Application.Security;
 
 namespace Listenarr.Infrastructure.Metadata.Providers.OpenLibrary
 {

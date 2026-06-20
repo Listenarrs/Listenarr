@@ -16,7 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using Listenarr.Application.Security;
 using Listenarr.Domain.Common;
 using Microsoft.AspNetCore.Mvc;
 using System.Runtime.InteropServices;

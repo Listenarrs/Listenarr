@@ -1,5 +1,4 @@
 using Listenarr.Application.Interfaces.Repositories;
-using Listenarr.Infrastructure.Ffmpeg;
 using Listenarr.Tests.Common;
 using Microsoft.AspNetCore.SignalR;
 

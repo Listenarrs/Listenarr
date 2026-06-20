@@ -8,7 +8,6 @@
  * (at your option) any later version.
  */
 
-using Listenarr.Infrastructure.Security;
 using Listenarr.Tests.Common;
 using Microsoft.AspNetCore.DataProtection;
 

@@ -9,7 +9,6 @@
  */
 
 using Listenarr.Application.Interfaces;
-using Listenarr.Application.Security;
 
 namespace Listenarr.Api.Controllers
 {

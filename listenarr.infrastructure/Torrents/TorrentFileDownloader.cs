@@ -17,7 +17,6 @@
  */
 using System.Net;
 using System.Net.Http.Headers;
-using Listenarr.Application.Security;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.Torrents

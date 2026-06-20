@@ -17,7 +17,6 @@
  */
 using System.Net;
 using System.Net.Sockets;
-using Listenarr.Application.Security;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.Images.Cache

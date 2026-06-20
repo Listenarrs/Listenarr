@@ -19,7 +19,7 @@ public static class HttpSecurityRequestUtils
             return true;
         }
 
-        return Listenarr.Application.Security.SecurityRequestUtils.IsLoopback(ip);
+        return SecurityRequestUtils.IsLoopback(ip);
     }
 
     public static bool IsLocalOrPrivateRequest(HttpContext? context)
@@ -30,7 +30,7 @@ public static class HttpSecurityRequestUtils
             return true;
         }
 
-        return Listenarr.Application.Security.SecurityRequestUtils.IsPrivateOrLoopback(ip);
+        return SecurityRequestUtils.IsPrivateOrLoopback(ip);
     }
 
     public static bool IsAuthenticatedAdminOrApiKey(HttpContext? context)

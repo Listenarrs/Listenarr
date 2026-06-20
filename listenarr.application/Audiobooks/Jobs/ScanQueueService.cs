@@ -18,7 +18,6 @@
 using System.Collections.Concurrent;
 using System.Threading.Channels;
 using Listenarr.Application.Interfaces;
-using Listenarr.Application.Security;
 using Listenarr.Domain.Models;
 using Microsoft.Extensions.Logging;
 

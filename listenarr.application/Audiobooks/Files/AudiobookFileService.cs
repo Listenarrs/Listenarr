@@ -23,7 +23,6 @@ using Listenarr.Application.Interfaces;
 using Listenarr.Application.Interfaces.Repositories;
 using Microsoft.Extensions.Logging;
 using Listenarr.Domain.Models;
-using Listenarr.Application.Security;
 
 namespace Listenarr.Application.Audiobooks.Files
 {

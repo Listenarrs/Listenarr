@@ -21,7 +21,6 @@ using Listenarr.Domain.Models;
 using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Application.Common;
 using Microsoft.Extensions.Logging;
-using Listenarr.Application.Security;
 
 namespace Listenarr.Application.Downloads.Submission
 {

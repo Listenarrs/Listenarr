@@ -17,7 +17,6 @@
  */
 using Listenarr.Application.Common;
 using Listenarr.Application.Interfaces;
-using Listenarr.Application.Security;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Notifications.Payloads

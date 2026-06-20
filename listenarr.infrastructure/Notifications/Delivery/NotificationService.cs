@@ -20,7 +20,6 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Listenarr.Application.Interfaces;
-using Listenarr.Application.Security;
 using Listenarr.Domain.Models;
 using Microsoft.Extensions.Logging;
 

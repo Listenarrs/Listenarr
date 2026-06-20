@@ -10,7 +10,6 @@
 
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Interfaces.Repositories;
-using Listenarr.Application.Security;
 using Microsoft.AspNetCore.WebUtilities;
 
 namespace Listenarr.Infrastructure.Downloads.Submission;

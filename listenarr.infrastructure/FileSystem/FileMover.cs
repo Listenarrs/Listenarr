@@ -25,7 +25,6 @@ using Microsoft.Extensions.Logging;
 using Listenarr.Domain.Common;
 using Listenarr.Domain.Models.Configurations;
 using Listenarr.Domain.Models.Enumerations;
-using Listenarr.Application.Security;
 
 namespace Listenarr.Infrastructure.FileSystem
 {

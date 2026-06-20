@@ -20,7 +20,6 @@ using Microsoft.AspNetCore.Authorization;
 using Listenarr.Application.Interfaces;
 using Listenarr.Domain.Models;
 using Listenarr.Application.Interfaces.Repositories;
-using Listenarr.Application.Security;
 using Listenarr.Api.Attributes;
 
 namespace Listenarr.Api.Controllers

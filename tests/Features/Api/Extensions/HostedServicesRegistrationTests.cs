@@ -18,7 +18,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Listenarr.Infrastructure.Extensions;
-using Listenarr.Infrastructure.Ffmpeg;
 
 namespace Listenarr.Tests.Features.Api.Extensions
 {

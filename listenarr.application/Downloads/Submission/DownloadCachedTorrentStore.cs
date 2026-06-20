@@ -17,7 +17,6 @@
  */
 
 using Listenarr.Application.Common;
-using Listenarr.Application.Security;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 

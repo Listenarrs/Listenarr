@@ -22,7 +22,6 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using AsyncKeyedLock;
 using Microsoft.Extensions.Logging;
-using Listenarr.Application.Security;
 
 namespace Listenarr.Infrastructure.Search.Providers.MyAnonamouse
 {

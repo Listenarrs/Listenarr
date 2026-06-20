@@ -17,7 +17,6 @@
  */
 using System.Security.Claims;
 using Listenarr.Application.Interfaces;
-using Listenarr.Application.Security;
 
 namespace Listenarr.Api.Middleware
 {

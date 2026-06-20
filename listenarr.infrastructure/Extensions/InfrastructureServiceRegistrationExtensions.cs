@@ -21,9 +21,6 @@ using Listenarr.Application.Interfaces;
 using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Infrastructure.Persistence;
 using Listenarr.Infrastructure.Persistence.Repositories;
-using Listenarr.Infrastructure.Platform;
-using Listenarr.Infrastructure.Services;
-using Listenarr.Infrastructure.Security;
 
 namespace Listenarr.Infrastructure.Extensions
 {

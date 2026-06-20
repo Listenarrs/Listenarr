@@ -17,7 +17,6 @@
  */
 
 using Listenarr.Application.Interfaces.Repositories;
-using Listenarr.Application.Security;
 using Listenarr.Domain.Models;
 using Microsoft.Extensions.Logging;
 

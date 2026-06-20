@@ -8,7 +8,6 @@
  * (at your option) any later version.
  */
 
-using Listenarr.Application.Security;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Api.Controllers

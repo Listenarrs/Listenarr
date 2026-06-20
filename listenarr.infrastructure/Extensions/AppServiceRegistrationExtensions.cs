@@ -17,14 +17,9 @@
  */
 // csharp
 using Listenarr.Application.Interfaces;
-using Listenarr.Application.Security;
 using Listenarr.Domain.Models.Configurations;
-using Listenarr.Infrastructure.Ffmpeg;
 using Listenarr.Infrastructure.FileSystem;
 using Listenarr.Infrastructure.Persistence;
-using Listenarr.Infrastructure.Platform;
-using Listenarr.Infrastructure.Security;
-using Listenarr.Infrastructure.Services;
 using Listenarr.Infrastructure.Web;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;

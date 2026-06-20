@@ -19,7 +19,6 @@ using System.Globalization;
 using System.Net;
 using System.Text.Json;
 using Listenarr.Application.Interfaces;
-using Listenarr.Application.Security;
 using Listenarr.Domain.Models;
 using Microsoft.Extensions.Logging;
 

@@ -18,7 +18,6 @@
 
 using System.Globalization;
 using System.Text.Json;
-using Listenarr.Application.Security;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Metadata.Audible

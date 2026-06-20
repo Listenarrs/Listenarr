@@ -17,7 +17,6 @@
  */
 
 using Listenarr.Application.Interfaces;
-using Listenarr.Application.Security;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
 

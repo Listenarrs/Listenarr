@@ -17,7 +17,6 @@
  */
 // csharp
 using Listenarr.Application.Interfaces;
-using Listenarr.Application.Security;
 using Listenarr.Domain.Common;
 using Microsoft.Extensions.Logging;
 

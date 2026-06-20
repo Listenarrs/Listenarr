@@ -18,7 +18,6 @@
 
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Interfaces.Repositories;
-using Listenarr.Application.Security;
 using Listenarr.Domain.Models;
 using Listenarr.Domain.Models.Exceptions;
 using Microsoft.Extensions.DependencyInjection;

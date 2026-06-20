@@ -18,7 +18,6 @@
 
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Common;
-using Listenarr.Application.Security;
 using Listenarr.Domain.Models;
 using Microsoft.AspNetCore.Mvc;
 
