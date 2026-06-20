@@ -18,7 +18,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
-namespace Listenarr.Tests.Features.Api.Services
+namespace Listenarr.Tests.Features.Infrastructure.Notifications.Discord
 {
     public class DiscordBotServiceTests
     {

@@ -17,7 +17,7 @@
  */
 using System.Net;
 
-namespace Listenarr.Tests.Features.Api.Services
+namespace Listenarr.Tests.Features.Application.Notifications.Payloads
 {
     public class NotificationPayloadBuilderAdapterTests
     {

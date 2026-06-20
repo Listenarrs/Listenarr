@@ -18,7 +18,6 @@
 
 using Listenarr.Application.Common;
 using Listenarr.Application.Interfaces;
-using Listenarr.Application.Notification;
 using Listenarr.Application.Search.Filters;
 using Listenarr.Application.Search.Strategies;
 

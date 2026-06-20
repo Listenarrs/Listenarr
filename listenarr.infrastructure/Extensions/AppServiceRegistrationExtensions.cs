@@ -17,7 +17,6 @@
  */
 // csharp
 using Listenarr.Application.Interfaces;
-using Listenarr.Application.Notification;
 using Listenarr.Application.Security;
 using Listenarr.Domain.Models.Configurations;
 using Listenarr.Infrastructure.Ffmpeg;

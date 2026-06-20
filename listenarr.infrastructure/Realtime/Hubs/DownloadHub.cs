@@ -20,7 +20,7 @@ using Listenarr.Application.Interfaces;
 using Listenarr.Domain.Models;
 using Microsoft.Extensions.Logging;
 
-namespace Listenarr.Infrastructure.SignalR
+namespace Listenarr.Infrastructure.Realtime.Hubs
 {
     /// <summary>
     /// SignalR hub for real-time download progress updates

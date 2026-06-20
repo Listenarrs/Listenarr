@@ -20,9 +20,9 @@ using Listenarr.Application.Interfaces;
 using Listenarr.Application.Security;
 using Microsoft.Extensions.Logging;
 
-namespace Listenarr.Application.Notification
+namespace Listenarr.Application.Notifications.Payloads
 {
-    internal static class NotificationPayloadContextResolver
+    public static class NotificationPayloadContextResolver
     {
         public static async Task<NotificationPayloadContext> ResolveAsync(
             IConfigurationService configurationService,
@@ -52,5 +52,5 @@ namespace Listenarr.Application.Notification
         }
     }
 
-    internal sealed record NotificationPayloadContext(string? BaseUrl, string ApiVersion);
+    public sealed record NotificationPayloadContext(string? BaseUrl, string ApiVersion);
 }

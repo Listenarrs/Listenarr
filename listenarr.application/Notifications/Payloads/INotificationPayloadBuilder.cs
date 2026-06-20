@@ -18,7 +18,7 @@
 using System.Text.Json.Nodes;
 using Listenarr.Application.Interfaces;
 
-namespace Listenarr.Application.Notification
+namespace Listenarr.Application.Notifications.Payloads
 {
     /// <summary>
     /// Abstraction for building notification payloads and preparing attachments.

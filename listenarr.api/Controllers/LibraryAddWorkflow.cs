@@ -20,7 +20,6 @@ using System.Security.Cryptography;
 using System.Text;
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Interfaces.Repositories;
-using Listenarr.Application.Notification;
 using Listenarr.Application.Security;
 using Listenarr.Domain.Common;
 using Listenarr.Domain.Models;
@@ -34,7 +33,7 @@ namespace Listenarr.Api.Controllers
         private readonly IImageCacheService _imageCacheService;
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly IHistoryRepository _historyRepository;
-        private readonly NotificationService? _notificationService;
+        private readonly INotificationService? _notificationService;
         private readonly ILibraryAddService? _libraryAddService;
         private readonly ILogger<LibraryAddWorkflow> _logger;
 
@@ -44,7 +43,7 @@ namespace Listenarr.Api.Controllers
             IServiceScopeFactory scopeFactory,
             IHistoryRepository historyRepository,
             ILogger<LibraryAddWorkflow> logger,
-            NotificationService? notificationService = null,
+            INotificationService? notificationService = null,
             ILibraryAddService? libraryAddService = null)
         {
             _repo = repo;

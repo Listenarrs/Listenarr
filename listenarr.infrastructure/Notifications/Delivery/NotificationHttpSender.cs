@@ -18,7 +18,7 @@
 using Listenarr.Application.Security;
 using Microsoft.Extensions.Logging;
 
-namespace Listenarr.Application.Notification
+namespace Listenarr.Infrastructure.Notifications.Delivery
 {
     internal sealed class NotificationHttpSender(
         HttpClient httpClient,

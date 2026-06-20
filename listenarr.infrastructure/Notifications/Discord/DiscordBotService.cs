@@ -21,16 +21,8 @@ using Listenarr.Application.Interfaces;
 using Listenarr.Application.Security;
 using Microsoft.Extensions.Logging;
 
-namespace Listenarr.Application.Notification
+namespace Listenarr.Infrastructure.Notifications.Discord
 {
-    public interface IDiscordBotService
-    {
-        Task<bool> StartBotAsync();
-        Task<bool> StopBotAsync();
-        Task<bool> IsBotRunningAsync();
-        Task<string?> GetBotStatusAsync();
-    }
-
     public class DiscordBotService : IDiscordBotService
     {
         private readonly ILogger<DiscordBotService> _logger;

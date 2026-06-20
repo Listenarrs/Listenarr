@@ -18,7 +18,7 @@
 
 using Listenarr.Application.Interfaces;
 
-namespace Listenarr.Infrastructure.SignalR
+namespace Listenarr.Infrastructure.Realtime.Clients
 {
     public sealed class SignalRClientRegistry : IRealtimeClientRegistry
     {

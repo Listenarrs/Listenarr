@@ -18,7 +18,7 @@
 using System.Text.Json.Nodes;
 using System.Net;
 
-namespace Listenarr.Api.Tests
+namespace Listenarr.Tests.Features.Infrastructure.Notifications.Delivery
 {
     public partial class NotificationServiceTests
     {

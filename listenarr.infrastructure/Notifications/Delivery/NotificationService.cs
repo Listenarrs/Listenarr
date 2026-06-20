@@ -24,7 +24,7 @@ using Listenarr.Application.Security;
 using Listenarr.Domain.Models;
 using Microsoft.Extensions.Logging;
 
-namespace Listenarr.Application.Notification
+namespace Listenarr.Infrastructure.Notifications.Delivery
 {
     /// <summary>
     /// Service for sending webhook notifications.

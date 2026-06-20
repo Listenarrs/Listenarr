@@ -1,7 +1,7 @@
 /*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2026 Listenarr Contributors
- *
+ * 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as published
  * by the Free Software Foundation, either version 3 of the License, or
@@ -18,48 +18,40 @@
 
 using Microsoft.Extensions.Logging;
 
-namespace Listenarr.Infrastructure.SignalR
+namespace Listenarr.Infrastructure.Realtime.Hubs
 {
     /// <summary>
-    /// SignalR hub for real-time settings updates
+    /// SignalR hub for real-time system log broadcasting
     /// </summary>
-    public class SettingsHub : Hub
+    public class LogHub : Hub
     {
-        private readonly ILogger<SettingsHub> _logger;
+        private readonly ILogger<LogHub> _logger;
 
-        public SettingsHub(ILogger<SettingsHub> logger)
+        public LogHub(ILogger<LogHub> logger)
         {
             _logger = logger;
         }
 
-        // Track connected clients for debugging/health checks
-        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> _connectedClients = new();
-
-        public static IReadOnlyCollection<string> ConnectedClientIds => _connectedClients.Keys.ToArray();
-
         public override async Task OnConnectedAsync()
         {
-            _connectedClients[Context.ConnectionId] = DateTime.UtcNow;
-            _logger.LogInformation("Settings client connected: {ConnectionId}. ConnectedCount={Count}", Context.ConnectionId, _connectedClients.Count);
-
+            _logger.LogDebug("Log viewer connected: {ConnectionId}", Context.ConnectionId);
             await base.OnConnectedAsync();
         }
 
         public override async Task OnDisconnectedAsync(Exception? exception)
         {
-            _connectedClients.TryRemove(Context.ConnectionId, out _);
-            _logger.LogInformation("Settings client disconnected: {ConnectionId}. ConnectedCount={Count}", Context.ConnectionId, _connectedClients.Count);
-
+            _logger.LogDebug("Log viewer disconnected: {ConnectionId}", Context.ConnectionId);
             await base.OnDisconnectedAsync(exception);
         }
 
         /// <summary>
-        /// Client can request current settings
+        /// Client can request historical logs
         /// </summary>
-        public Task RequestSettings()
+        public Task RequestLogs()
         {
-            _logger.LogDebug("Client {ConnectionId} requested settings", Context.ConnectionId);
+            _logger.LogDebug("Client {ConnectionId} requested logs", Context.ConnectionId);
             return Task.CompletedTask;
         }
     }
 }
+

@@ -15,7 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-namespace Listenarr.Application.Notification
+namespace Listenarr.Application.Notifications.Payloads
 {
     /// <summary>
     /// Public DTO used by DI-friendly payload builders to describe an attachment prepared for notifications.

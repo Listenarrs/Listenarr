@@ -17,7 +17,6 @@
  */
 using Listenarr.Api.Attributes;
 using Listenarr.Application.Interfaces;
-using Listenarr.Application.Notification;
 using Listenarr.Application.Security;
 using Microsoft.AspNetCore.Mvc;
 using System.Text.Json;

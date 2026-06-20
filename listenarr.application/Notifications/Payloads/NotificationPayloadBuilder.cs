@@ -21,7 +21,7 @@ using System.Text.Json.Nodes;
 using Listenarr.Application.Common;
 using Listenarr.Application.Interfaces;
 
-namespace Listenarr.Application.Notification
+namespace Listenarr.Application.Notifications.Payloads
 {
     /// <summary>
     /// Helper responsible for building Discord payloads (embeds / content) and preparing attachment metadata.

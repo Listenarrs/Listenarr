@@ -18,7 +18,7 @@
 using Listenarr.Application.Interfaces;
 using Microsoft.Extensions.Logging;
 
-namespace Listenarr.Infrastructure.SignalR
+namespace Listenarr.Infrastructure.Realtime.Broadcasting
 {
     public class ToastService : IToastService
     {

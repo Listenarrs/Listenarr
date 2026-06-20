@@ -20,7 +20,7 @@ using Listenarr.Domain.Models;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 
-namespace Listenarr.Infrastructure.SignalR
+namespace Listenarr.Infrastructure.Realtime.Downloads
 {
     public class DownloadPushService(
         IHubContext<DownloadHub> hubContext,

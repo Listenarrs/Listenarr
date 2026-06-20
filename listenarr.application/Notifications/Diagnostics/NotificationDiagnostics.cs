@@ -18,9 +18,9 @@
 using Listenarr.Application.Security;
 using Microsoft.Extensions.Logging;
 
-namespace Listenarr.Application.Notification
+namespace Listenarr.Application.Notifications.Diagnostics
 {
-    internal static class NotificationDiagnostics
+    public static class NotificationDiagnostics
     {
         public static string AggressiveRedact(string input)
         {

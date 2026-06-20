@@ -18,7 +18,7 @@
 using Listenarr.Application.Interfaces;
 using Microsoft.Extensions.Logging;
 
-namespace Listenarr.Application.Notification
+namespace Listenarr.Application.Notifications.Progress
 {
     /// <summary>
     /// Handles broadcasting search progress updates to connected realtime clients.

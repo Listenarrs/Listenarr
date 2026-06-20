@@ -21,7 +21,6 @@ using Listenarr.Application.Interfaces;
 using Listenarr.Infrastructure.Factories;
 
 using Listenarr.Domain.Models.Configurations;
-using Listenarr.Application.Notification;
 using Listenarr.Infrastructure.FileSystem;
 using Microsoft.Extensions.DependencyInjection;
 using Polly.Extensions.Http;

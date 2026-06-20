@@ -21,7 +21,7 @@ using Listenarr.Domain.Models;
 using Serilog.Core;
 using Serilog.Events;
 
-namespace Listenarr.Infrastructure.SignalR
+namespace Listenarr.Infrastructure.Realtime.Logging
 {
     /// <summary>
     /// Custom Serilog sink to broadcast log messages via SignalR in real-time

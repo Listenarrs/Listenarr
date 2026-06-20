@@ -16,7 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using AsyncKeyedLock;
-using Listenarr.Application.Notification;
 using Listenarr.Application.Search.Filters;
 using Listenarr.Application.Search.Strategies;
 using Listenarr.Domain.Models;

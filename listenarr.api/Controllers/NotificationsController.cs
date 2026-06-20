@@ -18,7 +18,6 @@
 
 using Listenarr.Api.Attributes;
 using Listenarr.Application.Interfaces;
-using Listenarr.Application.Notification;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Api.Controllers
@@ -31,12 +30,12 @@ namespace Listenarr.Api.Controllers
     {
         private readonly IConfigurationService _configurationService;
         private readonly ILogger<NotificationsController> _logger;
-        private readonly NotificationService _notificationService;
+        private readonly INotificationService _notificationService;
 
         public NotificationsController(
             IConfigurationService configurationService,
             ILogger<NotificationsController> logger,
-            NotificationService notificationService)
+            INotificationService notificationService)
         {
             _configurationService = configurationService;
             _logger = logger;
@@ -71,7 +70,7 @@ namespace Listenarr.Api.Controllers
 
                 if (_notificationService == null)
                 {
-                    _logger.LogError("NotificationService not available to send test notification");
+                    _logger.LogError("INotificationService not available to send test notification");
                     return StatusCode(500, new { success = false, message = "Server misconfiguration: notification service unavailable" });
                 }
 

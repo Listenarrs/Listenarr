@@ -17,7 +17,6 @@
  */
 using Listenarr.Api.Attributes;
 using Listenarr.Application.Interfaces;
-using Listenarr.Application.Notification;
 using Listenarr.Domain.Models.Configurations;
 using Microsoft.AspNetCore.Mvc;
 
@@ -29,10 +28,10 @@ namespace Listenarr.Api.Controllers
     public class DiagnosticsController : ControllerBase
     {
         private readonly IConfigurationService _configurationService;
-        private readonly NotificationService _notificationService;
+        private readonly INotificationService _notificationService;
         private readonly ILogger<DiagnosticsController> _logger;
 
-        public DiagnosticsController(IConfigurationService configurationService, NotificationService notificationService, ILogger<DiagnosticsController> logger)
+        public DiagnosticsController(IConfigurationService configurationService, INotificationService notificationService, ILogger<DiagnosticsController> logger)
         {
             _configurationService = configurationService;
             _notificationService = notificationService;

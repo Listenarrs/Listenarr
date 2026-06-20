@@ -13,6 +13,7 @@ global using Listenarr.Application.Audiobooks.Renaming;
 global using Listenarr.Application.Metadata.Audible;
 global using Listenarr.Application.Metadata.Audnexus;
 global using Listenarr.Application.Metadata.Core;
+global using Listenarr.Application.Notifications.Progress;
 global using Listenarr.Application.Search.Audible;
 global using Listenarr.Application.Search.Core;
 global using Listenarr.Application.Search.Indexers.Common;
