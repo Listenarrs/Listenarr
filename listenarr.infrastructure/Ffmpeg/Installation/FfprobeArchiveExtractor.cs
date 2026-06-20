@@ -95,7 +95,7 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
                 }
             }
 
-            if (!FileUtils.TryValidateMutationTarget(ffprobePath, [baseDir], out var safeFfprobePath, out var reason))
+            if (!FileSystemSafety.TryValidateMutationTarget(ffprobePath, [baseDir], out var safeFfprobePath, out var reason))
             {
                 logger.LogWarning("Blocked ffprobe install target outside base directory: {Reason}", reason);
                 await TryDeleteFileAsync(tmpFile);

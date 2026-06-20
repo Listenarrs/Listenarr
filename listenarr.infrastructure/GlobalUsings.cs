@@ -48,6 +48,7 @@ global using Listenarr.Application.Security.Identity;
 global using Listenarr.Application.Security.Outbound;
 global using Listenarr.Application.Security.Redaction;
 global using Listenarr.Infrastructure.Configuration.Paths;
+global using Listenarr.Infrastructure.FileSystem;
 global using Listenarr.Infrastructure.Ffmpeg.Installation;
 global using Listenarr.Infrastructure.Ffmpeg.Metadata;
 global using Listenarr.Infrastructure.Library.Files;

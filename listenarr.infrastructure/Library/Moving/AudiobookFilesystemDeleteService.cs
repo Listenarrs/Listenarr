@@ -118,7 +118,7 @@ namespace Listenarr.Infrastructure.Library.Moving
 
                 var originalPath = path;
                 if (allowedRoots != null
-                    && !FileUtils.TryValidateMutationTarget(path, allowedRoots, out path, out var reason))
+                    && !FileSystemSafety.TryValidateMutationTarget(path, allowedRoots, out path, out var reason))
                 {
                     result.Warnings.Add("Refused to delete a file outside the allowed library roots.");
                     _logger.LogWarning(

@@ -17,6 +17,7 @@ global using Listenarr.Application.ActivityHistory.Contracts.Repositories;
 global using Listenarr.Application.Audiobooks.Contracts;
 global using Listenarr.Application.Audiobooks.Contracts.Repositories;
 global using Listenarr.Application.Configuration.Contracts;
+global using Listenarr.Application.Common.Contracts;
 global using Listenarr.Application.Downloads.Contracts;
 global using Listenarr.Application.Downloads.Contracts.Repositories;
 global using Listenarr.Application.Notifications.Contracts;

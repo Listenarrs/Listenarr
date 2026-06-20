@@ -28,6 +28,7 @@ namespace Listenarr.Api.Features.Library
         private readonly IImageCacheService _imageCacheService;
         private readonly IAudiobookFilesystemDeleteService _audiobookFilesystemDeleteService;
         private readonly string _contentRootPath;
+        private readonly IFileSystem _fileSystem;
         private readonly ILogger<LibraryDeleteWorkflow> _logger;
 
         public LibraryDeleteWorkflow(
@@ -35,12 +36,14 @@ namespace Listenarr.Api.Features.Library
             IImageCacheService imageCacheService,
             IAudiobookFilesystemDeleteService audiobookFilesystemDeleteService,
             IApplicationPathService applicationPathService,
+            IFileSystem fileSystem,
             ILogger<LibraryDeleteWorkflow> logger)
         {
             _repo = repo;
             _imageCacheService = imageCacheService;
             _audiobookFilesystemDeleteService = audiobookFilesystemDeleteService;
             _contentRootPath = applicationPathService.ContentRootPath;
+            _fileSystem = fileSystem;
             _logger = logger;
         }
 
@@ -111,9 +114,9 @@ namespace Listenarr.Api.Features.Library
             }
 
             var fullPath = FileUtils.CombineWithOptionalBase(_contentRootPath, imagePath);
-            if (File.Exists(fullPath))
+            if (_fileSystem.FileExists(fullPath))
             {
-                if (!FileUtils.TryValidateMutationTarget(fullPath, [_contentRootPath], out var safePath, out var reason))
+                if (!_fileSystem.TryValidateMutationTarget(fullPath, [_contentRootPath], out var safePath, out var reason))
                 {
                     _logger.LogWarning(
                         "Blocked cached image delete for {Source} {Identifier}: {Reason}",
@@ -123,7 +126,7 @@ namespace Listenarr.Api.Features.Library
                     return;
                 }
 
-                File.Delete(safePath);
+                _fileSystem.DeleteFile(safePath);
                 _logger.LogInformation("Deleted cached image for {Source} {Identifier}", source, LogRedaction.SanitizeText(identifier));
             }
         }

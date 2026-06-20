@@ -333,7 +333,7 @@ namespace Listenarr.Application.Configuration.Core
                 throw new IOException("Startup config path has no resolved config directory.");
             }
 
-            if (!FileUtils.TryValidateMutationTarget(_configPath, [configDir], out var safeConfigPath, out var reason))
+            if (!_fileSystem.TryValidateMutationTarget(_configPath, [configDir], out var safeConfigPath, out var reason))
             {
                 throw new IOException($"Startup config path is outside the resolved config directory: {reason}");
             }

@@ -146,7 +146,7 @@ namespace Listenarr.Infrastructure.Library.Moving
 
                 // Create a temporary directory under the target parent
                 var tempName = Path.Join(targetParent, Path.GetFileName(target) + ".tmp-" + job.Id.ToString("N"));
-                if (!FileUtils.TryValidateMutationTarget(tempName, [targetParent], out tempName, out var tempReason))
+                if (!FileSystemSafety.TryValidateMutationTarget(tempName, [targetParent], out tempName, out var tempReason))
                 {
                     moveQueueService.UpdateJobStatus(job.Id, "Failed", tempReason);
                     metrics.Increment("worker.move.job.failed");
@@ -189,7 +189,7 @@ namespace Listenarr.Infrastructure.Library.Moving
                         {
                             try
                             {
-                                if (File.Exists(destPath) && await FileUtils.FilesHaveSameContentAsync(entry, destPath, stoppingToken))
+                                if (File.Exists(destPath) && await FileSystemSafety.FilesHaveSameContentAsync(entry, destPath, stoppingToken))
                                 {
                                     logger.LogInformation(
                                         "Skipping copy for move job {JobId}; destination already has identical content: {Dest}",
@@ -456,7 +456,7 @@ namespace Listenarr.Infrastructure.Library.Moving
                     try
                     {
                         if (Directory.Exists(tempName)
-                            && FileUtils.TryValidateMutationTarget(tempName, [targetParent], out var safeTempName, out _))
+                            && FileSystemSafety.TryValidateMutationTarget(tempName, [targetParent], out var safeTempName, out _))
                         {
                             Directory.Delete(safeTempName, true);
                         }

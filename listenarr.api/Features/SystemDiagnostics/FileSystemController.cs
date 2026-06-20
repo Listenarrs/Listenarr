@@ -16,7 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using Listenarr.Domain.Common;
 using Microsoft.AspNetCore.Mvc;
 using System.Runtime.InteropServices;
 
@@ -28,10 +27,12 @@ namespace Listenarr.Api.Features.SystemDiagnostics;
 public class FileSystemController : ControllerBase
 {
     private readonly ILogger<FileSystemController> _logger;
+    private readonly IFileSystem _fileSystem;
 
-    public FileSystemController(ILogger<FileSystemController> logger)
+    public FileSystemController(ILogger<FileSystemController> logger, IFileSystem fileSystem)
     {
         _logger = logger;
+        _fileSystem = fileSystem;
     }
 
     /// <summary>
@@ -152,14 +153,14 @@ public class FileSystemController : ControllerBase
                 {
                     // Try to create a temporary file to check write permissions
                     var testFile = Path.Join(normalizedPath, $".listenarr_test_{Guid.NewGuid()}.tmp");
-                    if (!FileUtils.TryValidateMutationTarget(testFile, [normalizedPath], out var safeTestFile, out _))
+                    if (!_fileSystem.TryValidateMutationTarget(testFile, [normalizedPath], out var safeTestFile, out _))
                     {
                         isWritable = false;
                     }
                     else
                     {
-                        System.IO.File.WriteAllText(safeTestFile, "test");
-                        System.IO.File.Delete(safeTestFile);
+                        _fileSystem.WriteAllText(safeTestFile, "test");
+                        _fileSystem.DeleteFile(safeTestFile);
                         isWritable = true;
                     }
                 }

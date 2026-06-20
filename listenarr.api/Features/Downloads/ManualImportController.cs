@@ -34,6 +34,7 @@ public class ManualImportController : ControllerBase
     private readonly IScanQueueService _scanQueueService;
     private readonly IRootFolderService _rootFolderService;
     private readonly IFileMover _fileMover;
+    private readonly IFileSystem _fileSystem;
     private readonly ManualImportPathPlanner _pathPlanner;
     private readonly ManualImportCompanionImporter _companionImporter;
 
@@ -46,6 +47,7 @@ public class ManualImportController : ControllerBase
         IScanQueueService scanQueueService,
         IRootFolderService rootFolderService,
         IFileMover fileMover,
+        IFileSystem fileSystem,
         ManualImportPathPlanner? pathPlanner = null,
         ManualImportCompanionImporter? companionImporter = null)
     {
@@ -57,6 +59,7 @@ public class ManualImportController : ControllerBase
         _scanQueueService = scanQueueService;
         _rootFolderService = rootFolderService;
         _fileMover = fileMover;
+        _fileSystem = fileSystem;
         _pathPlanner = pathPlanner ?? new ManualImportPathPlanner(fileNamingService);
         _companionImporter = companionImporter ?? new ManualImportCompanionImporter(
             metadataService,
@@ -77,17 +80,17 @@ public class ManualImportController : ControllerBase
             if (string.IsNullOrWhiteSpace(path)) return BadRequest(new { error = "Path is required" });
 
             var normalized = Path.GetFullPath(path);
-            if (!Directory.Exists(normalized)) return NotFound(new { error = "Directory not found" });
+            if (!_fileSystem.DirectoryExists(normalized)) return NotFound(new { error = "Directory not found" });
 
             var settings = await _configService.GetApplicationSettingsAsync();
 
-            var files = Directory.EnumerateFiles(normalized, "*.*", SearchOption.AllDirectories)
+            var files = _fileSystem.EnumerateFiles(normalized, "*.*", SearchOption.AllDirectories)
                 .Where(f => !FileUtils.IsBlacklistedFile(f, settings.ImportBlacklistExtensions))
                 .Select(f => new
                 {
                     relativePath = Path.GetRelativePath(normalized, f),
                     fullPath = f,
-                    size = new FileInfo(f).Length,
+                    size = _fileSystem.GetFileLength(f),
                     // Simple heuristics for sample metadata
                     series = (string?)null,
                     season = (string?)null,
@@ -134,7 +137,7 @@ public class ManualImportController : ControllerBase
         }
 
         var sourceDirectory = Path.GetFullPath(request.Path);
-        if (!Directory.Exists(sourceDirectory))
+        if (!_fileSystem.DirectoryExists(sourceDirectory))
         {
             return NotFound(new { error = "Directory not found" });
         }
@@ -189,7 +192,7 @@ public class ManualImportController : ControllerBase
 
             if (request.CleanupEmptySourceFolders)
             {
-                FileUtils.DeleteEmptyDirectories(sourceDirectory);
+                _fileSystem.DeleteEmptyDirectories(sourceDirectory);
             }
 
             await EnqueueFocusedScansAsync(results);
@@ -247,7 +250,7 @@ public class ManualImportController : ControllerBase
             }
 
             // Check if source file exists
-            if (!System.IO.File.Exists(item.FullPath))
+            if (!_fileSystem.FileExists(item.FullPath))
             {
                 return ManualImportResultDto.FailureResult("Source file not found", item.FullPath);
             }
@@ -374,7 +377,7 @@ public class ManualImportController : ControllerBase
         try
         {
             basePath = FileUtils.NormalizeStoredPath(basePath);
-            if (System.IO.File.Exists(basePath))
+            if (_fileSystem.FileExists(basePath))
             {
                 basePath = Path.GetDirectoryName(basePath);
             }

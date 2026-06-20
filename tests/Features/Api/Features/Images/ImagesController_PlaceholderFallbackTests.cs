@@ -73,7 +73,7 @@ namespace Listenarr.Tests.Features.Api.Features.Images
                 audnexus.Object,
                 repo.Object,
                 Mock.Of<ILogger<ImagesController>>(),
-                mockPathService.Object);
+                mockPathService.Object, new LocalFileSystem());
 
             controller.ControllerContext = new ControllerContext
             {

@@ -35,6 +35,7 @@ namespace Listenarr.Tests.Features.Api.Features.Images
 
             _services.AddSingleton(_imageCache.Object);
             _services.AddSingleton(_mockPathService.Object);
+            _services.AddSingleton<IFileSystem>(new LocalFileSystem());
             Init();
 
             await base.InitializeAsync();

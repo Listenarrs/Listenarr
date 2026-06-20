@@ -10,13 +10,21 @@ public interface IFileSystem
     long GetFileLength(string path);
     string ReadAllText(string path);
     void WriteAllText(string path, string contents);
+    void DeleteFile(string path);
     void CreateDirectory(string path);
     void DeleteDirectory(string path, bool recursive);
     IEnumerable<string> EnumerateFiles(string path);
+    IEnumerable<string> EnumerateFiles(string path, string searchPattern, SearchOption searchOption);
     IEnumerable<string> EnumerateFileSystemEntries(string path);
     string[] GetFiles(string path, string searchPattern, SearchOption searchOption);
     Task<bool> FilesHaveSameContentAsync(
         string firstPath,
         string secondPath,
         CancellationToken cancellationToken = default);
+    bool TryValidateMutationTarget(
+        string targetPath,
+        IEnumerable<string?> allowedRoots,
+        out string normalizedPath,
+        out string reason);
+    void DeleteEmptyDirectories(string rootPath);
 }

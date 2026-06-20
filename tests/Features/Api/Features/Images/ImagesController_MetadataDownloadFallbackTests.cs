@@ -57,7 +57,7 @@ namespace Listenarr.Tests.Features.Api.Features.Images
             mockPathService.SetupGet(p => p.ContentRootPath).Returns(tempRoot);
 
             var audnexusMock = Mock.Of<IAudnexusService>();
-            var controller = new ImagesController(mockImageCache.Object, mockMetadata.Object, audibleMock.Object, audnexusMock, Mock.Of<IAudiobookRepository>(), Mock.Of<ILogger<ImagesController>>(), mockPathService.Object);
+            var controller = new ImagesController(mockImageCache.Object, mockMetadata.Object, audibleMock.Object, audnexusMock, Mock.Of<IAudiobookRepository>(), Mock.Of<ILogger<ImagesController>>(), mockPathService.Object, new LocalFileSystem());
             controller.ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
 
             // Act

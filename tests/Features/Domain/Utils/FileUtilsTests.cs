@@ -29,7 +29,7 @@ namespace Listenarr.Tests.Features.Domain.Utils
             // Ensure it does not exist
             if (File.Exists(tmp)) File.Delete(tmp);
 
-            var result = FileUtils.GetUniqueDestinationPath(tmp);
+            var result = FileUtils.GetUniqueDestinationPath(tmp, File.Exists);
             Assert.Equal(tmp, result);
         }
 
@@ -41,7 +41,7 @@ namespace Listenarr.Tests.Features.Domain.Utils
             var file = Path.Join(dir, "file.txt");
             File.WriteAllText(file, "x");
 
-            var result = FileUtils.GetUniqueDestinationPath(file);
+            var result = FileUtils.GetUniqueDestinationPath(file, File.Exists);
             Assert.NotEqual(file, result);
             Assert.StartsWith(Path.Join(dir, "file ("), result);
 
@@ -89,7 +89,7 @@ namespace Listenarr.Tests.Features.Domain.Utils
             var path = Path.Join(dir, longName);
             File.WriteAllText(path, "x");
 
-            var result = FileUtils.GetUniqueDestinationPath(path);
+            var result = FileUtils.GetUniqueDestinationPath(path, File.Exists);
             Assert.NotEqual(path, result);
             Assert.Contains(" (1)", result);
 
@@ -122,7 +122,7 @@ namespace Listenarr.Tests.Features.Domain.Utils
             {
                 dirInfo.Attributes |= FileAttributes.ReadOnly;
 
-                var result = FileUtils.GetUniqueDestinationPath(file);
+                var result = FileUtils.GetUniqueDestinationPath(file, File.Exists);
                 Assert.NotEqual(file, result);
                 Assert.Contains(" (1)", result);
             }
@@ -168,7 +168,7 @@ namespace Listenarr.Tests.Features.Domain.Utils
                 dirInfo.SetAccessControl(security);
 
                 // Generate unique path
-                var result = FileUtils.GetUniqueDestinationPath(desired);
+                var result = FileUtils.GetUniqueDestinationPath(desired, File.Exists);
 
                 // Attempt to write to the result path - should throw UnauthorizedAccessException when ACL denies write
                 bool threw = false;
@@ -425,11 +425,11 @@ namespace Listenarr.Tests.Features.Domain.Utils
                 var allowedTarget = Path.Join(root, "book.m4b");
                 var siblingTarget = Path.Join(sibling, "book.m4b");
 
-                Assert.True(FileUtils.TryValidateMutationTarget(allowedTarget, [root], out var normalized, out var reason));
+                Assert.True(new LocalFileSystem().TryValidateMutationTarget(allowedTarget, [root], out var normalized, out var reason));
                 Assert.Equal(Path.GetFullPath(allowedTarget), normalized);
                 Assert.Equal(string.Empty, reason);
 
-                Assert.False(FileUtils.TryValidateMutationTarget(siblingTarget, [root], out _, out reason));
+                Assert.False(new LocalFileSystem().TryValidateMutationTarget(siblingTarget, [root], out _, out reason));
                 Assert.Contains("outside", reason, StringComparison.OrdinalIgnoreCase);
             }
             finally
@@ -465,7 +465,7 @@ namespace Listenarr.Tests.Features.Domain.Utils
                 }
 
                 var target = Path.Join(linkPath, "escape.mp3");
-                var ok = FileUtils.TryValidateMutationTarget(target, [root], out _, out var reason);
+                var ok = new LocalFileSystem().TryValidateMutationTarget(target, [root], out _, out var reason);
 
                 Assert.False(ok);
                 Assert.Contains("resolves outside", reason, StringComparison.OrdinalIgnoreCase);
@@ -493,8 +493,8 @@ namespace Listenarr.Tests.Features.Domain.Utils
                 await File.WriteAllTextAsync(second, "same");
                 await File.WriteAllTextAsync(third, "diff");
 
-                Assert.True(await FileUtils.FilesHaveSameContentAsync(first, second));
-                Assert.False(await FileUtils.FilesHaveSameContentAsync(first, third));
+                Assert.True(await new LocalFileSystem().FilesHaveSameContentAsync(first, second));
+                Assert.False(await new LocalFileSystem().FilesHaveSameContentAsync(first, third));
             }
             finally
             {

@@ -78,7 +78,7 @@ namespace Listenarr.Tests.Features.Api.Features.Images
                 audnexusMock.Object,
                 repoMock.Object,
                 Mock.Of<ILogger<ImagesController>>(),
-                mockPathService.Object);
+                mockPathService.Object, new LocalFileSystem());
             controller.ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext
             {
                 HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext()

@@ -31,6 +31,7 @@ namespace Listenarr.Api.Features.Library
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly IFileNamingService _fileNamingService;
         private readonly string _contentRootPath;
+        private readonly IFileSystem _fileSystem;
         private readonly ILogger<LibraryBulkEditWorkflow> _logger;
 
         public LibraryBulkEditWorkflow(
@@ -40,6 +41,7 @@ namespace Listenarr.Api.Features.Library
             IServiceScopeFactory scopeFactory,
             IFileNamingService fileNamingService,
             IApplicationPathService applicationPathService,
+            IFileSystem fileSystem,
             ILogger<LibraryBulkEditWorkflow> logger)
         {
             _repo = repo;
@@ -48,6 +50,7 @@ namespace Listenarr.Api.Features.Library
             _scopeFactory = scopeFactory;
             _fileNamingService = fileNamingService;
             _contentRootPath = applicationPathService.ContentRootPath;
+            _fileSystem = fileSystem;
             _logger = logger;
         }
 
@@ -208,7 +211,7 @@ namespace Listenarr.Api.Features.Library
                                     ? settings!.FolderNamingPattern
                                     : settings?.FileNamingPattern ?? string.Empty;
                                 var newBase = LibraryPathPlanner.ComputeAudiobookBaseDirectoryFromPattern(audiobook, rootPath, fileNamingPattern, _fileNamingService);
-                                if (!FileUtils.TryValidateMutationTarget(newBase, [rootPath], out newBase, out var reason))
+                                if (!_fileSystem.TryValidateMutationTarget(newBase, [rootPath], out newBase, out var reason))
                                 {
                                     entryErrors.Add($"Computed audiobook path is outside the selected root folder: {reason}");
                                     continue;
@@ -216,9 +219,9 @@ namespace Listenarr.Api.Features.Library
 
                                 try
                                 {
-                                    if (!Directory.Exists(newBase))
+                                    if (!_fileSystem.DirectoryExists(newBase))
                                     {
-                                        Directory.CreateDirectory(newBase);
+                                        _fileSystem.CreateDirectory(newBase);
                                         _logger.LogInformation("Created directory for audiobook id={Id} at {Path}", id, newBase);
                                     }
 
@@ -270,9 +273,9 @@ namespace Listenarr.Api.Features.Library
                     if (imagePath != null)
                     {
                         var fullPath = ResolvePathWithOptionalBase(_contentRootPath, imagePath);
-                        if (File.Exists(fullPath))
+                        if (_fileSystem.FileExists(fullPath))
                         {
-                            if (!FileUtils.TryValidateMutationTarget(fullPath, [_contentRootPath], out var safePath, out var reason))
+                            if (!_fileSystem.TryValidateMutationTarget(fullPath, [_contentRootPath], out var safePath, out var reason))
                             {
                                 _logger.LogWarning(
                                     "Blocked cached image delete for ASIN {Asin}: {Reason}",
@@ -281,7 +284,7 @@ namespace Listenarr.Api.Features.Library
                                 return 0;
                             }
 
-                            File.Delete(safePath);
+                            _fileSystem.DeleteFile(safePath);
                             _logger.LogInformation("Deleted cached image for ASIN {Asin}", LogRedaction.SanitizeText(audiobook.Asin));
                             return 1;
                         }
@@ -326,9 +329,9 @@ namespace Listenarr.Api.Features.Library
                 if (!string.IsNullOrEmpty(imagePath))
                 {
                     var fullPath = ResolvePathWithOptionalBase(_contentRootPath, imagePath);
-                    if (File.Exists(fullPath))
+                    if (_fileSystem.FileExists(fullPath))
                     {
-                        if (!FileUtils.TryValidateMutationTarget(fullPath, [_contentRootPath], out var safePath, out var reason))
+                        if (!_fileSystem.TryValidateMutationTarget(fullPath, [_contentRootPath], out var safePath, out var reason))
                         {
                             _logger.LogWarning(
                                 "Blocked cached image delete for identifier {Identifier}: {Reason}",
@@ -337,7 +340,7 @@ namespace Listenarr.Api.Features.Library
                             return 0;
                         }
 
-                        File.Delete(safePath);
+                        _fileSystem.DeleteFile(safePath);
                         _logger.LogInformation("Deleted cached image for identifier (from ImageUrl): {Identifier}", LogRedaction.SanitizeText(identifier));
                         return 1;
                     }

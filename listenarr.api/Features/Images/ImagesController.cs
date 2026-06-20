@@ -16,7 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using Listenarr.Domain.Common;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Api.Features.Images
@@ -41,6 +40,7 @@ namespace Listenarr.Api.Features.Images
         private readonly ImageFallbackDownloadWorkflow _fallbackDownloadWorkflow;
         private readonly ImageCandidateLookupWorkflow _imageCandidateLookupWorkflow;
         private readonly string _effectiveContentRootPath;
+        private readonly IFileSystem _fileSystem;
 
         [ActivatorUtilitiesConstructor]
         public ImagesController(
@@ -50,7 +50,8 @@ namespace Listenarr.Api.Features.Images
             IAudnexusService audnexusService,
             IAudiobookRepository audiobookRepository,
             ILogger<ImagesController> logger,
-            IApplicationPathService applicationPathService)
+            IApplicationPathService applicationPathService,
+            IFileSystem fileSystem)
             : this(
                 imageCacheService,
                 audiobookMetadataService,
@@ -60,6 +61,7 @@ namespace Listenarr.Api.Features.Images
                 openLibraryService: null,
                 logger,
                 applicationPathService,
+                fileSystem,
                 placeholderResolver: null)
         {
         }
@@ -73,6 +75,7 @@ namespace Listenarr.Api.Features.Images
             IOpenLibraryService? openLibraryService,
             ILogger<ImagesController> logger,
             IApplicationPathService applicationPathService,
+            IFileSystem fileSystem,
             ImagePlaceholderResolver? placeholderResolver = null)
         {
             _imageCacheService = imageCacheService;
@@ -83,6 +86,7 @@ namespace Listenarr.Api.Features.Images
             _openLibraryService = openLibraryService;
             _logger = logger;
             _applicationPathService = applicationPathService;
+            _fileSystem = fileSystem;
             _placeholderResolver = placeholderResolver ?? new ImagePlaceholderResolver(Microsoft.Extensions.Logging.Abstractions.NullLogger<ImagePlaceholderResolver>.Instance);
             _effectiveContentRootPath = applicationPathService.ContentRootPath;
             _imageResponseBuilder = new ImageResponseBuilder(_placeholderResolver, _logger, _effectiveContentRootPath);
@@ -249,7 +253,7 @@ namespace Listenarr.Api.Features.Images
                 // Build the full file path
                 var fullPath = ImageIdentifierHelper.ResolvePathWithOptionalBase(_effectiveContentRootPath, relativePath);
 
-                if (!System.IO.File.Exists(fullPath))
+                if (!_fileSystem.FileExists(fullPath))
                 {
                     _logger.LogWarning("Image file does not exist at path: {Path}", LogRedaction.SanitizeFilePath(fullPath));
                     return CreatePlaceholderResult(
@@ -300,9 +304,9 @@ namespace Listenarr.Api.Features.Images
 
                 var fullPath = ImageIdentifierHelper.ResolvePathWithOptionalBase(_effectiveContentRootPath, relativePath);
 
-                if (System.IO.File.Exists(fullPath))
+                if (_fileSystem.FileExists(fullPath))
                 {
-                    if (!FileUtils.TryValidateMutationTarget(fullPath, [_effectiveContentRootPath], out var safePath, out var reason))
+                    if (!_fileSystem.TryValidateMutationTarget(fullPath, [_effectiveContentRootPath], out var safePath, out var reason))
                     {
                         _logger.LogWarning(
                             "Blocked image delete for identifier {Identifier}: {Reason}",
@@ -311,7 +315,7 @@ namespace Listenarr.Api.Features.Images
                         return BadRequest(new { message = "Image path is outside the allowed cache root" });
                     }
 
-                    System.IO.File.Delete(safePath);
+                    _fileSystem.DeleteFile(safePath);
                     _logger.LogInformation("Deleted cached image for identifier: {Identifier}", LogRedaction.SanitizeText(identifier));
                     return Ok(new { message = "Image deleted successfully" });
                 }

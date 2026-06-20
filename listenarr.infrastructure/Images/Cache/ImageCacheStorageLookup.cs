@@ -15,7 +15,6 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Listenarr.Domain.Common;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.Images.Cache
@@ -116,7 +115,7 @@ namespace Listenarr.Infrastructure.Images.Cache
                             _ => _tempCachePath
                         };
 
-                        if (FileUtils.TryValidateMutationTarget(filePath, [root], out var safePath, out var reason))
+                        if (FileSystemSafety.TryValidateMutationTarget(filePath, [root], out var safePath, out var reason))
                         {
                             File.Delete(safePath);
                         }

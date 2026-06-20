@@ -26,16 +26,19 @@ namespace Listenarr.Api.Features.Library
         private readonly IAudiobookRepository _repo;
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly IMoveQueueService? _moveQueueService;
+        private readonly IFileSystem _fileSystem;
         private readonly ILogger<LibraryMoveWorkflow> _logger;
 
         public LibraryMoveWorkflow(
             IAudiobookRepository repo,
             IServiceScopeFactory scopeFactory,
+            IFileSystem fileSystem,
             ILogger<LibraryMoveWorkflow> logger,
             IMoveQueueService? moveQueueService = null)
         {
             _repo = repo;
             _scopeFactory = scopeFactory;
+            _fileSystem = fileSystem;
             _logger = logger;
             _moveQueueService = moveQueueService;
         }
@@ -68,7 +71,7 @@ namespace Listenarr.Api.Features.Library
                 final = FileUtils.NormalizeStoredPath(final);
                 if (!destinationIsRooted
                     && !string.IsNullOrWhiteSpace(settings.OutputPath)
-                    && !FileUtils.TryValidateMutationTarget(final, [settings.OutputPath], out final, out var finalReason))
+                    && !_fileSystem.TryValidateMutationTarget(final, [settings.OutputPath], out final, out var finalReason))
                 {
                     _logger.LogWarning(
                         "Blocked move destination for audiobook {AudiobookId}: {Destination}. Reason: {Reason}",
@@ -111,7 +114,7 @@ namespace Listenarr.Api.Features.Library
                     return new BadRequestObjectResult(new { message = "Source path is not valid for this operating system." });
                 }
 
-                if (!Directory.Exists(sourcePath))
+                if (!_fileSystem.DirectoryExists(sourcePath))
                 {
                     return new BadRequestObjectResult(new { message = "Source path does not exist. Ensure the audiobook's current BasePath exists or provide a valid SourcePath in the request." });
                 }
@@ -124,7 +127,7 @@ namespace Listenarr.Api.Features.Library
 
                 try
                 {
-                    if (!Directory.Exists(targetParent)) Directory.CreateDirectory(targetParent);
+                    if (!_fileSystem.DirectoryExists(targetParent)) _fileSystem.CreateDirectory(targetParent);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                 {

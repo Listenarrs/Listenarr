@@ -8,7 +8,6 @@
  * (at your option) any later version.
  */
 using System.Net;
-using Listenarr.Infrastructure.FileSystem;
 using Listenarr.Infrastructure.Persistence.Repositories;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;

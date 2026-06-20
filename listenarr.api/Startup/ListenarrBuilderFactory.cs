@@ -127,9 +127,10 @@ public static class ListenarrBuilderFactory
 
             if (!File.Exists(externalConfigAbsolute))
             {
-                if (!FileUtils.TryValidateMutationTarget(externalConfigAbsolute, [dir], out var safeExternalConfigAbsolute, out var reason))
+                var safeExternalConfigAbsolute = Path.GetFullPath(externalConfigAbsolute);
+                if (!FileUtils.IsPathSameOrInside(safeExternalConfigAbsolute, Path.GetFullPath(dir)))
                 {
-                    throw new IOException($"External config path is outside the resolved config directory: {reason}");
+                    throw new IOException("External config path is outside the resolved config directory.");
                 }
 
                 var defaultJson = "{\n  \"Serilog\": {\n    \"MinimumLevel\": {\n      \"Default\": \"Information\",\n      \"Override\": {\n        \"Microsoft\": \"Warning\",\n        \"System\": \"Warning\"\n      }\n    }\n  }\n}";

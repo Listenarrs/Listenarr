@@ -16,7 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 // csharp
-using Listenarr.Domain.Common;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.FileSystem
@@ -97,7 +96,7 @@ namespace Listenarr.Infrastructure.FileSystem
                 _applicationPathService.ConfigRootPath
             };
 
-            if (FileUtils.TryValidateMutationTarget(path, roots, out var normalizedPath, out var reason))
+            if (FileSystemSafety.TryValidateMutationTarget(path, roots, out var normalizedPath, out var reason))
             {
                 return normalizedPath;
             }

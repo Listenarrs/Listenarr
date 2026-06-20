@@ -16,7 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Runtime.InteropServices;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -314,12 +313,10 @@ namespace Listenarr.Domain.Common
         /// Generate a unique destination path by appending " (1)", " (2)", ... before the extension
         /// when the candidate already exists either on disk or in an in-memory set of used paths.
         /// </summary>
-        public static string GetUniqueDestinationPath(string desiredPath, Func<string, bool>? existsPredicate = null, ISet<string>? inMemoryUsed = null)
+        public static string GetUniqueDestinationPath(string desiredPath, Func<string, bool> existsPredicate, ISet<string>? inMemoryUsed = null)
         {
             try
             {
-                existsPredicate ??= File.Exists;
-
                 if (!existsPredicate(desiredPath) && (inMemoryUsed == null || !inMemoryUsed.Contains(desiredPath)))
                     return desiredPath;
 
@@ -457,210 +454,6 @@ namespace Listenarr.Domain.Common
             return normalizedCandidate.StartsWith(baseWithSeparator, comparison);
         }
 
-        public static bool TryValidateMutationTarget(
-            string targetPath,
-            IEnumerable<string?> allowedRoots,
-            out string normalizedPath,
-            out string reason)
-        {
-            normalizedPath = string.Empty;
-            reason = string.Empty;
-
-            try
-            {
-                if (string.IsNullOrWhiteSpace(targetPath))
-                {
-                    reason = "Target path is empty.";
-                    return false;
-                }
-
-                normalizedPath = Path.GetFullPath(targetPath);
-                var target = normalizedPath;
-                var normalizedRoots = allowedRoots
-                    .Where(root => !string.IsNullOrWhiteSpace(root))
-                    .Select(root => Path.GetFullPath(root!))
-                    .Distinct(GetPathStringComparer())
-                    .ToList();
-
-                if (normalizedRoots.Count == 0)
-                {
-                    reason = "No allowed mutation roots were provided.";
-                    return false;
-                }
-
-                if (!normalizedRoots.Any(root => IsPathSameOrInside(target, root)))
-                {
-                    reason = "Target path is outside all allowed mutation roots.";
-                    return false;
-                }
-
-                if (!IsResolvedMutationTargetInsideRoots(target, normalizedRoots, out reason))
-                {
-                    return false;
-                }
-
-                return true;
-            }
-            catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
-            {
-                normalizedPath = string.Empty;
-                reason = "Target path could not be normalized.";
-                return false;
-            }
-        }
-
-        private static bool IsResolvedMutationTargetInsideRoots(
-            string normalizedTargetPath,
-            IReadOnlyCollection<string> normalizedRoots,
-            out string reason)
-        {
-            reason = string.Empty;
-
-            var resolvedRoots = normalizedRoots
-                .Select(root => TryResolveAllowedMutationRoot(root, out var resolvedRoot)
-                    ? resolvedRoot
-                    : string.Empty)
-                .Where(root => !string.IsNullOrWhiteSpace(root))
-                .Distinct(GetPathStringComparer())
-                .ToList();
-
-            if (resolvedRoots.Count == 0)
-            {
-                reason = "Allowed mutation roots could not be resolved safely.";
-                return false;
-            }
-
-            if (!TryGetNearestExistingPath(normalizedTargetPath, out var existingTargetPath))
-            {
-                reason = "Target path has no existing parent under an allowed mutation root.";
-                return false;
-            }
-
-            if (!TryResolveExistingFinalPath(existingTargetPath, out var resolvedExistingTargetPath))
-            {
-                reason = "Target path could not be resolved safely.";
-                return false;
-            }
-
-            if (resolvedRoots.Any(root => IsPathSameOrInside(resolvedExistingTargetPath, root)))
-            {
-                return true;
-            }
-
-            reason = "Target path resolves outside all allowed mutation roots.";
-            return false;
-        }
-
-        private static bool TryResolveAllowedMutationRoot(string rootPath, out string resolvedPath)
-        {
-            resolvedPath = string.Empty;
-
-            if (TryResolveExistingFinalPath(rootPath, out resolvedPath))
-            {
-                return true;
-            }
-
-            if (!TryGetNearestExistingPath(rootPath, out var existingRootAncestor))
-            {
-                return false;
-            }
-
-            return TryResolveExistingFinalPath(existingRootAncestor, out resolvedPath);
-        }
-
-        private static bool TryGetNearestExistingPath(string path, out string existingPath)
-        {
-            existingPath = string.Empty;
-
-            try
-            {
-                var current = Path.GetFullPath(path);
-                while (!string.IsNullOrWhiteSpace(current))
-                {
-                    if (File.Exists(current) || Directory.Exists(current))
-                    {
-                        existingPath = current;
-                        return true;
-                    }
-
-                    var parent = Directory.GetParent(current);
-                    if (parent == null)
-                    {
-                        return false;
-                    }
-
-                    current = parent.FullName;
-                }
-
-                return false;
-            }
-            catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
-            {
-                existingPath = string.Empty;
-                return false;
-            }
-        }
-
-        private static bool TryResolveExistingFinalPath(string path, out string resolvedPath)
-        {
-            resolvedPath = string.Empty;
-
-            try
-            {
-                var fullPath = Path.GetFullPath(path);
-                if (Directory.Exists(fullPath))
-                {
-                    var directoryInfo = new DirectoryInfo(fullPath);
-                    var resolvedTarget = directoryInfo.ResolveLinkTarget(returnFinalTarget: true);
-                    resolvedPath = Path.GetFullPath(resolvedTarget?.FullName ?? directoryInfo.FullName);
-                    return true;
-                }
-
-                if (File.Exists(fullPath))
-                {
-                    var fileInfo = new FileInfo(fullPath);
-                    var resolvedTarget = fileInfo.ResolveLinkTarget(returnFinalTarget: true);
-                    resolvedPath = Path.GetFullPath(resolvedTarget?.FullName ?? fileInfo.FullName);
-                    return true;
-                }
-
-                return false;
-            }
-            catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
-            {
-                resolvedPath = string.Empty;
-                return false;
-            }
-        }
-
-        public static async Task<bool> FilesHaveSameContentAsync(string firstPath, string secondPath, CancellationToken cancellationToken = default)
-        {
-            try
-            {
-                if (!File.Exists(firstPath) || !File.Exists(secondPath))
-                {
-                    return false;
-                }
-
-                var firstInfo = new FileInfo(firstPath);
-                var secondInfo = new FileInfo(secondPath);
-                if (firstInfo.Length != secondInfo.Length)
-                {
-                    return false;
-                }
-
-                await using var firstStream = File.Open(firstPath, FileMode.Open, FileAccess.Read, FileShare.Read);
-                await using var secondStream = File.Open(secondPath, FileMode.Open, FileAccess.Read, FileShare.Read);
-                var firstHash = await SHA256.HashDataAsync(firstStream, cancellationToken);
-                var secondHash = await SHA256.HashDataAsync(secondStream, cancellationToken);
-                return firstHash.SequenceEqual(secondHash);
-            }
-            catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
-            {
-                return false;
-            }
-        }
-
         public static string? GetCommonDirectory(IEnumerable<string> paths)
         {
             try
@@ -703,29 +496,6 @@ namespace Listenarr.Domain.Common
             }
         }
 
-        public static void DeleteEmptyDirectories(string rootPath)
-        {
-            try
-            {
-                if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
-                {
-                    return;
-                }
-
-                foreach (var directory in Directory.GetDirectories(rootPath, "*", SearchOption.AllDirectories)
-                    .OrderByDescending(path => path.Length))
-                {
-                    TryDeleteDirectoryIfEmpty(directory);
-                }
-
-                TryDeleteDirectoryIfEmpty(rootPath);
-            }
-            catch (Exception caughtEx_5) when (caughtEx_5 is not OperationCanceledException && caughtEx_5 is not OutOfMemoryException && caughtEx_5 is not StackOverflowException)
-            {
-                System.Diagnostics.Debug.WriteLine($"Suppressed empty-directory cleanup failure for '{rootPath}': {caughtEx_5.Message}");
-            }
-        }
-
         private static string GetCommonPath(string firstPath, string secondPath)
         {
             var normalizedFirst = NormalizeStoredPath(firstPath);
@@ -759,34 +529,7 @@ namespace Listenarr.Domain.Common
             var commonPath = normalizedFirst.Substring(0, commonLength)
                 .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
-            if (Directory.Exists(commonPath))
-            {
-                return commonPath;
-            }
-
-            return Directory.GetParent(commonPath)?.FullName ?? commonPath;
-        }
-
-        private static void TryDeleteDirectoryIfEmpty(string path)
-        {
-            try
-            {
-                if (!Directory.Exists(path))
-                {
-                    return;
-                }
-
-                if (Directory.EnumerateFileSystemEntries(path).Any())
-                {
-                    return;
-                }
-
-                Directory.Delete(path, recursive: false);
-            }
-            catch (Exception caughtEx_6) when (caughtEx_6 is not OperationCanceledException && caughtEx_6 is not OutOfMemoryException && caughtEx_6 is not StackOverflowException)
-            {
-                System.Diagnostics.Debug.WriteLine($"Suppressed empty-directory delete failure for '{path}': {caughtEx_6.Message}");
-            }
+            return commonPath;
         }
 
         private static bool IsGenericTrackLabel(string? value)
@@ -848,18 +591,9 @@ namespace Listenarr.Domain.Common
                 .Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries);
 
             var currentPath = pathRoot;
-            var forceResolve = longPathResolver != TryResolveLongWindowsPath;
-
             foreach (var normalizedSegment in segments.Select(NormalizeRelativePathSegment))
             {
                 var candidatePath = Path.Join(currentPath, normalizedSegment);
-                var canResolve = forceResolve || Directory.Exists(candidatePath) || File.Exists(candidatePath);
-                if (!canResolve)
-                {
-                    currentPath = candidatePath;
-                    continue;
-                }
-
                 var resolvedPath = longPathResolver(candidatePath);
                 currentPath = string.IsNullOrWhiteSpace(resolvedPath) ? candidatePath : resolvedPath!;
             }
@@ -934,7 +668,7 @@ namespace Listenarr.Domain.Common
         /// </summary>
         public static string GetAbsolutePath(params string[] segments)
         {
-            string root = Path.GetPathRoot(Directory.GetCurrentDirectory()) ?? "/";
+            string root = Path.GetPathRoot(Environment.CurrentDirectory) ?? "/";
             return Path.Combine(root, Path.Combine(segments));
         }
 

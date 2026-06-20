@@ -438,7 +438,7 @@ namespace Listenarr.Infrastructure.FileSystem
                     throw new IOException($"File copy destination escaped root: {relative}");
                 }
 
-                if (File.Exists(destFile) && FileUtils.FilesHaveSameContentAsync(file, destFile).GetAwaiter().GetResult())
+                if (File.Exists(destFile) && FileSystemSafety.FilesHaveSameContentAsync(file, destFile).GetAwaiter().GetResult())
                 {
                     LogMutation(FileMutationOutcome.Skipped, FileAction.Copy, file, destFile, "Destination already has identical content");
                     continue;
@@ -496,7 +496,7 @@ namespace Listenarr.Infrastructure.FileSystem
                             var sourceDirectory = Path.GetDirectoryName(source);
                             if (sourceDirectory != null)
                             {
-                                FileUtils.DeleteEmptyDirectories(sourceDirectory);
+                                FileSystemSafety.DeleteEmptyDirectories(sourceDirectory);
                             }
                             return true;
                         }
@@ -524,7 +524,7 @@ namespace Listenarr.Infrastructure.FileSystem
                 return false;
             }
 
-            if (!await FileUtils.FilesHaveSameContentAsync(sourceFile, destFile))
+            if (!await FileSystemSafety.FilesHaveSameContentAsync(sourceFile, destFile))
             {
                 return false;
             }
@@ -549,7 +549,7 @@ namespace Listenarr.Infrastructure.FileSystem
                 return false;
             }
 
-            if (!await FileUtils.FilesHaveSameContentAsync(sourceFile, destFile))
+            if (!await FileSystemSafety.FilesHaveSameContentAsync(sourceFile, destFile))
             {
                 return false;
             }

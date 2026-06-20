@@ -17,7 +17,6 @@
  */
 
 using AsyncKeyedLock;
-using Listenarr.Domain.Common;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.Images.Cache
@@ -198,7 +197,7 @@ namespace Listenarr.Infrastructure.Images.Cache
                 var filePath = _pathResolver.BuildTempFilePath(identifier, extension, _tempCachePath);
 
                 // Save to temp cache
-                if (!FileUtils.TryValidateMutationTarget(filePath, [_tempCachePath], out filePath, out var tempReason))
+                if (!FileSystemSafety.TryValidateMutationTarget(filePath, [_tempCachePath], out filePath, out var tempReason))
                 {
                     _logger.LogWarning("Blocked image cache write for {Identifier}: {Reason}", LogRedaction.SanitizeText(identifier), LogRedaction.SanitizeText(tempReason));
                     return null;
@@ -505,7 +504,7 @@ namespace Listenarr.Infrastructure.Images.Cache
                     {
                         try
                         {
-                            if (!FileUtils.TryValidateMutationTarget(file, [_tempCachePath], out var safeFile, out var reason))
+                            if (!FileSystemSafety.TryValidateMutationTarget(file, [_tempCachePath], out var safeFile, out var reason))
                             {
                                 _logger.LogWarning("Blocked temp cache delete for {File}: {Reason}", LogRedaction.SanitizeFilePath(file), LogRedaction.SanitizeText(reason));
                                 continue;
@@ -551,13 +550,13 @@ namespace Listenarr.Infrastructure.Images.Cache
             safeSourcePath = sourcePath;
             safeDestinationPath = destinationPath;
 
-            if (!FileUtils.TryValidateMutationTarget(sourcePath, [sourceRoot], out safeSourcePath, out var sourceReason))
+            if (!FileSystemSafety.TryValidateMutationTarget(sourcePath, [sourceRoot], out safeSourcePath, out var sourceReason))
             {
                 _logger.LogWarning("Blocked cached image move for {Identifier}: source invalid: {Reason}", LogRedaction.SanitizeText(identifier), LogRedaction.SanitizeText(sourceReason));
                 return false;
             }
 
-            if (!FileUtils.TryValidateMutationTarget(destinationPath, [destinationRoot], out safeDestinationPath, out var destinationReason))
+            if (!FileSystemSafety.TryValidateMutationTarget(destinationPath, [destinationRoot], out safeDestinationPath, out var destinationReason))
             {
                 _logger.LogWarning("Blocked cached image move for {Identifier}: destination invalid: {Reason}", LogRedaction.SanitizeText(identifier), LogRedaction.SanitizeText(destinationReason));
                 return false;

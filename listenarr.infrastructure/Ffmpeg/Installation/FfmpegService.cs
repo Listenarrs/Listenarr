@@ -163,7 +163,7 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
                 resp.EnsureSuccessStatusCode();
 
                 var tmpFile = Path.Join(_baseDir, "ffprobe-download.tmp");
-                if (!FileUtils.TryValidateMutationTarget(tmpFile, [_baseDir], out tmpFile, out var tmpReason))
+                if (!FileSystemSafety.TryValidateMutationTarget(tmpFile, [_baseDir], out tmpFile, out var tmpReason))
                 {
                     _logger.LogWarning("Blocked ffprobe download temp path: {Reason}", LogRedaction.SanitizeText(tmpReason));
                     return null;
@@ -307,7 +307,7 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
 
                             var chosenFull = Path.GetFullPath(chosen);
                             var destFull = Path.GetFullPath(dest);
-                            if (!FileUtils.TryValidateMutationTarget(chosenFull, [_baseDir], out chosenFull, out var chosenReason))
+                            if (!FileSystemSafety.TryValidateMutationTarget(chosenFull, [_baseDir], out chosenFull, out var chosenReason))
                             {
                                 _logger.LogWarning(
                                     "Blocked ffprobe candidate move. Candidate reason: {CandidateReason}",
@@ -315,7 +315,7 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
                                 return null;
                             }
 
-                            if (!FileUtils.TryValidateMutationTarget(destFull, [_baseDir], out destFull, out var destReason))
+                            if (!FileSystemSafety.TryValidateMutationTarget(destFull, [_baseDir], out destFull, out var destReason))
                             {
                                 _logger.LogWarning(
                                     "Blocked ffprobe candidate move. Destination reason: {DestinationReason}",
@@ -449,7 +449,7 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
                     throw new FfmpegException("ffprobe binary is unavailable.");
                 }
 
-                if (!FileUtils.TryValidateMutationTarget(_ffprobePath, [_baseDir], out var safeFfprobePath, out var ffprobeReason))
+                if (!FileSystemSafety.TryValidateMutationTarget(_ffprobePath, [_baseDir], out var safeFfprobePath, out var ffprobeReason))
                 {
                     throw new FfmpegException($"ffprobe binary is unavailable or outside configured root: {LogRedaction.SanitizeText(ffprobeReason)}");
                 }
