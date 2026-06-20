@@ -16,7 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using Listenarr.Domain.Common;
 using Serilog;
 using Serilog.Core;
 using Serilog.Events;
@@ -50,7 +49,7 @@ public static class ListenarrBuilderFactory
             EnvironmentName = environmentName
         });
 
-        EnsureExternalConfiguration(builder, fileSystem);
+        EnsureExternalConfiguration(builder.Environment.ContentRootPath, fileSystem);
         builder.Configuration.AddJsonFile(
             Path.Join("config", "appsettings", "appsettings.json"),
             optional: true,
@@ -118,10 +117,10 @@ public static class ListenarrBuilderFactory
         }
     }
 
-    private static void EnsureExternalConfiguration(WebApplicationBuilder builder, IFileSystem fileSystem)
+    internal static void EnsureExternalConfiguration(string contentRootPath, IFileSystem fileSystem)
     {
         var externalConfigRelative = Path.Join("config", "appsettings", "appsettings.json");
-        var externalConfigAbsolute = Path.Join(builder.Environment.ContentRootPath, externalConfigRelative);
+        var externalConfigAbsolute = Path.Join(contentRootPath, externalConfigRelative);
 
         try
         {
@@ -130,10 +129,14 @@ public static class ListenarrBuilderFactory
 
             if (!fileSystem.FileExists(externalConfigAbsolute))
             {
-                var safeExternalConfigAbsolute = Path.GetFullPath(externalConfigAbsolute);
-                if (!FileUtils.IsPathSameOrInside(safeExternalConfigAbsolute, Path.GetFullPath(dir)))
+                if (!fileSystem.TryValidateMutationTarget(
+                        externalConfigAbsolute,
+                        [contentRootPath],
+                        out var safeExternalConfigAbsolute,
+                        out var reason))
                 {
-                    throw new IOException("External config path is outside the resolved config directory.");
+                    throw new IOException(
+                        $"External config path is outside the resolved content root: {LogRedaction.SanitizeText(reason)}");
                 }
 
                 var defaultJson = "{\n  \"Serilog\": {\n    \"MinimumLevel\": {\n      \"Default\": \"Information\",\n      \"Override\": {\n        \"Microsoft\": \"Warning\",\n        \"System\": \"Warning\"\n      }\n    }\n  }\n}";
