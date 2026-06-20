@@ -18,7 +18,6 @@
 
 using System.Text.Json;
 using HtmlAgilityPack;
-using Listenarr.Application.Interfaces;
 
 namespace Listenarr.Infrastructure.Metadata.Providers.Audible
 {

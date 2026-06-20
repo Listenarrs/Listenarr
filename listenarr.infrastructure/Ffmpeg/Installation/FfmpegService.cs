@@ -19,11 +19,8 @@ using System.Security.Cryptography;
 using System.Runtime.InteropServices;
 using System.Diagnostics;
 using System.Text.Json;
-using Listenarr.Application.Interfaces;
 using Microsoft.Extensions.Logging;
-using Listenarr.Domain.Models;
 using Listenarr.Domain.Common;
-using Listenarr.Domain.Models.Exceptions;
 
 namespace Listenarr.Infrastructure.Ffmpeg.Installation
 {

@@ -18,9 +18,6 @@
 
 using Listenarr.Api.Attributes;
 using Listenarr.Api.Dtos;
-using Listenarr.Application.Interfaces;
-using Listenarr.Application.Interfaces.Repositories;
-using Listenarr.Domain.Models;
 using Microsoft.AspNetCore.Mvc;
 using System.Text.Json;
 

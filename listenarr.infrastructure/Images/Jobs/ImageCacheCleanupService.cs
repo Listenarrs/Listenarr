@@ -17,7 +17,6 @@
  */
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Listenarr.Application.Interfaces;
 
 namespace Listenarr.Infrastructure.Images.Jobs
 {

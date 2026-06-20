@@ -9,10 +9,7 @@
  */
 
 using Listenarr.Api.Dtos.ManualImport;
-using Listenarr.Application.Interfaces;
 using Listenarr.Domain.Common;
-using Listenarr.Domain.Models;
-using Listenarr.Domain.Models.Enumerations;
 
 namespace Listenarr.Api.Features.Downloads;
 

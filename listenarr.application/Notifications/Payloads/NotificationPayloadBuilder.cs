@@ -19,7 +19,6 @@ using System.Net;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Listenarr.Application.Common;
-using Listenarr.Application.Interfaces;
 
 namespace Listenarr.Application.Notifications.Payloads
 {

@@ -17,7 +17,8 @@
  */
 
 using Listenarr.Api.Startup;
-using Listenarr.Infrastructure.Extensions;
+using Listenarr.Infrastructure.DependencyInjection;
+using Listenarr.Infrastructure.Realtime.DependencyInjection;
 
 var realtimeLogSink = RealtimeLoggingExtensions.CreateListenarrRealtimeLogSink();
 var builder = ListenarrBuilderFactory.Create(args, realtimeLogSink);

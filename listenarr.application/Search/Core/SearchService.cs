@@ -17,10 +17,6 @@
  */
 
 using Microsoft.Extensions.Caching.Memory;
-using Listenarr.Application.Interfaces;
-using Listenarr.Domain.Models.Configurations;
-using Listenarr.Domain.Models;
-using Listenarr.Application.Interfaces.Repositories;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 

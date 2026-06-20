@@ -18,8 +18,6 @@
 
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
-using Listenarr.Application.Interfaces;
-using Listenarr.Domain.Models;
 
 namespace Listenarr.Api.Features.Search
 {

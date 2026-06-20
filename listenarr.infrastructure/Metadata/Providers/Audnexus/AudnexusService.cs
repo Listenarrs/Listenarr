@@ -18,7 +18,6 @@
 
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Listenarr.Application.Interfaces;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.Metadata.Providers.Audnexus

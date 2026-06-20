@@ -17,8 +17,6 @@
  */
 using System.Net;
 using System.Text.Json;
-using Listenarr.Application.Interfaces;
-using Listenarr.Domain.Models;
 using Listenarr.Infrastructure.Torrents;
 using Microsoft.Extensions.Logging;
 

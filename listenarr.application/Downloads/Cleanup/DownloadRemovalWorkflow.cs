@@ -8,10 +8,7 @@
  * (at your option) any later version.
  */
 
-using Listenarr.Application.Interfaces;
-using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Domain.Common;
-using Listenarr.Domain.Models;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Downloads.Cleanup

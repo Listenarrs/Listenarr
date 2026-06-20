@@ -16,8 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Listenarr.Api.Attributes;
-using Listenarr.Application.Interfaces;
-using Listenarr.Domain.Models.Configurations;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Api.Features.SystemDiagnostics

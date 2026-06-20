@@ -16,7 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Security.Claims;
-using Listenarr.Application.Interfaces;
 
 namespace Listenarr.Api.Middleware
 {

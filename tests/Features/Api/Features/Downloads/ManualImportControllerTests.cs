@@ -16,8 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Microsoft.Extensions.Logging.Abstractions;
-using Listenarr.Application.Interfaces.Repositories;
-using Listenarr.Domain.Models.Enumerations;
 using Listenarr.Infrastructure.FileSystem;
 using Listenarr.Api.Dtos.ManualImport;
 
@@ -111,7 +109,7 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
             configMock.Setup(c => c.GetApplicationSettingsAsync()).ReturnsAsync(settings);
 
             var rootFolderMock = new Mock<IRootFolderService>();
-            rootFolderMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new System.Collections.Generic.List<Listenarr.Domain.Models.RootFolder>());
+            rootFolderMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new System.Collections.Generic.List<RootFolder>());
 
             return new ManualImportController(
                 Mock.Of<Microsoft.Extensions.Logging.ILogger<ManualImportController>>(),

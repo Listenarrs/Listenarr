@@ -10,8 +10,6 @@
 
 using System.Text.Json;
 using Listenarr.Domain.Common;
-using Listenarr.Domain.Models;
-using Listenarr.Domain.Models.Exceptions;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent

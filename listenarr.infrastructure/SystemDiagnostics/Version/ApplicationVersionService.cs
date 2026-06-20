@@ -18,7 +18,6 @@
 
 using System.Diagnostics;
 using System.Reflection;
-using Listenarr.Application.Interfaces;
 
 namespace Listenarr.Infrastructure.SystemDiagnostics.Version
 {

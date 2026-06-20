@@ -17,7 +17,6 @@
  */
 
 using System.Security.Claims;
-using Listenarr.Application.Interfaces;
 
 namespace Listenarr.Application.Security.Identity
 {

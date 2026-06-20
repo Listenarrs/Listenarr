@@ -19,9 +19,6 @@ using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
-using Listenarr.Application.Interfaces;
-using Listenarr.Domain.Models;
-using Listenarr.Domain.Models.Configurations;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Common

@@ -9,7 +9,6 @@
  */
 
 using System.Text.Json;
-using Listenarr.Application.Interfaces;
 
 namespace Listenarr.Application.Downloads.Submission;
 

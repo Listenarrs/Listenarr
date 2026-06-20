@@ -18,8 +18,6 @@
 using System.Globalization;
 using System.Net;
 using System.Text.Json;
-using Listenarr.Application.Interfaces;
-using Listenarr.Domain.Models;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd

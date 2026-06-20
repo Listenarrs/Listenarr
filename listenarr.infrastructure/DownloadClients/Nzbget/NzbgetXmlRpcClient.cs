@@ -12,7 +12,6 @@ using System.Globalization;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Xml.Linq;
-using Listenarr.Domain.Models;
 
 namespace Listenarr.Infrastructure.DownloadClients.Nzbget
 {

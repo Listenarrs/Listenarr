@@ -16,10 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using Listenarr.Application.Interfaces.Repositories;
-using Listenarr.Application.Interfaces;
 using Listenarr.Api.Attributes;
-using Listenarr.Domain.Models;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Api.Features.ActivityHistory

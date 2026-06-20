@@ -1,4 +1,3 @@
-using Listenarr.Domain.Models;
 
 namespace Listenarr.Infrastructure.DownloadClients.Common
 {

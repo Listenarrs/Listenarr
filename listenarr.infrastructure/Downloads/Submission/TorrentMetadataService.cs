@@ -10,7 +10,6 @@
 
 using BencodeNET.Parsing;
 using BencodeNET.Torrents;
-using Listenarr.Application.Interfaces;
 
 namespace Listenarr.Infrastructure.Downloads.Submission;
 

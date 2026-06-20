@@ -17,7 +17,6 @@
  */
 
 using System.Runtime.InteropServices;
-using Listenarr.Application.Interfaces;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.SystemDiagnostics.Storage

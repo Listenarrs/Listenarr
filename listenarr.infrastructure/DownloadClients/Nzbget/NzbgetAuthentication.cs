@@ -18,7 +18,6 @@
 
 using System.Net.Http.Headers;
 using System.Text;
-using Listenarr.Domain.Models;
 
 namespace Listenarr.Infrastructure.DownloadClients.Nzbget
 {

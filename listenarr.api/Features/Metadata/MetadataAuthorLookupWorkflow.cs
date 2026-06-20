@@ -8,7 +8,6 @@
  * (at your option) any later version.
  */
 
-using Listenarr.Application.Interfaces;
 using Microsoft.Extensions.Caching.Memory;
 
 namespace Listenarr.Api.Features.Metadata

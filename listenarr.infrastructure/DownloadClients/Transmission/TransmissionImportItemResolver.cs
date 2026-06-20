@@ -17,7 +17,6 @@
  */
 
 using System.Text.Json;
-using Listenarr.Domain.Models;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.DownloadClients.Transmission

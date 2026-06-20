@@ -9,7 +9,6 @@
  */
 
 using Listenarr.Application.Common;
-using Listenarr.Domain.Models;
 
 namespace Listenarr.Application.Downloads.Submission;
 

@@ -8,8 +8,6 @@
  * (at your option) any later version.
  */
 
-using Listenarr.Application.Interfaces;
-using Listenarr.Application.Interfaces.Repositories;
 using Microsoft.AspNetCore.WebUtilities;
 
 namespace Listenarr.Infrastructure.Downloads.Submission;

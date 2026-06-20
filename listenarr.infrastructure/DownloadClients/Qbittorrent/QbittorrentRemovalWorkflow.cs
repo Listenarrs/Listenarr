@@ -9,7 +9,6 @@
  */
 
 using System.Net;
-using Listenarr.Domain.Models;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent

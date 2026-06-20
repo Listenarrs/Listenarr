@@ -18,7 +18,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using Listenarr.Infrastructure.Persistence.Converters;
-using Listenarr.Domain.Models.Configurations;
 
 namespace Listenarr.Infrastructure.Persistence.Configurations
 {

@@ -8,7 +8,6 @@
  * (at your option) any later version.
  */
 
-using Listenarr.Domain.Models;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.DownloadClients.Nzbget

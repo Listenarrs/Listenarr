@@ -16,8 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Microsoft.EntityFrameworkCore;
-using Listenarr.Domain.Models;
-using Listenarr.Application.Interfaces.Repositories;
 
 namespace Listenarr.Infrastructure.Persistence.Repositories
 {

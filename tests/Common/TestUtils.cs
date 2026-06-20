@@ -1,6 +1,5 @@
 using System.Runtime.CompilerServices;
 using Asp.Versioning.ApiExplorer;
-using Listenarr.Application.Interfaces.Repositories;
 
 namespace Listenarr.Tests.Common
 {

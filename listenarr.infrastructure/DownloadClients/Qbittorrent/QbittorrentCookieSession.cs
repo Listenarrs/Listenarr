@@ -16,7 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Net;
-using Listenarr.Domain.Models;
 
 namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
 {

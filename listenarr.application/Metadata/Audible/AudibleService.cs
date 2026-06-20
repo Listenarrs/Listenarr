@@ -17,7 +17,6 @@
  */
 using System.Globalization;
 using System.Text.Json;
-using Listenarr.Application.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 

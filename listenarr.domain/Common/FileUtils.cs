@@ -19,7 +19,6 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
-using Listenarr.Domain.Models;
 
 namespace Listenarr.Domain.Common
 {

@@ -17,8 +17,6 @@
  */
 
 using System.Text.Json;
-using Listenarr.Application.Interfaces;
-using Listenarr.Domain.Models;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.Search.Providers.InternetArchive;

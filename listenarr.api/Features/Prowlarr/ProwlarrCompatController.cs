@@ -17,9 +17,6 @@
  */
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
-using Listenarr.Application.Interfaces;
-using Listenarr.Domain.Models;
-using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Api.Attributes;
 
 namespace Listenarr.Api.Features.Prowlarr

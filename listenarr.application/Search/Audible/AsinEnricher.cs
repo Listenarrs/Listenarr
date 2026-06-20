@@ -18,8 +18,6 @@
 using AsyncKeyedLock;
 using Listenarr.Application.Search.Filters;
 using Listenarr.Application.Search.Strategies;
-using Listenarr.Domain.Models;
-using Listenarr.Domain.Models.Configurations;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 

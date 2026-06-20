@@ -15,7 +15,6 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Listenarr.Application.Interfaces;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.Realtime.Broadcasting
@@ -36,7 +35,7 @@ namespace Listenarr.Infrastructure.Realtime.Broadcasting
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
-        public async Task BroadcastQueueUpdateAsync(Domain.Models.QueueSnapshot queueSnapshot)
+        public async Task BroadcastQueueUpdateAsync(QueueSnapshot queueSnapshot)
         {
             try
             {

@@ -17,7 +17,6 @@
  */
 
 using HtmlAgilityPack;
-using Listenarr.Application.Interfaces;
 
 namespace Listenarr.Infrastructure.Metadata.Parsing
 {

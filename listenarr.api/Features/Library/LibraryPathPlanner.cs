@@ -17,9 +17,7 @@
  */
 
 using System.Text.RegularExpressions;
-using Listenarr.Application.Interfaces;
 using Listenarr.Domain.Common;
-using Listenarr.Domain.Models;
 
 namespace Listenarr.Api.Features.Library
 {

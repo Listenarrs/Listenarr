@@ -8,8 +8,6 @@
  * (at your option) any later version.
  */
 using System.Text.Json;
-using Listenarr.Application.Interfaces;
-using Listenarr.Domain.Models;
 using Listenarr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 

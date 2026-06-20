@@ -15,12 +15,8 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Listenarr.Application.Interfaces;
-using Listenarr.Domain.Models.Exceptions;
 using Microsoft.Extensions.Logging;
-using Listenarr.Domain.Models;
 using Microsoft.Extensions.DependencyInjection;
-using Listenarr.Application.Interfaces.Repositories;
 using System.Text.Json;
 
 namespace Listenarr.Infrastructure.Downloads.Processing
@@ -298,7 +294,7 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                         : HistoryOutcome.Succeeded;
                     var eventType = outcome == HistoryOutcome.Skipped
                         ? HistoryEvents.FileSkipped
-                        : result.Action == Listenarr.Domain.Models.Enumerations.FileAction.Move
+                        : result.Action == Listenarr.Domain.Audiobooks.Enumerations.FileAction.Move
                             ? HistoryEvents.FileMoved
                             : HistoryEvents.FileCopied;
                     await historyRepository.AddAsync(new History

@@ -16,7 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Listenarr.Tests.Common;
-using Listenarr.Application.Interfaces.Repositories;
 
 namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
 {

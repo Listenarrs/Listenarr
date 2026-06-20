@@ -16,8 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using AsyncKeyedLock;
-using Listenarr.Application.Interfaces;
-using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Domain.Common;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;

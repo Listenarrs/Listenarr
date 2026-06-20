@@ -15,9 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Listenarr.Application.Interfaces.Repositories;
 using Microsoft.EntityFrameworkCore;
-using Listenarr.Domain.Models.Configurations;
 
 namespace Listenarr.Infrastructure.Persistence.Repositories
 {

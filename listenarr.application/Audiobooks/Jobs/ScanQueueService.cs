@@ -17,8 +17,6 @@
  */
 using System.Collections.Concurrent;
 using System.Threading.Channels;
-using Listenarr.Application.Interfaces;
-using Listenarr.Domain.Models;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Audiobooks.Jobs

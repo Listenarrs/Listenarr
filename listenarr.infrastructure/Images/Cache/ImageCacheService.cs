@@ -17,7 +17,6 @@
  */
 
 using AsyncKeyedLock;
-using Listenarr.Application.Interfaces;
 using Listenarr.Domain.Common;
 using Microsoft.Extensions.Logging;
 

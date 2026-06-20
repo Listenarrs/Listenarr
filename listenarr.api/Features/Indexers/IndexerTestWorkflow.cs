@@ -11,9 +11,6 @@
 using System.Net;
 using System.Text.Json;
 using Listenarr.Application.Common;
-using Listenarr.Application.Interfaces;
-using Listenarr.Application.Interfaces.Repositories;
-using Listenarr.Domain.Models;
 
 namespace Listenarr.Api.Features.Indexers
 {

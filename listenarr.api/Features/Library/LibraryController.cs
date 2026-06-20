@@ -17,10 +17,6 @@
  */
 
 using Microsoft.AspNetCore.Mvc;
-using Listenarr.Domain.Models;
-using Listenarr.Domain.Common;
-using Listenarr.Application.Interfaces;
-using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Api.Attributes;
 
 namespace Listenarr.Api.Features.Library

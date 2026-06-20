@@ -16,10 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Listenarr.Application.Common;
-using Listenarr.Application.Interfaces;
 using Listenarr.Domain.Common;
-using Listenarr.Domain.Models;
-using Listenarr.Domain.Models.Enumerations;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Downloads.Import

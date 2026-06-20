@@ -19,12 +19,10 @@ using System.Security.Principal;
 using System.Runtime.InteropServices;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using Listenarr.Domain.Audiobooks.Enumerations;
 using Microsoft.Extensions.Options;
-using Listenarr.Application.Interfaces;
 using Microsoft.Extensions.Logging;
 using Listenarr.Domain.Common;
-using Listenarr.Domain.Models.Configurations;
-using Listenarr.Domain.Models.Enumerations;
 
 namespace Listenarr.Infrastructure.FileSystem
 {

@@ -1,4 +1,3 @@
-using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Tests.Common;
 using Microsoft.AspNetCore.SignalR;
 

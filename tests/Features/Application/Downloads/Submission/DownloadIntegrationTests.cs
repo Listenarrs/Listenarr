@@ -16,7 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Listenarr.Tests.Common;
-using Listenarr.Domain.Models.Enumerations;
 using Listenarr.Tests.Builders;
 
 namespace Listenarr.Tests.Features.Application.Downloads.Submission

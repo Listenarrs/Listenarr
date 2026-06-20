@@ -9,7 +9,6 @@
  */
 
 using System.Text.Json;
-using Listenarr.Domain.Models;
 
 namespace Listenarr.Infrastructure.Ffmpeg.Metadata
 {

@@ -8,7 +8,6 @@
  * (at your option) any later version.
  */
 
-using Listenarr.Domain.Models;
 
 namespace Listenarr.Application.Search.Audible
 {

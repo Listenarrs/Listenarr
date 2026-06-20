@@ -227,7 +227,7 @@ namespace Listenarr.Tests.Features.Api.Features.Search
 
             // Additional test: SearchByApi returns Prowlarr-like DTO for MyAnonamouse
             var mockService2 = new Mock<ISearchService>();
-            var mamResult = new Listenarr.Domain.Models.IndexerSearchResult
+            var mamResult = new Listenarr.Domain.Search.IndexerSearchResult
             {
                 Id = "28972",
                 Title = "Frank Herbert - Collection by Frank Herbert [ENG / MP3] [VIP]",
@@ -243,7 +243,7 @@ namespace Listenarr.Tests.Features.Api.Features.Search
                 IndexerImplementation = "MyAnonamouse",
                 Source = "MyAnonamouse"
             };
-            mockService2.Setup(s => s.SearchIndexerResultsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<SearchRequest?>())).ReturnsAsync(new List<Listenarr.Domain.Models.IndexerSearchResult> { mamResult });
+            mockService2.Setup(s => s.SearchIndexerResultsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<SearchRequest?>())).ReturnsAsync(new List<Listenarr.Domain.Search.IndexerSearchResult> { mamResult });
             var controller2 = new SearchController(mockService2.Object, logger, mockAudibleService, mockMetadataService.Object);
             controller2.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
             var apiResult = await controller2.SearchByApi("1", "Dune Frank Herbert");
@@ -271,7 +271,7 @@ namespace Listenarr.Tests.Features.Api.Features.Search
 
             // New test: when caller provides MAM query params, they are passed into SearchIndexerResultsAsync as a SearchRequest
             var mockService3 = new Mock<ISearchService>();
-            mockService3.Setup(s => s.SearchIndexerResultsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<SearchRequest?>())).ReturnsAsync(new List<Listenarr.Domain.Models.IndexerSearchResult>());
+            mockService3.Setup(s => s.SearchIndexerResultsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<SearchRequest?>())).ReturnsAsync(new List<Listenarr.Domain.Search.IndexerSearchResult>());
             var controller3 = new SearchController(mockService3.Object, logger, mockAudibleService, mockMetadataService.Object);
             controller3.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
 

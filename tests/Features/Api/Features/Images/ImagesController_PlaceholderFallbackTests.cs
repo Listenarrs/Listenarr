@@ -15,7 +15,6 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Listenarr.Application.Interfaces.Repositories;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
@@ -58,7 +57,7 @@ namespace Listenarr.Tests.Features.Api.Features.Images
                 .ReturnsAsync(new List<AudnexusAuthorSearchResult>());
 
             var repo = new Mock<IAudiobookRepository>();
-            repo.Setup(r => r.GetByAsinAsync(identifier)).ReturnsAsync((Listenarr.Domain.Models.Audiobook?)null);
+            repo.Setup(r => r.GetByAsinAsync(identifier)).ReturnsAsync((Audiobook?)null);
             repo.Setup(r => r.GetAuthorAsinByNameAsync(identifier)).ReturnsAsync((string?)null);
 
             var tempRoot = Path.Join(Path.GetTempPath(), "listenarr_test_contentroot_missing_placeholder");

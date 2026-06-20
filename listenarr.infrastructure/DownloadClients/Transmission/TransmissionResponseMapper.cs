@@ -19,7 +19,6 @@
 using System.Globalization;
 using System.Text.Json;
 using Listenarr.Domain.Common;
-using Listenarr.Domain.Models;
 
 namespace Listenarr.Infrastructure.DownloadClients.Transmission
 {

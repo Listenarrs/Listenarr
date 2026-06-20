@@ -18,8 +18,6 @@
 
 using Listenarr.Api.Attributes;
 using Listenarr.Api.Dtos;
-using Listenarr.Application.Interfaces;
-using Listenarr.Domain.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 

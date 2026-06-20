@@ -19,7 +19,6 @@ using Listenarr.Tests.Common;
 using Listenarr.Tests.Builders;
 using System.Runtime.InteropServices;
 using System.IO.Compression;
-using Listenarr.Domain.Models.Enumerations;
 using Listenarr.Tests.Mocks;
 
 namespace Listenarr.Tests.Features.Application.Downloads.Import

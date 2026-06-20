@@ -9,8 +9,6 @@
  */
 
 using System.Text.Json;
-using Listenarr.Application.Interfaces;
-using Listenarr.Domain.Models;
 
 namespace Listenarr.Api.Features.Search
 {

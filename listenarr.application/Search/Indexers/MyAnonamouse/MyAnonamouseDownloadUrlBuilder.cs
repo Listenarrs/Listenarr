@@ -16,7 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Listenarr.Application.Common;
-using Listenarr.Domain.Models;
 
 namespace Listenarr.Application.Search.Indexers.MyAnonamouse
 {

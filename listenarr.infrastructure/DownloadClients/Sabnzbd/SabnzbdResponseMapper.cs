@@ -19,7 +19,6 @@
 using System.Text.Json;
 using System.Globalization;
 using Listenarr.Domain.Common;
-using Listenarr.Domain.Models;
 
 namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd;
 

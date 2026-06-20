@@ -123,8 +123,8 @@ public sealed class BackendArchitectureTests
         var registrationFiles = new[]
         {
             Path.Join(RepositoryRoot, "listenarr.api", "Startup", "ListenarrWorkflowRegistration.cs"),
-            Path.Join(RepositoryRoot, "listenarr.infrastructure", "Extensions", "ServiceRegistrationExtensions.cs"),
-            Path.Join(RepositoryRoot, "listenarr.infrastructure", "Extensions", "InfrastructureStartupCompositionExtensions.cs")
+            Path.Join(RepositoryRoot, "listenarr.infrastructure", "DependencyInjection", "ServiceRegistrationExtensions.cs"),
+            Path.Join(RepositoryRoot, "listenarr.infrastructure", "DependencyInjection", "InfrastructureStartupCompositionExtensions.cs")
         };
         var source = string.Join(Environment.NewLine, registrationFiles.Select(File.ReadAllText));
 

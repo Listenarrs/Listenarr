@@ -17,10 +17,6 @@
  */
 
 using System.Text.Json;
-using Listenarr.Application.Interfaces;
-using Listenarr.Application.Interfaces.Repositories;
-using Listenarr.Domain.Models;
-using Listenarr.Domain.Models.Configurations;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Configuration.Core

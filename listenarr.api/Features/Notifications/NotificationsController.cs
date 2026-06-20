@@ -17,7 +17,6 @@
  */
 
 using Listenarr.Api.Attributes;
-using Listenarr.Application.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Api.Features.Notifications

@@ -17,8 +17,6 @@
  */
 
 using System.Text.RegularExpressions;
-using Listenarr.Application.Interfaces.Repositories;
-using Listenarr.Domain.Models;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.Downloads.Submission

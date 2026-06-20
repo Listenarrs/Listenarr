@@ -15,7 +15,6 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Infrastructure.Persistence.Repositories;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.EntityFrameworkCore;
@@ -446,7 +445,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Quality
             // profile maximumAge = 10 days, but indexer retention = 30 days; result age = 15 days -> should NOT be rejected for age
             var options = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<ListenArrDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
             using var db = new ListenArrDbContext(options);
-            var indexer = new Listenarr.Domain.Models.Indexer { Name = "TestIndexer", Url = "https://test.local", Retention = 30, IsEnabled = true };
+            var indexer = new Listenarr.Domain.Search.Indexer { Name = "TestIndexer", Url = "https://test.local", Retention = 30, IsEnabled = true };
             db.Indexers.Add(indexer);
             db.SaveChanges();
 
@@ -472,7 +471,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Quality
             // indexer retention = 10 days, result age = 12 days -> should be rejected (NZB path)
             var options = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<ListenArrDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
             using var db = new ListenArrDbContext(options);
-            var indexer = new Listenarr.Domain.Models.Indexer { Name = "TestIndexer2", Url = "https://test2.local", Retention = 10, IsEnabled = true };
+            var indexer = new Listenarr.Domain.Search.Indexer { Name = "TestIndexer2", Url = "https://test2.local", Retention = 10, IsEnabled = true };
             db.Indexers.Add(indexer);
             db.SaveChanges();
 
@@ -498,7 +497,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Quality
             // profile maxAge = 10 days, result age = 12 days -> torrent should be rejected
             var options = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<ListenArrDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
             using var db = new ListenArrDbContext(options);
-            var idx = new Listenarr.Domain.Models.Indexer { Name = "TorrentIdx", Url = "https://t.local", IsEnabled = true };
+            var idx = new Listenarr.Domain.Search.Indexer { Name = "TorrentIdx", Url = "https://t.local", IsEnabled = true };
             db.Indexers.Add(idx);
             db.SaveChanges();
 

@@ -17,12 +17,7 @@
  */
 using Microsoft.AspNetCore.Mvc;
 using Listenarr.Domain.Common;
-using Listenarr.Application.Interfaces;
 using Listenarr.Api.Dtos.ManualImport;
-using Listenarr.Domain.Models.Enumerations;
-using Listenarr.Domain.Models.Configurations;
-using Listenarr.Application.Interfaces.Repositories;
-using Listenarr.Domain.Models;
 
 namespace Listenarr.Api.Features.Downloads;
 

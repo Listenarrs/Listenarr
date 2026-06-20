@@ -18,8 +18,6 @@
 
 using System.Text.RegularExpressions;
 using HtmlAgilityPack;
-using Listenarr.Application.Interfaces;
-using Listenarr.Domain.Models;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.Search.Providers.Torznab;

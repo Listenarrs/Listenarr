@@ -17,9 +17,6 @@
  */
 
 using System.Text.Json;
-using Listenarr.Application.Interfaces;
-using Listenarr.Domain.Models;
-using Listenarr.Domain.Models.Exceptions;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Metadata.Extraction

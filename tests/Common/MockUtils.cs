@@ -1,7 +1,5 @@
 using System.Net;
 using System.Text;
-using Listenarr.Application.Interfaces.Repositories;
-using Listenarr.Domain.Models.Enumerations;
 
 using Listenarr.Infrastructure.Torrents;
 using Listenarr.Tests.Builders;

@@ -64,7 +64,7 @@ namespace Listenarr.Tests.Features.Application.Search.Core
                 Source = "altHUB"
             };
 
-            var sr = Listenarr.Domain.Models.SearchResultConverters.ToSearchResult(idx);
+            var sr = Listenarr.Domain.Search.SearchResultConverters.ToSearchResult(idx);
             Assert.Null(sr.Language);
         }
 
@@ -80,7 +80,7 @@ namespace Listenarr.Tests.Features.Application.Search.Core
                 PublishYear = "2020"
             };
 
-            var sr = Listenarr.Domain.Models.SearchResultConverters.ToSearchResult(md);
+            var sr = Listenarr.Domain.Search.SearchResultConverters.ToSearchResult(md);
             Assert.Null(sr.Language);
         }
 
@@ -101,7 +101,7 @@ namespace Listenarr.Tests.Features.Application.Search.Core
                 Source = "test"
             };
 
-            var sr = Listenarr.Domain.Models.SearchResultConverters.ToSearchResult(idx);
+            var sr = Listenarr.Domain.Search.SearchResultConverters.ToSearchResult(idx);
             Assert.Null(sr.Quality);
         }
     }

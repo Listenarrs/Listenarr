@@ -17,10 +17,8 @@
  */
 using System.Text.RegularExpressions;
 using Listenarr.Domain.Common;
-using Listenarr.Application.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Listenarr.Application.Interfaces.Repositories;
 
 namespace Listenarr.Infrastructure.Library.Scanning
 {

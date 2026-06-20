@@ -1,8 +1,5 @@
 using System.Text.RegularExpressions;
 using Listenarr.Application.Common;
-using Listenarr.Application.Interfaces;
-using Listenarr.Domain.Common;
-using Listenarr.Domain.Models;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Search.Metadata;

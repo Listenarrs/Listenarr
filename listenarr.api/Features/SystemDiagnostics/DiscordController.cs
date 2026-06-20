@@ -16,7 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Listenarr.Api.Attributes;
-using Listenarr.Application.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 using System.Text.Json;
 

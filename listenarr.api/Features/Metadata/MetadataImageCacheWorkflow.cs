@@ -16,8 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using Listenarr.Application.Interfaces;
-using Listenarr.Application.Interfaces.Repositories;
 
 namespace Listenarr.Api.Features.Metadata
 {

@@ -19,7 +19,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
-using Listenarr.Domain.Models;
 using Listenarr.Infrastructure.Persistence.Converters;
 
 namespace Listenarr.Infrastructure.Persistence.Configurations

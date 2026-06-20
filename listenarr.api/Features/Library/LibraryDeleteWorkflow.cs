@@ -17,10 +17,7 @@
  */
 
 using System.Text.RegularExpressions;
-using Listenarr.Application.Interfaces;
-using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Domain.Common;
-using Listenarr.Domain.Models;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Api.Features.Library

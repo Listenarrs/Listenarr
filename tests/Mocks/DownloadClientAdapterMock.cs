@@ -1,4 +1,3 @@
-using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Tests.Builders;
 
 namespace Listenarr.Tests.Mocks

@@ -17,9 +17,6 @@
  */
 
 using Listenarr.Api.Attributes;
-using Listenarr.Application.Interfaces;
-using Listenarr.Domain.Models;
-using Listenarr.Domain.Models.Configurations;
 using Microsoft.AspNetCore.Mvc;
 using System.Text.Json;
 

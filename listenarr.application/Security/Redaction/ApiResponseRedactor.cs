@@ -16,8 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Text.Json;
-using Listenarr.Domain.Models;
-using Listenarr.Domain.Models.Configurations;
 
 namespace Listenarr.Application.Security.Redaction;
 

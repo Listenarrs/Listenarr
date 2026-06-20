@@ -19,10 +19,7 @@ using Microsoft.Extensions.Caching.Memory;
 using System.Text.Json;
 using Listenarr.Application.Common;
 using Listenarr.Domain.Common;
-using Listenarr.Application.Interfaces;
-using Listenarr.Application.Interfaces.Repositories;
 using Microsoft.Extensions.Logging;
-using Listenarr.Domain.Models;
 
 namespace Listenarr.Application.Audiobooks.Files
 {

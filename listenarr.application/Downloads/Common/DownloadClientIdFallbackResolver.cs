@@ -9,7 +9,6 @@
  */
 
 using System.Text.RegularExpressions;
-using Listenarr.Domain.Models;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Downloads.Common

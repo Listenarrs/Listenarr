@@ -1,5 +1,4 @@
 using Listenarr.Tests.Common;
-using Listenarr.Domain.Models.Exceptions;
 
 namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
 {

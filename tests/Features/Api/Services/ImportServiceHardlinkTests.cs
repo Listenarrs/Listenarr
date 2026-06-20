@@ -17,7 +17,6 @@
  */
 using Listenarr.Tests.Common;
 using Listenarr.Tests.Builders;
-using Listenarr.Domain.Models.Enumerations;
 
 namespace Listenarr.Tests.Features.Api.Services
 {

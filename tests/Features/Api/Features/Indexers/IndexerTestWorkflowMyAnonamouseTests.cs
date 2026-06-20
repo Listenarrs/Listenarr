@@ -1,4 +1,3 @@
-using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Tests.Common;
 using Microsoft.Extensions.Logging.Abstractions;
 

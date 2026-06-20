@@ -8,7 +8,6 @@
  * (at your option) any later version.
  */
 
-using Listenarr.Application.Interfaces;
 
 namespace Listenarr.Api.Features.Images
 {

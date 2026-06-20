@@ -17,7 +17,6 @@
  */
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.EntityFrameworkCore;
-using Listenarr.Application.Interfaces.Repositories;
 using Listenarr.Infrastructure.Persistence.Repositories;
 
 namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs

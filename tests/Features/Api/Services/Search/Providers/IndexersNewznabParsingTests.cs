@@ -15,7 +15,6 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Listenarr.Application.Interfaces.Repositories;
 using Microsoft.Extensions.Logging.Abstractions;
 using System.Net;
 using Microsoft.EntityFrameworkCore;
@@ -175,7 +174,7 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
         [Fact]
         public void SearchResultConverters_Maps_Grabs_And_Files()
         {
-            var idx = new Listenarr.Domain.Models.IndexerSearchResult
+            var idx = new Listenarr.Domain.Search.IndexerSearchResult
             {
                 Id = "1",
                 Title = "Test",
@@ -188,7 +187,7 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
                 Source = "test"
             };
 
-            var sr = Listenarr.Domain.Models.SearchResultConverters.ToSearchResult(idx);
+            var sr = Listenarr.Domain.Search.SearchResultConverters.ToSearchResult(idx);
             Assert.Equal(99, sr.Grabs);
             Assert.Equal(7, sr.Files);
         }
@@ -196,7 +195,7 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
         [Fact]
         public void SearchResultConverters_DoesNotExpose_Peers_Or_Quality_For_Usenet()
         {
-            var idx = new Listenarr.Domain.Models.IndexerSearchResult
+            var idx = new Listenarr.Domain.Search.IndexerSearchResult
             {
                 Id = "u1",
                 Title = "Usenet Book",
@@ -211,7 +210,7 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
                 Source = "altHUB"
             };
 
-            var sr = Listenarr.Domain.Models.SearchResultConverters.ToSearchResult(idx);
+            var sr = Listenarr.Domain.Search.SearchResultConverters.ToSearchResult(idx);
             Assert.Null(sr.Seeders);
             Assert.Null(sr.Leechers);
             Assert.Null(sr.Quality);
@@ -617,7 +616,7 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
             Assert.Single(results);
             var r = results[0];
 
-            var dto = Listenarr.Domain.Models.SearchResultConverters.ToIndexerResultDto(r);
+            var dto = Listenarr.Domain.Search.SearchResultConverters.ToIndexerResultDto(r);
             Assert.Equal("MP3", dto.FileType);
             Assert.Equal("English", dto.Language);
         }
@@ -644,7 +643,7 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
             Assert.Equal("MP3", r.Format);
             Assert.Equal("Torrent", r.DownloadType);
 
-            var dto = Listenarr.Domain.Models.SearchResultConverters.ToIndexerResultDto(r);
+            var dto = Listenarr.Domain.Search.SearchResultConverters.ToIndexerResultDto(r);
             Assert.Equal("MP3", dto.FileType);
             Assert.Equal("torrent", dto.Protocol);
         }

@@ -1,6 +1,6 @@
 using Listenarr.Application.Search.Filters;
 using Listenarr.Application.Search.Strategies;
-using Listenarr.Infrastructure.Extensions;
+using Listenarr.Infrastructure.DependencyInjection;
 using Listenarr.Infrastructure.HostedServices;
 using Listenarr.Tests.Mocks;
 using Listenarr.Tests.Mocks.Api;

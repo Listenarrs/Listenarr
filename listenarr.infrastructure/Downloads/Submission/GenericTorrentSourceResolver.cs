@@ -8,8 +8,6 @@
  * (at your option) any later version.
  */
 
-using Listenarr.Application.Interfaces;
-using Listenarr.Domain.Models;
 using Listenarr.Infrastructure.Torrents;
 
 namespace Listenarr.Infrastructure.Downloads.Submission;

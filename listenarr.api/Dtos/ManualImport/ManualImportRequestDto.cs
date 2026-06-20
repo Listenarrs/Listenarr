@@ -16,7 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Text.Json.Serialization;
-using Listenarr.Domain.Models.Enumerations;
 
 namespace Listenarr.Api.Dtos.ManualImport
 {

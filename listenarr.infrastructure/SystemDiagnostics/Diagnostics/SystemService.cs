@@ -18,8 +18,6 @@
 
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using Listenarr.Application.Interfaces;
-using Listenarr.Domain.Models;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.SystemDiagnostics.Diagnostics
