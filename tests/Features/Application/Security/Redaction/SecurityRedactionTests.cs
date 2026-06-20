@@ -168,7 +168,7 @@ namespace Listenarr.Tests.Features.Application.Security.Redaction
                     }
                 }));
 
-            var controller = new DiscordController(mockConfig.Object, mockFactory.Object, mockLogger.Object, Mock.Of<IDiscordBotService>(), Mock.Of<IProcessRunner>(), Mock.Of<IApplicationPathService>());
+            var controller = new DiscordController(mockConfig.Object, mockFactory.Object, mockLogger.Object, Mock.Of<IDiscordBotService>(), Mock.Of<IProcessRunner>(), Mock.Of<IApplicationPathService>(), new LocalFileSystem());
 
             // Act
             await controller.GetStatus();

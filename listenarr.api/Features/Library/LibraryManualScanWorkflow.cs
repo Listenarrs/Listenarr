@@ -29,6 +29,7 @@ namespace Listenarr.Api.Features.Library
         private readonly INotificationService? _notificationService;
         private readonly LibraryScanPathResolver _scanPathResolver;
         private readonly LibraryScanQueueWorkflow _scanQueueWorkflow;
+        private readonly IFileSystem _fileSystem;
         private readonly ILogger<LibraryManualScanWorkflow> _logger;
 
         public LibraryManualScanWorkflow(
@@ -36,6 +37,7 @@ namespace Listenarr.Api.Features.Library
             IServiceScopeFactory scopeFactory,
             LibraryScanPathResolver scanPathResolver,
             LibraryScanQueueWorkflow scanQueueWorkflow,
+            IFileSystem fileSystem,
             ILogger<LibraryManualScanWorkflow> logger,
             INotificationService? notificationService = null)
         {
@@ -43,6 +45,7 @@ namespace Listenarr.Api.Features.Library
             _scopeFactory = scopeFactory;
             _scanPathResolver = scanPathResolver;
             _scanQueueWorkflow = scanQueueWorkflow;
+            _fileSystem = fileSystem;
             _logger = logger;
             _notificationService = notificationService;
         }
@@ -66,7 +69,7 @@ namespace Listenarr.Api.Features.Library
 
             var scanRoot = scanPathResolution.ScanRoot;
 
-            if (string.IsNullOrEmpty(scanRoot) || !Directory.Exists(scanRoot))
+            if (string.IsNullOrEmpty(scanRoot) || !_fileSystem.DirectoryExists(scanRoot))
             {
                 return new BadRequestObjectResult(new { message = "Scan path not provided or does not exist", path = scanRoot });
             }
@@ -85,7 +88,7 @@ namespace Listenarr.Api.Features.Library
                 return new OkObjectResult(new { message = "No files found during scan", scannedPath = scanRoot, found = 0 });
             }
 
-            var basePath = LibraryPathPlanner.CalculateBasePath(foundFiles, _logger);
+            var basePath = LibraryPathPlanner.CalculateBasePath(foundFiles, _fileSystem, _logger);
             _logger.LogInformation("Calculated base path for audiobook '{Title}': {BasePath}", LogRedaction.SanitizeText(audiobook.Title), LogRedaction.SanitizeFilePath(basePath));
 
             var created = new List<AudiobookFile>();
@@ -120,12 +123,11 @@ namespace Listenarr.Api.Features.Library
                         _logger.LogWarning(mex, "Failed to extract metadata for file {File}", filePath);
                     }
 
-                    var fi = new FileInfo(filePath);
                     var fileRecord = new AudiobookFile
                     {
                         AudiobookId = audiobook.Id,
                         Path = relativePath,
-                        Size = fi.Length,
+                        Size = _fileSystem.GetFileLength(filePath),
                         Source = "scan",
                         CreatedAt = DateTime.UtcNow,
                         DurationSeconds = meta?.Duration.TotalSeconds,
@@ -199,7 +201,7 @@ namespace Listenarr.Api.Features.Library
                     {
                         var normalizedDir = Path.GetFullPath(dir);
 
-                        foreach (var file in Directory.EnumerateFiles(normalizedDir))
+                        foreach (var file in _fileSystem.EnumerateFiles(normalizedDir))
                         {
                             try
                             {
@@ -222,7 +224,7 @@ namespace Listenarr.Api.Features.Library
                             }
                         }
 
-                        foreach (var sub in Directory.EnumerateDirectories(normalizedDir))
+                        foreach (var sub in _fileSystem.EnumerateDirectories(normalizedDir))
                         {
                             dirs.Push(sub);
                         }
@@ -316,7 +318,7 @@ namespace Listenarr.Api.Features.Library
                 var needsUpdate = false;
                 if (!string.IsNullOrEmpty(audiobook.FilePath))
                 {
-                    if (File.Exists(audiobook.FilePath))
+                    if (_fileSystem.FileExists(audiobook.FilePath))
                     {
                         var existingFileRecord = await audioFileRepository.ExistsAtPathAsync(audiobook.Id, audiobook.FilePath!);
 

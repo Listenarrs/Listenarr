@@ -22,11 +22,13 @@ namespace Listenarr.Api.Features.Images
     {
         private readonly ImagePathValidator _pathValidator;
         private readonly ILogger _logger;
+        private readonly IFileSystem _fileSystem;
 
-        public ImageCachedPathValidator(ImagePathValidator pathValidator, ILogger logger)
+        public ImageCachedPathValidator(ImagePathValidator pathValidator, IFileSystem fileSystem, ILogger logger)
         {
             _pathValidator = pathValidator;
             _logger = logger;
+            _fileSystem = fileSystem;
         }
 
         public string? ValidateReturnedPath(string identifier, string? relativePath)
@@ -83,7 +85,7 @@ namespace Listenarr.Api.Features.Images
                     return false;
                 }
 
-                if (!File.Exists(movedFull))
+                if (!_fileSystem.FileExists(movedFull))
                 {
                     _logger.LogWarning("Moved image file does not exist for identifier {Identifier}: {Path}", LogRedaction.SanitizeText(identifier), LogRedaction.SanitizeText(movedFull));
                     return false;
@@ -110,10 +112,9 @@ namespace Listenarr.Api.Features.Images
         {
             try
             {
-                if (File.Exists(fullPath))
+                if (_fileSystem.FileExists(fullPath))
                 {
-                    var attrs = File.GetAttributes(fullPath);
-                    if ((attrs & FileAttributes.ReparsePoint) != 0)
+                    if (_fileSystem.IsReparsePoint(fullPath))
                     {
                         _logger.LogWarning(reparsePointLogMessage, LogRedaction.SanitizeText(identifier), LogRedaction.SanitizeText(fullPath));
                         return false;

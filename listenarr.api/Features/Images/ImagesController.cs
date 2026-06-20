@@ -87,11 +87,13 @@ namespace Listenarr.Api.Features.Images
             _logger = logger;
             _applicationPathService = applicationPathService;
             _fileSystem = fileSystem;
-            _placeholderResolver = placeholderResolver ?? new ImagePlaceholderResolver(Microsoft.Extensions.Logging.Abstractions.NullLogger<ImagePlaceholderResolver>.Instance);
+            _placeholderResolver = placeholderResolver ?? new ImagePlaceholderResolver(
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<ImagePlaceholderResolver>.Instance,
+                fileSystem);
             _effectiveContentRootPath = applicationPathService.ContentRootPath;
             _imageResponseBuilder = new ImageResponseBuilder(_placeholderResolver, _logger, _effectiveContentRootPath);
             _imagePathValidator = new ImagePathValidator(_effectiveContentRootPath);
-            _cachedPathValidator = new ImageCachedPathValidator(_imagePathValidator, _logger);
+            _cachedPathValidator = new ImageCachedPathValidator(_imagePathValidator, fileSystem, _logger);
             _fallbackDownloadWorkflow = new ImageFallbackDownloadWorkflow(_imageCacheService, _logger);
             _imageCandidateLookupWorkflow = new ImageCandidateLookupWorkflow(
                 _imageCacheService,

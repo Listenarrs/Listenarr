@@ -26,7 +26,8 @@ namespace Listenarr.Api.Features.Metadata
     public class AdminMetadataController(
         IAudiobookFileRepository audioFiles,
         Microsoft.AspNetCore.Antiforgery.IAntiforgery antiforgery,
-        IMetadataService metadataService) : ControllerBase
+        IMetadataService metadataService,
+        IFileSystem fileSystem) : ControllerBase
     {
         /// <summary>
         /// Re-extract audio metadata (duration, format, bitrate, etc.) for a single audiobook file.
@@ -55,7 +56,7 @@ namespace Listenarr.Api.Features.Metadata
             var path = file.Path ?? string.Empty;
             if (string.IsNullOrWhiteSpace(path))
                 return BadRequest(new { message = "AudiobookFile has no path" });
-            if (!System.IO.File.Exists(path))
+            if (!fileSystem.FileExists(path))
                 return NotFound(new { message = "AudiobookFile path does not exist" });
             if (!FileUtils.IsAudioFile(path))
                 return BadRequest(new { message = "AudiobookFile path is not a supported audio file" });
@@ -70,8 +71,7 @@ namespace Listenarr.Api.Features.Metadata
                 return StatusCode(500, new { message = "Metadata extraction failed", detail = ex.Message });
             }
 
-            var fi = new System.IO.FileInfo(path);
-            file.Size = fi.Exists ? fi.Length : file.Size;
+            file.Size = fileSystem.GetFileLength(path);
             file.DurationSeconds = meta?.Duration.TotalSeconds ?? file.DurationSeconds;
             file.Format = string.IsNullOrEmpty(meta?.Format) ? file.Format : meta!.Format;
             file.Bitrate = (meta?.BitRate != 0) ? meta?.BitRate : file.Bitrate;
@@ -108,7 +108,7 @@ namespace Listenarr.Api.Features.Metadata
                 try
                 {
                     var path = f.Path ?? string.Empty;
-                    if (string.IsNullOrWhiteSpace(path) || !System.IO.File.Exists(path) || !FileUtils.IsAudioFile(path))
+                    if (string.IsNullOrWhiteSpace(path) || !fileSystem.FileExists(path) || !FileUtils.IsAudioFile(path))
                     {
                         continue;
                     }
@@ -116,8 +116,7 @@ namespace Listenarr.Api.Features.Metadata
                     var meta = await metadataService.ExtractFileMetadataAsync(path);
                     if (meta != null)
                     {
-                        var fi = new System.IO.FileInfo(f.Path ?? string.Empty);
-                        f.Size = fi.Exists ? fi.Length : f.Size;
+                        f.Size = fileSystem.GetFileLength(path);
                         f.DurationSeconds = Math.Abs(meta.Duration.TotalSeconds) > double.Epsilon ? meta.Duration.TotalSeconds : f.DurationSeconds;
                         f.Format = !string.IsNullOrEmpty(meta.Format) ? meta.Format : f.Format;
                         f.Bitrate = meta.BitRate != 0 ? meta.BitRate : f.Bitrate;

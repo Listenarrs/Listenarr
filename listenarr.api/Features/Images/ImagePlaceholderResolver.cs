@@ -23,10 +23,12 @@ namespace Listenarr.Api.Features.Images;
 public sealed class ImagePlaceholderResolver
 {
     private readonly ILogger<ImagePlaceholderResolver> _logger;
+    private readonly IFileSystem _fileSystem;
 
-    public ImagePlaceholderResolver(ILogger<ImagePlaceholderResolver> logger)
+    public ImagePlaceholderResolver(ILogger<ImagePlaceholderResolver> logger, IFileSystem fileSystem)
     {
         _logger = logger;
+        _fileSystem = fileSystem;
     }
 
     public string? ResolvePlaceholderPath(string effectiveContentRootPath)
@@ -41,7 +43,7 @@ public sealed class ImagePlaceholderResolver
             try
             {
                 var fullPath = Path.GetFullPath(candidate);
-                if (File.Exists(fullPath))
+                if (_fileSystem.FileExists(fullPath))
                 {
                     return fullPath;
                 }
@@ -55,13 +57,13 @@ public sealed class ImagePlaceholderResolver
         return null;
     }
 
-    private static IEnumerable<string> EnumeratePlaceholderCandidates(string effectiveContentRootPath)
+    private IEnumerable<string> EnumeratePlaceholderCandidates(string effectiveContentRootPath)
     {
         var baseDirectories = new[]
         {
             effectiveContentRootPath,
             AppContext.BaseDirectory,
-            Directory.GetCurrentDirectory()
+            _fileSystem.CurrentDirectory
         }
         .Where(path => !string.IsNullOrWhiteSpace(path))
         .Select(path =>
@@ -85,29 +87,15 @@ public sealed class ImagePlaceholderResolver
 
         foreach (var baseDirectory in baseDirectories)
         {
-            DirectoryInfo? current = null;
-            try
-            {
-                current = new DirectoryInfo(baseDirectory);
-            }
-            catch (Exception ex) when (
-                ex is ArgumentException or
-                ArgumentNullException or
-                PathTooLongException or
-                NotSupportedException or
-                System.Security.SecurityException)
-            {
-                current = null;
-            }
-
+            var current = baseDirectory;
             var depth = 0;
-            while (current != null && depth++ < 8)
+            while (!string.IsNullOrWhiteSpace(current) && depth++ < 8)
             {
-                yield return FileUtils.CombineRelativePath(current.FullName, "wwwroot", "placeholder.svg");
-                yield return FileUtils.CombineRelativePath(current.FullName, "fe", "public", "placeholder.svg");
-                yield return FileUtils.CombineRelativePath(current.FullName, "listenarr.api", "wwwroot", "placeholder.svg");
+                yield return FileUtils.CombineRelativePath(current, "wwwroot", "placeholder.svg");
+                yield return FileUtils.CombineRelativePath(current, "fe", "public", "placeholder.svg");
+                yield return FileUtils.CombineRelativePath(current, "listenarr.api", "wwwroot", "placeholder.svg");
 
-                current = current.Parent;
+                current = _fileSystem.GetParentDirectory(current);
             }
         }
     }

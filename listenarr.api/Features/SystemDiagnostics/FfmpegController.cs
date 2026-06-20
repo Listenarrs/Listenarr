@@ -30,11 +30,17 @@ namespace Listenarr.Api.Features.SystemDiagnostics
         private readonly IFfmpegService _ffmpegService;
         private readonly ILogger<FfmpegController> _logger;
         private readonly IProcessRunner? _processRunner;
+        private readonly IFileSystem _fileSystem;
 
-        public FfmpegController(IFfmpegService ffmpegService, ILogger<FfmpegController> logger, IProcessRunner? processRunner = null)
+        public FfmpegController(
+            IFfmpegService ffmpegService,
+            ILogger<FfmpegController> logger,
+            IFileSystem fileSystem,
+            IProcessRunner? processRunner = null)
         {
             _ffmpegService = ffmpegService;
             _logger = logger;
+            _fileSystem = fileSystem;
             _processRunner = processRunner;
         }
 
@@ -86,7 +92,7 @@ namespace Listenarr.Api.Features.SystemDiagnostics
                 return BadRequest(new { message = "FilePath is invalid" });
             }
 
-            if (!System.IO.File.Exists(filePath))
+            if (!_fileSystem.FileExists(filePath))
             {
                 return NotFound(new { message = "File not found" });
             }

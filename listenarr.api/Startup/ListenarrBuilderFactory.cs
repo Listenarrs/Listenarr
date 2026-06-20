@@ -25,7 +25,10 @@ namespace Listenarr.Api.Startup;
 
 public static class ListenarrBuilderFactory
 {
-    public static WebApplicationBuilder Create(string[] args, ILogEventSink realtimeLogSink)
+    public static WebApplicationBuilder Create(
+        string[] args,
+        ILogEventSink realtimeLogSink,
+        IFileSystem fileSystem)
     {
         var contentRootPath = ResolveContentRootPath();
         var environmentName = ResolveEnvironmentName();
@@ -33,12 +36,12 @@ public static class ListenarrBuilderFactory
         if (string.Equals("Test", environmentName, StringComparison.Ordinal))
         {
             var testContentRootPath = Path.Combine(Path.GetTempPath(), "ListenarrTests");
-            Directory.CreateDirectory(testContentRootPath);
+            fileSystem.CreateDirectory(testContentRootPath);
             Environment.SetEnvironmentVariable("LISTENARR_CONTENT_ROOT", testContentRootPath);
             contentRootPath = testContentRootPath;
         }
 
-        contentRootPath = ApplyContentRootOverride(contentRootPath);
+        contentRootPath = ApplyContentRootOverride(contentRootPath, fileSystem);
 
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
@@ -47,7 +50,7 @@ public static class ListenarrBuilderFactory
             EnvironmentName = environmentName
         });
 
-        EnsureExternalConfiguration(builder);
+        EnsureExternalConfiguration(builder, fileSystem);
         builder.Configuration.AddJsonFile(
             Path.Join("config", "appsettings", "appsettings.json"),
             optional: true,
@@ -88,7 +91,7 @@ public static class ListenarrBuilderFactory
     private static string ResolveContentRootPath()
         => AppContext.BaseDirectory;
 
-    private static string ApplyContentRootOverride(string contentRootPath)
+    private static string ApplyContentRootOverride(string contentRootPath, IFileSystem fileSystem)
     {
         var contentRootOverride = Environment.GetEnvironmentVariable("LISTENARR_CONTENT_ROOT");
         if (string.IsNullOrWhiteSpace(contentRootOverride))
@@ -100,10 +103,10 @@ public static class ListenarrBuilderFactory
         {
             contentRootOverride = Path.GetFullPath(contentRootOverride);
 
-            if (!Directory.Exists(contentRootOverride))
+            if (!fileSystem.DirectoryExists(contentRootOverride))
             {
                 Console.WriteLine($"[Listenarr] LISTENARR_CONTENT_ROOT '{contentRootOverride}' does not exist; creating it");
-                Directory.CreateDirectory(contentRootOverride);
+                fileSystem.CreateDirectory(contentRootOverride);
             }
 
             return contentRootOverride;
@@ -115,7 +118,7 @@ public static class ListenarrBuilderFactory
         }
     }
 
-    private static void EnsureExternalConfiguration(WebApplicationBuilder builder)
+    private static void EnsureExternalConfiguration(WebApplicationBuilder builder, IFileSystem fileSystem)
     {
         var externalConfigRelative = Path.Join("config", "appsettings", "appsettings.json");
         var externalConfigAbsolute = Path.Join(builder.Environment.ContentRootPath, externalConfigRelative);
@@ -123,9 +126,9 @@ public static class ListenarrBuilderFactory
         try
         {
             var dir = Path.GetDirectoryName(externalConfigAbsolute) ?? string.Empty;
-            if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+            if (!fileSystem.DirectoryExists(dir)) fileSystem.CreateDirectory(dir);
 
-            if (!File.Exists(externalConfigAbsolute))
+            if (!fileSystem.FileExists(externalConfigAbsolute))
             {
                 var safeExternalConfigAbsolute = Path.GetFullPath(externalConfigAbsolute);
                 if (!FileUtils.IsPathSameOrInside(safeExternalConfigAbsolute, Path.GetFullPath(dir)))
@@ -134,7 +137,7 @@ public static class ListenarrBuilderFactory
                 }
 
                 var defaultJson = "{\n  \"Serilog\": {\n    \"MinimumLevel\": {\n      \"Default\": \"Information\",\n      \"Override\": {\n        \"Microsoft\": \"Warning\",\n        \"System\": \"Warning\"\n      }\n    }\n  }\n}";
-                File.WriteAllText(safeExternalConfigAbsolute, defaultJson);
+                fileSystem.WriteAllText(safeExternalConfigAbsolute, defaultJson);
                 Console.WriteLine($"[Listenarr] Created default configuration at '{safeExternalConfigAbsolute}'. Edit this file to customize app settings.");
             }
         }

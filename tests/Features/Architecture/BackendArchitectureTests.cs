@@ -79,27 +79,7 @@ public sealed class BackendArchitectureTests
     {
         var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "Features/Downloads/ManualImportCompanionImporter.cs",
-            "Features/Downloads/ManualImportController.cs",
-            "Features/Images/ImageCachedPathValidator.cs",
-            "Features/Images/ImagePlaceholderResolver.cs",
-            "Features/Images/ImagesController.cs",
-            "Features/Library/LibraryBulkEditWorkflow.cs",
-            "Features/Library/LibraryDeleteWorkflow.cs",
-            "Features/Library/LibraryManualScanWorkflow.cs",
-            "Features/Library/LibraryMoveWorkflow.cs",
-            "Features/Library/LibraryPathPlanner.cs",
-            "Features/Library/RootFoldersController.cs",
-            "Features/Metadata/AdminMetadataController.cs",
-            "Features/SystemDiagnostics/DiscordController.cs",
-            "Features/SystemDiagnostics/FfmpegController.cs",
-            "Features/SystemDiagnostics/FileSystemController.cs",
-            "Features/SystemDiagnostics/SystemController.cs",
-            "Program.Testing.cs",
-            "Startup/ListenarrBuilderFactory.cs",
-            "Startup/ListenarrSecurityStartup.cs",
-            "Startup/ListenarrStaticAssetsStartup.cs",
-            "Startup/ListenarrSwaggerRegistration.cs"
+            "Program.Testing.cs"
         };
         var apiRoot = Path.Join(RepositoryRoot, "listenarr.api");
         var filesystemPattern = new Regex(

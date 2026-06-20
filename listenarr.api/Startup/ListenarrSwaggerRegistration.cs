@@ -24,7 +24,9 @@ namespace Listenarr.Api.Startup;
 
 public static class ListenarrSwaggerRegistration
 {
-    public static IServiceCollection AddListenarrSwagger(this IServiceCollection services)
+    public static IServiceCollection AddListenarrSwagger(
+        this IServiceCollection services,
+        IFileSystem fileSystem)
     {
         services.AddEndpointsApiExplorer();
         services.AddSwaggerGen(options =>
@@ -87,7 +89,7 @@ public static class ListenarrSwaggerRegistration
             {
                 var xmlFile = System.Reflection.Assembly.GetExecutingAssembly().GetName().Name + ".xml";
                 var xmlPath = Path.Join(AppContext.BaseDirectory, xmlFile);
-                if (File.Exists(xmlPath))
+                if (fileSystem.FileExists(xmlPath))
                 {
                     options.IncludeXmlComments(xmlPath);
                 }

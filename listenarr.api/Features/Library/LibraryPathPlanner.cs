@@ -87,7 +87,7 @@ namespace Listenarr.Api.Features.Library
             return ResolvePathWithOptionalBase(rootPath, relative);
         }
 
-        public static string CalculateBasePath(List<string> filePaths, ILogger logger)
+        public static string CalculateBasePath(List<string> filePaths, IFileSystem fileSystem, ILogger logger)
         {
             if (!filePaths.Any())
                 return string.Empty;
@@ -103,18 +103,18 @@ namespace Listenarr.Api.Features.Library
                 return directories[0];
             }
 
-            var commonPath = GetCommonPath(directories);
+            var commonPath = GetCommonPath(directories, fileSystem);
             var currentPath = commonPath;
             while (!string.IsNullOrEmpty(currentPath))
             {
                 try
                 {
-                    var parent = Directory.GetParent(currentPath)?.FullName;
+                    var parent = fileSystem.GetParentDirectory(currentPath);
                     if (string.IsNullOrEmpty(parent))
                         break;
 
-                    var subDirs = Directory.GetDirectories(parent).Length;
-                    var files = Directory.GetFiles(parent).Length;
+                    var subDirs = fileSystem.EnumerateDirectories(parent).Count();
+                    var files = fileSystem.EnumerateFiles(parent).Count();
 
                     if (subDirs + files > 1)
                     {
@@ -150,7 +150,7 @@ namespace Listenarr.Api.Features.Library
             return name.Trim();
         }
 
-        private static string GetCommonPath(List<string> paths)
+        private static string GetCommonPath(List<string> paths, IFileSystem fileSystem)
         {
             if (!paths.Any())
                 return string.Empty;
@@ -182,9 +182,9 @@ namespace Listenarr.Api.Features.Library
                     break;
             }
 
-            if (!string.IsNullOrEmpty(commonPath) && !Directory.Exists(commonPath))
+            if (!string.IsNullOrEmpty(commonPath) && !fileSystem.DirectoryExists(commonPath))
             {
-                var parent = Directory.GetParent(commonPath)?.FullName;
+                var parent = fileSystem.GetParentDirectory(commonPath);
                 return parent ?? commonPath;
             }
 

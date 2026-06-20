@@ -17,15 +17,18 @@ public sealed class ManualImportCompanionImporter
 {
     private readonly IMetadataService _metadataService;
     private readonly IFileMover _fileMover;
+    private readonly IFileSystem _fileSystem;
     private readonly ILogger<ManualImportCompanionImporter> _logger;
 
     public ManualImportCompanionImporter(
         IMetadataService metadataService,
         IFileMover fileMover,
+        IFileSystem fileSystem,
         ILogger<ManualImportCompanionImporter> logger)
     {
         _metadataService = metadataService;
         _fileMover = fileMover;
+        _fileSystem = fileSystem;
         _logger = logger;
     }
 
@@ -84,8 +87,8 @@ public sealed class ManualImportCompanionImporter
             .ToList();
 
         var companionFiles = selectedDirectories
-            .Where(Directory.Exists)
-            .SelectMany(dir => Directory.EnumerateFiles(dir!, "*", SearchOption.TopDirectoryOnly))
+            .Where(directory => directory != null && _fileSystem.DirectoryExists(directory))
+            .SelectMany(dir => _fileSystem.EnumerateFiles(dir!, "*", SearchOption.TopDirectoryOnly))
             .Where(file => !FileUtils.IsBlacklistedFile(file, importBlacklist))
             .Select(Path.GetFullPath)
             .Where(file => !selectedSourceFiles.Contains(file))

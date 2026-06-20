@@ -28,11 +28,13 @@ namespace Listenarr.Api.Features.SystemDiagnostics
     {
         private readonly ISystemService _systemService;
         private readonly ILogger<SystemController> _logger;
+        private readonly IFileSystem _fileSystem;
 
-        public SystemController(ISystemService systemService, ILogger<SystemController> logger)
+        public SystemController(ISystemService systemService, ILogger<SystemController> logger, IFileSystem fileSystem)
         {
             _systemService = systemService;
             _logger = logger;
+            _fileSystem = fileSystem;
         }
 
         /// <summary>
@@ -154,9 +156,9 @@ namespace Listenarr.Api.Features.SystemDiagnostics
                 var logFilePath = _systemService.GetLogFilePath();
 
                 // If log file exists, return it
-                if (System.IO.File.Exists(logFilePath))
+                if (_fileSystem.FileExists(logFilePath))
                 {
-                    var fileBytes = System.IO.File.ReadAllBytes(logFilePath);
+                    var fileBytes = _fileSystem.ReadAllBytes(logFilePath);
                     var fileName = $"listenarr-logs-{DateTime.UtcNow:yyyy-MM-dd-HHmmss}.log";
                     return File(fileBytes, "text/plain", fileName);
                 }

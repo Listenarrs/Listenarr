@@ -28,13 +28,20 @@ namespace Listenarr.Api.Features.Library
         private readonly IUnmatchedScanQueueService _unmatchedQueue;
         private readonly IAudiobookFileRepository _fileRepository;
         private readonly IAudiobookRepository _audiobookRepository;
+        private readonly IFileSystem _fileSystem;
 
-        public RootFoldersController(IRootFolderService service, IUnmatchedScanQueueService unmatchedQueue, IAudiobookFileRepository fileRepository, IAudiobookRepository audiobookRepository)
+        public RootFoldersController(
+            IRootFolderService service,
+            IUnmatchedScanQueueService unmatchedQueue,
+            IAudiobookFileRepository fileRepository,
+            IAudiobookRepository audiobookRepository,
+            IFileSystem fileSystem)
         {
             _service = service;
             _unmatchedQueue = unmatchedQueue;
             _fileRepository = fileRepository;
             _audiobookRepository = audiobookRepository;
+            _fileSystem = fileSystem;
         }
 
         /// <summary>
@@ -198,7 +205,7 @@ namespace Listenarr.Api.Features.Library
                     StringComparer.OrdinalIgnoreCase);
 
                 var filtered = (job.Results ?? new List<UnmatchedFileResult>())
-                    .Where(r => !tracked.Contains(r.FullPath) && System.IO.File.Exists(r.FullPath))
+                    .Where(r => !tracked.Contains(r.FullPath) && _fileSystem.FileExists(r.FullPath))
                     .ToList();
 
                 return Ok(new

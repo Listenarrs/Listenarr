@@ -33,6 +33,7 @@ namespace Listenarr.Api.Features.SystemDiagnostics
         private readonly IDiscordBotService _botService;
         private readonly IProcessRunner _processRunner;
         private readonly IApplicationPathService _applicationPathService;
+        private readonly IFileSystem _fileSystem;
 
         public DiscordController(
             IConfigurationService configurationService,
@@ -40,7 +41,8 @@ namespace Listenarr.Api.Features.SystemDiagnostics
             ILogger<DiscordController> logger,
             IDiscordBotService botService,
             IProcessRunner processRunner,
-            IApplicationPathService applicationPathService)
+            IApplicationPathService applicationPathService,
+            IFileSystem fileSystem)
         {
             _configurationService = configurationService;
             _httpClientFactory = httpClientFactory;
@@ -48,6 +50,7 @@ namespace Listenarr.Api.Features.SystemDiagnostics
             _botService = botService;
             _processRunner = processRunner;
             _applicationPathService = applicationPathService;
+            _fileSystem = fileSystem;
         }
 
         /// <summary>
@@ -399,8 +402,8 @@ namespace Listenarr.Api.Features.SystemDiagnostics
                 var botDirectory = _applicationPathService.DiscordBotRootPath;
                 var indexJsPath = System.IO.Path.Join(botDirectory, "index.js");
 
-                var botDirExists = System.IO.Directory.Exists(botDirectory);
-                var indexExists = System.IO.File.Exists(indexJsPath);
+                var botDirExists = _fileSystem.DirectoryExists(botDirectory);
+                var indexExists = _fileSystem.FileExists(indexJsPath);
 
                 // Check for node availability by running `node --version` (best-effort, non-blocking)
                 string? nodeVersion = null;

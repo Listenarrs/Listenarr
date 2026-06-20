@@ -27,7 +27,8 @@ public static class ListenarrSecurityStartup
     public static IServiceCollection AddListenarrSecurity(
         this IServiceCollection services,
         IConfiguration configuration,
-        IWebHostEnvironment environment)
+        IWebHostEnvironment environment,
+        IFileSystem fileSystem)
     {
         var antiforgeryCookiePolicy = CookieSecurePolicy.SameAsRequest;
         var cfgPolicy = configuration["Antiforgery:Cookie:SecurePolicy"];
@@ -59,7 +60,7 @@ public static class ListenarrSecurityStartup
         }
 
         var keyDir = Path.Join(environment.ContentRootPath, "config", "dataprotection-keys");
-        if (!Directory.Exists(keyDir)) Directory.CreateDirectory(keyDir);
+        if (!fileSystem.DirectoryExists(keyDir)) fileSystem.CreateDirectory(keyDir);
         services.AddDataProtection()
             .PersistKeysToFileSystem(new DirectoryInfo(keyDir))
             .SetApplicationName("Listenarr");

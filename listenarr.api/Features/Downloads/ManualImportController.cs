@@ -64,6 +64,7 @@ public class ManualImportController : ControllerBase
         _companionImporter = companionImporter ?? new ManualImportCompanionImporter(
             metadataService,
             fileMover,
+            fileSystem,
             Microsoft.Extensions.Logging.Abstractions.NullLogger<ManualImportCompanionImporter>.Instance);
     }
 

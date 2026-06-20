@@ -18,12 +18,14 @@
 
 using Listenarr.Api.Startup;
 using Listenarr.Infrastructure.DependencyInjection;
+using Listenarr.Infrastructure.FileSystem;
 using Listenarr.Infrastructure.Realtime.DependencyInjection;
 
 var realtimeLogSink = RealtimeLoggingExtensions.CreateListenarrRealtimeLogSink();
-var builder = ListenarrBuilderFactory.Create(args, realtimeLogSink);
+var bootstrapFileSystem = new LocalFileSystem();
+var builder = ListenarrBuilderFactory.Create(args, realtimeLogSink, bootstrapFileSystem);
 
-builder.AddListenarrApiServices();
+builder.AddListenarrApiServices(bootstrapFileSystem);
 builder.Services.AddListenarrInfrastructureComposition(builder.Configuration, builder.Environment);
 
 var app = builder.Build();

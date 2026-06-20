@@ -24,12 +24,13 @@ public static class ListenarrStaticAssetsStartup
 {
     public static WebApplication MapListenarrStaticAssets(this WebApplication app)
     {
+        var fileSystem = app.Services.GetRequiredService<IFileSystem>();
         var frontendPlaceholderPath = Path.Join(app.Environment.ContentRootPath, "..", "fe", "public", "placeholder.svg");
         app.MapGet("/placeholder.svg", async context =>
         {
             try
             {
-                if (File.Exists(frontendPlaceholderPath))
+                if (fileSystem.FileExists(frontendPlaceholderPath))
                 {
                     context.Response.ContentType = "image/svg+xml";
                     context.Response.Headers.CacheControl = "public, max-age=300";
@@ -38,7 +39,7 @@ public static class ListenarrStaticAssetsStartup
                 }
 
                 var fallback = Path.Join(app.Environment.ContentRootPath, "wwwroot", "placeholder.svg");
-                if (File.Exists(fallback))
+                if (fileSystem.FileExists(fallback))
                 {
                     context.Response.ContentType = "image/svg+xml";
                     context.Response.Headers.CacheControl = "public, max-age=300";
@@ -59,7 +60,7 @@ public static class ListenarrStaticAssetsStartup
         app.UseStaticFiles();
 
         var cacheImagesPath = Path.Join(app.Environment.ContentRootPath, "config", "cache", "images");
-        if (Directory.Exists(cacheImagesPath))
+        if (fileSystem.DirectoryExists(cacheImagesPath))
         {
             app.UseStaticFiles(new StaticFileOptions
             {

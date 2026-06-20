@@ -24,7 +24,9 @@ namespace Listenarr.Api.Startup;
 
 public static class ListenarrServiceRegistration
 {
-    public static WebApplicationBuilder AddListenarrApiServices(this WebApplicationBuilder builder)
+    public static WebApplicationBuilder AddListenarrApiServices(
+        this WebApplicationBuilder builder,
+        IFileSystem fileSystem)
     {
         if (builder.Environment.IsEnvironment("Test"))
         {
@@ -44,8 +46,8 @@ public static class ListenarrServiceRegistration
         builder.Services.AddListenarrRealtime();
         builder.Services.AddListenarrDomainWorkflows();
         builder.Services.AddListenarrDevelopmentCors(builder.Environment);
-        builder.Services.AddListenarrSwagger();
-        builder.Services.AddListenarrSecurity(builder.Configuration, builder.Environment);
+        builder.Services.AddListenarrSwagger(fileSystem);
+        builder.Services.AddListenarrSecurity(builder.Configuration, builder.Environment, fileSystem);
 
         return builder;
     }

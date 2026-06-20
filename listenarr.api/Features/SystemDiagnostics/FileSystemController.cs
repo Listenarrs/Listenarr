@@ -54,54 +54,29 @@ public class FileSystemController : ControllerBase
             // Validate and normalize the path
             var normalizedPath = Path.GetFullPath(path);
 
-            if (!Directory.Exists(normalizedPath))
+            if (!_fileSystem.DirectoryExists(normalizedPath))
             {
                 return NotFound(new { error = "Directory not found" });
             }
 
             var directories = new List<FileSystemItem>();
-            var parent = Directory.GetParent(normalizedPath);
+            var parent = _fileSystem.GetParentDirectory(normalizedPath);
 
             try
             {
-                // Get directories and files in the current path
-                var dirInfo = new DirectoryInfo(normalizedPath);
-
-                // Add directories
-                foreach (var dir in dirInfo.GetDirectories())
+                foreach (var entry in _fileSystem.EnumerateEntries(normalizedPath))
                 {
-                    // Skip hidden and system directories
-                    if ((dir.Attributes & FileAttributes.Hidden) != 0 ||
-                        (dir.Attributes & FileAttributes.System) != 0)
+                    if (entry.IsHidden || entry.IsSystem)
                     {
                         continue;
                     }
 
                     directories.Add(new FileSystemItem
                     {
-                        Name = dir.Name,
-                        Path = dir.FullName,
-                        IsDirectory = true,
-                        LastModified = dir.LastWriteTime
-                    });
-                }
-
-                // Add files
-                foreach (var file in dirInfo.GetFiles())
-                {
-                    // Skip hidden and system files
-                    if ((file.Attributes & FileAttributes.Hidden) != 0 ||
-                        (file.Attributes & FileAttributes.System) != 0)
-                    {
-                        continue;
-                    }
-
-                    directories.Add(new FileSystemItem
-                    {
-                        Name = file.Name,
-                        Path = file.FullName,
-                        IsDirectory = false,
-                        LastModified = file.LastWriteTime
+                        Name = entry.Name,
+                        Path = entry.FullPath,
+                        IsDirectory = entry.IsDirectory,
+                        LastModified = entry.LastWriteTime
                     });
                 }
             }
@@ -113,7 +88,7 @@ public class FileSystemController : ControllerBase
             return new FileSystemBrowseResponse
             {
                 CurrentPath = normalizedPath,
-                ParentPath = parent?.FullName,
+                ParentPath = parent,
                 Items = directories.OrderByDescending(d => d.IsDirectory).ThenBy(d => d.Name).ToList()
             };
         }
@@ -144,7 +119,7 @@ public class FileSystemController : ControllerBase
             }
 
             var normalizedPath = Path.GetFullPath(path);
-            var exists = Directory.Exists(normalizedPath);
+            var exists = _fileSystem.DirectoryExists(normalizedPath);
             var isWritable = false;
 
             if (exists)
@@ -193,42 +168,30 @@ public class FileSystemController : ControllerBase
 
     private FileSystemBrowseResponse GetRootDirectories()
     {
-        var items = new List<FileSystemItem>();
-
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-        {
-            // Get all drives on Windows
-            foreach (var drive in DriveInfo.GetDrives().Where(drive => drive.IsReady))
+        var items = _fileSystem
+            .EnumerateRoots()
+            .Select(root => new FileSystemItem
             {
-                items.Add(new FileSystemItem
+                Name = root.Name,
+                Path = root.FullPath,
+                IsDirectory = true,
+                LastModified = root.LastWriteTime
+            })
+            .ToList();
+
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            var commonDirs = new HashSet<string>(["/home", "/mnt", "/media", "/opt"], StringComparer.Ordinal);
+            items.AddRange(_fileSystem
+                .EnumerateEntries("/")
+                .Where(entry => entry.IsDirectory && commonDirs.Contains(entry.FullPath))
+                .Select(entry => new FileSystemItem
                 {
-                    Name = $"{drive.Name} ({drive.VolumeLabel})",
-                    Path = drive.Name,
+                    Name = entry.Name,
+                    Path = entry.FullPath,
                     IsDirectory = true,
-                    LastModified = DateTime.Now
-                });
-            }
-        }
-        else
-        {
-            // Unix-like systems start at root
-            items.Add(new FileSystemItem
-            {
-                Name = "/",
-                Path = "/",
-                IsDirectory = true,
-                LastModified = DateTime.Now
-            });
-
-            // Add common directories
-            var commonDirs = new[] { "/home", "/mnt", "/media", "/opt" };
-            items.AddRange(commonDirs.Where(Directory.Exists).Select(dir => new DirectoryInfo(dir)).Select(dirInfo => new FileSystemItem
-            {
-                Name = dirInfo.Name,
-                Path = dirInfo.FullName,
-                IsDirectory = true,
-                LastModified = dirInfo.LastWriteTime
-            }));
+                    LastModified = entry.LastWriteTime
+                }));
         }
 
         return new FileSystemBrowseResponse
