@@ -25,7 +25,6 @@ using Listenarr.Infrastructure.FileSystem;
 using Listenarr.Infrastructure.OpenLibrary;
 using Listenarr.Infrastructure.Persistence;
 using Listenarr.Infrastructure.Platform;
-using Listenarr.Infrastructure.Search.Providers;
 using Listenarr.Infrastructure.Security;
 using Listenarr.Infrastructure.Services;
 using Listenarr.Infrastructure.Web;

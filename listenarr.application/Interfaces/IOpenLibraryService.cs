@@ -1,4 +1,3 @@
-using Listenarr.Application.Search;
 
 namespace Listenarr.Application.Interfaces
 {

@@ -17,7 +17,6 @@
  */
 
 using System.Text.Json;
-using Listenarr.Application.Search;
 
 namespace Listenarr.Tests.Features.Application.Search
 {

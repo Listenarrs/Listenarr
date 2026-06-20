@@ -19,7 +19,6 @@ using Listenarr.Api.Controllers;
 using Microsoft.AspNetCore.Mvc;
 using System.Text.Json;
 using Listenarr.Application.Metadata;
-using Listenarr.Application.Search;
 
 namespace Listenarr.Tests.Features.Api.Controllers
 {

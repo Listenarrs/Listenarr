@@ -11,7 +11,6 @@
 using System.Text.Json;
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Metadata;
-using Listenarr.Application.Search;
 using Listenarr.Application.Security;
 using Listenarr.Domain.Models;
 

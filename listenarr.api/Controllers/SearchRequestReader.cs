@@ -11,7 +11,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
-using Listenarr.Application.Search;
 
 namespace Listenarr.Api.Controllers
 {

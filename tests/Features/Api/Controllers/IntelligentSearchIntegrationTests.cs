@@ -17,7 +17,6 @@
  */
 using Listenarr.Api.Controllers;
 using Listenarr.Application.Metadata;
-using Listenarr.Application.Search;
 
 namespace Listenarr.Tests.Features.Api.Controllers
 {

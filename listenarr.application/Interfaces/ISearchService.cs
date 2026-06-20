@@ -1,4 +1,3 @@
-using Listenarr.Application.Search;
 using Listenarr.Domain.Models;
 using Listenarr.Domain.Models.Configurations;
 

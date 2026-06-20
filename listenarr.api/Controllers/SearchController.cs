@@ -20,7 +20,6 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Metadata;
-using Listenarr.Application.Search;
 using Listenarr.Domain.Models;
 using Listenarr.Application.Security;
 

@@ -20,10 +20,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 using System.Net;
 using Microsoft.EntityFrameworkCore;
 using Listenarr.Application.Metadata;
-using Listenarr.Application.Search;
 using Listenarr.Application.Search.Filters;
 using Listenarr.Application.Search.Strategies;
-using Listenarr.Infrastructure.Search.Providers;
 using Listenarr.Infrastructure.Persistence.Repositories;
 
 namespace Listenarr.Tests.Features.Api.Services.Search.Providers

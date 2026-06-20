@@ -18,7 +18,6 @@
 using Listenarr.Infrastructure.Extensions;
 using Listenarr.Infrastructure.Cache;
 using Listenarr.Infrastructure.Platform;
-using Listenarr.Infrastructure.Search.Providers;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Http;
 using Microsoft.Extensions.Options;
