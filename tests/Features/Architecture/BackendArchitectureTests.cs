@@ -141,7 +141,8 @@ public sealed class BackendArchitectureTests
         var registrationFiles = new[]
         {
             Path.Join(RepositoryRoot, "listenarr.api", "Startup", "ListenarrWorkflowRegistration.cs"),
-            Path.Join(RepositoryRoot, "listenarr.infrastructure", "DependencyInjection", "ServiceRegistrationExtensions.cs"),
+            Path.Join(RepositoryRoot, "listenarr.infrastructure", "DependencyInjection", "Platform", "PlatformRegistrationExtensions.cs"),
+            Path.Join(RepositoryRoot, "listenarr.infrastructure", "DependencyInjection", "Metadata", "MetadataRegistrationExtensions.cs"),
             Path.Join(RepositoryRoot, "listenarr.infrastructure", "DependencyInjection", "InfrastructureStartupCompositionExtensions.cs")
         };
         var source = string.Join(Environment.NewLine, registrationFiles.Select(File.ReadAllText));
@@ -149,6 +150,34 @@ public sealed class BackendArchitectureTests
         Assert.Single(Regex.Matches(source, "AddHttpClient\\(\\\"us\\\"\\)"));
         Assert.Single(Regex.Matches(source, "AddHttpClient<AudibleService>"));
         Assert.Single(Regex.Matches(source, "AddHttpClient<(?:IAudnexusService,\\s*)?AudnexusService>"));
+    }
+
+    [Fact]
+    public void FeatureRegistrations_AreOwnedByFeatureModules()
+    {
+        var dependencyInjectionRoot = Path.Join(
+            RepositoryRoot,
+            "listenarr.infrastructure",
+            "DependencyInjection");
+        var compatibilityFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "AppServiceRegistrationExtensions.cs",
+            "HostedServiceRegistrationExtensions.cs",
+            "InfrastructureServiceRegistrationExtensions.cs",
+            "ServiceRegistrationExtensions.cs"
+        };
+        var registrationPattern = new Regex(
+            @"\bservices\.(?:AddScoped|AddSingleton|AddTransient|AddHostedService|AddHttpClient|Configure|TryAdd)",
+            RegexOptions.Compiled);
+
+        var violations = Directory
+            .EnumerateFiles(dependencyInjectionRoot, "*.cs", SearchOption.TopDirectoryOnly)
+            .Where(file => compatibilityFiles.Contains(Path.GetFileName(file)))
+            .Where(file => registrationPattern.IsMatch(File.ReadAllText(file)))
+            .Select(Path.GetFileName)
+            .ToList();
+
+        Assert.Empty(violations);
     }
 
     private static void AssertProjectReferences(string relativeProject, IReadOnlyCollection<string> expected)
