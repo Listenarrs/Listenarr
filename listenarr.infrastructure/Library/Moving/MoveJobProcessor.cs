@@ -267,74 +267,12 @@ namespace Listenarr.Infrastructure.Library.Moving
 
                     Directory.Delete(source, true);
 
-                    // Preserve local image path if it pointed inside the source directory
-                    try
-                    {
-                        if (!string.IsNullOrWhiteSpace(audiobook.ImageUrl))
-                        {
-                            var imageUrl = audiobook.ImageUrl;
-
-                            // Only attempt to rewrite file-system paths (skip /api/v1/images/ or URLs)
-                            bool looksLikeFsPath = Path.IsPathRooted(imageUrl) || imageUrl.StartsWith(source, StringComparison.OrdinalIgnoreCase) || imageUrl.StartsWith(source.Replace(Path.DirectorySeparatorChar, '/'), StringComparison.OrdinalIgnoreCase);
-                            if (looksLikeFsPath)
-                            {
-                                try
-                                {
-                                    var fullImagePath = Path.IsPathRooted(imageUrl)
-                                        ? Path.GetFullPath(imageUrl)
-                                        : Path.GetFullPath(Path.Join(source, imageUrl));
-                                    if (FileUtils.IsPathSameOrInside(fullImagePath, source))
-                                    {
-                                        var rel = Path.GetRelativePath(source, fullImagePath);
-                                        // Only update if the new file actually exists after move
-                                        if (FileUtils.TryResolveRelativePathWithinBase(target, rel, out var newImagePath)
-                                            && System.IO.File.Exists(newImagePath))
-                                        {
-                                            audiobook.ImageUrl = newImagePath;
-                                            await audiobookRepository.UpdateAsync(audiobook);
-                                            logger.LogInformation("Updated ImageUrl for audiobook {AudiobookId} to new path after move", audiobook.Id);
-                                        }
-                                    }
-                                }
-                                catch (Exception innerEx) when (innerEx is not OperationCanceledException && innerEx is not OutOfMemoryException && innerEx is not StackOverflowException)
-                                {
-                                    logger.LogDebug(innerEx, "Non-fatal: failed to update ImageUrl after move for audiobook {AudiobookId}", audiobook.Id);
-                                }
-                            }
-                        }
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                    {
-                        logger.LogDebug(ex, "Non-fatal: error while attempting to preserve ImageUrl for audiobook {AudiobookId}", audiobook.Id);
-                    }
-
-                    // Preserve legacy single-file FilePath if it pointed inside the source directory
-                    try
-                    {
-                        if (!string.IsNullOrWhiteSpace(audiobook.FilePath))
-                        {
-                            var fullFilePath = Path.IsPathRooted(audiobook.FilePath)
-                                ? Path.GetFullPath(audiobook.FilePath)
-                                : Path.GetFullPath(Path.Join(source, audiobook.FilePath));
-
-                            if (FileUtils.IsPathSameOrInside(fullFilePath, source))
-                            {
-                                var rel = Path.GetRelativePath(source, fullFilePath);
-                                // Only update if the new file actually exists after move
-                                if (FileUtils.TryResolveRelativePathWithinBase(target, rel, out var newFilePath)
-                                    && File.Exists(newFilePath))
-                                {
-                                    audiobook.FilePath = newFilePath;
-                                    await audiobookRepository.UpdateAsync(audiobook);
-                                    logger.LogInformation("Updated FilePath for audiobook {AudiobookId} to new path after move", audiobook.Id);
-                                }
-                            }
-                        }
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                    {
-                        logger.LogDebug(ex, "Non-fatal: failed to update FilePath after move for audiobook {AudiobookId}", audiobook.Id);
-                    }
+                    await MovedAudiobookPathRewriter.RewriteAsync(
+                        audiobook,
+                        source,
+                        target,
+                        audiobookRepository,
+                        logger);
 
                     // Add history entry and send notifications for the move
                     try

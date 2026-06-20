@@ -23,7 +23,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.Library.Scanning
 {
-    public class ScanJobProcessor : IScanJobProcessor
+    public partial class ScanJobProcessor : IScanJobProcessor
     {
         private readonly IScanQueueService _queue;
         private readonly IServiceScopeFactory _scopeFactory;
@@ -202,111 +202,11 @@ namespace Listenarr.Infrastructure.Library.Scanning
                     return;
                 }
 
-                var titleToken = (audiobook.Title ?? string.Empty).Replace("\"", string.Empty).Trim();
-                var authorToken = audiobook.Authors?.FirstOrDefault() ?? string.Empty;
-
-                var exts = FileUtils.AudioExtensions;
-
-                // Collect candidate audio files first
-                var candidates = new List<string>();
-                // Walk directories iteratively and safely, catching IO/Access exceptions per directory.
-                var dirs = new Stack<string>();
-                dirs.Push(scanRoot);
-
-                while (dirs.Count > 0)
-                {
-                    var dir = dirs.Pop();
-                    try
-                    {
-                        // normalize path to full path to avoid odd relative issues
-                        var normalizedDir = Path.GetFullPath(dir);
-
-                        // enumerate files in this directory
-                        foreach (var file in Directory.EnumerateFiles(normalizedDir))
-                        {
-                            try
-                            {
-                                var ext = Path.GetExtension(file);
-                                if (!exts.Contains(ext, StringComparer.OrdinalIgnoreCase)) continue;
-                                candidates.Add(file);
-                            }
-                            catch (Exception innerFileEx) when (innerFileEx is not OperationCanceledException && innerFileEx is not OutOfMemoryException && innerFileEx is not StackOverflowException)
-                            {
-                                _logger.LogDebug(innerFileEx, "Skipped file while scanning {Dir}", normalizedDir);
-                                continue;
-                            }
-                        }
-
-                        // enqueue subdirectories
-                        foreach (var sub in Directory.EnumerateDirectories(normalizedDir))
-                        {
-                            dirs.Push(sub);
-                        }
-                    }
-                    catch (System.IO.IOException ioEx)
-                    {
-                        _logger.LogWarning(ioEx, "IO error while enumerating directory for scan job {JobId}: {Dir}", job.Id, dir);
-                        // don't fail the whole job - continue scanning other directories
-                        continue;
-                    }
-                    catch (UnauthorizedAccessException uaEx)
-                    {
-                        _logger.LogWarning(uaEx, "Access denied while enumerating directory for scan job {JobId}: {Dir}", job.Id, dir);
-                        continue;
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                    {
-                        _logger.LogWarning(ex, "Unexpected error while enumerating directory for scan job {JobId}: {Dir}", job.Id, dir);
-                        continue;
-                    }
-                }
-
-                // Decide which candidates belong to this audiobook.
-                // Strategy: if title/author tokens are empty, accept all candidates.
-                // Otherwise, group candidates by parent directory; if any file or the directory name matches the title/author token, accept the whole directory (useful for disc/chapter sets).
-                var foundFiles = new List<string>();
-                var unique = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-                if (candidates.Count > 0)
-                {
-                    if (string.IsNullOrEmpty(titleToken) && string.IsNullOrEmpty(authorToken))
-                    {
-                        foundFiles.AddRange(candidates.Where(unique.Add));
-                    }
-                    else
-                    {
-                        var groups = candidates.GroupBy(f => Path.GetDirectoryName(f) ?? string.Empty);
-                        foreach (var group in groups)
-                        {
-                            var dirName = Path.GetFileName(group.Key) ?? string.Empty;
-                            var groupHasMatch = group.Any(f =>
-                            {
-                                bool fileNameMatchesTitle = !string.IsNullOrEmpty(titleToken) && Path.GetFileNameWithoutExtension(f).IndexOf(titleToken, StringComparison.OrdinalIgnoreCase) >= 0;
-                                bool filePathMatchesAuthor = !string.IsNullOrEmpty(authorToken) && f.IndexOf(authorToken, StringComparison.OrdinalIgnoreCase) >= 0;
-                                bool dirMatchesTitle = !string.IsNullOrEmpty(titleToken) && dirName.IndexOf(titleToken, StringComparison.OrdinalIgnoreCase) >= 0;
-                                return fileNameMatchesTitle || filePathMatchesAuthor || dirMatchesTitle;
-                            });
-
-                            if (groupHasMatch)
-                            {
-                                foundFiles.AddRange(group.Where(unique.Add));
-                            }
-                            else
-                            {
-                                // include files that individually match
-                                foreach (var f in group)
-                                {
-                                    var fname = Path.GetFileNameWithoutExtension(f);
-                                    var matchesTitle = !string.IsNullOrEmpty(titleToken)
-                                        && fname.IndexOf(titleToken, StringComparison.OrdinalIgnoreCase) >= 0;
-                                    var matchesAuthor = !string.IsNullOrEmpty(authorToken)
-                                        && f.IndexOf(authorToken, StringComparison.OrdinalIgnoreCase) >= 0;
-                                    if ((matchesTitle || matchesAuthor) && unique.Add(f)) foundFiles.Add(f);
-                                }
-                            }
-                        }
-                    }
-                }
+                var foundFiles = ScanFileDiscovery.FindMatchingAudioFiles(
+                    scanRoot,
+                    audiobook,
+                    job.Id,
+                    _logger);
 
                 // Calculate base path for the audiobook files
                 var basePath = ScanPathPlanner.CalculateBasePath(foundFiles);
@@ -494,38 +394,7 @@ namespace Listenarr.Infrastructure.Library.Scanning
                     _logger.LogWarning(ex, "Failed to handle legacy filePath migration for audiobook {AudiobookId}", audiobook.Id);
                 }
 
-                // Send "book-available" notification if the audiobook is monitored and files were imported
-                if (audiobook.Monitored && createdFiles > 0)
-                {
-                    try
-                    {
-                        using var notificationScope = _scopeFactory.CreateScope();
-                        var notificationService = notificationScope.ServiceProvider.GetService<NotificationService>();
-                        var configService = notificationScope.ServiceProvider.GetRequiredService<IConfigurationService>();
-                        var settings = await configService.GetApplicationSettingsAsync();
-                        var availableData = new
-                        {
-                            id = audiobook.Id,
-                            title = audiobook.Title ?? "Unknown Title",
-                            authors = audiobook.Authors,
-                            asin = audiobook.Asin,
-                            imageUrl = audiobook.ImageUrl,
-                            description = audiobook.Description,
-                            monitored = audiobook.Monitored,
-                            qualityProfileId = audiobook.QualityProfileId,
-                            filesImported = createdFiles,
-                            totalFiles = 0 // Will be updated below
-                        };
-                        if (notificationService != null)
-                        {
-                            await notificationService.SendNotificationAsync("book-available", availableData, settings.WebhookUrl, settings.EnabledNotificationTriggers);
-                        }
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                    {
-                        _logger.LogWarning(ex, "Failed to send book-available notification for audiobook {AudiobookId} in background scan", audiobook.Id);
-                    }
-                }
+                await NotifyAvailableAsync(audiobook, createdFiles);
 
                 var updated = await audiobookRepository.GetByIdAsync(audiobook.Id);
                 if (updated != null)

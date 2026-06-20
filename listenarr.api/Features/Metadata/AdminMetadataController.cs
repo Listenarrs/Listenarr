@@ -27,7 +27,8 @@ namespace Listenarr.Api.Features.Metadata
         IAudiobookFileRepository audioFiles,
         Microsoft.AspNetCore.Antiforgery.IAntiforgery antiforgery,
         IMetadataService metadataService,
-        IFileSystem fileSystem) : ControllerBase
+        IFileSystem fileSystem,
+        ILogger<AdminMetadataController> logger) : ControllerBase
     {
         /// <summary>
         /// Re-extract audio metadata (duration, format, bitrate, etc.) for a single audiobook file.
@@ -129,8 +130,7 @@ namespace Listenarr.Api.Features.Metadata
                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                 {
                     // log and continue
-                    HttpContext.RequestServices.GetRequiredService<ILogger<AdminMetadataController>>()
-                        .LogWarning(ex, "Failed to re-extract for file id={Id} path={Path}", f.Id, f.Path);
+                    logger.LogWarning(ex, "Failed to re-extract for file id={Id} path={Path}", f.Id, f.Path);
                 }
             }
 

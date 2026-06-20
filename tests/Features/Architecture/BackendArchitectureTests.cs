@@ -178,6 +178,61 @@ public sealed class BackendArchitectureTests
         Assert.Empty(violations);
     }
 
+    [Fact]
+    public void Controllers_DoNotResolveServicesOrImplementPersistence()
+    {
+        var controllerFiles = Directory
+            .EnumerateFiles(
+                Path.Join(RepositoryRoot, "listenarr.api", "Features"),
+                "*Controller.cs",
+                SearchOption.AllDirectories)
+            .Where(file => !IsBuildArtifact(file))
+            .ToList();
+        var forbiddenPattern = new Regex(
+            @"\b(?:IServiceScopeFactory|DbContext|CreateScope\s*\(|GetRequiredService\s*<|GetService\s*<)",
+            RegexOptions.Compiled);
+
+        var violations = controllerFiles
+            .Where(file => forbiddenPattern.IsMatch(File.ReadAllText(file)))
+            .Select(file => Normalize(Path.GetRelativePath(
+                Path.Join(RepositoryRoot, "listenarr.api"),
+                file)))
+            .ToList();
+
+        Assert.Empty(violations);
+    }
+
+    [Fact]
+    public void ActiveProductionSourceFiles_RemainFocused()
+    {
+        var projectRoots = new[]
+        {
+            "listenarr.domain",
+            "listenarr.application",
+            "listenarr.infrastructure",
+            "listenarr.api"
+        };
+        var violations = projectRoots
+            .SelectMany(root => Directory.EnumerateFiles(
+                Path.Join(RepositoryRoot, root),
+                "*.cs",
+                SearchOption.AllDirectories))
+            .Where(file => !IsBuildArtifact(file))
+            .Where(file => !file.Contains(
+                $"{Path.DirectorySeparatorChar}Persistence{Path.DirectorySeparatorChar}Migrations{Path.DirectorySeparatorChar}",
+                StringComparison.OrdinalIgnoreCase))
+            .Select(file => new
+            {
+                File = Normalize(Path.GetRelativePath(RepositoryRoot, file)),
+                Lines = File.ReadLines(file).Count()
+            })
+            .Where(source => source.Lines > 500)
+            .Select(source => $"{source.File} ({source.Lines} lines)")
+            .ToList();
+
+        Assert.Empty(violations);
+    }
+
     private static void AssertProjectReferences(string relativeProject, IReadOnlyCollection<string> expected)
     {
         var document = XDocument.Load(Path.Join(RepositoryRoot, relativeProject));

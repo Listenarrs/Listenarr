@@ -24,7 +24,7 @@ namespace Listenarr.Api.Features.Search
     [ApiController]
     [Route("api/v{version:apiVersion}/search")]
     [Tags("Search")]
-    public class SearchController : ControllerBase
+    public partial class SearchController : ControllerBase
     {
         private readonly ISearchService _searchService;
         private readonly Microsoft.Extensions.Logging.ILogger _logger;
@@ -484,40 +484,5 @@ namespace Listenarr.Api.Features.Search
             }
         }
 
-        private void AttachDownloadReference(IndexerSearchResult result)
-        {
-            if (_downloadReferenceService == null)
-            {
-                return;
-            }
-
-            result.DownloadReference = _downloadReferenceService.Create(
-                TrustedDownloadCandidateFactory.Create(SearchResultConverters.ToSearchResult(result)));
-        }
-
-        private void AttachDownloadReference(SearchResult result)
-        {
-            if (_downloadReferenceService == null)
-            {
-                return;
-            }
-
-            result.DownloadReference = _downloadReferenceService.Create(
-                TrustedDownloadCandidateFactory.Create(result));
-        }
-
-        private static void ClearExecutableLocators(SearchResult result)
-        {
-            result.MagnetLink = string.Empty;
-            result.TorrentUrl = string.Empty;
-            result.NzbUrl = string.Empty;
-        }
-
-        private static void ClearExecutableLocators(IndexerSearchResult result)
-        {
-            result.MagnetLink = string.Empty;
-            result.TorrentUrl = string.Empty;
-            result.NzbUrl = string.Empty;
-        }
     }
 }
