@@ -17,7 +17,6 @@
  */
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Interfaces.Repositories;
-using Listenarr.Application.Metadata;
 using Listenarr.Domain.Models;
 using Microsoft.Extensions.Logging;
 using static Listenarr.Application.Audiobooks.Catalog.AuthorCatalogMapping;

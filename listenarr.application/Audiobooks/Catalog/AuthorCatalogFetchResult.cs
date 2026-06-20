@@ -1,4 +1,3 @@
-using Listenarr.Application.Metadata;
 
 namespace Listenarr.Application.Audiobooks.Catalog
 {

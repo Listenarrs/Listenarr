@@ -17,7 +17,6 @@
  */
 using System.Net;
 using System.Text.Json;
-using Listenarr.Application.Metadata;
 using Listenarr.Tests.Mocks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection.Extensions;

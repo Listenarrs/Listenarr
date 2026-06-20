@@ -19,7 +19,6 @@ using Listenarr.Application.Interfaces.Repositories;
 using Microsoft.Extensions.Logging.Abstractions;
 using System.Net;
 using Microsoft.EntityFrameworkCore;
-using Listenarr.Application.Metadata;
 using Listenarr.Application.Search.Filters;
 using Listenarr.Application.Search.Strategies;
 using Listenarr.Infrastructure.Persistence.Repositories;

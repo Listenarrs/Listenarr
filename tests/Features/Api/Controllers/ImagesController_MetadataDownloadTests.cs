@@ -17,7 +17,6 @@
  */
 using Listenarr.Api.Controllers;
 using Listenarr.Application.Interfaces.Repositories;
-using Listenarr.Application.Metadata;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Tests.Features.Api.Controllers

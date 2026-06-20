@@ -22,7 +22,6 @@ using System.Text;
 using System.Text.Json;
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Interfaces.Repositories;
-using Listenarr.Application.Metadata;
 using Listenarr.Domain.Common;
 using Listenarr.Domain.Models;
 using Microsoft.AspNetCore.Mvc;

@@ -18,7 +18,6 @@
 using Listenarr.Api.Controllers;
 using Microsoft.AspNetCore.Mvc;
 using System.Text.Json;
-using Listenarr.Application.Metadata;
 
 namespace Listenarr.Tests.Features.Api.Controllers
 {

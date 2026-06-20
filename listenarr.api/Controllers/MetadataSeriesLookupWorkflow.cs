@@ -9,7 +9,6 @@
  */
 
 using Listenarr.Application.Interfaces;
-using Listenarr.Application.Metadata;
 using Microsoft.Extensions.Caching.Memory;
 
 namespace Listenarr.Api.Controllers

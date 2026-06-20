@@ -24,7 +24,6 @@ using Listenarr.Application.Interfaces.Repositories;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Listenarr.Application.Notification;
-using Listenarr.Application.Metadata;
 using Listenarr.Application.Security;
 
 namespace Listenarr.Application.Search.Core

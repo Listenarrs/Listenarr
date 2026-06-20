@@ -16,7 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Listenarr.Application.Interfaces.Repositories;
-using Listenarr.Application.Metadata;
 
 namespace Listenarr.Tests.Features.Application.Audiobooks.Catalog
 {

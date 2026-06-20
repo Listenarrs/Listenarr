@@ -16,7 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Listenarr.Api.Controllers;
-using Listenarr.Application.Metadata;
 
 namespace Listenarr.Tests.Features.Api.Controllers
 {

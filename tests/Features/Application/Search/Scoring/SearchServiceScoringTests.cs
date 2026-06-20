@@ -17,7 +17,6 @@
  */
 using Listenarr.Application.Interfaces.Repositories;
 using Microsoft.Extensions.Logging.Abstractions;
-using Listenarr.Application.Metadata;
 using Listenarr.Application.Search.Strategies;
 using Listenarr.Application.Search.Filters;
 

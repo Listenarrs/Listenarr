@@ -17,7 +17,6 @@
  */
 using Listenarr.Api.Controllers;
 using Listenarr.Application.Interfaces.Repositories;
-using Listenarr.Application.Metadata;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 

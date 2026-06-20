@@ -20,7 +20,6 @@ using System.Security.Cryptography;
 using System.Text;
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Interfaces.Repositories;
-using Listenarr.Application.Metadata;
 using Listenarr.Application.Notification;
 using Listenarr.Application.Security;
 using Listenarr.Domain.Common;

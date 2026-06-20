@@ -22,7 +22,6 @@ using Listenarr.Domain.Common;
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Interfaces.Repositories;
 using Microsoft.Extensions.Logging;
-using Listenarr.Application.Metadata;
 using Listenarr.Domain.Models;
 using Listenarr.Application.Security;
 

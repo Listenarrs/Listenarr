@@ -8,6 +8,8 @@ global using Listenarr.Application.Audiobooks.Identifiers;
 global using Listenarr.Application.Audiobooks.Jobs;
 global using Listenarr.Application.Audiobooks.Matching;
 global using Listenarr.Application.Audiobooks.Renaming;
+global using Listenarr.Application.Metadata.Audible;
+global using Listenarr.Application.Metadata.Audnexus;
 global using Listenarr.Application.Search.Audible;
 global using Listenarr.Application.Search.Core;
 global using Listenarr.Application.Search.Indexers.Common;

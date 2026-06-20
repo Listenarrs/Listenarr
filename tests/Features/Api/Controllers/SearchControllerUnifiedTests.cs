@@ -17,7 +17,6 @@
  */
 
 using Listenarr.Api.Controllers;
-using Listenarr.Application.Metadata;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
 

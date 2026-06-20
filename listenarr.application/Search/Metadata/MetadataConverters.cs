@@ -1,7 +1,6 @@
 using System.Text.RegularExpressions;
 using Listenarr.Application.Common;
 using Listenarr.Application.Interfaces;
-using Listenarr.Application.Metadata;
 using Listenarr.Domain.Common;
 using Listenarr.Domain.Models;
 using Microsoft.Extensions.Logging;

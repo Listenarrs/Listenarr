@@ -18,7 +18,6 @@
 
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Interfaces.Repositories;
-using Listenarr.Application.Metadata;
 using Listenarr.Domain.Models;
 
 namespace Listenarr.Application.Audiobooks.Catalog

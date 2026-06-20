@@ -17,7 +17,6 @@
  */
 
 using Listenarr.Application.Interfaces;
-using Listenarr.Application.Metadata;
 using Listenarr.Domain.Models;
 
 namespace Listenarr.Api.Controllers;

@@ -10,7 +10,6 @@
 
 using Listenarr.Application.Interfaces;
 using Listenarr.Application.Interfaces.Repositories;
-using Listenarr.Application.Metadata;
 using Listenarr.Application.Security;
 using Listenarr.Domain.Models;
 
