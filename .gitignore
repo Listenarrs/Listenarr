@@ -279,3 +279,7 @@ listenarr.api/wwwroot/*.map
 listenarr.api/wwwroot/assets/**
 listenarr.api/config/appsettings/appsettings.json
 /listenarr.api/config
+/.agents
+/.codex
+/.codex-build
+.codex-workflows-manifest.json

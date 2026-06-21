@@ -55,7 +55,6 @@ namespace Listenarr.Application.Downloads.Processing
             var job = new DownloadProcessingJob
             {
                 DownloadId = download.Id,
-                ActiveDeduplicationKey = BuildActiveDeduplicationKey(download.Id),
                 JobType = ProcessingJobType.MoveOrCopyFile,
                 SourcePath = download.DownloadPath,
                 DownloadClientId = download.DownloadClientId,
@@ -144,8 +143,5 @@ namespace Listenarr.Application.Downloads.Processing
                 await jobRepository.UpdateAsync(job.UnStuck("Reset from stuck Processing state after service restart"));
             }
         }
-
-        private static string BuildActiveDeduplicationKey(string downloadId) =>
-            downloadId.Trim().ToUpperInvariant();
     }
 }

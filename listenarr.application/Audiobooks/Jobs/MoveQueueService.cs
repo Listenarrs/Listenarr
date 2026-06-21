@@ -26,7 +26,6 @@ namespace Listenarr.Application.Audiobooks.Jobs
     public class MoveQueueService : IMoveQueueService
     {
         private readonly ConcurrentDictionary<Guid, MoveJob> _jobs = new();
-        private readonly ConcurrentDictionary<string, SemaphoreSlim> _enqueueLocks = new(StringComparer.Ordinal);
         private readonly Channel<MoveJob> _channel = Channel.CreateUnbounded<MoveJob>();
         private readonly ILogger<MoveQueueService> _logger;
         private readonly IMoveQueuePersistence _persistence;
@@ -50,56 +49,45 @@ namespace Listenarr.Application.Audiobooks.Jobs
         public async Task<Guid> EnqueueMoveAsync(int audiobookId, string requestedPath, string? sourcePath = null)
         {
             var deduplicationKey = BuildDeduplicationKey(audiobookId, requestedPath);
-            var enqueueLock = _enqueueLocks.GetOrAdd(deduplicationKey, static _ => new SemaphoreSlim(1, 1));
-            await enqueueLock.WaitAsync();
+            var existingDb = await _persistence.GetActiveByKeyAsync(deduplicationKey);
+
+            if (existingDb != null)
+            {
+                _jobs[existingDb.Id] = existingDb;
+                _logger.LogInformation("Found active move job {JobId} for audiobook {AudiobookId} to {Path}; deduping and returning existing job id", existingDb.Id, audiobookId, LogRedaction.SanitizeFilePath(requestedPath));
+                return existingDb.Id;
+            }
+
+            var job = new MoveJob
+            {
+                AudiobookId = audiobookId,
+                RequestedPath = requestedPath,
+                ActiveDeduplicationKey = deduplicationKey,
+                EnqueuedAt = _timeProvider.GetUtcNow().UtcDateTime,
+                Status = "Queued",
+                SourcePath = sourcePath
+            };
+
             try
             {
-                var existingDb = await _persistence.GetActiveByKeyAsync(deduplicationKey);
-
+                await _persistence.AddAsync(job);
+            }
+            catch (UniqueConstraintViolationException)
+            {
+                existingDb = await _persistence.GetActiveByKeyAsync(deduplicationKey);
                 if (existingDb != null)
                 {
                     _jobs[existingDb.Id] = existingDb;
-                    _logger.LogInformation("Found active move job {JobId} for audiobook {AudiobookId} to {Path}; deduping and returning existing job id", existingDb.Id, audiobookId, LogRedaction.SanitizeFilePath(requestedPath));
                     return existingDb.Id;
                 }
 
-                var job = new MoveJob
-                {
-                    AudiobookId = audiobookId,
-                    RequestedPath = requestedPath,
-                    ActiveDeduplicationKey = deduplicationKey,
-                    EnqueuedAt = _timeProvider.GetUtcNow().UtcDateTime,
-                    Status = "Queued",
-                    SourcePath = sourcePath
-                };
-
-                try
-                {
-                    await _persistence.AddAsync(job);
-                }
-                catch (UniqueConstraintViolationException)
-                {
-                    existingDb = await _persistence.GetActiveByKeyAsync(deduplicationKey);
-                    if (existingDb != null)
-                    {
-                        _jobs[existingDb.Id] = existingDb;
-                        return existingDb.Id;
-                    }
-
-                    throw;
-                }
-
-                _jobs[job.Id] = job;
-                _logger.LogInformation("Enqueueing move job {JobId} for audiobook {AudiobookId} to {Path}", job.Id, audiobookId, LogRedaction.SanitizeFilePath(requestedPath));
-                await _channel.Writer.WriteAsync(job);
-                return job.Id;
+                throw;
             }
-            finally
-            {
-                enqueueLock.Release();
-                _enqueueLocks.TryRemove(
-                    new KeyValuePair<string, SemaphoreSlim>(deduplicationKey, enqueueLock));
-            }
+
+            _jobs[job.Id] = job;
+            _logger.LogInformation("Enqueueing move job {JobId} for audiobook {AudiobookId} to {Path}", job.Id, audiobookId, LogRedaction.SanitizeFilePath(requestedPath));
+            await _channel.Writer.WriteAsync(job);
+            return job.Id;
         }
 
         public async Task<MoveJob?> GetJobAsync(Guid id, CancellationToken cancellationToken = default)
@@ -124,18 +112,18 @@ namespace Listenarr.Application.Audiobooks.Jobs
             string? error = null,
             CancellationToken cancellationToken = default)
         {
+            var updatedAt = _timeProvider.GetUtcNow();
             if (_jobs.TryGetValue(id, out var job) && job != null)
             {
                 job.Status = status;
                 job.Error = error;
-                job.UpdatedAt = _timeProvider.GetUtcNow().UtcDateTime;
+                job.UpdatedAt = updatedAt.UtcDateTime;
                 job.ActiveDeduplicationKey = IsActive(status) ? job.ActiveDeduplicationKey : null;
                 _jobs[id] = job;
             }
 
             try
             {
-                var updatedAt = _timeProvider.GetUtcNow();
                 var dbJob = await _persistence.GetByIdAsync(id, cancellationToken);
                 await _persistence.UpdateStatusAsync(id, status, error, updatedAt, cancellationToken);
 
@@ -145,10 +133,10 @@ namespace Listenarr.Application.Audiobooks.Jobs
                     var payload = new
                     {
                         jobId = id.ToString(),
-                        audiobookId = dbJob?.AudiobookId ?? (job != null ? job.AudiobookId : (int?)null),
+                        audiobookId = dbJob?.AudiobookId ?? job?.AudiobookId,
                         status = status,
                         error = error,
-                        target = dbJob?.RequestedPath ?? (job != null ? job.RequestedPath : null),
+                        target = dbJob?.RequestedPath ?? job?.RequestedPath,
                         updatedAt
                     };
                     // Fire and forget but block briefly to surface errors during development
