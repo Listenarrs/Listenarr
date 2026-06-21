@@ -44,7 +44,9 @@ internal static class DownloadClientRegistrationExtensions
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        services.Configure<DownloadClientsOptions>(configuration.GetSection("DownloadClients"));
+        services.AddOptions<DownloadClientsOptions>()
+            .Bind(configuration.GetSection("DownloadClients"))
+            .ValidateOnStart();
         services.AddSingleton<IValidateOptions<DownloadClientsOptions>, DownloadClientsOptionsValidator>();
         services.AddScoped<INzbUrlResolver, NzbUrlResolver>();
         services.AddScoped<ITorrentFileDownloader, TorrentFileDownloader>();

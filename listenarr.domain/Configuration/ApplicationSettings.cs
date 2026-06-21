@@ -5,6 +5,7 @@ namespace Listenarr.Domain.Configuration
 {
     public class ApplicationSettings
     {
+        public int Version { get; set; }
         public int Id { get; set; } = 1; // Singleton pattern - only one settings record
         public string OutputPath
         {

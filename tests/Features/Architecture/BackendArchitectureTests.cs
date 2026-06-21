@@ -47,6 +47,136 @@ public sealed class BackendArchitectureTests
     }
 
     [Fact]
+    public void Api_DoesNotReferenceInfrastructureImplementationPackages()
+    {
+        AssertNoPackages(
+            "listenarr.api/Listenarr.Api.csproj",
+            [
+                "Microsoft.Data.Sqlite.Core",
+                "Microsoft.EntityFrameworkCore",
+                "Microsoft.EntityFrameworkCore.Design",
+                "Microsoft.EntityFrameworkCore.Sqlite",
+                "HtmlAgilityPack",
+                "SixLabors.ImageSharp",
+                "TagLibSharp",
+                "Polly",
+                "Microsoft.Extensions.Http.Polly"
+            ]);
+    }
+
+    [Fact]
+    public void Application_DoesNotUseServiceLocation()
+    {
+        var applicationRoot = Path.Join(RepositoryRoot, "listenarr.application");
+        var serviceLocationPattern = new Regex(
+            @"\b(?:IServiceProvider|IServiceScopeFactory|CreateScope\s*\(|GetRequiredService\s*<|GetService\s*<)",
+            RegexOptions.Compiled);
+
+        var violations = Directory
+            .EnumerateFiles(applicationRoot, "*.cs", SearchOption.AllDirectories)
+            .Where(file => !IsBuildArtifact(file))
+            .Where(file => serviceLocationPattern.IsMatch(File.ReadAllText(file)))
+            .Select(file => Normalize(Path.GetRelativePath(applicationRoot, file)))
+            .ToList();
+
+        Assert.Empty(violations);
+    }
+
+    [Fact]
+    public void Application_DoesNotBlockOnAsyncOperations()
+    {
+        var applicationRoot = Path.Join(RepositoryRoot, "listenarr.application");
+        var syncOverAsyncPattern = new Regex(
+            @"GetAwaiter\s*\(\s*\)\s*\.\s*GetResult\s*\(\s*\)",
+            RegexOptions.Compiled);
+
+        var violations = Directory
+            .EnumerateFiles(applicationRoot, "*.cs", SearchOption.AllDirectories)
+            .Where(file => !IsBuildArtifact(file))
+            .Where(file => syncOverAsyncPattern.IsMatch(File.ReadAllText(file)))
+            .Select(file => Normalize(Path.GetRelativePath(applicationRoot, file)))
+            .ToList();
+
+        Assert.Empty(violations);
+    }
+
+    [Fact]
+    public void NewDirectHttpClientConstruction_IsRestrictedToDocumentedLegacyAdapters()
+    {
+        var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "listenarr.application/Common/MyAnonamouseHelper.cs",
+            "listenarr.api/Features/Indexers/IndexerDebugSearchWorkflow.cs",
+            "listenarr.infrastructure/DownloadClients/Qbittorrent/QbittorrentCookieSession.cs",
+            "listenarr.infrastructure/DownloadClients/Transmission/TransmissionAdapter.cs",
+            "listenarr.infrastructure/Torrents/TorrentFileDownloader.cs"
+        };
+        var roots = new[]
+        {
+            "listenarr.application",
+            "listenarr.infrastructure",
+            "listenarr.api"
+        };
+        var constructionPattern = new Regex(@"\bnew\s+HttpClient\s*\(", RegexOptions.Compiled);
+
+        var violations = roots
+            .SelectMany(root => Directory.EnumerateFiles(
+                Path.Join(RepositoryRoot, root),
+                "*.cs",
+                SearchOption.AllDirectories))
+            .Where(file => !IsBuildArtifact(file))
+            .Where(file => constructionPattern.IsMatch(File.ReadAllText(file)))
+            .Select(file => Normalize(Path.GetRelativePath(RepositoryRoot, file)))
+            .Where(file => !allowed.Contains(file))
+            .ToList();
+
+        Assert.Empty(violations);
+    }
+
+    [Fact]
+    public void NewControllerBroadCatches_AreForbiddenOutsideDocumentedLegacyControllers()
+    {
+        var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "Features/Configuration/ApiKeyController.cs",
+            "Features/Configuration/ApiSourcesController.cs",
+            "Features/Configuration/SettingsController.cs",
+            "Features/Configuration/StartupConfigurationController.cs",
+            "Features/DownloadClients/DownloadClientController.cs",
+            "Features/Downloads/DownloadController.cs",
+            "Features/Downloads/DownloadsController.cs",
+            "Features/Downloads/ManualImportController.cs",
+            "Features/Downloads/RemotePathMappingsController.cs",
+            "Features/Identity/AccountController.cs",
+            "Features/Identity/AntiforgeryController.cs",
+            "Features/Images/ImagesController.cs",
+            "Features/Library/AuthorMonitoringController.cs",
+            "Features/Library/QualityProfileController.cs",
+            "Features/Library/SeriesMonitoringController.cs",
+            "Features/Metadata/AdminMetadataController.cs",
+            "Features/Metadata/MetadataController.cs",
+            "Features/Notifications/NotificationsController.cs",
+            "Features/Prowlarr/ProwlarrCompatController.cs",
+            "Features/Search/SearchController.cs",
+            "Features/SystemDiagnostics/DiscordController.cs",
+            "Features/SystemDiagnostics/FfmpegController.cs",
+            "Features/SystemDiagnostics/FileSystemController.cs",
+            "Features/SystemDiagnostics/SystemController.cs"
+        };
+        var apiRoot = Path.Join(RepositoryRoot, "listenarr.api");
+        var broadCatchPattern = new Regex(@"catch\s*\(\s*Exception\b", RegexOptions.Compiled);
+
+        var violations = Directory
+            .EnumerateFiles(Path.Join(apiRoot, "Features"), "*Controller.cs", SearchOption.AllDirectories)
+            .Where(file => broadCatchPattern.IsMatch(File.ReadAllText(file)))
+            .Select(file => Normalize(Path.GetRelativePath(apiRoot, file)))
+            .Where(file => !allowed.Contains(file))
+            .ToList();
+
+        Assert.Empty(violations);
+    }
+
+    [Fact]
     public void ActiveProductionNamespaces_MatchPhysicalFolders()
     {
         AssertNamespacesMatchFolders("listenarr.domain", "Listenarr.Domain");

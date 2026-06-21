@@ -17,7 +17,7 @@
  */
 using System.Collections.Concurrent;
 using System.Threading.Channels;
-using Microsoft.Extensions.DependencyInjection;
+using Listenarr.Application.Common;
 using Microsoft.Extensions.Logging;
 
 
@@ -26,30 +26,35 @@ namespace Listenarr.Application.Audiobooks.Jobs
     public class MoveQueueService : IMoveQueueService
     {
         private readonly ConcurrentDictionary<Guid, MoveJob> _jobs = new();
+        private readonly ConcurrentDictionary<string, SemaphoreSlim> _enqueueLocks = new(StringComparer.Ordinal);
         private readonly Channel<MoveJob> _channel = Channel.CreateUnbounded<MoveJob>();
         private readonly ILogger<MoveQueueService> _logger;
-        private readonly IServiceScopeFactory _scopeFactory;
+        private readonly IMoveQueuePersistence _persistence;
+        private readonly IHubBroadcaster _hubBroadcaster;
+        private readonly TimeProvider _timeProvider;
 
-        public MoveQueueService(ILogger<MoveQueueService> logger, IServiceScopeFactory scopeFactory)
+        public MoveQueueService(
+            ILogger<MoveQueueService> logger,
+            IMoveQueuePersistence persistence,
+            IHubBroadcaster hubBroadcaster,
+            TimeProvider timeProvider)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-            _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
+            _persistence = persistence ?? throw new ArgumentNullException(nameof(persistence));
+            _hubBroadcaster = hubBroadcaster ?? throw new ArgumentNullException(nameof(hubBroadcaster));
+            _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         }
 
         public ChannelReader<MoveJob> Reader => _channel.Reader;
 
         public async Task<Guid> EnqueueMoveAsync(int audiobookId, string requestedPath, string? sourcePath = null)
         {
+            var deduplicationKey = BuildDeduplicationKey(audiobookId, requestedPath);
+            var enqueueLock = _enqueueLocks.GetOrAdd(deduplicationKey, static _ => new SemaphoreSlim(1, 1));
+            await enqueueLock.WaitAsync();
             try
             {
-                // Check DB for existing active job
-                using var scope = _scopeFactory.CreateScope();
-                var moveJobRepository = scope.ServiceProvider.GetRequiredService<IMoveJobRepository>();
-
-                var requestedLower = (requestedPath ?? string.Empty).ToLower();
-                var activeJobs = await moveJobRepository.GetByStatusAsync(new[] { "Queued", "Processing" });
-                var existingDb = activeJobs.FirstOrDefault(j => j.AudiobookId == audiobookId &&
-                    ((j.RequestedPath ?? string.Empty).ToLower() == requestedLower));
+                var existingDb = await _persistence.GetActiveByKeyAsync(deduplicationKey);
 
                 if (existingDb != null)
                 {
@@ -57,76 +62,86 @@ namespace Listenarr.Application.Audiobooks.Jobs
                     _logger.LogInformation("Found active move job {JobId} for audiobook {AudiobookId} to {Path}; deduping and returning existing job id", existingDb.Id, audiobookId, LogRedaction.SanitizeFilePath(requestedPath));
                     return existingDb.Id;
                 }
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogWarning(ex, "Failed during dedupe check for move job; will enqueue new job");
-            }
 
-            var job = new MoveJob { AudiobookId = audiobookId, RequestedPath = requestedPath, EnqueuedAt = DateTime.UtcNow, Status = "Queued", SourcePath = sourcePath };
+                var job = new MoveJob
+                {
+                    AudiobookId = audiobookId,
+                    RequestedPath = requestedPath,
+                    ActiveDeduplicationKey = deduplicationKey,
+                    EnqueuedAt = _timeProvider.GetUtcNow().UtcDateTime,
+                    Status = "Queued",
+                    SourcePath = sourcePath
+                };
 
-            try
-            {
-                using var scope = _scopeFactory.CreateScope();
-                var moveJobRepository = scope.ServiceProvider.GetRequiredService<IMoveJobRepository>();
-                await moveJobRepository.AddAsync(job);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogWarning(ex, "Failed to persist move job to database; proceeding with in-memory job");
-            }
+                try
+                {
+                    await _persistence.AddAsync(job);
+                }
+                catch (UniqueConstraintViolationException)
+                {
+                    existingDb = await _persistence.GetActiveByKeyAsync(deduplicationKey);
+                    if (existingDb != null)
+                    {
+                        _jobs[existingDb.Id] = existingDb;
+                        return existingDb.Id;
+                    }
 
-            _jobs[job.Id] = job;
-            _logger.LogInformation("Enqueueing move job {JobId} for audiobook {AudiobookId} to {Path}", job.Id, audiobookId, LogRedaction.SanitizeFilePath(requestedPath));
-            await _channel.Writer.WriteAsync(job);
-            return job.Id;
+                    throw;
+                }
+
+                _jobs[job.Id] = job;
+                _logger.LogInformation("Enqueueing move job {JobId} for audiobook {AudiobookId} to {Path}", job.Id, audiobookId, LogRedaction.SanitizeFilePath(requestedPath));
+                await _channel.Writer.WriteAsync(job);
+                return job.Id;
+            }
+            finally
+            {
+                enqueueLock.Release();
+                _enqueueLocks.TryRemove(
+                    new KeyValuePair<string, SemaphoreSlim>(deduplicationKey, enqueueLock));
+            }
         }
 
-        public bool TryGetJob(Guid id, out MoveJob? job)
+        public async Task<MoveJob?> GetJobAsync(Guid id, CancellationToken cancellationToken = default)
         {
-            if (_jobs.TryGetValue(id, out job)) return true;
+            if (_jobs.TryGetValue(id, out var job)) return job;
             try
             {
-                using var scope = _scopeFactory.CreateScope();
-                var moveJobRepository = scope.ServiceProvider.GetRequiredService<IMoveJobRepository>();
-                job = moveJobRepository.GetByIdAsync(id).GetAwaiter().GetResult();
+                job = await _persistence.GetByIdAsync(id, cancellationToken);
                 if (job != null) _jobs[id] = job;
-                return job != null;
+                return job;
             }
-            catch (Exception caughtEx_1) when (caughtEx_1 is not OperationCanceledException && caughtEx_1 is not OutOfMemoryException && caughtEx_1 is not StackOverflowException)
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
-                job = null;
-                return false;
+                _logger.LogWarning(ex, "Failed to retrieve move job {JobId}", id);
+                return null;
             }
         }
 
-        public void UpdateJobStatus(Guid id, string status, string? error = null)
+        public async Task UpdateJobStatusAsync(
+            Guid id,
+            string status,
+            string? error = null,
+            CancellationToken cancellationToken = default)
         {
             if (_jobs.TryGetValue(id, out var job) && job != null)
             {
                 job.Status = status;
                 job.Error = error;
-                job.UpdatedAt = DateTime.UtcNow;
+                job.UpdatedAt = _timeProvider.GetUtcNow().UtcDateTime;
+                job.ActiveDeduplicationKey = IsActive(status) ? job.ActiveDeduplicationKey : null;
                 _jobs[id] = job;
             }
 
             try
             {
-                using var scope = _scopeFactory.CreateScope();
-                var moveJobRepository = scope.ServiceProvider.GetRequiredService<IMoveJobRepository>();
-                var dbJob = moveJobRepository.GetByIdAsync(id).GetAwaiter().GetResult();
-                if (dbJob != null)
-                {
-                    dbJob.Status = status;
-                    dbJob.Error = error;
-                    dbJob.UpdatedAt = DateTime.UtcNow;
-                    moveJobRepository.UpdateAsync(dbJob).GetAwaiter().GetResult();
-                }
+                var updatedAt = _timeProvider.GetUtcNow();
+                var dbJob = await _persistence.GetByIdAsync(id, cancellationToken);
+                await _persistence.UpdateStatusAsync(id, status, error, updatedAt, cancellationToken);
 
                 // Broadcast status update to realtime clients so UI can react to Processing/Failed/Completed
                 try
                 {
-                    var hub = scope.ServiceProvider.GetRequiredService<IHubBroadcaster>();
                     var payload = new
                     {
                         jobId = id.ToString(),
@@ -134,10 +149,10 @@ namespace Listenarr.Application.Audiobooks.Jobs
                         status = status,
                         error = error,
                         target = dbJob?.RequestedPath ?? (job != null ? job.RequestedPath : null),
-                        updatedAt = DateTime.UtcNow
+                        updatedAt
                     };
                     // Fire and forget but block briefly to surface errors during development
-                    hub.BroadcastAsync("MoveJobUpdate", payload).GetAwaiter().GetResult();
+                    await _hubBroadcaster.BroadcastAsync("MoveJobUpdate", payload, cancellationToken);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                 {
@@ -167,9 +182,7 @@ namespace Listenarr.Application.Audiobooks.Jobs
             {
                 try
                 {
-                    using var scope = _scopeFactory.CreateScope();
-                    var moveJobRepository = scope.ServiceProvider.GetRequiredService<IMoveJobRepository>();
-                    job = await moveJobRepository.GetByIdAsync(jobId);
+                    job = await _persistence.GetByIdAsync(jobId);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                 {
@@ -189,22 +202,9 @@ namespace Listenarr.Application.Audiobooks.Jobs
                 return null;
             }
 
-            var newJob = new MoveJob { AudiobookId = job.AudiobookId, RequestedPath = job.RequestedPath, EnqueuedAt = DateTime.UtcNow, Status = "Queued", SourcePath = job.SourcePath };
-            try
-            {
-                using var scope = _scopeFactory.CreateScope();
-                var moveJobRepository = scope.ServiceProvider.GetRequiredService<IMoveJobRepository>();
-                await moveJobRepository.AddAsync(newJob);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogWarning(ex, "Failed to persist requeued move job to database; proceeding with in-memory job");
-            }
-
-            _jobs[newJob.Id] = newJob;
-            _logger.LogInformation("Requeueing move job {OldJobId} as new job {NewJobId} for audiobook {AudiobookId}", jobId, newJob.Id, job.AudiobookId);
-            await _channel.Writer.WriteAsync(newJob);
-            return newJob.Id;
+            var newJobId = await EnqueueMoveAsync(job.AudiobookId, job.RequestedPath ?? string.Empty, job.SourcePath);
+            _logger.LogInformation("Requeueing move job {OldJobId} as job {NewJobId} for audiobook {AudiobookId}", jobId, newJobId, job.AudiobookId);
+            return newJobId;
         }
 
         private static bool CanRequeueJobStatus(string status)
@@ -213,5 +213,19 @@ namespace Listenarr.Application.Audiobooks.Jobs
                    string.Equals(status, "Completed", StringComparison.OrdinalIgnoreCase) ||
                    string.Equals(status, "Queued", StringComparison.OrdinalIgnoreCase);
         }
+
+        private static string BuildDeduplicationKey(int audiobookId, string? requestedPath)
+        {
+            var normalizedPath = (requestedPath ?? string.Empty)
+                .Trim()
+                .Replace('\\', '/')
+                .TrimEnd('/')
+                .ToUpperInvariant();
+            return $"{audiobookId}:{normalizedPath}";
+        }
+
+        private static bool IsActive(string status) =>
+            string.Equals(status, "Queued", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(status, "Processing", StringComparison.OrdinalIgnoreCase);
     }
 }

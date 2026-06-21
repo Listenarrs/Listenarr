@@ -16,12 +16,14 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using Listenarr.Application.Common.Exceptions;
+
 namespace Listenarr.Application.Common
 {
-    public class PersistenceException : Exception
+    public class PersistenceException : ListenarrApplicationException
     {
         public PersistenceException(string message, Exception innerException)
-            : base(message, innerException)
+            : base("persistence_failure", "A persistence operation failed.", innerException)
         {
         }
     }

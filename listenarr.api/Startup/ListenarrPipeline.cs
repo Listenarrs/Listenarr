@@ -18,10 +18,6 @@
 
 using Asp.Versioning.ApiExplorer;
 using Listenarr.Api.Middleware;
-using Microsoft.AspNetCore.Diagnostics;
-using Microsoft.AspNetCore.Mvc;
-using Serilog;
-
 namespace Listenarr.Api.Startup;
 
 public static class ListenarrPipeline
@@ -31,6 +27,7 @@ public static class ListenarrPipeline
         Action<IEndpointRouteBuilder> mapRealtimeHubs)
     {
         app.UseListenarrSwaggerUi();
+        app.UseMiddleware<RequestTelemetryMiddleware>();
         app.UseListenarrExceptionHandler();
         app.UseForwardedHeaders();
         app.MapListenarrStaticAssets();
@@ -68,28 +65,7 @@ public static class ListenarrPipeline
 
     private static void UseListenarrExceptionHandler(this WebApplication app)
     {
-        app.UseExceptionHandler(exceptionApp =>
-        {
-            exceptionApp.Run(async context =>
-            {
-                var exceptionFeature = context.Features.Get<IExceptionHandlerFeature>();
-                var exception = exceptionFeature?.Error;
-                Log.Logger.Error(exception, "Unhandled API exception for {Method} {Path}", context.Request.Method, context.Request.Path);
-
-                context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-                context.Response.ContentType = "application/problem+json";
-
-                var problem = new ProblemDetails
-                {
-                    Status = StatusCodes.Status500InternalServerError,
-                    Title = "Internal server error",
-                    Detail = app.Environment.IsDevelopment() ? exception?.Message : null,
-                    Instance = context.Request.Path,
-                };
-
-                await context.Response.WriteAsJsonAsync(problem);
-            });
-        });
+        app.UseExceptionHandler();
     }
 
     private static void UseListenarrDevelopmentCors(this WebApplication app)

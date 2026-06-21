@@ -27,12 +27,18 @@ namespace Listenarr.Api.Features.SystemDiagnostics
     public class SystemController : ControllerBase
     {
         private readonly ISystemService _systemService;
+        private readonly ISystemReadinessService _readinessService;
         private readonly ILogger<SystemController> _logger;
         private readonly IFileSystem _fileSystem;
 
-        public SystemController(ISystemService systemService, ILogger<SystemController> logger, IFileSystem fileSystem)
+        public SystemController(
+            ISystemService systemService,
+            ISystemReadinessService readinessService,
+            ILogger<SystemController> logger,
+            IFileSystem fileSystem)
         {
             _systemService = systemService;
+            _readinessService = readinessService;
             _logger = logger;
             _fileSystem = fileSystem;
         }
@@ -42,12 +48,12 @@ namespace Listenarr.Api.Features.SystemDiagnostics
         /// </summary>
         [AllowAnonymous]
         [HttpGet("ready")]
-        public IActionResult GetReady()
+        public async Task<IActionResult> GetReady(CancellationToken cancellationToken)
         {
-            return Ok(new
-            {
-                status = "ready"
-            });
+            var readiness = await _readinessService.CheckAsync(cancellationToken);
+            return readiness.IsReady
+                ? Ok(readiness)
+                : StatusCode(StatusCodes.Status503ServiceUnavailable, readiness);
         }
 
         /// <summary>

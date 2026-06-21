@@ -53,6 +53,8 @@ namespace Listenarr.Domain.Downloads
         [Required]
         public string DownloadId { get; set; } = string.Empty;
 
+        public string? ActiveDeduplicationKey { get; set; }
+
         /// <summary>
         /// Type of processing job
         /// </summary>

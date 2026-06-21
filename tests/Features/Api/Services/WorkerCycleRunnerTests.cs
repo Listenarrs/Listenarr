@@ -69,6 +69,28 @@ namespace Listenarr.Tests.Features.Api.Services
             metrics.Verify(m => m.Increment("worker.exampleworker.cycle.started", It.IsAny<double>()), Times.Never);
         }
 
+        [Fact]
+        public async Task RunPeriodicAsync_ShutdownDuringCycle_StopsWithoutFailureMetric()
+        {
+            var metrics = new Mock<IAppMetricsService>();
+            using var cts = new CancellationTokenSource();
+            var runner = CreateRunner(metrics);
+
+            await runner.RunPeriodicAsync(
+                "ExampleWorker",
+                initialDelay: null,
+                intervalProvider: () => TimeSpan.FromMinutes(10),
+                runCycle: async cancellationToken =>
+                {
+                    await cts.CancelAsync();
+                    await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                },
+                cts.Token);
+
+            metrics.Verify(m => m.Increment("worker.exampleworker.cycle.skipped", It.IsAny<double>()), Times.Once);
+            metrics.Verify(m => m.Increment("worker.exampleworker.cycle.failed", It.IsAny<double>()), Times.Never);
+        }
+
         private static WorkerCycleRunner CreateRunner(Mock<IAppMetricsService> metrics) =>
             new(TimeProvider.System, metrics.Object, Mock.Of<ILogger<WorkerCycleRunner>>());
     }

@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Microsoft.EntityFrameworkCore;
+using Listenarr.Application.Common.Exceptions;
 
 namespace Listenarr.Infrastructure.Persistence.Repositories
 {
@@ -41,10 +42,25 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
 
             if (existing == null)
             {
+                settings.Version = 1;
                 _db.ApplicationSettings.Add(settings);
                 await _db.SaveChangesAsync(ct);
                 return settings;
             }
+
+            var persistedVersion = existing.Version;
+            var expectedVersion = settings.Version == 0
+                ? persistedVersion
+                : settings.Version;
+
+            if (expectedVersion != persistedVersion)
+            {
+                throw new ApplicationConflictException(
+                    "settings_concurrency_conflict",
+                    "Application settings were changed by another request. Reload and try again.");
+            }
+
+            settings.Version = persistedVersion + 1;
 
             // Detach the existing tracked entity to avoid identity-map conflicts when
             // `settings` is the same object reference that was previously Add()ed.
@@ -54,7 +70,18 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
             }
 
             _db.ApplicationSettings.Update(settings);
-            await _db.SaveChangesAsync(ct);
+            try
+            {
+                _db.Entry(settings).Property(item => item.Version).OriginalValue = persistedVersion;
+                await _db.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateConcurrencyException exception)
+            {
+                throw new ApplicationConflictException(
+                    "settings_concurrency_conflict",
+                    "Application settings were changed by another request. Reload and try again.",
+                    exception);
+            }
             return settings;
         }
     }

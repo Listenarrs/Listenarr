@@ -18,6 +18,7 @@
 
 using System.Text.Json.Serialization;
 using Asp.Versioning;
+using Listenarr.Api.Filters;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Api.Startup;
@@ -33,13 +34,18 @@ public static class ListenarrServiceRegistration
             Program.ApplyTestHostPatches(builder);
         }
 
-        builder.Services.AddControllers()
+        builder.Services.AddControllers(options =>
+            {
+                options.Filters.Add<ServerErrorProblemDetailsFilter>();
+            })
             .AddJsonOptions(options =>
             {
                 options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
                 options.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
             });
 
+        builder.Services.AddProblemDetails();
+        builder.Services.AddExceptionHandler<ListenarrExceptionHandler>();
         builder.Services.AddListenarrApiVersioning();
         builder.Services.AddAuthorization();
         builder.Services.AddListenarrReverseProxyHeaders();

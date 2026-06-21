@@ -22,5 +22,9 @@ namespace Listenarr.Domain.Configuration
     {
         // When true, attempts to force .com domains when localized content is detected
         public bool PreferUsDomain { get; set; } = true;
+
+        public int TimeoutSeconds { get; set; } = 60;
+
+        public int MaxRetries { get; set; } = 3;
     }
 }

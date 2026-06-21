@@ -18,10 +18,12 @@
 
 using Listenarr.Infrastructure.Persistence;
 using Listenarr.Infrastructure.Persistence.Repositories;
+using Listenarr.Infrastructure.Configuration;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Serilog;
 
 namespace Listenarr.Infrastructure.DependencyInjection;
@@ -95,7 +97,10 @@ public static class InfrastructureStartupCompositionExtensions
 
     private static IServiceCollection AddListenarrExternalRequests(this IServiceCollection services, IConfiguration configuration)
     {
-        services.Configure<ExternalRequestOptions>(configuration.GetSection("ExternalRequests"));
+        services.AddOptions<ExternalRequestOptions>()
+            .Bind(configuration.GetSection("ExternalRequests"))
+            .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<ExternalRequestOptions>, ExternalRequestOptionsValidator>();
 
         return services;
     }

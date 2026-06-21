@@ -17,22 +17,8 @@
   <ItemGroup>
     <PackageReference Include="Asp.Versioning.Mvc" />
     <PackageReference Include="Asp.Versioning.Mvc.ApiExplorer" />
-    <PackageReference Include="AsyncKeyedLock" />
-    <PackageReference Condition="!$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net9.0'))" Include="Backport.System.Threading.Lock" />
-    <PackageReference Include="Microsoft.Data.Sqlite.Core" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore" />
-    <PackageReference Include="SixLabors.ImageSharp" />
-    <PackageReference Include="Microsoft.Extensions.Http.Polly" />
-    <PackageReference Include="Polly" />
-    <PackageReference Include="TagLibSharp" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-      <PrivateAssets>all</PrivateAssets>
-    </PackageReference>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
     <PackageReference Include="Swashbuckle.AspNetCore" />
-    <PackageReference Include="HtmlAgilityPack" />
     <PackageReference Include="Serilog.AspNetCore" />
     <PackageReference Include="Serilog.Sinks.File" />
   </ItemGroup>

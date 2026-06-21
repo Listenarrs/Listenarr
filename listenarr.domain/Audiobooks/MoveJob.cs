@@ -30,9 +30,9 @@ namespace Listenarr.Domain.Audiobooks
         public string? Error { get; set; }
         public int AttemptCount { get; set; } = 0;
         public DateTime? UpdatedAt { get; set; }
+        public string? ActiveDeduplicationKey { get; set; }
         // Optional source path snapshot provided at enqueue time. Persist this so jobs
         // remain durable and can be inspected / resumed across restarts.
         public string? SourcePath { get; set; }
     }
 }
-

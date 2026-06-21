@@ -48,6 +48,11 @@ namespace Listenarr.Infrastructure.HostedServices
 
             while (!cancellationToken.IsCancellationRequested)
             {
+                using var scope = logger.BeginScope(new Dictionary<string, object?>
+                {
+                    ["WorkerName"] = workerName,
+                    ["WorkerCycleId"] = Guid.NewGuid().ToString("N")
+                });
                 try
                 {
                     metrics.Increment(BuildMetricName(workerName, "cycle.started"));

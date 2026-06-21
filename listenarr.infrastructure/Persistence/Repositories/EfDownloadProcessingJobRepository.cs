@@ -59,10 +59,10 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
 
         public async Task<DownloadProcessingJob?> GetActiveByDownloadIdAsync(string downloadId)
         {
+            var deduplicationKey = BuildActiveDeduplicationKey(downloadId);
             await using var ctx = await _dbFactory.CreateDbContextAsync();
             return await ctx.DownloadProcessingJobs
-                .Where(j => j.DownloadId == downloadId &&
-                           (j.Status == ProcessingJobStatus.Pending || j.Status == ProcessingJobStatus.Processing || j.Status == ProcessingJobStatus.Retry))
+                .Where(j => j.ActiveDeduplicationKey == deduplicationKey)
                 .OrderBy(j => j.CreatedAt)
                 .FirstOrDefaultAsync();
         }
@@ -78,6 +78,9 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
 
         public async Task<DownloadProcessingJob> AddAsync(DownloadProcessingJob job)
         {
+            job.ActiveDeduplicationKey = IsActive(job.Status)
+                ? BuildActiveDeduplicationKey(job.DownloadId)
+                : null;
             await using var ctx = await _dbFactory.CreateDbContextAsync();
             ctx.DownloadProcessingJobs.Add(job);
             await ctx.SaveChangesAsync();
@@ -106,6 +109,9 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
 
         public async Task UpdateAsync(DownloadProcessingJob job)
         {
+            job.ActiveDeduplicationKey = IsActive(job.Status)
+                ? BuildActiveDeduplicationKey(job.DownloadId)
+                : null;
             await using var ctx = await _dbFactory.CreateDbContextAsync();
             ctx.DownloadProcessingJobs.Update(job);
             await ctx.SaveChangesAsync();
@@ -189,5 +195,13 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
                 .Where(j => j.Status == ProcessingJobStatus.Processing)
                 .ToListAsync(cancellationToken);
         }
+
+        private static bool IsActive(ProcessingJobStatus status) =>
+            status is ProcessingJobStatus.Pending
+                or ProcessingJobStatus.Processing
+                or ProcessingJobStatus.Retry;
+
+        private static string BuildActiveDeduplicationKey(string downloadId) =>
+            downloadId.Trim().ToUpperInvariant();
     }
 }

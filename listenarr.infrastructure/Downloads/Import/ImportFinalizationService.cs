@@ -69,8 +69,10 @@ namespace Listenarr.Infrastructure.Downloads.Import
             }
 
             download.Imported();
+            download.ActiveAudiobookDeduplicationKey = null;
             download.LastImportedAt = DateTime.UtcNow;
             job.MarkAsCompleted();
+            job.ActiveDeduplicationKey = null;
             job.SetCheckpoint("ImportCommitted");
 
             await db.SaveChangesAsync(ct);

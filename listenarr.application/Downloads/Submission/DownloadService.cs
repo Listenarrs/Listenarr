@@ -318,7 +318,17 @@ namespace Listenarr.Application.Downloads.Submission
                 downloadClientIdForModel,
                 audiobookId);
 
-            await downloadRepository.AddAsync(download);
+            try
+            {
+                await downloadRepository.AddAsync(download);
+            }
+            catch (UniqueConstraintViolationException) when (audiobookId.HasValue)
+            {
+                logger.LogInformation(
+                    "Concurrent duplicate download prevented for audiobook {AudiobookId}",
+                    audiobookId);
+                return string.Empty;
+            }
             logger.LogInformation("Created download record in database: {DownloadId} for '{Title}'", downloadId, candidate.Title);
 
             DownloadClientSubmissionResult submissionResult;

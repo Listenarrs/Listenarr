@@ -22,9 +22,8 @@ namespace Listenarr.Application.Audiobooks.Contracts
     {
         Task<Guid> EnqueueMoveAsync(int audiobookId, string requestedPath, string? sourcePath = null);
         Task<Guid?> RequeueMoveAsync(Guid jobId);
-        bool TryGetJob(Guid id, out MoveJob? job);
-        void UpdateJobStatus(Guid id, string status, string? error = null);
+        Task<MoveJob?> GetJobAsync(Guid id, CancellationToken cancellationToken = default);
+        Task UpdateJobStatusAsync(Guid id, string status, string? error = null, CancellationToken cancellationToken = default);
         System.Threading.Channels.ChannelReader<MoveJob> Reader { get; }
     }
 }
-

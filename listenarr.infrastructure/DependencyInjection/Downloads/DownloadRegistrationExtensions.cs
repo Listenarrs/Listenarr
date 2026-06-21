@@ -8,9 +8,11 @@
  * (at your option) any later version.
  */
 using System.Net;
+using Listenarr.Infrastructure.Configuration;
 using Listenarr.Infrastructure.Persistence.Repositories;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Polly;
 using Polly.Extensions.Http;
 
@@ -57,7 +59,10 @@ internal static class DownloadRegistrationExtensions
         services.AddScoped<IDownloadImportService, DownloadImportService>();
         services.AddScoped<IFileMover, FileMover>();
         services.AddScoped<IArchiveExtractor, ArchiveExtractor>();
-        services.Configure<FileMoverOptions>(configuration.GetSection("FileMover"));
+        services.AddOptions<FileMoverOptions>()
+            .Bind(configuration.GetSection("FileMover"))
+            .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<FileMoverOptions>, FileMoverOptionsValidator>();
         services.AddScoped<IDownloadClientGateway, DownloadClientGateway>();
         services.AddScoped<IRemotePathMappingService, RemotePathMappingService>();
         services.AddScoped<IDownloadProcessingJobService, DownloadProcessingJobService>();

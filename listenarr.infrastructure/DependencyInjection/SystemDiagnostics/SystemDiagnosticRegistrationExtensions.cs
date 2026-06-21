@@ -17,11 +17,12 @@ internal static class SystemDiagnosticRegistrationExtensions
 {
     public static IServiceCollection AddSystemDiagnosticServices(this IServiceCollection services)
     {
-        services.AddSingleton<IAppMetricsService, NoopAppMetricsService>();
+        services.AddSingleton<IAppMetricsService, MeterAppMetricsService>();
         services.AddSingleton<IProcessRunner, SystemProcessRunner>();
         services.AddScoped<IProcessExecutionStore, ProcessExecutionStore>();
         services.AddSingleton<IDiskSpaceProbe, DiskSpaceProbe>();
         services.AddScoped<ISystemService, SystemService>();
+        services.AddScoped<ISystemReadinessService, SystemReadinessService>();
         return services;
     }
 

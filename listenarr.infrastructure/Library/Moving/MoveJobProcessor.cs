@@ -19,7 +19,6 @@ using Listenarr.Application.Mapping;
 using Listenarr.Domain.Common;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-
 namespace Listenarr.Infrastructure.Library.Moving
 {
     public class MoveJobProcessor(
@@ -33,12 +32,13 @@ namespace Listenarr.Infrastructure.Library.Moving
     {
         public async Task ProcessJobAsync(MoveJob job, CancellationToken stoppingToken)
         {
+            using var logScope = logger.BeginScope(new Dictionary<string, object?> { ["JobId"] = job.Id, ["AudiobookId"] = job.AudiobookId });
             metrics.Increment("worker.move.job.started");
             stoppingToken.ThrowIfCancellationRequested();
             try
             {
                 logger.LogInformation("Processing move job {JobId} for audiobook {AudiobookId} to {Path}", job.Id, job.AudiobookId, LogRedaction.SanitizeFilePath(job.RequestedPath));
-                moveQueueService.UpdateJobStatus(job.Id, "Processing");
+                await moveQueueService.UpdateJobStatusAsync(job.Id, "Processing", cancellationToken: stoppingToken);
 
                 using var scope = scopeFactory.CreateScope();
                 var audiobookRepository = scope.ServiceProvider.GetRequiredService<IAudiobookRepository>();
@@ -47,7 +47,7 @@ namespace Listenarr.Infrastructure.Library.Moving
                 var audiobook = await audiobookRepository.GetByIdAsync(job.AudiobookId);
                 if (audiobook == null)
                 {
-                    moveQueueService.UpdateJobStatus(job.Id, "Failed", "Audiobook not found");
+                    await moveQueueService.UpdateJobStatusAsync(job.Id, "Failed", "Audiobook not found", stoppingToken);
                     metrics.Increment("worker.move.job.failed");
                     return;
                 }
@@ -67,7 +67,7 @@ namespace Listenarr.Infrastructure.Library.Moving
 
                 if (string.IsNullOrWhiteSpace(source) || !Directory.Exists(source))
                 {
-                    moveQueueService.UpdateJobStatus(job.Id, "Failed", "Source path invalid or does not exist");
+                    await moveQueueService.UpdateJobStatusAsync(job.Id, "Failed", "Source path invalid or does not exist", stoppingToken);
                     metrics.Increment("worker.move.job.failed");
                     return;
                 }
@@ -78,7 +78,7 @@ namespace Listenarr.Infrastructure.Library.Moving
 
                 if (string.IsNullOrWhiteSpace(target))
                 {
-                    moveQueueService.UpdateJobStatus(job.Id, "Failed", "Target path not provided");
+                    await moveQueueService.UpdateJobStatusAsync(job.Id, "Failed", "Target path not provided", stoppingToken);
                     metrics.Increment("worker.move.job.failed");
                     return;
                 }
@@ -89,7 +89,7 @@ namespace Listenarr.Infrastructure.Library.Moving
 
                 if (IsFilesystemRoot(source) || IsFilesystemRoot(target))
                 {
-                    moveQueueService.UpdateJobStatus(job.Id, "Failed", "Refused to move a filesystem root");
+                    await moveQueueService.UpdateJobStatusAsync(job.Id, "Failed", "Refused to move a filesystem root", stoppingToken);
                     metrics.Increment("worker.move.job.failed");
                     logger.LogWarning(
                         "Blocked move job {JobId}: source or target is a filesystem root. Source={Source}, Target={Target}",
@@ -102,14 +102,14 @@ namespace Listenarr.Infrastructure.Library.Moving
                 // If source == target, nothing to do
                 if (string.Equals(source.TrimEnd(Path.DirectorySeparatorChar), target.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
                 {
-                    moveQueueService.UpdateJobStatus(job.Id, "Completed");
+                    await moveQueueService.UpdateJobStatusAsync(job.Id, "Completed", cancellationToken: stoppingToken);
                     metrics.Increment("worker.move.job.skipped");
                     return;
                 }
 
                 if (FileUtils.IsPathInsideOf(target, source) || FileUtils.IsPathInsideOf(source, target))
                 {
-                    moveQueueService.UpdateJobStatus(job.Id, "Failed", "Source and target paths overlap");
+                    await moveQueueService.UpdateJobStatusAsync(job.Id, "Failed", "Source and target paths overlap", stoppingToken);
                     metrics.Increment("worker.move.job.failed");
                     logger.LogWarning(
                         "Blocked overlapping move job {JobId}: {Source} -> {Target}",
@@ -123,7 +123,7 @@ namespace Listenarr.Infrastructure.Library.Moving
                 var targetParent = Path.GetDirectoryName(target);
                 if (string.IsNullOrEmpty(targetParent))
                 {
-                    moveQueueService.UpdateJobStatus(job.Id, "Failed", "Invalid target path");
+                    await moveQueueService.UpdateJobStatusAsync(job.Id, "Failed", "Invalid target path", stoppingToken);
                     metrics.Increment("worker.move.job.failed");
                     return;
                 }
@@ -136,7 +136,7 @@ namespace Listenarr.Infrastructure.Library.Moving
                     var targetHasContent = Directory.EnumerateFileSystemEntries(target).Any();
                     if (targetHasContent)
                     {
-                        moveQueueService.UpdateJobStatus(job.Id, "Failed", "Target directory already exists and contains files");
+                        await moveQueueService.UpdateJobStatusAsync(job.Id, "Failed", "Target directory already exists and contains files", stoppingToken);
                         metrics.Increment("worker.move.job.failed");
                         return;
                     }
@@ -148,7 +148,7 @@ namespace Listenarr.Infrastructure.Library.Moving
                 var tempName = Path.Join(targetParent, Path.GetFileName(target) + ".tmp-" + job.Id.ToString("N"));
                 if (!FileSystemSafety.TryValidateMutationTarget(tempName, [targetParent], out tempName, out var tempReason))
                 {
-                    moveQueueService.UpdateJobStatus(job.Id, "Failed", tempReason);
+                    await moveQueueService.UpdateJobStatusAsync(job.Id, "Failed", tempReason, stoppingToken);
                     metrics.Increment("worker.move.job.failed");
                     logger.LogWarning("Blocked move temp path for job {JobId}: {Reason}", job.Id, tempReason);
                     return;
@@ -383,7 +383,7 @@ namespace Listenarr.Infrastructure.Library.Moving
                         logger.LogWarning(historyEx, "Failed to add history entry or send notifications for move job {JobId}", job.Id);
                     }
 
-                    moveQueueService.UpdateJobStatus(job.Id, "Completed");
+                    await moveQueueService.UpdateJobStatusAsync(job.Id, "Completed", cancellationToken: stoppingToken);
                     metrics.Increment("worker.move.job.completed");
                     logger.LogInformation("Move job {JobId} completed: {Source} -> {Target}", job.Id, LogRedaction.SanitizeFilePath(source), LogRedaction.SanitizeFilePath(target));
                     // Completed move job — status updated and broadcasted where configured
@@ -457,7 +457,7 @@ namespace Listenarr.Infrastructure.Library.Moving
                         logger.LogWarning(historyEx, "Failed to add history entry for failed move job {JobId}", job.Id);
                     }
 
-                    moveQueueService.UpdateJobStatus(job.Id, "Failed", ex.Message);
+                    await moveQueueService.UpdateJobStatusAsync(job.Id, "Failed", ex.Message, stoppingToken);
                     metrics.Increment("worker.move.job.failed");
                     logger.LogError(ex, "Move job {JobId} failed", job.Id);
                     // Failure during move job — attempt counts updated and history recorded where configured
@@ -474,7 +474,7 @@ namespace Listenarr.Infrastructure.Library.Moving
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
                 logger.LogError(ex, "Unexpected error processing move job {JobId}", job.Id);
-                try { moveQueueService.UpdateJobStatus(job.Id, "Failed", ex.Message); }
+                try { await moveQueueService.UpdateJobStatusAsync(job.Id, "Failed", ex.Message, stoppingToken); }
                 catch (Exception caughtEx_2) when (caughtEx_2 is not OperationCanceledException && caughtEx_2 is not OutOfMemoryException && caughtEx_2 is not StackOverflowException)
                 {
                     System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");

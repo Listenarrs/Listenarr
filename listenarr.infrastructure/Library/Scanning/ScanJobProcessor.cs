@@ -42,6 +42,12 @@ namespace Listenarr.Infrastructure.Library.Scanning
 
         public async Task ProcessJobAsync(ScanJob job, CancellationToken stoppingToken)
         {
+            using var logScope = _logger.BeginScope(new Dictionary<string, object?>
+            {
+                ["JobId"] = job.Id,
+                ["AudiobookId"] = job.AudiobookId,
+                ["CorrelationId"] = job.CorrelationId ?? job.Id.ToString("N")
+            });
             _metrics.Increment("worker.scan.job.started");
             stoppingToken.ThrowIfCancellationRequested();
             try

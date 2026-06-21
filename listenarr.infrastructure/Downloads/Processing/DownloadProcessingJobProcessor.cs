@@ -101,6 +101,12 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                 return;
             }
 
+            using var logScope = logger.BeginScope(new Dictionary<string, object?>
+            {
+                ["JobId"] = job.Id,
+                ["DownloadId"] = job.DownloadId,
+                ["CorrelationId"] = job.GetOrCreateCorrelationId()
+            });
             try
             {
                 await ProcessJobAsync(job, cancellationToken);

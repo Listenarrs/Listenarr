@@ -8,6 +8,7 @@
  * (at your option) any later version.
  */
 using Listenarr.Infrastructure.Persistence;
+using Listenarr.Infrastructure.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -26,6 +27,8 @@ internal static class PersistenceRegistrationExtensions
                 ServiceLifetime.Singleton);
         }
 
+        services.AddScoped<IUnitOfWork, EfUnitOfWork>();
+        services.AddSingleton<IMoveQueuePersistence, EfMoveQueuePersistence>();
         services.AddScoped<IHistoryRepository, EfHistoryRepository>();
         return services;
     }

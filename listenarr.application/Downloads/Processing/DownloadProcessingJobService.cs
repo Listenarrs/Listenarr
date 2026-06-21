@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using Listenarr.Application.Common;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Downloads.Processing
@@ -54,6 +55,7 @@ namespace Listenarr.Application.Downloads.Processing
             var job = new DownloadProcessingJob
             {
                 DownloadId = download.Id,
+                ActiveDeduplicationKey = BuildActiveDeduplicationKey(download.Id),
                 JobType = ProcessingJobType.MoveOrCopyFile,
                 SourcePath = download.DownloadPath,
                 DownloadClientId = download.DownloadClientId,
@@ -65,7 +67,24 @@ namespace Listenarr.Application.Downloads.Processing
                 }
             };
 
-            job = await jobRepository.AddAsync(job);
+            try
+            {
+                job = await jobRepository.AddAsync(job);
+            }
+            catch (UniqueConstraintViolationException)
+            {
+                existingActive = await jobRepository.GetActiveByDownloadIdAsync(download.Id);
+                if (existingActive != null)
+                {
+                    logger.LogInformation(
+                        "Concurrent duplicate enqueue prevented - returning existing active job {JobId} for download {DownloadId}",
+                        existingActive.Id,
+                        download.Id);
+                    return existingActive.Id;
+                }
+
+                throw;
+            }
             logger.LogInformation("Queued download {DownloadId} for post-processing: {JobId}", download.Id, job.Id);
             return job.Id;
         }
@@ -125,5 +144,8 @@ namespace Listenarr.Application.Downloads.Processing
                 await jobRepository.UpdateAsync(job.UnStuck("Reset from stuck Processing state after service restart"));
             }
         }
+
+        private static string BuildActiveDeduplicationKey(string downloadId) =>
+            downloadId.Trim().ToUpperInvariant();
     }
 }

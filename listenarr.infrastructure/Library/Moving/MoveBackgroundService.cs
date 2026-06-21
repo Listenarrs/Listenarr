@@ -51,7 +51,7 @@ namespace Listenarr.Infrastructure.Library.Moving
                     catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                     {
                         logger.LogError(ex, "Unexpected error processing move job {JobId}", job.Id);
-                        try { moveQueueService.UpdateJobStatus(job.Id, "Failed", ex.Message); }
+                        try { await moveQueueService.UpdateJobStatusAsync(job.Id, "Failed", ex.Message, stoppingToken); }
                         catch (Exception caughtEx) when (caughtEx is not OperationCanceledException && caughtEx is not OutOfMemoryException && caughtEx is not StackOverflowException)
                         {
                             System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");

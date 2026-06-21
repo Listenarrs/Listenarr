@@ -168,11 +168,14 @@ namespace Listenarr.Api.Features.Library
             }
         }
 
-        public IActionResult GetStatus(string jobId)
+        public async Task<IActionResult> GetStatusAsync(
+            string jobId,
+            CancellationToken cancellationToken = default)
         {
             if (_moveQueueService == null) return new NotFoundObjectResult(new { message = "Move queue not available" });
             if (!Guid.TryParse(jobId, out var gid)) return new BadRequestObjectResult(new { message = "Invalid jobId" });
-            if (_moveQueueService.TryGetJob(gid, out var job))
+            var job = await _moveQueueService.GetJobAsync(gid, cancellationToken);
+            if (job != null)
             {
                 _logger.LogInformation("Queried move job {JobId} status: {Status}", gid, job!.Status);
                 return new OkObjectResult(job);

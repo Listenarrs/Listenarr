@@ -53,7 +53,8 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
             var succeeded = false;
             for (int i = 0; i < 60; i++)
             {
-                if (moveQueue.TryGetJob(jobId, out var job) && string.Equals(job.Status, "Completed", StringComparison.OrdinalIgnoreCase))
+                var job = await moveQueue.GetJobAsync(jobId);
+                if (job != null && string.Equals(job.Status, "Completed", StringComparison.OrdinalIgnoreCase))
                 {
                     succeeded = true; break;
                 }

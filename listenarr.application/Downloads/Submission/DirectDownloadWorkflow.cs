@@ -8,6 +8,7 @@
  * (at your option) any later version.
  */
 
+using Listenarr.Application.Common;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Downloads.Submission
@@ -51,10 +52,17 @@ namespace Listenarr.Application.Downloads.Submission
                 await downloadRepository.AddAsync(download);
                 return id;
             }
+            catch (UniqueConstraintViolationException) when (audiobookId.HasValue)
+            {
+                logger.LogInformation(
+                    "Concurrent duplicate direct download prevented for audiobook {AudiobookId}",
+                    audiobookId);
+                return string.Empty;
+            }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
-                logger.LogWarning(ex, "DownloadDirectlyAsync: failed to create DDL download record");
-                return Guid.NewGuid().ToString();
+                logger.LogError(ex, "Failed to persist direct-download reservation");
+                throw new PersistenceException("Failed to persist direct-download reservation.", ex);
             }
         }
     }

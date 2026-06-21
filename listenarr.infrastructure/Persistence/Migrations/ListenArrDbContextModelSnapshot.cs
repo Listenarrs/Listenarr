@@ -17,7 +17,201 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.8");
 
-            modelBuilder.Entity("Listenarr.Domain.Models.Audiobook", b =>
+            modelBuilder.Entity("Listenarr.Domain.ActivityHistory.DownloadHistory", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("AudiobookId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Data")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DownloadClient")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DownloadClientId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DownloadId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("EventDate")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("EventType")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("ImportedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OutputPath")
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Protocol")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("WasImported")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AudiobookId");
+
+                    b.HasIndex("DownloadId");
+
+                    b.HasIndex("EventDate");
+
+                    b.HasIndex("DownloadId", "EventType");
+
+                    b.ToTable("DownloadHistories", (string)null);
+                });
+
+            modelBuilder.Entity("Listenarr.Domain.ActivityHistory.History", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AudiobookExternalId")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("AudiobookId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AudiobookTitle")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CorrelationId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Data")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DownloadClientId")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DownloadId")
+                        .HasMaxLength(150)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(4000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Message")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("NotificationSent")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Outcome")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("ParentEventId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Source")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceTitle")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("Timestamp")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AudiobookExternalId");
+
+                    b.HasIndex("CorrelationId");
+
+                    b.HasIndex("DownloadClientId");
+
+                    b.HasIndex("DownloadId");
+
+                    b.HasIndex("EventType");
+
+                    b.HasIndex("Outcome");
+
+                    b.HasIndex("Timestamp");
+
+                    b.ToTable("History");
+                });
+
+            modelBuilder.Entity("Listenarr.Domain.ActivityHistory.ProcessExecutionLog", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Arguments")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("DurationMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("ExitCode")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("FileName")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Source")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Stderr")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Stdout")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("TimedOut")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("Timestamp")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("ProcessExecutionLogs");
+                });
+
+            modelBuilder.Entity("Listenarr.Domain.Audiobooks.Audiobook", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -124,7 +318,7 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.ToTable("Audiobooks");
                 });
 
-            modelBuilder.Entity("Listenarr.Domain.Models.AudiobookExternalIdentifier", b =>
+            modelBuilder.Entity("Listenarr.Domain.Audiobooks.AudiobookExternalIdentifier", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -179,7 +373,7 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.ToTable("AudiobookExternalIdentifiers", (string)null);
                 });
 
-            modelBuilder.Entity("Listenarr.Domain.Models.AudiobookFile", b =>
+            modelBuilder.Entity("Listenarr.Domain.Audiobooks.AudiobookFile", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -228,7 +422,7 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.ToTable("AudiobookFiles");
                 });
 
-            modelBuilder.Entity("Listenarr.Domain.Models.AudiobookSeriesMembership", b =>
+            modelBuilder.Entity("Listenarr.Domain.Audiobooks.AudiobookSeriesMembership", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -266,7 +460,7 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.ToTable("AudiobookSeriesMemberships", (string)null);
                 });
 
-            modelBuilder.Entity("Listenarr.Domain.Models.AuthorCacheEntry", b =>
+            modelBuilder.Entity("Listenarr.Domain.Audiobooks.AuthorCacheEntry", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -323,7 +517,340 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.ToTable("AuthorCacheEntries");
                 });
 
-            modelBuilder.Entity("Listenarr.Domain.Models.Configurations.ApiConfiguration", b =>
+            modelBuilder.Entity("Listenarr.Domain.Audiobooks.MonitoredAuthor", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AuthorAsin")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AuthorName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AuthorNameNormalized")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Language")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastCheckedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(2048)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastSuccessfulSyncAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Region")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LastCheckedAt");
+
+                    b.HasIndex("AuthorNameNormalized", "Region", "Language")
+                        .IsUnique();
+
+                    b.ToTable("MonitoredAuthors");
+                });
+
+            modelBuilder.Entity("Listenarr.Domain.Audiobooks.MonitoredSeries", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Language")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastCheckedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(2048)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastSuccessfulSyncAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Region")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SeriesAsin")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SeriesName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SeriesNameNormalized")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LastCheckedAt");
+
+                    b.HasIndex("SeriesNameNormalized", "Region", "Language")
+                        .IsUnique();
+
+                    b.ToTable("MonitoredSeries");
+                });
+
+            modelBuilder.Entity("Listenarr.Domain.Audiobooks.MoveJob", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ActiveDeduplicationKey")
+                        .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AudiobookId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("EnqueuedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Error")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RequestedPath")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourcePath")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ActiveDeduplicationKey")
+                        .IsUnique()
+                        .HasFilter("\"ActiveDeduplicationKey\" IS NOT NULL");
+
+                    b.HasIndex("AudiobookId", "Status");
+
+                    b.ToTable("MoveJobs");
+                });
+
+            modelBuilder.Entity("Listenarr.Domain.Audiobooks.QualityProfile", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CustomGroupNames")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("CustomGroupNames");
+
+                    b.Property<string>("CutoffQuality")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsDefault")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("MaximumAge")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("MaximumSize")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("MinimumScore")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("MinimumSeeders")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("MinimumSize")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("MustContain")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("MustContain");
+
+                    b.Property<string>("MustNotContain")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("MustNotContain");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("PreferNewerReleases")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PreferredFormats")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("PreferredFormats");
+
+                    b.Property<string>("PreferredLanguages")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("PreferredLanguages");
+
+                    b.PrimitiveCollection<string>("PreferredWords")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Qualities")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("Qualities");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("QualityProfiles");
+                });
+
+            modelBuilder.Entity("Listenarr.Domain.Audiobooks.RootFolder", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<bool>("IsDefault")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Path")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name");
+
+                    b.HasIndex("Path")
+                        .IsUnique();
+
+                    b.ToTable("RootFolders", (string)null);
+                });
+
+            modelBuilder.Entity("Listenarr.Domain.Audiobooks.SeriesCacheEntry", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CatalogBooks")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ImageUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastFetchedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Region")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SeriesAsin")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SeriesName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SeriesNameNormalized")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SeriesAsin", "Region");
+
+                    b.HasIndex("SeriesNameNormalized", "Region")
+                        .IsUnique();
+
+                    b.ToTable("SeriesCacheEntries");
+                });
+
+            modelBuilder.Entity("Listenarr.Domain.Configuration.ApiConfiguration", b =>
                 {
                     b.Property<string>("Id")
                         .HasColumnType("TEXT");
@@ -374,7 +901,7 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.ToTable("ApiConfigurations");
                 });
 
-            modelBuilder.Entity("Listenarr.Domain.Models.Configurations.ApplicationSettings", b =>
+            modelBuilder.Entity("Listenarr.Domain.Configuration.ApplicationSettings", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -513,6 +1040,10 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.Property<int>("UnmatchedScanConcurrency")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("WebhookUrl")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -525,10 +1056,13 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.ToTable("ApplicationSettings");
                 });
 
-            modelBuilder.Entity("Listenarr.Domain.Models.Download", b =>
+            modelBuilder.Entity("Listenarr.Domain.Downloads.Download", b =>
                 {
                     b.Property<string>("Id")
                         .HasColumnType("TEXT");
+
+                    b.Property<int?>("ActiveAudiobookDeduplicationKey")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("Album")
                         .IsRequired()
@@ -628,6 +1162,10 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("ActiveAudiobookDeduplicationKey")
+                        .IsUnique()
+                        .HasFilter("\"ActiveAudiobookDeduplicationKey\" IS NOT NULL");
+
                     b.HasIndex("CompletedAt");
 
                     b.HasIndex("DownloadClientId");
@@ -637,7 +1175,7 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.ToTable("Downloads");
                 });
 
-            modelBuilder.Entity("Listenarr.Domain.Models.DownloadClientConfiguration", b =>
+            modelBuilder.Entity("Listenarr.Domain.Downloads.DownloadClientConfiguration", b =>
                 {
                     b.Property<string>("Id")
                         .HasColumnType("TEXT");
@@ -692,82 +1230,13 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.ToTable("DownloadClientConfigurations");
                 });
 
-            modelBuilder.Entity("Listenarr.Domain.Models.DownloadHistory", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<Guid?>("AudiobookId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Data")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("DownloadClient")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("DownloadClientId")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("DownloadId")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ErrorMessage")
-                        .HasMaxLength(2000)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("EventDate")
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("EventType")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTime?>("ImportedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("OutputPath")
-                        .HasMaxLength(1000)
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("Protocol")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("Status")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("TEXT");
-
-                    b.Property<bool>("WasImported")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
-                        .HasDefaultValue(false);
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AudiobookId");
-
-                    b.HasIndex("DownloadId");
-
-                    b.HasIndex("EventDate");
-
-                    b.HasIndex("DownloadId", "EventType");
-
-                    b.ToTable("DownloadHistories", (string)null);
-                });
-
-            modelBuilder.Entity("Listenarr.Domain.Models.DownloadProcessingJob", b =>
+            modelBuilder.Entity("Listenarr.Domain.Downloads.DownloadProcessingJob", b =>
                 {
                     b.Property<string>("Id")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ActiveDeduplicationKey")
+                        .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime?>("CompletedAt")
@@ -824,6 +1293,10 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("ActiveDeduplicationKey")
+                        .IsUnique()
+                        .HasFilter("\"ActiveDeduplicationKey\" IS NOT NULL");
+
                     b.HasIndex("Status");
 
                     b.HasIndex("DownloadId", "Status");
@@ -831,90 +1304,110 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.ToTable("DownloadProcessingJobs");
                 });
 
-            modelBuilder.Entity("Listenarr.Domain.Models.History", b =>
+            modelBuilder.Entity("Listenarr.Domain.Downloads.RemotePathMapping", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
-                    b.Property<string>("AudiobookExternalId")
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
-                    b.Property<int?>("AudiobookId")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("AudiobookTitle")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("CorrelationId")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Data")
+                    b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("DownloadClientId")
-                        .HasMaxLength(100)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("DownloadId")
-                        .HasMaxLength(150)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Error")
-                        .HasMaxLength(4000)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("EventType")
                         .IsRequired()
-                        .HasMaxLength(100)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("Message")
+                    b.Property<string>("LocalPath")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<bool>("NotificationSent")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("Outcome")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int?>("ParentEventId")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("Source")
-                        .HasMaxLength(100)
+                    b.Property<string>("Name")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("SourceTitle")
-                        .HasMaxLength(500)
+                    b.Property<string>("RemotePath")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTime>("Timestamp")
+                    b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("AudiobookExternalId");
-
-                    b.HasIndex("CorrelationId");
-
-                    b.HasIndex("DownloadClientId");
-
-                    b.HasIndex("DownloadId");
-
-                    b.HasIndex("EventType");
-
-                    b.HasIndex("Outcome");
-
-                    b.HasIndex("Timestamp");
-
-                    b.ToTable("History");
+                    b.ToTable("RemotePathMappings");
                 });
 
-            modelBuilder.Entity("Listenarr.Domain.Models.Indexer", b =>
+            modelBuilder.Entity("Listenarr.Domain.Identity.User", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Email")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsAdmin")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PasswordHash")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("Users");
+                });
+
+            modelBuilder.Entity("Listenarr.Domain.Identity.UserSession", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsAdmin")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("LastAccessed")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("RememberMe")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExpiresAt");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("Username");
+
+                    b.ToTable("UserSessions");
+                });
+
+            modelBuilder.Entity("Listenarr.Domain.Search.Indexer", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -998,493 +1491,27 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.ToTable("Indexers");
                 });
 
-            modelBuilder.Entity("Listenarr.Domain.Models.MonitoredAuthor", b =>
+            modelBuilder.Entity("Listenarr.Domain.Audiobooks.Audiobook", b =>
                 {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("AuthorAsin")
-                        .HasMaxLength(32)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("AuthorName")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("AuthorNameNormalized")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Language")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime?>("LastCheckedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("LastError")
-                        .HasMaxLength(2048)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime?>("LastSuccessfulSyncAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Region")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("LastCheckedAt");
-
-                    b.HasIndex("AuthorNameNormalized", "Region", "Language")
-                        .IsUnique();
-
-                    b.ToTable("MonitoredAuthors");
-                });
-
-            modelBuilder.Entity("Listenarr.Domain.Models.MonitoredSeries", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Language")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime?>("LastCheckedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("LastError")
-                        .HasMaxLength(2048)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime?>("LastSuccessfulSyncAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Region")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("SeriesAsin")
-                        .HasMaxLength(32)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("SeriesName")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("SeriesNameNormalized")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("LastCheckedAt");
-
-                    b.HasIndex("SeriesNameNormalized", "Region", "Language")
-                        .IsUnique();
-
-                    b.ToTable("MonitoredSeries");
-                });
-
-            modelBuilder.Entity("Listenarr.Domain.Models.MoveJob", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("AttemptCount")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("AudiobookId")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTime>("EnqueuedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Error")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("RequestedPath")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("SourcePath")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AudiobookId", "Status");
-
-                    b.ToTable("MoveJobs");
-                });
-
-            modelBuilder.Entity("Listenarr.Domain.Models.ProcessExecutionLog", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("Arguments")
-                        .HasColumnType("TEXT");
-
-                    b.Property<int?>("DurationMs")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int?>("ExitCode")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("FileName")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Source")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Stderr")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Stdout")
-                        .HasColumnType("TEXT");
-
-                    b.Property<bool>("TimedOut")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTimeOffset>("Timestamp")
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("ProcessExecutionLogs");
-                });
-
-            modelBuilder.Entity("Listenarr.Domain.Models.QualityProfile", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("CustomGroupNames")
-                        .HasColumnType("TEXT")
-                        .HasColumnName("CustomGroupNames");
-
-                    b.Property<string>("CutoffQuality")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Description")
-                        .HasColumnType("TEXT");
-
-                    b.Property<bool>("IsDefault")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("MaximumAge")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("MaximumSize")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("MinimumScore")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("MinimumSeeders")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("MinimumSize")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("MustContain")
-                        .IsRequired()
-                        .HasColumnType("TEXT")
-                        .HasColumnName("MustContain");
-
-                    b.Property<string>("MustNotContain")
-                        .IsRequired()
-                        .HasColumnType("TEXT")
-                        .HasColumnName("MustNotContain");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("TEXT");
-
-                    b.Property<bool>("PreferNewerReleases")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("PreferredFormats")
-                        .IsRequired()
-                        .HasColumnType("TEXT")
-                        .HasColumnName("PreferredFormats");
-
-                    b.Property<string>("PreferredLanguages")
-                        .IsRequired()
-                        .HasColumnType("TEXT")
-                        .HasColumnName("PreferredLanguages");
-
-                    b.PrimitiveCollection<string>("PreferredWords")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Qualities")
-                        .IsRequired()
-                        .HasColumnType("TEXT")
-                        .HasColumnName("Qualities");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("QualityProfiles");
-                });
-
-            modelBuilder.Entity("Listenarr.Domain.Models.RemotePathMapping", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("DownloadClientId")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("LocalPath")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Name")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("RemotePath")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("RemotePathMappings");
-                });
-
-            modelBuilder.Entity("Listenarr.Domain.Models.RootFolder", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
-
-                    b.Property<bool>("IsDefault")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
-                        .HasDefaultValue(false);
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Path")
-                        .IsRequired()
-                        .HasMaxLength(1000)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Name");
-
-                    b.HasIndex("Path")
-                        .IsUnique();
-
-                    b.ToTable("RootFolders", (string)null);
-                });
-
-            modelBuilder.Entity("Listenarr.Domain.Models.SeriesCacheEntry", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("CatalogBooks")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Description")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ImageUrl")
-                        .HasMaxLength(2048)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime?>("LastFetchedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Region")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("SeriesAsin")
-                        .HasMaxLength(32)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("SeriesName")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("SeriesNameNormalized")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("SeriesAsin", "Region");
-
-                    b.HasIndex("SeriesNameNormalized", "Region")
-                        .IsUnique();
-
-                    b.ToTable("SeriesCacheEntries");
-                });
-
-            modelBuilder.Entity("Listenarr.Domain.Models.User", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Email")
-                        .HasColumnType("TEXT");
-
-                    b.Property<bool>("IsAdmin")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("PasswordHash")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Username")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("Users");
-                });
-
-            modelBuilder.Entity("Listenarr.Domain.Models.UserSession", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("ExpiresAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<bool>("IsAdmin")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTime>("LastAccessed")
-                        .HasColumnType("TEXT");
-
-                    b.Property<bool>("RememberMe")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("TokenHash")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Username")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ExpiresAt");
-
-                    b.HasIndex("TokenHash")
-                        .IsUnique();
-
-                    b.HasIndex("Username");
-
-                    b.ToTable("UserSessions");
-                });
-
-            modelBuilder.Entity("Listenarr.Domain.Models.Audiobook", b =>
-                {
-                    b.HasOne("Listenarr.Domain.Models.QualityProfile", "QualityProfile")
+                    b.HasOne("Listenarr.Domain.Audiobooks.QualityProfile", "QualityProfile")
                         .WithMany()
                         .HasForeignKey("QualityProfileId");
 
                     b.Navigation("QualityProfile");
                 });
 
-            modelBuilder.Entity("Listenarr.Domain.Models.AudiobookExternalIdentifier", b =>
+            modelBuilder.Entity("Listenarr.Domain.Audiobooks.AudiobookExternalIdentifier", b =>
                 {
-                    b.HasOne("Listenarr.Domain.Models.Audiobook", null)
+                    b.HasOne("Listenarr.Domain.Audiobooks.Audiobook", null)
                         .WithMany("ExternalIdentifiers")
                         .HasForeignKey("AudiobookId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
 
-            modelBuilder.Entity("Listenarr.Domain.Models.AudiobookFile", b =>
+            modelBuilder.Entity("Listenarr.Domain.Audiobooks.AudiobookFile", b =>
                 {
-                    b.HasOne("Listenarr.Domain.Models.Audiobook", "Audiobook")
+                    b.HasOne("Listenarr.Domain.Audiobooks.Audiobook", "Audiobook")
                         .WithMany("Files")
                         .HasForeignKey("AudiobookId")
                         .OnDelete(DeleteBehavior.Cascade)
@@ -1493,9 +1520,9 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.Navigation("Audiobook");
                 });
 
-            modelBuilder.Entity("Listenarr.Domain.Models.AudiobookSeriesMembership", b =>
+            modelBuilder.Entity("Listenarr.Domain.Audiobooks.AudiobookSeriesMembership", b =>
                 {
-                    b.HasOne("Listenarr.Domain.Models.Audiobook", "Audiobook")
+                    b.HasOne("Listenarr.Domain.Audiobooks.Audiobook", "Audiobook")
                         .WithMany("SeriesMemberships")
                         .HasForeignKey("AudiobookId")
                         .OnDelete(DeleteBehavior.Cascade)
@@ -1504,7 +1531,7 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.Navigation("Audiobook");
                 });
 
-            modelBuilder.Entity("Listenarr.Domain.Models.Audiobook", b =>
+            modelBuilder.Entity("Listenarr.Domain.Audiobooks.Audiobook", b =>
                 {
                     b.Navigation("ExternalIdentifiers");
 

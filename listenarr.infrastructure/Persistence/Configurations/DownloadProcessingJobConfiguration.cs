@@ -26,6 +26,10 @@ namespace Listenarr.Infrastructure.Persistence.Configurations
         public void Configure(EntityTypeBuilder<DownloadProcessingJob> builder)
         {
             builder.HasKey(j => j.Id);
+            builder.Property(j => j.ActiveDeduplicationKey).HasMaxLength(256);
+            builder.HasIndex(j => j.ActiveDeduplicationKey)
+                .IsUnique()
+                .HasFilter("\"ActiveDeduplicationKey\" IS NOT NULL");
 
             // Map JobData dictionary to a JSON TEXT column with centralized converter + comparer.
             var converter = new JsonValueConverter<Dictionary<string, object>>();

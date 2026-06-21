@@ -18,6 +18,7 @@
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
 using Listenarr.Tests.Mocks;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Listenarr.Tests.Features.Application.Downloads.Processing
 {
@@ -133,6 +134,38 @@ namespace Listenarr.Tests.Features.Application.Downloads.Processing
             var jobs = await downloadProcessingJobService.GetJobsForDownloadAsync(download.Id);
             Assert.Single(jobs);
             Assert.Equal(ProcessingJobStatus.Pending, jobs.First().Status);
+        }
+
+        [Fact]
+        public async Task ConcurrentInsertConflict_ReturnsPersistedWinner()
+        {
+            var download = new DownloadBuilder()
+                .WithCompletedStatus(DateTime.UtcNow)
+                .Build();
+            var winner = new DownloadProcessingJobBuilder()
+                .WithId("winning-job")
+                .WithDownload(download)
+                .WithPending(DateTime.UtcNow)
+                .Build();
+            var repository = new Mock<IDownloadProcessingJobRepository>();
+            repository.SetupSequence(repo => repo.GetActiveByDownloadIdAsync(download.Id))
+                .ReturnsAsync((DownloadProcessingJob?)null)
+                .ReturnsAsync(winner);
+            repository.Setup(repo => repo.GetRecentCompletedByDownloadIdAsync(
+                    download.Id,
+                    It.IsAny<DateTime>()))
+                .ReturnsAsync((DownloadProcessingJob?)null);
+            repository.Setup(repo => repo.AddAsync(It.IsAny<DownloadProcessingJob>()))
+                .ThrowsAsync(new UniqueConstraintViolationException(
+                    "duplicate active import job",
+                    new InvalidOperationException()));
+            var service = new DownloadProcessingJobService(
+                repository.Object,
+                NullLogger<DownloadProcessingJobService>.Instance);
+
+            var jobId = await service.EnqueueAsync(download);
+
+            Assert.Equal(winner.Id, jobId);
         }
 
         [Fact]

@@ -10,6 +10,7 @@
 using System.Net;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace Listenarr.Infrastructure.DependencyInjection.Platform;
 
@@ -20,10 +21,16 @@ internal static class PlatformRegistrationExtensions
         IConfiguration configuration)
     {
         services.AddHttpClient("default")
+            .ConfigureHttpClient((provider, client) =>
+                client.Timeout = TimeSpan.FromSeconds(
+                    provider.GetRequiredService<IOptions<ExternalRequestOptions>>().Value.TimeoutSeconds))
             .ConfigurePrimaryHttpMessageHandler(CreateExternalHandler);
         services.AddTransient(provider =>
             provider.GetRequiredService<IHttpClientFactory>().CreateClient("default"));
         services.AddHttpClient("us")
+            .ConfigureHttpClient((provider, client) =>
+                client.Timeout = TimeSpan.FromSeconds(
+                    provider.GetRequiredService<IOptions<ExternalRequestOptions>>().Value.TimeoutSeconds))
             .ConfigurePrimaryHttpMessageHandler(CreateExternalHandler);
         return services;
     }

@@ -713,22 +713,13 @@
         "dependencies": {
           "Asp.Versioning.Mvc": "[10.0.0, )",
           "Asp.Versioning.Mvc.ApiExplorer": "[10.0.0, )",
-          "AsyncKeyedLock": "[8.0.2, )",
-          "HtmlAgilityPack": "[1.12.4, )",
           "Listenarr.Application": "[1.0.0, )",
           "Listenarr.Domain": "[1.0.0, )",
           "Listenarr.Infrastructure": "[1.0.0, )",
           "Microsoft.AspNetCore.OpenApi": "[10.0.8, )",
-          "Microsoft.Data.Sqlite.Core": "[10.0.8, )",
-          "Microsoft.EntityFrameworkCore": "[10.0.8, )",
-          "Microsoft.EntityFrameworkCore.Sqlite": "[10.0.8, )",
-          "Microsoft.Extensions.Http.Polly": "[10.0.8, )",
-          "Polly": "[8.6.6, )",
           "Serilog.AspNetCore": "[10.0.0, )",
           "Serilog.Sinks.File": "[7.0.0, )",
-          "SixLabors.ImageSharp": "[3.1.12, )",
-          "Swashbuckle.AspNetCore": "[10.2.1, )",
-          "TagLibSharp": "[2.3.0, )"
+          "Swashbuckle.AspNetCore": "[10.2.1, )"
         }
       },
       "listenarr.application": {

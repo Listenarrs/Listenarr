@@ -257,10 +257,11 @@ namespace Listenarr.Api.Features.Library
         /// Get the current status of a file-move background job.
         /// </summary>
         /// <param name="jobId">The GUID returned when the move was enqueued.</param>
+        /// <param name="cancellationToken">Request cancellation token.</param>
         [HttpGet("move/{jobId}")]
-        public IActionResult GetMoveJobStatus(string jobId)
+        public async Task<IActionResult> GetMoveJobStatus(string jobId, CancellationToken cancellationToken)
         {
-            return _moveWorkflow.GetStatus(jobId);
+            return await _moveWorkflow.GetStatusAsync(jobId, cancellationToken);
         }
 
         /// <summary>
