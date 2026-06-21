@@ -283,3 +283,5 @@ listenarr.api/config/appsettings/appsettings.json
 /.codex
 /.codex-build
 .codex-workflows-manifest.json
+/docs/plans
+/docs/design

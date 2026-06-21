@@ -5,17 +5,77 @@ using Listenarr.Tests.Common;
 
 namespace Listenarr.Tests.Mocks.Api
 {
+    public sealed record MyAnonamouseMockRoute(
+        string Pattern,
+        Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> Handler)
+    {
+        public HttpMethod? Method { get; init; }
+    }
+
     public class MyAnonamouseApiMock : BaseApiMock
     {
+        private static readonly HttpRequestOptionsKey<bool> MatchedRouteKey = new("MyAnonamouseMatchedRoute");
+        private readonly object routeInvocationLock = new();
+        private readonly Dictionary<string, int> routeInvocationCounts = new(StringComparer.Ordinal);
         private readonly string cookieValue = "new_mam";
+        private bool defaultRoutesRegistered;
 
-        public MyAnonamouseApiMock()
+        public bool FailOnUnexpectedCalls { get; set; }
+
+        public void AddTrackedRoute(string routeName, MyAnonamouseMockRoute route)
         {
-            AddRoute("/tor/js/loadSearchJSONbasic.php", GetSearch, HttpMethod.Get);
-            AddRoute("/tor/download.php/me", GetError, HttpMethod.Get);
-            AddRoute(@"/tor/download\.php/dummy", GetDummyDownload, HttpMethod.Get);
-            AddRoute(@"/tor/download\.php(?!/me)(?!/dummy)", GetDownload, HttpMethod.Get);
-            AddRoute("/tor/redirectstart", GetRedirectedDownload, HttpMethod.Get);
+            lock (routeInvocationLock)
+            {
+                routeInvocationCounts.TryAdd(routeName, 0);
+            }
+
+            AddRoute(
+                route.Pattern,
+                async (request, cancellationToken) =>
+                {
+                    IncrementRouteInvocationCount(routeName);
+                    request.Options.Set(MatchedRouteKey, true);
+                    return await route.Handler(request, cancellationToken);
+                },
+                route.Method);
+        }
+
+        public int GetRouteInvocationCount(string routeName)
+        {
+            lock (routeInvocationLock)
+            {
+                return routeInvocationCounts.GetValueOrDefault(routeName);
+            }
+        }
+
+        public void ResetObservations()
+        {
+            ResetCallCount();
+            ResetRequestHistory();
+
+            lock (routeInvocationLock)
+            {
+                foreach (var routeName in routeInvocationCounts.Keys.ToArray())
+                {
+                    routeInvocationCounts[routeName] = 0;
+                }
+            }
+        }
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            EnsureDefaultRoutesRegistered();
+            var response = await base.SendAsync(request, cancellationToken);
+            if (!FailOnUnexpectedCalls || request.Options.TryGetValue(MatchedRouteKey, out _))
+            {
+                return response;
+            }
+
+            response.Dispose();
+            throw new InvalidOperationException(
+                $"Unexpected MyAnonamouse API request: {request.Method} {request.RequestUri}");
         }
 
         public HttpResponseMessage AddCookies(HttpResponseMessage response, string value)
@@ -65,7 +125,7 @@ namespace Listenarr.Tests.Mocks.Api
 
         public async Task<HttpResponseMessage> GetRedirectedDownload(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            if (_calls == 1)
+            if (GetRouteInvocationCount("redirect-start") == 1)
             {
                 var response = new HttpResponseMessage(HttpStatusCode.Found);
                 response.Headers.Location = new Uri("https://47.39.239.96/tor/download.php/abc");
@@ -84,6 +144,57 @@ namespace Listenarr.Tests.Mocks.Api
                 </body>
             </html>
             """, "text/html");
+        }
+
+        private void IncrementRouteInvocationCount(string routeName)
+        {
+            lock (routeInvocationLock)
+            {
+                routeInvocationCounts[routeName]++;
+            }
+        }
+
+        private void EnsureDefaultRoutesRegistered()
+        {
+            lock (routeInvocationLock)
+            {
+                if (defaultRoutesRegistered)
+                {
+                    return;
+                }
+
+                AddTrackedRoute(
+                    "search",
+                    new MyAnonamouseMockRoute("/tor/js/loadSearchJSONbasic.php", GetSearch)
+                    {
+                        Method = HttpMethod.Get
+                    });
+                AddTrackedRoute(
+                    "error-download",
+                    new MyAnonamouseMockRoute("/tor/download.php/me", GetError)
+                    {
+                        Method = HttpMethod.Get
+                    });
+                AddTrackedRoute(
+                    "dummy-download",
+                    new MyAnonamouseMockRoute(@"/tor/download\.php/dummy", GetDummyDownload)
+                    {
+                        Method = HttpMethod.Get
+                    });
+                AddTrackedRoute(
+                    "download",
+                    new MyAnonamouseMockRoute(@"/tor/download\.php(?!/me)(?!/dummy)", GetDownload)
+                    {
+                        Method = HttpMethod.Get
+                    });
+                AddTrackedRoute(
+                    "redirect-start",
+                    new MyAnonamouseMockRoute("/tor/redirectstart", GetRedirectedDownload)
+                    {
+                        Method = HttpMethod.Get
+                    });
+                defaultRoutesRegistered = true;
+            }
         }
     }
 }
