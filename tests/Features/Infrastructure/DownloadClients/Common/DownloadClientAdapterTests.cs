@@ -158,6 +158,118 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Common
             Assert.Equal(expectedPath, resolved.OutputPath);
         }
 
+        [Fact]
+        [Trait("Third-Party", "Nzbget")]
+        [Trait("Method", "GetImportItemAsync")]
+        public async Task Nzbget_GetImportItemAsync_DownloadClientItemHistoryCompatibility_PreservesMethodParametersAndResponse()
+        {
+            var apiMock = _provider.GetRequiredService<NzbgetApiMock>();
+            apiMock.ResetXmlRpcCapture();
+            var historyResponse = NzbgetApiMock.CreateHistoryResponse(
+                """
+                <value><struct>
+                  <member><name>ID</name><value><string>case-id</string></value></member>
+                  <member><name>DestDir</name><value><string>{{PATH}}</string></value></member>
+                </struct></value>
+                """.Replace("{{PATH}}", FileUtils.GetAbsolutePath("nzbget", "completed", "Case Book")));
+            apiMock.QueueXmlRpcResponse("history", historyResponse);
+            apiMock.QueueXmlRpcResponse("history", historyResponse);
+            var original = new DownloadClientItem
+            {
+                DownloadId = "CASE-ID",
+                OutputPath = string.Empty,
+                Title = "Original"
+            };
+            var unmatchedOriginal = new DownloadClientItem
+            {
+                DownloadId = "missing",
+                OutputPath = string.Empty,
+                Title = "Unmatched"
+            };
+            var adapter = MockUtils.CreateNzbgetAdapter(_provider);
+
+            var resolved = await adapter.GetImportItemAsync(_nzbgetClient, original);
+            var unmatched = await adapter.GetImportItemAsync(_nzbgetClient, unmatchedOriginal);
+
+            Assert.NotSame(original, resolved);
+            Assert.Equal(FileUtils.GetAbsolutePath("nzbget", "completed", "Case Book"), resolved.OutputPath);
+            Assert.Equal(string.Empty, original.OutputPath);
+            Assert.NotSame(unmatchedOriginal, unmatched);
+            Assert.Equal("Unmatched", unmatched.Title);
+            Assert.Equal(string.Empty, unmatched.OutputPath);
+            Assert.All(apiMock.XmlRpcCalls, AssertHistoryFalseCall);
+            Assert.Equal(2, apiMock.XmlRpcCalls.Count);
+        }
+
+        [Fact]
+        [Trait("Third-Party", "Nzbget")]
+        [Trait("Method", "GetImportItemAsync")]
+        public async Task Nzbget_GetImportItemAsync_QueueItemHistoryCompatibility_PreservesMethodParametersAndResponse()
+        {
+            var apiMock = _provider.GetRequiredService<NzbgetApiMock>();
+            apiMock.ResetXmlRpcCapture();
+            var historyResponse = NzbgetApiMock.CreateHistoryResponse(
+                """
+                <value><struct>
+                  <member><name>NZBID</name><value><string>501</string></value></member>
+                  <member><name>FinalDir</name><value><string>{{FINAL_PATH}}</string></value></member>
+                  <member><name>DestDir</name><value><string>{{IGNORED_PATH}}</string></value></member>
+                </struct></value>
+                <value><struct>
+                  <member><name>NZBID</name><value><string>502</string></value></member>
+                  <member><name>FinalDir</name><value><string></string></value></member>
+                  <member><name>DestDir</name><value><string>{{DEST_PATH}}</string></value></member>
+                </struct></value>
+                <value><struct>
+                  <member><name>NZBID</name><value><string>case-sensitive</string></value></member>
+                  <member><name>FinalDir</name><value><string>{{CASE_PATH}}</string></value></member>
+                </struct></value>
+                """
+                .Replace("{{FINAL_PATH}}", FileUtils.GetAbsolutePath("nzbget", "final"))
+                .Replace("{{IGNORED_PATH}}", FileUtils.GetAbsolutePath("nzbget", "ignored"))
+                .Replace("{{DEST_PATH}}", FileUtils.GetAbsolutePath("nzbget", "destination"))
+                .Replace("{{CASE_PATH}}", FileUtils.GetAbsolutePath("nzbget", "case")));
+            apiMock.QueueXmlRpcResponse("history", historyResponse);
+            apiMock.QueueXmlRpcResponse("history", historyResponse);
+            apiMock.QueueXmlRpcResponse("history", historyResponse);
+            var adapter = MockUtils.CreateNzbgetAdapter(_provider);
+            var download = new DownloadBuilder().Build();
+
+            var finalDirResult = await adapter.GetImportItemAsync(
+                _nzbgetClient,
+                download,
+                new QueueItem { Id = "501", ContentPath = string.Empty });
+            var destDirResult = await adapter.GetImportItemAsync(
+                _nzbgetClient,
+                download,
+                new QueueItem { Id = "502", ContentPath = string.Empty });
+            var unmatchedOriginal = new QueueItem
+            {
+                Id = "CASE-SENSITIVE",
+                ContentPath = string.Empty,
+                Title = "Unmatched"
+            };
+            var unmatched = await adapter.GetImportItemAsync(
+                _nzbgetClient,
+                download,
+                unmatchedOriginal);
+
+            Assert.Equal(FileUtils.GetAbsolutePath("nzbget", "final"), finalDirResult.ContentPath);
+            Assert.Equal(FileUtils.GetAbsolutePath("nzbget", "destination"), destDirResult.ContentPath);
+            Assert.NotSame(unmatchedOriginal, unmatched);
+            Assert.Equal("Unmatched", unmatched.Title);
+            Assert.Equal(string.Empty, unmatched.ContentPath);
+            Assert.All(apiMock.XmlRpcCalls, AssertHistoryFalseCall);
+            Assert.Equal(3, apiMock.XmlRpcCalls.Count);
+        }
+
+        private static void AssertHistoryFalseCall(NzbgetApiMock.XmlRpcCall call)
+        {
+            Assert.Equal("history", call.MethodName);
+            var parameter = Assert.Single(call.Parameters);
+            Assert.Equal("0", parameter.Element("boolean")?.Value);
+        }
+
         [Theory]
         [Trait("Third-Party", "Nzbget")]
         [Trait("Method", "GetImportItemAsync")]

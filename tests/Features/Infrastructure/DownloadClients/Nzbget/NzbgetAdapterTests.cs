@@ -18,6 +18,7 @@
 using System.Net;
 
 using Listenarr.Tests.Common;
+using Listenarr.Tests.Mocks.Api;
 using Microsoft.Extensions.Logging.Abstractions;
 using System.Xml.Linq;
 
@@ -35,6 +36,145 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Nzbget
             }
 
             public HttpClient CreateClient(string name) => _client;
+        }
+
+        [Fact]
+        public async Task TestConnectionAsync_VersionXmlRpcCompatibility_PreservesMethodParametersAndResponse()
+        {
+            using var apiMock = new NzbgetApiMock();
+            apiMock.QueueXmlRpcResponse("version", XmlRpcValueResponse("<string>25.4</string>"));
+            using var http = new HttpClient(apiMock);
+            var adapter = CreateAdapter(http);
+
+            var result = await adapter.TestConnectionAsync(CreateClient());
+
+            Assert.True(result.Success);
+            Assert.Equal("NZBGet: connected", result.Message);
+            var call = Assert.Single(apiMock.XmlRpcCalls);
+            Assert.Equal("version", call.MethodName);
+            Assert.Empty(call.Parameters);
+        }
+
+        [Fact]
+        public async Task AddAsync_AppendXmlRpcCompatibility_PreservesMethodParametersAndResponse()
+        {
+            using var apiMock = new NzbgetApiMock();
+            apiMock.QueueXmlRpcResponse("append", XmlRpcValueResponse("<i4>321</i4>"));
+            using var http = new HttpClient(apiMock);
+            var adapter = CreateAdapter(http);
+            var client = CreateClient();
+            client.Settings = new Dictionary<string, object>
+            {
+                ["category"] = "audiobooks",
+                ["recentPriority"] = "high"
+            };
+            var submission = new PreparedUsenetSubmission(
+                "Compatibility Book",
+                "Author",
+                "Album",
+                "Indexer",
+                "Lossless",
+                "English",
+                3,
+                "https://indexer.test/book.nzb",
+                [1, 2, 3],
+                "compatibility-book.nzb");
+
+            var result = await adapter.AddAsync(client, submission);
+
+            Assert.Equal("321", result.ExternalId);
+            Assert.False(result.WasDuplicate);
+            var call = Assert.Single(apiMock.XmlRpcCalls);
+            Assert.Equal("append", call.MethodName);
+            Assert.Equal(10, call.Parameters.Count);
+            Assert.Equal("compatibility-book.nzb", call.Parameters[0].Element("string")?.Value);
+            Assert.Equal("AQID", call.Parameters[1].Element("string")?.Value);
+            Assert.Equal("audiobooks", call.Parameters[2].Element("string")?.Value);
+            Assert.Equal("50", call.Parameters[3].Element("i4")?.Value);
+            Assert.Equal("0", call.Parameters[4].Element("boolean")?.Value);
+            Assert.Equal("0", call.Parameters[5].Element("boolean")?.Value);
+            Assert.Equal(string.Empty, call.Parameters[6].Element("string")?.Value);
+            Assert.Equal("0", call.Parameters[7].Element("i4")?.Value);
+            Assert.Equal("SCORE", call.Parameters[8].Element("string")?.Value);
+
+            var postProcessingParameter = Assert.Single(
+                call.Parameters[9].Element("array")!.Element("data")!.Elements("value"));
+            var members = ReadStructMembers(postProcessingParameter.Element("struct")!);
+            Assert.Equal("drone", members["Name"]);
+            Assert.Matches("^[0-9a-f]{32}$", members["Value"]);
+            Assert.Equal(members["Value"], result.ContentId);
+        }
+
+        [Fact]
+        public async Task RemoveAsync_HistoryDeleteXmlRpcCompatibility_PreservesMethodParametersAndResponse()
+        {
+            using var apiMock = new NzbgetApiMock();
+            apiMock.QueueXmlRpcResponse("editqueue", XmlRpcValueResponse("<boolean>1</boolean>"));
+            using var http = new HttpClient(apiMock);
+            var adapter = CreateAdapter(http);
+
+            var result = await adapter.RemoveAsync(CreateClient(), "123", deleteFiles: true);
+
+            Assert.True(result);
+            var call = Assert.Single(apiMock.XmlRpcCalls);
+            AssertEditQueueCall(call, "HistoryDelete", 123);
+        }
+
+        [Theory]
+        [InlineData(false, "GroupDelete")]
+        [InlineData(true, "GroupDeleteFinal")]
+        public async Task RemoveAsync_GroupDeleteXmlRpcCompatibility_PreservesMethodParametersAndResponse(
+            bool deleteFiles,
+            string expectedCommand)
+        {
+            using var apiMock = new NzbgetApiMock();
+            apiMock.QueueXmlRpcResponse("editqueue", XmlRpcValueResponse("<boolean>0</boolean>"));
+            apiMock.QueueXmlRpcResponse("editqueue", XmlRpcValueResponse("<boolean>1</boolean>"));
+            using var http = new HttpClient(apiMock);
+            var adapter = CreateAdapter(http);
+
+            var result = await adapter.RemoveAsync(CreateClient(), "123", deleteFiles);
+
+            Assert.True(result);
+            Assert.Collection(
+                apiMock.XmlRpcCalls,
+                call => AssertEditQueueCall(call, "HistoryDelete", 123),
+                call => AssertEditQueueCall(call, expectedCommand, 123));
+        }
+
+        [Fact]
+        public async Task GetRecentHistoryAsync_HistoryFalseXmlRpcCompatibility_PreservesMethodParametersAndResponse()
+        {
+            using var apiMock = new NzbgetApiMock();
+            apiMock.QueueXmlRpcResponse(
+                "history",
+                XmlRpcValueResponse(
+                    """
+                    <array><data>
+                      <value><struct>
+                        <member><name>ID</name><value><i4>101</i4></value></member>
+                        <member><name>NZBName</name><value><string>First Book</string></value></member>
+                      </struct></value>
+                      <value><struct>
+                        <member><name>ID</name><value><i4>202</i4></value></member>
+                        <member><name>NZBName</name><value><string>Second Book</string></value></member>
+                      </struct></value>
+                      <value><struct>
+                        <member><name>ID</name><value><i4>303</i4></value></member>
+                        <member><name>NZBName</name><value><string>Beyond Limit</string></value></member>
+                      </struct></value>
+                    </data></array>
+                    """));
+            using var http = new HttpClient(apiMock);
+            var adapter = CreateAdapter(http);
+
+            var result = await adapter.GetRecentHistoryAsync(CreateClient(), limit: 2);
+
+            Assert.Equal([("101", "First Book"), ("202", "Second Book")], result);
+            var call = Assert.Single(apiMock.XmlRpcCalls);
+            Assert.Equal("history", call.MethodName);
+            var parameter = Assert.Single(call.Parameters);
+            Assert.Equal("0", parameter.Element("boolean")?.Value);
         }
 
         [Fact]
@@ -217,6 +357,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Nzbget
             var structElement = XElement.Parse(
                 $$"""
                 <struct>
+                  <member><name>NZBID</name><value><i4>999</i4></value></member>
                   <member><name>GroupID</name><value><i4>123</i4></value></member>
                   <member><name>NZBName</name><value><string>Book</string></value></member>
                   <member><name>Status</name><value><string>{{status}}</string></value></member>
@@ -232,6 +373,61 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Nzbget
             Assert.Equal(expectedItemStatus, clientItem.Status);
             Assert.Equal(expectedQueueStatus, queueItem.Status);
             Assert.Equal(0, clientItem.RemainingSize);
+
+            var lastIdOnly = XElement.Parse(
+                "<struct><member><name>NZBID</name><value><i4>999</i4></value></member><member><name>LastID</name><value><i4>456</i4></value></member></struct>");
+            var generatedId = NzbgetResponseMapper.MapGroupToDownloadClientItem(
+                client,
+                XElement.Parse("<struct><member><name>NZBID</name><value><i4>999</i4></value></member></struct>"))
+                .DownloadId;
+            Assert.Equal("123", clientItem.DownloadId);
+            Assert.Equal("456", NzbgetResponseMapper.MapGroup(client, lastIdOnly).Id);
+            Assert.Matches("^[0-9A-F]{32}$", generatedId);
+        }
+
+        private static NzbgetAdapter CreateAdapter(HttpClient http)
+        {
+            return new NzbgetAdapter(
+                new TestHttpClientFactory(http),
+                Mock.Of<INzbUrlResolver>(),
+                NullLogger<NzbgetAdapter>.Instance);
+        }
+
+        private static DownloadClientConfiguration CreateClient()
+        {
+            return new DownloadClientConfiguration
+            {
+                Host = "localhost",
+                Port = 6789
+            };
+        }
+
+        private static string XmlRpcValueResponse(string serializedValue)
+        {
+            return $"<?xml version=\"1.0\"?><methodResponse><params><param><value>{serializedValue}</value></param></params></methodResponse>";
+        }
+
+        private static IReadOnlyDictionary<string, string> ReadStructMembers(XElement structElement)
+        {
+            return structElement.Elements("member").ToDictionary(
+                member => member.Element("name")!.Value,
+                member => member.Element("value")!.Elements().Single().Value,
+                StringComparer.Ordinal);
+        }
+
+        private static void AssertEditQueueCall(
+            NzbgetApiMock.XmlRpcCall call,
+            string expectedCommand,
+            int expectedId)
+        {
+            Assert.Equal("editqueue", call.MethodName);
+            Assert.Equal(4, call.Parameters.Count);
+            Assert.Equal(expectedCommand, call.Parameters[0].Element("string")?.Value);
+            Assert.Equal("0", call.Parameters[1].Element("i4")?.Value);
+            Assert.Equal(string.Empty, call.Parameters[2].Element("string")?.Value);
+            var id = Assert.Single(
+                call.Parameters[3].Element("array")!.Element("data")!.Elements("value"));
+            Assert.Equal(expectedId.ToString(), id.Element("i4")?.Value);
         }
     }
 }
