@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Net;
+using System.Text;
 
 using Listenarr.Tests.Common;
 using Listenarr.Tests.Mocks.Api;
@@ -36,6 +37,122 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Nzbget
             }
 
             public HttpClient CreateClient(string name) => _client;
+        }
+
+        private sealed class CancellationAwareReadStream : Stream
+        {
+            private readonly MemoryStream _innerStream = new(Encoding.UTF8.GetBytes(
+                "<?xml version=\"1.0\"?><methodResponse><params><param><value><string>25.4</string></value></param></params></methodResponse>"));
+
+            public override bool CanRead => true;
+            public override bool CanSeek => false;
+            public override bool CanWrite => false;
+            public override long Length => _innerStream.Length;
+
+            public override long Position
+            {
+                get => _innerStream.Position;
+                set => throw new NotSupportedException();
+            }
+
+            public override int Read(byte[] buffer, int offset, int count)
+            {
+                return _innerStream.Read(buffer, offset, count);
+            }
+
+            public override Task<int> ReadAsync(
+                byte[] buffer,
+                int offset,
+                int count,
+                CancellationToken cancellationToken)
+            {
+                return cancellationToken.IsCancellationRequested
+                    ? Task.FromCanceled<int>(cancellationToken)
+                    : _innerStream.ReadAsync(buffer, offset, count, cancellationToken);
+            }
+
+            public override ValueTask<int> ReadAsync(
+                Memory<byte> buffer,
+                CancellationToken cancellationToken = default)
+            {
+                return cancellationToken.IsCancellationRequested
+                    ? ValueTask.FromCanceled<int>(cancellationToken)
+                    : _innerStream.ReadAsync(buffer, cancellationToken);
+            }
+
+            public override void Flush()
+            {
+            }
+
+            public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+            public override void SetLength(long value) => throw new NotSupportedException();
+
+            public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+            protected override void Dispose(bool disposing)
+            {
+                if (disposing)
+                {
+                    _innerStream.Dispose();
+                }
+
+                base.Dispose(disposing);
+            }
+        }
+
+        [Fact]
+        public async Task CallAsync_CancellationDuringSend_PropagatesOperationCanceledException()
+        {
+            using var cancellationTokenSource = new CancellationTokenSource();
+            var cancellationToken = cancellationTokenSource.Token;
+            using var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(XmlRpcValueResponse("<string>25.4</string>"))
+            };
+            var handler = new DelegatingHandlerMock((_, observedToken) =>
+            {
+                cancellationTokenSource.Cancel();
+                return observedToken.IsCancellationRequested
+                    ? Task.FromCanceled<HttpResponseMessage>(observedToken)
+                    : Task.FromResult(response);
+            });
+            using var http = new HttpClient(handler);
+            var xmlRpcClient = new NzbgetXmlRpcClient(new TestHttpClientFactory(http), "nzbget");
+            var request = new NzbgetXmlRpcRequest
+            {
+                Client = CreateClient(),
+                MethodName = "version"
+            };
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                () => xmlRpcClient.CallAsync(request, cancellationToken));
+        }
+
+        [Fact]
+        public async Task CallAsync_CancellationDuringResponseRead_PropagatesOperationCanceledException()
+        {
+            using var cancellationTokenSource = new CancellationTokenSource();
+            var cancellationToken = cancellationTokenSource.Token;
+            using var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StreamContent(new CancellationAwareReadStream())
+            };
+            var handler = new DelegatingHandlerMock((_, _) =>
+            {
+                cancellationTokenSource.Cancel();
+                return Task.FromResult(response);
+            });
+            using var http = new HttpClient(handler);
+            var xmlRpcClient = new NzbgetXmlRpcClient(new TestHttpClientFactory(http), "nzbget");
+            var request = new NzbgetXmlRpcRequest
+            {
+                Client = CreateClient(),
+                MethodName = "version"
+            };
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                () => xmlRpcClient.CallAsync(request, cancellationToken));
         }
 
         [Fact]

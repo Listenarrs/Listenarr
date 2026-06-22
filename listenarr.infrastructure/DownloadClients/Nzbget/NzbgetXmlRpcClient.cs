@@ -15,6 +15,13 @@ using System.Xml.Linq;
 
 namespace Listenarr.Infrastructure.DownloadClients.Nzbget
 {
+    internal sealed record NzbgetXmlRpcRequest
+    {
+        public required DownloadClientConfiguration Client { get; init; }
+        public required string MethodName { get; init; }
+        public IReadOnlyList<object> Parameters { get; init; } = [];
+    }
+
     internal sealed class NzbgetXmlRpcClient
     {
         private readonly IHttpClientFactory _httpClientFactory;
@@ -26,30 +33,45 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
             _clientType = clientType;
         }
 
-        public async Task<XElement> CallAsync(DownloadClientConfiguration client, string methodName, params object[] parameters)
+        public Task<XElement> CallAsync(DownloadClientConfiguration client, string methodName, params object[] parameters)
         {
+            return CallAsync(
+                new NzbgetXmlRpcRequest
+                {
+                    Client = client,
+                    MethodName = methodName,
+                    Parameters = parameters
+                },
+                CancellationToken.None);
+        }
+
+        internal async Task<XElement> CallAsync(
+            NzbgetXmlRpcRequest request,
+            CancellationToken cancellationToken)
+        {
+            var client = request.Client;
             var baseUrl = DownloadClientUriBuilder.BuildUri(client, "/xmlrpc").ToString();
             var httpClient = _httpClientFactory.CreateClient(_clientType);
 
             var methodCall = new XElement("methodCall",
-                new XElement("methodName", methodName),
+                new XElement("methodName", request.MethodName),
                 new XElement("params",
-                    parameters.Select(p => new XElement("param", new XElement("value", SerializeValue(p))))
+                    request.Parameters.Select(p => new XElement("param", new XElement("value", SerializeValue(p))))
                 )
             );
 
             var xmlContent = $"<?xml version=\"1.0\"?>\n{methodCall}";
             var content = new StringContent(xmlContent, Encoding.UTF8, "text/xml");
 
-            using var request = new HttpRequestMessage(HttpMethod.Post, baseUrl) { Content = content };
+            using var httpRequest = new HttpRequestMessage(HttpMethod.Post, baseUrl) { Content = content };
             var authHeader = BuildAuthHeader(client);
             if (authHeader != null)
             {
-                request.Headers.Authorization = authHeader;
+                httpRequest.Headers.Authorization = authHeader;
             }
 
-            using var response = await httpClient.SendAsync(request);
-            var responseBody = await response.Content.ReadAsStringAsync();
+            using var response = await httpClient.SendAsync(httpRequest, cancellationToken);
+            var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
 
             if (!response.IsSuccessStatusCode)
             {
