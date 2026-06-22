@@ -1,6 +1,7 @@
 using Listenarr.Application.Search.Filters;
 using Listenarr.Application.Search.Strategies;
 using Listenarr.Infrastructure.DependencyInjection;
+using Listenarr.Infrastructure.DependencyInjection.Downloads;
 using Listenarr.Infrastructure.HostedServices;
 using Listenarr.Tests.Mocks;
 using Listenarr.Tests.Mocks.Api;
@@ -226,7 +227,10 @@ namespace Listenarr.Tests.Builders
             services.AddSingleton<SabnzbdApiMock>();
             services.AddSingleton<NzbgetApiMock>();
             services.AddSingleton<QbittorrentApiMock>();
-            services.AddSingleton<MyAnonamouseApiMock>();
+            services.AddSingleton(_ => new MyAnonamouseApiMock
+            {
+                FailOnUnexpectedCalls = true
+            });
 
             services.AddHttpClient<AudibleService>()
                 .ConfigurePrimaryHttpMessageHandler<AudibleApiMock>();
@@ -244,6 +248,9 @@ namespace Listenarr.Tests.Builders
 
             services.AddHttpClient("qbittorrent")
                 .ConfigurePrimaryHttpMessageHandler<QbittorrentApiMock>();
+
+            services.AddHttpClient(DownloadRegistrationExtensions.MyAnonamouseTorrentClientName)
+                .ConfigurePrimaryHttpMessageHandler<MyAnonamouseApiMock>();
 
             services.AddHttpClient<IAudnexusService, AudnexusService>()
                 .ConfigurePrimaryHttpMessageHandler<AudnexusServiceApiMock>();

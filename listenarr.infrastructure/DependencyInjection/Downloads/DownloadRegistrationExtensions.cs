@@ -20,6 +20,8 @@ namespace Listenarr.Infrastructure.DependencyInjection.Downloads;
 
 internal static class DownloadRegistrationExtensions
 {
+    internal const string MyAnonamouseTorrentClientName = "MyAnonamouseTorrent";
+
     public static IServiceCollection AddDownloadHttpClients(this IServiceCollection services)
     {
         services.AddHttpClient("DirectDownload")
@@ -36,6 +38,13 @@ internal static class DownloadRegistrationExtensions
                 .HandleTransientHttpError()
                 .Or<TaskCanceledException>()
                 .WaitAndRetryAsync(2, attempt => TimeSpan.FromSeconds(Math.Pow(2, attempt))));
+
+        services.AddHttpClient(MyAnonamouseTorrentClientName)
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+            {
+                AllowAutoRedirect = false
+            });
+
         return services;
     }
 

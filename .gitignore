@@ -285,3 +285,4 @@ listenarr.api/config/appsettings/appsettings.json
 .codex-workflows-manifest.json
 /docs/plans
 /docs/design
+/docs/adr
