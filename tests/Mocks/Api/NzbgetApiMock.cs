@@ -1,4 +1,7 @@
 using Listenarr.Tests.Common;
+using System.Net;
+using System.Text;
+using System.Text.Json;
 using System.Xml.Linq;
 
 namespace Listenarr.Tests.Mocks.Api
@@ -6,10 +9,17 @@ namespace Listenarr.Tests.Mocks.Api
     public class NzbgetApiMock : BaseApiMock
     {
         public sealed record XmlRpcCall(string MethodName, IReadOnlyList<XElement> Parameters);
+        public sealed record JsonRpcCall(string MethodName, string Body);
+
+        private sealed record QueuedResponse(
+            string Body,
+            HttpStatusCode StatusCode,
+            TimeSpan Delay);
 
         private readonly object _xmlRpcLock = new();
         private readonly List<XmlRpcCall> _xmlRpcCalls = [];
-        private readonly Dictionary<string, Queue<string>> _responses =
+        private readonly List<JsonRpcCall> _jsonRpcCalls = [];
+        private readonly Dictionary<string, Queue<QueuedResponse>> _responses =
             new(StringComparer.Ordinal);
 
         public static readonly string SINGLE_FILE_NZBGET = "101";
@@ -26,19 +36,52 @@ namespace Listenarr.Tests.Mocks.Api
             }
         }
 
+        public IReadOnlyList<JsonRpcCall> JsonRpcCalls
+        {
+            get
+            {
+                lock (_xmlRpcLock)
+                {
+                    return _jsonRpcCalls.ToList().AsReadOnly();
+                }
+            }
+        }
+
         public NzbgetApiMock()
         {
             AddRoute("xmlrpc", ProcessXmlRpcRequest, HttpMethod.Post);
+            AddRoute("jsonrpc", ProcessJsonRpcRequest, HttpMethod.Post);
         }
 
         public void QueueXmlRpcResponse(string methodName, string response)
         {
+            QueueXmlRpcResponse(methodName, response, HttpStatusCode.OK, TimeSpan.Zero);
+        }
+
+        public void QueueXmlRpcResponse(
+            string methodName,
+            string response,
+            HttpStatusCode statusCode,
+            TimeSpan delay)
+        {
+            QueueResponse($"xml:{methodName}", new QueuedResponse(response, statusCode, delay));
+        }
+
+        public void QueueJsonRpcResponse(string methodName, string response)
+        {
+            QueueResponse(
+                $"json:{methodName}",
+                new QueuedResponse(response, HttpStatusCode.OK, TimeSpan.Zero));
+        }
+
+        private void QueueResponse(string key, QueuedResponse response)
+        {
             lock (_xmlRpcLock)
             {
-                if (!_responses.TryGetValue(methodName, out var responses))
+                if (!_responses.TryGetValue(key, out var responses))
                 {
-                    responses = new Queue<string>();
-                    _responses.Add(methodName, responses);
+                    responses = new Queue<QueuedResponse>();
+                    _responses.Add(key, responses);
                 }
 
                 responses.Enqueue(response);
@@ -50,6 +93,7 @@ namespace Listenarr.Tests.Mocks.Api
             lock (_xmlRpcLock)
             {
                 _xmlRpcCalls.Clear();
+                _jsonRpcCalls.Clear();
                 _responses.Clear();
             }
         }
@@ -89,11 +133,11 @@ namespace Listenarr.Tests.Mocks.Api
                 .ToArray()
                 ?? [];
 
-            string? response;
+            QueuedResponse? response;
             lock (_xmlRpcLock)
             {
                 _xmlRpcCalls.Add(new XmlRpcCall(methodName, Array.AsReadOnly(parameters)));
-                response = _responses.TryGetValue(methodName, out var responses) &&
+                response = _responses.TryGetValue($"xml:{methodName}", out var responses) &&
                     responses.TryDequeue(out var queuedResponse)
                         ? queuedResponse
                         : null;
@@ -101,12 +145,56 @@ namespace Listenarr.Tests.Mocks.Api
 
             if (response == null && string.Equals(methodName, "history", StringComparison.Ordinal))
             {
-                response = DefaultHistoryResponse();
+                response = new QueuedResponse(
+                    DefaultHistoryResponse(),
+                    HttpStatusCode.OK,
+                    TimeSpan.Zero);
             }
 
-            return response == null
-                ? new HttpResponseMessage(System.Net.HttpStatusCode.NotFound)
-                : MockUtils.GetCannedResponse(response, "text/xml");
+            return await CreateResponseAsync(response, "text/xml", ct);
+        }
+
+        private async Task<HttpResponseMessage> ProcessJsonRpcRequest(
+            HttpRequestMessage request,
+            CancellationToken ct)
+        {
+            var body = await request.Content!.ReadAsStringAsync(ct);
+            using var document = JsonDocument.Parse(body);
+            var methodName = document.RootElement.GetProperty("method").GetString()
+                ?? throw new InvalidOperationException("NZBGet JSON-RPC request has no method name.");
+
+            QueuedResponse? response;
+            lock (_xmlRpcLock)
+            {
+                _jsonRpcCalls.Add(new JsonRpcCall(methodName, body));
+                response = _responses.TryGetValue($"json:{methodName}", out var responses) &&
+                    responses.TryDequeue(out var queuedResponse)
+                        ? queuedResponse
+                        : null;
+            }
+
+            return await CreateResponseAsync(response, "application/json", ct);
+        }
+
+        private static async Task<HttpResponseMessage> CreateResponseAsync(
+            QueuedResponse? response,
+            string mediaType,
+            CancellationToken cancellationToken)
+        {
+            if (response == null)
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+
+            if (response.Delay > TimeSpan.Zero)
+            {
+                await Task.Delay(response.Delay, cancellationToken);
+            }
+
+            return new HttpResponseMessage(response.StatusCode)
+            {
+                Content = new StringContent(response.Body, Encoding.UTF8, mediaType)
+            };
         }
 
         private static string DefaultHistoryResponse()

@@ -37,12 +37,32 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
             IHttpClientFactory httpClientFactory,
             INzbUrlResolver nzbUrlResolver,
             ILogger<NzbgetAdapter> logger)
+            : this(
+                httpClientFactory,
+                nzbUrlResolver,
+                logger,
+                TimeProvider.System)
+        {
+        }
+
+        internal NzbgetAdapter(
+            IHttpClientFactory httpClientFactory,
+            INzbUrlResolver nzbUrlResolver,
+            ILogger<NzbgetAdapter> logger,
+            TimeProvider timeProvider)
         {
             ArgumentNullException.ThrowIfNull(httpClientFactory);
             ArgumentNullException.ThrowIfNull(nzbUrlResolver);
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            ArgumentNullException.ThrowIfNull(timeProvider);
             _xmlRpcClient = new NzbgetXmlRpcClient(httpClientFactory, ClientType);
-            _downloadPollingWorkflow = new NzbgetDownloadPollingWorkflow(httpClientFactory, _logger, ClientType);
+            var historyReader = new NzbgetHistoryReader(_xmlRpcClient);
+            _downloadPollingWorkflow = new NzbgetDownloadPollingWorkflow(
+                httpClientFactory,
+                historyReader,
+                _logger,
+                timeProvider,
+                ClientType);
             _removalWorkflow = new NzbgetRemovalWorkflow(_xmlRpcClient, _logger);
             _addWorkflow = new NzbgetAddWorkflow(_xmlRpcClient, _logger);
             _importItemResolver = new NzbgetImportItemResolver(_xmlRpcClient, _logger);
