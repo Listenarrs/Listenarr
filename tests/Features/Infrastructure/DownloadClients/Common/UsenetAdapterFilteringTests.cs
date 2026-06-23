@@ -17,6 +17,7 @@
  */
 using System.Net;
 using System.Text;
+using System.Xml.Linq;
 
 using Listenarr.Tests.Common;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -38,6 +39,29 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Common
             public HttpClient CreateClient(string name)
             {
                 return _httpClient;
+            }
+        }
+
+        private sealed class CapturingLogger<T> : ILogger<T>
+        {
+            public List<LogLevel> Levels { get; } = [];
+
+            public IDisposable? BeginScope<TState>(TState state)
+                where TState : notnull
+            {
+                return null;
+            }
+
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(
+                LogLevel logLevel,
+                EventId eventId,
+                TState state,
+                Exception? exception,
+                Func<TState, Exception?, string> formatter)
+            {
+                Levels.Add(logLevel);
             }
         }
 
@@ -144,6 +168,13 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Common
         [Trait("Scenario", "NzbgetQueueAndItemsRespectConfiguredCategory")]
         public async Task Nzbget_GetQueueAndItems_FilterByConfiguredCategory()
         {
+            // AC: AC-NZB-011/018 require configured-category parity and exact queue listgroups/history sequencing.
+            // Behavior: Existing queue/items category fixture -> queue history integration -> listgroups/history/listgroups with no warning.
+            // @category: integration
+            // @lane: integration
+            // @dependency: XML-RPC method capture and existing configured-category filter
+            // @complexity: medium
+            // Value Score: 30
             var xml = BuildNzbGetListGroupsResponse(
                 ("101", "Book One", "audiobooks", "DOWNLOADING"),
                 ("202", "Movie One", "movies", "DOWNLOADING"));
@@ -151,22 +182,38 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Common
             {
                 Content = new StringContent(xml, Encoding.UTF8, "text/xml")
             };
+            using var historyResponse = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    BuildNzbGetListGroupsResponse(),
+                    Encoding.UTF8,
+                    "text/xml")
+            };
             using var itemsResponse = new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(xml, Encoding.UTF8, "text/xml")
             };
             using var notFoundResponse = new HttpResponseMessage(HttpStatusCode.NotFound);
-            var responses = new Queue<HttpResponseMessage>(new[] { queueResponse, itemsResponse });
-            var handler = new DelegatingHandlerMock((req, ct) =>
+            var responses = new Queue<HttpResponseMessage>(
+                new[] { queueResponse, historyResponse, itemsResponse });
+            var methodNames = new List<string>();
+            var handler = new DelegatingHandlerMock(async (req, ct) =>
             {
-                return Task.FromResult(responses.Count > 0 ? responses.Dequeue() : notFoundResponse);
+                var body = await req.Content!.ReadAsStringAsync(ct);
+                var methodName = XDocument.Parse(body)
+                    .Root?
+                    .Element("methodName")?
+                    .Value;
+                methodNames.Add(methodName ?? string.Empty);
+                return responses.Count > 0 ? responses.Dequeue() : notFoundResponse;
             });
 
             using var httpClient = new HttpClient(handler);
+            var logger = new CapturingLogger<NzbgetAdapter>();
             var adapter = new NzbgetAdapter(
                 new TestHttpClientFactory(httpClient),
                 Mock.Of<INzbUrlResolver>(),
-                NullLogger<NzbgetAdapter>.Instance);
+                logger);
 
             var client = new DownloadClientConfiguration
             {
@@ -188,6 +235,10 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Common
 
             Assert.Single(items);
             Assert.Equal("Book One", items[0].Title);
+            Assert.Equal(["listgroups", "history", "listgroups"], methodNames);
+            Assert.DoesNotContain(
+                logger.Levels,
+                level => level >= LogLevel.Warning);
         }
 
         private static string BuildNzbGetListGroupsResponse(params (string Id, string Name, string Category, string Status)[] groups)

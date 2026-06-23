@@ -169,6 +169,50 @@ internal static class NzbgetResponseMapper
         };
     }
 
+    public static QueueItem MapHistoryToQueueItem(
+        DownloadClientConfiguration client,
+        NzbgetHistoryEntry entry)
+    {
+        var isCompleted = entry.Outcome == NzbgetHistoryOutcome.Completed;
+        var downloadedBytes = isCompleted
+            ? entry.TotalSizeBytes
+            : entry.DownloadedSizeBytes;
+        var progress = isCompleted
+            ? 100
+            : entry.TotalSizeBytes > 0
+                ? Math.Clamp(
+                    downloadedBytes * 100d / entry.TotalSizeBytes,
+                    0,
+                    100)
+                : 0;
+        var completedPath = isCompleted
+            ? entry.CompletedPath
+            : string.Empty;
+
+        return new QueueItem
+        {
+            Id = entry.CanonicalNzbId,
+            Title = entry.Title,
+            Quality = entry.Category,
+            Status = isCompleted ? "completed" : "failed",
+            Progress = progress,
+            Size = entry.TotalSizeBytes,
+            Downloaded = downloadedBytes,
+            DownloadSpeed = 0,
+            Eta = null,
+            DownloadClient = client.Name ?? client.Id ?? "NZBGet",
+            DownloadClientId = client.Id ?? string.Empty,
+            DownloadClientType = "nzbget",
+            AddedAt = DateTime.UtcNow,
+            ErrorMessage = isCompleted ? null : entry.RawStatus,
+            CanPause = false,
+            CanRemove = true,
+            RemotePath = completedPath,
+            LocalPath = completedPath,
+            ContentPath = completedPath
+        };
+    }
+
     private static IReadOnlyDictionary<string, string?> ReadMembers(XElement structElement)
     {
         var members = new Dictionary<string, string?>(StringComparer.Ordinal);

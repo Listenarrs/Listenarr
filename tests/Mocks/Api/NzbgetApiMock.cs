@@ -14,7 +14,9 @@ namespace Listenarr.Tests.Mocks.Api
         private sealed record QueuedResponse(
             string Body,
             HttpStatusCode StatusCode,
-            TimeSpan Delay);
+            TimeSpan Delay,
+            TaskCompletionSource? RequestStarted = null,
+            bool WaitForCancellation = false);
 
         private readonly object _xmlRpcLock = new();
         private readonly List<XmlRpcCall> _xmlRpcCalls = [];
@@ -67,6 +69,23 @@ namespace Listenarr.Tests.Mocks.Api
             QueueResponse($"xml:{methodName}", new QueuedResponse(response, statusCode, delay));
         }
 
+        public Task QueueXmlRpcCancellationResponse(
+            string methodName,
+            string response)
+        {
+            var requestStarted = new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            QueueResponse(
+                $"xml:{methodName}",
+                new QueuedResponse(
+                    response,
+                    HttpStatusCode.OK,
+                    TimeSpan.Zero,
+                    requestStarted,
+                    WaitForCancellation: true));
+            return requestStarted.Task;
+        }
+
         public void QueueJsonRpcResponse(string methodName, string response)
         {
             QueueResponse(
@@ -99,6 +118,16 @@ namespace Listenarr.Tests.Mocks.Api
         }
 
         public static string CreateHistoryResponse(string serializedEntries)
+        {
+            return CreateArrayResponse(serializedEntries);
+        }
+
+        public static string CreateListGroupsResponse(string serializedEntries)
+        {
+            return CreateArrayResponse(serializedEntries);
+        }
+
+        private static string CreateArrayResponse(string serializedEntries)
         {
             return $$"""
             <?xml version="1.0"?>
@@ -151,6 +180,7 @@ namespace Listenarr.Tests.Mocks.Api
                     TimeSpan.Zero);
             }
 
+            response?.RequestStarted?.TrySetResult();
             return await CreateResponseAsync(response, "text/xml", ct);
         }
 
@@ -189,6 +219,11 @@ namespace Listenarr.Tests.Mocks.Api
             if (response.Delay > TimeSpan.Zero)
             {
                 await Task.Delay(response.Delay, cancellationToken);
+            }
+
+            if (response.WaitForCancellation)
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             }
 
             return new HttpResponseMessage(response.StatusCode)
