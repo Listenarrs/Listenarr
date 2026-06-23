@@ -156,6 +156,186 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Nzbget
         }
 
         [Fact]
+        public async Task HistoryReader_VisibleHistory_ParsesAllEntriesInServerOrderAndUsesExactFalseParameter()
+        {
+            using var apiMock = new NzbgetApiMock();
+            var entries = Enumerable.Range(0, 101)
+                .Select(index => HistoryEntryValue(
+                    nzbId: (index + 1).ToString(),
+                    title: $"Ignored Book {index + 1}",
+                    status: "WARNING/REPAIRABLE"))
+                .Append(HistoryEntryValue(
+                    nzbId: "  777  ",
+                    title: "Qualifying Book",
+                    status: "  success/unpack  ",
+                    category: "audiobooks",
+                    finalDir: "/final/book",
+                    destDir: "/destination/book",
+                    fileSizeMb: "12.5",
+                    downloadedSizeMb: "99",
+                    historyTime: "1700000000"))
+                .ToArray();
+            apiMock.QueueXmlRpcResponse(
+                "history",
+                NzbgetApiMock.CreateHistoryResponse(string.Concat(entries)));
+            using var http = new HttpClient(apiMock);
+            var reader = CreateHistoryReader(http);
+
+            var result = await reader.ReadAsync(CreateClient(), CancellationToken.None);
+
+            Assert.Equal(102, result.Count);
+            Assert.Equal("1", result[0].CanonicalNzbId);
+            Assert.Equal("777", result[101].CanonicalNzbId);
+            Assert.Equal("Qualifying Book", result[101].Title);
+            Assert.Equal("audiobooks", result[101].Category);
+            Assert.Equal("success/unpack", result[101].RawStatus);
+            Assert.Equal(NzbgetHistoryOutcome.Completed, result[101].Outcome);
+            Assert.Equal("/final/book", result[101].CompletedPath);
+            Assert.Equal(13_107_200, result[101].TotalSizeBytes);
+            Assert.Equal(13_107_200, result[101].DownloadedSizeBytes);
+            Assert.Equal(
+                DateTimeOffset.FromUnixTimeSeconds(1_700_000_000).UtcDateTime,
+                result[101].HistoryTimeUtc);
+
+            var call = Assert.Single(apiMock.XmlRpcCalls);
+            Assert.Equal("history", call.MethodName);
+            var parameter = Assert.Single(call.Parameters);
+            Assert.Equal("0", parameter.Element("boolean")?.Value);
+        }
+
+        [Theory]
+        [InlineData("SUCCESS/UNPACK", 1)]
+        [InlineData("  success/par-check  ", 1)]
+        [InlineData("FAILURE/UNPACK", 2)]
+        [InlineData("  failure/health  ", 2)]
+        [InlineData("WARNING/REPAIRABLE", 0)]
+        [InlineData("DELETED/MANUAL", 0)]
+        [InlineData("", 0)]
+        [InlineData("SUCCESS", 0)]
+        [InlineData("UNKNOWN/FUTURE", 0)]
+        public async Task HistoryReader_StatusFamilies_ClassifyLiteralContract(
+            string status,
+            int expectedOutcome)
+        {
+            using var apiMock = new NzbgetApiMock();
+            apiMock.QueueXmlRpcResponse(
+                "history",
+                NzbgetApiMock.CreateHistoryResponse(
+                    HistoryEntryValue(nzbId: "42", title: "Book", status: status)));
+            using var http = new HttpClient(apiMock);
+            var reader = CreateHistoryReader(http);
+
+            var entry = Assert.Single(await reader.ReadAsync(CreateClient(), CancellationToken.None));
+
+            Assert.Equal(status.Trim(), entry.RawStatus);
+            Assert.Equal((NzbgetHistoryOutcome)expectedOutcome, entry.Outcome);
+        }
+
+        [Fact]
+        public async Task HistoryReader_Fields_ApplyPathNumericTimeAndFallbackSemantics()
+        {
+            using var apiMock = new NzbgetApiMock();
+            apiMock.QueueXmlRpcResponse(
+                "history",
+                NzbgetApiMock.CreateHistoryResponse(string.Concat(
+                    HistoryEntryValue(
+                        nzbId: "not-a-number",
+                        legacyId: "999",
+                        title: "Title Fallback Available",
+                        status: "SUCCESS/ALL",
+                        finalDir: "   ",
+                        destDir: "/destination/fallback",
+                        fileSizeMb: "-5",
+                        downloadedSizeMb: "-1",
+                        historyTime: "invalid"),
+                    HistoryEntryValue(
+                        nzbId: null,
+                        title: null,
+                        status: "FAILURE/PAR",
+                        finalDir: null,
+                        destDir: null,
+                        fileSizeMb: "999999999999999999999",
+                        downloadedSizeMb: "999999999999999999999",
+                        historyTime: "999999999999999999999"))));
+            using var http = new HttpClient(apiMock);
+            var reader = CreateHistoryReader(http);
+
+            var result = await reader.ReadAsync(CreateClient(), CancellationToken.None);
+
+            Assert.Collection(
+                result,
+                first =>
+                {
+                    Assert.Equal(string.Empty, first.CanonicalNzbId);
+                    Assert.Equal("Title Fallback Available", first.Title);
+                    Assert.Equal("/destination/fallback", first.CompletedPath);
+                    Assert.Equal(0, first.TotalSizeBytes);
+                    Assert.Equal(0, first.DownloadedSizeBytes);
+                    Assert.Null(first.HistoryTimeUtc);
+                },
+                second =>
+                {
+                    Assert.Equal(string.Empty, second.CanonicalNzbId);
+                    Assert.Equal(string.Empty, second.Title);
+                    Assert.Equal(string.Empty, second.Category);
+                    Assert.Equal(string.Empty, second.DestDir);
+                    Assert.Equal(string.Empty, second.FinalDir);
+                    Assert.Equal(string.Empty, second.CompletedPath);
+                    Assert.Equal(long.MaxValue, second.TotalSizeBytes);
+                    Assert.Equal(long.MaxValue, second.DownloadedSizeBytes);
+                    Assert.Null(second.HistoryTimeUtc);
+                });
+        }
+
+        [Fact]
+        public async Task HistoryReader_MalformedWholeResponseShape_Throws()
+        {
+            using var apiMock = new NzbgetApiMock();
+            apiMock.QueueXmlRpcResponse("history", XmlRpcValueResponse("<string>not-an-array</string>"));
+            using var http = new HttpClient(apiMock);
+            var reader = CreateHistoryReader(http);
+
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => reader.ReadAsync(CreateClient(), CancellationToken.None));
+
+            Assert.Contains("array/data", exception.Message, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public async Task HistoryReader_Cancellation_PropagatesSameToken()
+        {
+            using var cancellationTokenSource = new CancellationTokenSource();
+            var cancellationToken = cancellationTokenSource.Token;
+            var handler = new DelegatingHandlerMock((_, observedToken) =>
+            {
+                Assert.True(observedToken.CanBeCanceled);
+                cancellationTokenSource.Cancel();
+                return Task.FromCanceled<HttpResponseMessage>(observedToken);
+            });
+            using var http = new HttpClient(handler);
+            var reader = CreateHistoryReader(http);
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                () => reader.ReadAsync(CreateClient(), cancellationToken));
+
+            Assert.True(cancellationToken.IsCancellationRequested);
+        }
+
+        [Fact]
+        public void HistoryReader_ParseBoundary_CancellationPropagates()
+        {
+            using var cancellationTokenSource = new CancellationTokenSource();
+            cancellationTokenSource.Cancel();
+            var result = XElement.Parse(
+                "<value><array><data><value><struct /></value></data></array></value>");
+
+            var exception = Assert.Throws<OperationCanceledException>(
+                () => NzbgetHistoryReader.ParseEntries(result, cancellationTokenSource.Token));
+
+            Assert.Equal(cancellationTokenSource.Token, exception.CancellationToken);
+        }
+
+        [Fact]
         public async Task TestConnectionAsync_VersionXmlRpcCompatibility_PreservesMethodParametersAndResponse()
         {
             using var apiMock = new NzbgetApiMock();
@@ -510,6 +690,12 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Nzbget
                 NullLogger<NzbgetAdapter>.Instance);
         }
 
+        private static NzbgetHistoryReader CreateHistoryReader(HttpClient http)
+        {
+            return new NzbgetHistoryReader(
+                new NzbgetXmlRpcClient(new TestHttpClientFactory(http), "nzbget"));
+        }
+
         private static DownloadClientConfiguration CreateClient()
         {
             return new DownloadClientConfiguration
@@ -522,6 +708,46 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Nzbget
         private static string XmlRpcValueResponse(string serializedValue)
         {
             return $"<?xml version=\"1.0\"?><methodResponse><params><param><value>{serializedValue}</value></param></params></methodResponse>";
+        }
+
+        private static string HistoryEntryValue(
+            string? nzbId,
+            string? title,
+            string status,
+            string? category = null,
+            string? finalDir = null,
+            string? destDir = null,
+            string? fileSizeMb = null,
+            string? downloadedSizeMb = null,
+            string? historyTime = null,
+            string? legacyId = null)
+        {
+            var members = new[]
+            {
+                HistoryMember("NZBID", nzbId),
+                HistoryMember("ID", legacyId),
+                HistoryMember("NZBName", title),
+                HistoryMember("Category", category),
+                HistoryMember("Status", status),
+                HistoryMember("FinalDir", finalDir),
+                HistoryMember("DestDir", destDir),
+                HistoryMember("FileSizeMB", fileSizeMb),
+                HistoryMember("DownloadedSizeMB", downloadedSizeMb),
+                HistoryMember("HistoryTime", historyTime)
+            };
+
+            return $"<value><struct>{string.Concat(members)}</struct></value>";
+        }
+
+        private static string HistoryMember(string name, string? value)
+        {
+            return value == null
+                ? string.Empty
+                : new XElement(
+                    "member",
+                    new XElement("name", name),
+                    new XElement("value", new XElement("string", value)))
+                    .ToString(SaveOptions.DisableFormatting);
         }
 
         private static IReadOnlyDictionary<string, string> ReadStructMembers(XElement structElement)
