@@ -15,7 +15,10 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using System.Diagnostics;
+using System.Globalization;
 using System.Net;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 
@@ -24,15 +27,37 @@ using Listenarr.Tests.Common;
 using Listenarr.Tests.Mocks.Api;
 using Microsoft.Extensions.Logging.Abstractions;
 using System.Xml.Linq;
+using Xunit.Abstractions;
 
 namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Nzbget
 {
     public class NzbgetAdapterTests
     {
+        private const int PerformanceHistoryEntryCount = 1_000;
+        private const int PerformanceBeyondOneHundredIndex = 752;
+        private readonly ITestOutputHelper _output;
+
+        private delegate void MergeHistoryDelegate(
+            DownloadClientConfiguration client,
+            IReadOnlyList<NzbgetHistoryEntry> history,
+            IReadOnlyDictionary<string, Download> trackedById,
+            IReadOnlyList<Download> trackedDownloads,
+            ISet<Download> matchedDownloads,
+            ISet<string> activeCanonicalIds,
+            CancellationToken cancellationToken);
+
+        private static readonly MergeHistoryDelegate MergeHistoryForPerformanceTest =
+            CreateMergeHistoryDelegate();
+
         private sealed record CapturedLog(
             LogLevel Level,
             string Message,
             IReadOnlyDictionary<string, object?> State);
+
+        public NzbgetAdapterTests(ITestOutputHelper output)
+        {
+            _output = output;
+        }
 
         private sealed class CapturingLogger<T> : ILogger<T>
         {
@@ -384,6 +409,65 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Nzbget
                 () => NzbgetHistoryReader.ParseEntries(result, cancellationTokenSource.Token));
 
             Assert.Equal(cancellationTokenSource.Token, exception.CancellationToken);
+        }
+
+        [Fact]
+        public void NzbgetHistory_ParseAndMerge_OneThousandVisibleEntries_WithinGuardrails()
+        {
+            var historyResult = CreatePerformanceHistoryResult();
+            var warmState = CreatePerformanceMergeState();
+            var warmHistory = NzbgetHistoryReader.ParseEntries(
+                historyResult,
+                CancellationToken.None);
+            MergeHistoryForPerformanceTest(
+                warmState.Client,
+                warmHistory,
+                warmState.TrackedById,
+                warmState.Downloads,
+                warmState.MatchedDownloads,
+                warmState.ActiveCanonicalIds,
+                CancellationToken.None);
+
+            var measuredState = CreatePerformanceMergeState();
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+
+            var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+            var startTimestamp = Stopwatch.GetTimestamp();
+            var measuredHistory = NzbgetHistoryReader.ParseEntries(
+                historyResult,
+                CancellationToken.None);
+            MergeHistoryForPerformanceTest(
+                measuredState.Client,
+                measuredHistory,
+                measuredState.TrackedById,
+                measuredState.Downloads,
+                measuredState.MatchedDownloads,
+                measuredState.ActiveCanonicalIds,
+                CancellationToken.None);
+            var endTimestamp = Stopwatch.GetTimestamp();
+            var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+            var elapsedMilliseconds = Stopwatch
+                .GetElapsedTime(startTimestamp, endTimestamp)
+                .TotalMilliseconds;
+
+            _output.WriteLine(
+                $"elapsedMs={elapsedMilliseconds.ToString("F3", CultureInfo.InvariantCulture)}");
+            _output.WriteLine($"allocatedBytes={allocatedBytes}");
+
+            Assert.Equal(PerformanceHistoryEntryCount, measuredHistory.Count);
+            Assert.Equal(
+                DownloadStatus.Completed,
+                measuredState.BeyondOneHundredDownload.Status);
+            Assert.Equal(DownloadStatus.Downloading, measuredState.Downloads[0].Status);
+            Assert.Equal(DownloadStatus.Queued, measuredState.Downloads[996].Status);
+            Assert.True(
+                elapsedMilliseconds <= 500,
+                $"elapsedMs={elapsedMilliseconds.ToString("F3", CultureInfo.InvariantCulture)}");
+            Assert.True(
+                allocatedBytes <= 33_554_432,
+                $"allocatedBytes={allocatedBytes}");
         }
 
         [Fact]
@@ -1395,6 +1479,97 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Nzbget
         {
             return new NzbgetHistoryReader(
                 new NzbgetXmlRpcClient(new TestHttpClientFactory(http), "nzbget"));
+        }
+
+        private static MergeHistoryDelegate CreateMergeHistoryDelegate()
+        {
+            var mergeMethod = typeof(NzbgetDownloadPollingWorkflow).GetMethod(
+                "MergeHistory",
+                BindingFlags.NonPublic | BindingFlags.Static)
+                ?? throw new InvalidOperationException(
+                    "NzbgetDownloadPollingWorkflow.MergeHistory was not found.");
+            return mergeMethod.CreateDelegate<MergeHistoryDelegate>();
+        }
+
+        private static XElement CreatePerformanceHistoryResult()
+        {
+            var entries = new string[PerformanceHistoryEntryCount];
+            for (var index = 0; index < entries.Length; index++)
+            {
+                var canonicalId = PerformanceHistoryId(
+                    index == 996
+                        ? 992
+                        : index);
+                var status = (index % 4) switch
+                {
+                    0 => "SUCCESS/UNPACK",
+                    1 => "FAILURE/HEALTH",
+                    2 => "WARNING/REPAIRABLE",
+                    _ => "DELETED/MANUAL"
+                };
+                entries[index] = HistoryEntryValue(
+                    nzbId: canonicalId,
+                    title: $"Performance Book {index}",
+                    status: status,
+                    category: "audiobooks",
+                    finalDir: $"/final/performance-{index}",
+                    destDir: $"/destination/performance-{index}",
+                    fileSizeMb: "100",
+                    downloadedSizeMb: index % 4 == 1 ? "60" : "100");
+            }
+
+            return XElement.Parse(
+                $"<value><array><data>{string.Concat(entries)}</data></array></value>");
+        }
+
+        private static (
+            DownloadClientConfiguration Client,
+            List<Download> Downloads,
+            IReadOnlyDictionary<string, Download> TrackedById,
+            HashSet<Download> MatchedDownloads,
+            HashSet<string> ActiveCanonicalIds,
+            Download BeyondOneHundredDownload)
+            CreatePerformanceMergeState()
+        {
+            var client = CreateClient();
+            var downloads = new List<Download>(PerformanceHistoryEntryCount);
+            var trackedById = new Dictionary<string, Download>(
+                PerformanceHistoryEntryCount,
+                StringComparer.OrdinalIgnoreCase);
+            var matchedDownloads = new HashSet<Download>();
+            var activeCanonicalIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            for (var index = 0; index < PerformanceHistoryEntryCount; index++)
+            {
+                var canonicalId = PerformanceHistoryId(index);
+                var download = CreateDownload(
+                    $"performance-{index}",
+                    $"Performance Book {index}",
+                    canonicalId,
+                    100);
+                downloads.Add(download);
+                trackedById.TryAdd(canonicalId, download);
+
+                if (index % 20 == 0)
+                {
+                    download.Status = DownloadStatus.Downloading;
+                    matchedDownloads.Add(download);
+                    activeCanonicalIds.Add(canonicalId);
+                }
+            }
+
+            return (
+                client,
+                downloads,
+                trackedById,
+                matchedDownloads,
+                activeCanonicalIds,
+                downloads[PerformanceBeyondOneHundredIndex]);
+        }
+
+        private static string PerformanceHistoryId(int index)
+        {
+            return (10_000 + index).ToString(CultureInfo.InvariantCulture);
         }
 
         private static DownloadClientConfiguration CreateClient()
