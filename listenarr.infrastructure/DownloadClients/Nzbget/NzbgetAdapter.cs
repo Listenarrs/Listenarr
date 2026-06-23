@@ -16,8 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Net;
-using System.Xml.Linq;
-using Listenarr.Domain.Common;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.DownloadClients.Nzbget
@@ -30,7 +28,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
 
         private readonly ILogger<NzbgetAdapter> _logger;
         private readonly NzbgetXmlRpcClient _xmlRpcClient;
-        private readonly NzbgetHistoryReader _historyReader;
+        private readonly NzbgetHistoryEnrichmentWorkflow _historyEnrichmentWorkflow;
         private readonly NzbgetDownloadPollingWorkflow _downloadPollingWorkflow;
         private readonly NzbgetRemovalWorkflow _removalWorkflow;
         private readonly NzbgetAddWorkflow _addWorkflow;
@@ -59,10 +57,13 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             ArgumentNullException.ThrowIfNull(timeProvider);
             _xmlRpcClient = new NzbgetXmlRpcClient(httpClientFactory, ClientType);
-            _historyReader = new NzbgetHistoryReader(_xmlRpcClient);
+            var historyReader = new NzbgetHistoryReader(_xmlRpcClient);
+            _historyEnrichmentWorkflow = new NzbgetHistoryEnrichmentWorkflow(
+                historyReader,
+                _logger);
             _downloadPollingWorkflow = new NzbgetDownloadPollingWorkflow(
                 httpClientFactory,
-                _historyReader,
+                historyReader,
                 _logger,
                 timeProvider,
                 ClientType);
@@ -139,7 +140,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
             if (client == null) return items;
 
             var configuredCategory = DownloadClientCategoryFilter.GetConfiguredCategory(client);
-            var activeIdentities = new List<ActiveQueueIdentity>();
+            var activeIdentities = new List<NzbgetHistoryEnrichmentWorkflow.ActiveHistoryIdentity>();
 
             try
             {
@@ -177,8 +178,8 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
                             var queueItem = NzbgetResponseMapper.MapGroup(client, structElement);
                             items.Add(queueItem);
                             activeIdentities.Add(
-                                new ActiveQueueIdentity(
-                                    ReadActiveScalar(structElement, "NZBID").Trim(),
+                                _historyEnrichmentWorkflow.ParseActiveIdentity(
+                                    structElement,
                                     queueItem.Title));
                         }
                     }
@@ -199,7 +200,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
                 return items;
             }
 
-            await AppendQueueHistoryAsync(
+            await _historyEnrichmentWorkflow.EnrichQueueAsync(
                 client,
                 configuredCategory,
                 activeIdentities,
@@ -207,126 +208,6 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
                 ct);
             return items;
         }
-
-        private async Task AppendQueueHistoryAsync(
-            DownloadClientConfiguration client,
-            string? configuredCategory,
-            IReadOnlyList<ActiveQueueIdentity> activeIdentities,
-            List<QueueItem> items,
-            CancellationToken cancellationToken)
-        {
-            try
-            {
-                var history = await _historyReader.ReadAsync(client, cancellationToken);
-                AppendQueueHistory(
-                    client,
-                    configuredCategory,
-                    activeIdentities,
-                    history,
-                    items,
-                    cancellationToken);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogWarning(
-                    "NZBGet history enrichment failed clientId={ClientId} surface={Surface} activeCount={ActiveCount} failureType={FailureType}",
-                    LogRedaction.SanitizeText(client.Id ?? client.Name ?? client.Type),
-                    nameof(GetQueueAsync),
-                    items.Count,
-                    ex.GetType().Name);
-            }
-        }
-
-        private void AppendQueueHistory(
-            DownloadClientConfiguration client,
-            string? configuredCategory,
-            IReadOnlyList<ActiveQueueIdentity> activeIdentities,
-            IReadOnlyList<NzbgetHistoryEntry> history,
-            List<QueueItem> items,
-            CancellationToken cancellationToken)
-        {
-            var activeCanonicalIds = activeIdentities
-                .Where(identity => !string.IsNullOrEmpty(identity.CanonicalNzbId))
-                .Select(identity => identity.CanonicalNzbId)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var processedHistoryIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            foreach (var entry in history)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (!IsQueueHistoryCandidate(
-                    entry,
-                    configuredCategory,
-                    activeIdentities,
-                    activeCanonicalIds,
-                    processedHistoryIds))
-                {
-                    continue;
-                }
-
-                TryAppendQueueHistoryItem(client, entry, items);
-            }
-        }
-
-        private static bool IsQueueHistoryCandidate(
-            NzbgetHistoryEntry entry,
-            string? configuredCategory,
-            IReadOnlyList<ActiveQueueIdentity> activeIdentities,
-            ISet<string> activeCanonicalIds,
-            ISet<string> processedHistoryIds)
-        {
-            if (entry.Outcome == NzbgetHistoryOutcome.Ignored ||
-                !DownloadClientCategoryFilter.Matches(configuredCategory, entry.Category))
-            {
-                return false;
-            }
-
-            if (!string.IsNullOrEmpty(entry.CanonicalNzbId) &&
-                (!processedHistoryIds.Add(entry.CanonicalNzbId) ||
-                 activeCanonicalIds.Contains(entry.CanonicalNzbId)))
-            {
-                return false;
-            }
-
-            return !activeIdentities.Any(
-                active => TitleUtils.AreTitlesSimilar(active.Title, entry.Title));
-        }
-
-        private void TryAppendQueueHistoryItem(
-            DownloadClientConfiguration client,
-            NzbgetHistoryEntry entry,
-            ICollection<QueueItem> items)
-        {
-            try
-            {
-                items.Add(NzbgetResponseMapper.MapHistoryToQueueItem(client, entry));
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogWarning(
-                    "Failed to map NZBGet queue history entry clientId={ClientId} surface={Surface} failureType={FailureType}",
-                    LogRedaction.SanitizeText(client.Id ?? client.Name ?? client.Type),
-                    nameof(GetQueueAsync),
-                    ex.GetType().Name);
-            }
-        }
-
-        private static string ReadActiveScalar(XElement structElement, string name)
-        {
-            return structElement.Elements("member")
-                .FirstOrDefault(member => string.Equals(
-                    member.Element("name")?.Value,
-                    name,
-                    StringComparison.Ordinal))?
-                .Element("value")?
-                .Elements()
-                .FirstOrDefault()?
-                .Value ?? string.Empty;
-        }
-
-        private sealed record ActiveQueueIdentity(
-            string CanonicalNzbId,
-            string Title);
 
         public async Task<List<(string Id, string Name)>> GetRecentHistoryAsync(DownloadClientConfiguration client, int limit = 100, CancellationToken ct = default)
         {
@@ -384,10 +265,18 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
             if (client == null) return items;
 
             var configuredCategory = DownloadClientCategoryFilter.GetConfiguredCategory(client);
+            var activeIdentities = new List<NzbgetHistoryEnrichmentWorkflow.ActiveHistoryIdentity>();
 
             try
             {
-                var listResult = await _xmlRpcClient.CallAsync(client, "listgroups");
+                var listResult = await _xmlRpcClient.CallAsync(
+                    new NzbgetXmlRpcRequest
+                    {
+                        Client = client,
+                        MethodName = "listgroups",
+                        Parameters = [0]
+                    },
+                    ct);
                 var arrayData = listResult.Element("array")?.Element("data");
 
                 if (arrayData == null)
@@ -413,6 +302,10 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
 
                             var downloadClientItem = NzbgetResponseMapper.MapGroupToDownloadClientItem(client, structElement);
                             items.Add(downloadClientItem);
+                            activeIdentities.Add(
+                                _historyEnrichmentWorkflow.ParseActiveIdentity(
+                                    structElement,
+                                    downloadClientItem.Title));
                         }
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
@@ -424,8 +317,15 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
                 _logger.LogWarning(ex, "Failed to retrieve NZBGet items for client {ClientName}", LogRedaction.SanitizeText(client.Name ?? client.Id));
+                return items;
             }
 
+            await _historyEnrichmentWorkflow.EnrichItemsAsync(
+                client,
+                configuredCategory,
+                activeIdentities,
+                items,
+                ct);
             return items;
         }
 

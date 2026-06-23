@@ -213,6 +213,54 @@ internal static class NzbgetResponseMapper
         };
     }
 
+    public static DownloadClientItem MapHistoryToDownloadClientItem(
+        DownloadClientConfiguration client,
+        NzbgetHistoryEntry entry)
+    {
+        var isCompleted = entry.Outcome == NzbgetHistoryOutcome.Completed;
+        var downloadedBytes = isCompleted
+            ? entry.TotalSizeBytes
+            : entry.DownloadedSizeBytes;
+        var remainingBytes = isCompleted
+            ? 0
+            : Math.Max(0, entry.TotalSizeBytes - downloadedBytes);
+        var progress = isCompleted
+            ? 100
+            : entry.TotalSizeBytes > 0
+                ? Math.Clamp(
+                    downloadedBytes * 100d / entry.TotalSizeBytes,
+                    0,
+                    100)
+                : 0;
+
+        return new DownloadClientItem
+        {
+            DownloadId = entry.CanonicalNzbId.ToUpperInvariant(),
+            Title = entry.Title,
+            Category = entry.Category,
+            Status = isCompleted
+                ? DownloadItemStatus.Completed
+                : DownloadItemStatus.Failed,
+            TotalSize = entry.TotalSizeBytes,
+            RemainingSize = remainingBytes,
+            RemainingTime = null,
+            OutputPath = isCompleted ? entry.CompletedPath : string.Empty,
+            Message = entry.RawStatus,
+            Progress = progress,
+            DownloadSpeed = 0,
+            CanBeRemoved = true,
+            CanMoveFiles = isCompleted,
+            DownloadClientInfo = DownloadClientItemClientInfo.FromClient(
+                clientId: client.Id,
+                clientName: client.Name,
+                clientType: "nzbget",
+                protocol: DownloadProtocol.Usenet,
+                removeCompletedDownloads: client.Settings?.TryGetValue("removeCompletedDownloads", out var removeVal) is true &&
+                                         (removeVal is bool boolVal && boolVal),
+                hasPostImportCategory: !string.IsNullOrEmpty(client.Settings?.GetValueOrDefault("postImportCategory")?.ToString()))
+        };
+    }
+
     private static IReadOnlyDictionary<string, string?> ReadMembers(XElement structElement)
     {
         var members = new Dictionary<string, string?>(StringComparer.Ordinal);

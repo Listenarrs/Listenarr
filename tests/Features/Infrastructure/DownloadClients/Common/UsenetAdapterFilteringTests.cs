@@ -168,8 +168,8 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Common
         [Trait("Scenario", "NzbgetQueueAndItemsRespectConfiguredCategory")]
         public async Task Nzbget_GetQueueAndItems_FilterByConfiguredCategory()
         {
-            // AC: AC-NZB-011/018 require configured-category parity and exact queue listgroups/history sequencing.
-            // Behavior: Existing queue/items category fixture -> queue history integration -> listgroups/history/listgroups with no warning.
+            // AC: AC-NZB-011/018 require configured-category parity and exact queue/item listgroups/history sequencing.
+            // Behavior: Existing queue/items category fixture -> queue and item history integration -> listgroups/history/listgroups/history with no warning.
             // @category: integration
             // @lane: integration
             // @dependency: XML-RPC method capture and existing configured-category filter
@@ -193,9 +193,16 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Common
             {
                 Content = new StringContent(xml, Encoding.UTF8, "text/xml")
             };
+            using var itemHistoryResponse = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    BuildNzbGetListGroupsResponse(),
+                    Encoding.UTF8,
+                    "text/xml")
+            };
             using var notFoundResponse = new HttpResponseMessage(HttpStatusCode.NotFound);
             var responses = new Queue<HttpResponseMessage>(
-                new[] { queueResponse, historyResponse, itemsResponse });
+                new[] { queueResponse, historyResponse, itemsResponse, itemHistoryResponse });
             var methodNames = new List<string>();
             var handler = new DelegatingHandlerMock(async (req, ct) =>
             {
@@ -235,7 +242,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Common
 
             Assert.Single(items);
             Assert.Equal("Book One", items[0].Title);
-            Assert.Equal(["listgroups", "history", "listgroups"], methodNames);
+            Assert.Equal(["listgroups", "history", "listgroups", "history"], methodNames);
             Assert.DoesNotContain(
                 logger.Levels,
                 level => level >= LogLevel.Warning);
