@@ -228,6 +228,7 @@ namespace Listenarr.Tests.Builders
             services.AddSingleton<SabnzbdApiMock>();
             services.AddSingleton<NzbgetApiMock>();
             services.AddSingleton<QbittorrentApiMock>();
+            services.AddSingleton<DelugeApiMock>();
             services.AddSingleton(_ => new MyAnonamouseApiMock
             {
                 FailOnUnexpectedCalls = true
@@ -249,6 +250,9 @@ namespace Listenarr.Tests.Builders
 
             services.AddHttpClient("qbittorrent")
                 .ConfigurePrimaryHttpMessageHandler<QbittorrentApiMock>();
+
+            services.AddHttpClient("deluge")
+                .ConfigurePrimaryHttpMessageHandler<DelugeApiMock>();
 
             services.AddHttpClient("DirectDownload");
 
