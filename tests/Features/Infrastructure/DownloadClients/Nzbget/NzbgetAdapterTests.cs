@@ -1330,6 +1330,180 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Nzbget
         }
 
         [Fact]
+        public async Task GetQueueAndItemsAsync_TerminalHistory_ApplyIdenticalCrossSurfacePolicy()
+        {
+            // AC: AC-NZB-001/003-011/015/016/021 require paired queue/item parity through the real category filter.
+            // Behavior: Equivalent active/history responses -> both public surfaces -> identical shared status, path, identity, order, and dedupe semantics.
+            // @category: integration
+            // @lane: integration
+            // @dependency: DownloadClientCategoryFilter, TitleUtils.AreTitlesSimilar, typed history reader
+            // @complexity: high
+            // Value Score: 42
+            var activeResponse = NzbgetApiMock.CreateListGroupsResponse(string.Concat(
+                ActiveGroupValue("101", "9001", null, "Canonical Active", "DOWNLOADING", " Audiobooks ", "100", "25", "/active/one"),
+                ActiveGroupValue("102", null, "9002", "Title Active Unabridged", "QUEUED", "AUDIOBOOKS", "80", "80", "/active/two"),
+                ActiveGroupValue("103", "9003", null, "Filtered Active", "QUEUED", "movies", "10", "10", "/active/filtered")));
+            var historyResponse = NzbgetApiMock.CreateHistoryResponse(string.Concat(
+                HistoryEntryValue("101", "Canonical Conflict", "SUCCESS/UNPACK", "audiobooks", "/suppressed/id"),
+                HistoryEntryValue(null, "Title Active", "FAILURE/HEALTH", "audiobooks"),
+                HistoryEntryValue("201", "Completed Final", "SUCCESS/UNPACK", "audiobooks", "/final/one", "/dest/one", "120", "120"),
+                HistoryEntryValue("202", "Completed Destination", "SUCCESS/VERIFY", " AUDIOBOOKS ", string.Empty, "/dest/two", "90", "90"),
+                HistoryEntryValue("203", "Failed History", "  FAILURE/HEALTH  ", "AudioBooks", "/must/not/use", "/must/not/use", "100", "40"),
+                HistoryEntryValue("204", "Ignored Warning", "WARNING/REPAIRABLE", "audiobooks"),
+                HistoryEntryValue("205", "Filtered History", "SUCCESS/UNPACK", "movies", "/filtered"),
+                HistoryEntryValue("206", "First Duplicate", "SUCCESS/UNPACK", "audiobooks", "/duplicate/first", fileSizeMb: "50", downloadedSizeMb: "50"),
+                HistoryEntryValue("206", "Second Duplicate", "FAILURE/HEALTH", "audiobooks")));
+            using var apiMock = new NzbgetApiMock();
+            apiMock.QueueXmlRpcResponse("listgroups", activeResponse);
+            apiMock.QueueXmlRpcResponse("listgroups", activeResponse);
+            apiMock.QueueXmlRpcResponse("history", historyResponse);
+            apiMock.QueueXmlRpcResponse("history", historyResponse);
+            using var http = new HttpClient(apiMock);
+            var adapter = CreateAdapter(http);
+            var client = CreateClient();
+            client.Id = "parity-client";
+            client.Name = "Parity Client";
+            client.Settings = new Dictionary<string, object>
+            {
+                ["category"] = "  AudioBooks  "
+            };
+
+            var queue = await adapter.GetQueueAsync(client);
+            var items = await adapter.GetItemsAsync(client);
+
+            Assert.Equal(
+                ["Canonical Active", "Title Active Unabridged", "Completed Final", "Completed Destination", "Failed History", "First Duplicate"],
+                queue.Select(entry => entry.Title));
+            Assert.Equal(
+                ["Canonical Active", "Title Active Unabridged", "Completed Final", "Completed Destination", "Failed History", "First Duplicate"],
+                items.Select(entry => entry.Title));
+            Assert.Equal(
+                ["downloading", "queued", "completed", "completed", "failed", "completed"],
+                queue.Select(entry => entry.Status));
+            Assert.Equal(
+                [
+                    DownloadItemStatus.Downloading,
+                    DownloadItemStatus.Queued,
+                    DownloadItemStatus.Completed,
+                    DownloadItemStatus.Completed,
+                    DownloadItemStatus.Failed,
+                    DownloadItemStatus.Completed
+                ],
+                items.Select(entry => entry.Status));
+            Assert.Equal(
+                ["/final/one", "/dest/two", string.Empty, "/duplicate/first"],
+                queue.Skip(2).Select(entry => entry.ContentPath));
+            Assert.Equal(
+                ["/final/one", "/dest/two", string.Empty, "/duplicate/first"],
+                items.Skip(2).Select(entry => entry.OutputPath));
+            Assert.Equal("FAILURE/HEALTH", queue[4].ErrorMessage);
+            Assert.Equal("FAILURE/HEALTH", items[4].Message);
+            Assert.Equal(["9001", "9002"], queue.Take(2).Select(entry => entry.Id));
+            Assert.Equal(["9001", "9002"], items.Take(2).Select(entry => entry.DownloadId));
+            Assert.DoesNotContain(queue, entry => entry.Id is "101" or "102");
+            Assert.DoesNotContain(items, entry => entry.DownloadId is "101" or "102");
+            Assert.Single(queue, entry => entry.Id == "206");
+            Assert.Single(items, entry => entry.DownloadId == "206");
+            Assert.Equal(
+                ["listgroups", "history", "listgroups", "history"],
+                apiMock.XmlRpcCalls.Select(call => call.MethodName));
+        }
+
+        [Fact]
+        public async Task GetQueueAndItemsAsync_HistoryFailure_ReturnEquivalentActiveOnlyResults()
+        {
+            // AC: AC-NZB-014 requires paired non-cancellation degradation without losing either active prefix.
+            // Behavior: Equivalent malformed history responses -> both public surfaces -> active-only output and one sanitized surface warning each.
+            // @category: edge-case
+            // @lane: integration
+            // @dependency: typed history failure contract
+            // @complexity: medium
+            // Value Score: 34
+            var activeResponse = NzbgetApiMock.CreateListGroupsResponse(
+                ActiveGroupValue("301", "9301", null, "Active Only", "QUEUED", "audiobooks", "5", "5", "/active"));
+            using var apiMock = new NzbgetApiMock();
+            apiMock.QueueXmlRpcResponse("listgroups", activeResponse);
+            apiMock.QueueXmlRpcResponse("listgroups", activeResponse);
+            apiMock.QueueXmlRpcResponse("history", "<not-xml");
+            apiMock.QueueXmlRpcResponse("history", "<not-xml");
+            using var http = new HttpClient(apiMock);
+            var logger = new CapturingLogger<NzbgetAdapter>();
+            var adapter = CreateAdapter(http, logger);
+            var client = CreateClient();
+            client.Id = "parity-client";
+
+            var queue = await adapter.GetQueueAsync(client);
+            var items = await adapter.GetItemsAsync(client);
+
+            var queueActive = Assert.Single(queue);
+            var itemActive = Assert.Single(items);
+            Assert.Equal("9301", queueActive.Id);
+            Assert.Equal("9301", itemActive.DownloadId);
+            Assert.Equal("Active Only", queueActive.Title);
+            Assert.Equal("Active Only", itemActive.Title);
+            Assert.Equal("queued", queueActive.Status);
+            Assert.Equal(DownloadItemStatus.Queued, itemActive.Status);
+            Assert.Equal(Path.Join("/active", "Active Only"), queueActive.ContentPath);
+            Assert.Equal(Path.Join("/active", "Active Only"), itemActive.OutputPath);
+            Assert.Equal(
+                ["GetQueueAsync", "GetItemsAsync"],
+                logger.Entries
+                    .Where(entry => entry.Level == LogLevel.Warning)
+                    .Select(entry => GetLogValue(entry, "Surface")));
+        }
+
+        [Fact]
+        public async Task GetQueueAndItemsAsync_HistoryCancellation_PropagateWithoutFallback()
+        {
+            // AC: AC-NZB-013 requires paired cancellation propagation and forbids active-only fallback.
+            // Behavior: Each surface reaches its history request before caller cancellation -> same token escapes and no fallback warning is logged.
+            // @category: edge-case
+            // @lane: integration
+            // @dependency: deterministic cancellation-aware XML-RPC mock
+            // @complexity: high
+            // Value Score: 38
+            var activeResponse = NzbgetApiMock.CreateListGroupsResponse(
+                ActiveGroupValue("401", "9401", null, "Active Before Cancel", "QUEUED", "audiobooks", "5", "5", "/active"));
+            using var apiMock = new NzbgetApiMock();
+            apiMock.QueueXmlRpcResponse("listgroups", activeResponse);
+            apiMock.QueueXmlRpcResponse("listgroups", activeResponse);
+            var queueHistoryStarted = apiMock.QueueXmlRpcCancellationResponse(
+                "history",
+                NzbgetApiMock.CreateHistoryResponse(string.Empty));
+            var itemHistoryStarted = apiMock.QueueXmlRpcCancellationResponse(
+                "history",
+                NzbgetApiMock.CreateHistoryResponse(string.Empty));
+            using var http = new HttpClient(apiMock);
+            var logger = new CapturingLogger<NzbgetAdapter>();
+            var adapter = CreateAdapter(http, logger);
+            var client = CreateClient();
+
+            using var queueCancellation = new CancellationTokenSource();
+            var queueTask = adapter.GetQueueAsync(client, queueCancellation.Token);
+            await queueHistoryStarted.WaitAsync(TimeSpan.FromSeconds(5));
+            queueCancellation.Cancel();
+            var queueException = await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                () => queueTask);
+
+            using var itemCancellation = new CancellationTokenSource();
+            var itemTask = adapter.GetItemsAsync(client, itemCancellation.Token);
+            await itemHistoryStarted.WaitAsync(TimeSpan.FromSeconds(5));
+            itemCancellation.Cancel();
+            var itemException = await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                () => itemTask);
+
+            Assert.Equal(queueCancellation.Token, queueException.CancellationToken);
+            Assert.Equal(itemCancellation.Token, itemException.CancellationToken);
+            Assert.DoesNotContain(
+                logger.Entries,
+                entry => entry.Level == LogLevel.Warning &&
+                    GetLogValue(entry, "Surface") is "GetQueueAsync" or "GetItemsAsync");
+            Assert.Equal(
+                ["listgroups", "history", "listgroups", "history"],
+                apiMock.XmlRpcCalls.Select(call => call.MethodName));
+        }
+
+        [Fact]
         public async Task GetItemsAsync_ActiveAndTerminalHistory_PreservesPrefixAndAppendsServerOrder()
         {
             // AC: AC-NZB-001/003/004/006/007/011/016/018/021.
