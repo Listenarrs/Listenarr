@@ -1,5 +1,3 @@
-using Listenarr.Application.Metadata;
-
 namespace Listenarr.Tests.Builders
 {
     public class AudibleSearchResultBuilder
@@ -8,7 +6,7 @@ namespace Listenarr.Tests.Builders
         {
             Asin = "B0TESTASIN",
             Title = "Test Audiobook",
-            Authors = [new AudibleAuthor { Name = "Test Author" }],
+            Authors = [],
             Series = [],
             Language = "english",
             BookFormat = "unabridged"

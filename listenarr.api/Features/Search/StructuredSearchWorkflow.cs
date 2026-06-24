@@ -209,7 +209,7 @@ namespace Listenarr.Api.Features.Search
 
             try
             {
-                var audible = await _audibleService.GetBookMetadataAsync(req.Asin, region, true);
+                var audible = await _audibleService.GetBookMetadataAsync(req.Asin, region, true, language);
                 if (audible != null)
                 {
                     var metadata = _metadataConverters.ConvertAudibleToMetadata(audible, req.Asin, source: "Audible");

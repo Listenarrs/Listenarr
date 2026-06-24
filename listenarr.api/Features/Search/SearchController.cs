@@ -188,13 +188,6 @@ namespace Listenarr.Api.Features.Search
         {
             try
             {
-                // Debug: log raw incoming query to help integration-test diagnostics
-                try { _logger.LogDebug("[DEBUG] IntelligentSearch called with query='{Query}'", LogRedaction.SanitizeText(query ?? "<null>")); }
-                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                {
-                    System.Diagnostics.Debug.WriteLine($"SearchController IntelligentSearch debug logging failed: {ex.Message}");
-                }
-
                 if (string.IsNullOrEmpty(query))
                 {
                     return BadRequest("Query parameter is required");
@@ -353,33 +346,6 @@ namespace Listenarr.Api.Features.Search
             }
         }
 
-        // [HttpGet("indexers")]
-        // public async Task<ActionResult<List<SearchResult>>> SearchIndexers(
-        //     [FromQuery] string query,
-        //     [FromQuery] string? category = null)
-        // {
-        //     try
-        //     {
-        //         if (string.IsNullOrEmpty(query))
-        //         {
-        //             return BadRequest("Query parameter is required");
-        //         }
-
-        //         var results = await _searchService.SearchIndexersAsync(query, category);
-        // Optional tuning parameters exposed to callers
-        //var candidateLimit = int.TryParse(Request.Query["candidateLimit"], out var cl) ? Math.Clamp(cl, 5, 200) : 50;
-        //var returnLimit = int.TryParse(Request.Query["returnLimit"], out var rl) ? Math.Clamp(rl, 1, 100) : 10;
-        //var containmentMode = Request.Query.ContainsKey("containmentMode") ? Request.Query["containmentMode"].ToString() ?? "Relaxed" : "Relaxed";
-        //var requireAuthorAndPublisher = bool.TryParse(Request.Query["requireAuthorAndPublisher"], out var rap) ? rap : false;
-        //var fuzzyThreshold = double.TryParse(Request.Query["fuzzyThreshold"], out var ft) ? Math.Clamp(ft, 0.0, 1.0) : 0.7;
-        //         return Ok(results);
-        //     }
-        //     catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) //     {
-        //         _logger.LogError(ex, "Error searching indexers for query: {Query}", query);
-        //         return StatusCode(500, "Internal server error");
-        //     }
-        // }
-
         /// <summary>
         /// Search the Audible catalog for audiobooks.
         /// </summary>
@@ -433,7 +399,6 @@ namespace Listenarr.Api.Features.Search
             };
         }
 
-        // existing code continuation
         /// <summary>
         /// Search a specific API by ID
         /// Note: This route uses a parameter and must come after all specific routes to avoid conflicts
