@@ -2270,7 +2270,7 @@ function getAudiobookStatus(audiobook: CollectionDisplayItem): CollectionStatus 
     return 'not-added'
   }
 
-  return computeAudiobookStatus(audiobook, activeDownloadAudiobookIds.value, qualityProfiles.value)
+  return computeAudiobookStatus(audiobook, activeDownloadAudiobookIds.value)
 }
 
 function getMonitoringLabel(audiobook: CollectionDisplayItem): string {

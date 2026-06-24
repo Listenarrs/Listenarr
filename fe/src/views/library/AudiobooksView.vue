@@ -1816,7 +1816,7 @@ const activeDownloadAudiobookIds = computed(() => {
 })
 
 function computeAudiobookStatusRaw(audiobook: Audiobook): AudiobookStatus {
-  return computeAudiobookStatus(audiobook, activeDownloadAudiobookIds.value, qualityProfiles.value)
+  return computeAudiobookStatus(audiobook, activeDownloadAudiobookIds.value)
 }
 
 const audiobookStatusById = computed(() => {
