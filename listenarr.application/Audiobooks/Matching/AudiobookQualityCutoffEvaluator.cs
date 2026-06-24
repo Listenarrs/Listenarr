@@ -16,10 +16,19 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using Listenarr.Domain.Common;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Audiobooks.Matching
 {
+    /// <summary>
+    /// Shared "is the audiobook already at/above its quality cutoff?" evaluation.
+    ///
+    /// Per-file/-download quality is resolved through <see cref="QualityMatcher"/> rather than the
+    /// previous string-label classifier that emitted container labels (e.g. "M4B") which never
+    /// equalled a codec/bitrate rung — so the cutoff was never met and the audiobook was
+    /// searched/re-grabbed on every cycle.
+    /// </summary>
     public static class AudiobookQualityCutoffEvaluator
     {
         public static async Task<bool> IsQualityCutoffMetAsync(
@@ -28,7 +37,8 @@ namespace Listenarr.Application.Audiobooks.Matching
             IAudiobookFileRepository audioFileRepository,
             ILogger? logger = null)
         {
-            if (audiobook.QualityProfile == null)
+            var profile = audiobook.QualityProfile;
+            if (profile == null)
             {
                 return false;
             }
@@ -46,8 +56,9 @@ namespace Listenarr.Application.Audiobooks.Matching
                 return false;
             }
 
-            var cutoffQuality = audiobook.QualityProfile.Qualities
-                .FirstOrDefault(q => q.Quality == audiobook.QualityProfile.CutoffQuality);
+            // Preserve the original guard: an unset or unknown cutoff means "keep searching".
+            var cutoffQuality = profile.Qualities
+                .FirstOrDefault(q => q.Quality == profile.CutoffQuality);
 
             if (cutoffQuality == null)
             {
@@ -60,10 +71,7 @@ namespace Listenarr.Application.Audiobooks.Matching
                     !string.IsNullOrEmpty(download.Metadata?.GetValueOrDefault("Quality")?.ToString()))
                 {
                     var downloadQuality = download.Metadata["Quality"].ToString();
-                    var downloadQualityDefinition = audiobook.QualityProfile.Qualities
-                        .FirstOrDefault(q => q.Quality == downloadQuality);
-
-                    if (downloadQualityDefinition != null && downloadQualityDefinition.Priority >= cutoffQuality.Priority)
+                    if (QualityMatcher.LabelMeetsCutoff(downloadQuality, profile))
                     {
                         logger?.LogDebug(
                             "Quality cutoff met for audiobook '{Title}' by completed download (Quality: {Quality})",
@@ -84,21 +92,11 @@ namespace Listenarr.Application.Audiobooks.Matching
 
             foreach (var file in existingFiles)
             {
-                var fileQuality = DetermineFileQuality(file);
-                if (string.IsNullOrEmpty(fileQuality))
-                {
-                    continue;
-                }
-
-                var fileQualityDefinition = audiobook.QualityProfile.Qualities
-                    .FirstOrDefault(q => q.Quality == fileQuality);
-
-                if (fileQualityDefinition != null && fileQualityDefinition.Priority >= cutoffQuality.Priority)
+                if (QualityMatcher.MeetsCutoff(ToInput(file), profile))
                 {
                     logger?.LogDebug(
-                        "Quality cutoff met for audiobook '{Title}' by existing file (Quality: {Quality}, File: {FileName})",
+                        "Quality cutoff met for audiobook '{Title}' by existing file (File: {FileName})",
                         audiobook.Title,
-                        fileQuality,
                         Path.GetFileName(file.Path));
                     return true;
                 }
@@ -107,64 +105,17 @@ namespace Listenarr.Application.Audiobooks.Matching
             return false;
         }
 
-        private static string? DetermineFileQuality(AudiobookFile file)
+        /// <summary>The profile rung label a stored file maps to, or null if it does not match.</summary>
+        public static string? ResolveFileQualityLabel(AudiobookFile file, QualityProfile? profile)
+            => QualityMatcher.MatchLabel(ToInput(file), profile);
+
+        private static AudioQualityInput ToInput(AudiobookFile file) => new()
         {
-            if (!string.IsNullOrEmpty(file.Container))
-            {
-                var container = file.Container.ToLower();
-                if (container.Contains("flac")) return "FLAC";
-                if (container.Contains("m4b") || container.Contains("m4a")) return "M4B";
-            }
-
-            if (!string.IsNullOrEmpty(file.Format))
-            {
-                var format = file.Format.ToLower();
-                if (format.Contains("flac")) return "FLAC";
-                if (format.Contains("m4b") || format.Contains("m4a")) return "M4B";
-                if (format.Contains("aac")) return "M4B";
-            }
-
-            if (file.Bitrate.HasValue)
-            {
-                var kbps = file.Bitrate.Value / 1000;
-
-                if (kbps >= 320) return "MP3 320kbps";
-                if (kbps >= 256) return "MP3 256kbps";
-                if (kbps >= 192) return "MP3 192kbps";
-                if (kbps >= 128) return "MP3 128kbps";
-                if (kbps >= 64) return "MP3 64kbps";
-
-                return "MP3 64kbps";
-            }
-
-            if (!string.IsNullOrEmpty(file.Codec))
-            {
-                var codec = file.Codec.ToLower();
-                if (codec.Contains("flac")) return "FLAC";
-                if (codec.Contains("aac")) return "M4B";
-                if (codec.Contains("mp3")) return "MP3 128kbps";
-                if (codec.Contains("opus")) return "M4B";
-            }
-
-            if (!string.IsNullOrEmpty(file.Path))
-            {
-                var extension = Path.GetExtension(file.Path).ToLower();
-                switch (extension)
-                {
-                    case ".flac":
-                        return "FLAC";
-                    case ".m4b":
-                    case ".m4a":
-                        return "M4B";
-                    case ".mp3":
-                        return "MP3 128kbps";
-                    case ".aac":
-                    case ".opus":
-                        return "M4B";
-                }
-            }
-
-            return null;
-        }
+            Codec = file.Codec,
+            Container = file.Container,
+            Format = file.Format,
+            BitrateBitsPerSecond = file.Bitrate,
+            Path = file.Path
+        };
     }
 }

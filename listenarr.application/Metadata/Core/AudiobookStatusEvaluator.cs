@@ -16,6 +16,8 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using Listenarr.Domain.Common;
+
 namespace Listenarr.Application.Metadata.Core
 {
     public static class AudiobookStatusEvaluator
@@ -60,6 +62,13 @@ namespace Listenarr.Application.Metadata.Core
                     {
                         fileFormat = Normalize(f.Container);
                     }
+                    if (fileFormat.Length == 0)
+                    {
+                        // Path-only file (no probe metadata): fall back to the path extension so a
+                        // metadata-less book.flac still satisfies a PreferredFormats = ["flac"] filter
+                        // instead of being dropped before QualityMatcher can use the extension.
+                        fileFormat = ExtensionFromPath(f.Path);
+                    }
 
                     if (preferredFormats.Count == 0)
                     {
@@ -88,34 +97,29 @@ namespace Listenarr.Application.Metadata.Core
                 return QualityMatch;
             }
 
-            var qualityPriority = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            foreach (var quality in qualityProfile.Qualities)
+            // A pinned audiobook-level quality short-circuits per-file derivation.
+            if (!string.IsNullOrWhiteSpace(audiobookQuality))
             {
-                if (quality == null || string.IsNullOrWhiteSpace(quality.Quality))
-                {
-                    continue;
-                }
-
-                qualityPriority[Normalize(quality.Quality)] = quality.Priority;
+                return QualityMatcher.LabelMeetsCutoff(audiobookQuality, qualityProfile)
+                    ? QualityMatch
+                    : QualityMismatch;
             }
 
-            var cutoff = Normalize(qualityProfile.CutoffQuality);
-            var cutoffPriority = qualityPriority.TryGetValue(cutoff, out var foundCutoffPriority)
-                ? foundCutoffPriority
-                : int.MaxValue;
-
-            foreach (var derivedQuality in candidateFiles.Select(file => DeriveQualityLabel(file, audiobookQuality)))
+            foreach (var file in candidateFiles)
             {
-                if (derivedQuality.Length == 0)
+                var input = new AudioQualityInput
                 {
-                    continue;
-                }
+                    Codec = file.Codec,
+                    Container = file.Container,
+                    Format = file.Format,
+                    BitrateBitsPerSecond = file.Bitrate,
+                    // Path is the only quality signal when metadata processing is disabled,
+                    // ffprobe is unavailable, or extraction failed. Mirrors AudiobookQualityCutoffEvaluator
+                    // so automatic-search and library status agree for path-only files.
+                    Path = file.Path
+                };
 
-                var priority = qualityPriority.TryGetValue(derivedQuality, out var foundPriority)
-                    ? foundPriority
-                    : int.MaxValue;
-
-                if (priority <= cutoffPriority)
+                if (QualityMatcher.MeetsCutoff(input, qualityProfile))
                 {
                     return QualityMatch;
                 }
@@ -124,62 +128,19 @@ namespace Listenarr.Application.Metadata.Core
             return QualityMismatch;
         }
 
-        private static string DeriveQualityLabel(AudiobookFormatSummary? file, string? audiobookQuality)
-        {
-            var normalizedAudiobookQuality = Normalize(audiobookQuality);
-            if (normalizedAudiobookQuality.Length > 0)
-            {
-                return normalizedAudiobookQuality;
-            }
-
-            if (file?.Bitrate is int bitrate)
-            {
-                var bitrateKbps = bitrate >= 1000 ? bitrate / 1000d : bitrate;
-
-                if (bitrateKbps >= 320)
-                {
-                    return "320kbps";
-                }
-
-                if (bitrateKbps >= 256)
-                {
-                    return "256kbps";
-                }
-
-                if (bitrateKbps >= 192)
-                {
-                    return "192kbps";
-                }
-
-                return $"{Math.Round(bitrateKbps)}kbps";
-            }
-
-            var container = Normalize(file?.Container);
-            var codec = Normalize(file?.Codec);
-            if (container.Contains("flac", StringComparison.Ordinal)
-                || codec.Contains("flac", StringComparison.Ordinal)
-                || container.Contains("alac", StringComparison.Ordinal)
-                || codec.Contains("alac", StringComparison.Ordinal)
-                || container.Contains("aiff", StringComparison.Ordinal)
-                || codec.Contains("aiff", StringComparison.Ordinal)
-                || container.Contains("ape", StringComparison.Ordinal)
-                || codec.Contains("ape", StringComparison.Ordinal)
-                || container.Contains("dsd", StringComparison.Ordinal)
-                || codec.Contains("dsd", StringComparison.Ordinal)
-                || container.Contains("wv", StringComparison.Ordinal)
-                || codec.Contains("wv", StringComparison.Ordinal)
-                || container.Contains("wav", StringComparison.Ordinal)
-                || codec.Contains("wav", StringComparison.Ordinal))
-            {
-                return "lossless";
-            }
-
-            return Normalize(file?.Format);
-        }
-
         private static string Normalize(string? value)
         {
             return (value ?? string.Empty).Trim().ToLowerInvariant();
+        }
+
+        private static string ExtensionFromPath(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return string.Empty;
+            }
+
+            return Normalize(System.IO.Path.GetExtension(path).TrimStart('.'));
         }
     }
 }
