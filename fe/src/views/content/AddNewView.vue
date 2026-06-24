@@ -473,55 +473,69 @@
 
               <div class="result-meta">
                 <a
-                  v-if="
-                    audibleResult.asin &&
-                    ((audibleResult.metadataSource &&
-                      audibleResult.metadataSource.toLowerCase().includes('audible')) ||
-                      (audibleResult.searchResult &&
-                        audibleResult.searchResult.metadataSource &&
-                        audibleResult.searchResult.metadataSource
-                          .toLowerCase()
-                          .includes('audible')))
-                  "
-                  :href="audibleResultProductUrl"
+                  v-if="audibleResultSharedSourceUrl"
+                  :href="audibleResultSharedSourceUrl"
                   target="_blank"
                   rel="noopener noreferrer"
-                  class="metadata-source-link"
-                  :data-source="
-                    audibleResult.metadataSource ||
-                    (audibleResult.searchResult && audibleResult.searchResult.metadataSource)
-                  "
+                  class="metadata-source-link source-link combined-source-link"
+                  :data-source="audibleResultMetadataSource"
                 >
                   <PhGlobe />
+                  <PhCloud />
                   Audible
                 </a>
-                <span
-                  v-else-if="audibleResult.metadataSource"
-                  class="metadata-source-badge"
-                  :data-source="audibleResult.metadataSource"
-                >
-                  <PhGlobe />
-                  Metadata: {{ audibleResult.metadataSource }}
-                </span>
+                <template v-else>
+                  <a
+                    v-if="
+                      audibleResult.asin &&
+                      ((audibleResult.metadataSource &&
+                        audibleResult.metadataSource.toLowerCase().includes('audible')) ||
+                        (audibleResult.searchResult &&
+                          audibleResult.searchResult.metadataSource &&
+                          audibleResult.searchResult.metadataSource
+                            .toLowerCase()
+                            .includes('audible')))
+                    "
+                    :href="audibleResultProductUrl"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="metadata-source-link"
+                    :data-source="
+                      audibleResult.metadataSource ||
+                      (audibleResult.searchResult && audibleResult.searchResult.metadataSource)
+                    "
+                  >
+                    <PhGlobe />
+                    Audible
+                  </a>
+                  <span
+                    v-else-if="audibleResult.metadataSource"
+                    class="metadata-source-badge"
+                    :data-source="audibleResult.metadataSource"
+                  >
+                    <PhGlobe />
+                    Metadata: {{ audibleResult.metadataSource }}
+                  </span>
 
-                <a
-                  v-if="audibleResultSourceUrl"
-                  :href="audibleResultSourceUrl"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="source-link"
-                >
-                  <PhCloud />
-                  {{
-                    isAudibleHost(audibleResultSourceUrl)
-                      ? 'Audible'
-                      : `Source: ${audibleResult.source}`
-                  }}
-                </a>
-                <span v-else-if="audibleResult.source" class="source-badge">
-                  <PhCloud />
-                  Source: {{ audibleResult.source }}
-                </span>
+                  <a
+                    v-if="audibleResultSourceUrl"
+                    :href="audibleResultSourceUrl"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="source-link"
+                  >
+                    <PhCloud />
+                    {{
+                      isAudibleHost(audibleResultSourceUrl)
+                        ? 'Audible'
+                        : `Source: ${audibleResult.source}`
+                    }}
+                  </a>
+                  <span v-else-if="audibleResult.source" class="source-badge">
+                    <PhCloud />
+                    Source: {{ audibleResult.source }}
+                  </span>
+                </template>
                 <span v-if="audibleResult.explicit" class="metadata-badge">
                   <PhWarning />
                   Explicit
@@ -784,48 +798,58 @@
 
               <div class="result-meta">
                 <a
-                  v-if="book.metadataSource && getMetadataSourceUrl(book)"
-                  :href="getMetadataSourceUrl(book)"
+                  v-if="getSharedMetadataSourceUrl(book)"
+                  :href="getSharedMetadataSourceUrl(book)"
                   target="_blank"
                   rel="noopener noreferrer"
-                  class="metadata-source-link"
-                  :data-source="book.metadataSource"
+                  class="metadata-source-link source-link combined-source-link"
+                  :data-source="getBookMetadataSource(book)"
                 >
                   <PhGlobe />
-                  {{
-                    book.metadataSource && book.metadataSource.toLowerCase().includes('audible')
-                      ? 'Audible'
-                      : `Metadata: ${book.metadataSource}`
-                  }}
+                  <PhCloud />
+                  {{ getMetadataSourceLabel(getBookMetadataSource(book)) }}
                 </a>
-                <span
-                  v-else-if="book.metadataSource"
-                  class="metadata-source-badge"
-                  :data-source="book.metadataSource"
-                >
-                  <PhGlobe />
-                  Metadata: {{ book.metadataSource }}
-                </span>
+                <template v-else>
+                  <a
+                    v-if="getBookMetadataSource(book) && getMetadataSourceUrl(book)"
+                    :href="getMetadataSourceUrl(book)"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="metadata-source-link"
+                    :data-source="getBookMetadataSource(book)"
+                  >
+                    <PhGlobe />
+                    {{ getMetadataSourceLabel(getBookMetadataSource(book)) }}
+                  </a>
+                  <span
+                    v-else-if="getBookMetadataSource(book)"
+                    class="metadata-source-badge"
+                    :data-source="getBookMetadataSource(book)"
+                  >
+                    <PhGlobe />
+                    {{ getMetadataSourceLabel(getBookMetadataSource(book)) }}
+                  </span>
 
-                <!-- Prefer to show Audible as product source when metadata comes from Audible -->
-                <a
-                  v-if="getSourceUrl(book)"
-                  :href="getSourceUrl(book)"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="source-link"
-                >
-                  <PhCloud />
-                  {{
-                    isAudibleHost(getSourceUrl(book))
-                      ? 'Audible'
-                      : book.searchResult?.source || book.metadataSource || 'OpenLibrary'
-                  }}
-                </a>
-                <span v-else-if="book.searchResult?.source" class="source-badge">
-                  <PhCloud />
-                  Source: {{ book.searchResult.source }}
-                </span>
+                  <!-- Prefer to show Audible as product source when metadata comes from Audible -->
+                  <a
+                    v-if="getSourceUrl(book)"
+                    :href="getSourceUrl(book)"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="source-link"
+                  >
+                    <PhCloud />
+                    {{
+                      isAudibleHost(getSourceUrl(book))
+                        ? 'Audible'
+                        : book.searchResult?.source || getBookMetadataSource(book) || 'OpenLibrary'
+                    }}
+                  </a>
+                  <span v-else-if="book.searchResult?.source" class="source-badge">
+                    <PhCloud />
+                    Source: {{ book.searchResult.source }}
+                  </span>
+                </template>
               </div>
             </div>
 
@@ -990,7 +1014,6 @@ import { EmptyState } from '@/components/base'
 import { formatDate, formatRuntime, capitalizeLanguage } from '@/utils/searchResultFormatting'
 import {
   extractAuthors,
-  extractPublishedDate,
   normalizeSource,
   getOptionalString,
   canAddOpenLibraryResult as canAddOpenLibraryResultHelper,
@@ -1041,6 +1064,21 @@ type TitleSearchResult = Omit<OpenLibraryBook, 'isbn'> & {
 
 // Loose result type used for normalization of diverse backend shapes
 type LooseResult = Partial<SearchResult> & Record<string, unknown>
+
+const ASIN_KEYS = ['asin', 'Asin'] as const
+const METADATA_SOURCE_KEYS = ['metadataSource'] as const
+const PRODUCT_LINK_KEYS = ['productUrl', 'link', 'Link', 'sourceLink'] as const
+const PUBLISH_DATE_KEYS = [
+  'publishedDate',
+  'PublishedDate',
+  'releaseDate',
+  'ReleaseDate',
+  'release_date',
+  'Release_date',
+  'publishDate',
+  'PublishDate',
+] as const
+const SOURCE_KEYS = ['source', 'Source'] as const
 
 interface AudibleSeriesEntry {
   name?: string
@@ -1167,6 +1205,10 @@ const selectedSearchRegion = computed({
 
 const audibleResultRegion = computed(() => audibleResult.value?.region || searchLanguage.value)
 
+const audibleResultMetadataSource = computed(() => {
+  return audibleResult.value?.metadataSource ?? audibleResult.value?.searchResult?.metadataSource
+})
+
 const audibleResultProductUrl = computed(() =>
   audibleResult.value?.asin
     ? buildAudibleProductUrl(audibleResult.value.asin, audibleResultRegion.value)
@@ -1181,6 +1223,16 @@ const audibleResultSourceUrl = computed(() => {
   }
 
   return result.sourceLink
+})
+
+const audibleResultSharedSourceUrl = computed(() => {
+  const metadataSource = audibleResultMetadataSource.value
+  if (!metadataSource?.toLowerCase().includes('audible')) return undefined
+  if (!audibleResult.value?.asin) return undefined
+
+  return areSameUrl(audibleResultProductUrl.value, audibleResultSourceUrl.value)
+    ? audibleResultProductUrl.value
+    : undefined
 })
 
 // Parsed search query components (for error messages)
@@ -1460,6 +1512,31 @@ const filterResultsBySelectedLanguage = <T extends Partial<SearchResult> | Loose
   return results.filter((result) => getResultLanguageKey(result) === filter)
 }
 
+const getDateRecordValue = (
+  record: Record<string, unknown> | undefined,
+  keys: readonly string[],
+): string | undefined => {
+  if (!record) return undefined
+
+  for (const key of keys) {
+    const value = record[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+    if (value instanceof Date) return value.toISOString().split('T')[0]
+  }
+
+  return undefined
+}
+
+const getResultPublishYear = (result: LooseResult): number | undefined => {
+  const nested = getNestedResultRecord(result)
+  const publishDateStr =
+    getDateRecordValue(result, PUBLISH_DATE_KEYS) ?? getDateRecordValue(nested, PUBLISH_DATE_KEYS)
+  if (!publishDateStr) return undefined
+
+  const year = parseInt(publishDateStr.substring(0, 4), 10)
+  return Number.isNaN(year) ? undefined : year
+}
+
 const handleAdvancedSearchResults = async (results: Array<Partial<SearchResult> | LooseResult>) => {
   const filteredResults = filterResultsBySelectedLanguage(results)
 
@@ -1483,6 +1560,7 @@ const handleAdvancedSearchResults = async (results: Array<Partial<SearchResult> 
   for (const result of filteredResults) {
     const r = result as LooseResult
     const rr = r as Record<string, unknown>
+    const nestedSearchResult = getNestedResultRecord(rr)
 
     // Normalize all sources to standard TitleSearchResult
     // 1. Normalize ISBN
@@ -1492,14 +1570,10 @@ const handleAdvancedSearchResults = async (results: Array<Partial<SearchResult> 
     const authorsFromResult = extractAuthors(r)
 
     // 3. Normalize publish year
-    const publishDateStr = extractPublishedDate(r)
-    const publishYear = publishDateStr ? parseInt(publishDateStr.substring(0, 4)) : undefined
+    const publishYear = getResultPublishYear(r)
 
     // 4. Normalize source
-    let source = ''
-    try {
-      source = normalizeSource(result.metadataSource ?? result.source) || ''
-    } catch {}
+    const source = normalizeSource(getResultSourceValue(rr, nestedSearchResult)) || ''
 
     // 5. Normalize publisher
     let publisher: string[] | undefined = undefined
@@ -1518,13 +1592,10 @@ const handleAdvancedSearchResults = async (results: Array<Partial<SearchResult> 
     // 7. Normalize key
     const key = String(rr['asin'] ?? rr['id'] ?? rr['key'] ?? normalizedIsbn ?? '')
 
+    const isAudibleBacked = isAudibleBackedResult(rr, source, nestedSearchResult)
+
     // 8. Normalize metadataSource
-    let metadataSource: string | undefined = undefined
-    if (source) {
-      metadataSource = source
-    } else if (result.metadataSource) {
-      metadataSource = String(result.metadataSource)
-    }
+    const metadataSource = getAlignedMetadataSource(rr, source, nestedSearchResult)
 
     // 9. Compose TitleSearchResult
     const titleResult: TitleSearchResult = {
@@ -1548,9 +1619,8 @@ const handleAdvancedSearchResults = async (results: Array<Partial<SearchResult> 
     }
 
     const looksLikeAudibleMetadata =
-      (metadataSource && ['audible'].includes(String(metadataSource).toLowerCase())) ||
-      Boolean(rr['isEnriched']) ||
-      Boolean(rr['asin'])
+      (metadataSource && String(metadataSource).toLowerCase().includes('audible')) ||
+      isAudibleBacked
 
     if (looksLikeAudibleMetadata) {
       // Populate commonly used Audible-like fields (flattened to top-level)
@@ -2233,6 +2303,124 @@ const formatAuthors = (book: TitleSearchResult): string => {
   return book.searchResult?.artist || 'Unknown Author'
 }
 
+// Safely check whether a URL points to Audible or a subdomain of Audible. Avoids substring checks that can be
+// bypassed by crafted URLs containing 'audible.com' elsewhere (e.g., query parameters or malicious hostnames).
+const isAudibleHost = (url?: string): boolean => {
+  if (!url) return false
+  try {
+    // Use a base origin so relative URLs can be parsed too
+    const parsed = new URL(url, window.location.origin)
+    const host = parsed.hostname.toLowerCase()
+    return host.startsWith('audible.') || host.startsWith('www.audible.')
+  } catch {
+    // If parsing fails, treat as not audible
+    return false
+  }
+}
+
+const areSameUrl = (left?: string, right?: string): boolean => {
+  if (!left || !right) return false
+
+  try {
+    return (
+      new URL(left, window.location.origin).href === new URL(right, window.location.origin).href
+    )
+  } catch {
+    return left === right
+  }
+}
+
+const getStringRecordValue = (
+  record: Record<string, unknown> | undefined,
+  keys: readonly string[],
+): string | undefined => {
+  if (!record) return undefined
+
+  for (const key of keys) {
+    const value = record[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+
+  return undefined
+}
+
+const getNestedResultRecord = (
+  record: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined => {
+  const nested = record?.['searchResult']
+  return nested && typeof nested === 'object' ? (nested as Record<string, unknown>) : undefined
+}
+
+const getExplicitAsinValue = (
+  record: Record<string, unknown> | undefined,
+  nested = getNestedResultRecord(record),
+): string | undefined => {
+  return getStringRecordValue(record, ASIN_KEYS) ?? getStringRecordValue(nested, ASIN_KEYS)
+}
+
+const getResultProductLink = (
+  record: Record<string, unknown> | undefined,
+  nested = getNestedResultRecord(record),
+): string | undefined => {
+  return (
+    getStringRecordValue(record, PRODUCT_LINK_KEYS) ??
+    getStringRecordValue(nested, PRODUCT_LINK_KEYS)
+  )
+}
+
+const getResultSourceValue = (
+  record: Record<string, unknown> | undefined,
+  nested = getNestedResultRecord(record),
+): string | undefined => {
+  return (
+    getStringRecordValue(record, METADATA_SOURCE_KEYS) ??
+    getStringRecordValue(nested, METADATA_SOURCE_KEYS) ??
+    getStringRecordValue(record, SOURCE_KEYS) ??
+    getStringRecordValue(nested, SOURCE_KEYS)
+  )
+}
+
+const isAudibleBackedResult = (
+  record: Record<string, unknown> | undefined,
+  normalizedSource = '',
+  nested = getNestedResultRecord(record),
+): boolean => {
+  const sourceValues = [
+    normalizedSource,
+    getStringRecordValue(record, METADATA_SOURCE_KEYS),
+    getStringRecordValue(nested, METADATA_SOURCE_KEYS),
+    getStringRecordValue(record, SOURCE_KEYS),
+    getStringRecordValue(nested, SOURCE_KEYS),
+  ]
+
+  return (
+    sourceValues.some((source) => source?.toLowerCase().includes('audible')) ||
+    Boolean(record?.['isEnriched'] ?? nested?.['isEnriched']) ||
+    Boolean(getExplicitAsinValue(record, nested)) ||
+    isAudibleHost(getResultProductLink(record, nested))
+  )
+}
+
+const getAlignedMetadataSource = (
+  record: Record<string, unknown> | undefined,
+  normalizedSource = '',
+  nested = getNestedResultRecord(record),
+): string | undefined => {
+  if (normalizedSource) return normalizedSource
+
+  const explicitSource =
+    getStringRecordValue(record, METADATA_SOURCE_KEYS) ??
+    getStringRecordValue(nested, METADATA_SOURCE_KEYS)
+  if (explicitSource) return explicitSource
+
+  return isAudibleBackedResult(record, normalizedSource, nested) ? 'audible' : undefined
+}
+
+const getMetadataSourceLabel = (source?: string): string => {
+  if (!source) return ''
+  return source.toLowerCase().includes('audible') ? 'Audible' : `Metadata: ${source}`
+}
+
 /**
  * Normalises the region and productUrl fields on a raw title result record.
  * Propagates the resolved region into the nested searchResult, then determines
@@ -2249,8 +2437,8 @@ const normalizeResultRegionAndProductUrl = (
   if (tr['region']) {
     ;(tr['searchResult'] as Record<string, unknown>)['region'] = tr['region']
   }
-  const rawProductUrl = rrRes['productUrl'] ?? rrRes['link'] ?? rrRes['Link'] ?? undefined
-  const asin = typeof tr['asin'] === 'string' ? tr['asin'] : undefined
+  const rawProductUrl = getResultProductLink(rrRes)
+  const asin = getExplicitAsinValue(tr, rrRes)
   const resultRegion = typeof tr['region'] === 'string' ? tr['region'] : searchLanguage.value
   const sourceIsAudible =
     String(titleResult.metadataSource ?? '')
@@ -2266,29 +2454,69 @@ const normalizeResultRegionAndProductUrl = (
 }
 
 const getAsin = (book: TitleSearchResult): string | null => {
-  return book.searchResult?.asin || resolvedAsins.value[book.key] || null
+  return (
+    ((book as unknown as Record<string, unknown>)['asin'] as string | undefined) ||
+    book.searchResult?.asin ||
+    getNestedSearchResultValue<string>(book, 'asin') ||
+    resolvedAsins.value[book.key] ||
+    null
+  )
 }
 
 const getResultRegion = (book: TitleSearchResult): string => {
   const rawRegion =
-    book.region ?? (book.searchResult as Record<string, unknown> | undefined)?.['region']
+    book.region ??
+    (book.searchResult as Record<string, unknown> | undefined)?.['region'] ??
+    getNestedSearchResultValue<string>(book, 'region')
   return typeof rawRegion === 'string' && rawRegion.trim() ? rawRegion : searchLanguage.value
 }
 
-const getMetadataSourceUrl = (book: TitleSearchResult): string | undefined => {
+const getNestedSearchResultValue = <T,>(book: TitleSearchResult, field: string): T | undefined => {
+  const nested = getNestedResultRecord(book.searchResult as Record<string, unknown> | undefined)
+  return nested?.[field] as T | undefined
+}
+
+const getBookMetadataSource = (book: TitleSearchResult): string | undefined => {
   const source =
     book.metadataSource ??
-    ((book.searchResult as unknown as Record<string, unknown>)['metadataSource'] as
+    ((book.searchResult as Record<string, unknown> | undefined)?.['metadataSource'] as
       | string
-      | undefined)
+      | undefined) ??
+    getNestedSearchResultValue<string>(book, 'metadataSource')
+
+  return typeof source === 'string' && source.trim() ? source : undefined
+}
+
+const getBookProductUrl = (book: TitleSearchResult): string | undefined => {
+  const bookRecord = book as unknown as Record<string, unknown>
+  const searchResultRecord = book.searchResult as Record<string, unknown> | undefined
+
+  return (
+    getResultProductLink(bookRecord, searchResultRecord) ?? getResultProductLink(searchResultRecord)
+  )
+}
+
+const getSharedMetadataSourceUrl = (book: TitleSearchResult): string | undefined => {
+  if (!getBookMetadataSource(book)) return undefined
+
+  const metadataUrl = getMetadataSourceUrl(book)
+  const sourceUrl = getSourceUrl(book)
+  return areSameUrl(metadataUrl, sourceUrl) ? metadataUrl : undefined
+}
+
+const getMetadataSourceUrl = (book: TitleSearchResult): string | undefined => {
+  const source = getBookMetadataSource(book)
   if (!source) return undefined
 
   // OpenLibrary metadata does not require an ASIN; prefer resultUrl (JSON) then productUrl or OL work URL
   if (source.toLowerCase().includes('openlibrary')) {
     // Prefer the canonical metadata/result URL (e.g., OpenLibrary .json) if provided
     if (book.searchResult?.resultUrl) return book.searchResult.resultUrl
+    const nestedResultUrl = getNestedSearchResultValue<string>(book, 'resultUrl')
+    if (nestedResultUrl) return nestedResultUrl
     // Fall back to productUrl (human-facing page) if resultUrl is not available
-    if (book.searchResult?.productUrl) return book.searchResult.productUrl
+    const productUrl = getBookProductUrl(book)
+    if (productUrl) return productUrl
     const olBook = book as OpenLibraryBook
     // Avoid using our local generated keys (they start with 'search-') — prefer real OL identifiers
     const candidateKey = (olBook.key || '').toString()
@@ -2333,17 +2561,24 @@ const getMetadataSourceUrl = (book: TitleSearchResult): string | undefined => {
   }
 
   const asin = getAsin(book)
-  if (!asin) return undefined
+  const productUrl = getBookProductUrl(book)
 
   // Map metadata source to URL for ASIN-based providers
   if (source.toLowerCase().includes('audible')) {
+    if (productUrl) return productUrl
+    if (!asin) return undefined
     return buildAudibleProductUrl(asin, getResultRegion(book))
   } else if (source.toLowerCase().includes('audnex')) {
+    if (!asin) return undefined
     // Audnexus API format
     return `https://api.audnex.us/books/${asin}`
   } else if (source === 'Amazon') {
+    if (productUrl) return productUrl
+    if (!asin) return undefined
     return buildAmazonProductUrl(asin, getResultRegion(book))
   } else if (source === 'Audible') {
+    if (productUrl) return productUrl
+    if (!asin) return undefined
     return buildAudibleProductUrl(asin, getResultRegion(book))
   }
 
@@ -2353,23 +2588,16 @@ const getMetadataSourceUrl = (book: TitleSearchResult): string | undefined => {
 // Get a sensible 'source' URL for the book (indexer/product or OpenLibrary work page)
 const getSourceUrl = (book: TitleSearchResult): string | undefined => {
   const asin = getAsin(book)
-  const metaSource = (
-    book.metadataSource ??
-    ((book.searchResult as unknown as Record<string, unknown>)['metadataSource'] as
-      | string
-      | undefined) ??
-    ''
-  )
-    .toString()
-    .toLowerCase()
+  const metaSource = (getBookMetadataSource(book) ?? '').toString().toLowerCase()
 
   // Prefer explicit productUrl from the enriched SearchResult
-  if (book.searchResult?.productUrl) {
-    if ((metaSource.includes('audible') || isAudibleHost(book.searchResult.productUrl)) && asin) {
+  const productUrl = getBookProductUrl(book)
+  if (productUrl) {
+    if ((metaSource.includes('audible') || isAudibleHost(productUrl)) && asin) {
       return buildAudibleProductUrl(asin, getResultRegion(book))
     }
 
-    return book.searchResult.productUrl
+    return productUrl
   }
 
   // If metadata indicates Audible-backed metadata, link to the Audible product page when possible.
@@ -2398,21 +2626,6 @@ const getSourceUrl = (book: TitleSearchResult): string | undefined => {
   }
 
   return undefined
-}
-
-// Safely check whether a URL points to Audible or a subdomain of Audible. Avoids substring checks that can be
-// bypassed by crafted URLs containing 'audible.com' elsewhere (e.g., query parameters or malicious hostnames).
-const isAudibleHost = (url?: string): boolean => {
-  if (!url) return false
-  try {
-    // Use a base origin so relative URLs can be parsed too
-    const parsed = new URL(url, window.location.origin)
-    const host = parsed.hostname.toLowerCase()
-    return host.startsWith('audible.') || host.startsWith('www.audible.')
-  } catch {
-    // If parsing fails, treat as not audible
-    return false
-  }
 }
 
 // Extract ISBN candidates from an OpenLibrary-derived TitleSearchResult
@@ -2800,10 +3013,12 @@ const handleSimpleSearchResults = async (results: SearchResult[]) => {
   }
 
   for (const result of filteredResults) {
+    const rr = result as unknown as Record<string, unknown>
+    const nestedSearchResult = getNestedResultRecord(rr)
+
     // Normalize common metadata keys from backend variations so the template
     // consistently finds `subtitle`/`subtitles`, `narrator` and `source`.
     try {
-      const rr = result as unknown as Record<string, unknown>
       // subtitles may be provided as `subtitle`, `Subtitle`, `Subtitles` or `subtitles`
       rr['subtitles'] =
         rr['subtitles'] ?? rr['subtitle'] ?? rr['Subtitle'] ?? rr['Subtitles'] ?? undefined
@@ -2829,27 +3044,12 @@ const handleSimpleSearchResults = async (results: SearchResult[]) => {
           rr['narrator'] = rr['Narrator'] as string
         }
       }
-
-      // Normalize legacy/current Audible-backed metadata source values for display.
-      if (rr['metadataSource'] && String(rr['metadataSource']).toLowerCase().includes('audible')) {
-        rr['source'] = 'Audible'
-      }
     } catch (e) {
       // swallow normalization errors
       logger.debug('Normalization failed for simple result', e)
     }
 
-    // Extract year from publishedDate if it's a Date object, otherwise parse string
-    let publishYear: number | undefined
-    const dateStr = result.publishedDate
-    if (dateStr) {
-      if (typeof dateStr === 'object') {
-        publishYear = (dateStr as Date).getFullYear()
-      } else if (typeof dateStr === 'string') {
-        const year = parseInt(dateStr.substring(0, 4))
-        if (!isNaN(year)) publishYear = year
-      }
-    }
+    const publishYear = getResultPublishYear(result as unknown as LooseResult)
 
     const authorsFromResult = ((): string[] => {
       const rrec = result as unknown as Record<string, unknown>
@@ -2907,14 +3107,19 @@ const handleSimpleSearchResults = async (results: SearchResult[]) => {
       return []
     })()
 
+    const source = normalizeSource(getResultSourceValue(rr, nestedSearchResult)) || ''
+    const metadataSource = getAlignedMetadataSource(rr, source, nestedSearchResult)
+    const isAudibleBacked = isAudibleBackedResult(rr, source, nestedSearchResult)
+    if (metadataSource?.toLowerCase().includes('audible')) {
+      rr['source'] = 'Audible'
+    }
+
     // If the result looks like an Audible-backed audiobook result (or explicitly marked),
     // prefer to populate the richer audiobook-shaped fields so the Add New UI
     // can surface subtitles, narrators, runtime, publish date, etc.
     const looksLikeAudibleMetadata =
-      (result.metadataSource &&
-        ['audible', 'audible'].includes(String(result.metadataSource).toLowerCase())) ||
-      Boolean(result.isEnriched) ||
-      Boolean(result.asin)
+      (metadataSource && String(metadataSource).toLowerCase().includes('audible')) ||
+      isAudibleBacked
 
     const titleResult: TitleSearchResult = {
       title: result.title || '',
@@ -2932,17 +3137,7 @@ const handleSimpleSearchResults = async (results: SearchResult[]) => {
       searchResult: result,
       imageUrl: result.imageUrl,
       // Prefer explicit metadataSource, but normalize Audible-backed results to a stable label.
-      metadataSource: (looksLikeAudibleMetadata
-        ? 'audible'
-        : (result.metadataSource ??
-          ((result as unknown as Record<string, unknown>)['searchResult']
-            ? (
-                (result as unknown as Record<string, unknown>)['searchResult'] as Record<
-                  string,
-                  unknown
-                >
-              )['metadataSource']
-            : undefined))) as string | undefined,
+      metadataSource,
       // forward publisher into the top-level TitleSearchResult so template's publisher check works
       publisher: Array.isArray(result.publisher)
         ? result.publisher

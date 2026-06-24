@@ -127,6 +127,7 @@ public class AsinSearchHandler
         if (metadata != null)
         {
             await _searchProgressReporter.BroadcastAsync($"Found audiobook: {metadata.Title}", null);
+            metadata.Region ??= safeRegion;
             var result = await _metadataConverters.ConvertMetadataToSearchResultAsync(metadata, asin, null, null, null);
             _logger.LogInformation("Converted metadata to SearchResult: Title={Title}, Series={Series}, SeriesNumber={SeriesNumber}",
                 result.Title, result.Series, result.SeriesNumber);

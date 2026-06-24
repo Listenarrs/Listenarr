@@ -146,39 +146,53 @@
       <slot name="meta-links">
         <div class="result-meta">
           <a
-            v-if="metadataSourceUrl"
-            :href="metadataSourceUrl"
+            v-if="sharedMetadataSourceUrl"
+            :href="sharedMetadataSourceUrl"
             target="_blank"
             rel="noopener noreferrer"
-            class="metadata-source-link"
-            :data-source="book.metadataSource"
+            class="metadata-source-link source-link combined-source-link"
+            :data-source="metadataSource"
           >
             <PhGlobe />
+            <PhCloud />
             {{ metadataSourceLabel }}
           </a>
-          <span
-            v-else-if="book.metadataSource"
-            class="metadata-source-badge"
-            :data-source="book.metadataSource"
-          >
-            <PhGlobe />
-            {{ metadataSourceLabel }}
-          </span>
+          <template v-else>
+            <a
+              v-if="metadataSource && metadataSourceUrl"
+              :href="metadataSourceUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="metadata-source-link"
+              :data-source="metadataSource"
+            >
+              <PhGlobe />
+              {{ metadataSourceLabel }}
+            </a>
+            <span
+              v-else-if="metadataSource"
+              class="metadata-source-badge"
+              :data-source="metadataSource"
+            >
+              <PhGlobe />
+              {{ metadataSourceLabel }}
+            </span>
 
-          <a
-            v-if="sourceUrl"
-            :href="sourceUrl"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="source-link"
-          >
-            <PhCloud />
-            {{ sourceLabel }}
-          </a>
-          <span v-else-if="book.searchResult?.source" class="source-badge">
-            <PhCloud />
-            Source: {{ book.searchResult.source }}
-          </span>
+            <a
+              v-if="sourceUrl"
+              :href="sourceUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="source-link"
+            >
+              <PhCloud />
+              {{ sourceLabel }}
+            </a>
+            <span v-else-if="book.searchResult?.source" class="source-badge">
+              <PhCloud />
+              Source: {{ book.searchResult.source }}
+            </span>
+          </template>
         </div>
       </slot>
     </div>
@@ -269,6 +283,13 @@ const openLibraryId = computed(() => {
   return props.book.searchResult?.id || props.book.key || undefined
 })
 
+const nestedSearchResult = computed(() => {
+  const nested = (props.book.searchResult as unknown as Record<string, unknown> | undefined)?.[
+    'searchResult'
+  ]
+  return nested && typeof nested === 'object' ? (nested as Record<string, unknown>) : undefined
+})
+
 /**
  * Format author names from various sources
  */
@@ -302,9 +323,22 @@ const formatAuthors = (book: typeof props.book): string => {
 const isAudibleHost = (url?: string): boolean => {
   if (!url) return false
   try {
-    return /audible\.|audible-/i.test(new URL(url).hostname)
+    const host = new URL(url, window.location.origin).hostname.toLowerCase()
+    return host.startsWith('audible.') || host.startsWith('www.audible.')
   } catch {
     return false
+  }
+}
+
+const areSameUrl = (left?: string, right?: string): boolean => {
+  if (!left || !right) return false
+
+  try {
+    return (
+      new URL(left, window.location.origin).href === new URL(right, window.location.origin).href
+    )
+  } catch {
+    return left === right
   }
 }
 
@@ -312,10 +346,24 @@ const isAudibleHost = (url?: string): boolean => {
  * Generate metadata source label
  */
 const metadataSourceLabel = computed((): string => {
-  if (!props.book.metadataSource) return ''
-  const source = props.book.metadataSource.toLowerCase()
+  if (!metadataSource.value) return ''
+  const source = metadataSource.value.toLowerCase()
   if (source.includes('audible')) return 'Audible'
-  return `Metadata: ${props.book.metadataSource}`
+  return `Metadata: ${metadataSource.value}`
+})
+
+const metadataSource = computed((): string | undefined => {
+  const source =
+    props.book.metadataSource ??
+    props.book.searchResult?.metadataSource ??
+    (nestedSearchResult.value?.['metadataSource'] as string | undefined)
+
+  return typeof source === 'string' && source.trim() ? source : undefined
+})
+
+const sharedMetadataSourceUrl = computed((): string | undefined => {
+  if (!metadataSource.value) return undefined
+  return areSameUrl(props.metadataSourceUrl, props.sourceUrl) ? props.metadataSourceUrl : undefined
 })
 
 /**
@@ -324,7 +372,12 @@ const metadataSourceLabel = computed((): string => {
 const sourceLabel = computed((): string => {
   if (!props.sourceUrl) return ''
   if (isAudibleHost(props.sourceUrl)) return 'Audible'
-  return props.book.searchResult?.source || props.book.metadataSource || 'OpenLibrary'
+  return (
+    props.book.searchResult?.source ||
+    (nestedSearchResult.value?.['source'] as string | undefined) ||
+    metadataSource.value ||
+    'OpenLibrary'
+  )
 })
 </script>
 

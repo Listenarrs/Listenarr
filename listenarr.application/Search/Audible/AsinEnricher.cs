@@ -58,6 +58,7 @@ public class AsinEnricher
         Dictionary<string, OpenLibraryBook> asinToOpenLibrary,
         List<ApiConfiguration> metadataSources,
         string? query,
+        string? region = null,
         CancellationToken ct = default)
     {
         using var semaphore = new AsyncNonKeyedLocker(5); // Increased from 3 to 5 for better throughput
@@ -154,7 +155,7 @@ public class AsinEnricher
                         ct.ThrowIfCancellationRequested();
                         await _searchProgressReporter.BroadcastAsync($"Fetching metadata for ASIN: {asin}", asin);
                         (metadata, metadataSourceName) = await _metadataStrategyCoordinator.FetchMetadataAsync(
-                            asin, metadataSources, originalSource);
+                            asin, metadataSources, originalSource, region);
                     }
 
                     // If all metadata sources failed, queue for fallback handling
@@ -171,6 +172,7 @@ public class AsinEnricher
 
                     if (metadata != null)
                     {
+                        metadata.Region ??= AudiobookIdentifierNormalizer.NormalizeRegion(region);
                         // Accept metadata even if Title is missing. ConvertMetadataToSearchResult
                         // will use raw result title as fallback if metadata title is empty.
                         var enrichedResult = await _metadataConverters.ConvertMetadataToSearchResultAsync(metadata, asin, rawResult.Title, rawResult.Author, rawResult.ImageUrl, rawResult.Language);
@@ -248,4 +250,3 @@ public record EnrichmentResult(
     List<SearchResult> EnrichedResults,
     List<string> AsinsNeedingFallback,
     ConcurrentDictionary<string, string> CandidateDropReasons);
-

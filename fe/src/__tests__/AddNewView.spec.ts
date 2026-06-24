@@ -24,6 +24,7 @@ import { createRouter, createMemoryHistory } from 'vue-router'
 import AddNewView from '@/views/content/AddNewView.vue'
 import { useLibraryStore } from '@/stores/library'
 import { useConfigurationStore } from '@/stores/configuration'
+import type { SearchResult } from '@/types'
 
 // apiService and signalR are mocked centrally in test-setup.ts
 
@@ -754,6 +755,9 @@ describe('AddNewView pagination', () => {
     expect(sourceLink.exists()).toBe(true)
     expect(sourceLink.attributes('href')).toBe('https://www.audible.de/pd/BAUD1')
     expect(sourceLink.text()).toContain('Audible')
+    expect(wrapper.findAll('.result-meta a')).toHaveLength(1)
+    expect(sourceLink.classes()).toContain('metadata-source-link')
+    expect(sourceLink.findAll('svg')).toHaveLength(2)
   })
 
   it('shows Amazon metadata badge links for the selected result region', async () => {
@@ -783,6 +787,106 @@ describe('AddNewView pagination', () => {
     expect(metaLink.exists()).toBe(true)
     expect(metaLink.attributes('href')).toBe('https://www.amazon.de/dp/BAMZ1')
     expect(metaLink.text()).toContain('Metadata: Amazon')
+  })
+
+  it('shows metadata and source links for simple Audible-backed card results', async () => {
+    const router = createTestRouter()
+    const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    const vm = wrapper.vm as unknown as {
+      handleSimpleSearchResults?: (results: SearchResult[]) => Promise<void>
+    }
+
+    await vm.handleSimpleSearchResults?.([
+      {
+        id: 'simple-audible-url',
+        title: 'Simple Audible Result',
+        artist: 'Author Name',
+        album: '',
+        category: '',
+        source: '',
+        sourceLink: '',
+        publishedDate: '',
+        format: '',
+        size: 0,
+        magnetLink: '',
+        torrentUrl: '',
+        nzbUrl: '',
+        downloadType: 'Torrent',
+        language: 'english',
+        publisher: 'Pottermore Publishing',
+        releaseDate: '2016-11-20',
+        link: 'https://www.audible.de/pd/B01M02FJ7A',
+      },
+    ])
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    const metaLink = wrapper.find('.title-results .metadata-source-link')
+    expect(metaLink.exists()).toBe(true)
+    expect(metaLink.attributes('data-source')).toBe('audible')
+    expect(metaLink.attributes('href')).toBe('https://www.audible.de/pd/B01M02FJ7A')
+    expect(metaLink.text()).toContain('Audible')
+
+    const sourceLink = wrapper.find('.title-results .source-link')
+    expect(sourceLink.exists()).toBe(true)
+    expect(sourceLink.attributes('href')).toBe('https://www.audible.de/pd/B01M02FJ7A')
+    expect(sourceLink.text()).toContain('Audible')
+    expect(wrapper.findAll('.title-results .result-meta a')).toHaveLength(1)
+    expect(sourceLink.classes()).toContain('metadata-source-link')
+    expect(sourceLink.findAll('svg')).toHaveLength(2)
+
+    const badgeText = wrapper
+      .findAll('.title-results .metadata-badges .metadata-badge')
+      .map((badge) => badge.text())
+    expect(badgeText).toContain('Pottermore Publishing')
+    expect(badgeText).toContain('2016')
+  })
+
+  it('shows metadata and source links for advanced Audible-backed results', async () => {
+    const apiModule = await import('@/services/api')
+    const advancedSearchSpy = vi.spyOn(apiModule.apiService, 'advancedSearch').mockResolvedValue([
+      {
+        asin: 'B01M02FJ7A',
+        region: 'de',
+        title: 'Advanced Audible Result',
+        author: 'Author Name',
+        language: 'english',
+        link: 'https://www.audible.de/pd/B01M02FJ7A',
+      },
+    ])
+
+    try {
+      const router = createTestRouter()
+      const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+      const vm = wrapper.vm as unknown as {
+        showAdvancedSearch?: boolean
+        advancedSearchParams?: Record<string, unknown>
+        performAdvancedSearch?: () => Promise<void>
+      }
+
+      vm.showAdvancedSearch = true
+      vm.advancedSearchParams = { title: 'Advanced Audible Result' }
+
+      await vm.performAdvancedSearch?.()
+      await flushPromises()
+      await wrapper.vm.$nextTick()
+
+      const metaLink = wrapper.find('.title-results .metadata-source-link')
+      expect(metaLink.exists()).toBe(true)
+      expect(metaLink.attributes('data-source')).toBe('audible')
+      expect(metaLink.attributes('href')).toBe('https://www.audible.de/pd/B01M02FJ7A')
+      expect(metaLink.text()).toContain('Audible')
+
+      const sourceLink = wrapper.find('.title-results .source-link')
+      expect(sourceLink.exists()).toBe(true)
+      expect(sourceLink.attributes('href')).toBe('https://www.audible.de/pd/B01M02FJ7A')
+      expect(sourceLink.text()).toContain('Audible')
+      expect(wrapper.findAll('.title-results .result-meta a')).toHaveLength(1)
+      expect(sourceLink.classes()).toContain('metadata-source-link')
+      expect(sourceLink.findAll('svg')).toHaveLength(2)
+    } finally {
+      advancedSearchSpy.mockRestore()
+    }
   })
 
   it('does not label non-Audible URLs containing audible.com as Audible', async () => {

@@ -149,6 +149,7 @@ namespace Listenarr.Application.Search.Core
                     asinToOpenLibrary,
                     metadataSources,
                     query,
+                    region,
                     ct);
 
                 var enrichedList = enrichmentResult.EnrichedResults;

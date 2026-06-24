@@ -41,11 +41,13 @@ public class MetadataStrategyCoordinator
     /// <param name="asin">The ASIN to fetch metadata for</param>
     /// <param name="metadataSources">List of metadata sources to try in order</param>
     /// <param name="originalSource">Original source where ASIN was found (Amazon/Audible)</param>
+    /// <param name="region">Requested marketplace region for region-specific providers</param>
     /// <returns>Tuple of (metadata, sourceName) if successful, (null, null) otherwise</returns>
     public async Task<(AudibleBookMetadata? metadata, string? sourceName)> FetchMetadataAsync(
         string asin,
         List<ApiConfiguration> metadataSources,
-        string? originalSource)
+        string? originalSource,
+        string? region = null)
     {
         if (metadataSources.Count > 0)
         {
@@ -70,7 +72,7 @@ public class MetadataStrategyCoordinator
                     continue;
                 }
 
-                var metadata = await strategy.FetchMetadataAsync(asin, source, originalSource);
+                var metadata = await strategy.FetchMetadataAsync(asin, source, originalSource, region);
 
                 if (metadata != null)
                 {
@@ -88,4 +90,3 @@ public class MetadataStrategyCoordinator
         return (null, null);
     }
 }
-

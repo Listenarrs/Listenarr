@@ -508,5 +508,75 @@ describe('SearchResultCard', () => {
       const text = wrapper.text()
       expect(text).toContain('Metadata: openlibrary')
     })
+
+    it('shows nested metadata source badges', () => {
+      const wrapper = mount(SearchResultCard, {
+        props: {
+          book: {
+            ...mockBook,
+            metadataSource: undefined,
+            searchResult: {
+              ...mockBook.searchResult,
+              metadataSource: undefined,
+              searchResult: {
+                metadataSource: 'Amazon',
+              },
+            } as unknown as SearchResult,
+          },
+        },
+      })
+
+      const badge = wrapper.find('.metadata-source-badge')
+      expect(badge.exists()).toBe(true)
+      expect(badge.attributes('data-source')).toBe('Amazon')
+      expect(badge.text()).toContain('Metadata: Amazon')
+    })
+
+    it('labels metadata links from nested metadata source', () => {
+      const wrapper = mount(SearchResultCard, {
+        props: {
+          book: {
+            ...mockBook,
+            metadataSource: undefined,
+            searchResult: {
+              ...mockBook.searchResult,
+              metadataSource: undefined,
+              searchResult: {
+                metadataSource: 'Amazon',
+              },
+            } as unknown as SearchResult,
+          },
+          metadataSourceUrl: 'https://www.amazon.de/dp/BAMZ2',
+        },
+      })
+
+      const link = wrapper.find('.metadata-source-link')
+      expect(link.exists()).toBe(true)
+      expect(link.attributes('href')).toBe('https://www.amazon.de/dp/BAMZ2')
+      expect(link.attributes('data-source')).toBe('Amazon')
+      expect(link.text()).toContain('Metadata: Amazon')
+    })
+
+    it('combines metadata and source links when urls match', () => {
+      const wrapper = mount(SearchResultCard, {
+        props: {
+          book: {
+            ...mockBook,
+            metadataSource: 'audible',
+          },
+          metadataSourceUrl: 'https://www.audible.de/pd/B01M02FJ7A',
+          sourceUrl: 'https://www.audible.de/pd/B01M02FJ7A',
+        },
+      })
+
+      const links = wrapper.findAll('.result-meta a')
+      expect(links).toHaveLength(1)
+      const link = links[0]!
+      expect(link.classes()).toContain('metadata-source-link')
+      expect(link.classes()).toContain('source-link')
+      expect(link.attributes('href')).toBe('https://www.audible.de/pd/B01M02FJ7A')
+      expect(link.text()).toContain('Audible')
+      expect(link.findAll('svg')).toHaveLength(2)
+    })
   })
 })
