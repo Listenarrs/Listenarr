@@ -332,6 +332,20 @@ namespace Listenarr.Tests.Features.Domain.Utils
             Assert.False(QualityMatcher.MeetsCutoff(file, profile));
         }
 
+        [Fact]
+        public void MeetsCutoff_DisabledLowerRung_DoesNotPromoteFileToHigherAllowedRung()
+        {
+            var profile = new QualityProfileBuilder()
+                .WithName("DisabledLowerRung")
+                .WithCutoff("AAC 320kbps")
+                .WithQuality("AAC 320kbps", 0, codec: "AAC", bitrate: 320)
+                .WithQuality("AAC 256kbps", 1, codec: "AAC", bitrate: 256, allowed: false)
+                .Build();
+            var file = new AudioQualityInput { Codec = "aac", BitrateBitsPerSecond = 256_000 };
+
+            Assert.False(QualityMatcher.MeetsCutoff(file, profile));
+        }
+
         // ---- LabelMeetsCutoff & IsLabelBetter ---------------------------------------------
 
         [Fact]
