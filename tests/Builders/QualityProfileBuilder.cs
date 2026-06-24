@@ -29,7 +29,13 @@ namespace Listenarr.Tests.Builders
             return this;
         }
 
-        public QualityProfileBuilder WithQuality(string quality, int priority, string? codec = null, int? bitrate = null, bool lossless = false)
+        public QualityProfileBuilder WithQuality(
+            string quality,
+            int priority,
+            string? codec = null,
+            int? bitrate = null,
+            bool lossless = false,
+            bool allowed = true)
         {
             _qualityProfile.Qualities.Add(new QualityDefinition
             {
@@ -37,7 +43,8 @@ namespace Listenarr.Tests.Builders
                 Priority = priority,
                 Codec = codec,
                 Bitrate = bitrate,
-                IsLossless = lossless
+                IsLossless = lossless,
+                Allowed = allowed
             });
             return this;
         }

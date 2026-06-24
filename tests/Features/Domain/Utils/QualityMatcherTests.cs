@@ -111,6 +111,21 @@ namespace Listenarr.Tests.Features.Domain.Utils
             Assert.Equal(QualityMatchKind.CodecMismatch, result.Kind);
         }
 
+        [Fact]
+        public void Match_DisabledMatchingRung_IsNotReturnedAsMatch()
+        {
+            var profile = new QualityProfileBuilder()
+                .WithName("DisabledAac")
+                .WithQuality("AAC 256kbps", 0, codec: "AAC", bitrate: 256, allowed: false)
+                .Build();
+            var file = new AudioQualityInput { Codec = "aac", BitrateBitsPerSecond = 256_000 };
+
+            var result = QualityMatcher.Match(file, profile);
+
+            Assert.False(result.IsMatch);
+            Assert.Equal(QualityMatchKind.Unknown, result.Kind);
+        }
+
         // ---- lossless ---------------------------------------------------------------------
 
         [Fact]
@@ -304,7 +319,20 @@ namespace Listenarr.Tests.Features.Domain.Utils
             Assert.False(QualityMatcher.MeetsCutoff(file, profile));
         }
 
-        // ---- LabelMeetsCutoff & IsLabelBetter & ProfileContainsHint -----------------------
+        [Fact]
+        public void MeetsCutoff_DisabledCutoffRung_IsFalse()
+        {
+            var profile = new QualityProfileBuilder()
+                .WithName("DisabledCutoff")
+                .WithCutoff("AAC 256kbps")
+                .WithQuality("AAC 256kbps", 0, codec: "AAC", bitrate: 256, allowed: false)
+                .Build();
+            var file = new AudioQualityInput { Codec = "aac", BitrateBitsPerSecond = 256_000 };
+
+            Assert.False(QualityMatcher.MeetsCutoff(file, profile));
+        }
+
+        // ---- LabelMeetsCutoff & IsLabelBetter ---------------------------------------------
 
         [Fact]
         public void LabelMeetsCutoff_HonoursPriorityDirection()
@@ -314,6 +342,18 @@ namespace Listenarr.Tests.Features.Domain.Utils
             Assert.True(QualityMatcher.LabelMeetsCutoff("AAC 320kbps", profile));
             Assert.True(QualityMatcher.LabelMeetsCutoff("AAC 256kbps", profile));
             Assert.False(QualityMatcher.LabelMeetsCutoff("AAC 192kbps", profile));
+        }
+
+        [Fact]
+        public void LabelMeetsCutoff_DisabledDownloadQuality_IsFalse()
+        {
+            var profile = new QualityProfileBuilder()
+                .WithName("DisabledDownloadQuality")
+                .WithCutoff("AAC 256kbps")
+                .WithQuality("AAC 256kbps", 0, codec: "AAC", bitrate: 256, allowed: false)
+                .Build();
+
+            Assert.False(QualityMatcher.LabelMeetsCutoff("AAC 256kbps", profile));
         }
 
         [Fact]
@@ -338,15 +378,15 @@ namespace Listenarr.Tests.Features.Domain.Utils
         }
 
         [Fact]
-        public void ProfileContainsHint_IsCaseInsensitive()
+        public void IsLabelBetter_AllowedCandidateBeatsDisabledExistingQuality()
         {
             var profile = new QualityProfileBuilder()
-                .WithName("Custom")
-                .WithQuality("Audible AAX", 0)
+                .WithName("DisabledExisting")
+                .WithQuality("AAC 320kbps", 0, codec: "AAC", bitrate: 320)
+                .WithQuality("AAC 256kbps", 1, codec: "AAC", bitrate: 256, allowed: false)
                 .Build();
 
-            Assert.True(QualityMatcher.ProfileContainsHint(profile, "audible aax"));
-            Assert.False(QualityMatcher.ProfileContainsHint(profile, "FLAC"));
+            Assert.True(QualityMatcher.IsLabelBetter("AAC 320kbps", "AAC 256kbps", profile));
         }
     }
 }

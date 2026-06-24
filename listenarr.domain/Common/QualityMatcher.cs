@@ -92,10 +92,14 @@ namespace Listenarr.Domain.Common
             var fileIsLossless = IsLosslessFile(file);
             var fileKbps = NormalizeKbps(file.BitrateBitsPerSecond);
 
-            var effective = profile.Qualities
-                .Where(q => q != null && !string.IsNullOrWhiteSpace(q.Quality))
+            var effective = AllowedQualities(profile)
                 .Select(EffectiveRung)
                 .ToList();
+
+            if (effective.Count == 0)
+            {
+                return new QualityMatchResult(QualityMatchKind.Unknown, null);
+            }
 
             // Codec-specific rungs take precedence; wildcard (codec-less) rungs are the fallback
             // and exist mainly for legacy/bare profiles such as "320kbps" / "lossless".
@@ -201,7 +205,7 @@ namespace Listenarr.Domain.Common
                 return false;
             }
 
-            var rung = FindRung(profile!, qualityLabel);
+            var rung = FindAllowedRung(profile!, qualityLabel);
             return rung != null && rung.Priority <= cutoff.Priority;
         }
 
@@ -216,23 +220,24 @@ namespace Listenarr.Domain.Common
                 return false;
             }
 
-            if (string.IsNullOrWhiteSpace(existing))
-            {
-                return true;
-            }
-
             if (profile == null)
             {
                 return false;
             }
 
-            var cand = FindRung(profile, candidate);
-            var exist = FindRung(profile, existing);
+            var cand = FindAllowedRung(profile, candidate);
 
             if (cand == null)
             {
                 return false;
             }
+
+            if (string.IsNullOrWhiteSpace(existing))
+            {
+                return true;
+            }
+
+            var exist = FindAllowedRung(profile, existing);
 
             if (exist == null)
             {
@@ -240,17 +245,6 @@ namespace Listenarr.Domain.Common
             }
 
             return cand.Priority < exist.Priority;
-        }
-
-        /// <summary>Whether the profile declares a rung whose label equals <paramref name="hint"/> (case-insensitive).</summary>
-        public static bool ProfileContainsHint(QualityProfile? profile, string? hint)
-        {
-            if (profile?.Qualities == null || string.IsNullOrWhiteSpace(hint))
-            {
-                return false;
-            }
-
-            return profile.Qualities.Any(q => string.Equals(q.Quality, hint, StringComparison.OrdinalIgnoreCase));
         }
 
         // ---- internals --------------------------------------------------------------------
@@ -276,11 +270,16 @@ namespace Listenarr.Domain.Common
                 return null;
             }
 
-            return FindRung(profile, profile.CutoffQuality);
+            return FindAllowedRung(profile, profile.CutoffQuality);
         }
 
-        private static QualityDefinition? FindRung(QualityProfile profile, string label)
-            => profile.Qualities.FirstOrDefault(q => string.Equals(q.Quality, label, StringComparison.OrdinalIgnoreCase));
+        private static IEnumerable<QualityDefinition> AllowedQualities(QualityProfile profile)
+            => profile.Qualities
+                .Where(q => q.Allowed && !string.IsNullOrWhiteSpace(q.Quality));
+
+        private static QualityDefinition? FindAllowedRung(QualityProfile profile, string label)
+            => AllowedQualities(profile)
+                .FirstOrDefault(q => string.Equals(q.Quality, label, StringComparison.OrdinalIgnoreCase));
 
         /// <summary>
         /// Resolve a rung's effective (codec group, bitrate-kbps, lossless) using the structured
