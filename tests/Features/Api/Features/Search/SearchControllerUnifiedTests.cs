@@ -20,7 +20,6 @@ using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Listenarr.Tests.Features.Api.Features.Search
