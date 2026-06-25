@@ -6,7 +6,7 @@ namespace Listenarr.Domain.Downloads
     {
         public string Id { get; set; } = Guid.NewGuid().ToString();
         public string Name { get; set; } = string.Empty;
-        public string Type { get; set; } = string.Empty; // "qbittorrent", "transmission", "sabnzbd", "nzbget"
+        public string Type { get; set; } = string.Empty; // "qbittorrent", "transmission", "deluge", "sabnzbd", "nzbget"
         public string Host { get; set; } = string.Empty;
         public int Port { get; set; }
         public string Username { get; set; } = string.Empty;

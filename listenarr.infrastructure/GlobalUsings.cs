@@ -97,6 +97,7 @@ global using Listenarr.Infrastructure.Metadata.Providers.Audnexus;
 global using Listenarr.Infrastructure.Metadata.Providers.OpenLibrary;
 global using Listenarr.Infrastructure.HostedServices.Search;
 global using Listenarr.Infrastructure.DownloadClients.Common;
+global using Listenarr.Infrastructure.DownloadClients.Deluge;
 global using Listenarr.Infrastructure.DownloadClients.Nzbget;
 global using Listenarr.Infrastructure.DownloadClients.Qbittorrent;
 global using Listenarr.Infrastructure.DownloadClients.Sabnzbd;

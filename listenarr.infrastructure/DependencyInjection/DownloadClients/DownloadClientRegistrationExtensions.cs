@@ -35,6 +35,7 @@ internal static class DownloadClientRegistrationExtensions
 
         AddAdapterClient(services, "qbittorrent", useCookies: true, retryPolicy, circuitBreakerPolicy);
         AddAdapterClient(services, "transmission", useCookies: false, retryPolicy, circuitBreakerPolicy);
+        AddAdapterClient(services, "deluge", useCookies: true, retryPolicy, circuitBreakerPolicy);
         AddAdapterClient(services, "sabnzbd", useCookies: false, retryPolicy, circuitBreakerPolicy);
         AddAdapterClient(services, "nzbget", useCookies: false, retryPolicy, circuitBreakerPolicy);
         return services;
@@ -52,6 +53,7 @@ internal static class DownloadClientRegistrationExtensions
         services.AddScoped<ITorrentFileDownloader, TorrentFileDownloader>();
         services.AddScoped<IDownloadClientAdapter, QbittorrentAdapter>();
         services.AddScoped<IDownloadClientAdapter, TransmissionAdapter>();
+        services.AddScoped<IDownloadClientAdapter, DelugeAdapter>();
         services.AddScoped<IDownloadClientAdapter, SabnzbdAdapter>();
         services.AddScoped<IDownloadClientAdapter, NzbgetAdapter>();
         services.AddScoped<IDownloadClientAdapterFactory, DownloadClientAdapterFactory>();
