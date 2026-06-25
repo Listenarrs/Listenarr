@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using Listenarr.Application.Search.Filters;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -93,6 +94,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             var qualityProfileService = scope.ServiceProvider.GetRequiredService<IQualityProfileService>();
             var downloadService = scope.ServiceProvider.GetRequiredService<IDownloadService>();
             var configurationService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
+            var relevanceGate = scope.ServiceProvider.GetRequiredService<AutomaticSearchRelevanceGate>();
 
             var timing = AutomaticSearchTiming.FromSettings(await configurationService.GetApplicationSettingsAsync());
 
@@ -127,7 +129,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
                     isFirstBook = false;
 
                     var downloadsQueuedForBook = await ProcessAudiobookAsync(
-                        audiobook, searchService, qualityProfileService, downloadService, audiobookRepository, downloadRepository, fileRepository, stoppingToken);
+                        audiobook, searchService, qualityProfileService, downloadService, relevanceGate, audiobookRepository, downloadRepository, fileRepository, stoppingToken);
 
                     downloadsQueued += downloadsQueuedForBook;
                     processedCount++;
@@ -162,6 +164,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             ISearchService searchService,
             IQualityProfileService qualityProfileService,
             IDownloadService downloadService,
+            AutomaticSearchRelevanceGate relevanceGate,
             IAudiobookRepository audiobookRepository,
             IDownloadRepository downloadRepository,
             IAudiobookFileRepository fileRepository,
@@ -257,6 +260,17 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             if (!searchResults.Any())
             {
                 _logger.LogInformation("No search results found for audiobook '{Title}'", audiobook.Title);
+                return 0;
+            }
+
+            // Automatic path only: drop results irrelevant to THIS audiobook (e.g. a result
+            // sharing only an author surname) before the scorer ranks them. The metadata-page
+            // filter pipeline is intentionally not run on raw indexer results.
+            searchResults = relevanceGate.Apply(searchResults, audiobook);
+
+            if (!searchResults.Any())
+            {
+                _logger.LogInformation("All search results rejected as irrelevant for audiobook '{Title}'", audiobook.Title);
                 return 0;
             }
 
