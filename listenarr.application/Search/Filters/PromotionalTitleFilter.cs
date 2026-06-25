@@ -25,7 +25,7 @@ public class PromotionalTitleFilter : ISearchResultFilter
 {
     public string FilterReason => "promotional_title_filtered";
 
-    public bool ShouldFilter(SearchResult result)
+    public bool ShouldFilter(SearchResult result, Audiobook? audiobook = null)
     {
         return SearchValidation.IsPromotionalTitle(result.Title) || SearchValidation.IsTitleNoise(result.Title);
     }

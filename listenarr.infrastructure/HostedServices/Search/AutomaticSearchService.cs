@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using Listenarr.Application.Search.Filters;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -75,6 +76,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             var searchService = scope.ServiceProvider.GetRequiredService<ISearchService>();
             var qualityProfileService = scope.ServiceProvider.GetRequiredService<IQualityProfileService>();
             var downloadService = scope.ServiceProvider.GetRequiredService<IDownloadService>();
+            var filterPipeline = scope.ServiceProvider.GetRequiredService<SearchResultFilterPipeline>();
 
             // Get all monitored audiobooks that haven't been searched in the last 6 hours
             var cutoffTime = DateTime.UtcNow.AddHours(-6);
@@ -99,7 +101,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
                 try
                 {
                     var downloadsQueuedForBook = await ProcessAudiobookAsync(
-                        audiobook, searchService, qualityProfileService, downloadService, audiobookRepository, downloadRepository, fileRepository, stoppingToken);
+                        audiobook, searchService, qualityProfileService, downloadService, filterPipeline, audiobookRepository, downloadRepository, fileRepository, stoppingToken);
 
                     downloadsQueued += downloadsQueuedForBook;
                     processedCount++;
@@ -134,6 +136,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             ISearchService searchService,
             IQualityProfileService qualityProfileService,
             IDownloadService downloadService,
+            SearchResultFilterPipeline filterPipeline,
             IAudiobookRepository audiobookRepository,
             IDownloadRepository downloadRepository,
             IAudiobookFileRepository fileRepository,
@@ -210,6 +213,23 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             if (!searchResults.Any())
             {
                 _logger.LogInformation("No search results found for audiobook '{Title}'", audiobook.Title);
+                return 0;
+            }
+
+            // Context-aware filter pass: reject results whose title is irrelevant to
+            // THIS audiobook (e.g. a result sharing only an author surname) before the
+            // scorer ranks them. Filters that don't need the audiobook ignore it.
+            var preFilterCount = searchResults.Count;
+            searchResults = filterPipeline.ApplyFilters(searchResults, logFilteredResults: true, audiobook: audiobook);
+            if (searchResults.Count < preFilterCount)
+            {
+                _logger.LogInformation("Filtered {Removed} of {Total} results as irrelevant for audiobook '{Title}'",
+                    preFilterCount - searchResults.Count, preFilterCount, audiobook.Title);
+            }
+
+            if (!searchResults.Any())
+            {
+                _logger.LogInformation("All search results filtered as irrelevant for audiobook '{Title}'", audiobook.Title);
                 return 0;
             }
 

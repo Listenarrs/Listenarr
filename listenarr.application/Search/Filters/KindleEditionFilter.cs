@@ -25,7 +25,7 @@ public class KindleEditionFilter : ISearchResultFilter
 {
     public string FilterReason => "kindle_edition_filtered";
 
-    public bool ShouldFilter(SearchResult result)
+    public bool ShouldFilter(SearchResult result, Audiobook? audiobook = null)
     {
         return SearchValidation.IsKindleEdition(result.Title);
     }
