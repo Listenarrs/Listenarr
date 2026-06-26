@@ -245,5 +245,10 @@ namespace Listenarr.Domain.Configuration
         /// Preferred default language filter for Add New searches.
         /// </summary>
         public string DefaultSearchLanguage { get; set; } = "english";
+
+        /// <summary>
+        /// When true, marks a book as unmonitored automatically once the listener finishes it.
+        /// </summary>
+        public bool PlayerAutoUnmonitorOnFinish { get; set; } = true;
     }
 }
