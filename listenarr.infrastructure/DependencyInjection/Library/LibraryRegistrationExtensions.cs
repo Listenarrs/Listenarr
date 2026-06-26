@@ -7,6 +7,7 @@
  * by the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  */
+using Listenarr.Application.Audiobooks.Playback;
 using Listenarr.Infrastructure.Persistence.Repositories;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -27,6 +28,7 @@ internal static class LibraryRegistrationExtensions
         services.AddScoped<IFileNamingService, FileNamingService>();
         services.AddScoped<IRenameService, RenameService>();
         services.AddScoped<IQualityProfileService, QualityProfileService>();
+        services.AddScoped<IPlaybackService, PlaybackService>();
         return services;
     }
 
