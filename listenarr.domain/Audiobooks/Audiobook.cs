@@ -54,6 +54,15 @@ namespace Listenarr.Domain.Audiobooks
         public bool Explicit { get; set; }
         public bool Abridged { get; set; }
 
+        /// <summary>Index of the file in the natural-ordered playlist the listener last played.</summary>
+        public int PlaybackFileIndex { get; set; }
+        /// <summary>Resume position within that file, in seconds.</summary>
+        public double PlaybackPositionSeconds { get; set; }
+        /// <summary>When playback position was last saved (UTC). Null = never played.</summary>
+        public DateTime? PlaybackUpdatedUtc { get; set; }
+        /// <summary>True once the listener finished the book.</summary>
+        public bool Finished { get; set; }
+
         // Monitoring and file management
         public bool Monitored { get; set; } = true;
         // NOTE: single-file properties are deprecated in favor of Files collection
