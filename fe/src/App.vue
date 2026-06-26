@@ -502,6 +502,9 @@
       </main>
     </div>
 
+    <!-- Persistent bottom audio player — self-hides when nothing is loaded -->
+    <AudioPlayer />
+
     <!-- Global Notification Modal -->
     <!-- Global Confirm Dialog (centralized) -->
     <ConfirmDialog
@@ -571,7 +574,9 @@ import { normalizeQueueSnapshot } from '@/utils/queueSnapshot'
 import type { QueueItem } from '@/types'
 import { ref as vueRef, ref as vueRef2, reactive } from 'vue'
 import GlobalToast from '@/components/ui/GlobalToast.vue'
+import AudioPlayer from '@/components/player/AudioPlayer.vue'
 import { useToast } from '@/services/toastService'
+import { usePlayerStore } from '@/stores/player'
 import { logger } from '@/utils/logger'
 import BrandLogo from '@/components/base/BrandLogo.vue'
 import {
@@ -587,6 +592,7 @@ const { getProtectedImageSrc } = useProtectedImages()
 const downloadsStore = useDownloadsStore()
 const libraryStore = useLibraryStore()
 const auth = useAuthStore()
+const playerStore = usePlayerStore()
 const authEnabled = ref(false)
 const startupConfigLoaded = ref(false)
 const securityWarningDismissed = ref(false)
@@ -1393,11 +1399,14 @@ const appShellCssVars = computed(() => {
   const topNavHeightPx = 60
   const bannerHeightPx = showSecurityWarningBanner.value ? 44 : 0
   const topOffsetPx = hideLayout.value ? 0 : topNavHeightPx + bannerHeightPx
+  // Reserve space at the bottom when the audio player bar is visible
+  const playerHeightPx = playerStore.current ? 72 : 0
 
   return {
     '--top-nav-height': `${topNavHeightPx}px`,
     '--security-banner-height': `${bannerHeightPx}px`,
     '--app-top-offset': `${topOffsetPx}px`,
+    '--player-height': `${playerHeightPx}px`,
   } as Record<string, string>
 })
 
@@ -1709,7 +1718,7 @@ these are not present, the Google Fonts import in `fe/index.html` will be used a
   position: fixed;
   left: 0;
   top: var(--app-top-offset);
-  bottom: 0;
+  bottom: var(--player-height, 0px);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -1899,6 +1908,7 @@ these are not present, the Google Fonts import in `fe/index.html` will be used a
   min-width: 0;
   min-height: calc(100dvh - var(--app-top-offset));
   width: calc(100vw - 217px);
+  padding-bottom: var(--player-height, 0px);
 }
 
 .main-content.full-page {

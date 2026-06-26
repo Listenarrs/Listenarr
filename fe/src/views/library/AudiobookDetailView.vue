@@ -164,6 +164,21 @@
             </Pill>
           </div>
 
+          <!-- Playback progress indicator: shown when this book is loaded in the player -->
+          <div
+            v-if="bookInPlayer && player.positionSeconds > 0 && player.duration > 0"
+            class="playback-progress"
+            aria-label="Current playback position"
+          >
+            <div class="playback-progress-track">
+              <div
+                class="playback-progress-fill"
+                :style="{ width: `${Math.min(100, (player.positionSeconds / player.duration) * 100)}%` }"
+              />
+            </div>
+            <span class="playback-progress-label">at {{ formatPlaybackTime(player.positionSeconds) }}</span>
+          </div>
+
           <div class="description" v-if="audiobook.description">
             <div class="description-content" :class="{ expanded: showFullDescription }">
               {{ stripHtmlAndNormalize(audiobook.description) }}
@@ -649,6 +664,7 @@ import { ref, onMounted, onUnmounted, watch, computed, type Component } from 'vu
 import { useToast } from '@/services/toastService'
 import type { Audiobook as AudiobookType } from '@/types'
 import { useRoute, useRouter } from 'vue-router'
+import { usePlayerStore } from '@/stores/player'
 import { useLibraryStore } from '@/stores/library'
 import { useConfigurationStore } from '@/stores/configuration'
 import { useRootFoldersStore } from '@/stores/rootFolders'
@@ -680,6 +696,7 @@ import {
   PhArrowLeft,
   PhArrowClockwise,
   PhBookmark,
+  PhPlay,
   PhSpinner,
   PhMagnifyingGlass,
   PhFolderOpen,
@@ -717,6 +734,7 @@ const router = useRouter()
 const libraryStore = useLibraryStore()
 const configStore = useConfigurationStore()
 const rootFoldersStore = useRootFoldersStore()
+const player = usePlayerStore()
 const { getProtectedImageSrc } = useProtectedImages()
 
 type DetailTab = 'details' | 'files' | 'history'
@@ -754,6 +772,18 @@ const mobileTabOptions = computed(() => [
 ])
 
 const topActions = computed<DetailTopAction[]>(() => [
+  {
+    key: 'play',
+    label: playActionLabel.value,
+    title: playActionLabel.value,
+    ariaLabel: `${playActionLabel.value} audiobook`,
+    icon: PhPlay,
+    iconProps: { weight: 'fill' },
+    disabled: !audiobook.value?.files?.length,
+    desktopGroup: 'primary',
+    desktopClass: 'primary',
+    onClick: () => { void playBook() },
+  },
   {
     key: 'refresh',
     label: 'Refresh',
@@ -871,6 +901,7 @@ type DetailIdentifierItem = {
 
 type DetailTopAction = {
   key:
+    | 'play'
     | 'refresh'
     | 'manual-search'
     | 'scan'
@@ -899,6 +930,34 @@ const assignedProfileName = computed(() => {
   const p = qualityProfiles.value.find((q) => q.id === id)
   return p ? p.name : null
 })
+
+// True when this audiobook is currently loaded in the player
+const bookInPlayer = computed(
+  () => !!audiobook.value && player.current?.audiobookId === audiobook.value.id,
+)
+
+// Label for the play button: "Resume" when the player has progress for this book
+const playActionLabel = computed(() => {
+  if (bookInPlayer.value && player.positionSeconds > 0 && !player.current?.finished) {
+    return 'Resume'
+  }
+  return 'Play'
+})
+
+// Format seconds as h:mm:ss for the progress indicator
+function formatPlaybackTime(sec: number): string {
+  const s = Math.max(0, Math.floor(sec))
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const ss = s % 60
+  return `${h}:${String(m).padStart(2, '0')}:${String(ss).padStart(2, '0')}`
+}
+
+async function playBook() {
+  if (!audiobook.value?.id) return
+  await player.load(audiobook.value.id)
+  player.playing = true
+}
 
 const primaryAsinIdentifier = computed(() => {
   const ids = audiobook.value?.identifiers || []
@@ -2226,8 +2285,39 @@ function formatDate(dateString?: string): string {
 .status-badges {
   display: flex;
   gap: 8px;
-  margin-bottom: 20px;
+  margin-bottom: 12px;
   flex-wrap: wrap;
+}
+
+/* Playback progress bar shown below status badges when this book is in the player */
+.playback-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.playback-progress-track {
+  flex: 1;
+  max-width: 200px;
+  height: 4px;
+  background: #3a3a3a;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.playback-progress-fill {
+  height: 100%;
+  background: var(--brand-500, #2196f3);
+  border-radius: 2px;
+  transition: width 1s linear;
+}
+
+.playback-progress-label {
+  font-size: 0.78rem;
+  color: #9aa0a6;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .description {
