@@ -1109,3 +1109,20 @@ export interface RenameResult {
   error?: string
   renamedFiles: FileRenameResultItem[]
 }
+
+// Built-in player types
+export interface PlaybackFile {
+  index: number
+  durationSeconds: number | null
+  contentType: string
+}
+
+export interface PlaybackState {
+  audiobookId: number
+  title: string | null
+  asin: string | null
+  files: PlaybackFile[]
+  fileIndex: number
+  positionSeconds: number
+  finished: boolean
+}

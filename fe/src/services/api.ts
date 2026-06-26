@@ -60,6 +60,7 @@ import type {
   RenamePreview,
   RenameOperation,
   RenameResult,
+  PlaybackState,
 } from '@/types'
 import { getStartupConfigCached, resetCache as resetStartupConfigCache } from './startupConfigCache'
 import { sessionTokenManager } from '@/utils/sessionToken'
@@ -69,6 +70,7 @@ import { errorTracking } from '@/services/errorTracking'
 import { normalizeQueueSnapshot } from '@/utils/queueSnapshot'
 import {
   applyApiVersionFromStartupConfig,
+  buildApiPath,
   API_BASE_PATH,
   API_BASE_URL,
   API_ORIGIN,
@@ -1993,6 +1995,26 @@ class ApiService {
     return this.request<
       Array<{ id: number; username: string; email?: string; isAdmin: boolean; createdAt: string }>
     >('/account/admins')
+  }
+
+  // Built-in player API
+  async getPlayback(id: number): Promise<PlaybackState> {
+    return this.request<PlaybackState>(`/audiobooks/${id}/playback`)
+  }
+
+  async savePlayback(
+    id: number,
+    body: { fileIndex: number; positionSeconds: number; finished: boolean },
+  ): Promise<void> {
+    return this.request<void>(`/audiobooks/${id}/playback`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    })
+  }
+
+  // URL for the <audio> element — same-origin GET, cookie auth applies automatically.
+  streamUrl(id: number, fileIndex: number): string {
+    return buildApiPath(`/audiobooks/${id}/files/${fileIndex}/stream`)
   }
 }
 
