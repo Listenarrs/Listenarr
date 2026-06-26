@@ -639,6 +639,8 @@ export interface Audiobook {
   explicit?: boolean
   abridged?: boolean
   monitored?: boolean
+  finished?: boolean
+  playbackPositionSeconds?: number
   filePath?: string
   fileSize?: number
   fileCount?: number

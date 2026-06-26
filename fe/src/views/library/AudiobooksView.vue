@@ -477,6 +477,23 @@
                     <component :is="audiobook.monitored ? PhEye : PhEyeSlash" />
                     {{ audiobook.monitored ? 'Monitored' : 'Unmonitored' }}
                   </div>
+                  <div
+                    v-if="audiobook.finished"
+                    class="monitored-badge playback-finished"
+                    aria-label="Finished"
+                  >
+                    <PhCheckCircle />
+                    Finished
+                  </div>
+                  <div
+                    v-else-if="(audiobook.playbackPositionSeconds ?? 0) > 0"
+                    class="monitored-badge playback-in-progress"
+                    aria-label="In progress"
+                  >
+                    <PhPlay />
+                    In progress
+                  </div>
+                  <!-- ponytail: percentage bar deferred; total-duration aggregation across multi-file books needs Phase 2 server rollup -->
                 </div>
                 <div class="action-buttons">
                   <button
@@ -640,6 +657,23 @@
                 <component :is="audiobook.monitored ? PhEye : PhEyeSlash" />
                 {{ audiobook.monitored ? 'Monitored' : 'Unmonitored' }}
               </div>
+              <div
+                v-if="audiobook.finished"
+                class="monitored-badge playback-finished"
+                aria-label="Finished"
+              >
+                <PhCheckCircle />
+                Finished
+              </div>
+              <div
+                v-else-if="(audiobook.playbackPositionSeconds ?? 0) > 0"
+                class="monitored-badge playback-in-progress"
+                aria-label="In progress"
+              >
+                <PhPlay />
+                In progress
+              </div>
+              <!-- ponytail: percentage bar deferred; total-duration aggregation across multi-file books needs Phase 2 server rollup -->
             </div>
             <div class="list-actions">
               <button
@@ -809,6 +843,8 @@ import {
   PhUser,
   PhBooks,
   PhFolderOpen,
+  PhCheckCircle,
+  PhPlay,
 } from '@phosphor-icons/vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useLibraryStore } from '@/stores/library'
@@ -3631,6 +3667,18 @@ defineExpose({
   background-color: rgba(231, 76, 60, 0.2);
   border-color: rgba(231, 76, 60, 0.4);
   color: #e74c3c;
+}
+
+.monitored-badge.playback-finished {
+  background-color: rgba(52, 152, 219, 0.2);
+  border-color: rgba(52, 152, 219, 0.4);
+  color: #3498db;
+}
+
+.monitored-badge.playback-in-progress {
+  background-color: rgba(243, 156, 18, 0.2);
+  border-color: rgba(243, 156, 18, 0.4);
+  color: #f39c12;
 }
 
 .monitored-badge i {

@@ -71,6 +71,8 @@ namespace Listenarr.Application.Mapping
                     })
                     .ToArray(),
                 Monitored = audiobook.Monitored,
+                Finished = audiobook.Finished,
+                PlaybackPositionSeconds = audiobook.PlaybackPositionSeconds,
                 FilePath = audiobook.FilePath,
                 FileSize = audiobook.FileSize,
                 BasePath = audiobook.BasePath,
