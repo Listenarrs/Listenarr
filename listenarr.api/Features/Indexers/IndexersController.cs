@@ -111,6 +111,8 @@ namespace Listenarr.Api.Features.Indexers
                 {
                     var s when s == "internetarchive" || s == "internet archive" => await TestInternetArchive(indexer, persist),
                     var s when s == "myanonamouse" => await TestMyAnonamouse(indexer, persist),
+                    var s when s == "annasarchive" || s == "anna's archive" => await TestAnnasArchive(indexer, persist),
+                    var s when s == "zlibrary" || s == "z-library" => await TestZLibrary(indexer, persist),
                     // For Newznab/Torznab/Custom fall back to a generic connectivity check
                     _ => await TestGenericIndexer(indexer, persist)
                 };
@@ -379,6 +381,28 @@ namespace Listenarr.Api.Features.Indexers
                 error = result.Error,
                 indexer = RedactIndexerForCaller(indexer)
             });
+        }
+
+        /// <summary>
+        /// Test Anna's Archive indexer connection
+        /// </summary>
+        private async Task<IActionResult> TestAnnasArchive(Indexer indexer, bool persist)
+        {
+            var result = await _indexerTestWorkflow.TestAnnasArchiveAsync(indexer, persist);
+            if (result.Succeeded)
+                return Ok(new { success = true, message = result.Message, indexer = RedactIndexerForCaller(indexer) });
+            return BadRequest(new { success = false, message = result.Message, error = result.Error, indexer = RedactIndexerForCaller(indexer) });
+        }
+
+        /// <summary>
+        /// Test Z-Library indexer connection
+        /// </summary>
+        private async Task<IActionResult> TestZLibrary(Indexer indexer, bool persist)
+        {
+            var result = await _indexerTestWorkflow.TestZLibraryAsync(indexer, persist);
+            if (result.Succeeded)
+                return Ok(new { success = true, message = result.Message, indexer = RedactIndexerForCaller(indexer) });
+            return BadRequest(new { success = false, message = result.Message, error = result.Error, indexer = RedactIndexerForCaller(indexer) });
         }
 
         /// <summary>

@@ -286,6 +286,138 @@ namespace Listenarr.Api.Features.Indexers
             return IndexerTestWorkflowResult.Failure("Internet Archive test failed", error: ex.Message);
         }
 
+        public async Task<IndexerTestWorkflowResult> TestAnnasArchiveAsync(Indexer indexer, bool persist)
+        {
+            try
+            {
+                var baseUrl = (!string.IsNullOrWhiteSpace(indexer.Url) ? indexer.Url : "https://annas-archive.org").TrimEnd('/');
+                var testUrl = $"{baseUrl}/search?q=test&ext=mp3&content=audiobook";
+
+                _logger.LogInformation("Testing Anna's Archive indexer '{Name}' at {Url}",
+                    LogRedaction.SanitizeText(indexer.Name), LogRedaction.SanitizeUrl(testUrl));
+
+                var blockedReason = ValidateOutboundUrl(testUrl);
+                if (!string.IsNullOrWhiteSpace(blockedReason))
+                {
+                    await SaveTestResultAsync(indexer, persist, false, $"Blocked outbound target: {blockedReason}");
+                    return IndexerTestWorkflowResult.Failure($"Blocked outbound target: {blockedReason}");
+                }
+
+                using var response = await SendValidatedAsync(currentUri =>
+                {
+                    var req = new HttpRequestMessage(HttpMethod.Get, currentUri);
+                    req.Headers.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+                    return req;
+                }, testUrl);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    var msg = $"Anna's Archive returned HTTP {(int)response.StatusCode} (possibly Cloudflare block — try a mirror URL)";
+                    await SaveTestResultAsync(indexer, persist, false, msg);
+                    return IndexerTestWorkflowResult.Failure(msg, (int)response.StatusCode);
+                }
+
+                await SaveTestResultAsync(indexer, persist, true, null);
+                _logger.LogInformation("Anna's Archive indexer '{Name}' test succeeded", LogRedaction.SanitizeText(indexer.Name));
+                return IndexerTestWorkflowResult.Success("Anna's Archive connection successful");
+            }
+            catch (HttpRequestException ex)
+            {
+                return await BuildAnnasArchiveFailureAsync(indexer, persist, ex);
+            }
+            catch (TaskCanceledException ex)
+            {
+                return await BuildAnnasArchiveFailureAsync(indexer, persist, ex);
+            }
+            catch (UriFormatException ex)
+            {
+                return await BuildAnnasArchiveFailureAsync(indexer, persist, ex);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return await BuildAnnasArchiveFailureAsync(indexer, persist, ex);
+            }
+        }
+
+        private async Task<IndexerTestWorkflowResult> BuildAnnasArchiveFailureAsync(Indexer indexer, bool persist, Exception ex)
+        {
+            _logger.LogWarning(ex, "Anna's Archive indexer '{Name}' test failed", LogRedaction.SanitizeText(indexer.Name));
+            await SaveTestResultAsync(indexer, persist, false, ex.Message);
+            return IndexerTestWorkflowResult.Failure("Anna's Archive test failed", error: ex.Message);
+        }
+
+        public async Task<IndexerTestWorkflowResult> TestZLibraryAsync(Indexer indexer, bool persist)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(indexer.Url))
+                {
+                    const string error = "Z-Library requires a base URL. Set the URL field to the current working Z-Library domain (e.g. https://z-lib.id).";
+                    await SaveTestResultAsync(indexer, persist, false, error);
+                    return IndexerTestWorkflowResult.Failure("Z-Library test failed", error: error);
+                }
+
+                var baseUrl = indexer.Url.TrimEnd('/');
+                var testUrl = $"{baseUrl}/s/test?e=1";
+
+                _logger.LogInformation("Testing Z-Library indexer '{Name}' at {Url}",
+                    LogRedaction.SanitizeText(indexer.Name), LogRedaction.SanitizeUrl(testUrl));
+
+                var blockedReason = ValidateOutboundUrl(testUrl);
+                if (!string.IsNullOrWhiteSpace(blockedReason))
+                {
+                    await SaveTestResultAsync(indexer, persist, false, $"Blocked outbound target: {blockedReason}");
+                    return IndexerTestWorkflowResult.Failure($"Blocked outbound target: {blockedReason}");
+                }
+
+                using var response = await SendValidatedAsync(currentUri =>
+                {
+                    var req = new HttpRequestMessage(HttpMethod.Get, currentUri);
+                    req.Headers.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+                    if (!string.IsNullOrWhiteSpace(indexer.ApiKey))
+                        req.Headers.Add("Cookie", indexer.ApiKey);
+                    return req;
+                }, testUrl);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    var msg = $"Z-Library returned HTTP {(int)response.StatusCode} — domain may have changed or auth cookie may be expired";
+                    await SaveTestResultAsync(indexer, persist, false, msg);
+                    return IndexerTestWorkflowResult.Failure(msg, (int)response.StatusCode);
+                }
+
+                await SaveTestResultAsync(indexer, persist, true, null);
+                _logger.LogInformation("Z-Library indexer '{Name}' test succeeded", LogRedaction.SanitizeText(indexer.Name));
+                var authMsg = string.IsNullOrWhiteSpace(indexer.ApiKey)
+                    ? "Z-Library connection successful (unauthenticated — downloads require cookie auth in API Key field)"
+                    : "Z-Library connection successful";
+                return IndexerTestWorkflowResult.Success(authMsg);
+            }
+            catch (HttpRequestException ex)
+            {
+                return await BuildZLibraryFailureAsync(indexer, persist, ex);
+            }
+            catch (TaskCanceledException ex)
+            {
+                return await BuildZLibraryFailureAsync(indexer, persist, ex);
+            }
+            catch (UriFormatException ex)
+            {
+                return await BuildZLibraryFailureAsync(indexer, persist, ex);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return await BuildZLibraryFailureAsync(indexer, persist, ex);
+            }
+        }
+
+        private async Task<IndexerTestWorkflowResult> BuildZLibraryFailureAsync(Indexer indexer, bool persist, Exception ex)
+        {
+            _logger.LogWarning(ex, "Z-Library indexer '{Name}' test failed", LogRedaction.SanitizeText(indexer.Name));
+            await SaveTestResultAsync(indexer, persist, false, ex.Message);
+            return IndexerTestWorkflowResult.Failure("Z-Library test failed", error: ex.Message);
+        }
+
         private string? ValidateOutboundUrl(string url)
         {
             if (!OutboundRequestSecurity.TryValidateExternalHttpUrl(url, out var reason, allowPrivateTargets: true))

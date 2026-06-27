@@ -56,6 +56,8 @@
                 <option value="Torznab">Torznab</option>
                 <option value="MyAnonamouse">MyAnonamouse</option>
                 <option value="InternetArchive">Internet Archive</option>
+                <option value="AnnasArchive">Anna's Archive</option>
+                <option value="ZLibrary">Z-Library</option>
                 <option value="Custom">Custom</option>
               </select>
             </FormRow>
@@ -65,6 +67,7 @@
               label="URL *"
               labelFor="url"
             >
+
               <select
                 v-if="formData.implementation === 'MyAnonamouse'"
                 id="url"
@@ -170,26 +173,55 @@
               </small>
             </div>
 
+            <!-- Anna's Archive Settings -->
+            <div v-if="formData.implementation === 'AnnasArchive'" class="form-section">
+              <h4>Anna's Archive Settings</h4>
+              <small class="info-text">
+                <PhInfo />
+                Set the URL to a working mirror (default: https://annas-archive.org). No authentication
+                is required for search. Downloads use the /fast-download/ redirect to IPFS/partner mirrors.
+                If the canonical domain is blocked by Cloudflare, update the URL to an active mirror.
+              </small>
+            </div>
+
+            <!-- Z-Library Settings -->
+            <div v-if="formData.implementation === 'ZLibrary'" class="form-section">
+              <h4>Z-Library Settings</h4>
+              <small class="info-text">
+                <PhInfo />
+                Set the URL to a working Z-Library domain (e.g. https://z-lib.id). Z-Library rotates
+                its public domains — update this field if the current one stops responding. For
+                downloads, set the API Key field to your session cookies:
+                <code>remix_userid=XXXXX; remix_userkey=YYYYY</code>. Obtain these by logging in to
+                your Z-Library account in a browser and copying the two cookie values from DevTools.
+              </small>
+            </div>
+
             <!-- API Key for other implementations -->
             <FormRow
               v-if="
                 formData.implementation !== 'MyAnonamouse' &&
-                formData.implementation !== 'InternetArchive'
+                formData.implementation !== 'InternetArchive' &&
+                formData.implementation !== 'AnnasArchive'
               "
-              label="API Key"
-              labelFor="apiKey"
+              :label="formData.implementation === 'ZLibrary' ? 'Session Cookies' : 'API Key'"
+              :labelFor="'apiKey'"
             >
               <PasswordInput
                 id="apiKey"
                 v-model="formData.apiKey"
                 autocomplete="off"
-                placeholder="Your API key"
+                :placeholder="formData.implementation === 'ZLibrary' ? 'remix_userid=...; remix_userkey=...' : 'Your API key'"
                 class="admin-input"
               />
             </FormRow>
 
             <FormRow
-              v-if="formData.implementation !== 'InternetArchive'"
+              v-if="
+                formData.implementation !== 'InternetArchive' &&
+                formData.implementation !== 'AnnasArchive' &&
+                formData.implementation !== 'ZLibrary'
+              "
               label="Categories"
               labelFor="categories"
               help="Leave empty to search all categories"
@@ -206,7 +238,11 @@
           <!-- Features -->
           <FormSection title="Features" :icon="PhGear">
             <CheckboxCard
-              v-if="formData.implementation !== 'InternetArchive'"
+              v-if="
+                formData.implementation !== 'InternetArchive' &&
+                formData.implementation !== 'AnnasArchive' &&
+                formData.implementation !== 'ZLibrary'
+              "
               v-model="formData.enableRss"
               title="Enable RSS"
               description="Use RSS feeds to monitor for new releases"
@@ -387,6 +423,15 @@ const buildIndexerPayload = (): IndexerPayload => {
     payload.categories = ''
     payload.enableRss = false
     payload.minimumAge = 0
+  } else if (payload.implementation === 'AnnasArchive') {
+    // No auth; mirror URL comes from the URL field (default applied server-side if blank)
+    payload.apiKey = ''
+    payload.categories = ''
+    payload.enableRss = false
+  } else if (payload.implementation === 'ZLibrary') {
+    // Cookie stored in apiKey; URL is the current Z-Library domain
+    payload.categories = ''
+    payload.enableRss = false
   }
 
   return payload
@@ -475,8 +520,12 @@ watch(
 watch(
   () => formData.value.implementation,
   (newImplementation) => {
-    // Internet Archive is DDL only, set type to Usenet
-    if (newImplementation === 'InternetArchive') {
+    // DDL-only sources: set type to Usenet (no torrent/RSS)
+    if (
+      newImplementation === 'InternetArchive' ||
+      newImplementation === 'AnnasArchive' ||
+      newImplementation === 'ZLibrary'
+    ) {
       formData.value.type = 'Usenet'
     }
     // MyAnonamouse is torrent only

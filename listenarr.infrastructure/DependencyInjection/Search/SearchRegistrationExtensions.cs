@@ -19,6 +19,8 @@ internal static class SearchRegistrationExtensions
         services.AddScoped<IIndexerSearchProvider, InternetArchiveSearchProvider>();
         services.AddScoped<IIndexerSearchProvider, TorznabNewznabSearchProvider>();
         services.AddScoped<IIndexerSearchProvider, MyAnonamouseSearchProvider>();
+        services.AddScoped<IIndexerSearchProvider, AnnasArchiveSearchProvider>();
+        services.AddScoped<IIndexerSearchProvider, ZLibrarySearchProvider>();
         services.AddScoped<IMyAnonamouseConnectionTester, MyAnonamouseConnectionTester>();
         services.AddScoped<IndexerAdditionalSettingsParser>();
         services.AddScoped<IndexerSearchWorkflow>();
