@@ -727,7 +727,24 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-/* Floating centered bar */
+/*
+ * Design tokens used below — all defined in fe/src/styles/base/base.css:
+ *   --bg-tertiary: #2a2a2a   (bar bg — matches nav/sidebar chrome)
+ *   --bg-surface:  #3a3a3a   (button hover, borders)
+ *   --bg-secondary: #1a1a1a  (popovers — darker for separation)
+ *   --bg-primary:  #0f0f0f   (deepest dark — selects, inputs)
+ *   --text-primary:   #ffffff (titles, dominant text)
+ *   --text-secondary: #cccccc (icons, time, labels — 8.2:1 on bar bg)
+ *   --brand-500: #2196f3     (accent / focus ring / scrub)
+ *   --brand-600: #1976d2     (play btn hover)
+ *   --brand-700: #0d47a1     (play btn active)
+ *   --brand-300: #64b5f6     (chapter accent / active item — 5.9:1 on bar bg)
+ *
+ * Note: --text-muted is overridden to rgba(0,0,0,0.6) in light mode, so it is
+ * NOT used here. Secondary labels use --text-secondary directly.
+ */
+
+/* --- Floating centered bar --- */
 .audio-player {
   position: fixed;
   bottom: 14px;
@@ -736,17 +753,19 @@ onUnmounted(() => {
   margin: 0 auto;
   max-width: 860px;
   width: calc(100% - 24px);
-  background-color: #252525;
-  border: 1px solid #3a3a3a;
+  background-color: var(--bg-tertiary, #2a2a2a);
+  border: 1px solid var(--bg-surface, #3a3a3a);
   border-radius: 12px;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.55), 0 1px 6px rgba(0, 0, 0, 0.35);
+  box-shadow:
+    0 6px 32px rgba(0, 0, 0, 0.65),
+    0 1px 6px rgba(0, 0, 0, 0.4);
   z-index: 900;
   display: flex;
   flex-direction: column;
   overflow: visible;
 }
 
-/* Scrub bar: sits at the top of the bar */
+/* Scrub bar: sits at the top edge of the bar */
 .scrub-bar {
   width: 100%;
   height: 4px;
@@ -762,11 +781,11 @@ onUnmounted(() => {
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 0.75rem;
-  padding: 6px 12px 8px;
+  padding: 6px 12px 10px;
   box-sizing: border-box;
 }
 
-/* Left: cover thumbnail + title + chapter + position */
+/* --- Left: cover + title + chapter + time --- */
 .player-meta {
   display: flex;
   align-items: center;
@@ -788,30 +807,32 @@ onUnmounted(() => {
 
 .player-title {
   font-size: 0.875rem;
-  font-weight: 500;
-  color: #fff;
+  font-weight: 600;
+  color: var(--text-primary, #fff);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+/* Chapter name in brand-300 (#64b5f6): 5.9:1 on --bg-tertiary — passes AA */
 .player-chapter {
   font-size: 0.72rem;
-  color: var(--brand-400, #64b5f6);
+  color: var(--brand-300, #64b5f6);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   margin-top: 1px;
 }
 
+/* Time readout in --text-secondary (#cccccc): 8.2:1 on --bg-tertiary — passes AAA */
 .player-time {
   font-size: 0.72rem;
-  color: #9aa0a6;
+  color: var(--text-secondary, #ccc);
   margin-top: 1px;
   font-variant-numeric: tabular-nums;
 }
 
-/* Center: main playback controls */
+/* --- Center: playback controls --- */
 .player-controls-wrap {
   display: flex;
   flex-direction: column;
@@ -822,53 +843,87 @@ onUnmounted(() => {
 .player-controls {
   display: flex;
   align-items: center;
-  gap: 0.125rem;
+  gap: 0.25rem;
 }
 
+/* Base button — 36×36 meets ≥32px secondary target */
 .player-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
   padding: 0;
-  font-size: 16px;
-  color: #bbb;
-  border-radius: 6px;
+  font-size: 17px;
+  /* --text-secondary (#cccccc) on --bg-tertiary (#2a2a2a) = 8.2:1 */
+  color: var(--text-secondary, #ccc);
+  border-radius: var(--radius-md, 6px);
   background: none;
   border: none;
   cursor: pointer;
   flex-shrink: 0;
+  transition:
+    background-color var(--transition-fast, 0.12s ease),
+    color var(--transition-fast, 0.12s ease),
+    transform 0.08s ease;
 }
 
+/* Play/pause: solid brand circle — visually dominant, 44×44 (≥40px primary target) */
 .player-btn--play {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background-color: var(--brand-500, #2196f3);
   color: #fff;
   font-size: 22px;
 }
 
+/* Small utility buttons — 32×32 meets ≥32px minimum */
 .player-btn--sm {
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   font-size: 15px;
 }
 
+/* Hover: reveal surface tint; play keeps brand identity */
 .player-btn:hover {
-  color: #fff;
-  background-color: #3a3a3a;
+  color: var(--text-primary, #fff);
+  background-color: var(--bg-surface, #3a3a3a);
 }
 
+.player-btn--play:hover {
+  background-color: var(--brand-600, #1976d2);
+  color: #fff;
+}
+
+/* Active/pressed: slight shrink gives tactile feedback */
+.player-btn:active {
+  transform: scale(0.93);
+  opacity: 0.8;
+}
+
+.player-btn--play:active {
+  background-color: var(--brand-700, #0d47a1);
+  transform: scale(0.93);
+  opacity: 1;
+}
+
+/* Focus ring: brand-500 (#2196f3) on --bg-tertiary = 5.2:1 — exceeds 3:1 for focus indicators */
 .player-btn:focus-visible {
   outline: 2px solid var(--brand-500, #2196f3);
-  outline-offset: 1px;
+  outline-offset: 2px;
 }
 
+/* Active state (sleep/mark-done engaged) */
 .player-btn--active {
-  color: var(--brand-400, #64b5f6);
+  color: var(--brand-300, #64b5f6);
 }
 
-/* Right: volume + extras */
+.player-btn--active:hover {
+  color: var(--brand-300, #64b5f6);
+}
+
+/* --- Right: volume + extras --- */
 .player-right {
   display: flex;
   align-items: center;
@@ -900,14 +955,15 @@ onUnmounted(() => {
 
 .player-speed-label {
   font-size: 0.72rem;
-  color: #9aa0a6;
+  color: var(--text-secondary, #ccc);
 }
 
 .speed-select {
-  background: #1a1a1a;
-  border: 1px solid #3a3a3a;
-  color: #ccc;
-  border-radius: 4px;
+  background: var(--bg-primary, #0f0f0f);
+  border: 1px solid var(--bg-surface, #3a3a3a);
+  /* --text-secondary (#cccccc) on --bg-primary (#0f0f0f) = ~12:1 */
+  color: var(--text-secondary, #ccc);
+  border-radius: var(--radius-sm, 4px);
   padding: 3px 6px;
   font-size: 0.85rem;
   cursor: pointer;
@@ -918,29 +974,30 @@ onUnmounted(() => {
   outline-offset: 1px;
 }
 
-/* Sleep timer countdown badge */
+/* Sleep countdown badge inside the timer button */
 .timer-badge {
   font-size: 0.6rem;
   font-variant-numeric: tabular-nums;
   margin-left: 1px;
-  color: var(--brand-400, #64b5f6);
+  /* brand-300 (#64b5f6) on --bg-tertiary = 5.9:1 */
+  color: var(--brand-300, #64b5f6);
   line-height: 1;
 }
 
-/* Popover container */
+/* --- Popover container --- */
 .popover-wrap {
   position: relative;
 }
 
-/* Shared popover panel */
+/* Shared popover panel — uses --bg-secondary (#1a1a1a) for clear separation from bar */
 .player-popover {
   position: absolute;
-  bottom: calc(100% + 8px);
+  bottom: calc(100% + 10px);
   right: 0;
-  background: #252525;
-  border: 1px solid #3a3a3a;
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  background: var(--bg-secondary, #1a1a1a);
+  border: 1px solid var(--bg-surface, #3a3a3a);
+  border-radius: var(--radius-lg, 8px);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.7);
   z-index: 950;
   min-width: 180px;
   max-width: 280px;
@@ -968,30 +1025,32 @@ onUnmounted(() => {
   padding: 8px 10px 6px;
   font-size: 0.75rem;
   font-weight: 600;
-  color: #9aa0a6;
+  /* --text-secondary (#cccccc) on --bg-secondary (#1a1a1a) = ~12:1 */
+  color: var(--text-secondary, #ccc);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  border-bottom: 1px solid #333;
+  letter-spacing: 0.06em;
+  border-bottom: 1px solid var(--bg-surface, #3a3a3a);
 }
 
 .popover-add-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   background: none;
   border: none;
-  color: #9aa0a6;
+  color: var(--text-secondary, #ccc);
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: var(--radius-sm, 4px);
   padding: 0;
   font-size: 14px;
+  transition: background-color var(--transition-fast, 0.12s ease);
 }
 
 .popover-add-btn:hover {
-  color: #fff;
-  background: #3a3a3a;
+  color: var(--text-primary, #fff);
+  background: var(--bg-surface, #3a3a3a);
 }
 
 .popover-list {
@@ -1005,8 +1064,10 @@ onUnmounted(() => {
   align-items: center;
 }
 
+/* Active chapter/sleep option: brand-300 on --bg-secondary = 4.7:1 — passes AA */
 .popover-item.active .popover-item-btn {
-  color: var(--brand-400, #64b5f6);
+  color: var(--brand-300, #64b5f6);
+  font-weight: 500;
 }
 
 .popover-item-btn {
@@ -1015,19 +1076,20 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 6px 10px;
+  padding: 8px 10px;
   background: none;
   border: none;
-  color: #ccc;
+  /* --text-primary (#fff) on --bg-secondary (#1a1a1a) = ~14.9:1 */
+  color: var(--text-primary, #fff);
   cursor: pointer;
   text-align: left;
-  font-size: 0.82rem;
+  font-size: 0.85rem;
   min-width: 0;
+  transition: background-color var(--transition-fast, 0.12s ease);
 }
 
 .popover-item-btn:hover {
-  background: #333;
-  color: #fff;
+  background: var(--bg-tertiary, #2a2a2a);
 }
 
 .popover-item-label {
@@ -1038,39 +1100,47 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
+/* Secondary time labels: --text-secondary (#cccccc) on --bg-secondary = ~12:1 */
 .popover-item-time {
   flex-shrink: 0;
   font-size: 0.72rem;
-  color: #9aa0a6;
+  color: var(--text-secondary, #ccc);
   font-variant-numeric: tabular-nums;
 }
 
+/* Delete button — 32×32 meets ≥32px minimum */
 .popover-del-btn {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   background: none;
   border: none;
-  color: #666;
+  color: var(--text-secondary, #ccc);
   cursor: pointer;
-  border-radius: 4px;
-  font-size: 13px;
+  border-radius: var(--radius-sm, 4px);
+  font-size: 14px;
   padding: 0;
+  transition: background-color var(--transition-fast, 0.12s ease);
 }
 
 .popover-del-btn:hover {
-  color: #f44;
-  background: rgba(255, 68, 68, 0.08);
+  color: var(--danger-500, #ff6b6b);
+  background: rgba(255, 107, 107, 0.1);
+}
+
+.popover-del-btn:focus-visible {
+  outline: 2px solid var(--brand-500, #2196f3);
+  outline-offset: 1px;
 }
 
 .popover-empty {
-  padding: 10px;
+  padding: 12px;
   text-align: center;
-  font-size: 0.8rem;
-  color: #666;
+  font-size: 0.82rem;
+  color: var(--text-secondary, #ccc);
 }
 
 .bookmark-label-wrap {
@@ -1078,17 +1148,17 @@ onUnmounted(() => {
   align-items: center;
   gap: 4px;
   padding: 6px 8px;
-  border-bottom: 1px solid #333;
+  border-bottom: 1px solid var(--bg-surface, #3a3a3a);
 }
 
 .bookmark-label-input {
   flex: 1 1 auto;
-  background: #1a1a1a;
-  border: 1px solid #3a3a3a;
-  border-radius: 4px;
-  color: #ccc;
-  font-size: 0.82rem;
-  padding: 4px 6px;
+  background: var(--bg-primary, #0f0f0f);
+  border: 1px solid var(--bg-surface, #3a3a3a);
+  border-radius: var(--radius-sm, 4px);
+  color: var(--text-primary, #fff);
+  font-size: 0.85rem;
+  padding: 5px 8px;
   outline: none;
 }
 
@@ -1096,7 +1166,7 @@ onUnmounted(() => {
   border-color: var(--brand-500, #2196f3);
 }
 
-/* Responsive: narrow screens */
+/* --- Responsive: narrow screens --- */
 @media (max-width: 700px) {
   .audio-player {
     bottom: 8px;
@@ -1107,7 +1177,7 @@ onUnmounted(() => {
   .player-inner {
     grid-template-columns: auto minmax(0, 1fr);
     gap: 0.5rem;
-    padding: 4px 8px 6px;
+    padding: 4px 8px 8px;
   }
 
   .player-right {
@@ -1125,16 +1195,15 @@ onUnmounted(() => {
     width: 36px;
     height: 36px;
   }
-
-  .volume-wrap {
-    display: none;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .scrub-bar,
-  .volume-slider {
+  .player-btn {
     transition: none;
+  }
+
+  .player-btn:active {
+    transform: none;
   }
 }
 </style>
