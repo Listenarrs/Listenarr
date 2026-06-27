@@ -16,8 +16,14 @@
   along with this program. If not, see <https://www.gnu.org/licenses/>.
 -->
 <template>
-  <div v-if="player.current" class="audio-player" role="region" aria-label="Audio player">
-    <!-- Hidden audio element — the actual playback engine -->
+  <div
+    v-if="player.current"
+    class="audio-player"
+    :class="{ 'audio-player--pill': player.collapsed }"
+    role="region"
+    aria-label="Audio player"
+  >
+    <!-- Audio element always present when current is set — drives playback regardless of collapsed state -->
     <audio
       ref="el"
       :src="src"
@@ -28,6 +34,41 @@
       @pause="onPause"
     />
 
+    <!-- Collapsed pill: cover + play/pause + restore + close -->
+    <div v-if="player.collapsed" class="pill-inner">
+      <img v-if="coverUrl" :src="coverUrl" alt="" class="pill-cover" aria-hidden="true" />
+      <span class="pill-title" :title="player.current.title ?? ''">
+        {{ player.current.title ?? '' }}
+      </span>
+      <button
+        class="nav-btn player-btn player-btn--play"
+        @click="togglePlay"
+        :aria-label="player.playing ? 'Pause' : 'Play'"
+        :aria-pressed="player.playing"
+      >
+        <PhPause v-if="player.playing" weight="fill" />
+        <PhPlay v-else weight="fill" />
+      </button>
+      <button
+        class="nav-btn player-btn"
+        @click="player.toggleCollapsed()"
+        aria-label="Restore player"
+        title="Restore player"
+      >
+        <PhCaretUp />
+      </button>
+      <button
+        class="nav-btn player-btn player-btn--sm"
+        @click="player.close()"
+        aria-label="Close player"
+        title="Close player"
+      >
+        <PhX />
+      </button>
+    </div>
+
+    <!-- Full bar: scrub bar + controls (hidden when collapsed) -->
+    <template v-else>
     <!-- Scrub bar: full width, above controls -->
     <input
       type="range"
@@ -283,8 +324,29 @@
             <option v-for="s in SPEEDS" :key="s" :value="s">{{ s }}x</option>
           </select>
         </div>
+
+        <!-- Minimize player -->
+        <button
+          class="nav-btn player-btn player-btn--sm"
+          @click="player.toggleCollapsed()"
+          aria-label="Minimize player"
+          title="Minimize player"
+        >
+          <PhCaretDown />
+        </button>
+
+        <!-- Close player -->
+        <button
+          class="nav-btn player-btn player-btn--sm"
+          @click="player.close()"
+          aria-label="Close player"
+          title="Close player"
+        >
+          <PhX />
+        </button>
       </div>
     </div>
+    </template>
   </div>
 </template>
 
@@ -316,6 +378,9 @@ import {
   PhFastForward,
   PhCaretLeft,
   PhCaretRight,
+  PhCaretDown,
+  PhCaretUp,
+  PhX,
   PhListBullets,
   PhTimer,
   PhBookmarkSimple,
@@ -1164,6 +1229,40 @@ onUnmounted(() => {
 
 .bookmark-label-input:focus {
   border-color: var(--brand-500, #2196f3);
+}
+
+/* --- Collapsed pill variant --- */
+.audio-player--pill {
+  max-width: 480px;
+  border-radius: 32px;
+  /* ponytail: fixed pill shape; pill width shrinks on narrow screens via width: calc(100% - 24px) on parent */
+}
+
+.pill-inner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px;
+}
+
+.pill-cover {
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.pill-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.85rem;
+  font-weight: 500;
+  /* --text-primary (#fff) on --bg-tertiary = ~14:1 */
+  color: var(--text-primary, #fff);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* --- Responsive: narrow screens --- */

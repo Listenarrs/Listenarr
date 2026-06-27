@@ -234,4 +234,52 @@ describe('AudioPlayer', () => {
     const btn = wrapper.find('[aria-label="Mark as finished"]')
     expect(btn.exists()).toBe(true)
   })
+
+  it('shows minimize and close buttons in the full (non-collapsed) bar', () => {
+    const store = usePlayerStore()
+    store.current = makeState()
+    store.collapsed = false
+
+    const wrapper = mount(AudioPlayer)
+
+    expect(wrapper.find('[aria-label="Minimize player"]').exists()).toBe(true)
+    expect(wrapper.find('[aria-label="Close player"]').exists()).toBe(true)
+  })
+
+  it('renders pill when collapsed and audio element still present', async () => {
+    const store = usePlayerStore()
+    store.current = makeState()
+    store.collapsed = true
+
+    const wrapper = mount(AudioPlayer)
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('.pill-inner').exists()).toBe(true)
+    expect(wrapper.find('audio').exists()).toBe(true)
+    // Full bar elements should not be present
+    expect(wrapper.find('.scrub-bar').exists()).toBe(false)
+    expect(wrapper.find('.player-inner').exists()).toBe(false)
+  })
+
+  it('pill shows restore and close buttons', async () => {
+    const store = usePlayerStore()
+    store.current = makeState()
+    store.collapsed = true
+
+    const wrapper = mount(AudioPlayer)
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('[aria-label="Restore player"]').exists()).toBe(true)
+    expect(wrapper.find('[aria-label="Close player"]').exists()).toBe(true)
+  })
+
+  it('renders nothing when current is null regardless of collapsed state', () => {
+    const store = usePlayerStore()
+    store.current = null
+    store.collapsed = true
+
+    const wrapper = mount(AudioPlayer)
+
+    expect(wrapper.find('.audio-player').exists()).toBe(false)
+  })
 })

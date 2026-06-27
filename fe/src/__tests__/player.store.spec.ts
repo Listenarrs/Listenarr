@@ -476,4 +476,55 @@ describe('player store', () => {
     expect(store.finished).toBe(true)
     expect(savePlaybackMock).toHaveBeenCalledWith(9, expect.objectContaining({ finished: true }))
   })
+
+  // --- Collapse / close ---
+
+  it('collapsed defaults to false when no localStorage entry', () => {
+    const store = usePlayerStore()
+    expect(store.collapsed).toBe(false)
+  })
+
+  it('toggleCollapsed() flips collapsed to true and persists "1" to localStorage', () => {
+    const store = usePlayerStore()
+    store.toggleCollapsed()
+    expect(store.collapsed).toBe(true)
+    expect(localStorage.getItem('player.collapsed')).toBe('1')
+  })
+
+  it('toggleCollapsed() twice restores collapsed to false and persists "0"', () => {
+    const store = usePlayerStore()
+    store.toggleCollapsed()
+    store.toggleCollapsed()
+    expect(store.collapsed).toBe(false)
+    expect(localStorage.getItem('player.collapsed')).toBe('0')
+  })
+
+  it('collapsed initializes to true when localStorage contains "1"', () => {
+    localStorage.setItem('player.collapsed', '1')
+    // Re-create store to pick up stored value
+    setActivePinia(createPinia())
+    const store = usePlayerStore()
+    expect(store.collapsed).toBe(true)
+  })
+
+  it('close() sets playing=false and current=null', async () => {
+    const store = usePlayerStore()
+    store.current = makeState({ audiobookId: 3 })
+    store.playing = true
+    savePlaybackMock.mockResolvedValue(undefined)
+
+    await store.close()
+
+    expect(store.playing).toBe(false)
+    expect(store.current).toBeNull()
+  })
+
+  it('close() is best-effort: does not throw when flush fails', async () => {
+    const store = usePlayerStore()
+    store.current = makeState({ audiobookId: 3 })
+    savePlaybackMock.mockRejectedValue(new Error('network error'))
+
+    await expect(store.close()).resolves.toBeUndefined()
+    expect(store.current).toBeNull()
+  })
 })

@@ -1400,8 +1400,10 @@ const appShellCssVars = computed(() => {
   const bannerHeightPx = showSecurityWarningBanner.value ? 44 : 0
   const topOffsetPx = hideLayout.value ? 0 : topNavHeightPx + bannerHeightPx
   // Reserve space at the bottom when the floating audio player bar is visible.
-  // Bar is ~80px tall and sits 14px above the bottom edge; add ~10px breathing room.
-  const playerHeightPx = playerStore.current ? 104 : 0
+  // Full bar is ~80px tall; collapsed pill is ~56px; both sit 14px above the bottom edge.
+  const playerHeightPx = playerStore.current
+    ? playerStore.collapsed ? 78 : 104
+    : 0
 
   return {
     '--top-nav-height': `${topNavHeightPx}px`,

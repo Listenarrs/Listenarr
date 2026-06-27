@@ -22,6 +22,7 @@ import type { PlaybackState, Chapter, Bookmark } from '@/types'
 
 const RATE_KEY = 'player.rate'
 const VOL_KEY = 'player.volume'
+const COLLAPSED_KEY = 'player.collapsed'
 const THROTTLE_MS = 10_000
 
 function clampRate(r: number): number {
@@ -52,6 +53,14 @@ function readStoredVolume(): number {
   return 1
 }
 
+function readStoredCollapsed(): boolean {
+  try {
+    return localStorage.getItem(COLLAPSED_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
 // ponytail: module-level so tests can override via _setNowFn
 let _now = () => Date.now()
 
@@ -67,6 +76,7 @@ export const usePlayerStore = defineStore('player', () => {
   const volume = ref(readStoredVolume())
   const muted = ref(false)
   const finished = ref(false)
+  const collapsed = ref(readStoredCollapsed())
 
   // Bookmarks for the current audiobook
   const bookmarks = ref<Bookmark[]>([])
@@ -215,6 +225,21 @@ export const usePlayerStore = defineStore('player', () => {
     muted.value = !muted.value
   }
 
+  function toggleCollapsed(): void {
+    collapsed.value = !collapsed.value
+    try {
+      localStorage.setItem(COLLAPSED_KEY, collapsed.value ? '1' : '0')
+    } catch {
+      // localStorage unavailable
+    }
+  }
+
+  async function close(): Promise<void> {
+    playing.value = false
+    try { await flush() } catch { /* best-effort */ }
+    current.value = null
+  }
+
   // --- Progress save ---
 
   function save(): void {
@@ -346,6 +371,7 @@ export const usePlayerStore = defineStore('player', () => {
     volume,
     muted,
     finished,
+    collapsed,
     bookmarks,
     sleepTimerMode,
     sleepTimerEndsAt,
@@ -359,6 +385,8 @@ export const usePlayerStore = defineStore('player', () => {
     setRate,
     setVolume,
     toggleMute,
+    toggleCollapsed,
+    close,
     save,
     flush,
     markFinished,
