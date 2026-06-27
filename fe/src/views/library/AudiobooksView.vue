@@ -150,7 +150,6 @@
       </div>
     </div>
 
-    <ContinueListeningShelf />
 
     <!-- Audiobooks Grid -->
     <div v-if="loading" class="loading-state">
@@ -402,8 +401,297 @@
       </div>
     </div>
 
+    <template v-else>
+      <!-- Continue Listening: in-progress books; hidden when empty -->
+      <CollapsibleSection
+        v-if="continueListeningBooks.length > 0"
+        title="Continue Listening"
+        :count="continueListeningBooks.length"
+        section-key="continue"
+      >
+        <!-- ponytail: section grids are non-virtualized; fine for typical in-progress counts -->
+        <!-- ponytail: grid-only; list-view toggle for sections if requested -->
+        <div class="audiobooks-grid section-grid">
+          <div
+            v-for="book in continueListeningBooks"
+            :key="book.id"
+            class="audiobook-wrapper"
+          >
+            <div
+              tabindex="0"
+              @keydown.enter="navigateToDetail(book.id)"
+              class="audiobook-item"
+              :class="{
+                selected: libraryStore.isSelected(book.id),
+                'status-no-file': getAudiobookStatus(book) === 'no-file',
+                'status-downloading': getAudiobookStatus(book) === 'downloading',
+                'status-quality-mismatch': getAudiobookStatus(book) === 'quality-mismatch',
+                'status-quality-match': getAudiobookStatus(book) === 'quality-match',
+              }"
+              @click="navigateToDetail(book.id)"
+            >
+              <div class="row-click-target" @click="navigateToDetail(book.id)" />
+              <div
+                class="selection-checkbox"
+                @click.stop="handleCheckboxClick(book, $event)"
+                @mousedown.prevent
+              >
+                <input
+                  type="checkbox"
+                  :checked="libraryStore.isSelected(book.id)"
+                  @change="onCheckboxChange(book, $event)"
+                  @keydown.space.prevent="handleCheckboxKeydown(book, $event)"
+                />
+              </div>
+              <div
+                class="audiobook-poster-container"
+                :class="{ 'show-details': showItemDetails }"
+              >
+                <div
+                  class="audiobook-image-placeholder"
+                  :class="{ loaded: isImageLoaded(getBookImageKey(book)) }"
+                >
+                  <PhBookOpen class="audiobook-placeholder-icon" />
+                </div>
+                <img
+                  :src="getProtectedImageSrc(getBookImageUrl(book), getPlaceholderUrl())"
+                  :alt="book.title"
+                  class="audiobook-poster cover-loading-image"
+                  :class="{ loaded: isImageLoaded(getBookImageKey(book)) }"
+                  loading="lazy"
+                  decoding="async"
+                  @load="markImageLoaded(getBookImageKey(book))"
+                  @error="handleLazyImageError(getBookImageKey(book), $event)"
+                />
+                <div class="status-overlay">
+                  <div v-if="!showItemDetails" class="audiobook-title">
+                    {{ safeText(book.title) }}
+                  </div>
+                  <div v-if="!showItemDetails" class="audiobook-author">
+                    {{
+                      book.authors?.map((author) => safeText(author)).join(', ') ||
+                      'Unknown Author'
+                    }}
+                  </div>
+                  <div
+                    v-if="getQualityProfileName(book.qualityProfileId)"
+                    class="quality-profile-badge"
+                  >
+                    <PhStar />
+                    {{ getQualityProfileName(book.qualityProfileId) }}
+                  </div>
+                  <div class="monitored-badge" :class="{ unmonitored: !book.monitored }">
+                    <component :is="book.monitored ? PhEye : PhEyeSlash" />
+                    {{ book.monitored ? 'Monitored' : 'Unmonitored' }}
+                  </div>
+                  <div class="monitored-badge playback-in-progress" aria-label="In progress">
+                    <PhPlay />
+                    In progress
+                  </div>
+                </div>
+                <div class="action-buttons">
+                  <button
+                    class="action-btn resume-btn-small"
+                    @click.stop="resumeBook(book.id)"
+                    title="Resume"
+                    aria-label="Resume playback"
+                  >
+                    <PhPlay />
+                  </button>
+                  <button
+                    class="action-btn edit-btn-small"
+                    @click.stop="openEditModal(book)"
+                    title="Edit"
+                  >
+                    <PhPencil />
+                  </button>
+                  <button
+                    class="action-btn delete-btn-small"
+                    @click.stop="confirmDelete(book)"
+                    title="Delete"
+                  >
+                    <PhTrash />
+                  </button>
+                </div>
+              </div>
+              <div v-if="showItemDetails" class="grid-bottom-details">
+                <div class="detail-line title">{{ safeText(book.title) }}</div>
+                <div class="detail-line small">
+                  {{
+                    (book.authors || [])
+                      .slice(0, 2)
+                      .map((a) => safeText(a))
+                      .join(', ') || 'Unknown Author'
+                  }}
+                  <div v-if="(book.narrators || []).length">
+                    {{
+                      (book.narrators || [])
+                        .slice(0, 1)
+                        .map((n) => safeText(n))
+                        .join(', ')
+                    }}
+                  </div>
+                </div>
+                <div v-if="formatSeriesMemberships(book)" class="detail-line small">
+                  Series: {{ safeText(formatSeriesMemberships(book)) }}
+                </div>
+                <div class="detail-line small">
+                  {{ safeText(book.publisher)
+                  }}<span v-if="book.publishYear">
+                    • {{ safeText(book.publishYear?.toString?.() ?? '') }}</span
+                  >
+                </div>
+                <div class="detail-line small">{{ statusText(getAudiobookStatus(book)) }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </CollapsibleSection>
+
+      <!-- Finished: completed books; hidden when empty -->
+      <CollapsibleSection
+        v-if="finishedBooks.length > 0"
+        title="Finished"
+        :count="finishedBooks.length"
+        section-key="finished"
+      >
+        <!-- ponytail: section grids are non-virtualized; fine for typical Finished counts -->
+        <div class="audiobooks-grid section-grid">
+          <div
+            v-for="book in finishedBooks"
+            :key="book.id"
+            class="audiobook-wrapper"
+          >
+            <div
+              tabindex="0"
+              @keydown.enter="navigateToDetail(book.id)"
+              class="audiobook-item"
+              :class="{
+                selected: libraryStore.isSelected(book.id),
+                'status-no-file': getAudiobookStatus(book) === 'no-file',
+                'status-downloading': getAudiobookStatus(book) === 'downloading',
+                'status-quality-mismatch': getAudiobookStatus(book) === 'quality-mismatch',
+                'status-quality-match': getAudiobookStatus(book) === 'quality-match',
+              }"
+              @click="navigateToDetail(book.id)"
+            >
+              <div class="row-click-target" @click="navigateToDetail(book.id)" />
+              <div
+                class="selection-checkbox"
+                @click.stop="handleCheckboxClick(book, $event)"
+                @mousedown.prevent
+              >
+                <input
+                  type="checkbox"
+                  :checked="libraryStore.isSelected(book.id)"
+                  @change="onCheckboxChange(book, $event)"
+                  @keydown.space.prevent="handleCheckboxKeydown(book, $event)"
+                />
+              </div>
+              <div
+                class="audiobook-poster-container"
+                :class="{ 'show-details': showItemDetails }"
+              >
+                <div
+                  class="audiobook-image-placeholder"
+                  :class="{ loaded: isImageLoaded(getBookImageKey(book)) }"
+                >
+                  <PhBookOpen class="audiobook-placeholder-icon" />
+                </div>
+                <img
+                  :src="getProtectedImageSrc(getBookImageUrl(book), getPlaceholderUrl())"
+                  :alt="book.title"
+                  class="audiobook-poster cover-loading-image"
+                  :class="{ loaded: isImageLoaded(getBookImageKey(book)) }"
+                  loading="lazy"
+                  decoding="async"
+                  @load="markImageLoaded(getBookImageKey(book))"
+                  @error="handleLazyImageError(getBookImageKey(book), $event)"
+                />
+                <div class="status-overlay">
+                  <div v-if="!showItemDetails" class="audiobook-title">
+                    {{ safeText(book.title) }}
+                  </div>
+                  <div v-if="!showItemDetails" class="audiobook-author">
+                    {{
+                      book.authors?.map((author) => safeText(author)).join(', ') ||
+                      'Unknown Author'
+                    }}
+                  </div>
+                  <div
+                    v-if="getQualityProfileName(book.qualityProfileId)"
+                    class="quality-profile-badge"
+                  >
+                    <PhStar />
+                    {{ getQualityProfileName(book.qualityProfileId) }}
+                  </div>
+                  <div class="monitored-badge" :class="{ unmonitored: !book.monitored }">
+                    <component :is="book.monitored ? PhEye : PhEyeSlash" />
+                    {{ book.monitored ? 'Monitored' : 'Unmonitored' }}
+                  </div>
+                  <div class="monitored-badge playback-finished" aria-label="Finished">
+                    <PhCheckCircle />
+                    Finished
+                  </div>
+                </div>
+                <div class="action-buttons">
+                  <button
+                    class="action-btn edit-btn-small"
+                    @click.stop="openEditModal(book)"
+                    title="Edit"
+                  >
+                    <PhPencil />
+                  </button>
+                  <button
+                    class="action-btn delete-btn-small"
+                    @click.stop="confirmDelete(book)"
+                    title="Delete"
+                  >
+                    <PhTrash />
+                  </button>
+                </div>
+              </div>
+              <div v-if="showItemDetails" class="grid-bottom-details">
+                <div class="detail-line title">{{ safeText(book.title) }}</div>
+                <div class="detail-line small">
+                  {{
+                    (book.authors || [])
+                      .slice(0, 2)
+                      .map((a) => safeText(a))
+                      .join(', ') || 'Unknown Author'
+                  }}
+                  <div v-if="(book.narrators || []).length">
+                    {{
+                      (book.narrators || [])
+                        .slice(0, 1)
+                        .map((n) => safeText(n))
+                        .join(', ')
+                    }}
+                  </div>
+                </div>
+                <div v-if="formatSeriesMemberships(book)" class="detail-line small">
+                  Series: {{ safeText(formatSeriesMemberships(book)) }}
+                </div>
+                <div class="detail-line small">
+                  {{ safeText(book.publisher)
+                  }}<span v-if="book.publishYear">
+                    • {{ safeText(book.publishYear?.toString?.() ?? '') }}</span
+                  >
+                </div>
+                <div class="detail-line small">{{ statusText(getAudiobookStatus(book)) }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </CollapsibleSection>
+
+      <!-- Library: all filtered/sorted books, always shown, uses virtual scroll -->
+      <CollapsibleSection
+        title="Library"
+        :count="audiobooks.length"
+        section-key="library"
+      >
     <div
-      v-else
       ref="scrollContainer"
       :class="['audiobooks-scroll-container', { 'has-selection': selectedCount > 0 }]"
       @scroll="updateVisibleRange"
@@ -697,6 +985,8 @@
         </div>
       </div>
     </div>
+      </CollapsibleSection>
+    </template>
     <div v-if="groupBy === 'books'" class="audiobook-status-legend">
       <span class="legend-title"></span>
       <span class="legend-item">
@@ -864,7 +1154,8 @@ import CustomSelect from '@/components/form/CustomSelect.vue'
 import FiltersDropdown from '@/components/ui/FiltersDropdown.vue'
 import CustomFilterModal from '@/components/domain/collection/CustomFilterModal.vue'
 import { EmptyState } from '@/components/base'
-import ContinueListeningShelf from '@/components/domain/audiobook/ContinueListeningShelf.vue'
+import CollapsibleSection from '@/components/ui/CollapsibleSection.vue'
+import { usePlayerStore } from '@/stores/player'
 import { showConfirm } from '@/composables/useConfirm'
 import type { Audiobook, AudiobookStatus, QualityProfile } from '@/types'
 import { evaluateRules } from '@/utils/customFilterEvaluator'
@@ -912,6 +1203,7 @@ const libraryStore = useLibraryStore()
 const configStore = useConfigurationStore()
 const rootFoldersStore = useRootFoldersStore()
 const downloadsStore = useDownloadsStore()
+const player = usePlayerStore()
 const { getProtectedImageSrc } = useProtectedImages()
 
 // Computed list after applying search, filters and sorting
@@ -1225,6 +1517,19 @@ const filteredAndSortedAudiobooks = computed(() => {
 })
 
 const audiobooks = computed(() => filteredAndSortedAudiobooks.value)
+
+// Section buckets derived from the filtered+sorted list
+const continueListeningBooks = computed(() =>
+  audiobooks.value.filter((b) => (b.playbackPositionSeconds ?? 0) > 0 && !b.finished),
+)
+const finishedBooks = computed(() =>
+  audiobooks.value.filter((b) => b.finished === true),
+)
+
+async function resumeBook(id: number): Promise<void> {
+  await player.load(id)
+  player.playing = true
+}
 
 // Reactive map of fetched author cover overrides (keyed by author name)
 const authorCoverOverrides = reactive<Record<string, string>>({})
@@ -2414,6 +2719,8 @@ defineExpose({
   setGroupBy,
   groupedCollections,
   showItemDetails,
+  continueListeningBooks,
+  finishedBooks,
 })
 </script>
 
@@ -3735,6 +4042,20 @@ defineExpose({
 
 .edit-btn-small:hover {
   background-color: rgba(41, 128, 185, 1);
+}
+
+.resume-btn-small {
+  background-color: rgba(33, 150, 243, 0.9);
+  border-color: rgba(21, 101, 192, 0.5);
+}
+
+.resume-btn-small:hover {
+  background-color: rgba(21, 101, 192, 1);
+}
+
+/* Section grids (CL, Finished) are non-virtualized — add surrounding padding */
+.section-grid {
+  padding: 10px 20px;
 }
 
 .loading-state,
