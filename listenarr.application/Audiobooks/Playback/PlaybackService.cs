@@ -64,8 +64,10 @@ public class PlaybackService(
         var book = await LoadBookWithFilesAsync(audiobookId, ct);
         if (book is null) return false;
 
-        book.PlaybackFileIndex = req.FileIndex;
-        book.PlaybackPositionSeconds = req.PositionSeconds;
+        // Clamp client-supplied values: never persist negative/NaN/out-of-range resume state.
+        var fileCount = book.Files?.Count ?? 0;
+        book.PlaybackFileIndex = fileCount == 0 ? 0 : Math.Clamp(req.FileIndex, 0, fileCount - 1);
+        book.PlaybackPositionSeconds = double.IsFinite(req.PositionSeconds) ? Math.Max(0, req.PositionSeconds) : 0;
         book.PlaybackUpdatedUtc = DateTime.UtcNow;
         book.Finished = req.Finished;
 

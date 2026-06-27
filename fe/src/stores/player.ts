@@ -98,11 +98,15 @@ export const usePlayerStore = defineStore('player', () => {
     const t = _now()
     if (t - lastSaveAt < THROTTLE_MS) return
     lastSaveAt = t
-    apiService.savePlayback(current.value.audiobookId, {
-      fileIndex: fileIndex.value,
-      positionSeconds: positionSeconds.value,
-      finished: false,
-    })
+    apiService
+      .savePlayback(current.value.audiobookId, {
+        fileIndex: fileIndex.value,
+        positionSeconds: positionSeconds.value,
+        finished: false,
+      })
+      .catch(() => {
+        // best-effort progress save; ignore transient failures
+      })
   }
 
   async function flush(finished = false): Promise<void> {
