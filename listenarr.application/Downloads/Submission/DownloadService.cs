@@ -130,14 +130,22 @@ namespace Listenarr.Application.Downloads.Submission
                 };
             }
 
-            if (audiobook.QualityProfile == null)
+            // Fall back to the default profile when an audiobook has none, so auto-search
+            // doesn't silently bail. Only give up if no profile exists at all.
+            var qualityProfile = audiobook.QualityProfile ?? await qualityProfileService.GetDefaultAsync();
+            if (qualityProfile == null)
             {
-                logger.LogWarning("Audiobook '{Title}' has no quality profile assigned", audiobook.Title);
+                logger.LogWarning("Audiobook '{Title}' has no quality profile and no default profile exists", audiobook.Title);
                 return new SearchAndDownloadResult
                 {
                     Success = false,
-                    Message = "Audiobook has no quality profile assigned"
+                    Message = "No quality profile is configured"
                 };
+            }
+            if (audiobook.QualityProfile == null)
+            {
+                logger.LogInformation("Audiobook '{Title}' has no quality profile assigned; using default profile '{Profile}'",
+                    LogRedaction.SanitizeText(audiobook.Title), qualityProfile.Name);
             }
 
             // Build search query from audiobook metadata
@@ -159,7 +167,7 @@ namespace Listenarr.Application.Downloads.Submission
             }
 
             // Score results against quality profile
-            var scoredResults = await qualityProfileService.ScoreSearchResults(searchResults, audiobook.QualityProfile);
+            var scoredResults = await qualityProfileService.ScoreSearchResults(searchResults, qualityProfile);
 
             // Log all scored results for debugging
             logger.LogInformation("Scored {Count} search results for audiobook '{Title}':", scoredResults.Count, LogRedaction.SanitizeText(audiobook.Title));
