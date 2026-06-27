@@ -150,6 +150,8 @@
       </div>
     </div>
 
+    <ContinueListeningShelf />
+
     <!-- Audiobooks Grid -->
     <div v-if="loading" class="loading-state">
       <PhSpinner class="ph-spin" />
@@ -862,6 +864,7 @@ import CustomSelect from '@/components/form/CustomSelect.vue'
 import FiltersDropdown from '@/components/ui/FiltersDropdown.vue'
 import CustomFilterModal from '@/components/domain/collection/CustomFilterModal.vue'
 import { EmptyState } from '@/components/base'
+import ContinueListeningShelf from '@/components/domain/audiobook/ContinueListeningShelf.vue'
 import { showConfirm } from '@/composables/useConfirm'
 import type { Audiobook, AudiobookStatus, QualityProfile } from '@/types'
 import { evaluateRules } from '@/utils/customFilterEvaluator'

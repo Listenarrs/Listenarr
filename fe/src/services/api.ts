@@ -1999,6 +1999,10 @@ class ApiService {
   }
 
   // Built-in player API
+  async getContinueListening(): Promise<Audiobook[]> {
+    return this.request<Audiobook[]>('/audiobooks/continue-listening')
+  }
+
   async getPlayback(id: number): Promise<PlaybackState> {
     return this.request<PlaybackState>(`/audiobooks/${id}/playback`)
   }
