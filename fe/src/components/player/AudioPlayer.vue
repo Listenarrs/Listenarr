@@ -28,8 +28,19 @@
       @pause="onPause"
     />
 
+    <!-- Scrub bar: full width, above controls -->
+    <input
+      type="range"
+      class="scrub-bar"
+      min="0"
+      :max="player.duration || 0"
+      v-model.number="player.positionSeconds"
+      @input="onScrubInput"
+      aria-label="Playback position"
+    />
+
     <div class="player-inner">
-      <!-- Cover thumbnail + title + time -->
+      <!-- Left: cover + title + chapter -->
       <div class="player-meta">
         <img
           v-if="coverUrl"
@@ -42,24 +53,29 @@
           <div class="player-title" :title="player.current.title ?? ''">
             {{ player.current.title ?? 'Unknown title' }}
           </div>
+          <div v-if="player.currentChapter" class="player-chapter" :title="player.currentChapter.title">
+            {{ player.currentChapter.title }}
+          </div>
           <div class="player-time">
             {{ formatTime(player.positionSeconds) }} / {{ formatTime(player.duration) }}
           </div>
         </div>
       </div>
 
-      <!-- Scrub bar + playback controls -->
+      <!-- Center: main playback controls -->
       <div class="player-controls-wrap">
-        <input
-          type="range"
-          class="scrub-bar"
-          min="0"
-          :max="player.duration || 0"
-          v-model.number="player.positionSeconds"
-          @input="onScrubInput"
-          aria-label="Playback position"
-        />
         <div class="player-controls" role="group" aria-label="Playback controls">
+          <!-- Prev chapter -->
+          <button
+            v-if="player.chapters.length > 0"
+            class="nav-btn player-btn"
+            @click="player.prevChapter()"
+            aria-label="Previous chapter"
+            title="Previous chapter"
+          >
+            <PhCaretLeft weight="bold" />
+          </button>
+
           <button class="nav-btn player-btn" @click="prevFile" aria-label="Previous part">
             <PhSkipBack />
           </button>
@@ -81,21 +97,192 @@
           <button class="nav-btn player-btn" @click="nextFile" aria-label="Next part">
             <PhSkipForward />
           </button>
+
+          <!-- Next chapter -->
+          <button
+            v-if="player.chapters.length > 0"
+            class="nav-btn player-btn"
+            @click="player.nextChapter()"
+            aria-label="Next chapter"
+            title="Next chapter"
+          >
+            <PhCaretRight weight="bold" />
+          </button>
         </div>
       </div>
 
-      <!-- Speed selector -->
+      <!-- Right: extra controls -->
       <div class="player-right">
-        <label class="player-speed-label" for="player-speed">Speed</label>
-        <select
-          id="player-speed"
-          class="speed-select"
-          :value="player.rate"
-          @change="onRateChange"
-          aria-label="Playback speed"
+        <!-- Volume -->
+        <div class="volume-wrap">
+          <button
+            class="nav-btn player-btn player-btn--sm"
+            @click="player.toggleMute()"
+            :aria-label="player.muted ? 'Unmute' : 'Mute'"
+            :title="player.muted ? 'Unmute' : 'Mute'"
+          >
+            <PhSpeakerX v-if="player.muted || player.volume === 0" />
+            <PhSpeakerLow v-else-if="player.volume < 0.5" />
+            <PhSpeakerHigh v-else />
+          </button>
+          <input
+            type="range"
+            class="volume-slider"
+            min="0"
+            max="1"
+            step="0.05"
+            :value="player.muted ? 0 : player.volume"
+            @input="onVolumeInput"
+            aria-label="Volume"
+          />
+        </div>
+
+        <!-- Chapters popover -->
+        <div v-if="player.chapters.length > 0" class="popover-wrap" ref="chapterWrapRef">
+          <button
+            class="nav-btn player-btn player-btn--sm"
+            @click="toggleChapterList"
+            :aria-expanded="chapterListOpen"
+            aria-label="Chapter list"
+            title="Chapters"
+          >
+            <PhListBullets />
+          </button>
+          <div v-if="chapterListOpen" class="player-popover chapter-popover" role="dialog" aria-label="Chapters">
+            <div class="popover-header">Chapters</div>
+            <ul class="popover-list" role="list">
+              <li
+                v-for="ch in player.chapters"
+                :key="ch.index"
+                class="popover-item"
+                :class="{ active: player.currentChapter?.index === ch.index }"
+                role="listitem"
+              >
+                <button
+                  class="popover-item-btn"
+                  @click="jumpToChapter(ch)"
+                >
+                  <span class="popover-item-label">{{ ch.title }}</span>
+                  <span class="popover-item-time">{{ formatTime(ch.startSeconds) }}</span>
+                </button>
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Sleep timer -->
+        <div class="popover-wrap" ref="sleepWrapRef">
+          <button
+            class="nav-btn player-btn player-btn--sm"
+            :class="{ 'player-btn--active': player.sleepTimerMode !== 'off' }"
+            @click="toggleSleepMenu"
+            :aria-expanded="sleepMenuOpen"
+            aria-label="Sleep timer"
+            title="Sleep timer"
+          >
+            <PhTimer />
+            <span v-if="player.sleepTimerMode === 'timed'" class="timer-badge">
+              {{ formatSleepRemaining() }}
+            </span>
+          </button>
+          <div v-if="sleepMenuOpen" class="player-popover sleep-popover" role="dialog" aria-label="Sleep timer">
+            <div class="popover-header">Sleep timer</div>
+            <ul class="popover-list" role="list">
+              <li
+                v-for="opt in SLEEP_OPTIONS"
+                :key="opt.value"
+                class="popover-item"
+                :class="{ active: isSleepOptActive(opt.value) }"
+              >
+                <button class="popover-item-btn" @click="setSleep(opt.value)">
+                  {{ opt.label }}
+                </button>
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Bookmarks -->
+        <div class="popover-wrap" ref="bookmarkWrapRef">
+          <button
+            class="nav-btn player-btn player-btn--sm"
+            @click="onBookmarkBtn"
+            aria-label="Bookmark"
+            title="Add bookmark / view bookmarks"
+          >
+            <PhBookmarkSimple />
+          </button>
+          <div v-if="bookmarkPanelOpen" class="player-popover bookmark-popover" role="dialog" aria-label="Bookmarks">
+            <div class="popover-header">
+              Bookmarks
+              <button class="popover-add-btn" @click="addBookmark" aria-label="Add bookmark here">
+                <PhPlus />
+              </button>
+            </div>
+            <!-- Optional label input -->
+            <div v-if="bookmarkLabelInputOpen" class="bookmark-label-wrap">
+              <input
+                ref="bookmarkLabelRef"
+                v-model="bookmarkLabel"
+                class="bookmark-label-input"
+                type="text"
+                placeholder="Label (optional)"
+                @keydown.enter="confirmAddBookmark"
+                @keydown.escape="bookmarkLabelInputOpen = false"
+                maxlength="80"
+                aria-label="Bookmark label"
+              />
+              <button class="popover-add-btn" @click="confirmAddBookmark" aria-label="Save bookmark">
+                <PhCheck />
+              </button>
+            </div>
+            <ul v-if="player.bookmarks.length > 0" class="popover-list" role="list">
+              <li
+                v-for="bm in player.bookmarks"
+                :key="bm.id"
+                class="popover-item"
+              >
+                <button class="popover-item-btn" @click="player.jumpToBookmark(bm)">
+                  <span class="popover-item-label">{{ bm.label ?? formatTime(bm.positionSeconds) }}</span>
+                  <span class="popover-item-time">{{ formatTime(bm.positionSeconds) }}</span>
+                </button>
+                <button
+                  class="popover-del-btn"
+                  @click.stop="player.removeBookmark(bm.id)"
+                  :aria-label="`Delete bookmark ${bm.label ?? formatTime(bm.positionSeconds)}`"
+                >
+                  <PhTrash />
+                </button>
+              </li>
+            </ul>
+            <div v-else class="popover-empty">No bookmarks yet</div>
+          </div>
+        </div>
+
+        <!-- Mark finished -->
+        <button
+          class="nav-btn player-btn player-btn--sm"
+          :class="{ 'player-btn--active': player.finished }"
+          @click="onMarkFinished"
+          :aria-label="player.finished ? 'Marked as finished' : 'Mark as finished'"
+          :title="player.finished ? 'Marked as finished' : 'Mark as finished'"
         >
-          <option v-for="s in SPEEDS" :key="s" :value="s">{{ s }}x</option>
-        </select>
+          <PhCheckCircle :weight="player.finished ? 'fill' : 'regular'" />
+        </button>
+
+        <!-- Speed selector -->
+        <div class="player-speed">
+          <label class="player-speed-label" for="player-speed">Speed</label>
+          <select
+            id="player-speed"
+            class="speed-select"
+            :value="player.rate"
+            @change="onRateChange"
+            aria-label="Playback speed"
+          >
+            <option v-for="s in SPEEDS" :key="s" :value="s">{{ s }}x</option>
+          </select>
+        </div>
       </div>
     </div>
   </div>
@@ -120,12 +307,44 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
-import { PhPlay, PhPause, PhSkipBack, PhSkipForward, PhRewind, PhFastForward } from '@phosphor-icons/vue'
+import {
+  PhPlay,
+  PhPause,
+  PhSkipBack,
+  PhSkipForward,
+  PhRewind,
+  PhFastForward,
+  PhCaretLeft,
+  PhCaretRight,
+  PhListBullets,
+  PhTimer,
+  PhBookmarkSimple,
+  PhPlus,
+  PhCheck,
+  PhTrash,
+  PhCheckCircle,
+  PhSpeakerHigh,
+  PhSpeakerLow,
+  PhSpeakerX,
+} from '@phosphor-icons/vue'
 import { usePlayerStore } from '@/stores/player'
+import type { Chapter } from '@/types'
 import { apiService } from '@/services/api'
 import { buildApiPath } from '@/services/apiBase'
 
 const SPEEDS = [0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3]
+
+type SleepOpt = 'off' | 'chapter' | number
+interface SleepOption { label: string; value: SleepOpt }
+const SLEEP_OPTIONS: SleepOption[] = [
+  { label: 'Off', value: 'off' },
+  { label: '5 min', value: 5 },
+  { label: '15 min', value: 15 },
+  { label: '30 min', value: 30 },
+  { label: '45 min', value: 45 },
+  { label: '60 min', value: 60 },
+  { label: 'End of chapter', value: 'chapter' },
+]
 
 const player = usePlayerStore()
 
@@ -153,12 +372,110 @@ function formatTime(sec: number): string {
   return `${h}:${String(m).padStart(2, '0')}:${String(ss).padStart(2, '0')}`
 }
 
+// --- Popover state ---
+
+const chapterListOpen = ref(false)
+const sleepMenuOpen = ref(false)
+const bookmarkPanelOpen = ref(false)
+const bookmarkLabelInputOpen = ref(false)
+const bookmarkLabel = ref('')
+const bookmarkLabelRef = ref<HTMLInputElement | null>(null)
+
+// Refs for click-outside detection
+const chapterWrapRef = ref<HTMLElement | null>(null)
+const sleepWrapRef = ref<HTMLElement | null>(null)
+const bookmarkWrapRef = ref<HTMLElement | null>(null)
+
+function closeAllPopovers() {
+  chapterListOpen.value = false
+  sleepMenuOpen.value = false
+  bookmarkPanelOpen.value = false
+  bookmarkLabelInputOpen.value = false
+}
+
+function toggleChapterList() {
+  const next = !chapterListOpen.value
+  closeAllPopovers()
+  chapterListOpen.value = next
+}
+
+function toggleSleepMenu() {
+  const next = !sleepMenuOpen.value
+  closeAllPopovers()
+  sleepMenuOpen.value = next
+}
+
+function onBookmarkBtn() {
+  const next = !bookmarkPanelOpen.value
+  closeAllPopovers()
+  bookmarkPanelOpen.value = next
+  if (next && player.bookmarks.length === 0) {
+    // Lazy-load bookmarks on first open
+    void player.loadBookmarks()
+  }
+}
+
+function handleGlobalClick(e: MouseEvent) {
+  const target = e.target as Node
+  const refs = [chapterWrapRef.value, sleepWrapRef.value, bookmarkWrapRef.value]
+  for (const r of refs) {
+    if (r && r.contains(target)) return
+  }
+  closeAllPopovers()
+}
+
+// --- Sleep timer helpers ---
+
+function isSleepOptActive(val: SleepOpt): boolean {
+  if (val === 'off') return player.sleepTimerMode === 'off'
+  if (val === 'chapter') return player.sleepTimerMode === 'chapter'
+  return player.sleepTimerMode === 'timed'
+}
+
+function setSleep(val: SleepOpt) {
+  player.setSleepTimer(val)
+  sleepMenuOpen.value = false
+}
+
+function formatSleepRemaining(): string {
+  const s = player.sleepTimerRemainingSeconds()
+  if (s <= 0) return ''
+  const m = Math.floor(s / 60)
+  const ss = s % 60
+  return m > 0 ? `${m}m` : `${ss}s`
+}
+
+// --- Bookmark helpers ---
+
+function addBookmark() {
+  bookmarkLabelInputOpen.value = true
+  bookmarkLabel.value = ''
+  nextTick(() => bookmarkLabelRef.value?.focus())
+}
+
+async function confirmAddBookmark() {
+  const label = bookmarkLabel.value.trim() || undefined
+  bookmarkLabelInputOpen.value = false
+  bookmarkLabel.value = ''
+  await player.addBookmarkHere(label)
+}
+
+// --- Chapter navigation ---
+
+function jumpToChapter(ch: Chapter) {
+  player.skipToChapter(ch)
+  chapterListOpen.value = false
+  // If fileIndex didn't change, the _seekRequest watcher below handles the seek.
+  // If fileIndex changed, the fileIndex watcher + onLoadedMetadata handles it.
+}
+
 // --- Audio element event handlers ---
 
 function onLoadedMetadata() {
   if (!el.value) return
   el.value.currentTime = player.positionSeconds // resume from stored position
   el.value.playbackRate = player.rate
+  el.value.volume = player.muted ? 0 : player.volume
   player.duration = el.value.duration
 }
 
@@ -166,6 +483,10 @@ function onTimeUpdate() {
   if (!el.value) return
   player.positionSeconds = el.value.currentTime
   player.save() // store throttles writes to 10s
+  // Check sleep timer
+  if (player.checkSleepTrigger()) {
+    doSleepFade()
+  }
 }
 
 function onEnded() {
@@ -177,6 +498,27 @@ function onEnded() {
 function onPause() {
   player.playing = false
   void player.flush()
+}
+
+// Fade audio.volume to 0 over ~5s then pause, and restore volume
+function doSleepFade() {
+  if (!el.value) return
+  const audio = el.value
+  const startVol = audio.volume
+  const steps = 25
+  const interval = 5000 / steps
+  let step = 0
+  const fade = setInterval(() => {
+    step++
+    if (!audio || step >= steps) {
+      clearInterval(fade)
+      audio.pause()
+      // Restore volume for next play
+      audio.volume = startVol
+      return
+    }
+    audio.volume = startVol * (1 - step / steps)
+  }, interval)
 }
 
 // --- User control handlers ---
@@ -224,6 +566,19 @@ function onRateChange(e: Event) {
   if (el.value) el.value.playbackRate = val
 }
 
+function onVolumeInput(e: Event) {
+  const val = parseFloat((e.target as HTMLInputElement).value)
+  player.setVolume(val)
+  if (player.muted && val > 0) player.muted = false
+  if (el.value) el.value.volume = player.muted ? 0 : player.volume
+}
+
+async function onMarkFinished() {
+  if (!player.finished) {
+    await player.markFinished()
+  }
+}
+
 // --- Watchers ---
 
 // Auto-play when the active file changes (next/prev file, onEnded advancing to next)
@@ -248,6 +603,25 @@ watch(
     }
   },
   { flush: 'post' },
+)
+
+// Apply volume changes to the audio element
+watch(
+  () => [player.volume, player.muted] as const,
+  ([vol, muted]) => {
+    if (el.value) el.value.volume = muted ? 0 : vol
+  },
+)
+
+// Programmatic seek requests (same-file chapter jumps, bookmark jumps)
+watch(
+  () => player._seekRequest,
+  (req) => {
+    if (req && el.value) {
+      el.value.currentTime = req.position
+    }
+  },
+  { deep: true },
 )
 
 // Update OS / lock-screen / headphone controls when book or file changes
@@ -280,6 +654,48 @@ function setupMediaSession() {
   navigator.mediaSession.setActionHandler('nexttrack', () => { nextFile() })
 }
 
+// --- Keyboard shortcuts (global, ignored when focus is in text fields) ---
+
+function isInputFocused(): boolean {
+  const tag = (document.activeElement as HTMLElement | null)?.tagName ?? ''
+  const ce = (document.activeElement as HTMLElement | null)?.isContentEditable ?? false
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || ce
+}
+
+function onGlobalKeydown(e: KeyboardEvent) {
+  if (!player.current) return
+  if (isInputFocused()) return
+
+  switch (e.key) {
+    case ' ':
+      e.preventDefault()
+      togglePlay()
+      break
+    case 'ArrowLeft':
+      e.preventDefault()
+      rewind10()
+      break
+    case 'ArrowRight':
+      e.preventDefault()
+      forward30()
+      break
+    case 'ArrowUp':
+      e.preventDefault()
+      player.setVolume(Math.min(1, player.volume + 0.05))
+      if (el.value) el.value.volume = player.muted ? 0 : player.volume
+      break
+    case 'ArrowDown':
+      e.preventDefault()
+      player.setVolume(Math.max(0, player.volume - 0.05))
+      if (el.value) el.value.volume = player.muted ? 0 : player.volume
+      break
+    case 'b':
+    case 'B':
+      void player.addBookmarkHere()
+      break
+  }
+}
+
 // --- Lifecycle ---
 
 function onBeforeUnload() {
@@ -288,8 +704,13 @@ function onBeforeUnload() {
 
 onMounted(() => {
   window.addEventListener('beforeunload', onBeforeUnload)
+  document.addEventListener('keydown', onGlobalKeydown)
+  document.addEventListener('click', handleGlobalClick)
+
+  // Apply stored volume to audio element on mount
+  if (el.value) el.value.volume = player.muted ? 0 : player.volume
+
   // Handle the case where player.playing was set before this component mounted
-  // (e.g. detail view sets playing=true, then Vue renders AudioPlayer)
   if (player.playing) {
     void nextTick(() => {
       void el.value?.play().catch(() => {})
@@ -299,48 +720,65 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('beforeunload', onBeforeUnload)
+  document.removeEventListener('keydown', onGlobalKeydown)
+  document.removeEventListener('click', handleGlobalClick)
   void player.flush()
 })
 </script>
 
 <style scoped>
+/* Floating centered bar */
 .audio-player {
   position: fixed;
-  bottom: 0;
+  bottom: 14px;
   left: 0;
   right: 0;
-  height: 72px;
-  background-color: #2a2a2a;
-  border-top: 1px solid #3a3a3a;
+  margin: 0 auto;
+  max-width: 860px;
+  width: calc(100% - 24px);
+  background-color: #252525;
+  border: 1px solid #3a3a3a;
+  border-radius: 12px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.55), 0 1px 6px rgba(0, 0, 0, 0.35);
   z-index: 900;
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  overflow: visible;
+}
+
+/* Scrub bar: sits at the top of the bar */
+.scrub-bar {
+  width: 100%;
+  height: 4px;
+  cursor: pointer;
+  accent-color: var(--brand-500, #2196f3);
+  border-radius: 12px 12px 0 0;
+  display: block;
+  /* ponytail: native range, no custom thumb lib needed */
 }
 
 .player-inner {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  gap: 1rem;
-  width: 100%;
-  padding: 0 1rem;
+  gap: 0.75rem;
+  padding: 6px 12px 8px;
   box-sizing: border-box;
-  height: 100%;
 }
 
-/* Left: cover thumbnail + title + position */
+/* Left: cover thumbnail + title + chapter + position */
 .player-meta {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.625rem;
   min-width: 0;
 }
 
 .player-cover {
-  width: 48px;
-  height: 48px;
+  width: 44px;
+  height: 44px;
   object-fit: cover;
-  border-radius: 4px;
+  border-radius: 6px;
   flex-shrink: 0;
 }
 
@@ -357,29 +795,28 @@ onUnmounted(() => {
   text-overflow: ellipsis;
 }
 
+.player-chapter {
+  font-size: 0.72rem;
+  color: var(--brand-400, #64b5f6);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 1px;
+}
+
 .player-time {
   font-size: 0.72rem;
   color: #9aa0a6;
-  margin-top: 2px;
+  margin-top: 1px;
   font-variant-numeric: tabular-nums;
 }
 
-/* Center: scrub bar stacked above controls */
+/* Center: main playback controls */
 .player-controls-wrap {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
-  min-width: 0;
-  width: 100%;
-}
-
-.scrub-bar {
-  width: 100%;
-  height: 4px;
-  cursor: pointer;
-  accent-color: var(--brand-500, #2196f3);
-  /* ponytail: native range, no custom thumb lib needed */
+  flex-shrink: 0;
 }
 
 .player-controls {
@@ -398,6 +835,10 @@ onUnmounted(() => {
   font-size: 16px;
   color: #bbb;
   border-radius: 6px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  flex-shrink: 0;
 }
 
 .player-btn--play {
@@ -405,6 +846,12 @@ onUnmounted(() => {
   height: 40px;
   color: #fff;
   font-size: 22px;
+}
+
+.player-btn--sm {
+  width: 30px;
+  height: 30px;
+  font-size: 15px;
 }
 
 .player-btn:hover {
@@ -417,8 +864,34 @@ onUnmounted(() => {
   outline-offset: 1px;
 }
 
-/* Right: speed selector */
+.player-btn--active {
+  color: var(--brand-400, #64b5f6);
+}
+
+/* Right: volume + extras */
 .player-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.volume-wrap {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.volume-slider {
+  width: 72px;
+  height: 4px;
+  cursor: pointer;
+  accent-color: var(--brand-500, #2196f3);
+}
+
+/* Speed selector */
+.player-speed {
   display: flex;
   align-items: center;
   gap: 4px;
@@ -445,31 +918,196 @@ onUnmounted(() => {
   outline-offset: 1px;
 }
 
-/* Responsive: tighten on small screens */
-@media (max-width: 768px) {
-  .audio-player {
-    height: 64px;
-  }
-
-  .player-inner {
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    gap: 0.5rem;
-    padding: 0 0.5rem;
-  }
-
-  .player-cover {
-    width: 40px;
-    height: 40px;
-  }
-
-  .player-speed-label {
-    display: none;
-  }
+/* Sleep timer countdown badge */
+.timer-badge {
+  font-size: 0.6rem;
+  font-variant-numeric: tabular-nums;
+  margin-left: 1px;
+  color: var(--brand-400, #64b5f6);
+  line-height: 1;
 }
 
-@media (max-width: 480px) {
+/* Popover container */
+.popover-wrap {
+  position: relative;
+}
+
+/* Shared popover panel */
+.player-popover {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  background: #252525;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  z-index: 950;
+  min-width: 180px;
+  max-width: 280px;
+  overflow: hidden;
+}
+
+.chapter-popover {
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.sleep-popover {
+  min-width: 140px;
+}
+
+.bookmark-popover {
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #9aa0a6;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid #333;
+}
+
+.popover-add-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: none;
+  border: none;
+  color: #9aa0a6;
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 0;
+  font-size: 14px;
+}
+
+.popover-add-btn:hover {
+  color: #fff;
+  background: #3a3a3a;
+}
+
+.popover-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+}
+
+.popover-item {
+  display: flex;
+  align-items: center;
+}
+
+.popover-item.active .popover-item-btn {
+  color: var(--brand-400, #64b5f6);
+}
+
+.popover-item-btn {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  background: none;
+  border: none;
+  color: #ccc;
+  cursor: pointer;
+  text-align: left;
+  font-size: 0.82rem;
+  min-width: 0;
+}
+
+.popover-item-btn:hover {
+  background: #333;
+  color: #fff;
+}
+
+.popover-item-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.popover-item-time {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  color: #9aa0a6;
+  font-variant-numeric: tabular-nums;
+}
+
+.popover-del-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: none;
+  border: none;
+  color: #666;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 13px;
+  padding: 0;
+}
+
+.popover-del-btn:hover {
+  color: #f44;
+  background: rgba(255, 68, 68, 0.08);
+}
+
+.popover-empty {
+  padding: 10px;
+  text-align: center;
+  font-size: 0.8rem;
+  color: #666;
+}
+
+.bookmark-label-wrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid #333;
+}
+
+.bookmark-label-input {
+  flex: 1 1 auto;
+  background: #1a1a1a;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  color: #ccc;
+  font-size: 0.82rem;
+  padding: 4px 6px;
+  outline: none;
+}
+
+.bookmark-label-input:focus {
+  border-color: var(--brand-500, #2196f3);
+}
+
+/* Responsive: narrow screens */
+@media (max-width: 700px) {
+  .audio-player {
+    bottom: 8px;
+    width: calc(100% - 16px);
+    border-radius: 10px;
+  }
+
   .player-inner {
     grid-template-columns: auto minmax(0, 1fr);
+    gap: 0.5rem;
+    padding: 4px 8px 6px;
   }
 
   .player-right {
@@ -477,8 +1115,25 @@ onUnmounted(() => {
   }
 }
 
+@media (max-width: 480px) {
+  .player-inner {
+    grid-template-columns: auto 1fr;
+    gap: 0.375rem;
+  }
+
+  .player-cover {
+    width: 36px;
+    height: 36px;
+  }
+
+  .volume-wrap {
+    display: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .scrub-bar {
+  .scrub-bar,
+  .volume-slider {
     transition: none;
   }
 }

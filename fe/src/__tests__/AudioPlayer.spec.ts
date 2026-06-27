@@ -20,7 +20,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { describe, it, beforeEach, expect, vi } from 'vitest'
 import type { PlaybackState } from '@/types'
 
-// jsdom does not implement HTMLMediaElement play/pause/currentTime — stub them
+// jsdom does not implement HTMLMediaElement play/pause/currentTime/volume — stub them
 const playStub = vi.fn().mockResolvedValue(undefined)
 const pauseStub = vi.fn()
 
@@ -37,11 +37,19 @@ Object.defineProperty(HTMLMediaElement.prototype, 'currentTime', {
   get: vi.fn().mockReturnValue(0),
   set: vi.fn(),
 })
+Object.defineProperty(HTMLMediaElement.prototype, 'volume', {
+  configurable: true,
+  get: vi.fn().mockReturnValue(1),
+  set: vi.fn(),
+})
 
 vi.mock('@/services/api', () => ({
   apiService: {
     streamUrl: (id: number, idx: number) => `/audiobooks/${id}/files/${idx}/stream`,
     savePlayback: vi.fn().mockResolvedValue(undefined),
+    getBookmarks: vi.fn().mockResolvedValue([]),
+    addBookmark: vi.fn().mockResolvedValue({ id: 1, fileIndex: 0, positionSeconds: 0, label: null, createdUtc: '' }),
+    deleteBookmark: vi.fn().mockResolvedValue(undefined),
   },
 }))
 
@@ -62,6 +70,7 @@ function makeState(overrides: Partial<PlaybackState> = {}): PlaybackState {
     fileIndex: 0,
     positionSeconds: 0,
     finished: false,
+    chapters: [],
     ...overrides,
   }
 }
@@ -163,5 +172,66 @@ describe('AudioPlayer', () => {
     const values = options.map((o) => parseFloat(o.element.value))
 
     expect(values).toEqual([0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3])
+  })
+
+  it('shows the current chapter title when a chapter is active', async () => {
+    const store = usePlayerStore()
+    store.current = makeState({
+      chapters: [{ index: 0, fileIndex: 0, startSeconds: 0, endSeconds: 120, title: 'Intro' }],
+    })
+    store.fileIndex = 0
+    store.positionSeconds = 30
+
+    const wrapper = mount(AudioPlayer)
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('.player-chapter').exists()).toBe(true)
+    expect(wrapper.find('.player-chapter').text()).toBe('Intro')
+  })
+
+  it('shows chapter navigation buttons when chapters are present', () => {
+    const store = usePlayerStore()
+    store.current = makeState({
+      chapters: [
+        { index: 0, fileIndex: 0, startSeconds: 0, endSeconds: 60, title: 'Ch1' },
+        { index: 1, fileIndex: 0, startSeconds: 60, endSeconds: 120, title: 'Ch2' },
+      ],
+    })
+
+    const wrapper = mount(AudioPlayer)
+
+    expect(wrapper.find('[aria-label="Previous chapter"]').exists()).toBe(true)
+    expect(wrapper.find('[aria-label="Next chapter"]').exists()).toBe(true)
+  })
+
+  it('does not show chapter navigation buttons when no chapters', () => {
+    const store = usePlayerStore()
+    store.current = makeState({ chapters: [] })
+
+    const wrapper = mount(AudioPlayer)
+
+    expect(wrapper.find('[aria-label="Previous chapter"]').exists()).toBe(false)
+    expect(wrapper.find('[aria-label="Next chapter"]').exists()).toBe(false)
+  })
+
+  it('has a volume slider', () => {
+    const store = usePlayerStore()
+    store.current = makeState()
+
+    const wrapper = mount(AudioPlayer)
+    const volSlider = wrapper.find('.volume-slider')
+
+    expect(volSlider.exists()).toBe(true)
+    expect(volSlider.attributes('aria-label')).toBe('Volume')
+  })
+
+  it('shows the mark-finished button', () => {
+    const store = usePlayerStore()
+    store.current = makeState()
+
+    const wrapper = mount(AudioPlayer)
+
+    const btn = wrapper.find('[aria-label="Mark as finished"]')
+    expect(btn.exists()).toBe(true)
   })
 })
