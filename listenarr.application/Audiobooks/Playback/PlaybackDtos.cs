@@ -19,5 +19,6 @@
 namespace Listenarr.Application.Audiobooks.Playback;
 
 public record PlaybackFileDto(int Index, double? DurationSeconds, string ContentType);
-public record PlaybackStateDto(int AudiobookId, string? Title, string? Asin, IReadOnlyList<PlaybackFileDto> Files, int FileIndex, double PositionSeconds, bool Finished);
+public record ChapterDto(int Index, int FileIndex, double StartSeconds, double EndSeconds, string Title);
+public record PlaybackStateDto(int AudiobookId, string? Title, string? Asin, IReadOnlyList<PlaybackFileDto> Files, int FileIndex, double PositionSeconds, bool Finished, IReadOnlyList<ChapterDto> Chapters);
 public record SavePlaybackRequest(int FileIndex, double PositionSeconds, bool Finished);

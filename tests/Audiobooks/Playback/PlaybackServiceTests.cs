@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Listenarr.Application.Audiobooks.Playback;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Listenarr.Tests.Audiobooks.Playback
 {
@@ -49,7 +50,7 @@ namespace Listenarr.Tests.Audiobooks.Playback
             repo.Setup(r => r.GetByIdsWithFilesAsync(It.IsAny<IEnumerable<int>>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync([]);
 
-            var svc = new PlaybackService(repo.Object, BuildSettingsRepo(autoUnmonitor: true).Object);
+            var svc = BuildService(repo.Object, BuildSettingsRepo(autoUnmonitor: true).Object);
 
             var result = await svc.GetStateAsync(999);
             Assert.Null(result);
@@ -66,13 +67,13 @@ namespace Listenarr.Tests.Audiobooks.Playback
                 Title = "Test Book",
                 Files = new List<AudiobookFile>
                 {
-                    new() { Path = "/audio/Part 10.mp3", Container = "mp3", DurationSeconds = 10 },
-                    new() { Path = "/audio/Part 2.mp3",  Container = "mp3", DurationSeconds = 2  },
-                    new() { Path = "/audio/Part 1.mp3",  Container = "mp3", DurationSeconds = 1  },
+                    new() { Path = "/audio/Part 10.mp3", Container = "mp3", DurationSeconds = 10, ChaptersJson = "[]" },
+                    new() { Path = "/audio/Part 2.mp3",  Container = "mp3", DurationSeconds = 2,  ChaptersJson = "[]" },
+                    new() { Path = "/audio/Part 1.mp3",  Container = "mp3", DurationSeconds = 1,  ChaptersJson = "[]" },
                 }
             };
 
-            var svc = new PlaybackService(
+            var svc = BuildService(
                 BuildRepoWithBook(book).Object,
                 BuildSettingsRepo(autoUnmonitor: true).Object);
 
@@ -98,11 +99,11 @@ namespace Listenarr.Tests.Audiobooks.Playback
                 Id = 1,
                 Files = new List<AudiobookFile>
                 {
-                    new() { Path = "/a/file.m4b", Container = "m4b" },
+                    new() { Path = "/a/file.m4b", Container = "m4b", ChaptersJson = "[]" },
                 }
             };
 
-            var svc = new PlaybackService(
+            var svc = BuildService(
                 BuildRepoWithBook(book).Object,
                 BuildSettingsRepo(autoUnmonitor: true).Object);
 
@@ -127,7 +128,7 @@ namespace Listenarr.Tests.Audiobooks.Playback
                 .Callback<Audiobook>(b => saved = b)
                 .ReturnsAsync(true);
 
-            var svc = new PlaybackService(repo.Object, BuildSettingsRepo(autoUnmonitor: true).Object);
+            var svc = BuildService(repo.Object, BuildSettingsRepo(autoUnmonitor: true).Object);
 
             var result = await svc.SaveAsync(1, new SavePlaybackRequest(0, 100.0, Finished: true));
 
@@ -150,7 +151,7 @@ namespace Listenarr.Tests.Audiobooks.Playback
                 .Callback<Audiobook>(b => saved = b)
                 .ReturnsAsync(true);
 
-            var svc = new PlaybackService(repo.Object, BuildSettingsRepo(autoUnmonitor: false).Object);
+            var svc = BuildService(repo.Object, BuildSettingsRepo(autoUnmonitor: false).Object);
 
             var result = await svc.SaveAsync(1, new SavePlaybackRequest(0, 100.0, Finished: true));
 
@@ -166,7 +167,7 @@ namespace Listenarr.Tests.Audiobooks.Playback
             repo.Setup(r => r.GetByIdsWithFilesAsync(It.IsAny<IEnumerable<int>>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync([]);
 
-            var svc = new PlaybackService(repo.Object, BuildSettingsRepo(autoUnmonitor: true).Object);
+            var svc = BuildService(repo.Object, BuildSettingsRepo(autoUnmonitor: true).Object);
 
             var result = await svc.SaveAsync(999, new SavePlaybackRequest(0, 0, Finished: false));
             Assert.False(result);
@@ -186,7 +187,7 @@ namespace Listenarr.Tests.Audiobooks.Playback
                 }
             };
 
-            var svc = new PlaybackService(
+            var svc = BuildService(
                 BuildRepoWithBook(book).Object,
                 BuildSettingsRepo(autoUnmonitor: true).Object);
 
@@ -206,7 +207,7 @@ namespace Listenarr.Tests.Audiobooks.Playback
                 }
             };
 
-            var svc = new PlaybackService(
+            var svc = BuildService(
                 BuildRepoWithBook(book).Object,
                 BuildSettingsRepo(autoUnmonitor: true).Object);
 
@@ -235,6 +236,18 @@ namespace Listenarr.Tests.Audiobooks.Playback
             settingsRepo.Setup(r => r.GetAsync(It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new ApplicationSettings { PlayerAutoUnmonitorOnFinish = autoUnmonitor });
             return settingsRepo;
+        }
+
+        private static PlaybackService BuildService(
+            IAudiobookRepository repo,
+            IApplicationSettingsRepository settingsRepo,
+            IFfmpegService? ffmpeg = null,
+            IAudiobookFileRepository? fileRepo = null)
+        {
+            ffmpeg ??= Mock.Of<IFfmpegService>(f =>
+                f.RunFfprobeChaptersAsync(It.IsAny<string>()) == Task.FromResult<IReadOnlyList<FfprobeChapter>>(Array.Empty<FfprobeChapter>()));
+            fileRepo ??= Mock.Of<IAudiobookFileRepository>();
+            return new PlaybackService(repo, settingsRepo, ffmpeg, fileRepo, NullLogger<PlaybackService>.Instance);
         }
     }
 }

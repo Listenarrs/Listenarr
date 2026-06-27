@@ -59,6 +59,9 @@ namespace Listenarr.Domain.Audiobooks
 
         // Optional source or notes (e.g., DDL, qBittorrent, NZB)
         public string? Source { get; set; }
+
+        // Cached ffprobe chapter data as JSON. Null = never probed; "[]" = probed, no chapters (or ffprobe failed).
+        public string? ChaptersJson { get; set; }
     }
 }
 

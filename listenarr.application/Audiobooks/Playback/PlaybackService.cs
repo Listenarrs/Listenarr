@@ -15,14 +15,21 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using System.Text.Json;
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Audiobooks.Playback;
 
 public class PlaybackService(
     IAudiobookRepository audiobookRepository,
-    IApplicationSettingsRepository settingsRepository) : IPlaybackService
+    IApplicationSettingsRepository settingsRepository,
+    IFfmpegService ffmpegService,
+    IAudiobookFileRepository fileRepository,
+    ILogger<PlaybackService> logger) : IPlaybackService
 {
+    private static readonly JsonSerializerOptions _jsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+
     public async Task<PlaybackStateDto?> GetStateAsync(int audiobookId, CancellationToken ct = default)
     {
         var book = await LoadBookWithFilesAsync(audiobookId, ct);
@@ -36,6 +43,8 @@ public class PlaybackService(
                 AudioContentType.ForContainer(f.Container ?? f.Format)))
             .ToList();
 
+        var chapters = await BuildChaptersAsync(ordered, ct);
+
         return new PlaybackStateDto(
             book.Id,
             book.Title,
@@ -43,7 +52,8 @@ public class PlaybackService(
             fileDtos,
             book.PlaybackFileIndex,
             book.PlaybackPositionSeconds,
-            book.Finished);
+            book.Finished,
+            chapters);
     }
 
     public async Task<(string Path, string ContentType)?> ResolveFileAsync(int audiobookId, int fileIndex, CancellationToken ct = default)
@@ -83,6 +93,92 @@ public class PlaybackService(
         await audiobookRepository.UpdateAsync(book);
         return true;
     }
+
+    // ── Chapter extraction & aggregation ─────────────────────────────────────
+
+    private async Task<IReadOnlyList<ChapterDto>> BuildChaptersAsync(List<AudiobookFile> ordered, CancellationToken ct)
+    {
+        var result = new List<ChapterDto>();
+        var chapterIndex = 0;
+
+        for (var fileIdx = 0; fileIdx < ordered.Count; fileIdx++)
+        {
+            var file = ordered[fileIdx];
+
+            // Lazy-extract and cache chapter data. null = never probed.
+            if (file.ChaptersJson is null)
+            {
+                file.ChaptersJson = await ProbeAndSerializeAsync(file, ct);
+                try { await fileRepository.UpdateAsync(file, ct); }
+                catch (Exception ex) when (ex is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
+                {
+                    logger.LogWarning(ex, "Failed to persist chapter cache for AudiobookFile {Id}", file.Id);
+                }
+            }
+
+            var embedded = DeserializeChapters(file.ChaptersJson);
+
+            if (embedded.Count > 0)
+            {
+                // File has embedded chapters — emit one ChapterDto per chapter.
+                foreach (var ch in embedded)
+                {
+                    var title = string.IsNullOrWhiteSpace(ch.Title)
+                        ? $"Chapter {chapterIndex + 1}"
+                        : ch.Title;
+                    result.Add(new ChapterDto(chapterIndex++, fileIdx, ch.StartSeconds, ch.EndSeconds, title));
+                }
+            }
+            else
+            {
+                // No embedded chapters — emit a single whole-file chapter.
+                var title = !string.IsNullOrWhiteSpace(file.Path)
+                    ? Path.GetFileNameWithoutExtension(file.Path)
+                    : $"Part {fileIdx + 1}";
+                result.Add(new ChapterDto(chapterIndex++, fileIdx, 0, file.DurationSeconds ?? 0, title));
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>Run ffprobe and return the JSON to cache. Always returns non-null ("[]" on any failure).</summary>
+    private async Task<string> ProbeAndSerializeAsync(AudiobookFile file, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(file.Path)) return "[]";
+
+        try
+        {
+            var chapters = await ffmpegService.RunFfprobeChaptersAsync(file.Path);
+            if (chapters.Count == 0) return "[]";
+
+            var entries = chapters.Select(c => new ChapterCacheEntry(c.StartSeconds, c.EndSeconds, c.Title)).ToList();
+            return JsonSerializer.Serialize(entries, _jsonOptions);
+        }
+        catch (Exception ex) when (ex is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
+        {
+            logger.LogWarning(ex, "Failed to probe chapters for file {Path}", file.Path);
+            return "[]";
+        }
+    }
+
+    private static IReadOnlyList<ChapterCacheEntry> DeserializeChapters(string? json)
+    {
+        if (string.IsNullOrEmpty(json) || json == "[]") return Array.Empty<ChapterCacheEntry>();
+
+        try
+        {
+            var list = JsonSerializer.Deserialize<List<ChapterCacheEntry>>(json, _jsonOptions);
+            return list ?? (IReadOnlyList<ChapterCacheEntry>)Array.Empty<ChapterCacheEntry>();
+        }
+        catch
+        {
+            return Array.Empty<ChapterCacheEntry>();
+        }
+    }
+
+    // ponytail: simple POD for chapter JSON cache; no version field needed until the schema changes.
+    private record ChapterCacheEntry(double StartSeconds, double EndSeconds, string Title);
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 

@@ -49,5 +49,10 @@ namespace Listenarr.Tests.Mocks
 
             return new AudioMetadataBuilder().Build();
         }
+
+        public Task<IReadOnlyList<FfprobeChapter>> RunFfprobeChaptersAsync(string filePath)
+        {
+            return Task.FromResult<IReadOnlyList<FfprobeChapter>>(Array.Empty<FfprobeChapter>());
+        }
     }
 }

@@ -48,5 +48,15 @@ namespace Listenarr.Application.SystemDiagnostics.Contracts
         /// </summary>
         /// <returns>Content of the license file if any or empty string</returns>
         Task<string> GetLicenseAsync();
+
+        /// <summary>
+        /// Execute ffprobe with -show_chapters against the given file and return the raw chapter list.
+        /// Returns an empty list when the file has no chapters or ffprobe cannot read the file.
+        /// Never throws — callers should treat exceptions as a no-chapters result.
+        /// </summary>
+        Task<IReadOnlyList<FfprobeChapter>> RunFfprobeChaptersAsync(string filePath);
     }
+
+    /// <summary>A single chapter entry returned by RunFfprobeChaptersAsync.</summary>
+    public record FfprobeChapter(double StartSeconds, double EndSeconds, string Title);
 }
