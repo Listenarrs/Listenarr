@@ -38,6 +38,8 @@ namespace Listenarr.Application.Audiobooks.Catalog
         public string? Edition { get; set; }
         public string? ImageUrl { get; set; }
         public bool Monitored { get; set; }
+        public bool Finished { get; set; }
+        public double PlaybackPositionSeconds { get; set; }
         public string? BasePath { get; set; }
         public string? FilePath { get; set; }
         public long? FileSize { get; set; }

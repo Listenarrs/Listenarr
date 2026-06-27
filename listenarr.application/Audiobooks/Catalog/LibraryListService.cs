@@ -133,6 +133,8 @@ namespace Listenarr.Application.Audiobooks.Catalog
                     Edition = a.Edition,
                     ImageUrl = a.ImageUrl,
                     Monitored = a.Monitored,
+                    Finished = a.Finished,
+                    PlaybackPositionSeconds = a.PlaybackPositionSeconds,
                     BasePath = a.BasePath,
                     FilePath = a.FilePath,
                     FileSize = a.FileSize,
