@@ -15,7 +15,7 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                 table: "ApplicationSettings",
                 type: "INTEGER",
                 nullable: false,
-                defaultValue: false);
+                defaultValue: true);
 
             migrationBuilder.AddColumn<string>(
                 name: "IndexerMirrorOverridesJson",
