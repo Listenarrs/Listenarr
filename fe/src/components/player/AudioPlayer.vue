@@ -69,16 +69,20 @@
 
     <!-- Full bar: scrub bar + controls (hidden when collapsed) -->
     <template v-else>
-    <!-- Scrub bar: full width, above controls -->
-    <input
-      type="range"
-      class="scrub-bar"
-      min="0"
-      :max="player.duration || 0"
-      v-model.number="player.positionSeconds"
-      @input="onScrubInput"
-      aria-label="Playback position"
-    />
+    <!-- Progress row: elapsed · scrub · total (integrated into the bar body) -->
+    <div class="player-progress">
+      <span class="player-time">{{ formatTime(player.positionSeconds) }}</span>
+      <input
+        type="range"
+        class="scrub-bar"
+        min="0"
+        :max="player.duration || 0"
+        v-model.number="player.positionSeconds"
+        @input="onScrubInput"
+        aria-label="Playback position"
+      />
+      <span class="player-time">{{ formatTime(player.duration) }}</span>
+    </div>
 
     <div class="player-inner">
       <!-- Left: cover + title + chapter -->
@@ -96,9 +100,6 @@
           </div>
           <div v-if="player.currentChapter" class="player-chapter" :title="player.currentChapter.title">
             {{ player.currentChapter.title }}
-          </div>
-          <div class="player-time">
-            {{ formatTime(player.positionSeconds) }} / {{ formatTime(player.duration) }}
           </div>
         </div>
       </div>
@@ -816,7 +817,7 @@ onUnmounted(() => {
   left: 0;
   right: 0;
   margin: 0 auto;
-  max-width: 860px;
+  max-width: 1040px;
   width: calc(100% - 24px);
   background-color: var(--bg-tertiary, #2a2a2a);
   border: 1px solid var(--bg-surface, #3a3a3a);
@@ -830,23 +831,31 @@ onUnmounted(() => {
   overflow: visible;
 }
 
-/* Scrub bar: sits at the top edge of the bar */
+/* Progress row: elapsed time · scrub · total time, integrated into the bar body */
+.player-progress {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 10px 16px 2px;
+  box-sizing: border-box;
+}
+
 .scrub-bar {
-  width: 100%;
-  height: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 5px;
   cursor: pointer;
   accent-color: var(--brand-500, #2196f3);
-  border-radius: 12px 12px 0 0;
-  display: block;
+  border-radius: 4px;
   /* ponytail: native range, no custom thumb lib needed */
 }
 
 .player-inner {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto minmax(max-content, 1fr);
   align-items: center;
-  gap: 0.75rem;
-  padding: 6px 12px 10px;
+  gap: 1.25rem;
+  padding: 4px 16px 10px;
   box-sizing: border-box;
 }
 
@@ -893,8 +902,10 @@ onUnmounted(() => {
 .player-time {
   font-size: 0.72rem;
   color: var(--text-secondary, #ccc);
-  margin-top: 1px;
   font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+  min-width: 52px;
+  text-align: center;
 }
 
 /* --- Center: playback controls --- */
@@ -908,7 +919,7 @@ onUnmounted(() => {
 .player-controls {
   display: flex;
   align-items: center;
-  gap: 0.25rem;
+  gap: 0.4rem;
 }
 
 /* Base button — 36×36 meets ≥32px secondary target */
@@ -992,7 +1003,7 @@ onUnmounted(() => {
 .player-right {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
   justify-content: flex-end;
   min-width: 0;
 }
@@ -1004,7 +1015,7 @@ onUnmounted(() => {
 }
 
 .volume-slider {
-  width: 72px;
+  width: 56px;
   height: 4px;
   cursor: pointer;
   accent-color: var(--brand-500, #2196f3);
