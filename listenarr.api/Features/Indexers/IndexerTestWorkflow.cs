@@ -139,6 +139,69 @@ namespace Listenarr.Api.Features.Indexers
             }
         }
 
+        public async Task<IndexerTestWorkflowResult> TestAudioBookBayAsync(Indexer indexer, bool persist)
+        {
+            const string browserUserAgent =
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36";
+
+            try
+            {
+                var raw = indexer.Url?.Trim();
+                var host = "audiobookbay.lu";
+                if (!string.IsNullOrWhiteSpace(raw))
+                {
+                    host = Uri.TryCreate(raw, UriKind.Absolute, out var abs) && !string.IsNullOrEmpty(abs.Host)
+                        ? abs.Host
+                        : raw.Replace("https://", "").Replace("http://", "").Split('/')[0];
+                }
+
+                var testUrl = $"https://{host}/?s=harry+potter";
+
+                var blockedReason = ValidateOutboundUrl(testUrl);
+                if (!string.IsNullOrWhiteSpace(blockedReason))
+                {
+                    await SaveTestResultAsync(indexer, persist, false, $"Blocked outbound target: {blockedReason}");
+                    return IndexerTestWorkflowResult.Failure($"Blocked outbound target: {blockedReason}");
+                }
+
+                using var response = await SendValidatedAsync(currentUri =>
+                {
+                    var req = new HttpRequestMessage(HttpMethod.Get, currentUri);
+                    req.Headers.UserAgent.ParseAdd(browserUserAgent);
+                    return req;
+                }, testUrl);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    await SaveTestResultAsync(indexer, persist, false, $"HTTP {(int)response.StatusCode}");
+                    return IndexerTestWorkflowResult.Failure(
+                        $"AudioBookBay returned HTTP {(int)response.StatusCode}", (int)response.StatusCode);
+                }
+
+                var content = await response.Content.ReadAsStringAsync();
+                // ABB result pages render posts in elements with class "post"; absence usually means a Cloudflare/JS wall.
+                if (!content.Contains("post", StringComparison.OrdinalIgnoreCase))
+                {
+                    await SaveTestResultAsync(indexer, persist, false, "Unexpected response (host may be blocking scrapers)");
+                    return IndexerTestWorkflowResult.Failure(
+                        "AudioBookBay returned an unexpected response (possible Cloudflare block)");
+                }
+
+                await SaveTestResultAsync(indexer, persist, true, null);
+                return IndexerTestWorkflowResult.Success($"AudioBookBay connection successful ({host})");
+            }
+            catch (HttpRequestException ex)
+            {
+                await SaveTestResultAsync(indexer, persist, false, ex.Message);
+                return IndexerTestWorkflowResult.Failure($"AudioBookBay test failed: {ex.Message}");
+            }
+            catch (TaskCanceledException)
+            {
+                await SaveTestResultAsync(indexer, persist, false, "Request timed out");
+                return IndexerTestWorkflowResult.Failure("AudioBookBay test timed out");
+            }
+        }
+
         public async Task<IndexerTestWorkflowResult> TestInternetArchiveAsync(Indexer indexer, bool persist)
         {
             try
