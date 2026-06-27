@@ -368,6 +368,10 @@ export interface ApplicationSettings {
   enableOpenLibrarySearch?: boolean
   defaultSearchRegion?: string
   defaultSearchLanguage?: string
+  // Indexer domain rotation: automatically switches domain-rotating indexers to a working mirror
+  enableIndexerDomainRotation?: boolean
+  // Optional JSON blob for extra mirror candidates: {"AnnasArchive": ["annas-archive.xyz"]}
+  indexerMirrorOverridesJson?: string
 }
 
 export interface ProwlarrImportConnectionSettings {

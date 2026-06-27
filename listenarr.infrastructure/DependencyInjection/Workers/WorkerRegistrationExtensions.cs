@@ -50,6 +50,7 @@ internal static class WorkerRegistrationExtensions
             provider.GetRequiredService<DownloadProcessingJobProcessor>());
 
         AddHostedProcessor<UnmatchedScanProcessor, IUnmatchedScanProcessor, UnmatchedScanBackgroundService>(services);
+        AddHostedProcessor<IndexerDomainRotationProcessor, IIndexerDomainRotationProcessor, IndexerDomainRotationBackgroundService>(services);
         return services;
     }
 
