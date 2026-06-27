@@ -1119,6 +1119,22 @@ export interface PlaybackFile {
   contentType: string
 }
 
+export interface Chapter {
+  index: number
+  fileIndex: number
+  startSeconds: number
+  endSeconds: number
+  title: string
+}
+
+export interface Bookmark {
+  id: number
+  fileIndex: number
+  positionSeconds: number
+  label: string | null
+  createdUtc: string
+}
+
 export interface PlaybackState {
   audiobookId: number
   title: string | null
@@ -1127,4 +1143,5 @@ export interface PlaybackState {
   fileIndex: number
   positionSeconds: number
   finished: boolean
+  chapters: Chapter[]
 }

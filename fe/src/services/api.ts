@@ -61,6 +61,7 @@ import type {
   RenameOperation,
   RenameResult,
   PlaybackState,
+  Bookmark,
 } from '@/types'
 import { getStartupConfigCached, resetCache as resetStartupConfigCache } from './startupConfigCache'
 import { sessionTokenManager } from '@/utils/sessionToken'
@@ -2015,6 +2016,27 @@ class ApiService {
   // URL for the <audio> element — same-origin GET, cookie auth applies automatically.
   streamUrl(id: number, fileIndex: number): string {
     return buildApiPath(`/audiobooks/${id}/files/${fileIndex}/stream`)
+  }
+
+  // Bookmark endpoints
+  async getBookmarks(id: number): Promise<Bookmark[]> {
+    return this.request<Bookmark[]>(`/audiobooks/${id}/bookmarks`)
+  }
+
+  async addBookmark(
+    id: number,
+    body: { fileIndex: number; positionSeconds: number; label?: string | null },
+  ): Promise<Bookmark> {
+    return this.request<Bookmark>(`/audiobooks/${id}/bookmarks`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    })
+  }
+
+  async deleteBookmark(id: number, bookmarkId: number): Promise<void> {
+    return this.request<void>(`/audiobooks/${id}/bookmarks/${bookmarkId}`, {
+      method: 'DELETE',
+    })
   }
 }
 
