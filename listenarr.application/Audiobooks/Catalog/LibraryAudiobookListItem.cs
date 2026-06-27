@@ -40,6 +40,7 @@ namespace Listenarr.Application.Audiobooks.Catalog
         public bool Monitored { get; set; }
         public bool Finished { get; set; }
         public double PlaybackPositionSeconds { get; set; }
+        public DateTime? PlaybackUpdatedUtc { get; set; }
         public string? BasePath { get; set; }
         public string? FilePath { get; set; }
         public long? FileSize { get; set; }

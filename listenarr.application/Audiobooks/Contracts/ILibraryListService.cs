@@ -21,5 +21,11 @@ namespace Listenarr.Application.Audiobooks.Contracts
     public interface ILibraryListService
     {
         Task<IReadOnlyList<LibraryAudiobookListItem>> GetAllAsync();
+
+        /// <summary>
+        /// Return up to 20 in-progress books (PlaybackUpdatedUtc != null, Finished == false),
+        /// ordered most-recently-played first.
+        /// </summary>
+        Task<IReadOnlyList<LibraryAudiobookListItem>> GetContinueListeningAsync();
     }
 }

@@ -47,6 +47,17 @@ namespace Listenarr.Application.Audiobooks.Catalog
             _downloadRepository = downloadRepository;
         }
 
+        public async Task<IReadOnlyList<LibraryAudiobookListItem>> GetContinueListeningAsync()
+        {
+            // Reuse GetAllAsync projection; filter + sort in memory (library is bounded).
+            var all = await GetAllAsync();
+            return all
+                .Where(a => a.PlaybackUpdatedUtc.HasValue && !a.Finished)
+                .OrderByDescending(a => a.PlaybackUpdatedUtc)
+                .Take(20)
+                .ToList();
+        }
+
         public async Task<IReadOnlyList<LibraryAudiobookListItem>> GetAllAsync()
         {
             var allAudiobooks = await _audiobookRepository.GetAllAsync();
@@ -135,6 +146,7 @@ namespace Listenarr.Application.Audiobooks.Catalog
                     Monitored = a.Monitored,
                     Finished = a.Finished,
                     PlaybackPositionSeconds = a.PlaybackPositionSeconds,
+                    PlaybackUpdatedUtc = a.PlaybackUpdatedUtc,
                     BasePath = a.BasePath,
                     FilePath = a.FilePath,
                     FileSize = a.FileSize,
