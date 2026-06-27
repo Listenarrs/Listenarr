@@ -23,6 +23,7 @@ namespace Listenarr.Infrastructure.Persistence
     public class ListenArrDbContext : DbContext
     {
         public DbSet<Audiobook> Audiobooks { get; set; } = null!;
+        public DbSet<Bookmark> Bookmarks { get; set; } = null!;
         public DbSet<AudiobookSeriesMembership> AudiobookSeriesMemberships { get; set; } = null!;
         public DbSet<AudiobookExternalIdentifier> AudiobookExternalIdentifiers { get; set; } = null!;
         public DbSet<AudiobookFile> AudiobookFiles { get; set; } = null!;

@@ -17,6 +17,8 @@
  */
 
 using Microsoft.AspNetCore.Mvc;
+using Listenarr.Application.Audiobooks.Bookmarks;
+using Listenarr.Application.Audiobooks.Contracts;
 using Listenarr.Application.Audiobooks.Playback;
 using Listenarr.Domain.Common;
 
@@ -28,17 +30,23 @@ namespace Listenarr.Api.Features.Listening
     public class ListenController : ControllerBase
     {
         private readonly IPlaybackService _playback;
+        private readonly IBookmarkService _bookmarkService;
+        private readonly ILibraryListService _libraryListService;
         private readonly ILogger<ListenController> _logger;
         private readonly IFileSystem _fileSystem;
         private readonly IRootFolderRepository _rootFolderRepository;
 
         public ListenController(
             IPlaybackService playback,
+            IBookmarkService bookmarkService,
+            ILibraryListService libraryListService,
             ILogger<ListenController> logger,
             IFileSystem fileSystem,
             IRootFolderRepository rootFolderRepository)
         {
             _playback = playback;
+            _bookmarkService = bookmarkService;
+            _libraryListService = libraryListService;
             _logger = logger;
             _fileSystem = fileSystem;
             _rootFolderRepository = rootFolderRepository;
@@ -94,6 +102,55 @@ namespace Listenarr.Api.Features.Listening
             var ok = await _playback.SaveAsync(id, req, ct);
             return ok ? NoContent() : NotFound();
         }
+
+        // ── Continue Listening ────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Get in-progress audiobooks (started but not finished), ordered most-recently-played first, capped at 20.
+        /// </summary>
+        [HttpGet("continue-listening")]
+        public async Task<IActionResult> GetContinueListening()
+        {
+            return Ok(await _libraryListService.GetContinueListeningAsync());
+        }
+
+        // ── Bookmarks ────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// List all bookmarks for an audiobook.
+        /// </summary>
+        /// <param name="id">Audiobook database ID.</param>
+        [HttpGet("{id:int}/bookmarks")]
+        public async Task<IActionResult> GetBookmarks(int id, CancellationToken ct)
+        {
+            return Ok(await _bookmarkService.GetAsync(id, ct));
+        }
+
+        /// <summary>
+        /// Create a bookmark for an audiobook.
+        /// </summary>
+        /// <param name="id">Audiobook database ID.</param>
+        /// <param name="request">File index, position, and optional label.</param>
+        [HttpPost("{id:int}/bookmarks")]
+        public async Task<IActionResult> CreateBookmark(int id, [FromBody] CreateBookmarkRequest request, CancellationToken ct)
+        {
+            var dto = await _bookmarkService.AddAsync(id, request, ct);
+            return StatusCode(201, dto);
+        }
+
+        /// <summary>
+        /// Delete a bookmark.
+        /// </summary>
+        /// <param name="id">Audiobook database ID.</param>
+        /// <param name="bookmarkId">Bookmark ID to delete.</param>
+        [HttpDelete("{id:int}/bookmarks/{bookmarkId:int}")]
+        public async Task<IActionResult> DeleteBookmark(int id, int bookmarkId, CancellationToken ct)
+        {
+            var deleted = await _bookmarkService.DeleteAsync(id, bookmarkId, ct);
+            return deleted ? NoContent() : NotFound();
+        }
+
+        // ── Internal helpers ──────────────────────────────────────────────────
 
         /// <summary>
         /// Returns true only when <paramref name="path"/> is inside one of the app's configured

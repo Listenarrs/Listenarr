@@ -7,6 +7,7 @@
  * by the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  */
+using Listenarr.Application.Audiobooks.Bookmarks;
 using Listenarr.Application.Audiobooks.Playback;
 using Listenarr.Infrastructure.Persistence.Repositories;
 using Microsoft.Extensions.DependencyInjection;
@@ -29,6 +30,7 @@ internal static class LibraryRegistrationExtensions
         services.AddScoped<IRenameService, RenameService>();
         services.AddScoped<IQualityProfileService, QualityProfileService>();
         services.AddScoped<IPlaybackService, PlaybackService>();
+        services.AddScoped<IBookmarkService, BookmarkService>();
         return services;
     }
 
@@ -41,6 +43,7 @@ internal static class LibraryRegistrationExtensions
         services.AddScoped<IMonitoredAuthorRepository, EfMonitoredAuthorRepository>();
         services.AddScoped<IMonitoredSeriesRepository, EfMonitoredSeriesRepository>();
         services.AddScoped<IRootFolderRepository, EfRootFolderRepository>();
+        services.AddScoped<IBookmarkRepository, EfBookmarkRepository>();
         return services;
     }
 }
