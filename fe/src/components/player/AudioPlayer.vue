@@ -1245,8 +1245,9 @@ onUnmounted(() => {
 /* --- Collapsed pill variant --- */
 .audio-player--pill {
   max-width: 480px;
-  border-radius: 32px;
-  /* ponytail: fixed pill shape; pill width shrinks on narrow screens via width: calc(100% - 24px) on parent */
+  border-radius: 14px;
+  /* ponytail: squircle radius matches the bar (12px) and asset/button rounding, not a capsule.
+     Pill width shrinks on narrow screens via width: calc(100% - 24px) on parent. */
 }
 
 .pill-inner {
