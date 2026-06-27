@@ -131,8 +131,12 @@ namespace Listenarr.Application.Downloads.Submission
             }
 
             // Fall back to the default profile when an audiobook has none, so auto-search
-            // doesn't silently bail. Only give up if no profile exists at all.
-            var qualityProfile = audiobook.QualityProfile ?? await qualityProfileService.GetDefaultAsync();
+            // doesn't silently bail. GetDefaultAsync only returns a profile flagged
+            // IsDefault, which may be unset, so fall back to any profile too. Only give
+            // up if no profile exists at all.
+            var qualityProfile = audiobook.QualityProfile
+                ?? await qualityProfileService.GetDefaultAsync()
+                ?? (await qualityProfileService.GetAllAsync()).FirstOrDefault();
             if (qualityProfile == null)
             {
                 logger.LogWarning("Audiobook '{Title}' has no quality profile and no default profile exists", audiobook.Title);
