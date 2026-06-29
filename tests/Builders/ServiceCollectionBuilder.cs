@@ -137,7 +137,7 @@ namespace Listenarr.Tests.Builders
             var services = new ServiceCollection();
             services.AddLogging();
             services.AddMemoryCache();
-            services.AddSingleton(TimeProvider.System);
+            services.TryAddSingleton(TimeProvider.System);
             services.AddSingleton<IWorkerCycleRunner, WorkerCycleRunner>();
             services.AddListenarrAppServices(configuration);
             services.AddListenarrAdapters(configuration);
@@ -263,6 +263,9 @@ namespace Listenarr.Tests.Builders
             services.AddSingleton<DownloadMonitorService>();
             services.AddSingleton<DownloadProcessingJobProcessor>();
             services.AddSingleton<IDownloadImportProcessor>(sp => sp.GetRequiredService<DownloadProcessingJobProcessor>());
+            services.AddSingleton<DownloadProcessingJobCleanupProcessor>();
+            services.AddSingleton<IDownloadProcessingJobCleanupProcessor>(sp => sp.GetRequiredService<DownloadProcessingJobCleanupProcessor>());
+            services.AddSingleton<DownloadProcessingJobCleanupService>();
 
             return services;
         }

@@ -89,15 +89,33 @@ namespace Listenarr.Infrastructure.Downloads.Cleanup
         IServiceScopeFactory scopeFactory,
         ILogger<MovedDownloadCleanupProcessor> logger) : IMovedDownloadCleanupProcessor
     {
+        private static readonly TimeSpan ClientRemovalGracePeriod = TimeSpan.FromHours(2);
+        private static readonly TimeSpan FailedCleanupWarningGracePeriod = TimeSpan.FromHours(24);
+        private static readonly TimeSpan LegacyMovedProofGracePeriod = TimeSpan.FromDays(7);
+
+        private enum ImportProofKind
+        {
+            None,
+            CompletedProcessingJob,
+            LastImportedAt,
+            ImportedHistory,
+            LegacyDownloadHistory,
+            LegacyMovedState
+        }
+
+        private sealed record ImportProof(
+            ImportProofKind Kind,
+            string CorrelationId,
+            string? ProcessingJobId,
+            DateTime? ProvenAt)
+        {
+            public bool AllowsDestructiveCleanup => Kind is not ImportProofKind.LegacyMovedState;
+        }
+
         /// <summary>
         /// Processes deferred removals for downloads that have been imported (Status == Moved)
         /// but couldn't be removed from the client because the torrent hadn't reached its seed limit.
         /// Checks metadata CanBeRemoved flag which is updated by DownloadMonitorService on each poll.
-        /// 
-        /// Handles edge cases:
-        /// - CanBeRemoved never set (download assigned to wrong client type, e.g. NZBGet for a torrent)
-        /// - Primary client removal fails (cross-client fallback using TorrentHash)
-        /// - All removal attempts fail (stale DB record cleanup after grace period)
         /// </summary>
         public async Task RunCycleAsync(CancellationToken cancellationToken)
         {
@@ -107,6 +125,7 @@ namespace Listenarr.Infrastructure.Downloads.Cleanup
             var downloadClientGateway = scope.ServiceProvider.GetRequiredService<IDownloadClientGateway>();
             var processingJobRepository = scope.ServiceProvider.GetRequiredService<IDownloadProcessingJobRepository>();
             var historyRepository = scope.ServiceProvider.GetRequiredService<IHistoryRepository>();
+            var downloadHistoryRepository = scope.ServiceProvider.GetRequiredService<IDownloadHistoryRepository>();
 
             var movedDownloads = (await downloadRepository.GetActiveAsync())
                 .Where(d => d.Status == DownloadStatus.Moved)
@@ -114,7 +133,8 @@ namespace Listenarr.Infrastructure.Downloads.Cleanup
 
             if (movedDownloads.Count == 0) return;
 
-            // Pre-load all enabled client configurations for cross-client removal fallback
+            // Pre-load enabled clients once so torrent cross-client cleanup does not reload
+            // configuration for every moved download in a cleanup cycle.
             List<DownloadClientConfiguration> allEnabledClients;
             try
             {
@@ -131,40 +151,70 @@ namespace Listenarr.Infrastructure.Downloads.Cleanup
             {
                 try
                 {
-                    var completedJob = (await processingJobRepository.GetByDownloadIdAsync(download.Id))
-                        .Where(job => job.Status == ProcessingJobStatus.Completed)
-                        .OrderByDescending(job => job.CompletedAt)
-                        .FirstOrDefault();
-                    if (completedJob == null)
+                    var clientConfig = await configurationService.GetDownloadClientConfigurationAsync(download.DownloadClientId);
+                    if (clientConfig == null)
+                    {
+                        logger.LogDebug(
+                            "Deferred removal: Skipping download {DownloadId} because client {ClientId} no longer exists",
+                            download.Id,
+                            download.DownloadClientId);
+                        continue;
+                    }
+
+                    if (!clientConfig.IsEnabled)
+                    {
+                        logger.LogDebug("Deferred removal: Skipping download {DownloadId} — client {ClientName} is disabled",
+                            download.Id, clientConfig.Name);
+                        continue;
+                    }
+
+                    var removalPolicy = clientConfig.RemoveCompletedDownloads;
+                    if (string.IsNullOrEmpty(removalPolicy) || removalPolicy == "none")
+                    {
+                        // Policy none is an intentional retention choice, so do not resolve import
+                        // proof, infer removability, or write cleanup history for these records.
+                        logger.LogDebug("Deferred removal: Retaining imported download {DownloadId}; client action is none", download.Id);
+                        continue;
+                    }
+
+                    var proof = await ResolveImportProofAsync(
+                        download,
+                        processingJobRepository,
+                        historyRepository,
+                        downloadHistoryRepository,
+                        cancellationToken);
+                    if (proof.Kind == ImportProofKind.None)
                     {
                         logger.LogWarning(
-                            "Deferred removal: Download {DownloadId} is Moved without a completed import job; cleanup is blocked",
+                            "Deferred removal: Download {DownloadId} is Moved without durable import proof; cleanup is blocked",
                             download.Id);
                         continue;
                     }
 
-                    var correlationId = completedJob.GetOrCreateCorrelationId();
-
-                    // Check if CanBeRemoved is now true (updated by DownloadMonitorService)
-                    bool canBeRemoved = false;
+                    var hasCanBeRemoved = false;
+                    var canBeRemoved = false;
                     if (download.Metadata != null && download.Metadata.TryGetValue("CanBeRemoved", out var canRemoveObj))
                     {
-                        canBeRemoved = canRemoveObj is bool b ? b : (canRemoveObj is System.Text.Json.JsonElement je ? je.GetBoolean() : bool.TryParse(canRemoveObj?.ToString(), out var parsed) && parsed);
+                        hasCanBeRemoved = true;
+                        canBeRemoved = canRemoveObj is bool b
+                            ? b
+                            : canRemoveObj is JsonElement je
+                                ? je.GetBoolean()
+                                : bool.TryParse(canRemoveObj?.ToString(), out var parsed) && parsed;
                     }
 
-                    // Fallback: if CanBeRemoved was never set (e.g. download assigned to wrong
-                    // client type — NZBGet record for a Transmission torrent — so the correct
-                    // poller never updates it), treat as removable after a grace period.
-                    // The import is already done (status == Moved), so cleaning up is safe.
-                    var timeSinceCompleted = download.CompletedAt.HasValue
-                        ? DateTime.UtcNow - download.CompletedAt.Value
+                    // Only infer removability when the client never reported CanBeRemoved. A stored
+                    // false value means the client explicitly says cleanup is not ready yet.
+                    var timeSinceImportProof = proof.ProvenAt.HasValue
+                        ? DateTime.UtcNow - proof.ProvenAt.Value
                         : (TimeSpan?)null;
-
-                    if (!canBeRemoved && timeSinceCompleted.HasValue && timeSinceCompleted.Value > TimeSpan.FromHours(2))
+                    if (!canBeRemoved && !hasCanBeRemoved &&
+                        timeSinceImportProof.HasValue &&
+                        timeSinceImportProof.Value > ClientRemovalGracePeriod)
                     {
-                        logger.LogInformation(
+                        logger.LogDebug(
                             "Deferred removal: Download {DownloadId} CanBeRemoved not set after {Hours:F1}h — " +
-                            "treating as removable (possible client ID mismatch)", download.Id, timeSinceCompleted.Value.TotalHours);
+                            "treating as removable (possible client ID mismatch)", download.Id, timeSinceImportProof.Value.TotalHours);
                         canBeRemoved = true;
                     }
 
@@ -174,72 +224,64 @@ namespace Listenarr.Infrastructure.Downloads.Cleanup
                         continue;
                     }
 
-                    var clientConfig = await configurationService.GetDownloadClientConfigurationAsync(download.DownloadClientId);
-                    if (clientConfig != null && !clientConfig.IsEnabled)
+                    var deleteFiles = removalPolicy == "remove_and_delete";
+                    if (deleteFiles && !proof.AllowsDestructiveCleanup)
                     {
-                        logger.LogDebug("Deferred removal: Skipping download {DownloadId} — client {ClientName} is disabled",
-                            download.Id, clientConfig.Name);
-                        continue;
+                        // Legacy Moved alone is enough to clean stale client/DB state, but not
+                        // enough to prove it is safe to delete files from the external client.
+                        logger.LogWarning(
+                            "Deferred removal: Download {DownloadId} has only legacy Moved-state import proof; remove_and_delete was downgraded to remove",
+                            download.Id);
+                        deleteFiles = false;
                     }
 
-                    // Determine removal policy from any configured client (prefer primary)
-                    var removalPolicy = clientConfig?.RemoveCompletedDownloads;
-                    if (string.IsNullOrEmpty(removalPolicy) || removalPolicy == "none")
+                    if (proof.Kind == ImportProofKind.LegacyMovedState)
                     {
-                        // "None" means retain both the client item and the durable imported record.
-                        logger.LogDebug("Deferred removal: Retaining imported download {DownloadId}; client action is none", download.Id);
-                        continue;
+                        logger.LogInformation(
+                            "Deferred removal: Attempting non-destructive legacy cleanup for download {DownloadId}",
+                            download.Id);
                     }
 
-                    bool deleteFiles = removalPolicy == "remove_and_delete";
-
-                    // Resolve the client-side ID (prefer TorrentHash for torrents, then ClientDownloadId for usenet)
                     string? torrentHash = null;
                     if (download.Metadata != null && download.Metadata.TryGetValue("TorrentHash", out var hashObj))
                     {
                         torrentHash = hashObj?.ToString();
                     }
+
                     string? clientDownloadId = null;
                     if (download.Metadata != null && download.Metadata.TryGetValue("ClientDownloadId", out var clientIdObj))
                     {
                         clientDownloadId = clientIdObj?.ToString();
                     }
+
                     string clientId = !string.IsNullOrEmpty(torrentHash) ? torrentHash
                         : !string.IsNullOrEmpty(clientDownloadId) ? clientDownloadId
                         : download.Id;
 
-                    // Attempt 1: Try primary client
-                    bool removed = false;
+                    var removed = false;
                     await AddCleanupHistoryAsync(
                         historyRepository,
                         download,
                         HistoryEvents.CleanupRequested,
                         HistoryOutcome.Requested,
-                        correlationId,
+                        proof.CorrelationId,
                         $"Client cleanup requested ({removalPolicy})",
-                        new Dictionary<string, object>
-                        {
-                            ["ProcessingJobId"] = completedJob.Id,
-                            ["RemovalPolicy"] = removalPolicy,
-                            ["DeleteFiles"] = deleteFiles
-                        },
+                        BuildCleanupDetails(proof, removalPolicy, deleteFiles),
                         cancellationToken);
-                    if (clientConfig != null)
+
+                    try
                     {
-                        try
-                        {
-                            removed = await downloadClientGateway.RemoveAsync(clientConfig, clientId, deleteFiles);
-                        }
-                        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                        {
-                            logger.LogDebug(ex, "Deferred removal: Primary client {ClientName} removal failed for {DownloadId}",
-                                clientConfig.Name, download.Id);
-                        }
+                        removed = await downloadClientGateway.RemoveAsync(clientConfig, clientId, deleteFiles);
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                    {
+                        logger.LogDebug(ex, "Deferred removal: Primary client {ClientName} removal failed for {DownloadId}",
+                            clientConfig.Name, download.Id);
                     }
 
-                    // Attempt 2: Cross-client fallback — if primary failed and we have a torrent
-                    // hash, try all other enabled torrent clients. This handles cases where the
-                    // download was recorded under the wrong DownloadClientId.
+                    // If the primary client did not remove a torrent, try other enabled torrent
+                    // clients by hash. This keeps cleanup resilient to older records assigned to
+                    // the wrong DownloadClientId.
                     if (!removed && !string.IsNullOrEmpty(torrentHash))
                     {
                         var torrentClientTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -253,7 +295,8 @@ namespace Listenarr.Infrastructure.Downloads.Cleanup
                         {
                             try
                             {
-                                var altDeleteFiles = altClient.RemoveCompletedDownloads == "remove_and_delete";
+                                var altDeleteFiles = proof.AllowsDestructiveCleanup &&
+                                    altClient.RemoveCompletedDownloads == "remove_and_delete";
                                 removed = await downloadClientGateway.RemoveAsync(altClient, torrentHash, altDeleteFiles);
                                 if (removed)
                                 {
@@ -281,36 +324,28 @@ namespace Listenarr.Infrastructure.Downloads.Cleanup
                             download,
                             HistoryEvents.CleanupSucceeded,
                             HistoryOutcome.Succeeded,
-                            correlationId,
+                            proof.CorrelationId,
                             "Client cleanup completed",
-                            new Dictionary<string, object>
-                            {
-                                ["ProcessingJobId"] = completedJob.Id,
-                                ["RemovalPolicy"] = removalPolicy,
-                                ["DeleteFiles"] = deleteFiles
-                            },
+                            BuildCleanupDetails(proof, removalPolicy, deleteFiles),
                             cancellationToken);
                         await downloadRepository.RemoveAsync(download.Id);
                     }
-                    else if (timeSinceCompleted.HasValue && timeSinceCompleted.Value > TimeSpan.FromHours(24))
+                    else if (timeSinceImportProof.HasValue && timeSinceImportProof.Value > FailedCleanupWarningGracePeriod)
                     {
                         logger.LogWarning(
                             "Deferred removal: All removal attempts failed for {DownloadId} after {Hours:F1}h — " +
                             "retaining the operational record for a future retry",
-                            download.Id, timeSinceCompleted.Value.TotalHours);
+                            download.Id, timeSinceImportProof.Value.TotalHours);
+                        var details = BuildCleanupDetails(proof, removalPolicy, deleteFiles);
+                        details["OperationalRecordRemoved"] = false;
                         await AddCleanupHistoryAsync(
                             historyRepository,
                             download,
                             HistoryEvents.CleanupFailed,
                             HistoryOutcome.Failed,
-                            correlationId,
+                            proof.CorrelationId,
                             "Client cleanup failed after the grace period; operational record retained",
-                            new Dictionary<string, object>
-                            {
-                                ["ProcessingJobId"] = completedJob.Id,
-                                ["RemovalPolicy"] = removalPolicy,
-                                ["OperationalRecordRemoved"] = false
-                            },
+                            details,
                             cancellationToken);
                     }
                     else
@@ -321,13 +356,9 @@ namespace Listenarr.Infrastructure.Downloads.Cleanup
                             download,
                             HistoryEvents.CleanupFailed,
                             HistoryOutcome.Retrying,
-                            correlationId,
+                            proof.CorrelationId,
                             "Client cleanup failed and will be retried",
-                            new Dictionary<string, object>
-                            {
-                                ["ProcessingJobId"] = completedJob.Id,
-                                ["RemovalPolicy"] = removalPolicy
-                            },
+                            BuildCleanupDetails(proof, removalPolicy, deleteFiles),
                             cancellationToken);
                     }
                 }
@@ -336,6 +367,105 @@ namespace Listenarr.Infrastructure.Downloads.Cleanup
                     logger.LogDebug(ex, "Error processing deferred removal for {DownloadId}", download.Id);
                 }
             }
+        }
+
+        private static async Task<ImportProof> ResolveImportProofAsync(
+            Download download,
+            IDownloadProcessingJobRepository processingJobRepository,
+            IHistoryRepository historyRepository,
+            IDownloadHistoryRepository downloadHistoryRepository,
+            CancellationToken cancellationToken)
+        {
+            var completedJob = (await processingJobRepository.GetByDownloadIdAsync(download.Id))
+                .Where(job => job.Status == ProcessingJobStatus.Completed)
+                .OrderByDescending(job => job.CompletedAt ?? job.CreatedAt)
+                .FirstOrDefault();
+            if (completedJob != null)
+            {
+                return new ImportProof(
+                    ImportProofKind.CompletedProcessingJob,
+                    completedJob.GetOrCreateCorrelationId(),
+                    completedJob.Id,
+                    completedJob.CompletedAt);
+            }
+
+            if (download.LastImportedAt.HasValue)
+            {
+                return new ImportProof(
+                    ImportProofKind.LastImportedAt,
+                    download.Id.ToUpperInvariant(),
+                    null,
+                    download.LastImportedAt.Value);
+            }
+
+            var importedHistory = await historyRepository.GetSucceededImportedByDownloadIdAsync(
+                download.Id,
+                cancellationToken);
+            if (importedHistory != null)
+            {
+                return new ImportProof(
+                    ImportProofKind.ImportedHistory,
+                    importedHistory.CorrelationId ?? download.Id.ToUpperInvariant(),
+                    null,
+                    importedHistory.Timestamp);
+            }
+
+            var legacyDownloadHistory = await downloadHistoryRepository.GetImportedByDownloadIdAsync(
+                download.Id,
+                cancellationToken);
+            if (legacyDownloadHistory != null)
+            {
+                return new ImportProof(
+                    ImportProofKind.LegacyDownloadHistory,
+                    download.Id.ToUpperInvariant(),
+                    null,
+                    legacyDownloadHistory.ImportedAt ?? legacyDownloadHistory.EventDate);
+            }
+
+            var oldestHistoryAt = await historyRepository.GetOldestTimestampByDownloadIdAsync(
+                download.Id,
+                cancellationToken);
+            if (oldestHistoryAt.HasValue && DateTime.UtcNow - oldestHistoryAt.Value > LegacyMovedProofGracePeriod)
+            {
+                // Older builds used Moved as the only durable import marker. This is enough
+                // to clean stale client/DB state, but not enough to delete external files.
+                return new ImportProof(
+                    ImportProofKind.LegacyMovedState,
+                    download.Id.ToUpperInvariant(),
+                    null,
+                    oldestHistoryAt.Value);
+            }
+
+            return new ImportProof(
+                ImportProofKind.None,
+                download.Id.ToUpperInvariant(),
+                null,
+                null);
+        }
+
+        private static Dictionary<string, object> BuildCleanupDetails(
+            ImportProof proof,
+            string removalPolicy,
+            bool deleteFiles)
+        {
+            var details = new Dictionary<string, object>
+            {
+                ["ImportProof"] = proof.Kind.ToString(),
+                ["RemovalPolicy"] = removalPolicy,
+                ["DeleteFiles"] = deleteFiles
+            };
+
+            if (!string.IsNullOrWhiteSpace(proof.ProcessingJobId))
+            {
+                details["ProcessingJobId"] = proof.ProcessingJobId;
+            }
+
+            if (proof.ProvenAt.HasValue)
+            {
+                details["ImportProofAt"] = proof.ProvenAt.Value;
+            }
+
+            return details;
         }
 
         private static Task AddCleanupHistoryAsync(

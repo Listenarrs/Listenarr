@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Listenarr.Infrastructure.DependencyInjection;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Http;
 using Microsoft.Extensions.Options;
@@ -68,6 +69,43 @@ namespace Listenarr.Tests.Features.Infrastructure.DependencyInjection
                     descriptor.ServiceType == typeof(IMyAnonamouseConnectionTester) &&
                     descriptor.ImplementationType == typeof(MyAnonamouseConnectionTester) &&
                     descriptor.Lifetime == ServiceLifetime.Scoped);
+        }
+
+        [Fact]
+        public void AddListenarrAppServices_RegistersTimeProviderForDownloadProcessingServices()
+        {
+            var services = new ServiceCollection();
+
+            services.AddListenarrAppServices(new ConfigurationManager());
+
+            Assert.Contains(
+                services,
+                descriptor => descriptor.ServiceType == typeof(TimeProvider));
+
+            Assert.Contains(
+                services,
+                descriptor =>
+                    descriptor.ServiceType == typeof(IDownloadProcessingJobService) &&
+                    descriptor.ImplementationType == typeof(DownloadProcessingJobService) &&
+                    descriptor.Lifetime == ServiceLifetime.Scoped);
+        }
+
+        [Fact]
+        public void DownloadProcessingJobService_ResolvesWithoutAdaptersOrHostedWorkers()
+        {
+            var services = new ServiceCollection();
+            services.AddLogging();
+
+            services.AddListenarrInfrastructure(options =>
+                options.UseInMemoryDatabase(Guid.NewGuid().ToString()));
+            services.AddListenarrAppServices(new ConfigurationManager());
+
+            using var provider = services.BuildServiceProvider(validateScopes: true);
+            using var scope = provider.CreateScope();
+
+            var service = scope.ServiceProvider.GetRequiredService<IDownloadProcessingJobService>();
+
+            Assert.NotNull(service);
         }
     }
 }

@@ -23,6 +23,7 @@ namespace Listenarr.Application.Downloads.Contracts.Repositories
         Task<DownloadHistory> AddAsync(DownloadHistory history, CancellationToken ct = default);
         Task<List<DownloadHistory>> GetByDownloadIdAsync(string downloadId, CancellationToken ct = default);
         Task<DownloadHistory?> GetLatestEventAsync(string downloadId, CancellationToken ct = default);
+        Task<DownloadHistory?> GetImportedByDownloadIdAsync(string downloadId, CancellationToken ct = default);
         Task<List<DownloadHistory>> GetPendingImportsAsync(CancellationToken ct = default);
         Task MarkAsImportedAsync(string downloadId, CancellationToken ct = default);
         Task<bool> WasImportedAsync(string downloadId, CancellationToken ct = default);

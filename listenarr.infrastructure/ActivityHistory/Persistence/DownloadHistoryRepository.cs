@@ -98,6 +98,21 @@ namespace Listenarr.Infrastructure.ActivityHistory.Persistence
             return entry == null ? null : ToLegacyDownloadHistory(entry);
         }
 
+        public async Task<DownloadHistory?> GetImportedByDownloadIdAsync(string downloadId, CancellationToken ct = default)
+        {
+            if (string.IsNullOrEmpty(downloadId)) return null;
+
+            var normalizedId = downloadId.ToUpperInvariant();
+            var entry = await _context.DownloadHistories
+                .AsNoTracking()
+                .Where(h =>
+                    h.DownloadId.ToUpper() == normalizedId &&
+                    (h.WasImported || h.ImportedAt.HasValue || h.EventType == DownloadHistoryEventType.Imported))
+                .OrderByDescending(h => h.ImportedAt ?? h.EventDate)
+                .FirstOrDefaultAsync(ct);
+            return entry;
+        }
+
         /// <summary>
         /// Check if a download has already been imported (prevents duplicates)
         /// This is a key pattern - check history before grabbing

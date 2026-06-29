@@ -26,8 +26,12 @@ namespace Listenarr.Application.Downloads.Processing
     /// </summary>
     public class DownloadProcessingJobService(
         IDownloadProcessingJobRepository jobRepository,
-        ILogger<DownloadProcessingJobService> logger) : IDownloadProcessingJobService
+        ILogger<DownloadProcessingJobService> logger,
+        TimeProvider timeProvider) : IDownloadProcessingJobService
     {
+        private static readonly ProcessingJobStatus[] TerminalCleanupStatuses =
+            [ProcessingJobStatus.Completed, ProcessingJobStatus.Failed];
+
         public async Task<string> EnqueueAsync(Download download)
         {
             var now = DateTime.UtcNow;
@@ -120,8 +124,28 @@ namespace Listenarr.Application.Downloads.Processing
         public async Task<QueueStats> GetStatsAsync()
             => await jobRepository.GetStatsAsync();
 
-        public async Task CleanupOldJobsAsync(int retentionDays = 7)
-            => await jobRepository.CleanupOldJobsAsync(retentionDays);
+        public async Task CleanupOldJobsAsync(int retentionDays = 7, CancellationToken cancellationToken = default)
+        {
+            // Retention policy belongs in the application layer so repositories remain thin
+            // persistence adapters and cannot silently widen cleanup to active jobs later.
+            var cutoffUtc = timeProvider
+                .GetUtcNow()
+                .UtcDateTime
+                .AddDays(-retentionDays);
+
+            var removed = await jobRepository.DeleteCompletedBeforeAsync(
+                TerminalCleanupStatuses,
+                cutoffUtc,
+                cancellationToken);
+
+            if (removed > 0)
+            {
+                logger.LogInformation(
+                    "Cleaned up {Count} old processing jobs older than {Days} days",
+                    removed,
+                    retentionDays);
+            }
+        }
 
         public async Task<List<DownloadProcessingJob>> GetRecentActivityAsync(int count = 50)
             => await jobRepository.GetRecentAsync(count);

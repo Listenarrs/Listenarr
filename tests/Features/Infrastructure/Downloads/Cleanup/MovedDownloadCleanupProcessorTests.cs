@@ -7,6 +7,7 @@
  * by the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  */
+using System.Text.Json;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
 using Listenarr.Tests.Mocks;
@@ -26,17 +27,10 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Cleanup
         }
 
         [Fact]
-        public async Task RunCycleAsync_DoesNotCleanupMovedDownloadWithoutCompletedImportJob()
+        public async Task RunCycleAsync_DoesNotCleanupMovedDownloadWithoutImportProof()
         {
             var client = await CreateDownloadClientConfiguration();
-            var download = new DownloadBuilder()
-                .WithDownloadClientConfiguration(client)
-                .WithStatus(DownloadStatus.Moved)
-                .WithCompletedStatus(DateTime.UtcNow.AddMinutes(-5))
-                .Build();
-            download.Status = DownloadStatus.Moved;
-            download.Metadata["CanBeRemoved"] = true;
-            await _downloadRepository.AddAsync(download);
+            var download = await AddMovedDownloadAsync(client, canBeRemoved: true);
 
             await _provider.GetRequiredService<IMovedDownloadCleanupProcessor>()
                 .RunCycleAsync(CancellationToken.None);
@@ -51,24 +45,33 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Cleanup
             var client = await CreateDownloadClientConfiguration();
             client.RemoveCompletedDownloads = "none";
             await _downloadClientConfigurationRepository.SaveAsync(client);
-            var download = new DownloadBuilder()
-                .WithDownloadClientConfiguration(client)
-                .WithStatus(DownloadStatus.Moved)
-                .WithCompletedStatus(DateTime.UtcNow.AddMinutes(-5))
-                .Build();
-            download.Status = DownloadStatus.Moved;
-            download.Metadata["CanBeRemoved"] = true;
-            await _downloadRepository.AddAsync(download);
-            await _downloadProcessingJobRepository.AddAsync(new DownloadProcessingJobBuilder()
-                .WithDownload(download)
-                .WithCompleted(DateTime.UtcNow)
-                .Build());
+            var download = await AddMovedDownloadAsync(client, canBeRemoved: true);
+            await AddCompletedImportJobAsync(download);
 
             await _provider.GetRequiredService<IMovedDownloadCleanupProcessor>()
                 .RunCycleAsync(CancellationToken.None);
 
             Assert.NotNull(await _downloadRepository.GetByIdAsync(download.Id));
             Assert.Equal(0, _gateway.GetCallCount(nameof(_gateway.RemoveAsync)));
+            var history = await GetCleanupHistoryAsync(download.Id);
+            Assert.DoesNotContain(history.Records, entry => entry.EventType == HistoryEvents.CleanupRequested);
+        }
+
+        [Fact]
+        public async Task RunCycleAsync_PolicyNoneRetainsRecordBeforeImportProofValidation()
+        {
+            var client = await CreateRemovableClientAsync("none");
+            _gateway.RemoveResult = true;
+            var download = await AddMovedDownloadAsync(client, canBeRemoved: true);
+
+            await _provider.GetRequiredService<IMovedDownloadCleanupProcessor>()
+                .RunCycleAsync(CancellationToken.None);
+
+            Assert.NotNull(await _downloadRepository.GetByIdAsync(download.Id));
+            Assert.Equal(0, _gateway.GetCallCount(nameof(_gateway.RemoveAsync)));
+            var history = await GetCleanupHistoryAsync(download.Id);
+            Assert.DoesNotContain(history.Records, entry => entry.EventType == HistoryEvents.CleanupRequested);
+            Assert.DoesNotContain(history.Records, entry => entry.EventType == HistoryEvents.CleanupFailed);
         }
 
         [Fact]
@@ -88,10 +91,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Cleanup
             failedDownload.Status = DownloadStatus.Failed;
             failedDownload.Metadata["CanBeRemoved"] = true;
             await _downloadRepository.AddAsync(failedDownload);
-            await _downloadProcessingJobRepository.AddAsync(new DownloadProcessingJobBuilder()
-                .WithDownload(failedDownload)
-                .WithCompleted(DateTime.UtcNow)
-                .Build());
+            await AddCompletedImportJobAsync(failedDownload);
 
             await _provider.GetRequiredService<IMovedDownloadCleanupProcessor>()
                 .RunCycleAsync(CancellationToken.None);
@@ -99,18 +99,11 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Cleanup
             Assert.NotNull(await _downloadRepository.GetByIdAsync(failedDownload.Id));
             Assert.Equal(0, _gateway.GetCallCount(nameof(_gateway.RemoveAsync)));
 
-            var movedDownload = new DownloadBuilder()
-                .WithDownloadClientConfiguration(client)
-                .WithCompletedStatus(DateTime.UtcNow.AddMinutes(-5))
-                .WithClientDownloadId("moved-history")
-                .Build();
-            movedDownload.Status = DownloadStatus.Moved;
-            movedDownload.Metadata["CanBeRemoved"] = true;
-            await _downloadRepository.AddAsync(movedDownload);
-            await _downloadProcessingJobRepository.AddAsync(new DownloadProcessingJobBuilder()
-                .WithDownload(movedDownload)
-                .WithCompleted(DateTime.UtcNow)
-                .Build());
+            var movedDownload = await AddMovedDownloadAsync(
+                client,
+                canBeRemoved: true,
+                clientDownloadId: "moved-history");
+            await AddCompletedImportJobAsync(movedDownload);
 
             await _provider.GetRequiredService<IMovedDownloadCleanupProcessor>()
                 .RunCycleAsync(CancellationToken.None);
@@ -126,20 +119,11 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Cleanup
             client.RemoveCompletedDownloads = "remove";
             await _downloadClientConfigurationRepository.SaveAsync(client);
             _gateway.RemoveResult = true;
-            var download = new DownloadBuilder()
-                .WithDownloadClientConfiguration(client)
-                .WithCompletedStatus(DateTime.UtcNow.AddMinutes(-5))
-                .WithClientDownloadId("external-1")
-                .Build();
-            download.Status = DownloadStatus.Moved;
-            download.Metadata["CanBeRemoved"] = true;
-            await _downloadRepository.AddAsync(download);
-            var job = new DownloadProcessingJobBuilder()
-                .WithDownload(download)
-                .WithCompleted(DateTime.UtcNow)
-                .Build();
-            job.JobData["CorrelationId"] = "cleanup-success";
-            await _downloadProcessingJobRepository.AddAsync(job);
+            var download = await AddMovedDownloadAsync(
+                client,
+                canBeRemoved: true,
+                clientDownloadId: "external-1");
+            await AddCompletedImportJobAsync(download, correlationId: "cleanup-success");
 
             await _provider.GetRequiredService<IMovedDownloadCleanupProcessor>()
                 .RunCycleAsync(CancellationToken.None);
@@ -160,23 +144,256 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Cleanup
             client.RemoveCompletedDownloads = "remove_and_delete";
             await _downloadClientConfigurationRepository.SaveAsync(client);
             _gateway.RemoveResult = false;
-            var download = new DownloadBuilder()
-                .WithDownloadClientConfiguration(client)
-                .WithCompletedStatus(DateTime.UtcNow.AddHours(-30))
-                .WithClientDownloadId("external-failure")
-                .Build();
-            download.Status = DownloadStatus.Moved;
-            download.Metadata["CanBeRemoved"] = true;
-            await _downloadRepository.AddAsync(download);
-            await _downloadProcessingJobRepository.AddAsync(new DownloadProcessingJobBuilder()
-                .WithDownload(download)
-                .WithCompleted(DateTime.UtcNow.AddHours(-30))
-                .Build());
+            var download = await AddMovedDownloadAsync(
+                client,
+                canBeRemoved: true,
+                clientDownloadId: "external-failure");
+            await AddCompletedImportJobAsync(download, completedAt: DateTime.UtcNow.AddHours(-30));
 
             await _provider.GetRequiredService<IMovedDownloadCleanupProcessor>()
                 .RunCycleAsync(CancellationToken.None);
 
             Assert.NotNull(await _downloadRepository.GetByIdAsync(download.Id));
+        }
+
+        [Fact]
+        public async Task RunCycleAsync_AllowsCleanupWhenLastImportedAtExistsWithoutProcessingJob()
+        {
+            var client = await CreateRemovableClientAsync("remove");
+            _gateway.RemoveResult = true;
+            var download = await AddMovedDownloadAsync(client, canBeRemoved: true);
+            download.LastImportedAt = DateTime.UtcNow.AddDays(-1);
+            await _downloadRepository.UpdateAsync(download);
+
+            await _provider.GetRequiredService<IMovedDownloadCleanupProcessor>()
+                .RunCycleAsync(CancellationToken.None);
+
+            Assert.Null(await _downloadRepository.GetByIdAsync(download.Id));
+            var history = await GetCleanupHistoryAsync(download.Id);
+            Assert.Contains(history.Records, entry => DetailValue(entry, "ImportProof") == "LastImportedAt");
+        }
+
+        [Fact]
+        public async Task RunCycleAsync_AllowsCleanupWhenImportedHistoryExistsWithoutProcessingJob()
+        {
+            var client = await CreateRemovableClientAsync("remove");
+            _gateway.RemoveResult = true;
+            var download = await AddMovedDownloadAsync(client, canBeRemoved: true);
+            await AddImportedHistoryAsync(download, "import-history-proof");
+
+            await _provider.GetRequiredService<IMovedDownloadCleanupProcessor>()
+                .RunCycleAsync(CancellationToken.None);
+
+            Assert.Null(await _downloadRepository.GetByIdAsync(download.Id));
+            var history = await GetCleanupHistoryAsync(download.Id);
+            Assert.Contains(history.Records, entry => DetailValue(entry, "ImportProof") == "ImportedHistory");
+        }
+
+        [Fact]
+        public async Task RunCycleAsync_AllowsCleanupAfterProcessingJobRetentionWhenImportedHistoryExists()
+        {
+            var client = await CreateRemovableClientAsync("remove");
+            _gateway.RemoveResult = true;
+            var download = await AddMovedDownloadAsync(client, canBeRemoved: true);
+            await AddImportedHistoryAsync(download, "retained-import-history");
+
+            // The completed processing job has already been removed by retention cleanup.
+            Assert.Empty(await _downloadProcessingJobRepository.GetByDownloadIdAsync(download.Id));
+
+            await _provider.GetRequiredService<IMovedDownloadCleanupProcessor>()
+                .RunCycleAsync(CancellationToken.None);
+
+            Assert.Null(await _downloadRepository.GetByIdAsync(download.Id));
+            Assert.Equal(1, _gateway.GetCallCount(nameof(_gateway.RemoveAsync)));
+        }
+
+        [Fact]
+        public async Task RunCycleAsync_AllowsCleanupWhenLegacyDownloadHistoryShowsImported()
+        {
+            var client = await CreateRemovableClientAsync("remove");
+            _gateway.RemoveResult = true;
+            var download = await AddMovedDownloadAsync(client, canBeRemoved: true);
+            await AddLegacyImportedDownloadHistoryAsync(download);
+
+            await _provider.GetRequiredService<IMovedDownloadCleanupProcessor>()
+                .RunCycleAsync(CancellationToken.None);
+
+            Assert.Null(await _downloadRepository.GetByIdAsync(download.Id));
+            var history = await GetCleanupHistoryAsync(download.Id);
+            Assert.Contains(history.Records, entry => DetailValue(entry, "ImportProof") == "LegacyDownloadHistory");
+        }
+
+        [Fact]
+        public async Task RunCycleAsync_AllowsNonDestructiveCleanupForOldLegacyMovedState()
+        {
+            var client = await CreateRemovableClientAsync("remove");
+            _gateway.RemoveResult = true;
+            var download = await AddMovedDownloadAsync(client, canBeRemoved: true);
+            await AddGrabbedHistoryAsync(download, DateTime.UtcNow.AddDays(-8));
+
+            await _provider.GetRequiredService<IMovedDownloadCleanupProcessor>()
+                .RunCycleAsync(CancellationToken.None);
+
+            Assert.Null(await _downloadRepository.GetByIdAsync(download.Id));
+            Assert.False(_gateway.LastRemoveDeleteFiles);
+            var history = await GetCleanupHistoryAsync(download.Id);
+            Assert.Contains(history.Records, entry => DetailValue(entry, "ImportProof") == "LegacyMovedState");
+        }
+
+        [Fact]
+        public async Task RunCycleAsync_DowngradesDeleteFilesForLegacyMovedState()
+        {
+            var client = await CreateRemovableClientAsync("remove_and_delete");
+            _gateway.RemoveResult = true;
+            var download = await AddMovedDownloadAsync(client, canBeRemoved: true);
+            await AddGrabbedHistoryAsync(download, DateTime.UtcNow.AddDays(-8));
+
+            await _provider.GetRequiredService<IMovedDownloadCleanupProcessor>()
+                .RunCycleAsync(CancellationToken.None);
+
+            Assert.Null(await _downloadRepository.GetByIdAsync(download.Id));
+            Assert.Equal(1, _gateway.GetCallCount(nameof(_gateway.RemoveAsync)));
+            Assert.False(_gateway.LastRemoveDeleteFiles);
+        }
+
+        [Fact]
+        public async Task RunCycleAsync_BlocksRecentMovedWithoutImportProof()
+        {
+            var client = await CreateRemovableClientAsync("remove");
+            _gateway.RemoveResult = true;
+            var download = await AddMovedDownloadAsync(client, canBeRemoved: true);
+            await AddGrabbedHistoryAsync(download, DateTime.UtcNow.AddHours(-1));
+
+            await _provider.GetRequiredService<IMovedDownloadCleanupProcessor>()
+                .RunCycleAsync(CancellationToken.None);
+
+            Assert.NotNull(await _downloadRepository.GetByIdAsync(download.Id));
+            Assert.Equal(0, _gateway.GetCallCount(nameof(_gateway.RemoveAsync)));
+        }
+
+        [Fact]
+        public async Task RunCycleAsync_DoesNotOverrideExplicitCanBeRemovedFalse()
+        {
+            var client = await CreateRemovableClientAsync("remove");
+            _gateway.RemoveResult = true;
+            var download = await AddMovedDownloadAsync(client, canBeRemoved: false);
+            await AddGrabbedHistoryAsync(download, DateTime.UtcNow.AddDays(-8));
+
+            await _provider.GetRequiredService<IMovedDownloadCleanupProcessor>()
+                .RunCycleAsync(CancellationToken.None);
+
+            Assert.NotNull(await _downloadRepository.GetByIdAsync(download.Id));
+            Assert.Equal(0, _gateway.GetCallCount(nameof(_gateway.RemoveAsync)));
+            var history = await GetCleanupHistoryAsync(download.Id);
+            Assert.DoesNotContain(history.Records, entry => entry.EventType == HistoryEvents.CleanupRequested);
+        }
+
+        private async Task<DownloadClientConfiguration> CreateRemovableClientAsync(string policy)
+        {
+            var client = await CreateDownloadClientConfiguration();
+            client.RemoveCompletedDownloads = policy;
+            return await _downloadClientConfigurationRepository.SaveAsync(client);
+        }
+
+        private async Task<Download> AddMovedDownloadAsync(
+            DownloadClientConfiguration client,
+            bool? canBeRemoved,
+            string clientDownloadId = "external-1")
+        {
+            var download = new DownloadBuilder()
+                .WithDownloadClientConfiguration(client)
+                .WithCompletedStatus(DateTime.UtcNow.AddMinutes(-5))
+                .WithClientDownloadId(clientDownloadId)
+                .Build();
+            download.Status = DownloadStatus.Moved;
+            if (canBeRemoved.HasValue)
+            {
+                download.Metadata["CanBeRemoved"] = canBeRemoved.Value;
+            }
+
+            return await _downloadRepository.AddAsync(download);
+        }
+
+        private async Task AddCompletedImportJobAsync(
+            Download download,
+            string? correlationId = null,
+            DateTime? completedAt = null)
+        {
+            var job = new DownloadProcessingJobBuilder()
+                .WithDownload(download)
+                .WithCompleted(completedAt ?? DateTime.UtcNow)
+                .Build();
+            if (!string.IsNullOrWhiteSpace(correlationId))
+            {
+                job.JobData["CorrelationId"] = correlationId;
+            }
+
+            await _downloadProcessingJobRepository.AddAsync(job);
+        }
+
+        private Task AddImportedHistoryAsync(Download download, string correlationId) =>
+            _historyRepository.AddAsync(new History
+            {
+                AudiobookId = download.AudiobookId,
+                AudiobookTitle = download.Title,
+                SourceTitle = download.Title,
+                DownloadId = download.Id.ToUpperInvariant(),
+                DownloadClientId = download.DownloadClientId,
+                EventType = HistoryEvents.Imported,
+                Outcome = HistoryOutcome.Succeeded,
+                Source = "Test",
+                Message = "Import completed",
+                Timestamp = DateTime.UtcNow.AddDays(-1),
+                CorrelationId = correlationId
+            });
+
+        private Task AddGrabbedHistoryAsync(Download download, DateTime timestamp) =>
+            _historyRepository.AddAsync(new History
+            {
+                AudiobookId = download.AudiobookId,
+                AudiobookTitle = download.Title,
+                SourceTitle = download.Title,
+                DownloadId = download.Id.ToUpperInvariant(),
+                DownloadClientId = download.DownloadClientId,
+                EventType = HistoryEvents.Grabbed,
+                Outcome = HistoryOutcome.Succeeded,
+                Source = "Test",
+                Message = "Download grabbed",
+                Timestamp = timestamp,
+                CorrelationId = download.Id.ToUpperInvariant()
+            });
+
+        private async Task AddLegacyImportedDownloadHistoryAsync(Download download)
+        {
+            var db = _provider.GetRequiredService<ListenArrDbContext>();
+            db.DownloadHistories.Add(new DownloadHistory
+            {
+                DownloadId = download.Id,
+                EventType = DownloadHistoryEventType.Imported,
+                Status = DownloadItemStatus.Completed,
+                EventDate = DateTime.UtcNow.AddDays(-1),
+                ImportedAt = DateTime.UtcNow.AddDays(-1),
+                WasImported = true,
+                DownloadClientId = download.DownloadClientId,
+                Title = download.Title
+            });
+            await db.SaveChangesAsync();
+        }
+
+        private Task<HistoryPage> GetCleanupHistoryAsync(string downloadId) =>
+            _historyRepository.QueryAsync(new HistoryQuery
+            {
+                DownloadId = downloadId.ToUpperInvariant(),
+                Limit = 100
+            });
+
+        private static string? DetailValue(History entry, string key)
+        {
+            if (string.IsNullOrWhiteSpace(entry.Data)) return null;
+            using var document = JsonDocument.Parse(entry.Data);
+            return document.RootElement.TryGetProperty(key, out var value)
+                ? value.ToString()
+                : null;
         }
     }
 }

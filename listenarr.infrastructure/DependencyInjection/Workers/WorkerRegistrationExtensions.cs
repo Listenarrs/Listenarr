@@ -10,6 +10,7 @@
 using Listenarr.Infrastructure.HostedServices;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Listenarr.Infrastructure.DependencyInjection.Workers;
 
@@ -19,7 +20,7 @@ internal static class WorkerRegistrationExtensions
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        services.AddSingleton(TimeProvider.System);
+        services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<IWorkerCycleRunner, WorkerCycleRunner>();
 
         services.AddSingleton<IScanQueueService, ScanQueueService>();
@@ -48,6 +49,13 @@ internal static class WorkerRegistrationExtensions
             provider.GetRequiredService<DownloadProcessingJobProcessor>());
         services.AddHostedService(provider =>
             provider.GetRequiredService<DownloadProcessingJobProcessor>());
+
+        // Retention cleanup gets its own worker so importing files and pruning old
+        // terminal processing-job rows remain separate durable responsibilities.
+        AddHostedProcessor<
+            DownloadProcessingJobCleanupProcessor,
+            IDownloadProcessingJobCleanupProcessor,
+            DownloadProcessingJobCleanupService>(services);
 
         AddHostedProcessor<UnmatchedScanProcessor, IUnmatchedScanProcessor, UnmatchedScanBackgroundService>(services);
         return services;

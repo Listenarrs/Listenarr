@@ -61,9 +61,10 @@ namespace Listenarr.Application.Downloads.Contracts
         Task<QueueStats> GetStatsAsync();
 
         /// <summary>
-        /// Clean up old completed/failed jobs
+        /// Clean up old terminal jobs after the retention window. Active jobs are never eligible,
+        /// even if they are older than the retention cutoff.
         /// </summary>
-        Task CleanupOldJobsAsync(int retentionDays = 7);
+        Task CleanupOldJobsAsync(int retentionDays = 7, CancellationToken cancellationToken = default);
 
         /// <summary>
         /// Get recent processing activity for monitoring

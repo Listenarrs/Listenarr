@@ -161,7 +161,8 @@ namespace Listenarr.Tests.Features.Application.Downloads.Processing
                     new InvalidOperationException()));
             var service = new DownloadProcessingJobService(
                 repository.Object,
-                NullLogger<DownloadProcessingJobService>.Instance);
+                NullLogger<DownloadProcessingJobService>.Instance,
+                TimeProvider.System);
 
             var jobId = await service.EnqueueAsync(download);
 

@@ -37,6 +37,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DependencyInjection
             nameof(FfmpegInstallBackgroundService),
             nameof(MetadataRescanService),
             nameof(DownloadProcessingJobProcessor),
+            nameof(DownloadProcessingJobCleanupService),
             nameof(UnmatchedScanBackgroundService)
         ];
 
@@ -44,6 +45,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DependencyInjection
         [
             typeof(DownloadMonitorProcessor),
             typeof(DownloadProcessingJobProcessor),
+            typeof(DownloadProcessingJobCleanupProcessor),
             typeof(MovedDownloadCleanupProcessor),
             typeof(ScanJobProcessor),
             typeof(MoveJobProcessor),
@@ -79,6 +81,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DependencyInjection
             AssertHostedServiceRegistered<FfmpegInstallBackgroundService>(services);
             AssertHostedServiceRegistered<MetadataRescanService>(services);
             AssertHostedServiceRegistered<DownloadProcessingJobProcessor>(services);
+            AssertHostedServiceRegistered<DownloadProcessingJobCleanupService>(services);
             AssertHostedServiceRegistered<UnmatchedScanBackgroundService>(services);
 
             // Assert - singletons / supporting services registered
@@ -93,6 +96,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DependencyInjection
 
             AssertProcessorRegistered<IDownloadMonitorProcessor>(services);
             AssertProcessorRegistered<IDownloadImportProcessor>(services);
+            AssertProcessorRegistered<IDownloadProcessingJobCleanupProcessor>(services);
             AssertProcessorRegistered<IMovedDownloadCleanupProcessor>(services);
             AssertProcessorRegistered<IScanJobProcessor>(services);
             AssertProcessorRegistered<IMoveJobProcessor>(services);
@@ -147,7 +151,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DependencyInjection
         {
             Assert.Contains(services, d =>
                 d.ServiceType == typeof(IHostedService) &&
-                (d.ImplementationType == typeof(TImplementation) || d.ImplementationFactory != null));
+                GetHostedServiceName(d) == typeof(TImplementation).Name);
             Assert.Contains(services, d =>
                 d.ServiceType == typeof(TImplementation) && d.Lifetime == ServiceLifetime.Singleton);
         }

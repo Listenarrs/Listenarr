@@ -23,6 +23,8 @@ namespace Listenarr.Application.ActivityHistory.Contracts.Repositories
         Task<HistoryPage> QueryAsync(HistoryQuery query, CancellationToken ct = default);
         Task<History?> GetByIdAsync(int id, CancellationToken ct = default);
         Task<List<History>> GetByCorrelationIdAsync(string correlationId, CancellationToken ct = default);
+        Task<History?> GetSucceededImportedByDownloadIdAsync(string downloadId, CancellationToken ct = default);
+        Task<DateTime?> GetOldestTimestampByDownloadIdAsync(string downloadId, CancellationToken ct = default);
         Task<List<History>> GetPagedAsync(int limit, int offset, CancellationToken ct = default);
         Task<int> CountAsync(CancellationToken ct = default);
         Task<List<History>> GetByAudiobookIdAsync(int audiobookId, CancellationToken ct = default);

@@ -12,6 +12,7 @@ using Listenarr.Infrastructure.Configuration;
 using Listenarr.Infrastructure.Persistence.Repositories;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using Polly;
 using Polly.Extensions.Http;
@@ -52,6 +53,8 @@ internal static class DownloadRegistrationExtensions
         this IServiceCollection services,
         IConfiguration configuration)
     {
+        services.TryAddSingleton(TimeProvider.System);
+
         services.AddSingleton<IDownloadPushService, DownloadPushService>();
         services.AddScoped<IDownloadService, DownloadService>();
         services.AddScoped<DownloadTypeResolver>();

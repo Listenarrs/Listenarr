@@ -80,6 +80,36 @@ namespace Listenarr.Infrastructure.ActivityHistory.Persistence
                 .ToListAsync(ct);
         }
 
+        public async Task<History?> GetSucceededImportedByDownloadIdAsync(string downloadId, CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(downloadId)) return null;
+
+            var normalizedId = downloadId.ToUpperInvariant();
+            return await _db.History
+                .AsNoTracking()
+                .Where(h =>
+                    h.DownloadId != null &&
+                    h.DownloadId.ToUpper() == normalizedId &&
+                    h.EventType == HistoryEvents.Imported &&
+                    h.Outcome == HistoryOutcome.Succeeded)
+                .OrderByDescending(h => h.Timestamp)
+                .ThenByDescending(h => h.Id)
+                .FirstOrDefaultAsync(ct);
+        }
+
+        public async Task<DateTime?> GetOldestTimestampByDownloadIdAsync(string downloadId, CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(downloadId)) return null;
+
+            var normalizedId = downloadId.ToUpperInvariant();
+            return await _db.History
+                .AsNoTracking()
+                .Where(h => h.DownloadId != null && h.DownloadId.ToUpper() == normalizedId)
+                .OrderBy(h => h.Timestamp)
+                .Select(h => (DateTime?)h.Timestamp)
+                .FirstOrDefaultAsync(ct);
+        }
+
         public async Task<List<History>> GetPagedAsync(int limit, int offset, CancellationToken ct = default)
         {
             return await _db.History
