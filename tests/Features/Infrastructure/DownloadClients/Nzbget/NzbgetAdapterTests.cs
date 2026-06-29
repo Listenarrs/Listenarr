@@ -1293,6 +1293,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Nzbget
             var result = await adapter.AddAsync(client, submission);
 
             Assert.Equal("321", result.ExternalId);
+            Assert.Null(result.ContentId);
             Assert.False(result.WasDuplicate);
             var call = Assert.Single(apiMock.XmlRpcCalls);
             Assert.Equal("append", call.MethodName);
@@ -1307,12 +1308,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Nzbget
             Assert.Equal("0", call.Parameters[7].Element("i4")?.Value);
             Assert.Equal("SCORE", call.Parameters[8].Element("string")?.Value);
 
-            var postProcessingParameter = Assert.Single(
-                call.Parameters[9].Element("array")!.Element("data")!.Elements("value"));
-            var members = ReadStructMembers(postProcessingParameter.Element("struct")!);
-            Assert.Equal("drone", members["Name"]);
-            Assert.Matches("^[0-9a-f]{32}$", members["Value"]);
-            Assert.Equal(members["Value"], result.ContentId);
+            Assert.Empty(call.Parameters[9].Element("array")!.Element("data")!.Elements("value"));
         }
 
         [Fact]
