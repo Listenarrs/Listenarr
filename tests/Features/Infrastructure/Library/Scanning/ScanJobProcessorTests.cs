@@ -124,6 +124,44 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Scanning
             Assert.Single(files);
         }
 
+        [Fact]
+        public async Task ProcessJobAsync_BasePathMissing_ClearsLegacyFileColumns()
+        {
+            // A book whose entire folder vanished: BasePath points at a non-existent directory and
+            // the legacy single-file columns (FilePath/FileSize) are still populated. The scan must
+            // clear those columns alongside BasePath — otherwise hasAnyFile/Wanted keep treating the
+            // book as "Downloaded" with zero files forever and it never re-searches.
+            var missingPath = Path.Combine(FileService.GetTempDirectory("scan-processor-basepath-gone"), "vanished");
+            Assert.False(Directory.Exists(missingPath));
+
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Vanished Folder")
+                .WithBasePath(missingPath)
+                .WithFilePath(Path.Combine(missingPath, "Vanished.m4b"))
+                .WithFileSize(123456)
+                .WithMonitored(true)
+                .Build());
+            var (queue, job) = await CreateQueuedScanJobAsync(audiobook);
+
+            var processor = _provider.GetRequiredService<IScanJobProcessor>();
+            await processor.ProcessJobAsync(job, CancellationToken.None);
+
+            Assert.True(queue.TryGetJob(job.Id, out var updatedJob));
+            Assert.Equal("Completed", updatedJob!.Status);
+
+            // Read through a fresh scope so we bypass the test context's identity map (it tracked
+            // this audiobook at AddAsync; the scan updated it through its own DbContext scope).
+            using var readScope = _provider.CreateScope();
+            var reloaded = await readScope.ServiceProvider
+                .GetRequiredService<IAudiobookRepository>()
+                .GetByIdAsync(audiobook.Id);
+            Assert.NotNull(reloaded);
+            // The legacy single-file columns must be cleared so the book no longer reads as
+            // "Downloaded" with zero files (these drive hasAnyFile / Wanted).
+            Assert.Null(reloaded!.FilePath);
+            Assert.Null(reloaded.FileSize);
+        }
+
         private async Task<(ScanQueueService Queue, ScanJob Job)> CreateQueuedScanJobAsync(Audiobook audiobook)
         {
             var queue = Assert.IsType<ScanQueueService>(_provider.GetRequiredService<IScanQueueService>());
