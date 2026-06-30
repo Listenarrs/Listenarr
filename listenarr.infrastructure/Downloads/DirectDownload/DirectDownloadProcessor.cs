@@ -93,10 +93,9 @@ internal sealed class DirectDownloadProcessor(
             await downloadRepository.UpdateAsync(download);
 
             logger.LogInformation(
-                "Downloading direct-download item {DownloadId} with {ArtifactCount} artifact(s) to {Path}",
+                "Downloading direct-download item {DownloadId} with {ArtifactCount} artifact(s)",
                 download.Id,
-                transfers.Count,
-                LogRedaction.SanitizeFilePath(download.DownloadPath));
+                transfers.Count);
 
             var client = httpClientFactory.CreateClient(DirectDownloadClientName);
             long downloadedBytes = 0;
