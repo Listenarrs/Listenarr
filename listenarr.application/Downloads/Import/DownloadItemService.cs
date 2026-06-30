@@ -28,7 +28,7 @@ namespace Listenarr.Application.Downloads.Import
 
         public async Task<QueueItem> GetImportItemAsync(Download download, CancellationToken ct = default)
         {
-            if (string.Equals(download.DownloadClientId, "DDL", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(download.DownloadClientId, DirectDownloadMetadataKeys.ClientId, StringComparison.OrdinalIgnoreCase))
             {
                 // DDLs are fetched by Listenarr itself and have no external client
                 // row to resolve. Infrastructure owns local filesystem discovery.

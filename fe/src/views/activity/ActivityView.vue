@@ -486,6 +486,9 @@ const showCompletedExternalDownloads = computed(
 )
 
 // All activity items — unified list of queue + downloads
+const isDirectDownload = (downloadClientId?: string): boolean =>
+  (downloadClientId || '').toString().toUpperCase() === 'DDL'
+
 const allActivityItems = computed(() => {
   const queueItems = [...queue.value]
   const trackedQueueIds = new Set(queueItems.map((item) => item.id))
@@ -494,15 +497,17 @@ const allActivityItems = computed(() => {
   const failedDownloadsList = unref(downloadsStore.failedDownloads || [])
 
   const ddlDownloadItems = activeDownloadsList
-    .filter((d) => (d.downloadClientId || '').toString().toUpperCase() === 'DDL')
+    .filter((d) => isDirectDownload(d.downloadClientId))
+    .filter((d) => !trackedQueueIds.has(d.id))
     .map(convertDownloadToQueueItem)
 
-  const failedDDLItems = failedDownloadsList.map(convertDownloadToQueueItem)
+  const failedDDLItems = failedDownloadsList
+    .filter((d) => isDirectDownload(d.downloadClientId))
+    .filter((d) => !trackedQueueIds.has(d.id))
+    .map(convertDownloadToQueueItem)
 
   const externalActiveDownloads = activeDownloadsList
-    .filter(
-      (d) => d.downloadClientId && (d.downloadClientId || '').toString().toUpperCase() !== 'DDL',
-    )
+    .filter((d) => d.downloadClientId && !isDirectDownload(d.downloadClientId))
     .filter((d) => !trackedQueueIds.has(d.id))
     .map(convertDownloadToQueueItem)
 

@@ -37,7 +37,8 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Processing
             downloadImportServiceMock.Verify(m => m.ImportDownloadFilesAsync(
                     It.IsAny<Audiobook>(),
                     It.IsAny<List<string>>(),
-                    It.IsAny<CancellationToken>()),
+                    It.IsAny<CancellationToken>(),
+                    It.IsAny<DownloadImportOptions?>()),
                 Times.Never);
 
             job = await _downloadProcessingJobRepository.GetByIdAsync(job.Id);
@@ -75,7 +76,8 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Processing
             downloadImportServiceMock.Verify(m => m.ImportDownloadFilesAsync(
                     It.IsAny<Audiobook>(),
                     It.IsAny<List<string>>(),
-                    It.IsAny<CancellationToken>()),
+                    It.IsAny<CancellationToken>(),
+                    It.IsAny<DownloadImportOptions?>()),
                 Times.Never);
 
             job = await _downloadProcessingJobRepository.GetByIdAsync(job.Id);
@@ -102,7 +104,134 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Processing
             Assert.NotNull(download);
             Assert.Equal(DownloadStatus.ImportBlocked, download.Status);
             Assert.NotNull(download.ImportBlockMessages);
-            Assert.Contains(download.ImportBlockMessages, m => m.Contains("see the log of job", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(download.ImportBlockMessages, m => m.Contains($"job {job.Id}", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(download.ImportBlockMessages, m => m.Contains("{job.Id}", StringComparison.OrdinalIgnoreCase));
+        }
+
+        [Fact]
+        [Trait("Scenario", "ExternalImportResolverRecoversStaleDownloadPath")]
+        public async Task Import_ExternalClientStaleDownloadPath_UsesResolvedSourceFiles()
+        {
+            // Arrange
+            var source = FileService.GetTempDirectory("source");
+            var filePath = await FileService.GetFileAsync(source, "audiobook.mp3");
+            var stalePath = Path.Join(FileService.GetTempDirectory("stale-source"), "missing-client-path");
+
+            downloadClientGatewayMock.SourceFiles = [filePath];
+
+            var download = await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithCompletedStatus(at: DateTime.UtcNow)
+                .WithDownloadClientConfiguration(await CreateDownloadClientConfiguration())
+                .WithAudiobook(await CreateAudiobook())
+                .WithPath(stalePath)
+                .Build());
+
+            await _downloadProcessingJobRepository.AddAsync(new DownloadProcessingJobBuilder()
+                .WithDownload(download)
+                .Build());
+
+            // Act
+            var processor = _provider.GetRequiredService<DownloadProcessingJobProcessor>();
+            await processor.ProcessQueueAsync(CancellationToken.None);
+
+            // Assert
+            download = await _downloadRepository.GetByIdAsync(download.Id);
+            Assert.NotNull(download);
+            Assert.Equal(DownloadStatus.Moved, download.Status);
+            Assert.Equal(1, downloadClientGatewayMock.GetCallCount(nameof(downloadClientGatewayMock.GetQueueItemAsync)));
+        }
+
+        [Fact]
+        [Trait("Scenario", "DirectDownloadMissingStagedFileRetries")]
+        public async Task Import_DirectDownloadMissingStagedFile_RetriesWithoutExternalClientRecovery()
+        {
+            // Arrange
+            var missingPath = Path.Join(FileService.GetTempDirectory("ddl-source"), "missing.m4b");
+            var audiobook = await CreateAudiobook();
+            var download = await _downloadRepository.AddAsync(new Download
+            {
+                Id = $"ddl-{Guid.NewGuid():N}",
+                AudiobookId = audiobook.Id,
+                Title = "DDL Book",
+                Artist = "DDL Author",
+                Album = "DDL Book",
+                DownloadClientId = DirectDownloadMetadataKeys.ClientId,
+                Status = DownloadStatus.Completed,
+                StartedAt = DateTime.UtcNow.AddMinutes(-5),
+                CompletedAt = DateTime.UtcNow,
+                DownloadPath = missingPath,
+                Metadata = new Dictionary<string, object>
+                {
+                    [DirectDownloadMetadataKeys.DownloadType] = DirectDownloadMetadataKeys.ClientId
+                }
+            });
+
+            var job = await _downloadProcessingJobRepository.AddAsync(new DownloadProcessingJobBuilder()
+                .WithDownload(download)
+                .Build());
+
+            // Act
+            var processor = _provider.GetRequiredService<DownloadProcessingJobProcessor>();
+            await processor.ProcessQueueAsync(CancellationToken.None);
+
+            // Assert
+            job = await _downloadProcessingJobRepository.GetByIdAsync(job.Id);
+            Assert.NotNull(job);
+            Assert.Equal(ProcessingJobStatus.Pending, job.Status);
+            Assert.Equal(1, job.RetryCount);
+            Assert.Contains("Direct-download source path not found", job.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(0, downloadClientGatewayMock.GetCallCount(nameof(downloadClientGatewayMock.GetQueueItemAsync)));
+        }
+
+        [Fact]
+        public async Task Import_DirectDownloadArchivePlan_ForcesArchiveExtraction()
+        {
+            // Given
+            var importService = new Mock<IDownloadImportService>();
+            importService
+                .Setup(service => service.ImportDownloadFilesAsync(
+                    It.IsAny<Audiobook>(),
+                    It.IsAny<List<string>>(),
+                    It.IsAny<CancellationToken>(),
+                    It.IsAny<DownloadImportOptions?>()))
+                .ReturnsAsync((Audiobook _, List<string> files, CancellationToken _, DownloadImportOptions? _) =>
+                    [ImportResult.ImportSuccess(FileAction.Copy, files[0], files[0], wasRegisteredToAudiobook: true)]);
+            Init(builder => builder.WithSingleton<IDownloadImportService>(importService.Object));
+            var sourceDirectory = FileService.GetTempDirectory("ddl-archive-source");
+            var archivePath = await FileService.GetFileAsync(sourceDirectory, "book.zip");
+            var audiobook = await CreateAudiobook();
+            var download = await _downloadRepository.AddAsync(new Download
+            {
+                Id = $"ddl-{Guid.NewGuid():N}",
+                AudiobookId = audiobook.Id,
+                Title = "DDL Archive Book",
+                Artist = "DDL Author",
+                Album = "DDL Archive Book",
+                DownloadClientId = DirectDownloadMetadataKeys.ClientId,
+                Status = DownloadStatus.Completed,
+                StartedAt = DateTime.UtcNow.AddMinutes(-5),
+                CompletedAt = DateTime.UtcNow,
+                DownloadPath = archivePath,
+                Metadata = new Dictionary<string, object>
+                {
+                    [DirectDownloadMetadataKeys.DownloadType] = DirectDownloadMetadataKeys.ClientId,
+                    [DirectDownloadMetadataKeys.RequiresArchiveExtraction] = true
+                }
+            });
+            await _downloadProcessingJobRepository.AddAsync(new DownloadProcessingJobBuilder()
+                .WithDownload(download)
+                .Build());
+
+            // When
+            await _provider.GetRequiredService<DownloadProcessingJobProcessor>()
+                .ProcessQueueAsync(CancellationToken.None);
+
+            // Then
+            importService.Verify(service => service.ImportDownloadFilesAsync(
+                It.Is<Audiobook>(item => item.Id == audiobook.Id),
+                It.Is<List<string>>(files => files.Contains(archivePath)),
+                It.IsAny<CancellationToken>(),
+                It.Is<DownloadImportOptions>(options => options.ForceArchiveExtraction)), Times.Once);
         }
 
         [Fact]
@@ -204,7 +333,8 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Processing
             downloadImportServiceMock.Verify(m => m.ImportDownloadFilesAsync(
                     It.IsAny<Audiobook>(),
                     It.IsAny<List<string>>(),
-                    It.IsAny<CancellationToken>()),
+                    It.IsAny<CancellationToken>(),
+                    It.IsAny<DownloadImportOptions?>()),
                 Times.Never);
 
             Assert.Equal(0, downloadClientGatewayMock.GetCallCount(nameof(downloadClientGatewayMock.GetQueueItemAsync)));
@@ -310,7 +440,8 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Processing
             downloadImportServiceMock.Verify(m => m.ImportDownloadFilesAsync(
                     It.IsAny<Audiobook>(),
                     It.IsAny<List<string>>(),
-                    It.IsAny<CancellationToken>()),
+                    It.IsAny<CancellationToken>(),
+                    It.IsAny<DownloadImportOptions?>()),
                 Times.Never);
 
             job = await _downloadProcessingJobRepository.GetByIdAsync(job.Id);

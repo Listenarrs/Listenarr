@@ -172,7 +172,7 @@ namespace Listenarr.Application.Downloads.Queue
                 // Direct-download records are owned internally by Listenarr. They do
                 // not have a download-client queue item to reconcile against, so the
                 // absence of ClientDownloadId/TorrentHash is valid only for DDL.
-                if (string.Equals(download.DownloadClientId, "DDL", StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(download.DownloadClientId, DirectDownloadMetadataKeys.ClientId, StringComparison.OrdinalIgnoreCase))
                 {
                     return null;
                 }

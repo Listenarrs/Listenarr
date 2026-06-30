@@ -98,7 +98,7 @@ namespace Listenarr.Application.Downloads.Submission
             {
                 EffectiveDownloadType.Torrent => "Torrent",
                 EffectiveDownloadType.Usenet => "Usenet",
-                EffectiveDownloadType.DirectDownload => "DDL",
+                EffectiveDownloadType.DirectDownload => DirectDownloadMetadataKeys.ClientId,
                 _ => string.Empty
             };
         }

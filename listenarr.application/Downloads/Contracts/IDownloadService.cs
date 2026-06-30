@@ -82,7 +82,7 @@ namespace Listenarr.Application.Downloads.Contracts
         /// <summary>
         /// Allows to modify a download by giving an updated one
         /// </summary>
-        /// <param name="download">The download with updated informations</param>
+        /// <param name="download">The download with updated information</param>
         Task UpdateAsync(Download download);
     }
 }

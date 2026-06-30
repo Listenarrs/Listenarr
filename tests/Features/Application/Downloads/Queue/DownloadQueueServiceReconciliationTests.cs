@@ -1693,6 +1693,90 @@ namespace Listenarr.Tests.Features.Application.Downloads.Queue
             Assert.Equal(ddl.OriginalUrl, item.RemotePath);
         }
 
+        [Fact]
+        [Trait("Scenario", "DirectDownloadVisibleFromDatabase")]
+        public async Task GetQueueAsync_MapsDirectDownloadProgressAndImportStatuses_FromDatabase()
+        {
+            var downloading = new Download
+            {
+                Id = "ddl-downloading",
+                Title = "DDL Downloading",
+                Artist = "Author",
+                OriginalUrl = "https://archive.org/download/book/book.m4b",
+                DownloadClientId = "DDL",
+                Status = DownloadStatus.Downloading,
+                Progress = 42.5M,
+                TotalSize = 1000,
+                DownloadedSize = 425,
+                StartedAt = DateTime.UtcNow.AddMinutes(-3),
+                Metadata = new Dictionary<string, object>
+                {
+                    ["Quality"] = "M4B",
+                    ["Language"] = "English",
+                    ["DownloadType"] = "DDL"
+                }
+            };
+            var importPending = new Download
+            {
+                Id = "ddl-importpending",
+                Title = "DDL Import Pending",
+                OriginalUrl = "https://archive.org/download/book/import.m4b",
+                DownloadClientId = "DDL",
+                Status = DownloadStatus.ImportPending,
+                Progress = 100,
+                TotalSize = 1000,
+                DownloadedSize = 1000,
+                StartedAt = DateTime.UtcNow.AddMinutes(-2),
+                Metadata = new Dictionary<string, object> { ["DownloadType"] = "DDL" }
+            };
+            var importBlocked = new Download
+            {
+                Id = "ddl-importblocked",
+                Title = "DDL Import Blocked",
+                OriginalUrl = "https://archive.org/download/book/blocked.m4b",
+                DownloadClientId = "DDL",
+                Status = DownloadStatus.ImportBlocked,
+                Progress = 100,
+                TotalSize = 1000,
+                DownloadedSize = 1000,
+                StartedAt = DateTime.UtcNow.AddMinutes(-1),
+                ErrorMessage = "Import failed",
+                Metadata = new Dictionary<string, object> { ["DownloadType"] = "DDL" }
+            };
+
+            var downloadRepoMock = new Mock<IDownloadRepository>();
+            SetupQueueRepository(downloadRepoMock, new List<Download> { downloading, importPending, importBlocked });
+
+            var configMock = new Mock<IConfigurationService>();
+            configMock.Setup(c => c.GetDownloadClientConfigurationsAsync())
+                .ReturnsAsync(new List<DownloadClientConfiguration>());
+            configMock.Setup(c => c.GetApplicationSettingsAsync())
+                .ReturnsAsync(new ApplicationSettings());
+
+            var processingJobRepoMock = new Mock<IDownloadProcessingJobRepository>();
+            var gatewayMock = new Mock<IDownloadClientGateway>();
+            var metricsMock = new Mock<IAppMetricsService>();
+
+            var service = CreateService(
+                configMock.Object,
+                downloadRepoMock.Object,
+                processingJobRepoMock.Object,
+                gatewayMock.Object,
+                metricsMock.Object);
+
+            var result = await service.GetQueueAsync();
+            var items = result.ToDictionary(item => item.Id, StringComparer.OrdinalIgnoreCase);
+
+            Assert.Equal(3, result.Count);
+            Assert.Equal("downloading", items["ddl-downloading"].Status);
+            Assert.Equal(42.5, items["ddl-downloading"].Progress);
+            Assert.Equal(425, items["ddl-downloading"].Downloaded);
+            Assert.Equal(1000, items["ddl-downloading"].Size);
+            Assert.Equal("importpending", items["ddl-importpending"].Status);
+            Assert.Equal("importblocked", items["ddl-importblocked"].Status);
+            Assert.Equal("Import failed", items["ddl-importblocked"].ErrorMessage);
+        }
+
         private static bool IsQueueDisplayCandidate(Download d)
         {
             bool isDdl = d.DownloadClientId == "DDL";

@@ -439,6 +439,61 @@ describe('ActivityView', () => {
     expect(wrapper.text()).toContain('qBittorrent unavailable after a timeout')
   })
 
+  it('prefers the queue snapshot over a DDL active download with the same tracked id', async () => {
+    mockSignalR()
+    mockApi({
+      getQueue: vi.fn(async () => ({
+        items: [
+          {
+            id: 'ddl-alice',
+            title: 'Alice in Wonderland',
+            status: 'downloading',
+            progress: 42,
+            size: 1000,
+            downloaded: 420,
+            downloadSpeed: 0,
+            quality: 'M4B',
+            downloadClient: 'Direct Download',
+            downloadClientId: 'DDL',
+            downloadClientType: 'ddl',
+            addedAt: new Date().toISOString(),
+            canPause: false,
+            canRemove: true,
+          },
+        ],
+        clients: [],
+        generatedAt: new Date().toISOString(),
+        hasStaleData: false,
+        hasUnavailableClients: false,
+      })),
+    })
+    mockConfigurationStore(false)
+    mockLibraryStore()
+    mockDownloadsStore({
+      activeDownloads: [
+        {
+          id: 'ddl-alice',
+          title: 'Alice in Wonderland',
+          status: 'Queued',
+          progress: 0,
+          totalSize: 1000,
+          downloadedSize: 0,
+          downloadClientId: 'DDL',
+          startedAt: new Date().toISOString(),
+        },
+      ],
+    })
+
+    const wrapper = await mountActivityView()
+    const vm = wrapper.vm as unknown as ActivityViewVm
+
+    expect(vm.allActivityItems).toHaveLength(1)
+    expect(vm.allActivityItems[0]?.id).toBe('ddl-alice')
+    expect(vm.allActivityItems[0]?.status).toBe('downloading')
+    expect(vm.allActivityItems[0]?.progress).toBe(42)
+    expect(vm.allActivityItems[0]?.downloadClientType).toBe('ddl')
+  })
+
   it('prefers the queue snapshot over an external active download with the same tracked id', async () => {
     mockSignalR()
     mockApi({

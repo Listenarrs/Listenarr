@@ -1,6 +1,8 @@
 
 namespace Listenarr.Application.Downloads.Contracts
 {
+    public sealed record DownloadImportOptions(bool ForceArchiveExtraction = false);
+
     /// <summary>
     /// Download import responsible for processing a given download importation
     /// </summary>
@@ -15,9 +17,14 @@ namespace Listenarr.Application.Downloads.Contracts
         /// <param name="audiobook">Audiobook for which we are importing files</param>
         /// <param name="files">List of files to import as reported by the IDownloadClientGateway</param>
         /// <param name="ct"></param>
+        /// <param name="options">Per-download import requirements that supplement global settings.</param>
         /// <returns></returns>
         /// <exception cref="InvalidOperationException">If arguments are not consistent (missing audiobook base path for example)</exception>
         /// <exception cref="IOException">Thrown if we are unable to process one archive</exception>
-        Task<List<ImportResult>> ImportDownloadFilesAsync(Audiobook audiobook, List<string> files, CancellationToken ct = default);
+        Task<List<ImportResult>> ImportDownloadFilesAsync(
+            Audiobook audiobook,
+            List<string> files,
+            CancellationToken ct = default,
+            DownloadImportOptions? options = null);
     }
 }

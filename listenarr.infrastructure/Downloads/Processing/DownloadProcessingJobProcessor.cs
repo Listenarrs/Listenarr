@@ -123,12 +123,14 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                 var download = await downloadRepository.GetByIdAsync(job.DownloadId);
                 if (download == null)
                 {
-                    logger.LogError($"Download {job.DownloadId} disapeared after job {job.Id} failed");
+                    logger.LogError($"Download {job.DownloadId} disappeared after job {job.Id} failed");
                     return;
                 }
 
                 await downloadService.UpdateAsync(
-                    download.Blocked($"Unable to import the download", "See the log of job {job.Id} for more informations"));
+                    download.Blocked(
+                        "Unable to import the download",
+                        $"See the log of job {job.Id} for more information"));
             }
         }
 
@@ -187,7 +189,7 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                 throw new DownloadProcessingException($"Inconsistency: Download {download.Id}'s audiobook {download.AudiobookId} cannot be retrieved");
             }
 
-            var isDirectDownload = string.Equals(download.DownloadClientId, "DDL", StringComparison.OrdinalIgnoreCase);
+            var isDirectDownload = string.Equals(download.DownloadClientId, DirectDownloadMetadataKeys.ClientId, StringComparison.OrdinalIgnoreCase);
             DownloadClientConfiguration? client = null;
             if (!isDirectDownload)
             {
@@ -218,11 +220,12 @@ namespace Listenarr.Infrastructure.Downloads.Processing
 
             if (!job.HasCheckpoint("FilesImported"))
             {
-                if (string.IsNullOrEmpty(download.DownloadPath) || (!File.Exists(download.DownloadPath) && !Directory.Exists(download.DownloadPath)))
+                if (isDirectDownload &&
+                    (string.IsNullOrEmpty(download.DownloadPath) || (!File.Exists(download.DownloadPath) && !Directory.Exists(download.DownloadPath))))
                 {
                     metrics.Increment("processing.source_missing");
                     await ScheduleRetryAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
-                        correlationId, $"Source path not found at processing time: {job.SourcePath}", cancellationToken);
+                        correlationId, $"Direct-download source path not found at processing time: {download.DownloadPath}", cancellationToken);
                     return;
                 }
 
@@ -231,6 +234,9 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                 try
                 {
                     var downloadItemService = scope.ServiceProvider.GetRequiredService<IDownloadItemService>();
+                    // External client DownloadPath may be stale or missing. Client-specific
+                    // import resolvers own recovery from queue/history before the processor
+                    // decides the source is unavailable.
                     queueItem = await downloadItemService.GetImportItemAsync(download, cancellationToken);
                     if (queueItem?.SourceFiles == null)
                     {
@@ -266,7 +272,17 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                 try
                 {
                     var downloadImportService = scope.ServiceProvider.GetRequiredService<IDownloadImportService>();
-                    results = await downloadImportService.ImportDownloadFilesAsync(audiobook, files, cancellationToken);
+                    var importOptions = isDirectDownload && string.Equals(
+                        download.GetMetadataString(DirectDownloadMetadataKeys.RequiresArchiveExtraction),
+                        bool.TrueString,
+                        StringComparison.OrdinalIgnoreCase)
+                        ? new DownloadImportOptions(ForceArchiveExtraction: true)
+                        : null;
+                    results = await downloadImportService.ImportDownloadFilesAsync(
+                        audiobook,
+                        files,
+                        cancellationToken,
+                        importOptions);
                 }
                 catch (InvalidOperationException exception)
                 {

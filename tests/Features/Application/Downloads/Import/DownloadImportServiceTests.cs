@@ -218,6 +218,40 @@ namespace Listenarr.Tests.Features.Application.Downloads.Import
         }
 
         [Fact]
+        [Trait("Scenario", "ForcedArchiveExtractionImportsContainedFile")]
+        public async Task ArchiveExtraction_ForcedByDownloadPlan_ImportsWhenGlobalSettingIsDisabled()
+        {
+            // Given
+            var destinationDirectory = FileService.GetTempDirectory("forced-archive-destination");
+            var inner = FileService.GetTempDirectory("forced-archive-inner");
+            _ = await FileService.GetFileAsync(inner, "forced-audio.mp3");
+            var zipPath = Path.Join(FileService.GetTempPath(), "forced-release.zip");
+            ZipFile.CreateFromDirectory(inner, zipPath);
+            var audiobook = await CreateAudiobook();
+            audiobook.BasePath = Path.Join(destinationDirectory, "Fake Author/Fake Title/Forced Archive");
+            await _audiobookRepository.UpdateAsync(audiobook);
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
+                .WithoutExtractArchive()
+                .WithMultiFileNamingPattern("{Title}")
+                .WithOutputPath(destinationDirectory)
+                .WithoutMetadataProcessing()
+                .Build());
+
+            // When
+            var downloadImportService = _provider.GetRequiredService<IDownloadImportService>();
+            await downloadImportService.ImportDownloadFilesAsync(
+                audiobook,
+                [zipPath],
+                CancellationToken.None,
+                new DownloadImportOptions(ForceArchiveExtraction: true));
+
+            // Then
+            var expected = Path.Join(audiobook.BasePath, "forced-audio.mp3");
+            Assert.True(File.Exists(expected));
+            Assert.Single(await _audiobookFileRepository.GetAllAsync());
+        }
+
+        [Fact]
         [Trait("Method", "ProcessCompletedDownloadAsync")]
         public async Task ProcessCompleteDownloadAsync_MultipleFiles()
         {

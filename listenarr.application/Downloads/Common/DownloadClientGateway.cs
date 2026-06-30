@@ -24,7 +24,7 @@ using Microsoft.Extensions.Logging;
 namespace Listenarr.Application.Downloads.Common
 {
     /// <summary>
-    /// Responsabilities:
+    /// Responsibilities:
     /// - Make sure any path reported by any download client adapter is mapped using adequate Remote Path Mapping
     /// - Single point of contact for any download client adapter, no download client adapter detail should be visible behind this
     /// - Persistence: Do not persist anything here, it's up to callers to know what they are doing
@@ -224,7 +224,7 @@ namespace Listenarr.Application.Downloads.Common
 
         /// <summary>
         /// Handles path mapping of queue item
-        /// Make sure all path are localy accessible after processing and
+        /// Make sure all paths are locally accessible after processing and
         /// that a proper list of sanitized source files is produced
         /// </summary>
         /// <param name="client">Download client configuration to use for path mapping</param>

@@ -36,11 +36,13 @@ namespace Listenarr.Application.Downloads.Queue
                 queueMatchingCandidates.Count,
                 knownClientItemIds.Count);
 
-            var ddlDownloads = queueDisplayCandidates.Where(d => d.DownloadClientId == "DDL").ToList();
+            var ddlDownloads = queueDisplayCandidates
+                .Where(d => string.Equals(d.DownloadClientId, DirectDownloadMetadataKeys.ClientId, StringComparison.OrdinalIgnoreCase))
+                .ToList();
             var ddlToShow = await BuildVisibleDdlDownloadsAsync(ddlDownloads);
 
             var externalDownloads = queueDisplayCandidates
-                .Where(d => d.DownloadClientId != "DDL")
+                .Where(d => !string.Equals(d.DownloadClientId, DirectDownloadMetadataKeys.ClientId, StringComparison.OrdinalIgnoreCase))
                 .ToList();
 
             var visibleDownloads = ddlToShow.Concat(externalDownloads).ToList();

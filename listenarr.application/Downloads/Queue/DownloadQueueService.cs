@@ -61,7 +61,7 @@ namespace Listenarr.Application.Downloads.Queue
             // so DDL reservations, progress, completion, and import-pending work
             // are visible in Activity.
             queueItems.AddRange(listenarrDownloads
-                .Where(download => string.Equals(download.DownloadClientId, "DDL", StringComparison.OrdinalIgnoreCase))
+                .Where(download => string.Equals(download.DownloadClientId, DirectDownloadMetadataKeys.ClientId, StringComparison.OrdinalIgnoreCase))
                 .Select(ToDirectDownloadQueueItem));
 
             ApplicationSettings? appSettings = await cache.GetOrCreateAsync("ApplicationSettings", async entry =>
@@ -293,7 +293,7 @@ namespace Listenarr.Application.Downloads.Queue
                     var existingIds = queueItems.Select(q => q.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
                     var completedExternal = listenarrDownloads
-                        .Where(d => d.DownloadClientId != "DDL" && d.Status == DownloadStatus.Completed)
+                        .Where(d => !string.Equals(d.DownloadClientId, DirectDownloadMetadataKeys.ClientId, StringComparison.OrdinalIgnoreCase) && d.Status == DownloadStatus.Completed)
                         .ToList();
 
                     foreach (var download in completedExternal)
@@ -387,7 +387,7 @@ namespace Listenarr.Application.Downloads.Queue
                 DownloadSpeed = 0,
                 Eta = null,
                 DownloadClient = "Direct Download",
-                DownloadClientId = "DDL",
+                DownloadClientId = DirectDownloadMetadataKeys.ClientId,
                 DownloadClientType = "ddl",
                 AddedAt = download.StartedAt,
                 CanPause = false,
@@ -409,8 +409,8 @@ namespace Listenarr.Application.Downloads.Queue
             DownloadStatus.Paused => "paused",
             DownloadStatus.Completed => "completed",
             DownloadStatus.Processing => "processing",
-            DownloadStatus.ImportPending => "importPending",
-            DownloadStatus.ImportBlocked => "importBlocked",
+            DownloadStatus.ImportPending => "importpending",
+            DownloadStatus.ImportBlocked => "importblocked",
             DownloadStatus.Failed => "failed",
             DownloadStatus.Moved => "moved",
             _ => status.ToString().ToLowerInvariant()

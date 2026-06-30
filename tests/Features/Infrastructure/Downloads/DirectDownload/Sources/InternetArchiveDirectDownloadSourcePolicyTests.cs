@@ -19,7 +19,7 @@ public sealed class InternetArchiveDirectDownloadSourcePolicyTests : BaseTests
         var candidate = CreateCandidate();
         var uri = new Uri("https://archive.org/download/book/book.m4b");
 
-        Assert.True(_policy.CanPrepare(indexer, candidate, uri));
+        Assert.True(_policy.CanPrepare(indexer, candidate, [uri]));
     }
 
     [Theory]
@@ -35,7 +35,48 @@ public sealed class InternetArchiveDirectDownloadSourcePolicyTests : BaseTests
         var indexer = CreateIndexer(implementation, isEnabled);
         var candidate = CreateCandidate();
 
-        Assert.False(_policy.CanPrepare(indexer, candidate, new Uri(url)));
+        Assert.False(_policy.CanPrepare(indexer, candidate, [new Uri(url)]));
+    }
+
+    [Fact]
+    public void CanPrepare_UrlsFromDifferentItems_ReturnsFalse()
+    {
+        var indexer = CreateIndexer("InternetArchive", isEnabled: true);
+
+        var result = _policy.CanPrepare(
+            indexer,
+            CreateCandidate(),
+            [
+                new Uri("https://archive.org/download/book-one/chapter-01.mp3"),
+                new Uri("https://archive.org/download/book-two/chapter-02.mp3")
+            ]);
+
+        Assert.False(result);
+    }
+
+    [Theory]
+    [InlineData("https://archive.org/download/")]
+    [InlineData("https://archive.org/download/book")]
+    [InlineData("https://archive.org/download/book/")]
+    public void TryValidateInitialUri_MissingArtifactPath_ReturnsFalse(string url)
+    {
+        var result = _policy.TryValidateInitialUri(
+            new Uri(url),
+            out var error);
+
+        Assert.False(result);
+        Assert.Contains("artifact", error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void TryValidateInitialUri_NestedDownloadArtifactPath_ReturnsTrue()
+    {
+        var result = _policy.TryValidateInitialUri(
+            new Uri("https://archive.org/download/book/subdir/chapter-01.mp3"),
+            out var error);
+
+        Assert.True(result);
+        Assert.Empty(error);
     }
 
     [Fact]

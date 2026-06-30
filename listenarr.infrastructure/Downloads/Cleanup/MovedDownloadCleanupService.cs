@@ -36,7 +36,7 @@ namespace Listenarr.Infrastructure.Downloads.Cleanup
 
         public override async Task StartAsync(CancellationToken cancellationToken)
         {
-            logger.LogInformation("CompletedDownloadHandlingService starting");
+            logger.LogInformation("MovedDownloadCleanupService starting");
 
             try
             {
@@ -50,11 +50,11 @@ namespace Listenarr.Infrastructure.Downloads.Cleanup
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                logger.LogInformation("CompletedDownloadHandlingService startup canceled");
+                logger.LogInformation("MovedDownloadCleanupService startup canceled");
             }
             catch (OperationCanceledException ex)
             {
-                logger.LogWarning(ex, "CompletedDownloadHandlingService settings load canceled/timed out during startup; using default interval");
+                logger.LogWarning(ex, "MovedDownloadCleanupService settings load canceled/timed out during startup; using default interval");
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
@@ -66,13 +66,13 @@ namespace Listenarr.Infrastructure.Downloads.Cleanup
 
         public override async Task StopAsync(CancellationToken cancellationToken)
         {
-            logger.LogInformation("CompletedDownloadHandlingService stopping");
+            logger.LogInformation("MovedDownloadCleanupService stopping");
             await base.StopAsync(cancellationToken);
         }
 
         protected override async Task ExecuteAsync(CancellationToken cancellationToken)
         {
-            logger.LogInformation("CompletedDownloadHandlingService background task started");
+            logger.LogInformation("MovedDownloadCleanupService background task started");
 
             await cycleRunner.RunPeriodicAsync(
                 nameof(MovedDownloadCleanupService),
@@ -81,7 +81,7 @@ namespace Listenarr.Infrastructure.Downloads.Cleanup
                 runCycle: processor.RunCycleAsync,
                 cancellationToken);
 
-            logger.LogInformation("CompletedDownloadHandlingService background task stopped");
+            logger.LogInformation("MovedDownloadCleanupService background task stopped");
         }
     }
 

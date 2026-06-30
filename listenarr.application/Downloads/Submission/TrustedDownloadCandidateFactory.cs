@@ -28,7 +28,16 @@ public static class TrustedDownloadCandidateFactory
         {
             locators.Add(new(DownloadSourceLocatorKind.Magnet, result.MagnetLink));
         }
-        if (!string.IsNullOrWhiteSpace(result.TorrentUrl))
+        if (protocol == DownloadProtocol.DirectDownload && result.DirectDownloadArtifacts.Count > 0)
+        {
+            locators.AddRange(result.DirectDownloadArtifacts.Select(artifact => new DownloadSourceLocator(
+                DownloadSourceLocatorKind.DirectUrl,
+                artifact.Url,
+                artifact.FileName,
+                artifact.ExpectedSize,
+                artifact.Packaging)));
+        }
+        else if (!string.IsNullOrWhiteSpace(result.TorrentUrl))
         {
             locators.Add(new(
                 protocol == DownloadProtocol.DirectDownload
@@ -86,7 +95,7 @@ public static class TrustedDownloadCandidateFactory
             return DownloadProtocol.Torrent;
         }
 
-        if (string.Equals(result.DownloadType, "DDL", StringComparison.OrdinalIgnoreCase) ||
+        if (string.Equals(result.DownloadType, DirectDownloadMetadataKeys.ClientId, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(result.IndexerImplementation, "InternetArchive", StringComparison.OrdinalIgnoreCase))
         {
             return DownloadProtocol.DirectDownload;

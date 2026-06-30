@@ -85,11 +85,11 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
             await using var ctx = await _dbFactory.CreateDbContextAsync();
             var ddl = await ctx.Downloads
                 .AsNoTracking()
-                .Where(d => d.DownloadClientId == "DDL" && d.Status != DownloadStatus.Moved)
+                .Where(d => d.DownloadClientId == DirectDownloadMetadataKeys.ClientId && d.Status != DownloadStatus.Moved)
                 .ToListAsync();
             var nonDdl = await ctx.Downloads
                 .AsNoTracking()
-                .Where(d => d.DownloadClientId != "DDL")
+                .Where(d => d.DownloadClientId != DirectDownloadMetadataKeys.ClientId)
                 .Where(d => d.Status != DownloadStatus.Moved && d.Status != DownloadStatus.Failed)
                 .Where(d => d.Status != DownloadStatus.Completed || string.IsNullOrEmpty(d.FinalPath))
                 .ToListAsync();
@@ -101,7 +101,7 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
             await using var ctx = await _dbFactory.CreateDbContextAsync();
             return await ctx.Downloads
                 .AsNoTracking()
-                .Where(d => d.DownloadClientId != "DDL" && d.Status != DownloadStatus.Failed)
+                .Where(d => d.DownloadClientId != DirectDownloadMetadataKeys.ClientId && d.Status != DownloadStatus.Failed)
                 .ToListAsync();
         }
 

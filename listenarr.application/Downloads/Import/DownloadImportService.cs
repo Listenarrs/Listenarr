@@ -31,7 +31,11 @@ namespace Listenarr.Application.Downloads.Import
         ArchiveImportExtractor archiveImportExtractor,
         ILogger<DownloadImportService> logger) : IDownloadImportService
     {
-        public async Task<List<ImportResult>> ImportDownloadFilesAsync(Audiobook audiobook, List<string> files, CancellationToken ct = default)
+        public async Task<List<ImportResult>> ImportDownloadFilesAsync(
+            Audiobook audiobook,
+            List<string> files,
+            CancellationToken ct = default,
+            DownloadImportOptions? options = null)
         {
             if (string.IsNullOrEmpty(audiobook.BasePath))
             {
@@ -45,7 +49,7 @@ namespace Listenarr.Application.Downloads.Import
                 var completedFileAction = settings.CompletedFileAction;
 
                 // Extract archives if any
-                if (settings.ExtractArchives)
+                if (settings.ExtractArchives || options?.ForceArchiveExtraction == true)
                 {
                     var archives = files
                         .Where(archiveExtractor.IsArchive)

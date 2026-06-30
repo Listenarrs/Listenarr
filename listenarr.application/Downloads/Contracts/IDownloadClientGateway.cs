@@ -50,7 +50,7 @@ namespace Listenarr.Application.Downloads.Contracts
         Task<bool> MarkItemAsImportedAsync(DownloadClientConfiguration client, Download download, CancellationToken ct = default);
 
         /// <summary>
-        /// Given a list of download, update theit data based on reported download client informations
+        /// Given a list of downloads, update their data based on reported download client information
         /// </summary>
         /// <param name="client"></param>
         /// <param name="downloads">List of downloads to update</param>

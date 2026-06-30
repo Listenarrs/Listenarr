@@ -26,9 +26,10 @@ public static class SearchResultAttributeParser
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             { "ENG", "English" }, { "EN", "English" },
-            { "DUT", "Dutch" },   { "NL", "Dutch" },
-            { "GER", "German" },  { "DE", "German" },
-            { "FRE", "French" },  { "FR", "French" }
+            { "DUT", "Dutch" },   { "NLD", "Dutch" },   { "NL", "Dutch" },
+            { "GER", "German" },  { "DEU", "German" },  { "DE", "German" },
+            { "FRE", "French" },  { "FRA", "French" },  { "FR", "French" },
+            { "SPA", "Spanish" }, { "ES", "Spanish" }
         };
 
     public static string DetectQualityFromTags(string tags)

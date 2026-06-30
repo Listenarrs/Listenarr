@@ -1,5 +1,12 @@
-// Listenarr - Audiobook Management System
-// Copyright (C) 2024-2026 Listenarr Contributors
+/*
+ * Listenarr - Audiobook Management System
+ * Copyright (C) 2024-2026 Listenarr Contributors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published
+ * by the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ */
 
 namespace Listenarr.Application.Downloads.Submission;
 
@@ -10,9 +17,12 @@ namespace Listenarr.Application.Downloads.Submission;
 /// </summary>
 public static class DirectDownloadMetadataKeys
 {
+    public const string ClientId = "DDL";
     public const string DownloadType = "DownloadType";
     public const string SourcePolicyKey = "DirectDownloadSourcePolicy";
     public const string OriginalHost = "DirectDownloadOriginalHost";
+    public const string ArtifactPlan = "DirectDownloadArtifactPlan";
+    public const string RequiresArchiveExtraction = "DirectDownloadRequiresArchiveExtraction";
     public const string StartedAt = "DirectDownloadStartedAt";
     public const string CompletedAt = "DirectDownloadCompletedAt";
     public const string FailedAt = "DirectDownloadFailedAt";

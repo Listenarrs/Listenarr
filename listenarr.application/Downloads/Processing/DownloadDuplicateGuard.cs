@@ -37,7 +37,7 @@ namespace Listenarr.Application.Downloads.Processing
                           (d.Status == DownloadStatus.Queued ||
                            d.Status == DownloadStatus.Downloading ||
                            d.Status == DownloadStatus.ImportPending) &&
-                          (d.DownloadClientId == "DDL" ||
+                          (string.Equals(d.DownloadClientId, DirectDownloadMetadataKeys.ClientId, StringComparison.OrdinalIgnoreCase) ||
                            (!string.IsNullOrEmpty(d.DownloadClientId) && enabledClientIds.Contains(d.DownloadClientId))));
         }
     }

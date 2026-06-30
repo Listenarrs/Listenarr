@@ -2,7 +2,7 @@
 namespace Listenarr.Application.Downloads.Contracts
 {
     /// <summary>
-    /// Resolves download informations with accurate paths and metadata as queue items
+    /// Resolves download information with accurate paths and metadata as queue items
     /// </summary>
     public interface IDownloadItemService
     {

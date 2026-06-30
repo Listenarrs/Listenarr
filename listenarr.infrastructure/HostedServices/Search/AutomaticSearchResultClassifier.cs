@@ -41,7 +41,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
         {
             if (!string.IsNullOrEmpty(result.DownloadType))
             {
-                if (result.DownloadType == "DDL")
+                if (string.Equals(result.DownloadType, DirectDownloadMetadataKeys.ClientId, StringComparison.OrdinalIgnoreCase))
                 {
                     return false;
                 }
