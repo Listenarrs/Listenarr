@@ -56,6 +56,14 @@ namespace Listenarr.Application.Downloads.Queue
             var allDownloadsForMatching = candidateSet.MatchingDownloads;
             var allKnownClientItemIds = candidateSet.KnownClientItemIds;
 
+            // Direct downloads are internal work items, not rows reported by an
+            // external client queue. Add them from the DB before polling clients
+            // so DDL reservations, progress, completion, and import-pending work
+            // are visible in Activity.
+            queueItems.AddRange(listenarrDownloads
+                .Where(download => string.Equals(download.DownloadClientId, "DDL", StringComparison.OrdinalIgnoreCase))
+                .Select(ToDirectDownloadQueueItem));
+
             ApplicationSettings? appSettings = await cache.GetOrCreateAsync("ApplicationSettings", async entry =>
             {
                 entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(ClientStatusCacheExpirationSeconds);
@@ -358,6 +366,55 @@ namespace Listenarr.Application.Downloads.Queue
         {
             return string.Equals(queueItem.Status, "completed", StringComparison.OrdinalIgnoreCase);
         }
+
+        private static QueueItem ToDirectDownloadQueueItem(Download download)
+        {
+            var quality = download.Metadata != null && download.Metadata.TryGetValue("Quality", out var qualityObj)
+                ? qualityObj?.ToString() ?? "Unknown"
+                : "Unknown";
+
+            return new QueueItem
+            {
+                Id = download.Id,
+                Title = download.Title ?? "Unknown",
+                Author = download.Artist,
+                Quality = quality,
+                Language = download.Language,
+                Status = ToQueueStatus(download.Status),
+                Progress = (double)download.Progress,
+                Size = download.TotalSize,
+                Downloaded = download.DownloadedSize,
+                DownloadSpeed = 0,
+                Eta = null,
+                DownloadClient = "Direct Download",
+                DownloadClientId = "DDL",
+                DownloadClientType = "ddl",
+                AddedAt = download.StartedAt,
+                CanPause = false,
+                CanRemove = true,
+                AudiobookId = download.AudiobookId,
+                RemotePath = download.OriginalUrl,
+                LocalPath = download.DownloadPath,
+                ContentPath = string.IsNullOrWhiteSpace(download.FinalPath)
+                    ? download.DownloadPath
+                    : download.FinalPath,
+                ErrorMessage = download.ErrorMessage
+            };
+        }
+
+        private static string ToQueueStatus(DownloadStatus status) => status switch
+        {
+            DownloadStatus.Queued => "queued",
+            DownloadStatus.Downloading => "downloading",
+            DownloadStatus.Paused => "paused",
+            DownloadStatus.Completed => "completed",
+            DownloadStatus.Processing => "processing",
+            DownloadStatus.ImportPending => "importPending",
+            DownloadStatus.ImportBlocked => "importBlocked",
+            DownloadStatus.Failed => "failed",
+            DownloadStatus.Moved => "moved",
+            _ => status.ToString().ToLowerInvariant()
+        };
 
         private async Task PersistDiscoveredClientIdentifiersAsync(
             Download matchedDownload,

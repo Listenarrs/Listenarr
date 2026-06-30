@@ -2,6 +2,7 @@ using Listenarr.Application.Search.Filters;
 using Listenarr.Application.Search.Strategies;
 using Listenarr.Infrastructure.DependencyInjection;
 using Listenarr.Infrastructure.DependencyInjection.Downloads;
+using Listenarr.Infrastructure.Downloads.DirectDownload;
 using Listenarr.Infrastructure.HostedServices;
 using Listenarr.Tests.Mocks;
 using Listenarr.Tests.Mocks.Api;
@@ -249,6 +250,8 @@ namespace Listenarr.Tests.Builders
             services.AddHttpClient("qbittorrent")
                 .ConfigurePrimaryHttpMessageHandler<QbittorrentApiMock>();
 
+            services.AddHttpClient("DirectDownload");
+
             services.AddHttpClient(DownloadRegistrationExtensions.MyAnonamouseTorrentClientName)
                 .ConfigurePrimaryHttpMessageHandler<MyAnonamouseApiMock>();
 
@@ -256,11 +259,15 @@ namespace Listenarr.Tests.Builders
                 .ConfigurePrimaryHttpMessageHandler<AudnexusServiceApiMock>();
 
             services.AddSingleton<IDownloadClientAdapter, DownloadCLientAdapterMock>();
+            services.AddSingleton<IDirectDownloadImportSourceResolver, DirectDownloadImportSourceResolver>();
 
             // Background services
             services.AddSingleton<DownloadMonitorProcessor>();
             services.AddSingleton<IDownloadMonitorProcessor>(sp => sp.GetRequiredService<DownloadMonitorProcessor>());
             services.AddSingleton<DownloadMonitorService>();
+            services.AddSingleton<DirectDownloadProcessor>();
+            services.AddSingleton<IDirectDownloadProcessor>(sp => sp.GetRequiredService<DirectDownloadProcessor>());
+            services.AddSingleton<DirectDownloadService>();
             services.AddSingleton<DownloadProcessingJobProcessor>();
             services.AddSingleton<IDownloadImportProcessor>(sp => sp.GetRequiredService<DownloadProcessingJobProcessor>());
             services.AddSingleton<DownloadProcessingJobCleanupProcessor>();

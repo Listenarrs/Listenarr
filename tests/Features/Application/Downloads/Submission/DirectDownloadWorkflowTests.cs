@@ -54,5 +54,6 @@ public sealed class DirectDownloadWorkflowTests
         "en",
         100,
         "https://example.com/book.m4b",
-        new Uri("https://example.com/book.m4b"));
+        new Uri("https://example.com/book.m4b"),
+        "InternetArchive");
 }

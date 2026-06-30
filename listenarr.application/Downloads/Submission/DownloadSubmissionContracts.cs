@@ -109,7 +109,8 @@ public sealed record PreparedDirectDownloadSubmission(
     string? Language,
     long Size,
     string OriginalLocator,
-    Uri DownloadUri)
+    Uri DownloadUri,
+    string SourcePolicyKey)
     : PreparedDownloadSubmission(
         DownloadProtocol.DirectDownload,
         Title,

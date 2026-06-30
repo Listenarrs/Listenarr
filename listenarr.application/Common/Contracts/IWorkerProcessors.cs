@@ -31,6 +31,12 @@ namespace Listenarr.Application.Common.Contracts
         Task ProcessJobAsync(DownloadProcessingJob job, CancellationToken cancellationToken);
     }
 
+    public interface IDirectDownloadProcessor
+    {
+        Task RunCycleAsync(CancellationToken cancellationToken);
+        Task ProcessDownloadAsync(Download download, CancellationToken cancellationToken);
+    }
+
     public interface IMovedDownloadCleanupProcessor
     {
         Task RunCycleAsync(CancellationToken cancellationToken);

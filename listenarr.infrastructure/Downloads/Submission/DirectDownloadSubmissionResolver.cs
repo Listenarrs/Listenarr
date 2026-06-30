@@ -1,18 +1,11 @@
-/*
- * Listenarr - Audiobook Management System
- * Copyright (C) 2024-2026 Listenarr Contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Affero General Public License as published
- * by the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- */
-
+// Listenarr - Audiobook Management System
+// Copyright (C) 2024-2026 Listenarr Contributors
 
 namespace Listenarr.Infrastructure.Downloads.Submission;
 
-public sealed class DirectDownloadSourceResolver(
-    IIndexerRepository indexerRepository) : IDownloadSourceResolver
+internal sealed class DirectDownloadSubmissionResolver(
+    IIndexerRepository indexerRepository,
+    IEnumerable<IDirectDownloadSourcePolicy> sourcePolicies) : IDownloadSourceResolver
 {
     public int Priority => 0;
 
@@ -40,16 +33,24 @@ public sealed class DirectDownloadSourceResolver(
         }
 
         var indexer = await indexerRepository.GetByIdAsync(indexerId, cancellationToken);
-        if (indexer == null ||
-            !indexer.IsEnabled ||
-            !string.Equals(indexer.Implementation, "InternetArchive", StringComparison.OrdinalIgnoreCase) ||
-            !uri.Host.EndsWith("archive.org", StringComparison.OrdinalIgnoreCase) ||
-            !uri.AbsolutePath.StartsWith("/download/", StringComparison.OrdinalIgnoreCase))
+        if (indexer == null || !indexer.IsEnabled)
         {
             throw new DownloadClientSubmissionException(
                 "The direct-download source is not trusted.");
         }
 
+        var policy = sourcePolicies
+            .OrderBy(policy => policy.Priority)
+            .FirstOrDefault(policy => policy.CanPrepare(indexer, candidate, uri));
+        if (policy == null)
+        {
+            throw new DownloadClientSubmissionException(
+                "The direct-download source is not trusted.");
+        }
+
+        // Store the policy selected at submission time. The DDL worker re-resolves
+        // the same policy before fetching so adding a new source only requires a
+        // new allow-list policy, not changes to the transfer processor.
         return new PreparedDirectDownloadSubmission(
             candidate.Title,
             candidate.Artist,
@@ -59,6 +60,7 @@ public sealed class DirectDownloadSourceResolver(
             candidate.Language,
             candidate.Size,
             locator,
-            uri);
+            uri,
+            policy.Key);
     }
 }

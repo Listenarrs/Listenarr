@@ -18,6 +18,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Listenarr.Infrastructure.DependencyInjection;
+using Listenarr.Infrastructure.Downloads.DirectDownload;
 
 namespace Listenarr.Tests.Features.Infrastructure.DependencyInjection
 {
@@ -29,6 +30,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DependencyInjection
             nameof(MoveBackgroundService),
             nameof(ImageCacheCleanupService),
             nameof(DownloadMonitorService),
+            nameof(DirectDownloadService),
             nameof(MovedDownloadCleanupService),
             nameof(QueueMonitorService),
             nameof(AutomaticSearchService),
@@ -44,6 +46,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DependencyInjection
         private static readonly Type[] ExpectedProcessorTypes =
         [
             typeof(DownloadMonitorProcessor),
+            typeof(DirectDownloadProcessor),
             typeof(DownloadProcessingJobProcessor),
             typeof(DownloadProcessingJobCleanupProcessor),
             typeof(MovedDownloadCleanupProcessor),
@@ -74,6 +77,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DependencyInjection
             Assert.Contains(services, d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(MoveBackgroundService));
             AssertHostedServiceRegistered<ImageCacheCleanupService>(services);
             AssertHostedServiceRegistered<DownloadMonitorService>(services);
+            AssertHostedServiceRegistered<DirectDownloadService>(services);
             Assert.Contains(services, d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(QueueMonitorService));
             AssertHostedServiceRegistered<AutomaticSearchService>(services);
             AssertHostedServiceRegistered<AuthorMonitoringBackgroundService>(services);
@@ -95,6 +99,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DependencyInjection
             }
 
             AssertProcessorRegistered<IDownloadMonitorProcessor>(services);
+            AssertProcessorRegistered<IDirectDownloadProcessor>(services);
             AssertProcessorRegistered<IDownloadImportProcessor>(services);
             AssertProcessorRegistered<IDownloadProcessingJobCleanupProcessor>(services);
             AssertProcessorRegistered<IMovedDownloadCleanupProcessor>(services);

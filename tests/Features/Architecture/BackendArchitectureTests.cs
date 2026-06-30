@@ -205,6 +205,28 @@ public sealed class BackendArchitectureTests
     }
 
     [Fact]
+    public void DirectDownloadProcessor_DoesNotContainSourceSpecificTrustRules()
+    {
+        var processorFile = Path.Join(
+            RepositoryRoot,
+            "listenarr.infrastructure",
+            "Downloads",
+            "DirectDownload",
+            "DirectDownloadProcessor.cs");
+        var source = File.ReadAllText(processorFile);
+        var forbiddenProviderLiterals = new[]
+        {
+            "archive.org",
+            "InternetArchive",
+            "AnnasArchive",
+            "annas"
+        };
+
+        Assert.DoesNotContain(forbiddenProviderLiterals, literal =>
+            source.Contains(literal, StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void ConcreteDownloadAdapters_DoNotExposeLegacyFetchDownloadsAsync()
     {
         var adapterRoot = Path.Join(RepositoryRoot, "listenarr.infrastructure", "DownloadClients");

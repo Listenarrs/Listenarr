@@ -45,7 +45,11 @@ namespace Listenarr.Application.Downloads.Submission
                         ["Source"] = submission.Source,
                         ["Quality"] = submission.Quality ?? string.Empty,
                         ["Language"] = submission.Language ?? string.Empty,
-                        ["DownloadType"] = "DDL"
+                        [DirectDownloadMetadataKeys.DownloadType] = "DDL",
+                        // The worker revalidates this policy before every HTTP request so
+                        // future DDL sources stay additive without making Listenarr fetch arbitrary URLs.
+                        [DirectDownloadMetadataKeys.SourcePolicyKey] = submission.SourcePolicyKey,
+                        [DirectDownloadMetadataKeys.OriginalHost] = submission.DownloadUri.Host
                     }
                 };
 

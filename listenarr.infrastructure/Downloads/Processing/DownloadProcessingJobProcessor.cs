@@ -187,11 +187,16 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                 throw new DownloadProcessingException($"Inconsistency: Download {download.Id}'s audiobook {download.AudiobookId} cannot be retrieved");
             }
 
-            var configurationService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
-            var client = await configurationService.GetDownloadClientConfigurationAsync(download.DownloadClientId);
-            if (client == null)
+            var isDirectDownload = string.Equals(download.DownloadClientId, "DDL", StringComparison.OrdinalIgnoreCase);
+            DownloadClientConfiguration? client = null;
+            if (!isDirectDownload)
             {
-                throw new DownloadProcessingException($"Inconsistency: Download {download.Id}'s client {download.DownloadClientId} cannot be retrieved");
+                var configurationService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
+                client = await configurationService.GetDownloadClientConfigurationAsync(download.DownloadClientId);
+                if (client == null)
+                {
+                    throw new DownloadProcessingException($"Inconsistency: Download {download.Id}'s client {download.DownloadClientId} cannot be retrieved");
+                }
             }
 
             var downloadService = scope.ServiceProvider.GetRequiredService<IDownloadService>();
@@ -230,11 +235,13 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                     if (queueItem?.SourceFiles == null)
                     {
                         await ScheduleRetryAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
-                            correlationId, "Unable to fetch the download from the download client", cancellationToken);
+                            correlationId, isDirectDownload
+                                ? "Unable to resolve the local direct-download file"
+                                : "Unable to fetch the download from the download client", cancellationToken);
                         return;
                     }
 
-                    job.AddLogEntry($"Download client reported {queueItem.SourceFiles.Count} file(s) downloaded");
+                    job.AddLogEntry($"Resolved {queueItem.SourceFiles.Count} file(s) for import");
                     files = [.. queueItem.SourceFiles.Where(File.Exists)];
                     job.AddLogEntry($"{files.Count} file(s) remaining after checking which ones are effectively on disk");
                 }
@@ -333,16 +340,26 @@ namespace Listenarr.Infrastructure.Downloads.Processing
 
             if (!job.HasCheckpoint("ClientMarkedImported"))
             {
-                var downloadClientGateway = scope.ServiceProvider.GetRequiredService<IDownloadClientGateway>();
-                if (!await downloadClientGateway.MarkItemAsImportedAsync(client, download, cancellationToken))
+                if (isDirectDownload)
                 {
-                    await ScheduleRetryAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
-                        correlationId, $"Unable to mark the item imported in client {client.Id}", cancellationToken);
-                    return;
+                    // There is no external client history to mark for DDLs. The
+                    // local staged file is already under Listenarr's ownership.
+                    job.SetCheckpoint("ClientMarkedImported");
+                    await downloadProcessingJobService.UpdateJobAsync(job);
                 }
+                else
+                {
+                    var downloadClientGateway = scope.ServiceProvider.GetRequiredService<IDownloadClientGateway>();
+                    if (!await downloadClientGateway.MarkItemAsImportedAsync(client!, download, cancellationToken))
+                    {
+                        await ScheduleRetryAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
+                            correlationId, $"Unable to mark the item imported in client {client!.Id}", cancellationToken);
+                        return;
+                    }
 
-                job.SetCheckpoint("ClientMarkedImported");
-                await downloadProcessingJobService.UpdateJobAsync(job);
+                    job.SetCheckpoint("ClientMarkedImported");
+                    await downloadProcessingJobService.UpdateJobAsync(job);
+                }
             }
 
             if (!job.HasCheckpoint("ScanEnqueued"))
@@ -384,7 +401,7 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                     download.Id,
                     audiobook.Id,
                     audiobook.Title ?? download.Title,
-                    client.Id,
+                    client?.Id ?? download.DownloadClientId,
                     correlationId,
                     new Dictionary<string, object>
                     {

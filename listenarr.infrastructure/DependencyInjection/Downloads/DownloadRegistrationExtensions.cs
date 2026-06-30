@@ -29,6 +29,7 @@ internal static class DownloadRegistrationExtensions
             .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromHours(2))
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
             {
+                AllowAutoRedirect = false,
                 AutomaticDecompression = DecompressionMethods.All
             })
             .AddPolicyHandler(HttpPolicyExtensions
@@ -79,6 +80,7 @@ internal static class DownloadRegistrationExtensions
         services.AddScoped<IDownloadClientGateway, DownloadClientGateway>();
         services.AddScoped<IRemotePathMappingService, RemotePathMappingService>();
         services.AddScoped<IDownloadProcessingJobService, DownloadProcessingJobService>();
+        services.AddScoped<IDirectDownloadImportSourceResolver, DirectDownloadImportSourceResolver>();
         return services;
     }
 
@@ -95,10 +97,11 @@ internal static class DownloadRegistrationExtensions
         services.AddScoped<ITorrentMetadataService, TorrentMetadataService>();
         services.AddScoped<INzbFileDownloader, NzbFileDownloader>();
         services.AddScoped<MyAnonamouseTorrentPreparationService>();
+        services.AddSingleton<IDirectDownloadSourcePolicy, InternetArchiveDirectDownloadSourcePolicy>();
         services.AddScoped<IDownloadSourceResolver, MyAnonamouseSourceResolver>();
         services.AddScoped<IDownloadSourceResolver, GenericTorrentSourceResolver>();
         services.AddScoped<IDownloadSourceResolver, GenericUsenetSourceResolver>();
-        services.AddScoped<IDownloadSourceResolver, DirectDownloadSourceResolver>();
+        services.AddScoped<IDownloadSourceResolver, DirectDownloadSubmissionResolver>();
         return services;
     }
 }

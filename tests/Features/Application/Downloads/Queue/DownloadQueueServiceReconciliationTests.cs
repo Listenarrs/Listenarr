@@ -1636,6 +1636,63 @@ namespace Listenarr.Tests.Features.Application.Downloads.Queue
             metricsMock.Verify(m => m.Increment("download.orphan.removed", It.IsAny<int>()), Times.Never);
         }
 
+        [Fact]
+        [Trait("Scenario", "DirectDownloadVisibleFromDatabase")]
+        public async Task GetQueueAsync_IncludesDirectDownloadReservations_FromDatabase()
+        {
+            var ddl = new Download
+            {
+                Id = "ddl-1",
+                AudiobookId = 77,
+                Title = "Alice in Wonderland (Drama)",
+                Artist = "Lewis Carroll",
+                OriginalUrl = "https://archive.org/download/alice/alice.m4b",
+                DownloadClientId = "DDL",
+                Status = DownloadStatus.Queued,
+                Progress = 0,
+                TotalSize = 12345,
+                DownloadedSize = 0,
+                StartedAt = DateTime.UtcNow,
+                Metadata = new Dictionary<string, object>
+                {
+                    ["Quality"] = "M4B",
+                    ["Language"] = "English",
+                    ["DownloadType"] = "DDL"
+                }
+            };
+
+            var downloadRepoMock = new Mock<IDownloadRepository>();
+            SetupQueueRepository(downloadRepoMock, new List<Download> { ddl });
+
+            var configMock = new Mock<IConfigurationService>();
+            configMock.Setup(c => c.GetDownloadClientConfigurationsAsync())
+                .ReturnsAsync(new List<DownloadClientConfiguration>());
+            configMock.Setup(c => c.GetApplicationSettingsAsync())
+                .ReturnsAsync(new ApplicationSettings());
+
+            var processingJobRepoMock = new Mock<IDownloadProcessingJobRepository>();
+            var gatewayMock = new Mock<IDownloadClientGateway>();
+            var metricsMock = new Mock<IAppMetricsService>();
+
+            var service = CreateService(
+                configMock.Object,
+                downloadRepoMock.Object,
+                processingJobRepoMock.Object,
+                gatewayMock.Object,
+                metricsMock.Object);
+
+            var result = await service.GetQueueAsync();
+
+            var item = Assert.Single(result);
+            Assert.Equal("ddl-1", item.Id);
+            Assert.Equal("queued", item.Status);
+            Assert.Equal("Direct Download", item.DownloadClient);
+            Assert.Equal("DDL", item.DownloadClientId);
+            Assert.Equal("ddl", item.DownloadClientType);
+            Assert.Equal(77, item.AudiobookId);
+            Assert.Equal(ddl.OriginalUrl, item.RemotePath);
+        }
+
         private static bool IsQueueDisplayCandidate(Download d)
         {
             bool isDdl = d.DownloadClientId == "DDL";

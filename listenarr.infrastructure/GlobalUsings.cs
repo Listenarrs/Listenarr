@@ -83,6 +83,8 @@ global using Listenarr.Infrastructure.Library.Monitoring;
 global using Listenarr.Infrastructure.Library.Moving;
 global using Listenarr.Infrastructure.Library.Scanning;
 global using Listenarr.Infrastructure.Downloads.Cleanup;
+global using Listenarr.Infrastructure.Downloads.DirectDownload;
+global using Listenarr.Infrastructure.Downloads.DirectDownload.Sources;
 global using Listenarr.Infrastructure.Downloads.Import;
 global using Listenarr.Infrastructure.Downloads.Monitoring;
 global using Listenarr.Infrastructure.Downloads.Processing;
