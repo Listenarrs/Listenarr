@@ -115,3 +115,46 @@ export function stripHtmlAndNormalize(text: string | undefined | null): string {
 
   return decodeHtmlEntities(raw)
 }
+
+/**
+ * Normalizes a collection/display name (series, author, narrator) to a stable
+ * comparison key: strips diacritics, lowercases, and collapses any run of
+ * non-alphanumerics to a single space. Used so the same name matches regardless
+ * of punctuation/accents, and so a header-search suggestion's count lines up with
+ * the collection page it links to (both key off this function).
+ */
+export function normalizeCollectionText(value: string | undefined | null): string {
+  if (!value) return ''
+  return value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
+// Compared against normalizeCollectionText output.
+const NON_PERSON_NARRATOR_TOKENS = new Set([
+  'full cast',
+  'a full cast',
+  'full cast production',
+  'full cast dramatization',
+  'various',
+  'various narrators',
+  'uncredited',
+])
+
+/**
+ * True when a narrator credit isn't a real, browsable person (e.g. "Full Cast").
+ * Used to exclude such tokens from narrator grouping and unified search so the
+ * library doesn't sprout pseudo-narrator pages. Empty/blank credits count as
+ * non-person too. Not applied to the collection-page filter: you only reach a
+ * narrator page by clicking a real card, so there is nothing to exclude there.
+ */
+export function isNonPersonNarrator(name: string | undefined | null): boolean {
+  const normalized = normalizeCollectionText(name)
+  if (!normalized) return true
+  if (NON_PERSON_NARRATOR_TOKENS.has(normalized)) return true
+  // Catch "... full cast ..." phrasings not in the explicit set.
+  return normalized.includes('full cast')
+}

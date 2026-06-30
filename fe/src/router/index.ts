@@ -52,6 +52,12 @@ const routes = [
     meta: { requiresAuth: true },
   },
   {
+    path: '/search',
+    name: 'search',
+    component: () => import('../views/library/LibrarySearchView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
     path: '/add-new',
     name: 'add-new',
     component: () => import('../views/content/AddNewView.vue'),

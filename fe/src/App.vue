@@ -68,7 +68,7 @@
           <input
             v-model="searchQuery"
             @input="onSearchInput"
-            @keydown.enter="applyFirstResult"
+            @keydown.enter="goToResults"
             @keydown.escape.prevent="closeSearch"
             ref="searchInputRef"
             class="search-input-inline"
@@ -92,31 +92,43 @@
             class="search-results-inline"
             v-if="searching || suggestions.length > 0 || searchQuery.length > 0"
           >
-            <ul v-if="suggestions.length > 0" class="search-list">
-              <li
-                v-for="s in suggestions"
-                :key="s.id"
-                class="search-result"
-                @click="selectSuggestion(s)"
+            <template v-if="suggestions.length > 0">
+              <div
+                v-for="section in suggestionSections"
+                :key="section.kind"
+                class="search-section"
               >
-                <div style="display: flex; align-items: center; gap: 10px">
-                  <img
-                    v-if="s.imageUrl"
-                    :src="getProtectedImageSrc(s.imageUrl, getPlaceholderUrl())"
-                    @error="handleImageError"
-                    alt="cover"
-                    class="result-thumb"
-                    loading="lazy"
-                    decoding="async"
-                  />
-                  <img v-else :src="getPlaceholderUrl()" alt="cover" class="result-thumb" />
-                  <div>
-                    <div class="result-title">{{ s.title }}</div>
-                    <div class="result-sub">{{ s.author }}</div>
-                  </div>
-                </div>
-              </li>
-            </ul>
+                <div class="search-section-header">{{ section.label }}</div>
+                <ul class="search-list">
+                  <li
+                    v-for="s in section.items"
+                    :key="s.key"
+                    class="search-result"
+                    @click="selectSuggestion(s)"
+                  >
+                    <div style="display: flex; align-items: center; gap: 10px">
+                      <img
+                        v-if="s.imageUrl"
+                        :src="getProtectedImageSrc(s.imageUrl, getPlaceholderUrl())"
+                        @error="handleImageError"
+                        alt="cover"
+                        class="result-thumb"
+                        loading="lazy"
+                        decoding="async"
+                      />
+                      <img v-else :src="getPlaceholderUrl()" alt="cover" class="result-thumb" />
+                      <div>
+                        <div class="result-title">{{ s.label }}</div>
+                        <div class="result-sub">{{ s.sublabel }}</div>
+                      </div>
+                    </div>
+                  </li>
+                </ul>
+              </div>
+              <button type="button" class="search-see-all" @click="goToResults">
+                See all results for "{{ searchQuery.trim() }}"
+              </button>
+            </template>
 
             <div v-else class="search-empty-overlay">
               <div class="overlay-spinner" v-if="searching" aria-hidden="true"></div>
@@ -562,6 +574,12 @@ import { useAuthStore } from '@/stores/auth'
 import { apiService } from '@/services/api'
 import { getStartupConfigCached } from '@/services/startupConfigCache'
 import { handleImageError } from '@/utils/imageFallback'
+import {
+  buildLibraryFacets,
+  matchLibraryBooks,
+  matchLibraryFacets,
+  type LibraryFacetMatch,
+} from '@/utils/librarySearch'
 import { Pill } from '@/components/base'
 import { getPlaceholderUrl } from '@/utils/placeholder'
 import { useProtectedImages } from '@/composables/useProtectedImages'
@@ -950,9 +968,21 @@ router.afterEach(() => {
   pendingNavPath.value = null
 })
 const searchQuery = vueRef('')
-const suggestions = vueRef<
-  Array<{ id: number; title: string; author?: string; imageUrl?: string }>
->([])
+
+// A unified library-search suggestion. `kind` drives both the overlay grouping and
+// where a click navigates: books open the detail page, the other kinds open their
+// collection page (/collection/<kind>/<name>). Keys are composite (kind + id/name)
+// because collection suggestions have no numeric id.
+type SearchSuggestionKind = 'book' | 'series' | 'author' | 'narrator'
+type SearchSuggestion = {
+  kind: SearchSuggestionKind
+  key: string
+  label: string
+  sublabel?: string
+  imageUrl?: string
+  to: string | { name: string; params: Record<string, string> }
+}
+const suggestions = vueRef<SearchSuggestion[]>([])
 const searching = vueRef(false)
 const searchInputRef = vueRef<HTMLInputElement | null>(null)
 
@@ -984,6 +1014,15 @@ const handleSearchDocumentClick = (e: MouseEvent) => {
   }
 }
 
+// Distinct series / authors / narrators across the library, each with a book count
+// and a sample cover. Computed once and cached by Vue until the library changes, so
+// each keystroke filters this prepared index instead of re-scanning every book.
+const libraryFacets = computed(() => buildLibraryFacets(libraryStore.audiobooks))
+
+const BOOK_SUGGESTION_LIMIT = 5
+const FACET_SUGGESTION_LIMIT = 4
+const facetSub = (count: number) => `${count} book${count !== 1 ? 's' : ''}`
+
 let searchDebounceTimer: number | undefined
 const onSearchInput = async () => {
   if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
@@ -998,25 +1037,42 @@ const onSearchInput = async () => {
       if (libraryStore.audiobooks.length === 0) {
         await libraryStore.fetchLibrary()
       }
-      const lib = libraryStore.audiobooks
-      const lower = q.toLowerCase()
-      const localMatches = lib.filter(
-        (b) =>
-          (b.title || '').toLowerCase().includes(lower) ||
-          (Array.isArray(b.authors) ? b.authors.join(' ').toLowerCase() : '').includes(lower),
-      )
-      if (localMatches.length > 0) {
-        // Only show local library matches in the header search
-        suggestions.value = localMatches.slice(0, 8).map((b) => ({
-          id: b.id!,
-          title: b.title || 'Unknown',
-          author: Array.isArray(b.authors) ? b.authors[0] || '' : '',
-          imageUrl: b.imageUrl || '',
-        }))
-      } else {
-        // No fallback to indexers from header search; leave suggestions empty
-        suggestions.value = []
+      const out: SearchSuggestion[] = []
+
+      // Books — title or any author contains the query.
+      for (const b of matchLibraryBooks(libraryStore.audiobooks, q, BOOK_SUGGESTION_LIMIT)) {
+        out.push({
+          kind: 'book',
+          key: `book:${b.id}`,
+          label: b.title,
+          sublabel: b.author,
+          imageUrl: b.imageUrl,
+          to: { name: 'audiobook-detail', params: { id: String(b.id) } },
+        })
       }
+
+      // Series / authors / narrators — normalized substring match, most-books first.
+      const facets = libraryFacets.value
+      const pushFacets = (
+        arr: LibraryFacetMatch[],
+        kind: Exclude<SearchSuggestionKind, 'book'>,
+      ) => {
+        for (const f of matchLibraryFacets(arr, q, FACET_SUGGESTION_LIMIT)) {
+          out.push({
+            kind,
+            key: `${kind}:${f.normKey}`,
+            label: f.name,
+            sublabel: facetSub(f.count),
+            imageUrl: f.imageUrl,
+            to: `/collection/${kind}/${encodeURIComponent(f.name)}`,
+          })
+        }
+      }
+      pushFacets(facets.series, 'series')
+      pushFacets(facets.authors, 'author')
+      pushFacets(facets.narrators, 'narrator')
+
+      suggestions.value = out
     } catch (err) {
       logger.error('Header search failed', err)
       suggestions.value = []
@@ -1026,30 +1082,42 @@ const onSearchInput = async () => {
   }, 250)
 }
 
-const selectSuggestion = (s: { id: number; title: string; author?: string }) => {
-  // Navigate to audiobook detail if local (id > 0), else open search view
+// Section grouping for the overlay (Books / Series / Authors / Narrators).
+const SUGGESTION_SECTION_LABELS: Record<SearchSuggestionKind, string> = {
+  book: 'Books',
+  series: 'Series',
+  author: 'Authors',
+  narrator: 'Narrators',
+}
+const suggestionSections = computed(() => {
+  const order: SearchSuggestionKind[] = ['book', 'series', 'author', 'narrator']
+  return order
+    .map((kind) => ({
+      kind,
+      label: SUGGESTION_SECTION_LABELS[kind],
+      items: suggestions.value.filter((s) => s.kind === kind),
+    }))
+    .filter((section) => section.items.length > 0)
+})
+
+const selectSuggestion = (s: SearchSuggestion) => {
   if (!s) return
   searchQuery.value = ''
   suggestions.value = []
-  if (s.id && s.id > 0) {
-    // Navigate to audiobook detail page (router name: 'audiobook-detail')
-    void router.push({ name: 'audiobook-detail', params: { id: String(s.id) } })
-  } else {
-    // Use the general search page for indexer results
-    void router.push({ name: 'search', query: { q: s.title } })
-  }
+  searchOpen.value = false
+  void router.push(s.to)
 }
 
-const applyFirstResult = () => {
-  if (suggestions.value.length > 0) selectSuggestion(suggestions.value[0]!)
+// Enter (or the "See all results" row) opens the full results page — the single
+// place that lists every matching book, series, author and narrator.
+const goToResults = () => {
+  const q = searchQuery.value.trim()
+  if (!q) return
+  searchQuery.value = ''
+  suggestions.value = []
+  searchOpen.value = false
+  void router.push({ name: 'search', query: { q } })
 }
-
-watch(
-  () => suggestions.value.length,
-  () => {
-    // Native lazy loading covers search suggestions automatically
-  },
-)
 
 const parseAuthEnabledFromStartupConfig = (raw: unknown): boolean | null => {
   if (typeof raw === 'boolean') return raw
@@ -2355,6 +2423,40 @@ these are not present, the Google Fonts import in `fe/index.html` will be used a
   padding: 8px 10px;
   color: #9aa0a6;
   font-size: 0.9rem;
+}
+
+.search-section + .search-section {
+  margin-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  padding-top: 4px;
+}
+
+.search-section-header {
+  padding: 6px 10px 2px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #8a929a;
+}
+
+.search-see-all {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 10px;
+  margin-top: 4px;
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  background: transparent;
+  color: #2196f3;
+  font-size: 0.88rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.search-see-all:hover {
+  background: rgba(255, 255, 255, 0.03);
 }
 
 /* Mobile search overlay */
