@@ -147,6 +147,12 @@ namespace Listenarr.Infrastructure.Library.Scanning
                         }
 
                         audiobook.BasePath = null;
+                        // The whole folder is gone, so the legacy single-file columns are stale too.
+                        // Leaving them set makes hasAnyFile/Wanted treat the book as "Downloaded"
+                        // with zero files forever (it never re-searches). Clear them alongside
+                        // BasePath so the book correctly reverts to "no file" / wanted.
+                        audiobook.FilePath = null;
+                        audiobook.FileSize = null;
                         await audiobookRepository.UpdateAsync(audiobook);
 
                         if (removedFilesDto.Count > 0)
