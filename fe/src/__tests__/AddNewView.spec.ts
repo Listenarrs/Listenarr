@@ -980,4 +980,21 @@ describe('AddNewView pagination', () => {
     expect(addBtn.text()).toContain('Added')
     expect(addBtn.attributes('disabled')).toBeDefined()
   })
+
+  // Regression: cold-add "root folder not configured" false negative.
+  // The addToLibrary() guard reads rootFoldersStore.folders synchronously, so
+  // the store must be populated on mount; otherwise the first add after a fresh
+  // page load wrongly redirects to /settings.
+  it('loads root folders on mount so the cold first add is not falsely rejected', async () => {
+    const apiModule = await import('@/services/api')
+    const getRootFolders = apiModule.apiService.getRootFolders as unknown as Mock
+    getRootFolders.mockClear()
+    getRootFolders.mockResolvedValue([{ id: 1, name: 'Books', path: '/books', isDefault: true }])
+
+    const router = createTestRouter()
+    mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+
+    expect(getRootFolders).toHaveBeenCalled()
+  })
 })
