@@ -48,10 +48,7 @@ namespace Listenarr.Api.Features.Indexers
             _indexerRepository = indexerRepository;
             _logger = logger;
             _configurationService = configurationService;
-            _indexerTestWorkflow = indexerTestWorkflow ?? new IndexerTestWorkflow(
-                indexerRepository,
-                httpClient,
-                Microsoft.Extensions.Logging.Abstractions.NullLogger<IndexerTestWorkflow>.Instance);
+            _indexerTestWorkflow = indexerTestWorkflow ?? throw new ArgumentNullException(nameof(indexerTestWorkflow));
             _prowlarrImportWorkflow = prowlarrImportWorkflow ?? new ProwlarrIndexerImportWorkflow(
                 indexerRepository,
                 configurationService,
@@ -75,109 +72,41 @@ namespace Listenarr.Api.Features.Indexers
         private string? RedactMamIdForCaller(string? mamId)
             => _responseRedactor.RedactMamIdForCaller(mamId, HttpContext);
 
-        private async Task SaveTestResultAsync(Indexer indexer, bool persist, bool success, string? error)
+        private IActionResult ToActionResult(IndexerTestWorkflowResult result)
         {
-            // Update the passed indexer instance
-            indexer.LastTestedAt = DateTime.UtcNow;
-            indexer.LastTestSuccessful = success;
-            indexer.LastTestError = error;
-
-            if (persist && indexer.Id != 0)
+            return result.Kind switch
             {
-                // Persist test result back to the database for the stored indexer
-                var existing = await _indexerRepository.GetByIdAsync(indexer.Id);
-                if (existing != null)
-                {
-                    existing.LastTestedAt = indexer.LastTestedAt;
-                    existing.LastTestSuccessful = success;
-                    existing.LastTestError = error;
-                    existing.UpdatedAt = DateTime.UtcNow;
-                    await _indexerRepository.UpdateAsync(existing);
-                }
-            }
+                IndexerTestWorkflowResultKind.NotFound => NotFound(new { message = result.Message ?? "Indexer not found" }),
+                IndexerTestWorkflowResultKind.BadRequest => BadRequest(new { message = result.Message ?? "Index data is required" }),
+                IndexerTestWorkflowResultKind.Success => ToSuccessfulTestResult(result),
+                _ => ToFailedTestResult(result)
+            };
         }
 
-        private async Task<IActionResult> ExecuteIndexerTestAsync(Indexer indexer, bool persist)
+        private IActionResult ToSuccessfulTestResult(IndexerTestWorkflowResult result)
         {
-            // Normalize URL first
-            indexer.Url = IndexerUrlNormalizer.NormalizeIndexerUrl(indexer.Url);
-
-            var impl = (indexer.Implementation ?? string.Empty).Trim().ToLowerInvariant();
-
-            try
+            var testResult = result.TestResult!;
+            return Ok(new
             {
-                _logger.LogInformation("[IndexerTest] Testing indexer {Name} (impl={Impl}, url={Url})", LogRedaction.SanitizeText(indexer.Name), LogRedaction.SanitizeText(indexer.Implementation), LogRedaction.SanitizeUrl(indexer.Url));
-                return impl switch
-                {
-                    var s when s == "internetarchive" || s == "internet archive" => await TestInternetArchive(indexer, persist),
-                    var s when s == "myanonamouse" => await TestMyAnonamouse(indexer, persist),
-                    // For Newznab/Torznab/Custom fall back to a generic connectivity check
-                    _ => await TestGenericIndexer(indexer, persist)
-                };
-            }
-            catch (HttpRequestException ex)
-            {
-                _logger.LogWarning(ex, "Indexer '{Name}' test failed", LogRedaction.SanitizeText(indexer.Name));
-                return await BuildIndexerTestBadRequestAsync(indexer, persist, "Indexer test failed", ex);
-            }
-            catch (TaskCanceledException ex)
-            {
-                _logger.LogWarning(ex, "Indexer '{Name}' test failed", LogRedaction.SanitizeText(indexer.Name));
-                return await BuildIndexerTestBadRequestAsync(indexer, persist, "Indexer test failed", ex);
-            }
-            catch (JsonException ex)
-            {
-                _logger.LogWarning(ex, "Indexer '{Name}' test failed", LogRedaction.SanitizeText(indexer.Name));
-                return await BuildIndexerTestBadRequestAsync(indexer, persist, "Indexer test failed", ex);
-            }
-            catch (UriFormatException ex)
-            {
-                _logger.LogWarning(ex, "Indexer '{Name}' test failed", LogRedaction.SanitizeText(indexer.Name));
-                return await BuildIndexerTestBadRequestAsync(indexer, persist, "Indexer test failed", ex);
-            }
-            catch (System.Net.CookieException ex)
-            {
-                _logger.LogWarning(ex, "Indexer '{Name}' test failed", LogRedaction.SanitizeText(indexer.Name));
-                return await BuildIndexerTestBadRequestAsync(indexer, persist, "Indexer test failed", ex);
-            }
-            catch (InvalidOperationException ex)
-            {
-                _logger.LogWarning(ex, "Indexer '{Name}' test failed", LogRedaction.SanitizeText(indexer.Name));
-                return await BuildIndexerTestBadRequestAsync(indexer, persist, "Indexer test failed", ex);
-            }
-        }
-
-        private async Task<IActionResult> BuildIndexerTestBadRequestAsync(Indexer indexer, bool persist, string message, Exception ex)
-        {
-            await SaveTestResultAsync(indexer, persist, false, ex.Message);
-            return BadRequest(new
-            {
-                success = false,
-                message,
-                error = ex.Message,
-                indexer = RedactIndexerForCaller(indexer)
+                success = true,
+                message = testResult.Message,
+                collection = testResult.Collection,
+                mam_id = RedactMamIdForCaller(testResult.MamId),
+                indexer = result.Indexer == null ? null : RedactIndexerForCaller(result.Indexer)
             });
         }
 
-        private async Task<IActionResult> TestGenericIndexer(Indexer indexer, bool persist)
+        private IActionResult ToFailedTestResult(IndexerTestWorkflowResult result)
         {
-            var result = await _indexerTestWorkflow.TestGenericIndexerAsync(indexer, persist);
-            if (result.Succeeded)
+            var testResult = result.TestResult!;
+            return BadRequest(new
             {
-                return Ok(new { success = true, message = result.Message, indexer = RedactIndexerForCaller(indexer) });
-            }
-
-            if (result.Status.HasValue)
-            {
-                return BadRequest(new { success = false, message = result.Message, status = result.Status.Value, indexer = RedactIndexerForCaller(indexer) });
-            }
-
-            if (!string.IsNullOrEmpty(result.Error))
-            {
-                return BadRequest(new { success = false, message = result.Message, error = result.Error, indexer = RedactIndexerForCaller(indexer) });
-            }
-
-            return BadRequest(new { success = false, message = result.Message, indexer = RedactIndexerForCaller(indexer) });
+                success = false,
+                message = testResult.Message,
+                error = testResult.Error,
+                status = testResult.StatusCode,
+                indexer = result.Indexer == null ? null : RedactIndexerForCaller(result.Indexer)
+            });
         }
 
         /// <summary>
@@ -328,83 +257,24 @@ namespace Listenarr.Api.Features.Indexers
         /// Test an indexer's connection to verify it is reachable and properly configured.
         /// </summary>
         /// <param name="id">Indexer ID.</param>
+        /// <param name="cancellationToken">Request cancellation token.</param>
         [HttpPost("{id}/test")]
-        public async Task<IActionResult> Test(int id)
+        public async Task<IActionResult> Test(int id, CancellationToken cancellationToken = default)
         {
-            var indexer = await _indexerRepository.GetByIdAsync(id);
-            if (indexer == null)
-            {
-                return NotFound(new { message = "Indexer not found" });
-            }
-
-            return await ExecuteIndexerTestAsync(indexer, persist: true);
+            var result = await _indexerTestWorkflow.TestPersistedAsync(id, cancellationToken);
+            return ToActionResult(result);
         }
 
         /// <summary>
         /// Test an indexer configuration without saving it. Useful for validating settings before creating an indexer.
         /// </summary>
         /// <param name="indexer">Indexer configuration to test (not persisted).</param>
+        /// <param name="cancellationToken">Request cancellation token.</param>
         [HttpPost("test")]
-        public async Task<IActionResult> TestDraft([FromBody] Indexer indexer)
+        public async Task<IActionResult> TestDraft([FromBody] Indexer? indexer, CancellationToken cancellationToken = default)
         {
-            if (indexer == null)
-            {
-                return BadRequest(new { message = "Index data is required" });
-            }
-
-            return await ExecuteIndexerTestAsync(indexer, persist: false);
-        }
-
-        /// <summary>
-        /// Test Internet Archive indexer connection
-        /// </summary>
-        private async Task<IActionResult> TestInternetArchive(Indexer indexer, bool persist)
-        {
-            var result = await _indexerTestWorkflow.TestInternetArchiveAsync(indexer, persist);
-            if (result.Succeeded)
-            {
-                return Ok(new
-                {
-                    success = true,
-                    message = result.Message,
-                    collection = result.Collection,
-                    indexer = RedactIndexerForCaller(indexer)
-                });
-            }
-
-            return BadRequest(new
-            {
-                success = false,
-                message = result.Message,
-                error = result.Error,
-                indexer = RedactIndexerForCaller(indexer)
-            });
-        }
-
-        /// <summary>
-        /// Test MyAnonamouse indexer connection
-        /// </summary>
-        private async Task<IActionResult> TestMyAnonamouse(Indexer indexer, bool persist)
-        {
-            var result = await _indexerTestWorkflow.TestMyAnonamouseAsync(indexer, persist);
-            if (result.Succeeded)
-            {
-                return Ok(new
-                {
-                    success = true,
-                    message = result.Message,
-                    mam_id = RedactMamIdForCaller(result.MamId),
-                    indexer = RedactIndexerForCaller(indexer)
-                });
-            }
-
-            return BadRequest(new
-            {
-                success = false,
-                message = result.Message,
-                error = result.Error,
-                indexer = RedactIndexerForCaller(indexer)
-            });
+            var result = await _indexerTestWorkflow.TestDraftAsync(indexer, cancellationToken);
+            return ToActionResult(result);
         }
 
         /// <summary>

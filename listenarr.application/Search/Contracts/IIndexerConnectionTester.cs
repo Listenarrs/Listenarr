@@ -10,4 +10,14 @@
 
 namespace Listenarr.Application.Search.Contracts;
 
-// MyAnonamouse connection testing now uses the shared IIndexerConnectionTester contract.
+/// <summary>
+/// Defines provider-adjacent connection testing for a specific indexer implementation.
+/// </summary>
+public interface IIndexerConnectionTester
+{
+    string IndexerType { get; }
+
+    Task<IndexerConnectionTestResult> TestAsync(
+        Indexer indexer,
+        CancellationToken cancellationToken = default);
+}

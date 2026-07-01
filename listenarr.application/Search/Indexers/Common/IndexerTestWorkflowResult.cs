@@ -8,6 +8,18 @@
  * (at your option) any later version.
  */
 
-namespace Listenarr.Api.Features.Indexers;
+namespace Listenarr.Application.Search.Indexers.Common;
 
-// Indexer URL normalization now lives in Listenarr.Application.Search.Indexers.Common.
+public enum IndexerTestWorkflowResultKind
+{
+    Success,
+    Failed,
+    NotFound,
+    BadRequest
+}
+
+public sealed record IndexerTestWorkflowResult(
+    IndexerTestWorkflowResultKind Kind,
+    Indexer? Indexer,
+    IndexerConnectionTestResult? TestResult,
+    string? Message = null);
