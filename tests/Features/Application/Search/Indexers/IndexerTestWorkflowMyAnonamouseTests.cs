@@ -1,7 +1,7 @@
 using Listenarr.Tests.Common;
 using Microsoft.Extensions.Logging.Abstractions;
 
-namespace Listenarr.Tests.Features.Api.Features.Indexers;
+namespace Listenarr.Tests.Features.Application.Search.Indexers;
 
 [Trait("Name", "IndexerTestWorkflowMyAnonamouseTests")]
 [Trait("Category", "IndexerTestWorkflow")]

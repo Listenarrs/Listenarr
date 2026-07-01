@@ -41,7 +41,7 @@ namespace Listenarr.Api.Features.Indexers
             ILogger<IndexersController> logger,
             HttpClient httpClient,
             IConfigurationService configurationService,
-            IndexerTestWorkflow? indexerTestWorkflow = null,
+            IndexerTestWorkflow indexerTestWorkflow,
             ProwlarrIndexerImportWorkflow? prowlarrImportWorkflow = null,
             IndexerDebugSearchWorkflow? debugSearchWorkflow = null)
         {

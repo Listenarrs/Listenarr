@@ -95,8 +95,12 @@ public sealed class MyAnonamouseConnectionTester : IIndexerConnectionTester
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogWarning(ex, "MyAnonamouse connection test request failed");
-            return IndexerConnectionTestResult.Failure("MyAnonamouse test failed.", "The MyAnonamouse connection request failed.");
+            _logger.LogWarning(
+                "MAM connection test request failed with {ExceptionType}",
+                ex.GetType().Name);
+            return IndexerConnectionTestResult.Failure(
+                "MyAnonamouse test failed.",
+                "The MyAnonamouse connection request failed.");
         }
         catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
@@ -110,17 +114,25 @@ public sealed class MyAnonamouseConnectionTester : IIndexerConnectionTester
         }
         catch (CookieException ex)
         {
-            _logger.LogWarning(ex, "MyAnonamouse connection test cookie was invalid");
+            _logger.LogWarning(
+                "MAM connection test cookie was invalid with {ExceptionType}",
+                ex.GetType().Name);
             return IndexerConnectionTestResult.Failure("MyAnonamouse test failed.", "The configured MAM ID cookie is invalid.");
         }
         catch (UriFormatException ex)
         {
-            _logger.LogWarning(ex, "MyAnonamouse connection test URL was invalid");
-            return IndexerConnectionTestResult.Failure("MyAnonamouse test failed.", ex.Message);
+            _logger.LogWarning(
+                "MAM connection test URL was invalid with {ExceptionType}",
+                ex.GetType().Name);
+            return IndexerConnectionTestResult.Failure(
+                "MyAnonamouse test failed.",
+                "The configured MyAnonamouse indexer URL is invalid.");
         }
         catch (InvalidOperationException ex)
         {
-            _logger.LogWarning(ex, "MyAnonamouse connection test could not be completed");
+            _logger.LogWarning(
+                "MAM connection test could not be completed with {ExceptionType}",
+                ex.GetType().Name);
             return IndexerConnectionTestResult.Failure("MyAnonamouse test failed.", ex.Message);
         }
     }

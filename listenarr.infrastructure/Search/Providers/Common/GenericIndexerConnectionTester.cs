@@ -8,6 +8,7 @@
  * (at your option) any later version.
  */
 
+using System.Net;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.Search.Providers.Common;
@@ -46,6 +47,14 @@ public sealed class GenericIndexerConnectionTester : IIndexerConnectionTester
                 testUrl,
                 cancellationToken);
 
+            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+            {
+                return IndexerConnectionTestResult.Failure(
+                    "Authentication failed.",
+                    $"Authentication failed: Indexer returned HTTP {(int)response.StatusCode}.",
+                    (int)response.StatusCode);
+            }
+
             if (!response.IsSuccessStatusCode)
             {
                 return IndexerConnectionTestResult.Failure(
@@ -58,8 +67,12 @@ public sealed class GenericIndexerConnectionTester : IIndexerConnectionTester
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogWarning(ex, "Generic indexer connection test request failed");
-            return IndexerConnectionTestResult.Failure("Indexer test failed.", ex.Message);
+            _logger.LogWarning(
+                "Generic indexer connection test request failed with {ExceptionType}",
+                ex.GetType().Name);
+            return IndexerConnectionTestResult.Failure(
+                "Indexer test failed.",
+                "The indexer connection request failed.");
         }
         catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
@@ -68,13 +81,21 @@ public sealed class GenericIndexerConnectionTester : IIndexerConnectionTester
         }
         catch (UriFormatException ex)
         {
-            _logger.LogWarning(ex, "Generic indexer connection test URL was invalid");
-            return IndexerConnectionTestResult.Failure("Indexer test failed.", ex.Message);
+            _logger.LogWarning(
+                "Generic indexer connection test URL was invalid with {ExceptionType}",
+                ex.GetType().Name);
+            return IndexerConnectionTestResult.Failure(
+                "Indexer test failed.",
+                "The configured indexer URL is invalid.");
         }
         catch (InvalidOperationException ex)
         {
-            _logger.LogWarning(ex, "Generic indexer connection test could not be completed");
-            return IndexerConnectionTestResult.Failure("Indexer test failed.", ex.Message);
+            _logger.LogWarning(
+                "Generic indexer connection test could not be completed with {ExceptionType}",
+                ex.GetType().Name);
+            return IndexerConnectionTestResult.Failure(
+                "Indexer test failed.",
+                ex.Message);
         }
     }
 
