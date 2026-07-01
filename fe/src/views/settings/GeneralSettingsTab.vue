@@ -56,6 +56,8 @@
           @update:settings="(val) => Object.assign(localSettings, val)"
           @update:apiKey="(val) => emit('update:apiKey', val)"
         ></AuthenticationSection>
+
+        <AuthorMonitoringExclusionsSection />
       </div>
       <!-- settings-form -->
     </div>
@@ -74,6 +76,7 @@ import DownloadSettingsSection from '@/components/settings/DownloadSettingsSecti
 import FeaturesSection from '@/components/settings/FeaturesSection.vue'
 import SearchSettingsSection from '@/components/settings/SearchSettingsSection.vue'
 import AuthenticationSection from '@/components/settings/AuthenticationSection.vue'
+import AuthorMonitoringExclusionsSection from '@/components/settings/AuthorMonitoringExclusionsSection.vue'
 
 interface Props {
   settings: ApplicationSettings | null

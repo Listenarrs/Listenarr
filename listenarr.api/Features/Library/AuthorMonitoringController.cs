@@ -124,6 +124,53 @@ namespace Listenarr.Api.Features.Library
             }
         }
 
+        /// <summary>
+        /// List the books excluded from author-monitoring re-adds (created when a book is
+        /// deleted with "keep out of author monitoring").
+        /// </summary>
+        [HttpGet("exclusions")]
+        public async Task<IActionResult> GetExclusions(CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                var exclusions = await _authorMonitoringService.GetExclusionsAsync(cancellationToken);
+                return Ok(exclusions.Select(e => new AuthorMonitoringExclusionResponse
+                {
+                    Id = e.Id,
+                    Asin = e.Asin,
+                    Title = e.Title,
+                    AuthorName = e.AuthorName,
+                    CreatedAt = e.CreatedAt
+                }));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
+                _logger.LogError(ex, "Failed to list author-monitoring exclusions");
+                return StatusCode(StatusCodes.Status500InternalServerError, "Internal server error");
+            }
+        }
+
+        /// <summary>Remove an author-monitoring exclusion, allowing the sweep to re-add that book again.</summary>
+        [HttpDelete("exclusions/{id:int}")]
+        public async Task<IActionResult> RemoveExclusion(int id, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                var removed = await _authorMonitoringService.RemoveExclusionAsync(id, cancellationToken);
+                if (!removed)
+                {
+                    return NotFound();
+                }
+
+                return Ok(new { message = "Exclusion removed" });
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
+                _logger.LogError(ex, "Failed to remove author-monitoring exclusion {ExclusionId}", id);
+                return StatusCode(StatusCodes.Status500InternalServerError, "Internal server error");
+            }
+        }
+
         private static MonitoredAuthorResponse ToResponse(MonitoredAuthor monitoredAuthor)
         {
             return new MonitoredAuthorResponse
@@ -146,6 +193,15 @@ namespace Listenarr.Api.Features.Library
             public bool IsMonitored { get; set; }
 
             public MonitoredAuthorResponse? MonitoredAuthor { get; set; }
+        }
+
+        public sealed class AuthorMonitoringExclusionResponse
+        {
+            public int Id { get; set; }
+            public string? Asin { get; set; }
+            public string Title { get; set; } = string.Empty;
+            public string? AuthorName { get; set; }
+            public DateTime CreatedAt { get; set; }
         }
 
         public sealed class MonitorAuthorResponse

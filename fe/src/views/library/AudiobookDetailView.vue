@@ -598,6 +598,24 @@
               </div>
             </label>
           </div>
+
+          <div class="checkbox-row">
+            <label class="checkbox-wrapper checkbox-label">
+              <input
+                v-model="excludeFromAuthorMonitoring"
+                type="checkbox"
+                class="checkbox-input"
+                aria-label="Keep this book out of author monitoring"
+              />
+              <div class="checkbox-content">
+                <span class="checkbox-title">Keep out of author monitoring</span>
+                <small
+                  >If this author is monitored, the daily catalog sync would otherwise re-add this
+                  book after you delete it. Check this to keep it out for good.</small
+                >
+              </div>
+            </label>
+          </div>
         </div>
       </template>
     </DeleteConfirmationModal>
@@ -730,6 +748,7 @@ const showManualSearchModal = ref(false)
 const deleting = ref(false)
 const deleteFilesOnDisk = ref(false)
 const deleteFolderOnDisk = ref(false)
+const excludeFromAuthorMonitoring = ref(false)
 const showFullDescription = ref(false)
 const scanning = ref(false)
 const rescanningMetadata = ref(false)
@@ -1556,6 +1575,7 @@ async function executeDelete() {
     const success = await libraryStore.removeFromLibrary(audiobook.value.id, {
       deleteFiles: shouldDeleteFiles,
       deleteFolder: shouldDeleteFolder,
+      excludeFromAuthorMonitoring: excludeFromAuthorMonitoring.value,
     })
     if (success) {
       const toast = useToast()
@@ -1588,6 +1608,7 @@ async function executeDelete() {
 function resetDeleteOptions() {
   deleteFilesOnDisk.value = false
   deleteFolderOnDisk.value = false
+  excludeFromAuthorMonitoring.value = false
 }
 
 watch(deleteFolderOnDisk, (checked) => {

@@ -31,12 +31,15 @@ namespace Listenarr.Api.Features.Library
         private readonly IFileSystem _fileSystem;
         private readonly ILogger<LibraryDeleteWorkflow> _logger;
 
+        private readonly IAuthorMonitoringService _authorMonitoringService;
+
         public LibraryDeleteWorkflow(
             IAudiobookRepository repo,
             IImageCacheService imageCacheService,
             IAudiobookFilesystemDeleteService audiobookFilesystemDeleteService,
             IApplicationPathService applicationPathService,
             IFileSystem fileSystem,
+            IAuthorMonitoringService authorMonitoringService,
             ILogger<LibraryDeleteWorkflow> logger)
         {
             _repo = repo;
@@ -44,15 +47,23 @@ namespace Listenarr.Api.Features.Library
             _audiobookFilesystemDeleteService = audiobookFilesystemDeleteService;
             _contentRootPath = applicationPathService.ContentRootPath;
             _fileSystem = fileSystem;
+            _authorMonitoringService = authorMonitoringService;
             _logger = logger;
         }
 
-        public async Task<IActionResult> DeleteAsync(int id, bool deleteFiles, bool deleteFolder)
+        public async Task<IActionResult> DeleteAsync(int id, bool deleteFiles, bool deleteFolder, bool excludeFromAuthorMonitoring = false)
         {
             var audiobook = await _repo.GetByIdAsync(id);
             if (audiobook == null)
             {
                 return new NotFoundObjectResult(new { message = "Audiobook not found" });
+            }
+
+            // Record an exclusion BEFORE deleting so a monitored author's sweep doesn't
+            // just re-discover this book as "missing" and add it straight back.
+            if (excludeFromAuthorMonitoring)
+            {
+                await _authorMonitoringService.AddExclusionForAudiobookAsync(audiobook);
             }
 
             deleteFiles = deleteFiles || deleteFolder;

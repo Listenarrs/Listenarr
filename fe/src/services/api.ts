@@ -44,6 +44,7 @@ import type {
   AuthorLookupResponse,
   AuthorMonitoringStatusResponse,
   MonitorAuthorResponse,
+  AuthorMonitoringExclusion,
   MonitorSeriesResponse,
   SeriesMonitoringStatusResponse,
   SeriesCatalogResponse,
@@ -511,6 +512,16 @@ class ApiService {
 
   async unmonitorAuthor(id: number): Promise<{ message: string }> {
     return this.request<{ message: string }>(`/authors/monitoring/${id}`, {
+      method: 'DELETE',
+    })
+  }
+
+  async getAuthorMonitoringExclusions(): Promise<AuthorMonitoringExclusion[]> {
+    return this.request<AuthorMonitoringExclusion[]>('/authors/monitoring/exclusions')
+  }
+
+  async removeAuthorMonitoringExclusion(id: number): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/authors/monitoring/exclusions/${id}`, {
       method: 'DELETE',
     })
   }
@@ -1240,12 +1251,14 @@ class ApiService {
 
   async removeFromLibrary(
     id: number,
-    options?: { deleteFiles?: boolean; deleteFolder?: boolean },
+    options?: { deleteFiles?: boolean; deleteFolder?: boolean; excludeFromAuthorMonitoring?: boolean },
   ): Promise<{ message: string; id: number }> {
     const params = new URLSearchParams()
     if (options?.deleteFiles !== undefined) params.set('deleteFiles', String(options.deleteFiles))
     if (options?.deleteFolder !== undefined)
       params.set('deleteFolder', String(options.deleteFolder))
+    if (options?.excludeFromAuthorMonitoring !== undefined)
+      params.set('excludeFromAuthorMonitoring', String(options.excludeFromAuthorMonitoring))
     const suffix = params.toString() ? `?${params.toString()}` : ''
     return this.request<{ message: string; id: number }>(`/library/${id}${suffix}`, {
       method: 'DELETE',
@@ -2000,6 +2013,9 @@ export const apiService = new ApiService()
 
 // Compatibility export for legacy code expecting apiService.search
 export const search = apiService.advancedSearch.bind(apiService)
+export const getAuthorMonitoringExclusions = () => apiService.getAuthorMonitoringExclusions()
+export const removeAuthorMonitoringExclusion = (id: number) =>
+  apiService.removeAuthorMonitoringExclusion(id)
 
 // Export individual indexer functions for convenience
 export const getIndexers = () => apiService.getIndexers()

@@ -35,6 +35,12 @@ namespace Listenarr.Application.Audiobooks.Contracts
         Task<MonitorAuthorSyncResult> SyncAuthorAsync(int id, CancellationToken cancellationToken = default);
 
         Task<int> SyncDueAuthorsAsync(CancellationToken cancellationToken = default);
+
+        Task<List<AuthorMonitoringExclusion>> GetExclusionsAsync(CancellationToken cancellationToken = default);
+
+        Task<bool> RemoveExclusionAsync(int id, CancellationToken cancellationToken = default);
+
+        Task AddExclusionForAudiobookAsync(Audiobook audiobook, CancellationToken cancellationToken = default);
     }
 
     public sealed class MonitorAuthorRequest
@@ -60,6 +66,8 @@ namespace Listenarr.Application.Audiobooks.Contracts
         public int AddedCount { get; set; }
 
         public int ExistingCount { get; set; }
+
+        public int ExcludedCount { get; set; }
 
         public int FailedCount { get; set; }
 
