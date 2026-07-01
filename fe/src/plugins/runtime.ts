@@ -42,6 +42,9 @@ export function installPluginSdk(): void {
       request: <T>(endpoint: string, options?: RequestInit) =>
         apiService.pluginRequest<T>(endpoint, options),
       buildApiPath,
+      // Plugins doing writes should call this before a mutation so the antiforgery token is
+      // fresh (a stale token surfaces as a 500 that the core auto-retry doesn't cover).
+      ensureAntiforgery: () => apiService.ensureAntiforgeryForCurrentAuth(),
     },
     stores: { useLibraryStore },
     ui: { useProtectedImages, getPlaceholderUrl },
