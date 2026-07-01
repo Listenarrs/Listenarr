@@ -8,27 +8,29 @@ namespace Listenarr.Tests.Features.Api.Features.Indexers;
 public sealed class IndexerTestWorkflowMyAnonamouseTests : BaseTests
 {
     [Fact]
-    public async Task TestMyAnonamouseAsync_MissingMamIdFailsBeforeTester()
+    public async Task TestDraftAsync_MyAnonamouseMissingMamIdPropagatesTesterFailure()
     {
-        var tester = new Mock<IMyAnonamouseConnectionTester>();
+        var tester = CreateTester(IndexerConnectionTestResult.Failure(
+            "MyAnonamouse test failed.",
+            "MAM ID is required for MyAnonamouse."));
         var workflow = CreateWorkflow(new Mock<IIndexerRepository>().Object, tester.Object);
         var indexer = CreateIndexer(additionalSettings: "{}");
 
-        var result = await workflow.TestMyAnonamouseAsync(indexer, persist: false);
+        var result = await workflow.TestDraftAsync(indexer);
 
-        Assert.False(result.Succeeded);
+        Assert.Equal(IndexerTestWorkflowResultKind.Failed, result.Kind);
+        Assert.False(result.TestResult!.Succeeded);
         Assert.False(indexer.LastTestSuccessful);
         Assert.Contains("MAM ID is required", indexer.LastTestError);
         tester.Verify(
             value => value.TestAsync(
-                It.IsAny<Indexer>(),
-                It.IsAny<string>(),
+                It.Is<Indexer>(candidate => candidate == indexer),
                 It.IsAny<CancellationToken>()),
-            Times.Never);
+            Times.Once);
     }
 
     [Fact]
-    public async Task TestMyAnonamouseAsync_SuccessPersistsStatusAndRefreshedCookie()
+    public async Task TestPersistedAsync_MyAnonamouseSuccessPersistsStatusAndRefreshedCookie()
     {
         const string originalMamId = "original-secret";
         const string refreshedMamId = "refreshed-secret";
@@ -38,22 +40,20 @@ public sealed class IndexerTestWorkflowMyAnonamouseTests : BaseTests
         var repository = new Mock<IIndexerRepository>();
         repository.Setup(value => value.GetByIdAsync(7, It.IsAny<CancellationToken>()))
             .ReturnsAsync(stored);
-        var tester = new Mock<IMyAnonamouseConnectionTester>();
-        tester.Setup(value => value.TestAsync(
-                It.IsAny<Indexer>(),
-                originalMamId,
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(MyAnonamouseConnectionTestResult.Success(refreshedMamId));
+        var tester = CreateTester(IndexerConnectionTestResult.Success(
+            "MyAnonamouse authentication successful.",
+            mamId: refreshedMamId));
         var workflow = CreateWorkflow(repository.Object, tester.Object);
 
-        var result = await workflow.TestMyAnonamouseAsync(stored, persist: true);
+        var result = await workflow.TestPersistedAsync(7);
 
-        Assert.True(result.Succeeded);
+        Assert.Equal(IndexerTestWorkflowResultKind.Success, result.Kind);
+        Assert.True(result.TestResult!.Succeeded);
         Assert.True(stored.LastTestSuccessful);
         Assert.Null(stored.LastTestError);
         Assert.Equal(refreshedMamId, MyAnonamouseHelper.TryGetMamId(stored.AdditionalSettings));
-        Assert.DoesNotContain(refreshedMamId, result.Message);
-        Assert.DoesNotContain(originalMamId, result.Message);
+        Assert.DoesNotContain(refreshedMamId, result.TestResult.Message);
+        Assert.DoesNotContain(originalMamId, result.TestResult.Message);
         repository.Verify(
             value => value.UpdateAsync(
                 It.Is<Indexer>(indexer =>
@@ -65,48 +65,55 @@ public sealed class IndexerTestWorkflowMyAnonamouseTests : BaseTests
     }
 
     [Fact]
-    public async Task TestMyAnonamouseAsync_FailurePersistsSanitizedError()
+    public async Task TestPersistedAsync_MyAnonamouseFailurePersistsSanitizedError()
     {
         const string mamId = "never-expose-this";
         var stored = CreateIndexer(9, $"{{\"mam_id\":\"{mamId}\"}}");
         var repository = new Mock<IIndexerRepository>();
         repository.Setup(value => value.GetByIdAsync(9, It.IsAny<CancellationToken>()))
             .ReturnsAsync(stored);
-        var tester = new Mock<IMyAnonamouseConnectionTester>();
-        tester.Setup(value => value.TestAsync(
-                It.IsAny<Indexer>(),
-                mamId,
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(MyAnonamouseConnectionTestResult.Failure(
-                "MyAnonamouse authentication failed.",
-                403));
+        var tester = CreateTester(IndexerConnectionTestResult.Failure(
+            "MyAnonamouse authentication failed.",
+            "MyAnonamouse returned HTTP 403.",
+            403));
         var workflow = CreateWorkflow(repository.Object, tester.Object);
 
-        var result = await workflow.TestMyAnonamouseAsync(stored, persist: true);
+        var result = await workflow.TestPersistedAsync(9);
 
-        Assert.False(result.Succeeded);
-        Assert.Equal(403, result.Status);
+        Assert.Equal(IndexerTestWorkflowResultKind.Failed, result.Kind);
+        Assert.False(result.TestResult!.Succeeded);
+        Assert.Equal(403, result.TestResult.StatusCode);
         Assert.False(stored.LastTestSuccessful);
-        Assert.Equal("MyAnonamouse authentication failed.", stored.LastTestError);
-        Assert.DoesNotContain(mamId, result.Message);
-        Assert.DoesNotContain(mamId, result.Error);
+        Assert.Equal("MyAnonamouse returned HTTP 403.", stored.LastTestError);
+        Assert.DoesNotContain(mamId, result.TestResult.Message);
+        Assert.DoesNotContain(mamId, result.TestResult.Error);
         repository.Verify(
             value => value.UpdateAsync(
                 It.Is<Indexer>(indexer =>
                     indexer.LastTestSuccessful == false &&
-                    indexer.LastTestError == "MyAnonamouse authentication failed."),
+                    indexer.LastTestError == "MyAnonamouse returned HTTP 403."),
                 It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
+    private static Mock<IIndexerConnectionTester> CreateTester(IndexerConnectionTestResult result)
+    {
+        var tester = new Mock<IIndexerConnectionTester>();
+        tester.SetupGet(value => value.IndexerType).Returns("MyAnonamouse");
+        tester.Setup(value => value.TestAsync(
+                It.IsAny<Indexer>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(result);
+        return tester;
+    }
+
     private static IndexerTestWorkflow CreateWorkflow(
         IIndexerRepository repository,
-        IMyAnonamouseConnectionTester tester)
+        IIndexerConnectionTester tester)
         => new(
             repository,
-            new HttpClient(),
-            NullLogger<IndexerTestWorkflow>.Instance,
-            tester);
+            new[] { tester },
+            NullLogger<IndexerTestWorkflow>.Instance);
 
     private static Indexer CreateIndexer(int id = 0, string? additionalSettings = null)
         => new()

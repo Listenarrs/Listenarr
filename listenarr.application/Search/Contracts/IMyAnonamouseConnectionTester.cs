@@ -8,26 +8,6 @@
  * (at your option) any later version.
  */
 
-
 namespace Listenarr.Application.Search.Contracts;
 
-public interface IMyAnonamouseConnectionTester
-{
-    Task<MyAnonamouseConnectionTestResult> TestAsync(
-        Indexer indexer,
-        string mamId,
-        CancellationToken cancellationToken = default);
-}
-
-public sealed record MyAnonamouseConnectionTestResult(
-    bool Succeeded,
-    string Message,
-    int? StatusCode = null,
-    string? RefreshedMamId = null)
-{
-    public static MyAnonamouseConnectionTestResult Success(string? refreshedMamId = null)
-        => new(true, "MyAnonamouse authentication successful", RefreshedMamId: refreshedMamId);
-
-    public static MyAnonamouseConnectionTestResult Failure(string message, int? statusCode = null)
-        => new(false, message, statusCode);
-}
+// MyAnonamouse connection testing now uses the shared IIndexerConnectionTester contract.
