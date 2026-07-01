@@ -196,9 +196,9 @@ namespace Listenarr.Api.Features.Library
         /// <param name="deleteFiles">When true, delete all files within the audiobook folder when it can be done safely; otherwise fall back to tracked audiobook files before removing the library record.</param>
         /// <param name="deleteFolder">When true, also delete the audiobook folder when it can be done safely.</param>
         [HttpDelete("{id}")]
-        public async Task<IActionResult> DeleteAudiobook(int id, [FromQuery] bool deleteFiles = false, [FromQuery] bool deleteFolder = false)
+        public async Task<IActionResult> DeleteAudiobook(int id, [FromQuery] bool deleteFiles = false, [FromQuery] bool deleteFolder = false, [FromQuery] bool excludeFromAuthorMonitoring = false)
         {
-            return await _deleteWorkflow.DeleteAsync(id, deleteFiles, deleteFolder);
+            return await _deleteWorkflow.DeleteAsync(id, deleteFiles, deleteFolder, excludeFromAuthorMonitoring);
         }
 
         /// <summary>

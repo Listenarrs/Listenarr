@@ -83,6 +83,7 @@ namespace Listenarr.Application.Audiobooks.Monitoring
         private readonly IAudiobookRepository _audiobooks;
         private readonly IAuthorCatalogService _authorCatalogService;
         private readonly ILibraryAddService _libraryAddService;
+        private readonly IAuthorMonitoringExclusionRepository _exclusions;
         private readonly ILogger<AuthorMonitoringService> _logger;
 
         public AuthorMonitoringService(
@@ -90,12 +91,14 @@ namespace Listenarr.Application.Audiobooks.Monitoring
             IAudiobookRepository audiobooks,
             IAuthorCatalogService authorCatalogService,
             ILibraryAddService libraryAddService,
+            IAuthorMonitoringExclusionRepository exclusions,
             ILogger<AuthorMonitoringService> logger)
         {
             _authors = authors;
             _audiobooks = audiobooks;
             _authorCatalogService = authorCatalogService;
             _libraryAddService = libraryAddService;
+            _exclusions = exclusions;
             _logger = logger;
         }
 
@@ -170,6 +173,43 @@ namespace Listenarr.Application.Audiobooks.Monitoring
             return await _authors.DeleteAsync(id, cancellationToken);
         }
 
+        public async Task<List<AuthorMonitoringExclusion>> GetExclusionsAsync(CancellationToken cancellationToken = default)
+        {
+            return await _exclusions.GetAllAsync(cancellationToken);
+        }
+
+        public async Task<bool> RemoveExclusionAsync(int id, CancellationToken cancellationToken = default)
+        {
+            return await _exclusions.DeleteAsync(id, cancellationToken);
+        }
+
+        public async Task AddExclusionForAudiobookAsync(Audiobook audiobook, CancellationToken cancellationToken = default)
+        {
+            var asin = NormalizeIdentifier(audiobook.Asin);
+            var titleAuthorKey = BuildTitleAuthorKey(audiobook.Title, audiobook.Authors);
+
+            if (string.IsNullOrWhiteSpace(asin) && string.IsNullOrWhiteSpace(titleAuthorKey))
+            {
+                // Nothing identifiable to match on — an exclusion row would be inert.
+                _logger.LogWarning(
+                    "Skipping author-monitoring exclusion for audiobook id {Id}: no ASIN or title/author to match on.",
+                    audiobook.Id);
+                return;
+            }
+
+            await _exclusions.AddAsync(
+                new AuthorMonitoringExclusion
+                {
+                    Asin = string.IsNullOrWhiteSpace(asin) ? null : asin,
+                    TitleAuthorKey = string.IsNullOrWhiteSpace(titleAuthorKey) ? null : titleAuthorKey,
+                    Title = audiobook.Title ?? string.Empty,
+                    AuthorName = (audiobook.Authors ?? new List<string>())
+                        .FirstOrDefault(author => !string.IsNullOrWhiteSpace(author)),
+                    CreatedAt = DateTime.UtcNow
+                },
+                cancellationToken);
+        }
+
         public async Task<MonitorAuthorSyncResult> SyncAuthorAsync(int id, CancellationToken cancellationToken = default)
         {
             var monitoredAuthor = await _authors.GetByIdAsync(id, cancellationToken);
@@ -239,12 +279,32 @@ namespace Listenarr.Application.Audiobooks.Monitoring
 
                 var existingLibrary = await _audiobooks.GetAllAsync();
 
+                // Books the user explicitly excluded (deleted "and keep out of monitoring")
+                // must never be re-added by the sweep. Load once and match by ASIN or
+                // title+author key, mirroring FindExistingLibraryMatch.
+                var allExclusions = await _exclusions.GetAllAsync(cancellationToken);
+                var excludedAsins = allExclusions
+                    .Select(e => NormalizeIdentifier(e.Asin))
+                    .Where(value => !string.IsNullOrWhiteSpace(value))
+                    .ToHashSet(StringComparer.Ordinal);
+                var excludedTitleKeys = allExclusions
+                    .Select(e => e.TitleAuthorKey)
+                    .Where(value => !string.IsNullOrWhiteSpace(value))
+                    .Cast<string>()
+                    .ToHashSet(StringComparer.Ordinal);
+
                 foreach (var book in catalog.Books)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
 
                     if (!ShouldIncludeBookForLanguage(book, monitoredAuthor.Language))
                     {
+                        continue;
+                    }
+
+                    if (IsExcludedFromMonitoring(book, excludedAsins, excludedTitleKeys))
+                    {
+                        result.ExcludedCount++;
                         continue;
                     }
 

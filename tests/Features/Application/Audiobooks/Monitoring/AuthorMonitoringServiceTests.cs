@@ -105,6 +105,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Monitoring
                 audiobooksRepo,
                 authorCatalogService.Object,
                 libraryAddService.Object,
+                new EfAuthorMonitoringExclusionRepository(dbContext),
                 Mock.Of<ILogger<AuthorMonitoringService>>());
 
             var result = await service.MonitorAuthorAsync(new MonitorAuthorRequest
@@ -133,6 +134,69 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Monitoring
             Assert.Equal("Andy Weir", storedAuthor.AuthorName);
             Assert.Equal("andy weir", storedAuthor.AuthorNameNormalized);
             Assert.Equal("AUTHOR123", storedAuthor.AuthorAsin);
+        }
+
+        [Fact]
+        public async Task MonitorAuthorAsync_SkipsExcludedBooks_WithoutAddingThem()
+        {
+            var dbOptions = new DbContextOptionsBuilder<ListenArrDbContext>()
+                .UseInMemoryDatabase(databaseName: $"author-monitor-excl-{System.Guid.NewGuid():N}")
+                .Options;
+
+            await using var dbContext = new ListenArrDbContext(dbOptions);
+            // The user deleted "The Martian" and kept it out of monitoring.
+            dbContext.AuthorMonitoringExclusions.Add(new AuthorMonitoringExclusion
+            {
+                Asin = "B000MARTIAN",
+                Title = "The Martian",
+                AuthorName = "Andy Weir"
+            });
+            await dbContext.SaveChangesAsync();
+
+            var authorCatalogService = new Mock<IAuthorCatalogService>();
+            authorCatalogService
+                .Setup(service => service.GetCatalogAsync("Andy Weir", "us", 500, null, false, It.IsAny<System.Threading.CancellationToken>()))
+                .ReturnsAsync(new AuthorCatalogFetchResult
+                {
+                    Author = new AuthorLookupItem { Asin = "AUTHOR123", Name = "Andy Weir" },
+                    Books = new List<AudibleSearchResult>
+                    {
+                        new()
+                        {
+                            Asin = "B000MARTIAN",
+                            Title = "The Martian",
+                            Authors = new List<AudibleAuthor> { new() { Name = "Andy Weir" } },
+                            Language = "english"
+                        }
+                    }
+                });
+
+            var libraryAddService = new Mock<ILibraryAddService>();
+
+            var service = new AuthorMonitoringService(
+                new EfMonitoredAuthorRepository(dbContext),
+                new AudiobookRepository(dbContext),
+                authorCatalogService.Object,
+                libraryAddService.Object,
+                new EfAuthorMonitoringExclusionRepository(dbContext),
+                Mock.Of<ILogger<AuthorMonitoringService>>());
+
+            var result = await service.MonitorAuthorAsync(new MonitorAuthorRequest
+            {
+                Name = "Andy Weir",
+                Region = "us",
+                Language = "english"
+            });
+
+            Assert.True(result.SyncResult.Succeeded);
+            Assert.Equal(0, result.SyncResult.AddedCount);
+            Assert.Equal(1, result.SyncResult.ExcludedCount);
+
+            // The excluded book must never reach the library-add path.
+            libraryAddService.Verify(service => service.AddToLibraryAsync(
+                It.IsAny<LibraryAddOperationRequest>(),
+                It.IsAny<System.Threading.CancellationToken>()),
+                Times.Never);
         }
 
         [Fact]
@@ -178,6 +242,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Monitoring
                 audiobooksRepo,
                 authorCatalogService.Object,
                 Mock.Of<ILibraryAddService>(),
+                new EfAuthorMonitoringExclusionRepository(dbContext),
                 Mock.Of<ILogger<AuthorMonitoringService>>());
 
             var syncedCount = await service.SyncDueAuthorsAsync();

@@ -1109,3 +1109,11 @@ export interface RenameResult {
   error?: string
   renamedFiles: FileRenameResultItem[]
 }
+
+export interface AuthorMonitoringExclusion {
+  id: number
+  title: string
+  authorName?: string | null
+  asin?: string | null
+  createdAt: string
+}
