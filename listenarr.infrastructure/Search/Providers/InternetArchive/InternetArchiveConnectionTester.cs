@@ -77,8 +77,12 @@ public sealed class InternetArchiveConnectionTester : IIndexerConnectionTester
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogWarning(ex, "Internet Archive connection test request failed");
-            return IndexerConnectionTestResult.Failure("Internet Archive test failed.", ex.Message);
+            _logger.LogWarning(
+                "Internet Archive connection test request failed with {ExceptionType}",
+                ex.GetType().Name);
+            return IndexerConnectionTestResult.Failure(
+                "Internet Archive test failed.",
+                "The Internet Archive connection request failed.");
         }
         catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
@@ -92,12 +96,18 @@ public sealed class InternetArchiveConnectionTester : IIndexerConnectionTester
         }
         catch (UriFormatException ex)
         {
-            _logger.LogWarning(ex, "Internet Archive connection test URL was invalid");
-            return IndexerConnectionTestResult.Failure("Internet Archive test failed.", ex.Message);
+            _logger.LogWarning(
+                "Internet Archive connection test URL was invalid with {ExceptionType}",
+                ex.GetType().Name);
+            return IndexerConnectionTestResult.Failure(
+                "Internet Archive test failed.",
+                "The Internet Archive connection URL is invalid.");
         }
         catch (InvalidOperationException ex)
         {
-            _logger.LogWarning(ex, "Internet Archive connection test could not be completed");
+            _logger.LogWarning(
+                "Internet Archive connection test could not be completed with {ExceptionType}",
+                ex.GetType().Name);
             return IndexerConnectionTestResult.Failure("Internet Archive test failed.", ex.Message);
         }
     }

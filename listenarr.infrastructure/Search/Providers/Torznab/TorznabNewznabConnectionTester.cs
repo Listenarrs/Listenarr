@@ -86,8 +86,12 @@ public sealed class TorznabNewznabConnectionTester : IIndexerConnectionTester
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogWarning(ex, "Newznab/Torznab connection test request failed");
-            return IndexerConnectionTestResult.Failure("Indexer test failed.", ex.Message);
+            _logger.LogWarning(
+                "Newznab/Torznab connection test request failed with {ExceptionType}",
+                ex.GetType().Name);
+            return IndexerConnectionTestResult.Failure(
+                "Indexer test failed.",
+                "The indexer connection request failed.");
         }
         catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
@@ -101,12 +105,18 @@ public sealed class TorznabNewznabConnectionTester : IIndexerConnectionTester
         }
         catch (UriFormatException ex)
         {
-            _logger.LogWarning(ex, "Newznab/Torznab connection test URL was invalid");
-            return IndexerConnectionTestResult.Failure("Indexer test failed.", ex.Message);
+            _logger.LogWarning(
+                "Newznab/Torznab connection test URL was invalid with {ExceptionType}",
+                ex.GetType().Name);
+            return IndexerConnectionTestResult.Failure(
+                "Indexer test failed.",
+                "The configured indexer URL is invalid.");
         }
         catch (InvalidOperationException ex)
         {
-            _logger.LogWarning(ex, "Newznab/Torznab connection test could not be completed");
+            _logger.LogWarning(
+                "Newznab/Torznab connection test could not be completed with {ExceptionType}",
+                ex.GetType().Name);
             return IndexerConnectionTestResult.Failure("Indexer test failed.", ex.Message);
         }
     }
