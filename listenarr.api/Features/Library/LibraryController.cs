@@ -40,6 +40,8 @@ namespace Listenarr.Api.Features.Library
         private readonly LibraryPreviewPathWorkflow _previewPathWorkflow;
         private readonly LibraryQueryWorkflow _queryWorkflow;
         private readonly LibraryRenameWorkflow _renameWorkflow;
+        private readonly LibraryOrganizeSweepWorkflow _organizeSweepWorkflow;
+        private readonly LibraryMoveSummaryWorkflow _moveSummaryWorkflow;
         /// <summary>Initializes the library transport façade.</summary>
         public LibraryController(
             ILibraryListService libraryListService,
@@ -55,7 +57,9 @@ namespace Listenarr.Api.Features.Library
             LibraryIdentifierWorkflow identifierWorkflow,
             LibraryPreviewPathWorkflow previewPathWorkflow,
             LibraryQueryWorkflow queryWorkflow,
-            LibraryRenameWorkflow renameWorkflow)
+            LibraryRenameWorkflow renameWorkflow,
+            LibraryOrganizeSweepWorkflow organizeSweepWorkflow,
+            LibraryMoveSummaryWorkflow moveSummaryWorkflow)
         {
             _libraryListService = libraryListService;
             _addWorkflow = addWorkflow;
@@ -71,6 +75,8 @@ namespace Listenarr.Api.Features.Library
             _previewPathWorkflow = previewPathWorkflow;
             _queryWorkflow = queryWorkflow;
             _renameWorkflow = renameWorkflow;
+            _organizeSweepWorkflow = organizeSweepWorkflow;
+            _moveSummaryWorkflow = moveSummaryWorkflow;
         }
 
         /// <summary>

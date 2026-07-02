@@ -41,6 +41,13 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
                 .ToListAsync(ct);
         }
 
+        public async Task<List<MoveJob>> GetAllAsync(CancellationToken ct = default)
+        {
+            return await _db.MoveJobs
+                .AsNoTracking()
+                .ToListAsync(ct);
+        }
+
         public async Task<MoveJob> AddAsync(MoveJob job, CancellationToken ct = default)
         {
             _db.MoveJobs.Add(job);

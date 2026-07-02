@@ -34,5 +34,10 @@ namespace Listenarr.Domain.Audiobooks
         // Optional source path snapshot provided at enqueue time. Persist this so jobs
         // remain durable and can be inspected / resumed across restarts.
         public string? SourcePath { get; set; }
+        // When true, the processor may delete-and-replace a target directory that
+        // exists but contains no audio (leftover metadata from a removed release).
+        // Set only by the organize flow after verifying nothing in the DB
+        // references the target.
+        public bool ReplaceStubTarget { get; set; }
     }
 }

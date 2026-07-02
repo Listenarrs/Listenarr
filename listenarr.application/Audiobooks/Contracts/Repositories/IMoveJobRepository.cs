@@ -22,6 +22,7 @@ namespace Listenarr.Application.Audiobooks.Contracts.Repositories
     {
         Task<MoveJob?> GetByIdAsync(Guid id, CancellationToken ct = default);
         Task<List<MoveJob>> GetByStatusAsync(IEnumerable<string> statuses, CancellationToken ct = default);
+        Task<List<MoveJob>> GetAllAsync(CancellationToken ct = default);
         Task<MoveJob> AddAsync(MoveJob job, CancellationToken ct = default);
         Task UpdateAsync(MoveJob job, CancellationToken ct = default);
     }
