@@ -174,6 +174,7 @@ namespace Listenarr.Tests.Builders
             services.AddSingleton<IRootFolderService, RootFolderService>();
             services.AddSingleton<MetadataConverters>();
             services.AddSingleton<MetadataMerger>();
+            services.AddSingleton<ISearchActivityTracker, SearchActivityTracker>();
             services.AddSingleton<SearchProgressReporter>();
             services.AddSingleton<IndexerAdditionalSettingsParser>();
             services.AddSingleton<IndexerSearchWorkflow>();
