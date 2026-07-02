@@ -1256,6 +1256,26 @@ class ApiService {
     })
   }
 
+  async deleteAudiobookFile(
+    audiobookId: number,
+    fileId: number,
+    options?: { deleteFromDisk?: boolean },
+  ): Promise<{
+    message: string
+    fileId: number
+    deletedFromDisk: boolean
+    path: string | null
+    warnings: string[]
+  }> {
+    const params = new URLSearchParams()
+    if (options?.deleteFromDisk !== undefined)
+      params.set('deleteFromDisk', String(options.deleteFromDisk))
+    const suffix = params.toString() ? `?${params.toString()}` : ''
+    return this.request(`/library/${audiobookId}/files/${fileId}${suffix}`, {
+      method: 'DELETE',
+    })
+  }
+
   async removeFromLibrary(
     id: number,
     options?: { deleteFiles?: boolean; deleteFolder?: boolean },
