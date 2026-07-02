@@ -171,8 +171,13 @@
               <component :is="isCurrentSeriesMonitored ? PhEye : PhEyeSlash" />
               {{ isCurrentSeriesMonitored ? 'Monitoring Series' : 'Not Monitored' }}
             </Pill>
-            <Pill variant="success"> {{ seriesLibraryCount }} in library </Pill>
-            <Pill v-if="seriesNotAddedCount > 0" variant="warning">
+            <Pill v-if="seriesOwnedCount > 0" variant="success">
+              {{ seriesOwnedCount }} in library
+            </Pill>
+            <Pill v-if="seriesMissingCount > 0" variant="warning">
+              {{ seriesMissingCount }} missing
+            </Pill>
+            <Pill v-if="seriesNotAddedCount > 0" variant="default">
               {{ seriesNotAddedCount }} ready to add
             </Pill>
             <Pill variant="primary"> {{ seriesCatalogTotalCount }} total books </Pill>
@@ -1311,8 +1316,18 @@ const totalAddedAudiobooks = computed(() => audiobooks.value.filter((book) => bo
 const totalNotAddedAudiobooks = computed(() => audiobooks.value.filter((book) => !book.inLibrary))
 const authorLibraryCount = computed(() => totalAddedAudiobooks.value.length)
 const authorNotAddedCount = computed(() => totalNotAddedAudiobooks.value.length)
-const seriesLibraryCount = computed(() => totalAddedAudiobooks.value.length)
 const seriesNotAddedCount = computed(() => totalNotAddedAudiobooks.value.length)
+// "In library" should mean you actually have the audio, not just a tracked
+// record. A monitored-but-missing book has a row but no files — counting it as
+// "in library" reads as ownership it doesn't have. Split the two: owned = has
+// files; missing = tracked record with no files yet (these are the auto-search
+// targets).
+const seriesOwnedCount = computed(
+  () => totalAddedAudiobooks.value.filter((book) => (book.fileCount ?? 0) > 0).length,
+)
+const seriesMissingCount = computed(
+  () => totalAddedAudiobooks.value.filter((book) => (book.fileCount ?? 0) === 0).length,
+)
 const seriesVisibleBookCount = computed(() => audiobooks.value.length)
 const seriesCatalogTotalCount = computed(
   () =>
