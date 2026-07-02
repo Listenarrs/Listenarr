@@ -42,6 +42,7 @@ namespace Listenarr.Api.Features.Library
         private readonly LibraryRenameWorkflow _renameWorkflow;
         private readonly LibraryTransferFilesWorkflow _transferFilesWorkflow;
         private readonly LibraryFileDeleteWorkflow _fileDeleteWorkflow;
+        private readonly LibrarySplitPreviewWorkflow _splitPreviewWorkflow;
         /// <summary>Initializes the library transport façade.</summary>
         public LibraryController(
             ILibraryListService libraryListService,
@@ -59,7 +60,8 @@ namespace Listenarr.Api.Features.Library
             LibraryQueryWorkflow queryWorkflow,
             LibraryRenameWorkflow renameWorkflow,
             LibraryTransferFilesWorkflow transferFilesWorkflow,
-            LibraryFileDeleteWorkflow fileDeleteWorkflow)
+            LibraryFileDeleteWorkflow fileDeleteWorkflow,
+            LibrarySplitPreviewWorkflow splitPreviewWorkflow)
         {
             _libraryListService = libraryListService;
             _addWorkflow = addWorkflow;
@@ -77,6 +79,22 @@ namespace Listenarr.Api.Features.Library
             _renameWorkflow = renameWorkflow;
             _transferFilesWorkflow = transferFilesWorkflow;
             _fileDeleteWorkflow = fileDeleteWorkflow;
+            _splitPreviewWorkflow = splitPreviewWorkflow;
+        }
+
+        /// <summary>
+        /// Preview for the "Split collection" workflow: cluster this record's
+        /// files into per-book groups (subdirectory first, then embedded tag,
+        /// then filename stem) and suggest an existing library record for each
+        /// group. Read-only — applying is a sequence of file transfers/deletes
+        /// driven by the client.
+        /// </summary>
+        /// <param name="id">Audiobook whose files should be clustered.</param>
+        /// <param name="ct">Cancellation token bound to the request.</param>
+        [HttpGet("{id}/split/preview")]
+        public async Task<IActionResult> GetSplitPreview(int id, CancellationToken ct)
+        {
+            return await _splitPreviewWorkflow.PreviewAsync(id, ct);
         }
 
         /// <summary>

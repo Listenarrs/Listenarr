@@ -1238,6 +1238,20 @@ class ApiService {
     })
   }
 
+  async getSplitPreview(id: number): Promise<{
+    audiobookId: number
+    clusters: Array<{
+      key: string
+      displayName: string
+      fileIds: number[]
+      fileNames: string[]
+      suggestedTargetId?: number | null
+      suggestedTargetTitle?: string | null
+    }>
+  }> {
+    return this.request(`/library/${id}/split/preview`)
+  }
+
   async transferAudiobookFiles(
     sourceId: number,
     targetAudiobookId: number,
