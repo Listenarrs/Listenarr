@@ -40,6 +40,7 @@ namespace Listenarr.Api.Features.Library
         private readonly LibraryPreviewPathWorkflow _previewPathWorkflow;
         private readonly LibraryQueryWorkflow _queryWorkflow;
         private readonly LibraryRenameWorkflow _renameWorkflow;
+        private readonly LibraryTransferFilesWorkflow _transferFilesWorkflow;
         /// <summary>Initializes the library transport façade.</summary>
         public LibraryController(
             ILibraryListService libraryListService,
@@ -55,7 +56,8 @@ namespace Listenarr.Api.Features.Library
             LibraryIdentifierWorkflow identifierWorkflow,
             LibraryPreviewPathWorkflow previewPathWorkflow,
             LibraryQueryWorkflow queryWorkflow,
-            LibraryRenameWorkflow renameWorkflow)
+            LibraryRenameWorkflow renameWorkflow,
+            LibraryTransferFilesWorkflow transferFilesWorkflow)
         {
             _libraryListService = libraryListService;
             _addWorkflow = addWorkflow;
@@ -71,6 +73,22 @@ namespace Listenarr.Api.Features.Library
             _previewPathWorkflow = previewPathWorkflow;
             _queryWorkflow = queryWorkflow;
             _renameWorkflow = renameWorkflow;
+            _transferFilesWorkflow = transferFilesWorkflow;
+        }
+
+        /// <summary>
+        /// Move audio files from this audiobook to another existing library record.
+        /// DB ownership is reassigned always; the physical file moves into the
+        /// target's folder best-effort (failures leave it in place with a warning).
+        /// Null/empty <see cref="TransferFilesRequest.FileIds"/> transfers every file.
+        /// </summary>
+        /// <param name="id">Source audiobook ID.</param>
+        /// <param name="request">Target audiobook and optional subset of file IDs to move.</param>
+        /// <param name="ct">Cancellation token bound to the request.</param>
+        [HttpPost("{id}/files/transfer")]
+        public async Task<IActionResult> TransferFiles(int id, [FromBody] TransferFilesRequest request, CancellationToken ct)
+        {
+            return await _transferFilesWorkflow.TransferAsync(id, request, ct);
         }
 
         /// <summary>

@@ -1238,6 +1238,24 @@ class ApiService {
     })
   }
 
+  async transferAudiobookFiles(
+    sourceId: number,
+    targetAudiobookId: number,
+    fileIds: number[] | null,
+  ): Promise<{
+    message: string
+    sourceId: number
+    targetId: number
+    transferred: number
+    physicallyMoved: number
+    warnings: string[]
+  }> {
+    return this.request(`/library/${sourceId}/files/transfer`, {
+      method: 'POST',
+      body: JSON.stringify({ targetAudiobookId, fileIds }),
+    })
+  }
+
   async removeFromLibrary(
     id: number,
     options?: { deleteFiles?: boolean; deleteFolder?: boolean },
