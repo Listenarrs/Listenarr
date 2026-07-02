@@ -167,6 +167,10 @@ namespace Listenarr.Tests.Builders
             services.AddSingleton(new Mock<IDownloadHistoryService>().Object);
             services.AddSingleton(new Mock<IDiscordBotService>().Object);
             services.AddSingleton<IFfmpegService, FfmpegServiceMock>();
+            services.AddSingleton<Listenarr.Application.Audiobooks.Verification.Contracts.IWhisperService, Listenarr.Tests.Mocks.WhisperServiceMock>();
+            services.AddSingleton<Listenarr.Application.Audiobooks.Verification.Contracts.IAudioSampleExtractor, Listenarr.Infrastructure.Ffmpeg.Sampling.AudioSampleExtractor>();
+            services.AddSingleton<Listenarr.Application.Audiobooks.Verification.Contracts.IIdentityVerifier, Listenarr.Application.Audiobooks.Verification.DeterministicIdentityVerifier>();
+            services.AddSingleton<Listenarr.Application.Audiobooks.Verification.ILibraryVerificationQueueService, Listenarr.Application.Audiobooks.Verification.LibraryVerificationQueueService>();
             services.AddSingleton<IConfigurationService, ConfigurationService>();
             services.AddSingleton<IAudiobookFilesystemDeleteService, AudiobookFilesystemDeleteService>();
             services.AddSingleton<IMoveQueueService, MoveQueueService>();
@@ -218,6 +222,7 @@ namespace Listenarr.Tests.Builders
             services.AddSingleton<MoveBackgroundService>();
             services.AddSingleton<MoveQueueService>();
             services.AddSingleton<LibraryController>();
+            services.AddSingleton<Listenarr.Api.Features.Verification.VerificationController>();
             services.AddSingleton<ImagesController>();
             services.AddSingleton(new EphemeralDataProtectionProvider().CreateProtector("Listenarr.ConfigurationService.ProwlarrImport"));
 

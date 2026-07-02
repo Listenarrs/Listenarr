@@ -304,6 +304,27 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.Property<string>("Title")
                         .HasColumnType("TEXT");
 
+                    b.Property<double?>("VerificationConfidence")
+                        .HasColumnType("REAL");
+
+                    b.Property<string>("VerificationDetailJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("VerificationMethod")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("VerificationStatus")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("VerificationTranscript")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("VerifiedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("VerifiedBy")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Version")
                         .HasColumnType("TEXT");
 
@@ -1038,6 +1059,18 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<int>("UnmatchedScanConcurrency")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("VerificationClosingSeconds")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("VerificationLowCpuPriority")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("VerificationOnImport")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("VerificationOpeningSeconds")
                         .HasColumnType("INTEGER");
 
                     b.Property<int>("Version")

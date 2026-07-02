@@ -613,6 +613,54 @@ export interface AudiobookExternalIdentifierInput {
 
 export type AudiobookStatus = 'downloading' | 'no-file' | 'quality-mismatch' | 'quality-match'
 
+// Audio-based identity verification (ADR-0001). Manual states are sticky:
+// agent passes never overwrite manuallyVerified/rejected. agentUnverifiable is
+// the neutral "audio never announces itself" state — not a flag.
+export type VerificationStatus =
+  | 'unverified'
+  | 'agentVerified'
+  | 'agentFlagged'
+  | 'manuallyVerified'
+  | 'rejected'
+  | 'agentUnverifiable'
+
+export type VerificationOutcome = 'match' | 'mismatch' | 'uncertain' | 'noSpokenCredits'
+
+// Per-field verdict detail persisted by the agent pass (audiobook.verificationDetailJson).
+export interface VerificationFieldMatch {
+  score: number
+  matchedText?: string | null
+}
+
+// What the spoken credits CLAIM the book is, extracted from the opening
+// transcript — seeds the "find correct match" relabel flow on flagged books.
+export interface SpokenCredits {
+  title?: string | null
+  author?: string | null
+  narrator?: string | null
+  publisher?: string | null
+}
+
+// On-disk audio length versus catalog runtime — distinguishes "partial content
+// of the right book" from genuinely wrong audio.
+export interface VerificationCompleteness {
+  expectedMinutes: number
+  actualMinutes: number
+  coverage: number
+}
+
+export interface VerificationDetail {
+  outcome: VerificationOutcome
+  confidence: number
+  method: string
+  titleMatch?: VerificationFieldMatch | null
+  authorMatch?: VerificationFieldMatch | null
+  narratorMatch?: VerificationFieldMatch | null
+  publisherMatch?: VerificationFieldMatch | null
+  heardCredits?: SpokenCredits | null
+  completeness?: VerificationCompleteness | null
+}
+
 export interface Audiobook {
   id: number
   title: string
@@ -657,6 +705,13 @@ export interface Audiobook {
     createdAt?: string
     source?: string
   }[]
+  verificationStatus?: VerificationStatus
+  verificationConfidence?: number | null
+  verifiedAt?: string | null
+  verifiedBy?: string | null
+  verificationMethod?: string | null
+  verificationTranscript?: string | null
+  verificationDetailJson?: string | null
   quality?: string
   qualityProfileId?: number
   // Optional list of author ASINs (populated by backend when available)

@@ -36,6 +36,17 @@ namespace Listenarr.Application.SystemDiagnostics.Contracts
         Task<string?> EnsureFfprobeInstalledAsync();
 
         /// <summary>
+        /// Return the ffmpeg path if it exists in the bundled directory (no install attempt).
+        /// </summary>
+        Task<string?> GetFfmpegPathAsync();
+
+        /// <summary>
+        /// Ensure the ffmpeg binary is available in the bundled directory. The static
+        /// archive downloaded for ffprobe contains ffmpeg as well.
+        /// </summary>
+        Task<string?> EnsureFfmpegInstalledAsync();
+
+        /// <summary>
         /// Execute the utility ffprobe against the given file
         /// </summary>
         /// <param name="filePath">File to execute ffprobe on</param>

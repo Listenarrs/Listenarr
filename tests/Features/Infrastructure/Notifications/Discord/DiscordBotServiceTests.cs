@@ -60,6 +60,9 @@ namespace Listenarr.Tests.Features.Infrastructure.Notifications.Discord
                 return Task.FromResult(new ProcessResult(0, string.Empty, string.Empty, false));
             }
 
+            public Task<ProcessResult> RunAsync(System.Diagnostics.ProcessStartInfo startInfo, int timeoutMs, CancellationToken cancellationToken, System.Diagnostics.ProcessPriorityClass? priorityClass)
+                => RunAsync(startInfo, timeoutMs, cancellationToken);
+
             public Process StartProcess(ProcessStartInfo startInfo)
             {
                 LastStartedProcessStartInfo = startInfo;

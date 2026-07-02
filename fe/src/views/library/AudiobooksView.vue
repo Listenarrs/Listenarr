@@ -456,6 +456,36 @@
                   @load="markImageLoaded(getBookImageKey(audiobook))"
                   @error="handleLazyImageError(getBookImageKey(audiobook), $event)"
                 />
+                <!-- Persistent verification marker (ADR-0001): attention states
+                     (flagged/rejected) get a labeled chip; vetted states (agent or
+                     manual) get a compact icon-only shield so "has this been
+                     checked?" is answerable at a glance without hovering. The
+                     hover overlay carries the full label either way. -->
+                <div
+                  v-if="
+                    audiobook.verificationStatus && audiobook.verificationStatus !== 'unverified'
+                  "
+                  class="verification-poster-flag"
+                  :class="verificationClass(audiobook.verificationStatus)"
+                  :title="`Audio verification: ${verificationLabel(audiobook.verificationStatus)}`"
+                >
+                  <component
+                    :is="
+                      audiobook.verificationStatus === 'agentFlagged' ||
+                      audiobook.verificationStatus === 'rejected'
+                        ? PhWarningCircle
+                        : PhShieldCheck
+                    "
+                  />
+                  <template
+                    v-if="
+                      audiobook.verificationStatus === 'agentFlagged' ||
+                      audiobook.verificationStatus === 'rejected'
+                    "
+                  >
+                    {{ verificationLabel(audiobook.verificationStatus) }}
+                  </template>
+                </div>
                 <div class="status-overlay">
                   <div v-if="!showItemDetails" class="audiobook-title">
                     {{ safeText(audiobook.title) }}
@@ -640,6 +670,14 @@
                 <component :is="audiobook.monitored ? PhEye : PhEyeSlash" />
                 {{ audiobook.monitored ? 'Monitored' : 'Unmonitored' }}
               </div>
+              <div
+                v-if="audiobook.verificationStatus && audiobook.verificationStatus !== 'unverified'"
+                class="verification-badge"
+                :class="verificationClass(audiobook.verificationStatus)"
+                :title="`Audio verification: ${verificationLabel(audiobook.verificationStatus)}`"
+              >
+                {{ verificationLabel(audiobook.verificationStatus) }}
+              </div>
             </div>
             <div class="list-actions">
               <button
@@ -802,6 +840,7 @@ import {
   PhEyeSlash,
   PhSpinner,
   PhWarningCircle,
+  PhShieldCheck,
   PhInfo,
   PhCaretDown,
   PhBookOpen,
@@ -832,6 +871,7 @@ import { evaluateRules } from '@/utils/customFilterEvaluator'
 import type { RuleLike } from '@/utils/customFilterEvaluator'
 import { computeAudiobookStatus, formatAudiobookStatus } from '@/utils/audiobookStatus'
 import { safeText } from '@/utils/textUtils'
+import { verificationClass, verificationLabel } from '@/utils/verificationStatus'
 import { formatSeriesMemberships } from '@/utils/seriesUtils'
 import { getPlaceholderUrl } from '@/utils/placeholder'
 import { errorTracking } from '@/services/errorTracking'
@@ -1059,6 +1099,14 @@ const filteredAndSortedAudiobooks = computed(() => {
         const y = Number(b.publishYear || 0)
         return !isNaN(y) && (y === thisYear || y === thisYear - 1)
       })
+    } else if (sid === 'needs-review') {
+      // Audio verification (ADR-0001): books the agent flagged (mismatch or
+      // uncertain) that a human hasn't ruled on yet. agentUnverifiable is
+      // deliberately NOT included — no spoken credits is not a flag.
+      filtered = filtered.filter((b) => b.verificationStatus === 'agentFlagged')
+    } else if (sid === 'no-spoken-credits') {
+      // Neutral bucket: the audio never announces itself; browse separately.
+      filtered = filtered.filter((b) => b.verificationStatus === 'agentUnverifiable')
     } else {
       // custom filter (supports grouping/parentheses)
       const cf = customFilters.value.find((x) => x.id === sid)
@@ -3913,5 +3961,99 @@ defineExpose({
 .audiobook-wrapper {
   display: flex;
   flex-direction: column;
+}
+
+/* Audio verification (ADR-0001) badges */
+.verification-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  margin-top: 0.5rem;
+  margin-left: 0.25rem;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 500;
+  white-space: nowrap;
+  background-color: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  color: #cfcfcf;
+}
+
+.verification-badge.verification-ok {
+  background-color: rgba(46, 204, 113, 0.1);
+  border-color: rgba(46, 204, 113, 0.18);
+  color: #2ecc71;
+}
+
+.verification-badge.verification-flagged {
+  background-color: rgba(243, 156, 18, 0.1);
+  border-color: rgba(243, 156, 18, 0.18);
+  color: #f39c12;
+}
+
+.verification-badge.verification-rejected {
+  background-color: rgba(231, 76, 60, 0.12);
+  border-color: rgba(231, 76, 60, 0.18);
+  color: #e74c3c;
+}
+
+/* Persistent corner flag on grid posters for books needing attention.
+   Solid backgrounds (unlike the translucent badges) so the chip stays
+   legible over arbitrary cover art. */
+.verification-poster-flag {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.45rem;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+  /* Above the hover status-overlay (101) so the flag never dims; top-left
+     corner, so no spatial overlap with the top-right action buttons. */
+  z-index: 102;
+}
+
+.verification-poster-flag.verification-flagged {
+  background-color: rgba(243, 156, 18, 0.9);
+  color: #1a1a1a;
+}
+
+.verification-poster-flag.verification-rejected {
+  background-color: rgba(231, 76, 60, 0.92);
+  color: #fff;
+}
+
+/* Vetted (agent- or manually-verified): compact icon-only shield — present but
+   unobtrusive, since most of a healthy library will eventually carry it. */
+.verification-poster-flag.verification-ok {
+  background-color: rgba(0, 0, 0, 0.55);
+  color: #2ecc71;
+  padding: 0.25rem;
+  font-size: 13px;
+  line-height: 0;
+}
+
+.quality-profile-badge i {
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.monitored-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: 0.5rem;
+
+.verification-badge.verification-neutral,
+.verification-poster-flag.verification-neutral {
+  background: rgba(134, 142, 150, 0.18);
+  color: #adb5bd;
+  border: 1px solid rgba(134, 142, 150, 0.35);
 }
 </style>

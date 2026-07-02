@@ -26,6 +26,8 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
         private readonly string _baseDir;
         private readonly string _ffprobeName;
         private readonly string _ffprobePath;
+        private readonly string _ffmpegName;
+        private readonly string _ffmpegPath;
         private readonly ILogger<FfmpegService> _logger;
         private readonly HttpClient _httpClient;
         private readonly IStartupConfigService _startupConfigService;
@@ -62,6 +64,8 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
             _baseDir = applicationPathService.FfmpegRootPath;
             _ffprobeName = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "ffprobe.exe" : "ffprobe";
             _ffprobePath = Path.Join(_baseDir, _ffprobeName);
+            _ffmpegName = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "ffmpeg.exe" : "ffmpeg";
+            _ffmpegPath = Path.Join(_baseDir, _ffmpegName);
         }
 
         private static async Task TryDeleteFileAsync(string path, int retries = 3, int delayMs = 100, CancellationToken cancellationToken = default)

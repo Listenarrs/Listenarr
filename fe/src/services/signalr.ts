@@ -149,6 +149,34 @@ type ScanJobCallback = (job: {
   error?: string
 }) => void
 
+// Audio verification (ADR-0001) progress events from the settings hub.
+// trigger distinguishes user-started jobs ('manual') from auto-enqueued
+// verify-on-import jobs ('import') so UIs can ignore background work.
+export interface VerificationProgressPayload {
+  jobId: string
+  trigger?: string
+  processed: number
+  total: number
+  audiobookId: number
+  title?: string | null
+  outcome: string
+}
+
+export interface VerificationCompletePayload {
+  jobId: string
+  trigger?: string
+  // Terminal job status: 'Completed' | 'Cancelled' | 'Failed'
+  status?: string
+  processed: number
+  total: number
+  verified: number
+  flagged: number
+  unverifiable?: number
+  skipped: number
+  failed: number
+  error?: string | null
+}
+
 class SignalRService {
   constructor() {
     // Reconnect when browser auth state changes so the hub handshake can pick
@@ -190,6 +218,10 @@ class SignalRService {
   private queueUpdateCallbacks: Set<QueueUpdateCallback> = new Set()
   private audiobookUpdateCallbacks: Set<(a: Audiobook) => void> = new Set()
   private scanJobCallbacks: Set<ScanJobCallback> = new Set()
+  private verificationProgressCallbacks: Set<(payload: VerificationProgressPayload) => void> =
+    new Set()
+  private verificationCompleteCallbacks: Set<(payload: VerificationCompletePayload) => void> =
+    new Set()
   private moveJobCallbacks: Set<
     (job: {
       jobId: string
@@ -384,6 +416,20 @@ class SignalRService {
     }
 
     switch (target) {
+      case 'VerificationProgress':
+        if (args && args[0]) {
+          const vpPayload = args[0] as VerificationProgressPayload
+          this.verificationProgressCallbacks.forEach((cb) => cb(vpPayload))
+        }
+        break
+
+      case 'VerificationComplete':
+        if (args && args[0]) {
+          const vcPayload = args[0] as VerificationCompletePayload
+          this.verificationCompleteCallbacks.forEach((cb) => cb(vcPayload))
+        }
+        break
+
       case 'DownloadUpdate':
         // Single or multiple download updates
         if (args && args[0]) {
@@ -748,6 +794,21 @@ class SignalRService {
   // Subscribe to search progress messages (from server-side search operations)
   // By default clients do NOT receive automatic background search messages. To receive them,
   // pass `includeAutomatic=true`.
+  // Subscribe to audio-verification progress (per book) and completion
+  onVerificationProgress(callback: (payload: VerificationProgressPayload) => void): () => void {
+    this.verificationProgressCallbacks.add(callback)
+    return () => {
+      this.verificationProgressCallbacks.delete(callback)
+    }
+  }
+
+  onVerificationComplete(callback: (payload: VerificationCompletePayload) => void): () => void {
+    this.verificationCompleteCallbacks.add(callback)
+    return () => {
+      this.verificationCompleteCallbacks.delete(callback)
+    }
+  }
+
   onSearchProgress(
     callback: (payload: {
       message: string
