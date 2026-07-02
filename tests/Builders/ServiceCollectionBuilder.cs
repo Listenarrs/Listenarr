@@ -215,6 +215,7 @@ namespace Listenarr.Tests.Builders
             services.AddSingleton<LibraryPreviewPathWorkflow>();
             services.AddSingleton<LibraryQueryWorkflow>();
             services.AddSingleton<LibraryRenameWorkflow>();
+            services.AddSingleton<LibraryTransferFilesWorkflow>();
             services.AddSingleton<SearchResponseMapper>();
             services.AddSingleton<ImagePlaceholderResolver>();
             services.AddSingleton<IndexerTestWorkflow>();
