@@ -63,8 +63,7 @@
               tabindex="0"
               title="Add all of these to your library"
               @click="showAddMissingModal = true"
-              @keydown.enter="showAddMissingModal = true"
-              @keydown.space.prevent="showAddMissingModal = true"
+              @keydown="onAddMissingPillKeydown"
             >
               {{ authorNotAddedCount }} ready to add
             </Pill>
@@ -190,8 +189,7 @@
               tabindex="0"
               title="Add all of these to your library"
               @click="showAddMissingModal = true"
-              @keydown.enter="showAddMissingModal = true"
-              @keydown.space.prevent="showAddMissingModal = true"
+              @keydown="onAddMissingPillKeydown"
             >
               {{ seriesNotAddedCount }} ready to add
             </Pill>
@@ -1364,6 +1362,15 @@ const authorNotAddedCount = computed(() => totalNotAddedAudiobooks.value.length)
 
 // --- Bulk-add missing books ---------------------------------------------------------
 const showAddMissingModal = ref(false)
+
+// Single keydown handler: two @keydown modifiers on one element compile to a
+// duplicate onKeydown key, which the pinned vue-tsc (3.x) rejects (TS1117).
+function onAddMissingPillKeydown(e: KeyboardEvent) {
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault()
+    showAddMissingModal.value = true
+  }
+}
 
 // Missing (not-owned) works in this collection, as add-metadata for the bulk-add modal.
 const missingWorks = computed(() =>
