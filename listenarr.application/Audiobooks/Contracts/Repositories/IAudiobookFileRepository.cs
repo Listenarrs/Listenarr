@@ -25,6 +25,13 @@ namespace Listenarr.Application.Audiobooks.Contracts.Repositories
         Task<List<AudiobookFile>> GetMissingMetadataAsync(int max, CancellationToken ct = default);
         Task<AudiobookFile> AddAsync(AudiobookFile file, CancellationToken ct = default);
         Task UpdateAsync(AudiobookFile file, CancellationToken ct = default);
+
+        /// <summary>
+        /// Reassign a file row to another audiobook (optionally with a new path)
+        /// via a targeted column update — no entity tracking, so bulk transfers
+        /// can't trip EF identity-map conflicts on overlapping navigation graphs.
+        /// </summary>
+        Task ReassignAsync(int fileId, int newAudiobookId, string? newPath, CancellationToken ct = default);
         Task DeleteByAudiobookIdAsync(int audiobookId, CancellationToken ct = default);
         Task DeleteAsync(int id, CancellationToken ct = default);
         Task<bool> ExistsAtPathAsync(int audiobookId, string path, CancellationToken ct = default);

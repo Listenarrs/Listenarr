@@ -403,14 +403,56 @@
             </div>
           </div>
         </div>
+        <!-- Bulk-selection toolbar: pick a range of files (shift-click extends) and move
+             or delete them together, instead of one action at a time. -->
+        <div
+          v-if="(audiobook.files?.length ?? 0) > 1"
+          class="file-select-bar"
+          :class="{ active: selectionCount > 0 }"
+        >
+          <label class="checkbox-wrapper select-all-label">
+            <input
+              type="checkbox"
+              class="checkbox-input"
+              :checked="allFilesSelected"
+              :indeterminate.prop="selectionCount > 0 && !allFilesSelected"
+              aria-label="Select all files"
+              @change="toggleSelectAllFiles"
+            />
+            <span class="select-all-text">
+              {{ selectionCount > 0 ? `${selectionCount} selected` : 'Select files' }}
+            </span>
+          </label>
+          <div v-if="selectionCount > 0" class="file-select-actions">
+            <button type="button" class="bulk-move-btn" @click="openBulkMove">
+              Move selected…
+            </button>
+            <button type="button" class="bulk-delete-btn" @click="confirmBulkDelete">
+              <PhTrash />
+              Delete selected
+            </button>
+            <button type="button" class="clear-select-btn" @click="clearFileSelection">
+              Clear
+            </button>
+          </div>
+        </div>
         <div v-if="audiobook.files && audiobook.files.length" class="file-list">
           <div
             v-for="f in audiobook.files"
             :key="f.id"
             class="file-item"
-            :class="{ expanded: isFileAccordionExpanded(f.id) }"
+            :class="{ expanded: isFileAccordionExpanded(f.id), selected: isFileSelected(f.id) }"
           >
             <div class="file-header" @click="toggleFileAccordion(f.id)">
+              <label class="file-select-checkbox" @click.stop>
+                <input
+                  type="checkbox"
+                  class="checkbox-input"
+                  :checked="isFileSelected(f.id)"
+                  :aria-label="`Select ${getFileName(f.path)}`"
+                  @click="toggleFileSelection(f, $event)"
+                />
+              </label>
               <div class="file-info">
                 <PhFileAudio />
                 <span class="file-name">{{ getFileName(f.path) }}</span>
@@ -601,6 +643,49 @@
         </div>
       </template>
     </DeleteConfirmationModal>
+
+    <DeleteConfirmationModal
+      :visible="showBulkDeleteDialog"
+      title="Delete Files"
+      :confirmText="
+        bulkDeleting
+          ? 'Deleting...'
+          : `Delete ${selectionCount} file${selectionCount === 1 ? '' : 's'}`
+      "
+      @close="cancelBulkDelete"
+      @confirm="executeBulkDelete"
+    >
+      <template #default>
+        <p>
+          Remove <strong>{{ selectionCount }}</strong> selected file{{
+            selectionCount === 1 ? '' : 's'
+          }}
+          from this audiobook?
+        </p>
+        <ul class="bulk-delete-list">
+          <li v-for="f in selectedFiles" :key="f.id">{{ getFileName(f.path) }}</li>
+        </ul>
+        <div class="delete-options">
+          <div class="checkbox-row">
+            <label class="checkbox-wrapper checkbox-label">
+              <input
+                v-model="bulkDeleteFromDisk"
+                type="checkbox"
+                class="checkbox-input"
+                aria-label="Also delete the files from disk"
+              />
+              <div class="checkbox-content">
+                <span class="checkbox-title">Also delete the files from disk</span>
+                <small
+                  >Unchecked: only the database records are removed; the files stay on disk and a
+                  rescan will re-import them.</small
+                >
+              </div>
+            </label>
+          </div>
+        </div>
+      </template>
+    </DeleteConfirmationModal>
   </div>
 
   <!-- Loading State -->
@@ -642,6 +727,26 @@
     @close="showOrganizeModal = false"
     @done="handleOrganizeDone"
   />
+
+  <!-- Move files to another EXISTING library record (e.g. tracks imported onto
+       the wrong book, or a collection being split into its real books). -->
+  <TransferFilesModal
+    :visible="showTransferModal"
+    :audiobook="audiobook"
+    :initial-query="audiobook?.title || ''"
+    :initial-file-ids="bulkMoveFileIds"
+    @close="closeTransferModal"
+    @done="onTransferDone"
+  />
+
+  <!-- Break a multi-book record apart: server-side clustering with a suggested
+       destination per group; applying is transfers/deletes of each group. -->
+  <SplitCollectionModal
+    :visible="showSplitModal"
+    :audiobook="audiobook"
+    @close="showSplitModal = false"
+    @done="onSplitDone"
+  />
 </template>
 
 <script setup lang="ts">
@@ -671,6 +776,8 @@ import { errorTracking } from '@/services/errorTracking'
 import { useProtectedImages } from '@/composables/useProtectedImages'
 import { buildAudibleProductUrl } from '@/utils/marketDomains'
 import EditAudiobookModal from '@/components/domain/audiobook/EditAudiobookModal.vue'
+import TransferFilesModal from '@/components/domain/audiobook/TransferFilesModal.vue'
+import SplitCollectionModal from '@/components/domain/audiobook/SplitCollectionModal.vue'
 import ManualSearchModal from '@/components/domain/search/ManualSearchModal.vue'
 import RenamePreviewModal from '@/components/domain/organize/RenamePreviewModal.vue'
 import CustomSelect from '@/components/form/CustomSelect.vue'
@@ -710,6 +817,8 @@ import {
   PhFileMinus,
   PhCircle,
   PhDiscordLogo,
+  PhArrowsLeftRight,
+  PhArrowsSplit,
 } from '@phosphor-icons/vue'
 
 const route = useRoute()
@@ -737,6 +846,8 @@ const scanQueued = ref(false)
 const scanJobId = ref<string | null>(null)
 const showEditModal = ref(false)
 const showOrganizeModal = ref(false)
+const showTransferModal = ref(false)
+const showSplitModal = ref(false)
 const showMoreActions = ref(false)
 
 // History state
@@ -834,6 +945,31 @@ const topActions = computed<DetailTopAction[]>(() => [
     },
   },
   {
+    key: 'transfer-files',
+    label: 'Move Files to Another Book',
+    title: 'Move files to the existing library record they actually belong to',
+    ariaLabel: 'Move Files to Another Book',
+    icon: PhArrowsLeftRight,
+    disabled: !audiobook.value?.files?.length,
+    desktopGroup: 'secondary',
+    onClick: () => {
+      bulkMoveFileIds.value = []
+      showTransferModal.value = true
+    },
+  },
+  {
+    key: 'split-collection',
+    label: 'Split Collection',
+    title: 'Break a multi-book record into its real books',
+    ariaLabel: 'Split Collection',
+    icon: PhArrowsSplit,
+    disabled: (audiobook.value?.files?.length ?? 0) < 2,
+    desktopGroup: 'secondary',
+    onClick: () => {
+      showSplitModal.value = true
+    },
+  },
+  {
     key: 'delete',
     label: 'Delete',
     title: 'Delete',
@@ -878,6 +1014,8 @@ type DetailTopAction = {
     | 'edit'
     | 'rescan-metadata'
     | 'organize'
+    | 'transfer-files'
+    | 'split-collection'
     | 'delete'
   label: string
   title: string
@@ -1265,6 +1403,7 @@ watch(
 async function loadAudiobook() {
   loading.value = true
   error.value = null
+  clearFileSelection()
 
   try {
     const id = parseInt(route.params.id as string)
@@ -1618,6 +1757,166 @@ async function handleEditSaved() {
 async function handleOrganizeDone() {
   showOrganizeModal.value = false
   await loadAudiobook()
+}
+
+function closeTransferModal() {
+  showTransferModal.value = false
+  bulkMoveFileIds.value = []
+}
+
+function onSplitDone() {
+  showSplitModal.value = false
+  clearFileSelection()
+  // Groups left this record — reload it, and refresh the library list so the
+  // destinations' file counts are current too.
+  void loadAudiobook()
+  void libraryStore.fetchLibrary()
+}
+
+async function onTransferDone() {
+  showTransferModal.value = false
+  bulkMoveFileIds.value = []
+  clearFileSelection()
+  // Files left this record — reload it, and refresh the library list so the
+  // destination's file counts are current too.
+  await loadAudiobook()
+  void libraryStore.fetchLibrary()
+}
+
+// --- Multi-select in the Files list -------------------------------------------------
+// Lets the user tick a range of files (e.g. a duplicate copy of the book) and delete
+// or move them in one action instead of one at a time. Shift-click extends a range.
+type LibraryFile = NonNullable<Audiobook['files']>[number]
+
+const selectedFileIds = ref<Set<number>>(new Set())
+const lastClickedFileId = ref<number | null>(null)
+const selectionCount = computed(() => selectedFileIds.value.size)
+
+function isFileSelected(id: number): boolean {
+  return selectedFileIds.value.has(id)
+}
+
+function clearFileSelection(): void {
+  selectedFileIds.value = new Set()
+  lastClickedFileId.value = null
+}
+
+function toggleFileSelection(file: LibraryFile, event?: MouseEvent): void {
+  const ordered = audiobook.value?.files ?? []
+  const next = new Set(selectedFileIds.value)
+
+  // Shift-click selects the contiguous range from the last clicked row to this one.
+  if (event?.shiftKey && lastClickedFileId.value !== null) {
+    const from = ordered.findIndex((f) => f.id === lastClickedFileId.value)
+    const to = ordered.findIndex((f) => f.id === file.id)
+    if (from !== -1 && to !== -1) {
+      const [lo, hi] = from <= to ? [from, to] : [to, from]
+      for (let i = lo; i <= hi; i++) next.add(ordered[i].id)
+      selectedFileIds.value = next
+      lastClickedFileId.value = file.id
+      return
+    }
+  }
+
+  if (next.has(file.id)) next.delete(file.id)
+  else next.add(file.id)
+  selectedFileIds.value = next
+  lastClickedFileId.value = file.id
+}
+
+const allFilesSelected = computed(() => {
+  const total = audiobook.value?.files?.length ?? 0
+  return total > 0 && selectedFileIds.value.size === total
+})
+
+function toggleSelectAllFiles(): void {
+  if (allFilesSelected.value) {
+    clearFileSelection()
+  } else {
+    selectedFileIds.value = new Set((audiobook.value?.files ?? []).map((f) => f.id))
+  }
+}
+
+// Bulk move: hand the current selection to the transfer modal, which already knows how
+// to pick a destination record and relocate a subset of files.
+const bulkMoveFileIds = ref<number[]>([])
+
+function openBulkMove(): void {
+  if (selectedFileIds.value.size === 0) return
+  bulkMoveFileIds.value = Array.from(selectedFileIds.value)
+  showTransferModal.value = true
+}
+
+// Bulk delete: the per-file delete endpoint, looped over the selection, behind a
+// single confirm with a shared "also delete from disk" option.
+const showBulkDeleteDialog = ref(false)
+const bulkDeleteFromDisk = ref(true)
+const bulkDeleting = ref(false)
+
+const selectedFiles = computed<LibraryFile[]>(() =>
+  (audiobook.value?.files ?? []).filter((f) => selectedFileIds.value.has(f.id)),
+)
+
+function confirmBulkDelete(): void {
+  if (selectedFileIds.value.size === 0) return
+  bulkDeleteFromDisk.value = true
+  showBulkDeleteDialog.value = true
+}
+
+function cancelBulkDelete(): void {
+  showBulkDeleteDialog.value = false
+}
+
+async function executeBulkDelete(): Promise<void> {
+  if (!audiobook.value || selectedFileIds.value.size === 0) return
+  const audiobookId = audiobook.value.id
+  const targets = selectedFiles.value
+  const toast = useToast()
+  bulkDeleting.value = true
+
+  let deleted = 0
+  const failures: string[] = []
+  const warnings: string[] = []
+  try {
+    for (const file of targets) {
+      try {
+        const result = await apiService.deleteAudiobookFile(audiobookId, file.id, {
+          deleteFromDisk: bulkDeleteFromDisk.value,
+        })
+        deleted++
+        if (result.warnings && result.warnings.length > 0) {
+          warnings.push(...result.warnings)
+        }
+      } catch (err) {
+        failures.push(getFileName(file.path))
+        errorTracking.captureException(err as Error, {
+          component: 'AudiobookDetailView',
+          operation: 'executeBulkDelete',
+          metadata: { audiobookId, fileId: file.id },
+        })
+      }
+    }
+
+    const onDisk = bulkDeleteFromDisk.value ? ' and from disk' : ''
+    if (failures.length === 0) {
+      toast.success(
+        'Files removed',
+        `Removed ${deleted} file${deleted === 1 ? '' : 's'}${onDisk}.${
+          warnings.length ? ' ' + warnings.join(' ') : ''
+        }`,
+      )
+    } else {
+      toast.warning(
+        'Some files could not be deleted',
+        `Removed ${deleted} of ${targets.length}. Failed: ${failures.join(', ')}.`,
+      )
+    }
+  } finally {
+    bulkDeleting.value = false
+    showBulkDeleteDialog.value = false
+    clearFileSelection()
+    await loadAudiobook()
+  }
 }
 
 function formatRuntime(minutes: number): string {
@@ -3261,5 +3560,118 @@ a.identifier-link:hover {
 .secondary-actions .delete-btn {
   padding-left: 10px;
   padding-right: 10px;
+}
+
+/* Multi-select toolbar + per-row checkbox */
+.file-select-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  background-color: #2b2b2b;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+}
+
+.file-select-bar.active {
+  border-color: var(--brand-500);
+  background-color: #313131;
+}
+
+.select-all-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  color: #ccc;
+  font-size: 14px;
+}
+
+.select-all-text {
+  user-select: none;
+}
+
+.file-select-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.bulk-move-btn {
+  padding: 6px 10px;
+  background-color: rgba(var(--brand-rgb), 0.1);
+  border: 1px solid var(--brand-500);
+  border-radius: 4px;
+  color: var(--brand-500);
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.bulk-move-btn:hover {
+  background-color: rgba(var(--brand-rgb), 0.2);
+}
+
+.bulk-delete-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 14px;
+  background-color: rgba(255, 107, 107, 0.1);
+  color: #ff6b6b;
+  border: 1px solid rgba(255, 107, 107, 0.3);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.bulk-delete-btn:hover {
+  background-color: rgba(255, 107, 107, 0.2);
+  border-color: rgba(255, 107, 107, 0.5);
+}
+
+.clear-select-btn {
+  background: transparent;
+  border: none;
+  color: #999;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 6px 8px;
+  border-radius: 4px;
+}
+
+.clear-select-btn:hover {
+  color: #fff;
+  background-color: #3a3a3a;
+}
+
+.file-select-checkbox {
+  display: flex;
+  align-items: center;
+  margin-right: 12px;
+  cursor: pointer;
+}
+
+.file-item.selected {
+  background-color: #36404a;
+  box-shadow: inset 3px 0 0 var(--brand-500);
+}
+
+.bulk-delete-list {
+  margin: 8px 0;
+  padding-left: 20px;
+  max-height: 180px;
+  overflow-y: auto;
+  color: #ccc;
+  font-size: 13px;
+}
+
+.bulk-delete-list li {
+  margin: 2px 0;
+  word-break: break-all;
 }
 </style>
