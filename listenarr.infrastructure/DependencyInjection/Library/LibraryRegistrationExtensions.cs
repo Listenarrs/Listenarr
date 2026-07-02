@@ -9,6 +9,7 @@
  */
 using Listenarr.Infrastructure.Persistence.Repositories;
 using Microsoft.Extensions.DependencyInjection;
+using Listenarr.Application.Audiobooks.Organizing;
 
 namespace Listenarr.Infrastructure.DependencyInjection.Library;
 
@@ -17,6 +18,8 @@ internal static class LibraryRegistrationExtensions
     public static IServiceCollection AddLibraryServices(this IServiceCollection services)
     {
         services.AddScoped<IAudiobookFileService, AudiobookFileService>();
+        // Singleton: stateless filesystem primitives, consumed by the singleton MoveJobProcessor.
+        services.AddSingleton<IOrganizeFilesystem, Listenarr.Infrastructure.Library.Organizing.OrganizeFilesystem>();
         services.AddScoped<IAuthorCatalogService, AuthorCatalogService>();
         services.AddScoped<ISeriesCatalogService, SeriesCatalogService>();
         services.AddScoped<ILibraryAddService, LibraryAddService>();

@@ -1109,3 +1109,130 @@ export interface RenameResult {
   error?: string
   renamedFiles: FileRenameResultItem[]
 }
+
+/**
+ * One audiobook in the organize-library preview. The server has bucketed
+ * each row into one of `already_canonical` / `will_move` / `collision` /
+ * `invalid_target` based on the configured FolderNamingPattern.
+ */
+export type OrganizePreviewStatus =
+  | 'already_canonical'
+  | 'will_move'
+  | 'collision'
+  | 'invalid_target'
+
+export interface OrganizePreviewRow {
+  id: number
+  title: string | null
+  author: string | null
+  currentPath: string | null
+  targetPath: string | null
+  fileCount: number
+  totalSize: number
+  status: OrganizePreviewStatus
+  /** Set when status is `collision` — the shared normalized target. */
+  collisionKey: string | null
+  /** Set when status is `invalid_target` — the human-readable reason. */
+  reason: string | null
+  /**
+   * Set when status is `invalid_target` — machine-readable companion to
+   * `reason`. One of the `OrganizeInvalidReasonCode` values the backend emits
+   * (`missing_title`, `missing_author`, `source_at_root`, `target_ancestor`,
+   * `target_exists`, `source_missing`, …). The UI groups invalid rows by this code.
+   */
+  reasonCode: string | null
+  /**
+   * True only for `target_ancestor` rows that pass the backend's read-only
+   * flatten feasibility check. The UI shows the one-click "Flatten" action only
+   * when this is true.
+   */
+  canFlatten: boolean
+  /**
+   * True for `will_move` rows whose target folder exists on disk but holds only
+   * leftover metadata (no audio, nothing referenced by the DB). The move will
+   * replace the stub.
+   */
+  replacesStubTarget: boolean
+}
+
+/**
+ * One row in the currently-processing / recent-completed / recent-failed
+ * tails of a `GET /library/move/summary` response. Mirrors `MoveJob`
+ * fields the summary endpoint projects, plus the audiobook's title and
+ * per-job file count / total bytes so the UI can show size context
+ * without a second round-trip.
+ */
+export interface MoveQueueJobSummary {
+  id: string
+  audiobookId: number
+  audiobookTitle: string | null
+  status: string
+  error: string | null
+  requestedPath: string | null
+  sourcePath: string | null
+  enqueuedAt: string
+  updatedAt: string | null
+  attemptCount: number
+  /** Number of tracked AudiobookFile rows for the referenced audiobook. */
+  fileCount: number
+  /** Sum of AudiobookFile.Size (bytes) for the referenced audiobook. 0 when unknown. */
+  totalBytes: number
+}
+
+/**
+ * Shape returned by `GET /library/move/summary`. `total` is the sum of
+ * every non-purged MoveJob row; the per-status counts always sum to it
+ * (with anything unrecognized falling into `other` so the UI never
+ * silently drops a count). `queuedFiles` / `queuedBytes` aggregate
+ * across all Queued rows so the banner can show "queue: N files, M GB
+ * remaining" for ETA context.
+ */
+export interface MoveQueueSummary {
+  total: number
+  queued: number
+  processing: number
+  completed: number
+  failed: number
+  other: number
+  queuedFiles: number
+  queuedBytes: number
+  currentlyProcessing: MoveQueueJobSummary[]
+  recentCompleted: MoveQueueJobSummary[]
+  recentFailed: MoveQueueJobSummary[]
+}
+
+export interface OrganizeLibraryPreview {
+  rows: OrganizePreviewRow[]
+  alreadyCanonicalCount: number
+  willMoveCount: number
+  collisionCount: number
+  invalidTargetCount: number
+}
+
+export interface OrganizeApplySkipped {
+  audiobookId: number
+  reason: string
+}
+
+export interface OrganizeFlattenResult {
+  success: boolean
+  filesMoved: number
+  newPath: string | null
+  error: string | null
+}
+
+export interface OrganizeQueuedJob {
+  jobId: string
+  audiobookId: number
+  audiobookTitle: string | null
+  targetPath: string | null
+}
+
+export interface OrganizeLibraryApplyResult {
+  queued: number
+  skipped: number
+  failedToQueue: number
+  queuedJobs: OrganizeQueuedJob[]
+  skippedDetails: OrganizeApplySkipped[]
+  warnings: string[]
+}

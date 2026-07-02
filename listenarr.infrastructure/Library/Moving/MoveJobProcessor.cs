@@ -15,20 +15,22 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using Listenarr.Application.Audiobooks.Organizing;
 using Listenarr.Application.Mapping;
 using Listenarr.Domain.Common;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 namespace Listenarr.Infrastructure.Library.Moving
 {
-    public class MoveJobProcessor(
+    public partial class MoveJobProcessor(
         IMoveQueueService moveQueueService,
         IToastService toastService,
         IScanQueueService scanQueueService,
         ILogger<MoveJobProcessor> logger,
         IServiceScopeFactory scopeFactory,
         IHubContext<DownloadHub> hubContext,
-        IAppMetricsService metrics) : IMoveJobProcessor
+        IAppMetricsService metrics,
+        IOrganizeFilesystem organizeFilesystem) : IMoveJobProcessor
     {
         public async Task ProcessJobAsync(MoveJob job, CancellationToken stoppingToken)
         {
@@ -130,18 +132,11 @@ namespace Listenarr.Infrastructure.Library.Moving
 
                 if (!Directory.Exists(targetParent)) Directory.CreateDirectory(targetParent);
 
-                // Check if target exists and has content - only fail if it has files/folders we'd overwrite
-                if (Directory.Exists(target))
+                // Populated targets fail unless the organize flow flagged a replaceable
+                // metadata stub (see the TargetGate partial for the reclaim rules).
+                if (!await TryReclaimTargetAsync(job, target, stoppingToken))
                 {
-                    var targetHasContent = Directory.EnumerateFileSystemEntries(target).Any();
-                    if (targetHasContent)
-                    {
-                        await moveQueueService.UpdateJobStatusAsync(job.Id, "Failed", "Target directory already exists and contains files", stoppingToken);
-                        metrics.Increment("worker.move.job.failed");
-                        return;
-                    }
-                    // Target exists but is empty - safe to proceed (will use it instead of creating new)
-                    logger.LogInformation("Target directory {Target} exists but is empty; proceeding with move", LogRedaction.SanitizeFilePath(target));
+                    return;
                 }
 
                 // Create a temporary directory under the target parent
@@ -481,20 +476,6 @@ namespace Listenarr.Infrastructure.Library.Moving
                 }
                 metrics.Increment("worker.move.job.failed");
             }
-        }
-
-        private static bool IsFilesystemRoot(string path)
-        {
-            if (string.IsNullOrWhiteSpace(path))
-            {
-                return false;
-            }
-
-            var fullPath = Path.GetFullPath(path)
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            var root = Path.GetPathRoot(fullPath)?.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            return !string.IsNullOrWhiteSpace(root)
-                && string.Equals(fullPath, root, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
         }
     }
 }

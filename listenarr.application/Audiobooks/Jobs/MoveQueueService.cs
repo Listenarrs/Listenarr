@@ -46,7 +46,7 @@ namespace Listenarr.Application.Audiobooks.Jobs
 
         public ChannelReader<MoveJob> Reader => _channel.Reader;
 
-        public async Task<Guid> EnqueueMoveAsync(int audiobookId, string requestedPath, string? sourcePath = null)
+        public async Task<Guid> EnqueueMoveAsync(int audiobookId, string requestedPath, string? sourcePath = null, bool replaceStubTarget = false)
         {
             var deduplicationKey = BuildDeduplicationKey(audiobookId, requestedPath);
             var existingDb = await _persistence.GetActiveByKeyAsync(deduplicationKey);
@@ -65,7 +65,8 @@ namespace Listenarr.Application.Audiobooks.Jobs
                 ActiveDeduplicationKey = deduplicationKey,
                 EnqueuedAt = _timeProvider.GetUtcNow().UtcDateTime,
                 Status = "Queued",
-                SourcePath = sourcePath
+                SourcePath = sourcePath,
+                ReplaceStubTarget = replaceStubTarget
             };
 
             try
@@ -190,7 +191,7 @@ namespace Listenarr.Application.Audiobooks.Jobs
                 return null;
             }
 
-            var newJobId = await EnqueueMoveAsync(job.AudiobookId, job.RequestedPath ?? string.Empty, job.SourcePath);
+            var newJobId = await EnqueueMoveAsync(job.AudiobookId, job.RequestedPath ?? string.Empty, job.SourcePath, job.ReplaceStubTarget);
             _logger.LogInformation("Requeueing move job {OldJobId} as job {NewJobId} for audiobook {AudiobookId}", jobId, newJobId, job.AudiobookId);
             return newJobId;
         }

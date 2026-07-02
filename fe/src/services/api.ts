@@ -60,6 +60,10 @@ import type {
   RenamePreview,
   RenameOperation,
   RenameResult,
+  OrganizeLibraryPreview,
+  OrganizeLibraryApplyResult,
+  OrganizeFlattenResult,
+  MoveQueueSummary,
 } from '@/types'
 import { getStartupConfigCached, resetCache as resetStartupConfigCache } from './startupConfigCache'
 import { sessionTokenManager } from '@/utils/sessionToken'
@@ -1236,6 +1240,43 @@ class ApiService {
       method: 'POST',
       body: JSON.stringify(body),
     })
+  }
+
+  async getOrganizeLibraryPreview(): Promise<OrganizeLibraryPreview> {
+    return this.request<OrganizeLibraryPreview>(`/library/organize/preview`, {
+      method: 'GET',
+    })
+  }
+
+  async applyOrganizeLibrary(audiobookIds: number[]): Promise<OrganizeLibraryApplyResult> {
+    return this.request<OrganizeLibraryApplyResult>(`/library/organize/apply`, {
+      method: 'POST',
+      body: JSON.stringify({ audiobookIds }),
+    })
+  }
+
+  /**
+   * Collapse a single nested-one-level-too-deep row into its canonical parent
+   * folder. Only valid for `target_ancestor` invalid rows; the server
+   * re-validates and refuses anything else.
+   */
+  async flattenOrganizeRow(audiobookId: number): Promise<OrganizeFlattenResult> {
+    return this.request<OrganizeFlattenResult>(`/library/organize/flatten`, {
+      method: 'POST',
+      body: JSON.stringify({ audiobookId }),
+    })
+  }
+
+  /**
+   * Read the persisted move-queue state — status counts plus the most-recent
+   * completed and failed jobs. Backs the in-modal and Maintenance-page
+   * progress banner. `recentLimit` is clamped to [0, 200] server-side.
+   */
+  async getMoveQueueSummary(recentLimit = 5): Promise<MoveQueueSummary> {
+    return this.request<MoveQueueSummary>(
+      `/library/move/summary?recentLimit=${encodeURIComponent(String(recentLimit))}`,
+      { method: 'GET' },
+    )
   }
 
   async removeFromLibrary(
