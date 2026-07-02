@@ -32,7 +32,10 @@ namespace Listenarr.Infrastructure.SystemDiagnostics.Processes
             _logger = logger;
         }
 
-        public async Task<ProcessResult> RunAsync(ProcessStartInfo startInfo, int timeoutMs = 60000, CancellationToken cancellationToken = default)
+        public Task<ProcessResult> RunAsync(ProcessStartInfo startInfo, int timeoutMs = 60000, CancellationToken cancellationToken = default)
+            => RunAsync(startInfo, timeoutMs, cancellationToken, priorityClass: null);
+
+        public async Task<ProcessResult> RunAsync(ProcessStartInfo startInfo, int timeoutMs, CancellationToken cancellationToken, ProcessPriorityClass? priorityClass)
         {
             var stdout = new StringBuilder();
             var stderr = new StringBuilder();
@@ -49,6 +52,19 @@ namespace Listenarr.Infrastructure.SystemDiagnostics.Processes
             try
             {
                 process.Start();
+                if (priorityClass.HasValue)
+                {
+                    try
+                    {
+                        process.PriorityClass = priorityClass.Value;
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                    {
+                        // Best-effort: the process may already have exited, or the platform
+                        // may not allow the change. Never fail the run over scheduling.
+                        _logger.LogDebug(ex, "Could not set priority {Priority} for {FileName}", priorityClass.Value, startInfo.FileName);
+                    }
+                }
                 process.BeginOutputReadLine();
                 process.BeginErrorReadLine();
 

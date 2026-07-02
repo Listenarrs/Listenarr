@@ -53,6 +53,10 @@ describe('AudiobookDetailView SignalR integration', () => {
       void cb
       return () => {}
     }
+    ;(signalRService as unknown).onVerificationComplete = (cb?: (...args: unknown[]) => void) => {
+      void cb
+      return () => {}
+    }
 
     // Seed the library store with an initial audiobook
     const store = useLibraryStore()
@@ -98,6 +102,10 @@ describe('AudiobookDetailView SignalR integration', () => {
 
     // Ensure other signalR callbacks used by the component exist to avoid runtime errors
     ;(signalRService as unknown).onScanJobUpdate = (cb?: (...args: unknown[]) => void) => {
+      void cb
+      return () => {}
+    }
+    ;(signalRService as unknown).onVerificationComplete = (cb?: (...args: unknown[]) => void) => {
       void cb
       return () => {}
     }

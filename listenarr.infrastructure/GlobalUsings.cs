@@ -4,6 +4,8 @@ global using Microsoft.AspNetCore.SignalR;
 global using Microsoft.Extensions.Hosting;
 global using Listenarr.Application.Audiobooks.Catalog;
 global using Listenarr.Application.Audiobooks.Files;
+global using Listenarr.Application.Audiobooks.Verification;
+global using Listenarr.Application.Audiobooks.Verification.Contracts;
 global using Listenarr.Application.Audiobooks.Jobs;
 global using Listenarr.Application.Audiobooks.Monitoring;
 global using Listenarr.Application.Audiobooks.Quality;

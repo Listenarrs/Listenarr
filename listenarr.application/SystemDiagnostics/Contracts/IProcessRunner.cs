@@ -24,6 +24,11 @@ namespace Listenarr.Application.SystemDiagnostics.Contracts
     public interface IProcessRunner
     {
         Task<ProcessResult> RunAsync(ProcessStartInfo startInfo, int timeoutMs = 60000, CancellationToken cancellationToken = default);
+        // priorityClass lowers (or raises) the child's OS scheduling priority after start;
+        // best-effort — a failure to set it never fails the run. Kept as a separate
+        // overload (not an optional parameter) so existing Moq expression-tree
+        // setups against the three-argument shape keep compiling.
+        Task<ProcessResult> RunAsync(ProcessStartInfo startInfo, int timeoutMs, CancellationToken cancellationToken, ProcessPriorityClass? priorityClass);
         // Start a long-running process and return the Process instance so callers can interact with it (kill, read streams, etc.).
         // Implementations should not swallow exceptions - callers rely on the returned Process instance.
         Process StartProcess(ProcessStartInfo startInfo);

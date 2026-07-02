@@ -18,6 +18,8 @@ global using Listenarr.Application.Common;
 global using Listenarr.Application.Configuration.Core;
 global using Listenarr.Application.Audiobooks.Catalog;
 global using Listenarr.Application.Audiobooks.Files;
+global using Listenarr.Application.Audiobooks.Verification;
+global using Listenarr.Application.Audiobooks.Verification.Contracts;
 global using Listenarr.Application.Audiobooks.Identifiers;
 global using Listenarr.Application.Audiobooks.Jobs;
 global using Listenarr.Application.Audiobooks.Matching;

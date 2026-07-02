@@ -318,6 +318,110 @@
             </div>
           </div>
 
+          <div
+            class="detail-card"
+            v-if="audiobook.verificationStatus && audiobook.verificationStatus !== 'unverified'"
+          >
+            <h3>Audio Verification</h3>
+            <div class="detail-row">
+              <span class="label">Status:</span>
+              <span class="value">
+                <span
+                  class="verification-badge"
+                  :class="verificationClass(audiobook.verificationStatus)"
+                >
+                  {{ verificationLabel(audiobook.verificationStatus) }}
+                </span>
+                <span v-if="verificationDetail?.outcome" class="verification-outcome-note">
+                  agent outcome: {{ verificationDetail.outcome }}
+                </span>
+              </span>
+            </div>
+            <div class="detail-row" v-if="typeof audiobook.verificationConfidence === 'number'">
+              <span class="label">Confidence:</span>
+              <span class="value">{{ (audiobook.verificationConfidence * 100).toFixed(0) }}%</span>
+            </div>
+            <div class="detail-row" v-if="audiobook.verifiedAt">
+              <span class="label">Checked:</span>
+              <span class="value"
+                >{{ formatDate(audiobook.verifiedAt)
+                }}<template v-if="audiobook.verifiedBy">
+                  · {{ audiobook.verifiedBy }}</template
+                ></span
+              >
+            </div>
+            <div class="detail-row detail-row-stacked" v-if="verificationFieldScores.length">
+              <span class="label">Field matches:</span>
+              <div class="value verification-fields">
+                <div
+                  v-for="row in verificationFieldScores"
+                  :key="row.label"
+                  class="verification-field-row"
+                >
+                  <span class="verification-field-name">{{ row.label }}</span>
+                  <span class="verification-field-score">{{ Math.round(row.score * 100) }}%</span>
+                  <span v-if="row.matchedText" class="verification-field-heard"
+                    >heard "{{ row.matchedText }}"</span
+                  >
+                </div>
+              </div>
+            </div>
+            <div class="detail-row" v-if="verificationCompleteness">
+              <span class="label">Content length:</span>
+              <span
+                class="value"
+                :class="{ 'completeness-short': completenessIsShort || completenessIsLong }"
+              >
+                {{ formatRuntime(verificationCompleteness.actualMinutes) }} of
+                {{ formatRuntime(verificationCompleteness.expectedMinutes) }} expected ({{
+                  Math.round(verificationCompleteness.coverage * 100)
+                }}%)<template v-if="completenessIsShort"> — content appears incomplete</template
+                ><template v-else-if="completenessIsLong">
+                  — far more audio than this book (a collection or a different, longer
+                  book?)</template
+                >
+              </span>
+            </div>
+            <div class="detail-row verification-says-row" v-if="heardCredits">
+              <span class="label">The audio says:</span>
+              <div class="verification-says">
+                <div class="verification-fields verification-claims">
+                  <div v-if="heardCredits.title" class="verification-field-row">
+                    <span class="verification-field-name">Title</span>
+                    <span class="verification-field-claim">"{{ heardCredits.title }}"</span>
+                  </div>
+                  <div v-if="heardCredits.author" class="verification-field-row">
+                    <span class="verification-field-name">Author</span>
+                    <span class="verification-field-claim">"{{ heardCredits.author }}"</span>
+                  </div>
+                  <div v-if="heardCredits.narrator" class="verification-field-row">
+                    <span class="verification-field-name">Narrator</span>
+                    <span class="verification-field-claim">"{{ heardCredits.narrator }}"</span>
+                  </div>
+                  <div v-if="heardCredits.publisher" class="verification-field-row">
+                    <span class="verification-field-name">Publisher</span>
+                    <span class="verification-field-claim">"{{ heardCredits.publisher }}"</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="detail-row detail-row-stacked" v-if="audiobook.verificationTranscript">
+              <span class="label">
+                Transcript
+                <button
+                  type="button"
+                  class="show-more-btn transcript-toggle"
+                  @click="showTranscript = !showTranscript"
+                >
+                  {{ showTranscript ? 'Hide' : 'Show' }}
+                </button>
+              </span>
+              <pre v-if="showTranscript" class="verification-transcript">{{
+                audiobook.verificationTranscript
+              }}</pre>
+            </div>
+          </div>
+
           <div class="detail-card">
             <h3>Identifiers</h3>
             <div class="detail-row" v-if="audibleSourceUrl">
@@ -666,6 +770,11 @@ import type {
   SearchResult,
 } from '@/types'
 import { safeText, stripHtmlAndNormalize } from '@/utils/textUtils'
+import {
+  verificationLabel,
+  verificationClass,
+  parseVerificationDetail,
+} from '@/utils/verificationStatus'
 import { logger } from '@/utils/logger'
 import { errorTracking } from '@/services/errorTracking'
 import { useProtectedImages } from '@/composables/useProtectedImages'
@@ -683,6 +792,7 @@ import {
   PhSpinner,
   PhMagnifyingGlass,
   PhFolderOpen,
+  PhWaveform,
   PhTrash,
   PhClock,
   PhFolder,
@@ -737,6 +847,83 @@ const scanQueued = ref(false)
 const scanJobId = ref<string | null>(null)
 const showEditModal = ref(false)
 const showOrganizeModal = ref(false)
+
+// Audio verification (ADR-0001) state
+const verifyingAudio = ref(false)
+let verifyAudioJobId: string | null = null
+const showTranscript = ref(false)
+
+const verificationDetail = computed(() =>
+  audiobook.value ? parseVerificationDetail(audiobook.value) : null,
+)
+
+// Per-field rows for the Audio Verification card, in matcher-weight order.
+const verificationFieldScores = computed(() => {
+  const detail = verificationDetail.value
+  if (!detail) return []
+  const fields = [
+    { label: 'Title', match: detail.titleMatch },
+    { label: 'Author', match: detail.authorMatch },
+    { label: 'Narrator', match: detail.narratorMatch },
+    { label: 'Publisher', match: detail.publisherMatch },
+  ]
+  return fields
+    .filter((f) => f.match && typeof f.match.score === 'number')
+    .map((f) => ({ label: f.label, score: f.match!.score, matchedText: f.match!.matchedText }))
+})
+
+const heardCredits = computed(() => verificationDetail.value?.heardCredits ?? null)
+const verificationCompleteness = computed(() => verificationDetail.value?.completeness ?? null)
+const completenessIsShort = computed(() => (verificationCompleteness.value?.coverage ?? 1) < 0.7)
+const completenessIsLong = computed(() => (verificationCompleteness.value?.coverage ?? 1) > 1.5)
+
+async function verifyAudio() {
+  const book = audiobook.value
+  if (!book || verifyingAudio.value) return
+  const toast = useToast()
+  verifyingAudio.value = true
+  try {
+    const result = await apiService.verifyAudiobook(book.id)
+    verifyAudioJobId = result.jobId
+    toast.info('Audio verification started', 'Transcribing the opening and closing of this book…')
+  } catch (err) {
+    verifyingAudio.value = false
+    const message = err instanceof Error ? err.message : 'Unknown error'
+    toast.error('Could not start audio verification', message)
+  }
+}
+
+const verificationCompleteUnsub = signalRService.onVerificationComplete((payload) => {
+  if (!verifyAudioJobId || payload.jobId !== verifyAudioJobId) return
+  verifyAudioJobId = null
+  verifyingAudio.value = false
+  const toast = useToast()
+  void refresh()
+  if (payload.error) {
+    toast.error('Audio verification failed', payload.error)
+  } else if (payload.flagged > 0) {
+    toast.warning(
+      'Audio verification complete',
+      'This book was flagged — check the verification card for which field diverged.',
+    )
+  } else if (payload.verified > 0) {
+    toast.success('Audio verification complete', 'The spoken credits match the stored metadata.')
+  } else if ((payload.unverifiable ?? 0) > 0) {
+    toast.info(
+      'Audio verification complete',
+      'No spoken credits found — the audio never announces itself, which is not evidence of wrong content.',
+    )
+  } else {
+    toast.info(
+      'Audio verification complete',
+      'No verdict was recorded (book may have been skipped).',
+    )
+  }
+})
+
+onUnmounted(() => {
+  verificationCompleteUnsub()
+})
 const showMoreActions = ref(false)
 
 // History state
@@ -834,6 +1021,20 @@ const topActions = computed<DetailTopAction[]>(() => [
     },
   },
   {
+    key: 'verify-audio',
+    label: verifyingAudio.value ? 'Verifying Audio...' : 'Verify Audio',
+    title: 'Transcribe the opening/closing of this book and check it against the metadata',
+    ariaLabel: 'Verify Audio',
+    icon: verifyingAudio.value ? PhSpinner : PhWaveform,
+    iconClass: verifyingAudio.value ? 'ph-spin' : undefined,
+    disabled:
+      verifyingAudio.value || (!audiobook.value?.files?.length && !audiobook.value?.filePath),
+    desktopGroup: 'secondary',
+    onClick: () => {
+      void verifyAudio()
+    },
+  },
+  {
     key: 'delete',
     label: 'Delete',
     title: 'Delete',
@@ -878,6 +1079,7 @@ type DetailTopAction = {
     | 'edit'
     | 'rescan-metadata'
     | 'organize'
+    | 'verify-audio'
     | 'delete'
   label: string
   title: string
@@ -3261,5 +3463,196 @@ a.identifier-link:hover {
 .secondary-actions .delete-btn {
   padding-left: 10px;
   padding-right: 10px;
+}
+
+/* Audio Verification card (ADR-0001) */
+.verification-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.5rem;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  background-color: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  color: #cfcfcf;
+}
+
+.verification-badge.verification-ok {
+  background-color: rgba(46, 204, 113, 0.1);
+  border-color: rgba(46, 204, 113, 0.18);
+  color: #2ecc71;
+}
+
+.verification-badge.verification-flagged {
+  background-color: rgba(243, 156, 18, 0.1);
+  border-color: rgba(243, 156, 18, 0.18);
+  color: #f39c12;
+}
+
+.verification-badge.verification-rejected {
+  background-color: rgba(231, 76, 60, 0.12);
+  border-color: rgba(231, 76, 60, 0.18);
+  color: #e74c3c;
+}
+
+.verification-outcome-note {
+  margin-left: 0.5rem;
+  font-size: 12px;
+  color: #8a93a0;
+}
+
+.verification-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.verification-field-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  font-size: 13px;
+}
+
+.verification-field-name {
+  min-width: 70px;
+  color: #adb5bd;
+}
+
+.verification-field-score {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.verification-field-heard {
+  color: #8a93a0;
+  font-style: italic;
+  overflow-wrap: anywhere;
+}
+
+.verification-field-claim {
+  color: #d8dee6;
+  font-style: italic;
+  overflow-wrap: anywhere;
+}
+
+.completeness-short {
+  color: #f39c12;
+}
+
+.relabel-btn {
+  margin-top: 0.6rem;
+  align-self: flex-start;
+}
+
+.split-collection-btn {
+  margin-top: 0;
+}
+
+.verification-remedies {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/* "The audio says" needs room: stack label, claims, and remedy buttons
+   vertically at full width instead of competing in one space-between row
+   (which squeezed the claims into a sliver that wrapped mid-word). */
+.verification-says-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.verification-says {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+.verification-claims {
+  text-align: left;
+}
+
+.verification-claims .verification-field-row {
+  justify-content: flex-start;
+}
+
+.verification-claims .verification-field-name {
+  min-width: 80px;
+  flex-shrink: 0;
+}
+
+.verification-claims .verification-field-claim {
+  flex: 1;
+}
+
+.transcript-toggle {
+  margin-top: 0;
+  margin-left: 0.5rem;
+  padding: 2px 10px;
+  font-size: 11px;
+}
+
+.verification-transcript {
+  margin: 0.5rem 0 0;
+  padding: 0.75rem;
+  max-height: 280px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #c4cbd4;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+}
+
+.description :deep(p) {
+  margin: 0 0 12px 0;
+}
+
+.description :deep(br) {
+  display: block;
+  margin: 8px 0;
+}
+
+.description :deep(strong),
+.description :deep(b) {
+  color: #fff;
+  font-weight: 500;
+}
+
+.description :deep(em),
+.description :deep(i) {
+  font-style: italic;
+}
+
+.description :deep(a) {
+  color: var(--brand-500);
+}
+
+.description :deep(a:hover) {
+  text-decoration: underline;
+}
+
+.description :deep(ul),
+.description :deep(ol) {
+  margin: 12px 0;
+  padding-left: 24px;
+}
+
+.description :deep(li) {
+  margin: 4px 0;
+}
+
+.verification-badge.verification-neutral {
+  background-color: rgba(134, 142, 150, 0.12);
+  border-color: rgba(134, 142, 150, 0.3);
+  color: #adb5bd;
 }
 </style>

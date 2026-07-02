@@ -168,6 +168,9 @@ namespace Listenarr.Tests.Features.Api.Services
                 return Task.FromResult(new ProcessResult(1, string.Empty, string.Empty, false));
             }
 
+            public Task<ProcessResult> RunAsync(System.Diagnostics.ProcessStartInfo startInfo, int timeoutMs, CancellationToken cancellationToken, System.Diagnostics.ProcessPriorityClass? priorityClass)
+                => RunAsync(startInfo, timeoutMs, cancellationToken);
+
             public Process StartProcess(ProcessStartInfo startInfo) => throw new NotSupportedException();
 
             public IDisposable RegisterTransientSensitive(IEnumerable<string> values) => new NoopDisposable();

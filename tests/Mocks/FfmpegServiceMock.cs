@@ -18,6 +18,10 @@ namespace Listenarr.Tests.Mocks
             return _ffprobePath;
         }
 
+        public Task<string?> GetFfmpegPathAsync() => Task.FromResult<string?>(null);
+
+        public Task<string?> EnsureFfmpegInstalledAsync() => Task.FromResult<string?>(null);
+
         public async Task<string?> GetFfprobePathAsync()
         {
             if (string.IsNullOrWhiteSpace(_ffprobePath))

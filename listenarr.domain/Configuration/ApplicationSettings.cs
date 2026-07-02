@@ -112,6 +112,22 @@ namespace Listenarr.Domain.Configuration
         // Failed download handling settings
         public bool FailedDownloadHandlingEnabled { get; set; } = true;
         public bool FailedDownloadAutoSearch { get; set; } = false;
+
+        // Audio identity verification (ADR-0001) sample windows. The opening
+        // window is generous because publisher idents and music intros precede a
+        // cold open; closing credits are a short repeat.
+        public int VerificationOpeningSeconds { get; set; } = 90;
+        public int VerificationClosingSeconds { get; set; } = 30;
+
+        // Run whisper/ffmpeg verification work at idle OS priority so a library
+        // walk yields CPU to anything else on the host that wants it, instead of
+        // competing at normal priority for hours.
+        public bool VerificationLowCpuPriority { get; set; } = true;
+
+        // Auto-enqueue a verification pass for freshly imported audio, so a wrong
+        // grab gets flagged right away instead of waiting for a manual walk;
+        // skipped when whisper.cpp isn't installed.
+        public bool VerificationOnImport { get; set; } = true;
         public List<string> ImportBlacklistExtensions
         {
             get

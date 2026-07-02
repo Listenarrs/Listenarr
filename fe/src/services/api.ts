@@ -924,6 +924,56 @@ class ApiService {
     return this.request<SavedUnmatchedResponse>(`/rootfolders/${rootFolderId}/unmatched`)
   }
 
+  // Audio-based library verification (ADR-0001)
+  async startLibraryVerification(audiobookIds?: number[]): Promise<{ jobId: string }> {
+    return this.request<{ jobId: string }>('/verification/batch', {
+      method: 'POST',
+      body: JSON.stringify({ audiobookIds: audiobookIds ?? null }),
+    })
+  }
+
+  async verifyAudiobook(id: number): Promise<{ jobId: string }> {
+    return this.request<{ jobId: string }>(`/verification/audiobook/${id}`, { method: 'POST' })
+  }
+
+  async cancelVerificationJob(jobId: string): Promise<{ jobId: string; status: string }> {
+    return this.request<{ jobId: string; status: string }>(`/verification/jobs/${jobId}/cancel`, {
+      method: 'POST',
+    })
+  }
+
+  async setManualVerification(
+    id: number,
+    action: 'verify' | 'reject' | 'clear',
+  ): Promise<{
+    id: number
+    verificationStatus: import('@/types').VerificationStatus
+    verificationConfidence?: number | null
+    verifiedAt?: string | null
+    verifiedBy?: string | null
+    verificationMethod?: string | null
+  }> {
+    return this.request(`/verification/audiobook/${id}/manual`, {
+      method: 'POST',
+      body: JSON.stringify({ action }),
+    })
+  }
+
+  async getVerificationJob(jobId: string): Promise<{
+    jobId: string
+    status: string
+    total: number
+    processed: number
+    verified: number
+    flagged: number
+    unverifiable: number
+    skipped: number
+    failed: number
+    error?: string | null
+  }> {
+    return this.request(`/verification/jobs/${jobId}`)
+  }
+
   // Discord integration helpers
   async getDiscordStatus(): Promise<{
     success: boolean

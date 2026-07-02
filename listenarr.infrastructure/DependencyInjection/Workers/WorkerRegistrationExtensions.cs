@@ -39,6 +39,8 @@ internal static class WorkerRegistrationExtensions
         AddProcessor<QueueMonitorProcessor, IQueueMonitorProcessor>(services);
         services.AddHostedService<QueueMonitorService>();
 
+        services.AddHostedService<Listenarr.Infrastructure.HostedServices.Verification.LibraryVerificationBackgroundService>();
+
         AddHostedProcessor<AutomaticSearchProcessor, IAutomaticSearchProcessor, AutomaticSearchService>(services);
         AddHostedProcessor<AuthorMonitoringProcessor, IAuthorMonitoringProcessor, AuthorMonitoringBackgroundService>(services);
         AddHostedProcessor<SeriesMonitoringProcessor, ISeriesMonitoringProcessor, SeriesMonitoringBackgroundService>(services);

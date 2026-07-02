@@ -8,6 +8,47 @@ FROM golang:1.26.2-alpine AS gosu-builder
 ARG GOSU_VERSION=1.19
 RUN CGO_ENABLED=0 go install github.com/tianon/gosu@${GOSU_VERSION}
 
+# Build whisper.cpp from source for local speech-to-text (ADR-0001 audio
+# verification). Deliberately NOT the FFmpeg runtime-download pattern: upstream
+# publishes no prebuilt Linux binaries (v1.8.6 ships only Windows zips and an
+# Apple xcframework), and whisper.cpp is MIT, so baking it in at build time is
+# both possible and simpler. Source build is arch-agnostic (amd64/arm64).
+# GGML_NATIVE=OFF keeps the binary portable across CPUs of the same arch;
+# GGML_OPENMP=OFF avoids a libgomp runtime dep the aspnet base image lacks.
+# Instruction-set flags are pinned explicitly (x86-64-v3 baseline: AVX/AVX2/
+# FMA/F16C) rather than left to ggml's defaults, so the binary's requirements
+# are visible here. A build with these ON dies with SIGILL (exit 132) on hosts
+# capped at SSE4.2 (e.g. QEMU's default or x86-64-v2 CPU models) — flip them
+# OFF if the image must run on such a host. AVX-512 stays OFF.
+FROM debian:trixie-slim AS whisper-builder
+ARG WHISPER_CPP_VERSION=v1.8.6
+ARG WHISPER_MODEL=base.en
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends git build-essential cmake ca-certificates curl \
+	&& rm -rf /var/lib/apt/lists/*
+RUN git clone --depth 1 --branch ${WHISPER_CPP_VERSION} https://github.com/ggml-org/whisper.cpp /whisper \
+	&& cmake -S /whisper -B /whisper/build \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DBUILD_SHARED_LIBS=OFF \
+		-DGGML_NATIVE=OFF \
+		-DGGML_OPENMP=OFF \
+		-DGGML_AVX=ON \
+		-DGGML_AVX2=ON \
+		-DGGML_AVX512=OFF \
+		-DGGML_AVX_VNNI=OFF \
+		-DGGML_FMA=ON \
+		-DGGML_F16C=ON \
+		-DGGML_BMI2=ON \
+		-DWHISPER_BUILD_TESTS=OFF \
+		-DWHISPER_BUILD_SERVER=OFF \
+	&& cmake --build /whisper/build --config Release -j"$(nproc)" --target whisper-cli \
+	&& /whisper/models/download-ggml-model.sh ${WHISPER_MODEL} \
+	&& printf '%s\n' \
+		"whisper.cpp ${WHISPER_CPP_VERSION} (MIT License) - https://github.com/ggml-org/whisper.cpp" \
+		"ggml-${WHISPER_MODEL}.bin model from https://huggingface.co/ggerganov/whisper.cpp (MIT, derived from OpenAI Whisper weights)" \
+		"See LICENSE-whisper.txt alongside this notice for the full license text." \
+		> /whisper/NOTICE-whisper.txt
+
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS base
 WORKDIR /app
 EXPOSE 4545
@@ -50,6 +91,16 @@ RUN chmod +x /usr/local/bin/gosu
 RUN sh /tmp/listenarr-runtime/create-listenarr-user.sh
 
 COPY --from=build /app/publish .
+
+# Bundled whisper.cpp CLI + model for audio verification (ADR-0001).
+# WhisperService resolves these paths via ToolsRootPath (/app/tools/whisper)
+# unless overridden with LISTENARR_WHISPER_BIN / LISTENARR_WHISPER_MODEL.
+ARG WHISPER_MODEL=base.en
+COPY --from=whisper-builder /whisper/build/bin/whisper-cli /app/tools/whisper/whisper-cli
+COPY --from=whisper-builder /whisper/models/ggml-${WHISPER_MODEL}.bin /app/tools/whisper/ggml-${WHISPER_MODEL}.bin
+COPY --from=whisper-builder /whisper/LICENSE /app/tools/whisper/LICENSE-whisper.txt
+COPY --from=whisper-builder /whisper/NOTICE-whisper.txt /app/tools/whisper/NOTICE-whisper.txt
+RUN chmod +x /app/tools/whisper/whisper-cli
 
 # Install Node.js only for the Discord bot runtime. npm is used for the install
 # and then removed from the final filesystem; the bot only needs node.
