@@ -75,6 +75,7 @@ internal static class LibraryRegistrationExtensions
         services.AddScoped<ISeriesMonitoringService, SeriesMonitoringService>();
         services.AddScoped<IFileNamingService, FileNamingService>();
         services.AddScoped<IRenameService, RenameService>();
+        services.AddScoped<IAudiobookFileTransferService, AudiobookFileTransferService>();
         services.AddScoped<IQualityProfileService, QualityProfileService>();
         return services;
     }
