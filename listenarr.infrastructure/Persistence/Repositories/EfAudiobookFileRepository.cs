@@ -64,6 +64,40 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
             await _db.SaveChangesAsync(ct);
         }
 
+        public async Task ReassignAsync(int fileId, int newAudiobookId, string? newPath, CancellationToken ct = default)
+        {
+            // Targeted column update via a detached stub: Update(entity) on rows
+            // loaded with their navigation graphs trips EF's identity map on the
+            // second file of a bulk transfer ("instance with the same key is
+            // already being tracked"). Marking only the reassigned columns
+            // modified loads and tracks no graphs. (ExecuteUpdate would also
+            // work, but isn't supported by the InMemory test provider.)
+            var tracked = _db.AudiobookFiles.Local.FirstOrDefault(f => f.Id == fileId);
+            if (tracked != null)
+            {
+                _db.Entry(tracked).State = EntityState.Detached;
+            }
+
+            var stub = new AudiobookFile { Id = fileId, AudiobookId = newAudiobookId, Path = newPath };
+            var entry = _db.Entry(stub);
+            entry.Property(f => f.AudiobookId).IsModified = true;
+            if (newPath != null)
+            {
+                entry.Property(f => f.Path).IsModified = true;
+            }
+
+            try
+            {
+                await _db.SaveChangesAsync(ct);
+            }
+            finally
+            {
+                // Always detach: a failed save (e.g. unique-key collision) must not
+                // leave a dirty stub behind for an unrelated later SaveChanges.
+                entry.State = EntityState.Detached;
+            }
+        }
+
         public async Task DeleteByAudiobookIdAsync(int audiobookId, CancellationToken ct = default)
         {
             var files = await _db.AudiobookFiles.Where(f => f.AudiobookId == audiobookId).ToListAsync(ct);
