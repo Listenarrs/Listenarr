@@ -4049,6 +4049,19 @@ defineExpose({
   align-items: center;
   gap: 0.25rem;
   margin-top: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  margin-left: 0.25rem;
+  background-color: rgba(46, 204, 113, 0.2);
+  border: 1px solid rgba(46, 204, 113, 0.4);
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 500;
+  color: #2ecc71;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
 
 .verification-badge.verification-neutral,
 .verification-poster-flag.verification-neutral {
