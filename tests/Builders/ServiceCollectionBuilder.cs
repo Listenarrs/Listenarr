@@ -204,6 +204,7 @@ namespace Listenarr.Tests.Builders
             services.AddSingleton<LibraryTransferFilesWorkflow>();
             services.AddSingleton<LibraryFileDeleteWorkflow>();
             services.AddSingleton<LibrarySplitPreviewWorkflow>();
+            services.AddSingleton<LibraryDuplicatesWorkflow>();
             services.AddSingleton<SearchResponseMapper>();
             services.AddSingleton<ImagePlaceholderResolver>();
             services.AddSingleton<IndexerTestWorkflow>();

@@ -43,6 +43,7 @@ namespace Listenarr.Api.Features.Library
         private readonly LibraryTransferFilesWorkflow _transferFilesWorkflow;
         private readonly LibraryFileDeleteWorkflow _fileDeleteWorkflow;
         private readonly LibrarySplitPreviewWorkflow _splitPreviewWorkflow;
+        private readonly LibraryDuplicatesWorkflow _duplicatesWorkflow;
         /// <summary>Initializes the library transport façade.</summary>
         public LibraryController(
             ILibraryListService libraryListService,
@@ -61,7 +62,8 @@ namespace Listenarr.Api.Features.Library
             LibraryRenameWorkflow renameWorkflow,
             LibraryTransferFilesWorkflow transferFilesWorkflow,
             LibraryFileDeleteWorkflow fileDeleteWorkflow,
-            LibrarySplitPreviewWorkflow splitPreviewWorkflow)
+            LibrarySplitPreviewWorkflow splitPreviewWorkflow,
+            LibraryDuplicatesWorkflow duplicatesWorkflow)
         {
             _libraryListService = libraryListService;
             _addWorkflow = addWorkflow;
@@ -80,6 +82,20 @@ namespace Listenarr.Api.Features.Library
             _transferFilesWorkflow = transferFilesWorkflow;
             _fileDeleteWorkflow = fileDeleteWorkflow;
             _splitPreviewWorkflow = splitPreviewWorkflow;
+            _duplicatesWorkflow = duplicatesWorkflow;
+        }
+
+        /// <summary>
+        /// Read-only duplicate sweep: duplicate records (same ASIN, or same
+        /// normalized title+author without a conflicting ASIN/edition signal)
+        /// and records holding duplicate copies of their own audio (same file
+        /// set under two filename schemes).
+        /// </summary>
+        /// <param name="ct">Cancellation token bound to the request.</param>
+        [HttpGet("duplicates")]
+        public async Task<IActionResult> GetDuplicates(CancellationToken ct)
+        {
+            return await _duplicatesWorkflow.GetDuplicatesAsync(ct);
         }
 
         /// <summary>

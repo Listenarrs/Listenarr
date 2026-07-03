@@ -1109,3 +1109,35 @@ export interface RenameResult {
   error?: string
   renamedFiles: FileRenameResultItem[]
 }
+
+/** One book inside a duplicate-record group from GET /library/duplicates. */
+export interface DuplicateBookSummary {
+  id: number
+  title: string | null
+  subtitle?: string | null
+  publishYear?: string | null
+  asin?: string | null
+  fileCount: number
+  fileSize: number
+  monitored?: boolean
+}
+
+export interface DuplicateGroup {
+  key: string
+  reason: 'asin' | 'title-author'
+  books: DuplicateBookSummary[]
+  suggestedKeeperId: number
+}
+
+/** A record likely holding the same audio twice (two filename schemes). */
+export interface DuplicateCopyBook {
+  id: number
+  title: string | null
+  clusterCount: number
+  fileCount: number
+}
+
+export interface LibraryDuplicatesResponse {
+  duplicateGroups: DuplicateGroup[]
+  duplicateCopyBooks: DuplicateCopyBook[]
+}

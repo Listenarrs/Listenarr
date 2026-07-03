@@ -60,6 +60,7 @@ import type {
   RenamePreview,
   RenameOperation,
   RenameResult,
+  LibraryDuplicatesResponse,
 } from '@/types'
 import { getStartupConfigCached, resetCache as resetStartupConfigCache } from './startupConfigCache'
 import { sessionTokenManager } from '@/utils/sessionToken'
@@ -1288,6 +1289,10 @@ class ApiService {
     return this.request(`/library/${audiobookId}/files/${fileId}${suffix}`, {
       method: 'DELETE',
     })
+  }
+
+  async getLibraryDuplicates(): Promise<LibraryDuplicatesResponse> {
+    return this.request<LibraryDuplicatesResponse>(`/library/duplicates`)
   }
 
   async removeFromLibrary(
