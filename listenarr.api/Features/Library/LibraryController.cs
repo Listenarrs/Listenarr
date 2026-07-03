@@ -40,6 +40,10 @@ namespace Listenarr.Api.Features.Library
         private readonly LibraryPreviewPathWorkflow _previewPathWorkflow;
         private readonly LibraryQueryWorkflow _queryWorkflow;
         private readonly LibraryRenameWorkflow _renameWorkflow;
+        private readonly LibraryTransferFilesWorkflow _transferFilesWorkflow;
+        private readonly LibraryFileDeleteWorkflow _fileDeleteWorkflow;
+        private readonly LibrarySplitPreviewWorkflow _splitPreviewWorkflow;
+        private readonly LibraryDuplicatesWorkflow _duplicatesWorkflow;
         /// <summary>Initializes the library transport façade.</summary>
         public LibraryController(
             ILibraryListService libraryListService,
@@ -55,7 +59,11 @@ namespace Listenarr.Api.Features.Library
             LibraryIdentifierWorkflow identifierWorkflow,
             LibraryPreviewPathWorkflow previewPathWorkflow,
             LibraryQueryWorkflow queryWorkflow,
-            LibraryRenameWorkflow renameWorkflow)
+            LibraryRenameWorkflow renameWorkflow,
+            LibraryTransferFilesWorkflow transferFilesWorkflow,
+            LibraryFileDeleteWorkflow fileDeleteWorkflow,
+            LibrarySplitPreviewWorkflow splitPreviewWorkflow,
+            LibraryDuplicatesWorkflow duplicatesWorkflow)
         {
             _libraryListService = libraryListService;
             _addWorkflow = addWorkflow;
@@ -71,6 +79,66 @@ namespace Listenarr.Api.Features.Library
             _previewPathWorkflow = previewPathWorkflow;
             _queryWorkflow = queryWorkflow;
             _renameWorkflow = renameWorkflow;
+            _transferFilesWorkflow = transferFilesWorkflow;
+            _fileDeleteWorkflow = fileDeleteWorkflow;
+            _splitPreviewWorkflow = splitPreviewWorkflow;
+            _duplicatesWorkflow = duplicatesWorkflow;
+        }
+
+        /// <summary>
+        /// Read-only duplicate sweep: duplicate records (same ASIN, or same
+        /// normalized title+author without a conflicting ASIN/edition signal)
+        /// and records holding duplicate copies of their own audio (same file
+        /// set under two filename schemes).
+        /// </summary>
+        /// <param name="ct">Cancellation token bound to the request.</param>
+        [HttpGet("duplicates")]
+        public async Task<IActionResult> GetDuplicates(CancellationToken ct)
+        {
+            return await _duplicatesWorkflow.GetDuplicatesAsync(ct);
+        }
+
+        /// <summary>
+        /// Preview for the "Split collection" workflow: cluster this record's
+        /// files into per-book groups (subdirectory first, then embedded tag,
+        /// then filename stem) and suggest an existing library record for each
+        /// group. Read-only — applying is a sequence of file transfers/deletes
+        /// driven by the client.
+        /// </summary>
+        /// <param name="id">Audiobook whose files should be clustered.</param>
+        /// <param name="ct">Cancellation token bound to the request.</param>
+        [HttpGet("{id}/split/preview")]
+        public async Task<IActionResult> GetSplitPreview(int id, CancellationToken ct)
+        {
+            return await _splitPreviewWorkflow.PreviewAsync(id, ct);
+        }
+
+        /// <summary>
+        /// Delete a single tracked file from an audiobook. Optionally also remove the file from disk.
+        /// </summary>
+        /// <param name="id">Owning audiobook ID.</param>
+        /// <param name="fileId">AudiobookFile row ID to delete.</param>
+        /// <param name="deleteFromDisk">When true, attempt to delete the file from disk too. Disk-delete failures surface as warnings; the DB row is still removed.</param>
+        /// <param name="ct">Cancellation token bound to the request.</param>
+        [HttpDelete("{id}/files/{fileId}")]
+        public async Task<IActionResult> DeleteAudiobookFile(int id, int fileId, [FromQuery] bool deleteFromDisk = false, CancellationToken ct = default)
+        {
+            return await _fileDeleteWorkflow.DeleteFileAsync(id, fileId, deleteFromDisk, ct);
+        }
+
+        /// <summary>
+        /// Move audio files from this audiobook to another existing library record.
+        /// DB ownership is reassigned always; the physical file moves into the
+        /// target's folder best-effort (failures leave it in place with a warning).
+        /// Null/empty <see cref="TransferFilesRequest.FileIds"/> transfers every file.
+        /// </summary>
+        /// <param name="id">Source audiobook ID.</param>
+        /// <param name="request">Target audiobook and optional subset of file IDs to move.</param>
+        /// <param name="ct">Cancellation token bound to the request.</param>
+        [HttpPost("{id}/files/transfer")]
+        public async Task<IActionResult> TransferFiles(int id, [FromBody] TransferFilesRequest request, CancellationToken ct)
+        {
+            return await _transferFilesWorkflow.TransferAsync(id, request, ct);
         }
 
         /// <summary>

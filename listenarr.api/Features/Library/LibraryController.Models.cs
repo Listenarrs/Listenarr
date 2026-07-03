@@ -51,4 +51,12 @@ public partial class LibraryController
         public bool? MoveFiles { get; set; }
         public bool? DeleteEmptySource { get; set; }
     }
+
+    public class TransferFilesRequest
+    {
+        public int TargetAudiobookId { get; set; }
+
+        /// <summary>Files to move; null/empty transfers every file on the source.</summary>
+        public List<int>? FileIds { get; set; }
+    }
 }
