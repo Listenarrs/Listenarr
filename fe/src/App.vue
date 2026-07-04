@@ -2188,23 +2188,18 @@ these are not present, the Google Fonts import in `fe/index.html` will be used a
   flex-direction: column;
   padding-left: 36px;
   margin-bottom: 0.5rem;
-  /* collapse layout space when closed */
-  max-height: 0;
-  overflow: hidden;
-  /* Use transform-scale for smooth animation */
-  transform-origin: top;
-  transform: scaleY(0);
-  opacity: 0;
-  pointer-events: none;
-  transition:
-    max-height 220ms ease,
-    transform 160ms cubic-bezier(0.2, 0.9, 0.3, 1),
-    opacity 120ms ease;
+  /* Always expanded: sub-items stay visible and interactive so they highlight on their own
+     hover, with no need to hover the parent top node first. */
+  max-height: none;
+  overflow: visible;
+  transform: none;
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .sidebar .nav-sub.open {
-  max-height: 400px; /* large enough to contain items */
-  transform: scaleY(1);
+  max-height: none;
+  transform: none;
   opacity: 1;
   pointer-events: auto;
 }
@@ -2233,6 +2228,16 @@ these are not present, the Google Fonts import in `fe/index.html` will be used a
   color: #ffffff;
   font-weight: 500;
   border-left: 3px solid #2196f3; /* Highlighted border for active */
+}
+
+/* Hover / keyboard-focus feedback: sub-items previously had no reactive state, so they never
+   highlighted on hover. Distinct from the muted default and the solid-blue active state. */
+.sidebar .nav-subitem:hover,
+.sidebar .nav-subitem:focus-visible {
+  color: #ffffff;
+  border-left-color: rgba(33, 150, 243, 0.55);
+  background: rgba(255, 255, 255, 0.04);
+  outline: none;
 }
 
 .inline-spinner {
