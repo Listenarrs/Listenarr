@@ -64,6 +64,7 @@ internal static class MetadataRegistrationExtensions
                 AutomaticDecompression = System.Net.DecompressionMethods.All
             });
         services.AddSingleton<IImageCacheService, ImageCacheService>();
+        services.AddSingleton<Listenarr.Application.Audiobooks.Contracts.ICoverThumbnailService, Listenarr.Infrastructure.Images.Thumbnails.CoverThumbnailService>();
         return services;
     }
 }

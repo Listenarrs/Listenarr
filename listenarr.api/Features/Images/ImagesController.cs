@@ -41,6 +41,7 @@ namespace Listenarr.Api.Features.Images
         private readonly ImageCandidateLookupWorkflow _imageCandidateLookupWorkflow;
         private readonly string _effectiveContentRootPath;
         private readonly IFileSystem _fileSystem;
+        private readonly ICoverThumbnailService? _coverThumbnailService;
 
         [ActivatorUtilitiesConstructor]
         public ImagesController(
@@ -51,7 +52,8 @@ namespace Listenarr.Api.Features.Images
             IAudiobookRepository audiobookRepository,
             ILogger<ImagesController> logger,
             IApplicationPathService applicationPathService,
-            IFileSystem fileSystem)
+            IFileSystem fileSystem,
+            ICoverThumbnailService coverThumbnailService)
             : this(
                 imageCacheService,
                 audiobookMetadataService,
@@ -62,7 +64,8 @@ namespace Listenarr.Api.Features.Images
                 logger,
                 applicationPathService,
                 fileSystem,
-                placeholderResolver: null)
+                placeholderResolver: null,
+                coverThumbnailService: coverThumbnailService)
         {
         }
 
@@ -76,8 +79,10 @@ namespace Listenarr.Api.Features.Images
             ILogger<ImagesController> logger,
             IApplicationPathService applicationPathService,
             IFileSystem fileSystem,
-            ImagePlaceholderResolver? placeholderResolver = null)
+            ImagePlaceholderResolver? placeholderResolver = null,
+            ICoverThumbnailService? coverThumbnailService = null)
         {
+            _coverThumbnailService = coverThumbnailService;
             _imageCacheService = imageCacheService;
             _audiobookMetadataService = audiobookMetadataService;
             _audibleService = audibleService;
@@ -126,6 +131,9 @@ namespace Listenarr.Api.Features.Images
                 _logger.LogWarning("Rejected invalid identifier: {Identifier}", LogRedaction.SanitizeText(identifier));
                 return BadRequest("Invalid identifier");
             }
+
+            // Optional thumbnail size (allow-listed server-side; unknown/absent => original).
+            var size = Request.Query["size"].ToString();
 
             // Check for url parameter to download on demand
             var url = Request.Query["url"].ToString();
@@ -264,7 +272,20 @@ namespace Listenarr.Api.Features.Images
                         notFoundMessage: "Image file not found");
                 }
 
-                return _imageResponseBuilder.CreateCachedImageResult(Response.Headers, identifier!, relativePath, fullPath);
+                // If a known thumbnail size was requested, serve a downscaled variant instead of the
+                // full-resolution original. Falls back to the original when the size is unknown or
+                // generation fails, so behavior is unchanged for callers that omit ?size=.
+                var serveFullPath = fullPath;
+                if (!string.IsNullOrWhiteSpace(size) && _coverThumbnailService is not null)
+                {
+                    var thumbPath = await _coverThumbnailService.GetOrCreateThumbnailAsync(fullPath, size, HttpContext.RequestAborted);
+                    if (!string.IsNullOrWhiteSpace(thumbPath) && _fileSystem.FileExists(thumbPath))
+                    {
+                        serveFullPath = thumbPath;
+                    }
+                }
+
+                return _imageResponseBuilder.CreateCachedImageResult(Response.Headers, identifier!, relativePath, serveFullPath);
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
