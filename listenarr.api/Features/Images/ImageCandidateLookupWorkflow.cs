@@ -337,9 +337,15 @@ namespace Listenarr.Api.Features.Images
                                     }
                                     else
                                     {
-                                        // Try dynamic access
-                                        dynamic env = metadataEnvelope;
-                                        object? mdObj = env.metadata;
+                                        // Safe reflection instead of `dynamic env.metadata`: the dynamic
+                                        // access throws RuntimeBinderException when the envelope has no
+                                        // `metadata` property, which turned every uncached cover into an
+                                        // uncacheable 500 (re-fetched on every grid render pass). Reflection
+                                        // returns null instead, letting the caller fall through to the
+                                        // cacheable placeholder path.
+                                        var metaProp = metadataEnvelope.GetType().GetProperty("metadata")
+                                            ?? metadataEnvelope.GetType().GetProperty("Metadata");
+                                        object? mdObj = metaProp?.GetValue(metadataEnvelope);
 
                                         // If it's already the Audible type, use it
                                         if (mdObj is AudibleBookResponse mdMeta)
