@@ -1457,8 +1457,16 @@ class ApiService {
       logger.debug('[ApiService] getImageUrl authors-detect error', e)
     }
 
-    // Convert other relative URLs to absolute (no query-string auth tokens).
-    return `${getApiImageOrigin()}${imageUrl}`
+    // Convert other relative URLs to absolute (no query-string auth tokens). Library book covers
+    // are stored as already-built `/api/.../images/{id}` paths, which match none of the
+    // buildApiImageUrl branches above — so append the thumbnail size here too, otherwise the grid
+    // requests full-size originals.
+    const absolute = `${getApiImageOrigin()}${imageUrl}`
+    if (opts?.size && /\/images\//.test(imageUrl)) {
+      const separator = absolute.includes('?') ? '&' : '?'
+      return `${absolute}${separator}size=${encodeURIComponent(opts.size)}`
+    }
+    return absolute
   }
 
   /**
