@@ -337,12 +337,15 @@ namespace Listenarr.Api.Features.Images
                                     }
                                     else
                                     {
-                                        // Safe reflection instead of `dynamic env.metadata`: the dynamic
-                                        // access throws RuntimeBinderException when the envelope has no
-                                        // `metadata` property, which turned every uncached cover into an
-                                        // uncacheable 500 (re-fetched on every grid render pass). Reflection
-                                        // returns null instead, letting the caller fall through to the
-                                        // cacheable placeholder path.
+                                        // Safe reflection instead of `dynamic env.metadata`.
+                                        // GetMetadataAsync returns an *internal* anonymous type
+                                        // (`new { metadata = ... }`) declared in another assembly, so the
+                                        // dynamic binder here sees it as `object` and throws
+                                        // RuntimeBinderException ("'object' does not contain a definition
+                                        // for 'metadata'") — an uncacheable 500 that grid views then
+                                        // re-fetch on every render pass. Reflection reads the public
+                                        // property across the assembly boundary; a genuinely absent member
+                                        // yields null and falls through to the cacheable placeholder.
                                         var metaProp = metadataEnvelope.GetType().GetProperty("metadata")
                                             ?? metadataEnvelope.GetType().GetProperty("Metadata");
                                         object? mdObj = metaProp?.GetValue(metadataEnvelope);

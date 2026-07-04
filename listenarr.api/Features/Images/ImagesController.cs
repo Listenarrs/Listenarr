@@ -53,7 +53,9 @@ namespace Listenarr.Api.Features.Images
             ILogger<ImagesController> logger,
             IApplicationPathService applicationPathService,
             IFileSystem fileSystem,
-            ICoverThumbnailService coverThumbnailService)
+            // Optional so existing 8-arg test constructions still compile; DI injects the
+            // registered service in production (ActivatorUtilities resolves it over the default).
+            ICoverThumbnailService? coverThumbnailService = null)
             : this(
                 imageCacheService,
                 audiobookMetadataService,
