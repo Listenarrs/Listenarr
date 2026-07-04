@@ -239,7 +239,7 @@
                 <img
                   class="audiobook-poster author-cover"
                   :class="{ loaded: authorImageLoaded[collection.name] }"
-                  :src="getProtectedImageSrc(getAuthorImageUrl(collection), getPlaceholderUrl())"
+                  :src="getProtectedImageSrc(getAuthorImageUrl(collection), getPlaceholderUrl(), { size: 'grid' })"
                   :alt="collection.name"
                   loading="lazy"
                   decoding="async"
@@ -278,7 +278,7 @@
                   <template v-if="collection.coverUrls.length === 1">
                     <img
                       class="series-single-bg"
-                      :src="getProtectedImageSrc(collection.coverUrls[0], getPlaceholderUrl())"
+                      :src="getProtectedImageSrc(collection.coverUrls[0], getPlaceholderUrl(), { size: 'grid' })"
                       alt=""
                       loading="lazy"
                       decoding="async"
@@ -300,7 +300,7 @@
                         <PhBookOpen class="audiobook-placeholder-icon" />
                       </div>
                       <img
-                        :src="getProtectedImageSrc(collection.coverUrls[0], getPlaceholderUrl())"
+                        :src="getProtectedImageSrc(collection.coverUrls[0], getPlaceholderUrl(), { size: 'grid' })"
                         :alt="`${collection.name} Cover`"
                         class="series-cover-image centered cover-loading-image"
                         :class="{
@@ -343,7 +343,7 @@
                         <PhBookOpen class="audiobook-placeholder-icon" />
                       </div>
                       <img
-                        :src="getProtectedImageSrc(coverUrl, getPlaceholderUrl())"
+                        :src="getProtectedImageSrc(coverUrl, getPlaceholderUrl(), { size: 'grid' })"
                         :alt="`${collection.name} Cover`"
                         class="series-cover-image cover-loading-image"
                         :class="{
@@ -447,7 +447,7 @@
                   <PhBookOpen class="audiobook-placeholder-icon" />
                 </div>
                 <img
-                  :src="getProtectedImageSrc(getBookImageUrl(audiobook), getPlaceholderUrl())"
+                  :src="getProtectedImageSrc(getBookImageUrl(audiobook), getPlaceholderUrl(), { size: 'grid' })"
                   :alt="audiobook.title"
                   class="audiobook-poster cover-loading-image"
                   :class="{ loaded: isImageLoaded(getBookImageKey(audiobook)) }"
@@ -573,7 +573,7 @@
               <img
                 class="list-thumb cover-loading-image"
                 :class="{ loaded: isImageLoaded(getBookImageKey(audiobook)) }"
-                :src="getProtectedImageSrc(getBookImageUrl(audiobook), getPlaceholderUrl())"
+                :src="getProtectedImageSrc(getBookImageUrl(audiobook), getPlaceholderUrl(), { size: 'grid' })"
                 :alt="audiobook.title"
                 loading="lazy"
                 decoding="async"
@@ -1871,18 +1871,12 @@ async function initializeVirtualScroller() {
     await nextTick()
   }
 
-  if (!stopVisibleRangeWatch) {
-    stopVisibleRangeWatch = watch(
-      () => visibleRange.value,
-      async () => {
-        await nextTick()
-        if (syncMeasuredRowHeight()) {
-          updateVisibleRange()
-          await nextTick()
-        }
-      },
-    )
-  }
+  // Intentionally NO watcher on visibleRange here. Re-measuring row height inside a watcher
+  // that then calls updateVisibleRange() — which writes visibleRange — forms an infinite
+  // measure->update loop whenever card heights are not perfectly uniform (e.g. a 3px status
+  // border tripping the >1px guard). That loop is the root cause of the /books freeze and the
+  // memory growth over time. Row height is measured on mount, resize, view-mode change and the
+  // details toggle instead; the fixed-aspect (1/1) covers keep it stable across the window.
 
   if (!stopViewModeWatch) {
     stopViewModeWatch = watch(viewMode, async () => {
