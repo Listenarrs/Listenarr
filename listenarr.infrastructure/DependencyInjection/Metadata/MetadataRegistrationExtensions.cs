@@ -65,6 +65,7 @@ internal static class MetadataRegistrationExtensions
             });
         services.AddSingleton<IImageCacheService, ImageCacheService>();
         services.AddSingleton<Listenarr.Application.Audiobooks.Contracts.ICoverThumbnailService, Listenarr.Infrastructure.Images.Thumbnails.CoverThumbnailService>();
+        services.AddSingleton<Listenarr.Application.Audiobooks.Contracts.IImageCacheStore, Listenarr.Infrastructure.Images.Cache.ImageCacheStore>();
         return services;
     }
 }
