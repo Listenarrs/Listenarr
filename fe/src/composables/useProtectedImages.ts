@@ -27,9 +27,13 @@ export function isLikelyBackendImageUrl(url: string): boolean {
 }
 
 export function useProtectedImages() {
-  function getProtectedImageSrc(rawImageUrl: string | undefined, fallback = ''): string {
+  function getProtectedImageSrc(
+    rawImageUrl: string | undefined,
+    fallback = '',
+    opts?: { size?: 'grid' | 'grid2x' },
+  ): string {
     if (!rawImageUrl) return fallback
-    return apiService.getImageUrl(rawImageUrl) || fallback
+    return apiService.getImageUrl(rawImageUrl, opts) || fallback
   }
 
   return {

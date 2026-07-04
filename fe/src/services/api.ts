@@ -77,13 +77,15 @@ import {
 
 const getApiImageOrigin = (): string => (import.meta.env.DEV ? '' : API_ORIGIN)
 const getApiImagesBaseUrl = (): string => `${getApiImageOrigin()}${API_BASE_PATH}/images`
-const buildApiImageUrl = (identifier: string, sourceUrl?: string): string => {
+const buildApiImageUrl = (identifier: string, sourceUrl?: string, size?: string): string => {
   let url = `${getApiImagesBaseUrl()}/${encodeURIComponent(identifier)}`
-  if (sourceUrl) {
-    const params = new URLSearchParams()
-    params.append('url', sourceUrl)
-    url += `?${params.toString()}`
-  }
+  const params = new URLSearchParams()
+  if (sourceUrl) params.append('url', sourceUrl)
+  // Request a downscaled server-side thumbnail (allow-listed on the backend) so grid/list
+  // views load small covers instead of full-resolution originals.
+  if (size) params.append('size', size)
+  const query = params.toString()
+  if (query) url += `?${query}`
   return url
 }
 const ABSOLUTE_URL_REGEX = /^https?:\/\//i
@@ -1364,7 +1366,7 @@ class ApiService {
   }
 
   // Helper to convert relative image URLs to absolute
-  getImageUrl(imageUrl: string | undefined): string {
+  getImageUrl(imageUrl: string | undefined, opts?: { size?: 'grid' | 'grid2x' }): string {
     if (!imageUrl) return ''
 
     // If already absolute URL, return as is
@@ -1407,7 +1409,7 @@ class ApiService {
             }
           }
           if (asinMatch && asinMatch[1]) {
-            return buildApiImageUrl(asinMatch[1], imageUrl)
+            return buildApiImageUrl(asinMatch[1], imageUrl, opts?.size)
           }
 
           // If we couldn't extract ASIN, try to parse filename from path and
@@ -1417,7 +1419,7 @@ class ApiService {
             const fname = pathname.split('/').pop() || ''
             const base = fname.replace(/\.[^.]+$/, '')
             if (base && base.length >= 10 && base.length <= 12) {
-              return buildApiImageUrl(base, imageUrl)
+              return buildApiImageUrl(base, imageUrl, opts?.size)
             }
           } catch {}
         }
@@ -1435,7 +1437,7 @@ class ApiService {
         // Extract filename (with extension) and strip extension to use as identifier
         const filename = libMatch[1]
         const identifier = filename.replace(/\.[^.]+$/, '')
-        return buildApiImageUrl(identifier)
+        return buildApiImageUrl(identifier, undefined, opts?.size)
       }
     } catch (e) {
       // fall back to default behavior below on any error
@@ -1449,7 +1451,7 @@ class ApiService {
       if (authorMatch && authorMatch[1]) {
         const filename = authorMatch[1]
         const identifier = filename.replace(/\.[^.]+$/, '')
-        return buildApiImageUrl(identifier)
+        return buildApiImageUrl(identifier, undefined, opts?.size)
       }
     } catch (e) {
       logger.debug('[ApiService] getImageUrl authors-detect error', e)
