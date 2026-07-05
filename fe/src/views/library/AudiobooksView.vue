@@ -787,7 +787,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onActivated, onDeactivated, onUnmounted, watch, nextTick, reactive } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, onUnmounted, watch, nextTick, reactive } from 'vue'
 import {
   PhGridFour,
   PhList,
@@ -1687,10 +1687,6 @@ watch(showItemDetails, async () => {
 watch(
   () => route.query.group,
   (g) => {
-    // KeepAlive guard: while this view is cached but NOT the active route (we've navigated into a
-    // detail), route.query.group goes undefined and this watcher would router.replace us back to the
-    // list. Only run the group-normalization on the actual list route.
-    if (route.name !== 'audiobooks' && route.name !== 'home') return
     try {
       const mode = normalizeGroupBy(g) ?? 'books'
       // If the route changed the group, use setGroupBy so we run the same DOM/update/observer logic
@@ -1872,8 +1868,6 @@ function getAudiobookStatus(audiobook: Audiobook): AudiobookStatus {
 // Native loading="lazy" handles all image loading automatically - no custom code needed
 
 function handleClickOutside(event: Event) {
-  // The document listener persists while this view is kept-alive but deactivated; ignore then.
-  if (!isViewActive) return
   const target = event.target as HTMLElement
   if (!target.closest('.group-dropdown')) {
     showGroupMenu.value = false
@@ -1950,12 +1944,6 @@ async function initializeVirtualScroller() {
 // Preserve/restore the BOOKS inner-container scroll position across navigation (this view remounts;
 // the Pinia store keeps the data). Authors/series scroll the window and are restored by the router's
 // scrollBehavior instead, so this only matters for the books scrollContainer.
-// Named so <KeepAlive :include="['AudiobooksView']"> in App.vue caches this view, so authors/series
-// (a non-virtualized grouped view) don't re-render every cover on back-out.
-defineOptions({ name: 'AudiobooksView' })
-let isViewActive = true
-let hasActivatedOnce = false
-
 const SCROLL_POS_KEY = 'listenarr.audiobooks.scrollTop.'
 
 function saveScrollPosition() {
@@ -1987,10 +1975,15 @@ async function restoreScrollPosition() {
 
 onMounted(async () => {
   document.addEventListener('click', handleClickOutside)
+
+  // On a return visit the Pinia store still holds the library, so render instantly from cache and
+  // refresh in the background (silent = no loading flash). Only the first load blocks on the fetch.
+  const hadData = libraryStore.audiobooks.length > 0
+  const libraryFetch = libraryStore.fetchLibrary({ silent: hadData })
   await Promise.all([
-    libraryStore.fetchLibrary(),
     configStore.loadApplicationSettings(),
     loadQualityProfiles(),
+    hadData ? Promise.resolve() : libraryFetch,
   ])
 
   // Load persisted view mode (if available) before layout calc
@@ -2016,23 +2009,8 @@ onMounted(async () => {
   }
 })
 
-onActivated(() => {
-  isViewActive = true
-  // onActivated also fires right after the initial onMounted; skip that first pass.
-  if (!hasActivatedOnce) {
-    hasActivatedOnce = true
-    return
-  }
-  // Returning from a detail (kept alive, not remounted, so authors/series don't re-render): restore
-  // the books inner scroll and refresh quietly. Authors/series window scroll is restored by the
-  // router scrollBehavior.
-  void restoreScrollPosition()
-  void libraryStore.fetchLibrary({ silent: true })
-})
-
-onDeactivated(() => {
-  isViewActive = false
-  // Save before the view is cached so returning restores the position.
+onBeforeUnmount(() => {
+  // Save before the DOM is torn down so returning to this grouping restores the position.
   saveScrollPosition()
 })
 

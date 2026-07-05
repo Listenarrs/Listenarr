@@ -495,9 +495,9 @@
           <RouterView />
         </div>
         <RouterView v-else v-slot="{ Component }">
-          <KeepAlive :include="['AudiobooksView']" :max="1">
-            <component :is="Component" />
-          </KeepAlive>
+          <Transition name="page-fade">
+            <component :is="Component" :key="route.name as string" />
+          </Transition>
         </RouterView>
       </main>
     </div>
