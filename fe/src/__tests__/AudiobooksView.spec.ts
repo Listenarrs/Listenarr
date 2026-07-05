@@ -796,3 +796,229 @@ describe('AudiobooksView Grouping', () => {
     expect(wrapper.find('.series-bottom-placard').exists()).toBe(true)
   })
 })
+
+describe('AudiobooksView list-view virtual scroll', () => {
+  type ScrollVm = {
+    viewMode: 'grid' | 'list'
+    showItemDetails: boolean
+    measuredRowHeight: number | null
+    visibleRange: { start: number; end: number }
+    totalHeight: number
+    getRowHeight: () => number
+    updateVisibleRange: () => void
+    onScroll: () => void
+    sortKey: string
+    sortOrder: 'asc' | 'desc'
+  }
+
+  const ensureBrowserGlobals = () => {
+    if (
+      typeof (globalThis as unknown as { ResizeObserver?: unknown }).ResizeObserver === 'undefined'
+    ) {
+      ;(globalThis as unknown as Record<string, unknown>).ResizeObserver = class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      }
+    }
+    if (typeof (globalThis as unknown as { WebSocket?: unknown }).WebSocket === 'undefined') {
+      ;(globalThis as unknown as Record<string, unknown>).WebSocket = function () {
+        /* noop */
+      }
+    }
+  }
+
+  const mountListView = async (count: number) => {
+    ensureBrowserGlobals()
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', name: 'home', component: { template: '<div />' } },
+        { path: '/audiobooks', name: 'audiobooks', component: AudiobooksView },
+      ],
+    })
+    await router.push('/audiobooks')
+    await router.isReady().catch(() => {})
+
+    const store = useLibraryStore()
+    store.audiobooks = Array.from({ length: count }, (_, index) => ({
+      id: index + 1,
+      title: `Book ${index + 1}`,
+      authors: [`Author ${index % 5}`],
+      imageUrl: `cover${index + 1}.jpg`,
+      files: [],
+    })) as unknown as import('@/types').Audiobook[]
+    store.fetchLibrary = vi.fn(async () => undefined)
+
+    localStorage.setItem('listenarr.groupBy', 'books')
+    localStorage.setItem('listenarr.showItemDetails', 'false')
+
+    const wrapper = mount(AudiobooksView, {
+      global: {
+        plugins: [pinia, router],
+        stubs: [
+          'BulkEditModal',
+          'EditAudiobookModal',
+          'CustomFilterModal',
+          'FiltersDropdown',
+          'CustomSelect',
+        ],
+      },
+    })
+    await new Promise((r) => setTimeout(r, 0))
+
+    const vm = wrapper.vm as unknown as ScrollVm
+    vm.viewMode = 'list'
+    await new Promise((r) => setTimeout(r, 0))
+    return { wrapper, vm, store }
+  }
+
+  beforeEach(() => {
+    localStorage.clear()
+  })
+
+  it('uses a fixed list row height and ignores a stale grid measuredRowHeight (no oversized scroll area)', async () => {
+    const { vm } = await mountListView(50)
+
+    // Simulate an inflated grid measurement leaking into list view via the shared ref.
+    vm.measuredRowHeight = 240
+
+    expect(vm.viewMode).toBe('list')
+    // Must be the fixed list constant, not the leaked 240px grid measurement.
+    expect(vm.getRowHeight()).toBe(80)
+  })
+
+  it('uses a taller fixed row height when show-details is enabled', async () => {
+    const { vm } = await mountListView(10)
+
+    vm.showItemDetails = true
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(vm.getRowHeight()).toBe(120)
+  })
+
+  it('reserves space for the list header in totalHeight so the last row stays reachable', async () => {
+    const { vm } = await mountListView(50)
+
+    // n rows (80px) plus the always-present column header (40px). Without
+    // reserving the header height the last row sits below the scrollable area
+    // and cannot be fully scrolled into view.
+    expect(vm.totalHeight).toBe(80 * 50 + 40)
+  })
+
+  it('keeps the list scroll geometry stable when the sort order changes (sort-then-scroll)', async () => {
+    const { vm } = await mountListView(50)
+
+    // Simulate a tall row having been sampled, then the user re-sorts (e.g. Author
+    // Z->A). The reorder must not let that stale sample — or the reshuffle of which
+    // row renders first — change the fixed list row height or the scroll area; that
+    // interaction was what locked up the page on the next scroll.
+    vm.measuredRowHeight = 240
+    vm.sortKey = 'author-last'
+    vm.sortOrder = 'desc'
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(vm.sortOrder).toBe('desc')
+    expect(vm.getRowHeight()).toBe(80)
+    expect(vm.totalHeight).toBe(80 * 50 + 40)
+  })
+
+  it('does not reassign visibleRange when the computed range is unchanged', async () => {
+    const { vm } = await mountListView(50)
+
+    vm.updateVisibleRange()
+    const firstRange = vm.visibleRange
+    vm.updateVisibleRange()
+    const secondRange = vm.visibleRange
+
+    // Stable identity → no needless watcher fires / re-renders on every scroll tick.
+    expect(secondRange).toBe(firstRange)
+  })
+
+  it('coalesces rapid scroll events into a single animation frame', async () => {
+    const { vm } = await mountListView(50)
+
+    const rafCallbacks: FrameRequestCallback[] = []
+    const rafSpy = vi
+      .spyOn(globalThis, 'requestAnimationFrame')
+      .mockImplementation((cb: FrameRequestCallback) => {
+        rafCallbacks.push(cb)
+        return rafCallbacks.length
+      })
+
+    try {
+      vm.onScroll()
+      vm.onScroll()
+      vm.onScroll()
+      // Three scroll events, one scheduled frame.
+      expect(rafSpy).toHaveBeenCalledTimes(1)
+
+      // Flushing the frame allows the next scroll to schedule again.
+      rafCallbacks[0]?.(0)
+      vm.onScroll()
+      expect(rafSpy).toHaveBeenCalledTimes(2)
+    } finally {
+      rafSpy.mockRestore()
+    }
+  })
+
+  it('widens the visible slice to the rows scrolled into view', async () => {
+    const { wrapper, vm } = await mountListView(50)
+    const el = wrapper.find('.audiobooks-scroll-container').element as HTMLElement
+    // jsdom has no layout, so force the scroll geometry the math reads.
+    Object.defineProperty(el, 'clientHeight', { value: 800, configurable: true })
+    Object.defineProperty(el, 'scrollTop', { value: 800, configurable: true })
+
+    vm.updateVisibleRange()
+
+    // scrollTop 800 / 80px rows = row 10, ±BUFFER_ROWS(2), 10 viewport rows.
+    expect(vm.visibleRange).toEqual({ start: 8, end: 22 })
+  })
+
+  it('applies the new range only when the scheduled animation frame runs', async () => {
+    const { wrapper, vm } = await mountListView(50)
+    const el = wrapper.find('.audiobooks-scroll-container').element as HTMLElement
+    Object.defineProperty(el, 'clientHeight', { value: 800, configurable: true })
+    Object.defineProperty(el, 'scrollTop', { value: 800, configurable: true })
+
+    const frames: FrameRequestCallback[] = []
+    const rafSpy = vi
+      .spyOn(globalThis, 'requestAnimationFrame')
+      .mockImplementation((cb: FrameRequestCallback) => {
+        frames.push(cb)
+        return frames.length
+      })
+
+    try {
+      const before = { ...vm.visibleRange }
+      vm.onScroll()
+      // Deferred: nothing changes until the frame fires.
+      expect(vm.visibleRange).toEqual(before)
+
+      frames[0]?.(0)
+      expect(vm.visibleRange).toEqual({ start: 8, end: 22 })
+    } finally {
+      rafSpy.mockRestore()
+    }
+  })
+
+  it('cancels a pending scroll animation frame on unmount', async () => {
+    const { wrapper, vm } = await mountListView(50)
+
+    const rafSpy = vi
+      .spyOn(globalThis, 'requestAnimationFrame')
+      .mockImplementation(() => 123 as unknown as number)
+    const cancelSpy = vi.spyOn(globalThis, 'cancelAnimationFrame').mockImplementation(() => {})
+
+    try {
+      vm.onScroll() // schedules frame 123 (mock never runs it)
+      wrapper.unmount()
+      expect(cancelSpy).toHaveBeenCalledWith(123)
+    } finally {
+      rafSpy.mockRestore()
+      cancelSpy.mockRestore()
+    }
+  })
+})

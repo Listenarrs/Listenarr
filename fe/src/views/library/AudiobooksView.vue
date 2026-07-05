@@ -404,7 +404,7 @@
       v-else
       ref="scrollContainer"
       :class="['audiobooks-scroll-container', { 'has-selection': selectedCount > 0 }]"
-      @scroll="updateVisibleRange"
+      @scroll="onScroll"
     >
       <div class="audiobooks-scroll-spacer" :style="{ height: totalHeight + 'px' }">
         <div
@@ -543,6 +543,7 @@
             @keydown.enter="navigateToDetail(audiobook.id)"
             class="audiobook-list-item"
             :class="{
+              'show-details': showItemDetails,
               selected: libraryStore.isSelected(audiobook.id),
               'status-no-file': getAudiobookStatus(audiobook) === 'no-file',
               'status-quality-mismatch': getAudiobookStatus(audiobook) === 'quality-mismatch',
@@ -1630,6 +1631,8 @@ const hasRootFolderConfigured = computed(() => {
 const scrollContainer = ref<HTMLElement | null>(null)
 const ITEMS_PER_ROW = ref(4) // Will be recalculated for grid; list uses 1
 const LIST_ROW_HEIGHT = 80
+const LIST_ROW_HEIGHT_DETAILS = 120 // taller fixed row when "show details" is on (must match CSS)
+const LIST_HEADER_HEIGHT = 40 // fixed height of the list-view column header (must match CSS)
 const GRID_ROW_HEIGHT_FALLBACK = 220
 const GRID_DETAILS_EXTRA_HEIGHT = 64 // extra height for showing details under poster
 const GRID_GAP = 20
@@ -1702,26 +1705,31 @@ function toggleItemDetails() {
 }
 
 function getRowHeight() {
+  // List rows are a fixed height (enforced in CSS), so the scroll math is fully
+  // deterministic and never depends on a sampled height shared with grid view.
+  // Sampling a single variable-height row was what made the scroll area oversized.
+  if (viewMode.value === 'list') {
+    return showItemDetails.value ? LIST_ROW_HEIGHT_DETAILS : LIST_ROW_HEIGHT
+  }
+
+  // Grid cards are variable, so they are measured from the DOM where possible.
   if (measuredRowHeight.value && measuredRowHeight.value > 0) {
     return measuredRowHeight.value
   }
 
-  if (viewMode.value === 'grid') {
-    if (scrollContainer.value && ITEMS_PER_ROW.value > 0) {
-      const contentWidth = Math.max(0, scrollContainer.value.clientWidth - 40)
-      const cardWidth = Math.max(
-        0,
-        Math.floor((contentWidth - GRID_GAP * (ITEMS_PER_ROW.value - 1)) / ITEMS_PER_ROW.value),
-      )
+  if (scrollContainer.value && ITEMS_PER_ROW.value > 0) {
+    const contentWidth = Math.max(0, scrollContainer.value.clientWidth - 40)
+    const cardWidth = Math.max(
+      0,
+      Math.floor((contentWidth - GRID_GAP * (ITEMS_PER_ROW.value - 1)) / ITEMS_PER_ROW.value),
+    )
 
-      if (cardWidth > 0) {
-        return cardWidth + GRID_GAP + (showItemDetails.value ? GRID_DETAILS_EXTRA_HEIGHT : 0)
-      }
+    if (cardWidth > 0) {
+      return cardWidth + GRID_GAP + (showItemDetails.value ? GRID_DETAILS_EXTRA_HEIGHT : 0)
     }
-
-    return GRID_ROW_HEIGHT_FALLBACK + (showItemDetails.value ? GRID_DETAILS_EXTRA_HEIGHT : 0)
   }
-  return LIST_ROW_HEIGHT
+
+  return GRID_ROW_HEIGHT_FALLBACK + (showItemDetails.value ? GRID_DETAILS_EXTRA_HEIGHT : 0)
 }
 
 function syncMeasuredRowHeight() {
@@ -1777,7 +1785,25 @@ const updateVisibleRange = () => {
   const startIndex = Math.max(0, startRow * ITEMS_PER_ROW.value)
   const endIndex = Math.min(endRow * ITEMS_PER_ROW.value, audiobooks.value.length)
 
-  visibleRange.value = { start: startIndex, end: endIndex }
+  // Only publish a new range when it actually changes. Assigning a fresh object
+  // on every scroll tick needlessly re-fires the visibleRange watcher and forces
+  // re-renders, which (together with re-measuring) caused the scroll-time freeze.
+  const current = visibleRange.value
+  if (current.start !== startIndex || current.end !== endIndex) {
+    visibleRange.value = { start: startIndex, end: endIndex }
+  }
+}
+
+// Coalesce scroll events into one update per animation frame. updateVisibleRange
+// reads layout, so running it synchronously on every scroll event caused layout
+// thrash and stalls during fast flinging.
+let scrollRafId: number | null = null
+function onScroll() {
+  if (scrollRafId !== null) return
+  scrollRafId = requestAnimationFrame(() => {
+    scrollRafId = null
+    updateVisibleRange()
+  })
 }
 
 // Padding for offset positioning
@@ -1786,10 +1812,17 @@ const topPadding = computed(() => {
   return firstVisibleRow * getRowHeight()
 })
 
-// Total scroll height so the container scrollbar reflects the full list
+// Total scroll height so the container scrollbar reflects the full list.
+// The list view renders an always-present column header inside the scrolled
+// area, so reserve its height — otherwise the last row is pushed below the
+// scrollable region and can't be fully scrolled into view.
 const totalHeight = computed(() => {
   const totalRows = Math.ceil(audiobooks.value.length / ITEMS_PER_ROW.value)
-  return totalRows * getRowHeight()
+  let height = totalRows * getRowHeight()
+  if (viewMode.value === 'list' && audiobooks.value.length > 0) {
+    height += LIST_HEADER_HEIGHT
+  }
+  return height
 })
 
 const deleting = ref(false)
@@ -1871,12 +1904,21 @@ async function initializeVirtualScroller() {
     await nextTick()
   }
 
-  // Intentionally NO watcher on visibleRange here. Re-measuring row height inside a watcher
-  // that then calls updateVisibleRange() — which writes visibleRange — forms an infinite
-  // measure->update loop whenever card heights are not perfectly uniform (e.g. a 3px status
-  // border tripping the >1px guard). That loop is the root cause of the /books freeze and the
-  // memory growth over time. Row height is measured on mount, resize, view-mode change and the
-  // details toggle instead; the fixed-aspect (1/1) covers keep it stable across the window.
+  if (!stopVisibleRangeWatch) {
+    stopVisibleRangeWatch = watch(
+      () => visibleRange.value,
+      async () => {
+        // List rows are fixed-height and never need measuring. For grid, measure
+        // once when a row first renders; re-measuring on every range change (i.e.
+        // on every scroll) is what created the scroll -> measure -> resize -> scroll
+        // feedback loop that made the page unresponsive.
+        if (viewMode.value !== 'grid') return
+        if (measuredRowHeight.value !== null) return
+        await nextTick()
+        if (syncMeasuredRowHeight()) updateVisibleRange()
+      },
+    )
+  }
 
   if (!stopViewModeWatch) {
     stopViewModeWatch = watch(viewMode, async () => {
@@ -1928,6 +1970,13 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  if (scrollRafId !== null) {
+    try {
+      cancelAnimationFrame(scrollRafId)
+    } catch {}
+    scrollRafId = null
+  }
+
   try {
     resizeObserver?.disconnect()
   } catch {}
@@ -3788,6 +3837,17 @@ defineExpose({
     transform 0.12s;
   border-bottom: 1px solid rgba(255, 255, 255, 0.03);
   cursor: pointer;
+  /* Fixed height keeps the virtual scroller's row math deterministic; the value
+     must match LIST_ROW_HEIGHT in the script. overflow:hidden clips any content
+     that would otherwise grow a row and desync the scroll height. */
+  box-sizing: border-box;
+  height: 80px;
+  overflow: hidden;
+}
+
+/* Taller fixed row when extra details are shown — must match LIST_ROW_HEIGHT_DETAILS. */
+.audiobook-list-item.show-details {
+  height: 120px;
 }
 
 .audiobook-list-item:hover {
@@ -3850,7 +3910,8 @@ defineExpose({
   justify-self: end;
 }
 
-/* Header row to mimic table columns */
+/* Header row to mimic table columns. Fixed height must match LIST_HEADER_HEIGHT
+   in the script so the virtual scroller can reserve exactly this much space. */
 .list-header {
   display: grid;
   grid-template-columns: 40px 64px 1fr auto 120px;
@@ -3860,6 +3921,8 @@ defineExpose({
   font-size: 12px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
   align-items: center;
+  box-sizing: border-box;
+  height: 40px;
 }
 
 .list-header .col-cover {
@@ -3885,14 +3948,12 @@ defineExpose({
   justify-self: start;
 }
 
-/* Stack badges vertically on screens 768px and below */
+/* Keep badges in a single row on narrow screens too — list rows are a fixed
+   height, so stacking them vertically would only get clipped. */
 @media (max-width: 978px) {
   .list-badges {
-    flex-direction: column;
     gap: 4px;
-    align-items: flex-start;
     margin-left: 0;
-    margin-top: 8px;
   }
 }
 
