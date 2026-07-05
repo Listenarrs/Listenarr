@@ -214,6 +214,22 @@ namespace Listenarr.Api.Features.Search
                 {
                     var metadata = _metadataConverters.ConvertAudibleToMetadata(audible, req.Asin, source: "Audible");
                     var sr = await _metadataConverters.ConvertMetadataToSearchResultAsync(metadata, req.Asin, req.Title, req.Author, fallbackImageUrl: null, fallbackLanguage: language);
+
+                    // #525: this inlined ASIN lookup used to return whatever ConvertMetadataToSearchResultAsync
+                    // produced, including its literal "Unknown Title" fallback (hit when an ASIN is searched with
+                    // no title, e.g. Library Import reading the ASIN from file tags). Returning null here falls
+                    // through to the validated unified search path (IntelligentSearchAsync -> AsinSearchHandler)
+                    // instead of surfacing a titleless result. Mirrors AsinSearchHandler's title check.
+                    if (string.IsNullOrWhiteSpace(sr?.Title)
+                        || string.Equals(sr.Title, "Unknown Title", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(sr.Title, "Amazon.com", StringComparison.OrdinalIgnoreCase))
+                    {
+                        _logger.LogWarning(
+                            "ASIN {Asin} advanced-search metadata had no usable title; falling back to unified search",
+                            LogRedaction.SanitizeText(req.Asin));
+                        return null;
+                    }
+
                     _responseMapper.SanitizeResultForPublicApi(sr, region);
                     var md = SearchResultConverters.ToMetadata(sr);
                     await SearchResultImageNormalizer.NormalizeMetadataResultAsync(
