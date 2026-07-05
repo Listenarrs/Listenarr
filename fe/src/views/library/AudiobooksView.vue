@@ -787,7 +787,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch, nextTick, reactive } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, onUnmounted, watch, nextTick, reactive } from 'vue'
 import {
   PhGridFour,
   PhList,
@@ -1941,12 +1941,49 @@ async function initializeVirtualScroller() {
   }
 }
 
+// Preserve/restore the BOOKS inner-container scroll position across navigation (this view remounts;
+// the Pinia store keeps the data). Authors/series scroll the window and are restored by the router's
+// scrollBehavior instead, so this only matters for the books scrollContainer.
+const SCROLL_POS_KEY = 'listenarr.audiobooks.scrollTop.'
+
+function saveScrollPosition() {
+  try {
+    if (scrollContainer.value) {
+      sessionStorage.setItem(SCROLL_POS_KEY + groupBy.value, String(scrollContainer.value.scrollTop))
+    }
+  } catch {
+    /* ignore storage errors (e.g. privacy mode) */
+  }
+}
+
+async function restoreScrollPosition() {
+  try {
+    const raw = sessionStorage.getItem(SCROLL_POS_KEY + groupBy.value)
+    const top = raw == null ? 0 : Number(raw)
+    if (!Number.isFinite(top) || top <= 0) return
+    await nextTick()
+    if (scrollContainer.value) {
+      // #676 made row heights deterministic, so the spacer is sized correctly and scrollTop reaches
+      // the saved position; re-derive the visible window for it.
+      scrollContainer.value.scrollTop = top
+      updateVisibleRange()
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 onMounted(async () => {
   document.addEventListener('click', handleClickOutside)
+
+  // On a return visit the Pinia store still holds the library, so render instantly from cache and
+  // refresh in the background (silent = no loading flash). Only the first load blocks on the fetch.
+  const hadData = libraryStore.audiobooks.length > 0
+  const libraryFetch = libraryStore.fetchLibrary({ silent: hadData })
   await Promise.all([
-    libraryStore.fetchLibrary(),
     configStore.loadApplicationSettings(),
     loadQualityProfiles(),
+    hadData ? Promise.resolve() : libraryFetch,
   ])
 
   // Load persisted view mode (if available) before layout calc
@@ -1961,12 +1998,20 @@ onMounted(async () => {
 
   await initializeVirtualScroller()
 
+  // Restore the books inner-container scroll saved when we last left this grouping (no-op otherwise).
+  await restoreScrollPosition()
+
   if (groupBy.value === 'authors') {
     try {
       await nextTick()
       observeAuthorCards()
     } catch {}
   }
+})
+
+onBeforeUnmount(() => {
+  // Save before the DOM is torn down so returning to this grouping restores the position.
+  saveScrollPosition()
 })
 
 onUnmounted(() => {

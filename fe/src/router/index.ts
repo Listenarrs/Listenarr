@@ -159,6 +159,17 @@ export function createAppRouter() {
   const router = createRouter({
     history: createWebHistory(import.meta.env.BASE_URL),
     routes,
+    scrollBehavior(to, from, savedPosition) {
+      // Restore window scroll on back/forward (the authors/series grouped view scrolls the window);
+      // scroll to top on forward navigation (detail pages, fresh nav). Delay a tick so async list
+      // content has rendered its height before we restore a deep position. The books view scrolls an
+      // inner container (window stays ~0), so this is a no-op there; its scroll is restored in the
+      // component.
+      if (savedPosition) {
+        return new Promise((resolve) => setTimeout(() => resolve(savedPosition), 0))
+      }
+      return { top: 0 }
+    },
   })
 
   // Navigation guard: protect routes requiring auth and preserve redirectTo
