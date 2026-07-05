@@ -69,6 +69,7 @@ namespace Listenarr.Application.Audiobooks.Catalog
             // was started on this context instance" under real database latency.
             var fileSummaryRows = await _audiobookFileRepository.GetFormatSummariesAsync();
             var fileCountById = await _audiobookFileRepository.GetCountsByAudiobookIdAsync();
+            var fileSizeById = await _audiobookFileRepository.GetTotalSizesByAudiobookIdAsync();
             var membershipsByAudiobookId = await _audiobookRepository.GetAllSeriesMembershipsGroupedByAudiobookIdAsync();
             var filesByAudiobookId = fileSummaryRows
                 .GroupBy(f => f.AudiobookId)
@@ -135,7 +136,7 @@ namespace Listenarr.Application.Audiobooks.Catalog
                     Monitored = a.Monitored,
                     BasePath = a.BasePath,
                     FilePath = a.FilePath,
-                    FileSize = a.FileSize,
+                    FileSize = fileSizeById.TryGetValue(a.Id, out var totalSize) ? totalSize : a.FileSize,
                     FileCount = fileCountById.TryGetValue(a.Id, out var trueCount) ? trueCount : 0,
                     Quality = a.Quality,
                     QualityProfileId = a.QualityProfileId,

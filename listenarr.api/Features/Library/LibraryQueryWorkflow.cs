@@ -66,7 +66,9 @@ public sealed class LibraryQueryWorkflow(
         publisher = audiobook.Publisher,
         language = audiobook.Language,
         filePath = audiobook.FilePath,
-        fileSize = audiobook.FileSize,
+        fileSize = audiobook.Files != null && audiobook.Files.Any()
+            ? audiobook.Files.Sum(f => f.Size ?? 0)
+            : audiobook.FileSize,
         basePath = audiobook.BasePath,
         runtime = audiobook.Runtime,
         edition = audiobook.Edition,

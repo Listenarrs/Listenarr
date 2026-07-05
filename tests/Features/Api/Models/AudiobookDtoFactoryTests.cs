@@ -90,6 +90,33 @@ namespace Listenarr.Tests.Features.Api.Models
         }
 
         [Fact]
+        public async Task BuildFromEntity_SumsFileSizesAcrossMultipleFiles()
+        {
+            // #542: an audiobook is often multi-file; the total must be the SUM of per-file sizes,
+            // not the primary file's size or the stale Audiobook.FileSize scalar.
+            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+
+            using var db = new ListenArrDbContext(options);
+
+            var book = new Audiobook { Title = "Multi-file Book", Monitored = true, FileSize = 999 };
+            db.Audiobooks.Add(book);
+            await db.SaveChangesAsync();
+
+            db.AudiobookFiles.Add(new AudiobookFileBuilder().WithAudiobook(book).WithPath("C:\\b\\1.mp3").WithSize(100).Build());
+            db.AudiobookFiles.Add(new AudiobookFileBuilder().WithAudiobook(book).WithPath("C:\\b\\2.mp3").WithSize(200).Build());
+            db.AudiobookFiles.Add(new AudiobookFileBuilder().WithAudiobook(book).WithPath("C:\\b\\3.mp3").WithSize(300).Build());
+            await db.SaveChangesAsync();
+
+            var updated = await db.Audiobooks.Include(a => a.Files).FirstOrDefaultAsync(a => a.Id == book.Id);
+            var dto = AudiobookDtoFactory.BuildFromEntity(updated);
+
+            // Sum of the three files (600), not the primary file (100) nor the stale scalar (999).
+            Assert.Equal(600, dto.FileSize);
+        }
+
+        [Fact]
         public async Task BuildFromEntity_ComputesWantedWhenNoFiles()
         {
             var options = new DbContextOptionsBuilder<ListenArrDbContext>()

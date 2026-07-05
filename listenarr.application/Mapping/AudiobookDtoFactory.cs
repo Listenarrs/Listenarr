@@ -72,7 +72,9 @@ namespace Listenarr.Application.Mapping
                     .ToArray(),
                 Monitored = audiobook.Monitored,
                 FilePath = audiobook.FilePath,
-                FileSize = audiobook.FileSize,
+                FileSize = audiobook.Files != null && audiobook.Files.Any()
+                    ? audiobook.Files.Sum(f => f.Size ?? 0)
+                    : audiobook.FileSize,
                 BasePath = audiobook.BasePath,
                 Files = files,
                 ImageUrl = audiobook.ImageUrl,

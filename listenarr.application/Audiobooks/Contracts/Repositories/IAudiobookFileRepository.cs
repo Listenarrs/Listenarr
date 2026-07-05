@@ -33,5 +33,6 @@ namespace Listenarr.Application.Audiobooks.Contracts.Repositories
         Task<List<AudiobookFile>> GetAllAsync(CancellationToken ct = default);
         Task<List<AudiobookFormatSummary>> GetFormatSummariesAsync(CancellationToken ct = default);
         Task<Dictionary<int, int>> GetCountsByAudiobookIdAsync(CancellationToken ct = default);
+        Task<Dictionary<int, long>> GetTotalSizesByAudiobookIdAsync(CancellationToken ct = default);
     }
 }
