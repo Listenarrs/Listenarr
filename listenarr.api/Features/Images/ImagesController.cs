@@ -42,11 +42,6 @@ namespace Listenarr.Api.Features.Images
         private readonly string _effectiveContentRootPath;
         private readonly IFileSystem _fileSystem;
         private readonly ICoverThumbnailService? _coverThumbnailService;
-        private readonly IImageCacheStore? _imageCacheStore;
-
-        // 23h (deliberately not a round 24h) so the daily NoCover re-check drifts across the clock
-        // instead of syncing up with other daily jobs.
-        private const long NoCoverRetrySeconds = 23L * 60 * 60;
 
         [ActivatorUtilitiesConstructor]
         public ImagesController(
@@ -60,8 +55,7 @@ namespace Listenarr.Api.Features.Images
             IFileSystem fileSystem,
             // Optional so existing 8-arg test constructions still compile; DI injects the
             // registered service in production (ActivatorUtilities resolves it over the default).
-            ICoverThumbnailService? coverThumbnailService = null,
-            IImageCacheStore? imageCacheStore = null)
+            ICoverThumbnailService? coverThumbnailService = null)
             : this(
                 imageCacheService,
                 audiobookMetadataService,
@@ -73,8 +67,7 @@ namespace Listenarr.Api.Features.Images
                 applicationPathService,
                 fileSystem,
                 placeholderResolver: null,
-                coverThumbnailService: coverThumbnailService,
-                imageCacheStore: imageCacheStore)
+                coverThumbnailService: coverThumbnailService)
         {
         }
 
@@ -89,11 +82,9 @@ namespace Listenarr.Api.Features.Images
             IApplicationPathService applicationPathService,
             IFileSystem fileSystem,
             ImagePlaceholderResolver? placeholderResolver = null,
-            ICoverThumbnailService? coverThumbnailService = null,
-            IImageCacheStore? imageCacheStore = null)
+            ICoverThumbnailService? coverThumbnailService = null)
         {
             _coverThumbnailService = coverThumbnailService;
-            _imageCacheStore = imageCacheStore;
             _imageCacheService = imageCacheService;
             _audiobookMetadataService = audiobookMetadataService;
             _audibleService = audibleService;
@@ -247,18 +238,6 @@ namespace Listenarr.Api.Features.Images
                 var hasRequestedImageUrl = !string.IsNullOrWhiteSpace(url);
                 if (!hasValidImagePath && !hasRequestedImageUrl)
                 {
-                    // Negative cache: if we recently learned this identifier has no cover, skip the
-                    // (expensive) provider lookup and return the cacheable placeholder immediately.
-                    var cached = _imageCacheStore?.TryGet(identifier);
-                    if (cached is { Status: CoverCacheStatus.NoCover } &&
-                        (DateTimeOffset.UtcNow.ToUnixTimeSeconds() - cached.LastCheckedUtcSeconds) < NoCoverRetrySeconds)
-                    {
-                        return CreatePlaceholderResult(
-                            logContext: "no-cover (negative cache)",
-                            logValue: identifier,
-                            notFoundMessage: "Image not found");
-                    }
-
                     _logger.LogWarning("Image not found for identifier: {Identifier}", LogRedaction.SanitizeText(identifier));
 
                     // Cache is missing and caller did not provide a URL. Try metadata providers:
@@ -267,17 +246,11 @@ namespace Listenarr.Api.Features.Images
 
                     if (relativePath == null)
                     {
-                        // Remember the miss so refreshes don't re-hit providers; re-checked after
-                        // NoCoverRetrySeconds.
-                        _imageCacheStore?.UpsertNoCover(identifier);
                         return CreatePlaceholderResult(
                             logContext: "missing identifier",
                             logValue: identifier,
                             notFoundMessage: "Image not found");
                     }
-
-                    // Provider resolved a cover — record it so we know this identifier has one.
-                    _imageCacheStore?.UpsertResolved(identifier, relativePath, null);
                 }
 
 
