@@ -49,17 +49,12 @@ export const useLibraryStore = defineStore('library', () => {
     return book
   }
 
-  async function fetchLibrary(options?: { silent?: boolean }) {
+  async function fetchLibrary() {
     if (inFlightFetch) {
       return inFlightFetch
     }
 
-    // Background refreshes (e.g. returning to the list with data already cached) pass silent:true so
-    // the grid updates in place without flipping the loading flag and flashing a spinner.
-    const silent = options?.silent === true
-    if (!silent) {
-      loading.value = true
-    }
+    loading.value = true
     error.value = null
     inFlightFetch = (async () => {
       try {
@@ -73,9 +68,7 @@ export const useLibraryStore = defineStore('library', () => {
           operation: 'fetchLibrary',
         })
       } finally {
-        if (!silent) {
-          loading.value = false
-        }
+        loading.value = false
         inFlightFetch = null
       }
     })()
