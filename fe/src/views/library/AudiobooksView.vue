@@ -1904,21 +1904,11 @@ async function initializeVirtualScroller() {
     await nextTick()
   }
 
-  if (!stopVisibleRangeWatch) {
-    stopVisibleRangeWatch = watch(
-      () => visibleRange.value,
-      async () => {
-        // List rows are fixed-height and never need measuring. For grid, measure
-        // once when a row first renders; re-measuring on every range change (i.e.
-        // on every scroll) is what created the scroll -> measure -> resize -> scroll
-        // feedback loop that made the page unresponsive.
-        if (viewMode.value !== 'grid') return
-        if (measuredRowHeight.value !== null) return
-        await nextTick()
-        if (syncMeasuredRowHeight()) updateVisibleRange()
-      },
-    )
-  }
+  // Intentionally NO watcher on visibleRange. Even the guarded form above still re-fires on
+  // every scroll-driven range change and, on a large library, leaks DOM/memory over a session
+  // (the RAM bleed). Grid row height is measured on mount, resize, view-mode change and the
+  // details toggle instead, which is enough for the fixed-aspect covers. (Our original #731 fix,
+  // reapplied on top of #676.)
 
   if (!stopViewModeWatch) {
     stopViewModeWatch = watch(viewMode, async () => {
