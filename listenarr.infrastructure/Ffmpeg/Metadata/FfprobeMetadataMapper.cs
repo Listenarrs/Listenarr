@@ -15,6 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using System.Globalization;
 using System.Text.Json;
 
 namespace Listenarr.Infrastructure.Ffmpeg.Metadata
@@ -47,8 +48,10 @@ namespace Listenarr.Infrastructure.Ffmpeg.Metadata
         {
             if (fmt.TryGetProperty("duration", out var durEl)
                 && durEl.ValueKind == JsonValueKind.String
-                && double.TryParse(durEl.GetString(), out var dur))
+                && double.TryParse(durEl.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var dur))
             {
+                // #737 Bug A: ffprobe emits dot-decimal (e.g. "108555.624989"); parsing without
+                // InvariantCulture on a comma-decimal machine silently failed, zeroing every duration.
                 metadata.Duration = TimeSpan.FromSeconds(dur);
             }
 
@@ -57,7 +60,7 @@ namespace Listenarr.Infrastructure.Ffmpeg.Metadata
                 ApplyFormatName(metadata, fmtName.GetString() ?? string.Empty, filePath);
             }
 
-            if (fmt.TryGetProperty("bit_rate", out var br) && br.ValueKind == JsonValueKind.String && int.TryParse(br.GetString(), out var bitRate))
+            if (fmt.TryGetProperty("bit_rate", out var br) && br.ValueKind == JsonValueKind.String && int.TryParse(br.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var bitRate))
             {
                 metadata.BitRate = bitRate;
             }
@@ -99,7 +102,7 @@ namespace Listenarr.Infrastructure.Ffmpeg.Metadata
                 .EnumerateArray()
                 .Where(s => s.TryGetProperty("codec_type", out var codecType) && codecType.GetString() == "audio"))
             {
-                if (s.TryGetProperty("sample_rate", out var sr) && sr.ValueKind == JsonValueKind.String && int.TryParse(sr.GetString(), out var sampleRate))
+                if (s.TryGetProperty("sample_rate", out var sr) && sr.ValueKind == JsonValueKind.String && int.TryParse(sr.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var sampleRate))
                 {
                     metadata.SampleRate = sampleRate;
                 }
@@ -107,7 +110,7 @@ namespace Listenarr.Infrastructure.Ffmpeg.Metadata
                 {
                     metadata.Channels = ch.GetInt32();
                 }
-                if (s.TryGetProperty("bit_rate", out var sbr) && sbr.ValueKind == JsonValueKind.String && int.TryParse(sbr.GetString(), out var sbit))
+                if (s.TryGetProperty("bit_rate", out var sbr) && sbr.ValueKind == JsonValueKind.String && int.TryParse(sbr.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var sbit))
                 {
                     metadata.BitRate = metadata.BitRate == 0 ? sbit : metadata.BitRate;
                 }

@@ -62,13 +62,10 @@ namespace Listenarr.Application.Security.Redaction
                 }
             }
 
-            // If there are known secrets in the environment but none were replaced (edge cases),
-            // append a generic marker to ensure logs cannot leak values and tests reliably observe redaction.
-            if (combined.Any() && !redacted.Contains("<redacted>", StringComparison.OrdinalIgnoreCase))
-            {
-                redacted = redacted + " <redacted>";
-            }
-
+            // NOTE: do NOT append a generic "<redacted>" marker when nothing matched. If no secret value
+            // is present in the text there is nothing to leak, and appending a marker corrupts any
+            // functional payload the caller parses. This bug made every ffprobe probe fail to parse
+            // ("{...json...} <redacted>") whenever a secret env var (e.g. LISTENARR_API_KEY) was set (#737).
             return redacted;
         }
 
