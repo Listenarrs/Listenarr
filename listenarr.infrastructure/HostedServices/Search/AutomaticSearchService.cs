@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using Listenarr.Application.Search.Filters;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -99,7 +100,8 @@ namespace Listenarr.Infrastructure.HostedServices.Search
                 try
                 {
                     var downloadsQueuedForBook = await ProcessAudiobookAsync(
-                        audiobook, searchService, qualityProfileService, downloadService, audiobookRepository, downloadRepository, fileRepository, stoppingToken);
+                        audiobook, searchService, qualityProfileService, downloadService, audiobookRepository, downloadRepository, fileRepository, stoppingToken,
+                        filterPipeline: scope.ServiceProvider.GetService<SearchResultFilterPipeline>());
 
                     downloadsQueued += downloadsQueuedForBook;
                     processedCount++;
@@ -137,7 +139,8 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             IAudiobookRepository audiobookRepository,
             IDownloadRepository downloadRepository,
             IAudiobookFileRepository fileRepository,
-            CancellationToken stoppingToken)
+            CancellationToken stoppingToken,
+            SearchResultFilterPipeline? filterPipeline = null)
         {
             if (audiobook.QualityProfile == null)
             {
@@ -179,8 +182,26 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             _logger.LogInformation("Searching for audiobook '{Title}' with query: {Query}", audiobook.Title, searchQuery);
 
             // Search for results
-            var searchResults = await searchService.SearchAsync(searchQuery, isAutomaticSearch: true);
+            // Restrict to the Newznab "Books > Audiobook" category (3030) so music-only
+            // indexers configured without a category can't answer audiobook queries at all.
+            var searchResults = await searchService.SearchAsync(searchQuery, category: "3030", isAutomaticSearch: true);
             _logger.LogInformation("Found {Count} raw search results for audiobook '{Title}'", searchResults.Count, audiobook.Title);
+
+            // Context-aware filter pass — reject non-audiobook matter and results whose
+            // title isn't relevant to THIS audiobook (e.g., a Patterson Hood concert
+            // recording answering a James Patterson query on one shared surname)
+            // before scoring can pick one on seeders/quality alone.
+            if (filterPipeline != null)
+            {
+                var preFilterCount = searchResults.Count;
+                searchResults = filterPipeline.ApplyFilters(searchResults, logFilteredResults: true, audiobook: audiobook);
+                if (searchResults.Count < preFilterCount)
+                {
+                    _logger.LogInformation(
+                        "Filtered {Removed} of {Total} raw results for audiobook '{Title}' via context-aware pipeline",
+                        preFilterCount - searchResults.Count, preFilterCount, audiobook.Title);
+                }
+            }
 
             // Broadcast detailed debug info about the raw search results to help diagnose automatic search failures
             try

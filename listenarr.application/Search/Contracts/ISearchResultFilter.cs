@@ -32,6 +32,15 @@ public interface ISearchResultFilter
     bool ShouldFilter(SearchResult result);
 
     /// <summary>
+    /// Context-aware overload used when the filter pipeline knows the audiobook
+    /// the search is being run for (e.g., automatic search). Default implementation
+    /// delegates to the context-free overload so existing filters need no edits.
+    /// Filters that need the audiobook context (e.g., title-relevance) override this
+    /// and may make their context-free overload a no-op (fail open).
+    /// </summary>
+    bool ShouldFilter(SearchResult result, Audiobook? audiobook) => ShouldFilter(result);
+
+    /// <summary>
     /// Reason why the result was filtered (for logging/debugging).
     /// </summary>
     string FilterReason { get; }
