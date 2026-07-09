@@ -131,7 +131,15 @@ namespace Listenarr.Application.Search.Audible
 
             if (aggregated?.Any() != true)
             {
-                return null;
+                // The author-page lookup above requires the author name to
+                // resolve to an Audible author page. An STT-mangled or
+                // misspelled name (e.g. "Whisher" for the real "Wisher")
+                // never will, even when the book itself is genuinely on
+                // Audible — previously that meant the whole AUTHOR_TITLE
+                // search came back empty with no other recourse. Fall back
+                // to a plain keyword title+author search, which doesn't
+                // require an author-page match.
+                return await FallbackKeywordSearchAsync(title, author, candidateLimit, region, language);
             }
 
             var deduplicated = DeduplicateByAsin(aggregated);
@@ -177,6 +185,38 @@ namespace Listenarr.Application.Search.Audible
                 continueOnConversionError: true);
 
             return converted.Any() ? SearchResultConverters.ToMetadataList(converted) : null;
+        }
+
+        private async Task<List<MetadataSearchResult>?> FallbackKeywordSearchAsync(
+            string? title,
+            string author,
+            int candidateLimit,
+            string region,
+            string? language)
+        {
+            try
+            {
+                var response = await _audibleService.SearchByTitleAndAuthorPagedAsync(
+                    title ?? string.Empty, author, page: 1, limit: candidateLimit, region: region, language: language);
+                var results = response?.Results;
+                if (results == null || results.Count == 0)
+                {
+                    return null;
+                }
+
+                _logger.LogInformation(
+                    "AUTHOR_TITLE author-page lookup found nothing for '{Author}'; keyword fallback found {Count} result(s)",
+                    author, results.Count);
+
+                var converted = await AudibleSearchResultMapper.ConvertToSearchResultsAsync(
+                    results, _metadataConverters, region, logger: _logger, continueOnConversionError: true);
+                return converted.Any() ? SearchResultConverters.ToMetadataList(converted) : null;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
+                _logger.LogWarning(ex, "AUTHOR_TITLE keyword fallback search failed for author '{Author}', title '{Title}'", author, title);
+                return null;
+            }
         }
 
         private async Task<IEnumerable<AudibleSearchResult>> FilterByIsbnAsync(
