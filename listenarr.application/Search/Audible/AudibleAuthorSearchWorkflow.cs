@@ -199,24 +199,55 @@ namespace Listenarr.Application.Search.Audible
                 var response = await _audibleService.SearchByTitleAndAuthorPagedAsync(
                     title ?? string.Empty, author, page: 1, limit: candidateLimit, region: region, language: language);
                 var results = response?.Results;
-                if (results == null || results.Count == 0)
+                if (results is { Count: > 0 })
+                {
+                    _logger.LogInformation(
+                        "AUTHOR_TITLE author-page lookup found nothing for '{Author}'; keyword fallback found {Count} result(s)",
+                        author, results.Count);
+                    return await ConvertAsync(results, region);
+                }
+
+                // Audible's own "author" query parameter is a filter, not a
+                // fuzzy hint: passing it alongside title can return ZERO
+                // combined results even when the title alone would find the
+                // book, if the author string doesn't read as close enough to
+                // a real catalog author (confirmed live: "the hidden tower" +
+                // author param zeroed out results Audible returns for the
+                // title alone). Last resort — drop the author constraint
+                // entirely and search by title only; this is the manual
+                // "find correct match" review flow, so the user still picks
+                // the right candidate from the list rather than anything
+                // being auto-applied.
+                if (string.IsNullOrWhiteSpace(title))
+                {
+                    return null;
+                }
+
+                var titleOnly = await _audibleService.SearchByTitleAsync(
+                    title, page: 1, limit: candidateLimit, region: region, language: language);
+                var titleOnlyResults = titleOnly?.Results;
+                if (titleOnlyResults is not { Count: > 0 })
                 {
                     return null;
                 }
 
                 _logger.LogInformation(
-                    "AUTHOR_TITLE author-page lookup found nothing for '{Author}'; keyword fallback found {Count} result(s)",
-                    author, results.Count);
-
-                var converted = await AudibleSearchResultMapper.ConvertToSearchResultsAsync(
-                    results, _metadataConverters, region, logger: _logger, continueOnConversionError: true);
-                return converted.Any() ? SearchResultConverters.ToMetadataList(converted) : null;
+                    "AUTHOR_TITLE keyword fallback (with author) found nothing for '{Author}'; title-only fallback found {Count} result(s)",
+                    author, titleOnlyResults.Count);
+                return await ConvertAsync(titleOnlyResults, region);
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
                 _logger.LogWarning(ex, "AUTHOR_TITLE keyword fallback search failed for author '{Author}', title '{Title}'", author, title);
                 return null;
             }
+        }
+
+        private async Task<List<MetadataSearchResult>?> ConvertAsync(List<AudibleSearchResult> results, string region)
+        {
+            var converted = await AudibleSearchResultMapper.ConvertToSearchResultsAsync(
+                results, _metadataConverters, region, logger: _logger, continueOnConversionError: true);
+            return converted.Any() ? SearchResultConverters.ToMetadataList(converted) : null;
         }
 
         private async Task<IEnumerable<AudibleSearchResult>> FilterByIsbnAsync(
