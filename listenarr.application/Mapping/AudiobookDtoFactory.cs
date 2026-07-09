@@ -16,6 +16,8 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using Listenarr.Domain.Common;
+
 namespace Listenarr.Application.Mapping
 {
     public static class AudiobookDtoFactory
@@ -24,7 +26,7 @@ namespace Listenarr.Application.Mapping
         {
             if (audiobook == null) return null!;
 
-            var files = audiobook.Files?.Select(f => new AudiobookFileDto
+            var files = AudiobookFileOrdering.InNaturalOrder(audiobook.Files).Select(f => new AudiobookFileDto
             {
                 Id = f.Id,
                 Path = f.Path,
