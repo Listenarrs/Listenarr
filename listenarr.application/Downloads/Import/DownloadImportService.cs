@@ -94,31 +94,20 @@ namespace Listenarr.Application.Downloads.Import
                 try
                 {
                     // Precompute audiobook and best existing quality to avoid import-order races
-                    string? bestExisting = null;
-                    QualityProfile? abProfile = null;
-
-                    abProfile = audiobook.QualityProfile;
+                    AudioQualityInput? bestExisting = null;
+                    var abProfile = audiobook.QualityProfile;
 
                     if (audiobook.Files != null && audiobook.Files.Count != 0)
                     {
-                        foreach (var f in audiobook.Files)
+                        foreach (var existingFile in audiobook.Files)
                         {
-                            string q = string.Empty;
-                            if (!string.IsNullOrEmpty(f.Format)) q = f.Format;
-                            if (f.Bitrate.HasValue)
-                            {
-                                var kb = f.Bitrate.Value / 1000;
-                                if (kb >= 320) q = "MP3 320kbps";
-                                else if (kb >= 256) q = "MP3 256kbps";
-                                else if (kb >= 192) q = "MP3 192kbps";
-                                else if (kb >= 128) q = "MP3 128kbps";
-                            }
-                            if (string.IsNullOrEmpty(q) && !string.IsNullOrEmpty(f.Path)) q = ImportQualityEvaluator.Determine(null, f.Path);
+                            var existingInput = ImportQualityEvaluator.FromFile(existingFile);
 
-                            if (string.IsNullOrEmpty(bestExisting)) bestExisting = q;
-                            else if (!string.IsNullOrEmpty(q) && !string.IsNullOrEmpty(bestExisting) && abProfile != null && ImportQualityEvaluator.IsAcceptable(q, bestExisting, abProfile))
+                            // "Not worse than the current best" climbs the list to the hardest quality to beat.
+                            if (bestExisting is null
+                                || ImportQualityEvaluator.IsAcceptable(existingInput, bestExisting.Value, abProfile))
                             {
-                                bestExisting = q;
+                                bestExisting = existingInput;
                             }
                         }
                     }
@@ -188,14 +177,18 @@ namespace Listenarr.Application.Downloads.Import
                                 candidateMetadata = await metadataService.ExtractFileMetadataAsync(file);
                             }
 
-                            var candidateQuality = ImportQualityEvaluator.Determine(candidateMetadata, file);
+                            var candidateInput = ImportQualityEvaluator.FromMetadata(candidateMetadata, file);
 
                             try
                             {
-                                if (audiobook.Files != null && audiobook.Files.Count != 0 && !ImportQualityEvaluator.IsAcceptable(candidateQuality, bestExisting, abProfile))
+                                if (bestExisting is not null
+                                    && !ImportQualityEvaluator.IsAcceptable(candidateInput, bestExisting.Value, abProfile))
                                 {
-                                    results.Add(ImportResult.Skipped($"candidate quality '{candidateQuality}' is not better than existing '{bestExisting}'"));
-                                    logger.LogInformation($"Skipping import of file {file} for audiobook {audiobook.Id} because candidate quality '{candidateQuality}' is not better than existing '{bestExisting}'");
+                                    var candidateQuality = ImportQualityEvaluator.Describe(candidateInput, abProfile);
+                                    var existingQuality = ImportQualityEvaluator.Describe(bestExisting.Value, abProfile);
+
+                                    results.Add(ImportResult.Skipped($"candidate quality '{candidateQuality}' is not better than existing '{existingQuality}'"));
+                                    logger.LogInformation($"Skipping import of file {file} for audiobook {audiobook.Id} because candidate quality '{candidateQuality}' is not better than existing '{existingQuality}'");
                                     continue;
                                 }
                             }

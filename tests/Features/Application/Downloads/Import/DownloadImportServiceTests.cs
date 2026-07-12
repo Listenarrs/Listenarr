@@ -331,6 +331,209 @@ namespace Listenarr.Tests.Features.Application.Downloads.Import
             Assert.Single(files);
         }
 
+        // Reproduction for issue #582 - "Quality filters: Flaws in the current logic".
+        // The numeric path (MP3 320 vs MP3 128) above happens to work, but DownloadImportService.IsQualityBetter
+        // ignores the QualityProfile entirely and only compares regex-extracted bitrates. For a non-numeric
+        // format such as FLAC, the parse fails and the method falls through to `return true`, so a lossy MP3
+        // download is treated as "better" than an existing lossless FLAC and gets imported on top of it.
+        //
+        // This test asserts the INTENDED behaviour (the lossy download is skipped, leaving only the existing
+        // FLAC) and therefore FAILS against the current logic - that failure is the reproduction of #582.
+        [Fact]
+        public async Task QualityGating_LosslessExisting_SkipsLossyDownload()
+        {
+            var library = FileService.GetTempDirectory("library");
+            var existingFlac = await FileService.GetFileAsync(library, "existing.flac");
+
+            // Profile that clearly ranks lossless FLAC above lossy MP3.
+            var profile = new QualityProfileBuilder()
+                .WithName("Lossless Preferred")
+                .Build();
+            profile.Qualities =
+            [
+                new QualityDefinition { Quality = "flac", Codec = "FLAC", IsLossless = true, Priority = 1 },
+                new QualityDefinition { Quality = "mp3", Codec = "MP3", Bitrate = 320, Priority = 2 },
+            ];
+            var qualityProfile = await _qualityProfileRepository.AddAsync(profile);
+
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("The Lossless Book")
+                .WithBasePath(library)
+                .WithQualityProfile(qualityProfile)
+                .Build());
+
+            // Existing lossless FLAC file in the library. No bitrate is set so that "best existing quality"
+            // stays the format string "flac" (a non-numeric quality) - which is what triggers the flaw.
+            await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
+                .WithAudiobook(audiobook)
+                .WithPath(existingFlac)
+                .WithFormat("flac")
+                .Build());
+
+            // Incoming completed download is a lower-quality lossy MP3.
+            var lossyMp3 = await FileService.GetTempFileAsync("lossy.mp3");
+            metadataServiceMock.AddMetadata(@"lossy\.mp3$", new AudioMetadata { Title = "Lossy Download", Format = "mp3", BitRate = 320000 });
+
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettings { OutputPath = Path.GetTempPath(), EnableMetadataProcessing = true, CompletedFileAction = FileAction.Move });
+
+            // Act - process the lossy completed download against the audiobook that already has a FLAC.
+            var downloadImportService = _provider.GetRequiredService<IDownloadImportService>();
+            await downloadImportService.ImportDownloadFilesAsync(audiobook, [lossyMp3]);
+
+            // Assert: the lossy MP3 must NOT be imported over the existing lossless FLAC.
+            var files = await _audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id);
+            Assert.Single(files);
+            Assert.Equal("flac", files.First().Format);
+        }
+
+        // A higher-bitrate file of the same codec ranks onto a better profile rung, so it imports.
+        [Fact]
+        public async Task QualityGating_NumericUpgrade_ImportsHigherBitrate()
+        {
+            var library = FileService.GetTempDirectory("library");
+            var existingFile = await FileService.GetFileAsync(library, "existing.mp3");
+
+            var qualityProfile = await _qualityProfileRepository.AddAsync(new QualityProfileBuilder()
+                .WithName("Structured")
+                .WithStructuredDefaults()
+                .Build());
+
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("The Upgradable Book")
+                .WithBasePath(library)
+                .WithQualityProfile(qualityProfile)
+                .Build());
+
+            await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
+                .WithAudiobook(audiobook)
+                .WithPath(existingFile)
+                .WithFormat("mp3")
+                .WithBitrate(128000)
+                .Build());
+
+            var upgrade = await FileService.GetTempFileAsync("upgrade.mp3");
+            metadataServiceMock.AddMetadata(@"upgrade\.mp3$", new AudioMetadata { Title = "Upgrade", Format = "mp3", BitRate = 320000 });
+
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettings { OutputPath = Path.GetTempPath(), EnableMetadataProcessing = true, CompletedFileAction = FileAction.Move });
+
+            var downloadImportService = _provider.GetRequiredService<IDownloadImportService>();
+            await downloadImportService.ImportDownloadFilesAsync(audiobook, [upgrade]);
+
+            var files = await _audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id);
+            Assert.Equal(2, files.Count());
+        }
+
+        // Cross-codec upgrade: the profile ranks lossless FLAC above MP3, so a FLAC download imports
+        // over an existing MP3. This is the mirror of the #582 repro and only works because the
+        // comparison is profile-driven rather than bitrate-driven (FLAC carries no comparable bitrate).
+        [Fact]
+        public async Task QualityGating_CrossFormatUpgrade_ImportsLosslessOverLossy()
+        {
+            var library = FileService.GetTempDirectory("library");
+            var existingFile = await FileService.GetFileAsync(library, "existing.mp3");
+
+            var qualityProfile = await _qualityProfileRepository.AddAsync(new QualityProfileBuilder()
+                .WithName("Structured")
+                .WithStructuredDefaults()
+                .Build());
+
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("The Lossy Book")
+                .WithBasePath(library)
+                .WithQualityProfile(qualityProfile)
+                .Build());
+
+            await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
+                .WithAudiobook(audiobook)
+                .WithPath(existingFile)
+                .WithFormat("mp3")
+                .WithBitrate(320000)
+                .Build());
+
+            var upgrade = await FileService.GetTempFileAsync("upgrade.flac");
+            metadataServiceMock.AddMetadata(@"upgrade\.flac$", new AudioMetadata { Title = "Lossless Upgrade", Format = "flac" });
+
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettings { OutputPath = Path.GetTempPath(), EnableMetadataProcessing = true, CompletedFileAction = FileAction.Move });
+
+            var downloadImportService = _provider.GetRequiredService<IDownloadImportService>();
+            await downloadImportService.ImportDownloadFilesAsync(audiobook, [upgrade]);
+
+            var files = await _audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id);
+            Assert.Equal(2, files.Count());
+        }
+
+        // Equal quality must be ACCEPTED, not skipped. A multi-file audiobook imports parts whose
+        // quality merely matches what is already on disk; a strictly-better rule would skip every one
+        // of them. This is why import compares "not worse" while automatic search compares "better".
+        [Fact]
+        public async Task QualityGating_EqualQuality_IsImported()
+        {
+            var library = FileService.GetTempDirectory("library");
+            var existingFile = await FileService.GetFileAsync(library, "existing.mp3");
+
+            var qualityProfile = await _qualityProfileRepository.AddAsync(new QualityProfileBuilder()
+                .WithName("Structured")
+                .WithStructuredDefaults()
+                .Build());
+
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("The Multi Part Book")
+                .WithBasePath(library)
+                .WithQualityProfile(qualityProfile)
+                .Build());
+
+            await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
+                .WithAudiobook(audiobook)
+                .WithPath(existingFile)
+                .WithFormat("mp3")
+                .WithBitrate(320000)
+                .Build());
+
+            // Same codec, same bitrate as the file already on disk - i.e. the next chapter part.
+            var sameQuality = await FileService.GetTempFileAsync("part2.mp3");
+            metadataServiceMock.AddMetadata(@"part2\.mp3$", new AudioMetadata { Title = "Part Two", Format = "mp3", BitRate = 320000 });
+
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettings { OutputPath = Path.GetTempPath(), EnableMetadataProcessing = true, CompletedFileAction = FileAction.Move });
+
+            var downloadImportService = _provider.GetRequiredService<IDownloadImportService>();
+            await downloadImportService.ImportDownloadFilesAsync(audiobook, [sameQuality]);
+
+            var files = await _audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id);
+            Assert.Equal(2, files.Count());
+        }
+
+        // No profile and no usable codec/bitrate on either side: the quality is genuinely unknown, so
+        // the import is allowed. Gating must never silently drop a file it cannot reason about.
+        [Fact]
+        public async Task QualityGating_UnknownQualityAndNoProfile_AllowsImport()
+        {
+            var library = FileService.GetTempDirectory("library");
+            var existingFile = await FileService.GetFileAsync(library, "existing.mp3");
+
+            // Audiobook deliberately has no quality profile assigned.
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("The Unprofiled Book")
+                .WithBasePath(library)
+                .Build());
+
+            // Existing file with no format and no bitrate - nothing to rank it by.
+            await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
+                .WithAudiobook(audiobook)
+                .WithPath(existingFile)
+                .Build());
+
+            var unknown = await FileService.GetTempFileAsync("unknown.mp3");
+            metadataServiceMock.AddMetadata(@"unknown\.mp3$", new AudioMetadata { Title = "Unknown Quality" });
+
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettings { OutputPath = Path.GetTempPath(), EnableMetadataProcessing = true, CompletedFileAction = FileAction.Move });
+
+            var downloadImportService = _provider.GetRequiredService<IDownloadImportService>();
+            await downloadImportService.ImportDownloadFilesAsync(audiobook, [unknown]);
+
+            var files = await _audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id);
+            Assert.Equal(2, files.Count());
+        }
+
         [Fact]
         public async Task MultiFileImport_ImportsAllFiles_WithUniqueNames()
         {
