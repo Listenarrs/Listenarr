@@ -317,8 +317,8 @@ namespace Listenarr.Tests.Features.Application.Downloads.Import
                 .Build();
             profile.Qualities =
             [
-                new QualityDefinition { Quality = "flac", Codec = "FLAC", IsLossless = true, Priority = 2 },
-                new QualityDefinition { Quality = "mp3", Codec = "MP3", Bitrate = 320, Priority = 1 },
+                new QualityDefinition { Quality = "flac", Codec = "FLAC", IsLossless = true, Priority = 1 },
+                new QualityDefinition { Quality = "mp3", Codec = "MP3", Bitrate = 320, Priority = 2 },
             ];
             var qualityProfile = await _qualityProfileRepository.AddAsync(profile);
 

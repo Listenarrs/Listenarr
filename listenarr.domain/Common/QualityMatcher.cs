@@ -179,6 +179,13 @@ namespace Listenarr.Domain.Common
             => Match(file, profile).Rung?.Quality;
 
         /// <summary>
+        /// Whether a file is lossless, derived from the same mapped codec groups used for matching.
+        /// Exposed so profile-agnostic callers (e.g. the import gate) can honour lossless-vs-lossy
+        /// even when no profile rung is available.
+        /// </summary>
+        public static bool IsLossless(AudioQualityInput file) => IsLosslessFile(file);
+
+        /// <summary>
         /// Whether a file meets or exceeds the profile cutoff. A blank cutoff is always met;
         /// a missing/codec-mismatched file is not.
         /// </summary>
