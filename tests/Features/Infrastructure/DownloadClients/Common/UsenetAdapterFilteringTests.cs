@@ -153,7 +153,11 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Common
                 }
             };
 
-            var queue = await adapter.GetQueueAsync(client, ["SABnzbd_nzo_1", "SABnzbd_nzo_2"], CancellationToken.None);
+            // Category filtering scopes untracked discovery (the no-tracked-ids display
+            // path). A tracked nzo_id bypasses it so a grabbed job SABnzbd reassigned to
+            // Default is never hidden; here no ids are tracked, so the foreign-category
+            // "Movie One" slot is excluded and only the audiobooks slot survives.
+            var queue = await adapter.GetQueueAsync(client, CancellationToken.None);
 
             Assert.Single(queue);
             Assert.Equal("Book One", queue[0].Title);

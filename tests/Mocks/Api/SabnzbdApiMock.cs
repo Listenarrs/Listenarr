@@ -11,6 +11,7 @@ namespace Listenarr.Tests.Mocks.Api
         public static readonly string REMOTE_PATH = FileUtils.GetAbsolutePath("downloads", "completed");
 
         public string contentPath = FileUtils.GetAbsolutePath("completed", "Book.m4b");
+        public List<string> Categories { get; set; } = ["*", "Default"];
         public System.Net.HttpStatusCode HistoryStatusCode { get; set; } = System.Net.HttpStatusCode.OK;
         public string? HistoryResponseOverride { get; set; }
         public List<Uri> RemovalRequests { get; } = [];
@@ -92,6 +93,12 @@ namespace Listenarr.Tests.Mocks.Api
             return MockUtils.GetCannedResponse(response);
         }
 
+        public async Task<HttpResponseMessage> GetCats(HttpRequestMessage request, CancellationToken ct)
+        {
+            var quoted = Categories.Select(category => $"\"{category}\"");
+            return MockUtils.GetCannedResponse($$"""{"categories": [{{string.Join(", ", quoted)}}]}""");
+        }
+
         public async Task<HttpResponseMessage> GetVersion(HttpRequestMessage request, CancellationToken ct)
         {
             return MockUtils.GetCannedResponse("""
@@ -109,6 +116,10 @@ namespace Listenarr.Tests.Mocks.Api
             if (string.Equals("version", mode))
             {
                 return await GetVersion(request, ct);
+            }
+            else if (string.Equals("get_cats", mode))
+            {
+                return await GetCats(request, ct);
             }
             else if (string.Equals("history", mode))
             {
