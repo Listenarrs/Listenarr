@@ -128,5 +128,17 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
         {
             return await _db.Audiobooks.CountAsync(a => a.QualityProfileId == profileId);
         }
+
+        public async Task<bool> SeedDefaultProfileIfMissingAsync(CancellationToken cancellationToken = default)
+        {
+            if (await _db.QualityProfiles.AnyAsync(cancellationToken))
+            {
+                return false;
+            }
+
+            _db.QualityProfiles.Add(QualityProfile.CreateDefault());
+            await _db.SaveChangesAsync(cancellationToken);
+            return true;
+        }
     }
 }

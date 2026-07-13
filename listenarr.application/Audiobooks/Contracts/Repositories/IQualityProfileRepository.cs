@@ -27,5 +27,11 @@ namespace Listenarr.Application.Audiobooks.Contracts.Repositories
         Task<QualityProfile> UpdateAsync(QualityProfile profile);
         Task<bool> DeleteAsync(int id);
         Task<int> CountAudiobooksUsingProfileAsync(int profileId);
+
+        /// <summary>
+        /// Seeds a single default quality profile when the table is empty. Idempotent:
+        /// does nothing when any profile already exists. Returns true if a profile was seeded.
+        /// </summary>
+        Task<bool> SeedDefaultProfileIfMissingAsync(CancellationToken cancellationToken = default);
     }
 }

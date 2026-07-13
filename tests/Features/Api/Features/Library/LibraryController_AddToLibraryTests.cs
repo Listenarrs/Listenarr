@@ -50,6 +50,9 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 .WithIsDefault()
                 .WithPath(tempRoot)
                 .Build());
+
+            // Adds now require a resolvable quality profile; production seeds this at startup.
+            await _qualityProfileRepository.AddAsync(QualityProfile.CreateDefault());
         }
 
         [Fact]

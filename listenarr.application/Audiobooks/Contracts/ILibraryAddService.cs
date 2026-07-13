@@ -50,6 +50,12 @@ namespace Listenarr.Application.Audiobooks.Contracts
 
         public bool AlreadyExists { get; set; }
 
+        /// <summary>
+        /// True when the add was refused (e.g. an invalid quality profile id, or no profile
+        /// could be resolved). The caller should surface this as a 400-style validation error.
+        /// </summary>
+        public bool Rejected { get; set; }
+
         public string Message { get; set; } = string.Empty;
 
         public Audiobook? Audiobook { get; set; }

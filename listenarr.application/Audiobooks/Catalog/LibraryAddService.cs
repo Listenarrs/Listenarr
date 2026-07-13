@@ -119,6 +119,14 @@ namespace Listenarr.Application.Audiobooks.Catalog
                 }
             }
 
+            // Resolve and validate the quality profile before doing any persistence-side work.
+            // A profile-less audiobook is never searched, so refuse the add instead of storing it silently.
+            var resolvedProfile = await ResolveQualityProfileAsync(request, metadata.Title);
+            if (resolvedProfile.Rejected)
+            {
+                return resolvedProfile.Result!;
+            }
+
             var imageUrl = await MoveImageToLibraryStorageAsync(metadata, request.SearchResult, firstIsbn);
 
             var audiobook = metadata.ToAudiobook();
@@ -128,24 +136,7 @@ namespace Listenarr.Application.Audiobooks.Catalog
 
             AudiobookIdentifierMapper.SyncImportedIdentifiersFromLegacyFields(audiobook, metadata.Region);
 
-            if (request.QualityProfileId.HasValue)
-            {
-                audiobook.QualityProfileId = request.QualityProfileId.Value;
-            }
-            else
-            {
-                var defaultProfile = await _qualityProfileService.GetDefaultAsync();
-                if (defaultProfile != null)
-                {
-                    audiobook.QualityProfileId = defaultProfile.Id;
-                }
-                else
-                {
-                    _logger.LogWarning(
-                        "No default quality profile found. New audiobook '{Title}' will not have a quality profile assigned.",
-                        audiobook.Title);
-                }
-            }
+            audiobook.QualityProfileId = resolvedProfile.ProfileId;
 
             var settings = await _configurationService.GetApplicationSettingsAsync();
 
@@ -196,6 +187,45 @@ namespace Listenarr.Application.Audiobooks.Catalog
                 Message = "Audiobook added to library successfully",
                 Audiobook = audiobook
             };
+        }
+
+        private async Task<(bool Rejected, int ProfileId, LibraryAddOperationResult? Result)> ResolveQualityProfileAsync(
+            LibraryAddOperationRequest request,
+            string? title)
+        {
+            if (request.QualityProfileId.HasValue)
+            {
+                var suppliedProfile = await _qualityProfileService.GetByIdAsync(request.QualityProfileId.Value);
+                if (suppliedProfile == null)
+                {
+                    _logger.LogWarning(
+                        "Rejected library add for '{Title}': quality profile {ProfileId} does not exist.",
+                        title,
+                        request.QualityProfileId.Value);
+                    return (true, 0, new LibraryAddOperationResult
+                    {
+                        Rejected = true,
+                        Message = $"Quality profile with ID {request.QualityProfileId.Value} does not exist."
+                    });
+                }
+
+                return (false, suppliedProfile.Id, null);
+            }
+
+            var defaultProfile = await _qualityProfileService.GetDefaultAsync();
+            if (defaultProfile == null)
+            {
+                _logger.LogWarning(
+                    "Rejected library add for '{Title}': no quality profile supplied and no default profile is configured.",
+                    title);
+                return (true, 0, new LibraryAddOperationResult
+                {
+                    Rejected = true,
+                    Message = "No quality profile was supplied and no default quality profile is configured."
+                });
+            }
+
+            return (false, defaultProfile.Id, null);
         }
 
         private async Task<string?> MoveImageToLibraryStorageAsync(

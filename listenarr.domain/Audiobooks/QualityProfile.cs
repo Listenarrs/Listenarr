@@ -112,6 +112,35 @@ namespace Listenarr.Domain.Audiobooks
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+        /// <summary>
+        /// Builds the permissive "Any Quality" profile used to seed a fresh install so that
+        /// monitored audiobooks always resolve a quality profile and become searchable.
+        /// Every codec/bitrate rung is allowed and there is no cutoff, so no release is rejected on quality.
+        /// </summary>
+        public static QualityProfile CreateDefault()
+        {
+            return new QualityProfile
+            {
+                Name = "Any Quality",
+                Description = "Default profile seeded automatically. Accepts any audio quality.",
+                IsDefault = true,
+                Qualities = new List<QualityDefinition>
+                {
+                    new() { Quality = "AAC 320kbps", Allowed = true, Priority = 0, Codec = "AAC", Bitrate = 320 },
+                    new() { Quality = "AAC 256kbps", Allowed = true, Priority = 1, Codec = "AAC", Bitrate = 256 },
+                    new() { Quality = "AAC 192kbps", Allowed = true, Priority = 2, Codec = "AAC", Bitrate = 192 },
+                    new() { Quality = "AAC 128kbps", Allowed = true, Priority = 3, Codec = "AAC", Bitrate = 128 },
+                    new() { Quality = "AAC 64kbps", Allowed = true, Priority = 4, Codec = "AAC", Bitrate = 64 },
+                    new() { Quality = "MP3 320kbps", Allowed = true, Priority = 5, Codec = "MP3", Bitrate = 320 },
+                    new() { Quality = "MP3 256kbps", Allowed = true, Priority = 6, Codec = "MP3", Bitrate = 256 },
+                    new() { Quality = "MP3 VBR", Allowed = true, Priority = 7, Codec = "MP3" },
+                    new() { Quality = "MP3 192kbps", Allowed = true, Priority = 8, Codec = "MP3", Bitrate = 192 },
+                    new() { Quality = "MP3 128kbps", Allowed = true, Priority = 9, Codec = "MP3", Bitrate = 128 },
+                    new() { Quality = "MP3 64kbps", Allowed = true, Priority = 10, Codec = "MP3", Bitrate = 64 },
+                }
+            };
+        }
     }
 
     /// <summary>
