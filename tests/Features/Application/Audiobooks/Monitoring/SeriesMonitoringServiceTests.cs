@@ -146,6 +146,9 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Monitoring
                 .WithPath(rootPath)
                 .Build());
 
+            // Adds now require a resolvable quality profile; production seeds this at startup.
+            await _qualityProfileRepository.AddAsync(QualityProfile.CreateDefault());
+
             _seriesCatalogService
                 .Setup(service => service.GetCatalogAsync(
                     "Dungeon Crawler Carl",

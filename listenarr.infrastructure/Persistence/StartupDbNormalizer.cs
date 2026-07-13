@@ -39,9 +39,18 @@ namespace Listenarr.Infrastructure.Persistence
 
         public async Task StartAsync(CancellationToken cancellationToken)
         {
+            using var scope = _provider.CreateScope();
+
+            // Each pass is guarded independently: a failure normalizing legacy columns must not
+            // prevent seeding the default quality profile, which fresh installs rely on to search at all.
+            await NormalizeJsonColumnsAsync(scope, cancellationToken);
+            await SeedDefaultQualityProfileAsync(scope, cancellationToken);
+        }
+
+        private async Task NormalizeJsonColumnsAsync(IServiceScope scope, CancellationToken cancellationToken)
+        {
             try
             {
-                using var scope = _provider.CreateScope();
                 var audiobookRepository = scope.ServiceProvider.GetRequiredService<IAudiobookRepository>();
                 await audiobookRepository.NormalizeJsonColumnsAsync(cancellationToken);
                 _logger.LogInformation("StartupDbNormalizer: normalization pass complete.");
@@ -57,6 +66,27 @@ namespace Listenarr.Infrastructure.Persistence
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
                 _logger.LogError(ex, "StartupDbNormalizer: unexpected error while running normalization");
+            }
+        }
+
+        private async Task SeedDefaultQualityProfileAsync(IServiceScope scope, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var qualityProfileRepository = scope.ServiceProvider.GetRequiredService<IQualityProfileRepository>();
+                var seededDefaultProfile = await qualityProfileRepository.SeedDefaultProfileIfMissingAsync(cancellationToken);
+                if (seededDefaultProfile)
+                {
+                    _logger.LogInformation("StartupDbNormalizer: seeded default quality profile (none existed).");
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
+                _logger.LogError(ex, "StartupDbNormalizer: unexpected error while seeding default quality profile");
             }
         }
 

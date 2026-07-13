@@ -67,6 +67,11 @@ namespace Listenarr.Api.Features.Library
                     HistoryMessage = $"Audiobook '{request.Metadata.Title}' added to library from Add New page"
                 });
 
+                if (result.Rejected)
+                {
+                    return new BadRequestObjectResult(new { message = result.Message });
+                }
+
                 if (result.AlreadyExists)
                 {
                     return new ConflictObjectResult(new { message = result.Message, audiobook = result.Audiobook });
@@ -129,7 +134,11 @@ namespace Listenarr.Api.Features.Library
             _logger.LogInformation("Created Audiobook entity: Title={Title}, Asin={Asin}, PublishYear={PublishYear}",
                 LogRedaction.SanitizeText(audiobook.Title), LogRedaction.SanitizeText(audiobook.Asin), LogRedaction.SanitizeText(audiobook.PublishYear));
 
-            await AssignQualityProfileAsync(audiobook, request);
+            var profileError = await AssignQualityProfileAsync(audiobook, request);
+            if (profileError != null)
+            {
+                return profileError;
+            }
 
             if (!string.IsNullOrWhiteSpace(request.DestinationPath))
             {
@@ -251,29 +260,38 @@ namespace Listenarr.Api.Features.Library
             return fallbackImageUrl;
         }
 
-        private async Task AssignQualityProfileAsync(Audiobook audiobook, LibraryController.AddToLibraryRequest request)
+        private async Task<IActionResult?> AssignQualityProfileAsync(Audiobook audiobook, LibraryController.AddToLibraryRequest request)
         {
-            if (request.QualityProfileId.HasValue)
-            {
-                audiobook.QualityProfileId = request.QualityProfileId.Value;
-                _logger.LogInformation("Assigned custom quality profile ID {ProfileId} to new audiobook '{Title}'",
-                    request.QualityProfileId.Value, LogRedaction.SanitizeText(audiobook.Title));
-                return;
-            }
-
             using var scope = _scopeFactory.CreateScope();
             var qualityProfileService = scope.ServiceProvider.GetRequiredService<IQualityProfileService>();
+
+            if (request.QualityProfileId.HasValue)
+            {
+                var suppliedProfile = await qualityProfileService.GetByIdAsync(request.QualityProfileId.Value);
+                if (suppliedProfile == null)
+                {
+                    _logger.LogWarning("Rejected library add for '{Title}': quality profile {ProfileId} does not exist.",
+                        LogRedaction.SanitizeText(audiobook.Title), request.QualityProfileId.Value);
+                    return new BadRequestObjectResult(new { message = $"Quality profile with ID {request.QualityProfileId.Value} does not exist." });
+                }
+
+                audiobook.QualityProfileId = suppliedProfile.Id;
+                _logger.LogInformation("Assigned custom quality profile ID {ProfileId} to new audiobook '{Title}'",
+                    suppliedProfile.Id, LogRedaction.SanitizeText(audiobook.Title));
+                return null;
+            }
+
             var defaultProfile = await qualityProfileService.GetDefaultAsync();
-            if (defaultProfile != null)
+            if (defaultProfile == null)
             {
-                audiobook.QualityProfileId = defaultProfile.Id;
-                _logger.LogInformation("Assigned default quality profile '{ProfileName}' (ID: {ProfileId}) to new audiobook '{Title}'",
-                    defaultProfile.Name, defaultProfile.Id, audiobook.Title);
+                _logger.LogWarning("Rejected library add for '{Title}': no quality profile supplied and no default profile is configured.", LogRedaction.SanitizeText(audiobook.Title));
+                return new BadRequestObjectResult(new { message = "No quality profile was supplied and no default quality profile is configured." });
             }
-            else
-            {
-                _logger.LogWarning("No default quality profile found. New audiobook '{Title}' will not have a quality profile assigned.", LogRedaction.SanitizeText(audiobook.Title));
-            }
+
+            audiobook.QualityProfileId = defaultProfile.Id;
+            _logger.LogInformation("Assigned default quality profile '{ProfileName}' (ID: {ProfileId}) to new audiobook '{Title}'",
+                defaultProfile.Name, defaultProfile.Id, audiobook.Title);
+            return null;
         }
 
         private async Task ResolveAuthorAsinsAsync(Audiobook audiobook)
