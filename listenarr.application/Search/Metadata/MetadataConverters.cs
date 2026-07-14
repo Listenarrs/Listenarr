@@ -143,6 +143,7 @@ public class MetadataConverters
         {
             audnexusSeriesMemberships.Add(new AudiobookSeriesMembership
             {
+                SeriesAsin = audnexusData.SeriesPrimary.Asin,
                 SeriesName = audnexusData.SeriesPrimary.Name,
                 SeriesNumber = audnexusData.SeriesPrimary.Position,
                 IsPrimary = true,
@@ -154,6 +155,7 @@ public class MetadataConverters
         {
             audnexusSeriesMemberships.Add(new AudiobookSeriesMembership
             {
+                SeriesAsin = audnexusData.SeriesSecondary.Asin,
                 SeriesName = audnexusData.SeriesSecondary.Name,
                 SeriesNumber = audnexusData.SeriesSecondary.Position,
                 IsPrimary = audnexusSeriesMemberships.Count == 0,
