@@ -21,7 +21,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 namespace Listenarr.Infrastructure.Library.Moving
 {
-    public class MoveJobProcessor(
+    public partial class MoveJobProcessor(
         IMoveQueueService moveQueueService,
         IToastService toastService,
         IScanQueueService scanQueueService,
@@ -107,17 +107,8 @@ namespace Listenarr.Infrastructure.Library.Moving
                     return;
                 }
 
-                if (FileUtils.IsPathInsideOf(target, source) || FileUtils.IsPathInsideOf(source, target))
-                {
-                    await moveQueueService.UpdateJobStatusAsync(job.Id, "Failed", "Source and target paths overlap", stoppingToken);
-                    metrics.Increment("worker.move.job.failed");
-                    logger.LogWarning(
-                        "Blocked overlapping move job {JobId}: {Source} -> {Target}",
-                        job.Id,
-                        LogRedaction.SanitizeFilePath(source),
-                        LogRedaction.SanitizeFilePath(target));
-                    return;
-                }
+                var descendMove = FileUtils.IsPathInsideOf(target, source);
+                if (!descendMove && await FailIfUpwardOverlapAsync(job, source, target, stoppingToken)) return;
 
                 // Ensure target parent exists
                 var targetParent = Path.GetDirectoryName(target);
@@ -128,7 +119,7 @@ namespace Listenarr.Infrastructure.Library.Moving
                     return;
                 }
 
-                if (!Directory.Exists(targetParent)) Directory.CreateDirectory(targetParent);
+                if (!descendMove && !Directory.Exists(targetParent)) Directory.CreateDirectory(targetParent);
 
                 // Check if target exists and has content - only fail if it has files/folders we'd overwrite
                 if (Directory.Exists(target))
@@ -157,6 +148,12 @@ namespace Listenarr.Infrastructure.Library.Moving
                 // Copy recursively with retries per file
                 try
                 {
+                    if (descendMove)
+                    {
+                        ExecuteDescendMove(job, source, target, targetParent);
+                    }
+                    else
+                    {
                     // Only create tempName if target doesn't exist; otherwise copy directly into existing empty target
                     var useTemp = !Directory.Exists(target);
                     var copyDest = useTemp ? tempName : target;
@@ -266,6 +263,7 @@ namespace Listenarr.Infrastructure.Library.Moving
                     }
 
                     Directory.Delete(source, true);
+                    }
 
                     await MovedAudiobookPathRewriter.RewriteAsync(
                         audiobook,
