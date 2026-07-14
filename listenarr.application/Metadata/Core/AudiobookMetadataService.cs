@@ -115,6 +115,18 @@ namespace Listenarr.Application.Metadata.Core
                         continue;
                     }
 
+                    // An ASIN missing from Audible's catalog comes back as a
+                    // non-null but EMPTY product stub (no title, no fields).
+                    // Treating that as an answer both returns junk to the
+                    // caller and blocks every later source in the chain.
+                    if (result is AudibleBookResponse shell && string.IsNullOrWhiteSpace(shell.Title))
+                    {
+                        _logger.LogInformation(
+                            "{SourceName} returned an empty product stub for ASIN {Asin}; treating as no answer",
+                            source.Name, asin);
+                        result = null;
+                    }
+
                     if (result != null)
                     {
                         _logger.LogInformation("Successfully fetched metadata from {SourceName} for ASIN: {Asin}", source.Name, asin);
