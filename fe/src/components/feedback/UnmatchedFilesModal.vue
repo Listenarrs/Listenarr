@@ -250,14 +250,20 @@ const destinationFolder = computed(
 )
 
 const fileAction = computed(() => configStore.applicationSettings?.completedFileAction ?? 'copy')
-const fileInputMode = computed<'move' | 'copy' | 'hardlink/copy'>(() =>
-  fileAction.value === 'move' || fileAction.value === 'copy' || fileAction.value === 'hardlink/copy'
+const fileInputMode = computed<'move' | 'copy' | 'hardlink/copy' | 'symlink'>(() =>
+  fileAction.value === 'move' ||
+  fileAction.value === 'copy' ||
+  fileAction.value === 'hardlink/copy' ||
+  fileAction.value === 'symlink'
     ? fileAction.value
     : 'copy',
 )
-const fileActionLabel = computed(() =>
-  fileInputMode.value === 'copy' || fileInputMode.value === 'hardlink/copy' ? 'Copy to' : 'Move to',
-)
+const fileActionLabel = computed(() => {
+  if (fileInputMode.value === 'symlink') return 'Link to'
+  return fileInputMode.value === 'copy' || fileInputMode.value === 'hardlink/copy'
+    ? 'Copy to'
+    : 'Move to'
+})
 
 let jobId = ''
 let offSignalR: (() => void) | null = null

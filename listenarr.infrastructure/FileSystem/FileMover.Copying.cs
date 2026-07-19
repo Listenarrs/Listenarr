@@ -150,6 +150,110 @@ namespace Listenarr.Infrastructure.FileSystem
             }
         }
 
+        public async Task<bool> SymlinkFileAsync(string sourceFile, string destFile)
+        {
+            try
+            {
+                // Ensure destination directory exists
+                var destDir = Path.GetDirectoryName(destFile) ?? string.Empty;
+                if (!string.IsNullOrEmpty(destDir) && !Directory.Exists(destDir))
+                {
+                    Directory.CreateDirectory(destDir);
+                }
+
+                // Determine the link target. If the source is itself a symlink, point the new
+                // library link directly at its target so we never build a symlink chain. Relative
+                // link targets are resolved against the directory that holds the source symlink.
+                // A regular source file is linked to via its absolute path. Resolving the target
+                // never reads the file's content.
+                var linkTarget = ResolveSymlinkTarget(sourceFile);
+
+                // If the destination is already a symlink pointing at the same target there is
+                // nothing to do. Comparing link targets inspects only the link metadata and never
+                // reads file content, so a correct existing link is left untouched.
+                var existingTarget = new FileInfo(destFile).LinkTarget;
+                if (existingTarget != null && string.Equals(existingTarget, linkTarget, StringComparison.Ordinal))
+                {
+                    LogMutation(FileMutationOutcome.Skipped, FileAction.SymbolicLink, sourceFile, destFile, "Destination already links to the same target");
+                    return true;
+                }
+
+                // Safe ordering: create the symlink under a temporary name in the destination
+                // directory first, then atomically rename it onto the destination. This ensures an
+                // existing valid destination is never removed until a confirmed replacement is ready.
+                // File.CreateSymbolicLink never reads the source content and there is deliberately
+                // no copy/hardlink fallback: the source file must never be fully read.
+                // Use Path.GetFileName to strip any separators and Path.Join (not Path.Combine) so a
+                // rooted temp name cannot escape the destination directory.
+                var tempDestName = Path.GetFileName("." + Path.GetFileName(destFile) + "." + Guid.NewGuid().ToString("N") + ".tmp");
+                var tempDest = Path.Join(destDir, tempDestName);
+
+                try
+                {
+                    File.CreateSymbolicLink(tempDest, linkTarget);
+
+                    // Symlink created — atomically replace the destination.
+                    File.Move(tempDest, destFile, overwrite: true);
+                    LogMutation(FileMutationOutcome.Success, FileAction.SymbolicLink, sourceFile, destFile, $"Linked to {linkTarget}");
+                    return true;
+                }
+                catch (Exception linkEx) when (linkEx is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
+                {
+                    // Robust cleanup: File.Exists returns false for a broken symlink, so the leftover
+                    // temp link is removed unconditionally rather than guarded by File.Exists.
+                    TryDeleteLink(tempDest);
+                    LogMutation(FileMutationOutcome.Failed, FileAction.SymbolicLink, sourceFile, destFile, linkEx.Message);
+                    _logger.LogError(linkEx, "Symbolic link failed: {Source} -> {Dest}", sourceFile, destFile);
+                    return false;
+                }
+            }
+            catch (Exception ex) when (ex is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
+            {
+                LogMutation(FileMutationOutcome.Failed, FileAction.SymbolicLink, sourceFile, destFile, ex.Message);
+                _logger.LogError(ex, "Symbolic link failed: {Source} -> {Dest}", sourceFile, destFile);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Determines the target a new symbolic link should point at. When <paramref name="sourceFile"/>
+        /// is itself a symlink its own target is returned (resolving relative targets against the
+        /// source's directory) so no symlink chain is created; otherwise the absolute source path is used.
+        /// </summary>
+        private static string ResolveSymlinkTarget(string sourceFile)
+        {
+            var linkTarget = new FileInfo(sourceFile).LinkTarget;
+            if (string.IsNullOrEmpty(linkTarget))
+            {
+                // Regular file: link directly to its absolute path.
+                return Path.GetFullPath(sourceFile);
+            }
+
+            // Absolute targets are preserved as-is so they keep resolving under a shared container
+            // mount path; relative targets are resolved against the directory holding the source link.
+            if (Path.IsPathRooted(linkTarget))
+            {
+                return linkTarget;
+            }
+
+            var sourceDir = Path.GetDirectoryName(sourceFile) ?? string.Empty;
+            return Path.GetFullPath(Path.Combine(sourceDir, linkTarget));
+        }
+
+        private void TryDeleteLink(string path)
+        {
+            // File.Delete removes the symlink itself (not its target) and does not throw when the
+            // path is absent, so it safely cleans up even a broken temporary link.
+            try
+            {
+                File.Delete(path);
+            }
+            catch (Exception ex) when (ex is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
+            {
+                // best-effort temp cleanup; ignore non-critical failures
+            }
+        }
+
         private void CopyDirRecursive(string src, string dst)
         {
             Directory.CreateDirectory(dst);
@@ -239,6 +343,8 @@ namespace Listenarr.Infrastructure.FileSystem
                         return await HardlinkFileAsync(source, destination);
                     case FileAction.Copy:
                         return await CopyFileAsync(source, destination);
+                    case FileAction.SymbolicLink:
+                        return await SymlinkFileAsync(source, destination);
                 }
 
                 // Unhandled action: We are unable to fulfill the request
