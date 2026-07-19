@@ -32,7 +32,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
             // Cleared whenever the client may hold torrents that did not make it into items.
             var isComplete = true;
 
-            var baseUrl = DownloadClientUriBuilder.BuildAuthority(client);
+            var baseUrl = QBittorrentHelpers.BuildBaseUrl(client);
 
             try
             {

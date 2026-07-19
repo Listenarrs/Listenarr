@@ -33,7 +33,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 return true; // No-op is success
             }
 
-            var baseUrl = DownloadClientUriBuilder.BuildAuthority(client);
+            var baseUrl = QBittorrentHelpers.BuildBaseUrl(client);
             try
             {
                 using var httpClient = httpClientFactory.CreateClient(clientType);
