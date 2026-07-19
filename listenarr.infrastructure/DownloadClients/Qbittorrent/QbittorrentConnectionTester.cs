@@ -37,7 +37,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
         {
             try
             {
-                var baseUrl = DownloadClientUriBuilder.BuildAuthority(client);
+                var baseUrl = QBittorrentHelpers.BuildBaseUrl(client);
 
                 using var http = _httpClientFactory.CreateClient(_clientType);
                 using var resp = await http.GetAsync($"{baseUrl}/api/v2/app/version", ct);

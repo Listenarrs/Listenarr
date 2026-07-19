@@ -69,5 +69,37 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 logger.LogInformation("Fetching qBittorrent queue filtered by category: {Category}", category);
             }
         }
+
+        /// <summary>
+        /// Builds the base URL used for every qBittorrent WebAPI call, including an optional
+        /// "urlBase" path prefix from client settings (e.g. "/qbittorrent") for instances that
+        /// sit behind a reverse proxy at a path prefix.
+        /// Unlike Transmission's urlBase (which replaces the whole RPC path to match Transmission's
+        /// own configurable --rpc-url-base setting), qBittorrent has no equivalent server-side base
+        /// path setting, so this is a plain prefix prepended before the fixed "/api/v2/..." routes -
+        /// it must match whatever prefix the reverse proxy strips before forwarding to qBittorrent.
+        /// </summary>
+        /// <param name="client">The download client configuration providing host/port and settings.</param>
+        /// <returns>The authority (scheme://host:port) with the normalized urlBase prefix appended, if configured.</returns>
+        public static string BuildBaseUrl(DownloadClientConfiguration client)
+        {
+            var authority = DownloadClientUriBuilder.BuildAuthority(client);
+            var prefix = ResolveUrlBasePrefix(client);
+            return prefix.Length == 0 ? authority : authority + prefix;
+        }
+
+        private static string ResolveUrlBasePrefix(DownloadClientConfiguration client)
+        {
+            if (client.Settings?.TryGetValue("urlBase", out var urlBaseObj) is true)
+            {
+                var trimmed = urlBaseObj?.ToString()?.Trim().TrimEnd('/');
+                if (!string.IsNullOrEmpty(trimmed))
+                {
+                    return trimmed.StartsWith('/') ? trimmed : "/" + trimmed;
+                }
+            }
+
+            return string.Empty;
+        }
     }
 }
