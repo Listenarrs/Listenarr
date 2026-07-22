@@ -196,7 +196,8 @@ namespace Listenarr.Application.Downloads.Cleanup
                 if (downloadRecord?.Metadata != null)
                 {
                     if ((string.Equals(client.Type, "qbittorrent", StringComparison.OrdinalIgnoreCase) ||
-                         string.Equals(client.Type, "transmission", StringComparison.OrdinalIgnoreCase)) &&
+                         string.Equals(client.Type, "transmission", StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(client.Type, "deluge", StringComparison.OrdinalIgnoreCase)) &&
                         downloadRecord.Metadata.TryGetValue("TorrentHash", out var hashObj))
                     {
                         var hash = hashObj?.ToString();

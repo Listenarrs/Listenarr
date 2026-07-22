@@ -291,7 +291,7 @@ namespace Listenarr.Application.Downloads.Submission
                 if (downloadClientId == null)
                 {
                     var clientType = isTorrent ? "torrent" : "NZB";
-                    var neededClients = isTorrent ? "qBittorrent or Transmission" : "SABnzbd or NZBGet";
+                    var neededClients = isTorrent ? "qBittorrent, Transmission, or Deluge" : "SABnzbd or NZBGet";
                     throw new Exception($"No suitable download client found for {clientType}. Please configure and enable a {clientType} client ({neededClients}) in Settings.");
                 }
 
