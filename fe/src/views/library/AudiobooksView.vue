@@ -1167,6 +1167,18 @@ const filteredAndSortedAudiobooks = computed(() => {
         av = (a.publishYear || '').toString().toLowerCase()
         bv = (b.publishYear || '').toString().toLowerCase()
         break
+      case 'date-added': {
+        // Sort by when the earliest file was imported. Audiobooks with no file yet
+        // (no dateDownloaded) always sort last, regardless of ascending/descending.
+        const at = a.dateDownloaded ? Date.parse(a.dateDownloaded) : NaN
+        const bt = b.dateDownloaded ? Date.parse(b.dateDownloaded) : NaN
+        const aMissing = Number.isNaN(at)
+        const bMissing = Number.isNaN(bt)
+        if (aMissing && bMissing) return 0
+        if (aMissing) return 1
+        if (bMissing) return -1
+        return (at - bt) * (sortOrder.value === 'asc' ? 1 : -1)
+      }
       case 'monitored':
         av = !!a.monitored
         bv = !!b.monitored
@@ -1557,6 +1569,7 @@ const sortOptions = computed(() => {
       { value: 'narrator-first', label: 'Narrator First Name' },
       { value: 'publisher', label: 'Publisher' },
       { value: 'year', label: 'Release Year' },
+      { value: 'date-added', label: 'Date Added' },
       { value: 'monitored', label: 'Monitored' },
       { value: 'status', label: 'Status' },
     ]

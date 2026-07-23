@@ -434,5 +434,14 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
                     ownership.Reason),
                 _ => throw new ArgumentOutOfRangeException(nameof(ownership))
             };
+
+        public async Task<Dictionary<int, DateTime>> GetEarliestCreatedAtByAudiobookIdAsync(CancellationToken ct = default)
+        {
+            return await _db.AudiobookFiles
+                .AsNoTracking()
+                .GroupBy(f => f.AudiobookId)
+                .Select(g => new { AudiobookId = g.Key, EarliestCreatedAt = g.Min(f => f.CreatedAt) })
+                .ToDictionaryAsync(r => r.AudiobookId, r => r.EarliestCreatedAt, ct);
+        }
     }
 }

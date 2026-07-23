@@ -796,3 +796,82 @@ describe('AudiobooksView Grouping', () => {
     expect(wrapper.find('.series-bottom-placard').exists()).toBe(true)
   })
 })
+
+describe('AudiobooksView Date Added sorting', () => {
+  beforeEach(() => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+  })
+
+  it('sorts by date-added (file import date) with fileless books last', async () => {
+    if (
+      typeof (globalThis as unknown as { ResizeObserver?: unknown }).ResizeObserver === 'undefined'
+    ) {
+      ;(globalThis as unknown as Record<string, unknown>).ResizeObserver = class {
+        observe() {}
+        disconnect() {}
+      }
+    }
+    if (typeof (globalThis as unknown as { WebSocket?: unknown }).WebSocket === 'undefined') {
+      ;(globalThis as unknown as Record<string, unknown>).WebSocket = function () {
+        /* noop */
+      }
+    }
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', name: 'home', component: { template: '<div />' } },
+        { path: '/audiobooks', name: 'audiobooks', component: AudiobooksView },
+      ],
+    })
+    await router.push('/audiobooks')
+    await router.isReady().catch(() => {})
+
+    const store = useLibraryStore()
+    store.audiobooks = [
+      { id: 1, title: 'Oldest', authors: ['A'], dateDownloaded: '2023-01-01T00:00:00Z', files: [] },
+      { id: 2, title: 'Newest', authors: ['A'], dateDownloaded: '2025-06-01T00:00:00Z', files: [] },
+      { id: 3, title: 'Middle', authors: ['A'], dateDownloaded: '2024-03-15T00:00:00Z', files: [] },
+      { id: 4, title: 'No File', authors: ['A'], files: [] }, // no dateDownloaded
+    ] as unknown as import('@/types').Audiobook[]
+    store.fetchLibrary = vi.fn(async () => undefined)
+
+    const wrapper = mount(AudiobooksView, {
+      global: {
+        plugins: [pinia, router],
+        stubs: ['BulkEditModal', 'EditAudiobookModal', 'CustomFilterModal', 'FiltersDropdown', 'CustomSelect'],
+      },
+    })
+    await new Promise((r) => setTimeout(r, 0))
+
+    const vm = wrapper.vm as unknown as {
+      sortKey: string
+      sortOrder: string
+      groupBy: string
+      setGroupBy?: (value: string) => Promise<void> | void
+      audiobooks: Array<{ title?: string }>
+      sortOptions: Array<{ value: string; label: string }>
+    }
+
+    // Ensure we're in the flat books view (grouping may persist from other tests)
+    await vm.setGroupBy?.('books')
+    await wrapper.vm.$nextTick()
+
+    // The 'Date Added' option is offered when grouping by books
+    expect(vm.sortOptions.map((o) => o.value)).toContain('date-added')
+
+    // Descending: newest first, book with no file last
+    vm.sortKey = 'date-added'
+    vm.sortOrder = 'desc'
+    await wrapper.vm.$nextTick()
+    expect(vm.audiobooks.map((a) => a.title)).toEqual(['Newest', 'Middle', 'Oldest', 'No File'])
+
+    // Ascending: oldest first, book with no file still last
+    vm.sortOrder = 'asc'
+    await wrapper.vm.$nextTick()
+    expect(vm.audiobooks.map((a) => a.title)).toEqual(['Oldest', 'Middle', 'Newest', 'No File'])
+  })
+})

@@ -756,6 +756,9 @@ export interface Audiobook {
   wanted?: boolean
   // Server-computed list status used by slim /library responses.
   status?: AudiobookStatus
+  // When the earliest file for this audiobook was imported (UTC ISO string); undefined for
+  // audiobooks with no tracked files yet. Used for "Date Added" sorting.
+  dateDownloaded?: string
 }
 
 export interface AudiobookUpdateRequest {

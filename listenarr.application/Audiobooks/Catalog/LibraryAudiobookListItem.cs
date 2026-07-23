@@ -47,5 +47,11 @@ namespace Listenarr.Application.Audiobooks.Catalog
         public string[]? AuthorAsins { get; set; }
         public bool Wanted { get; set; }
         public string Status { get; set; } = string.Empty;
+
+        /// <summary>
+        /// When the audiobook's earliest file was imported (UTC). Null for audiobooks that
+        /// have no tracked files yet (e.g. wanted books). Used for "Date Added" sorting.
+        /// </summary>
+        public DateTime? DateDownloaded { get; set; }
     }
 }
