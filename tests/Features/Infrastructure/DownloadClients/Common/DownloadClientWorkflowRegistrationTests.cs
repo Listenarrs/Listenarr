@@ -33,6 +33,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Common
             Assert.Contains(adapters, a => a.ClientType == DownloadClientTypes.Transmission);
             Assert.Contains(adapters, a => a.ClientType == DownloadClientTypes.Sabnzbd);
             Assert.Contains(adapters, a => a.ClientType == DownloadClientTypes.Nzbget);
+            Assert.Contains(adapters, a => a.ClientType == DownloadClientTypes.Slskd);
         }
 
         [Fact]

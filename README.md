@@ -382,12 +382,15 @@ Docker users: the provided `docker-compose.yml` includes an example `LISTENARR_L
 
 ### Download Clients
 
+Native Slskd (Soulseek) setup, portable path mapping, and troubleshooting are documented in [docs/download-clients/slskd.md](docs/download-clients/slskd.md). A reusable deployment example is available at [docker-compose.slskd.example.yml](docker-compose.slskd.example.yml).
+
 Supported download clients:
 
 - **qBittorrent** - Popular torrent client with web UI
 - **Transmission** - Cross-platform torrent client
 - **SABnzbd** - Usenet downloader
 - **NZBGet** - Efficient usenet client
+- **Slskd** - Native Soulseek search, batch monitoring, and safe staged import
 
 ### Application Settings
 

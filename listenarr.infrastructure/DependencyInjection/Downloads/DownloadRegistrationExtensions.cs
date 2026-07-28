@@ -61,6 +61,7 @@ internal static class DownloadRegistrationExtensions
         services.AddScoped<DownloadTypeResolver>();
         services.AddScoped<DownloadClientSelector>();
         services.AddScoped<DownloadCachedTorrentStore>();
+        services.AddScoped<NativeSlskdDownloadRouter>();
         services.AddSingleton<IDownloadReferenceService, DownloadReferenceService>();
         services.AddScoped<DirectDownloadWorkflow>();
         services.AddScoped<DownloadRemovalWorkflow>();

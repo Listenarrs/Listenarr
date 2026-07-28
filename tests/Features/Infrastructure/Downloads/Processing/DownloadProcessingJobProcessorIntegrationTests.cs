@@ -128,10 +128,11 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Processing
 
             await downloadProcessingJobProcessor.ProcessQueueAsync(CancellationToken.None);
 
-            Assert.True(File.Exists(Path.Join(destRoot, "book.m4b")));
-            Assert.True(File.Exists(Path.Join(destRoot, "cover.jpg")));
-            Assert.True(File.Exists(Path.Join(destRoot, "book.txt")));
-            Assert.False(File.Exists(Path.Join(destRoot, "unrelated.txt")));
+            var canonicalDirectory = Path.Join(destRoot, "Unknown Author", "book");
+            Assert.True(File.Exists(Path.Join(canonicalDirectory, "book.m4b")));
+            Assert.True(File.Exists(Path.Join(canonicalDirectory, "cover.jpg")));
+            Assert.True(File.Exists(Path.Join(canonicalDirectory, "book.txt")));
+            Assert.False(File.Exists(Path.Join(canonicalDirectory, "unrelated.txt")));
         }
     }
 }

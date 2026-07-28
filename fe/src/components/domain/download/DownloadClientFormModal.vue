@@ -67,6 +67,7 @@
                 <option value="transmission">Transmission</option>
                 <option value="sabnzbd">SABnzbd</option>
                 <option value="nzbget">NZBGet</option>
+                <option value="slskd">Slskd (Soulseek)</option>
               </select>
             </div>
 
@@ -208,6 +209,27 @@
 
           <!-- Priority -->
           <FormSection title="Priority" :icon="PhSortAscending">
+            <div class="form-group">
+              <label for="clientPriority">Client Priority</label>
+              <input id="clientPriority" v-model.number="formData.priority" type="number" min="0" />
+              <small>Lower numbers are preferred for normal audiobook downloads.</small>
+            </div>
+            <div class="checkbox-group">
+              <Checkbox v-model="formData.isDefault">
+                <strong>Default download client</strong>
+                <small>Prefer this client ahead of priority ordering.</small>
+              </Checkbox>
+            </div>
+            <div class="checkbox-group" v-if="formData.type === 'slskd'">
+              <Checkbox v-model="formData.allowProtocolFallback">
+                <strong>Allow torrent/NZB fallback</strong>
+                <small>Off by default; native Slskd failures will not silently grab a torrent.</small>
+              </Checkbox>
+            </div>
+            <div class="form-group" v-if="formData.type === 'slskd'">
+              <label for="listenarrSourceRoot">Listenarr-visible source root *</label>
+              <input id="listenarrSourceRoot" v-model="formData.listenarrSourceRoot" type="text" required placeholder="/slskd-downloads" />
+            </div>
             <div class="form-group">
               <label for="recentPriority">Recent Priority</label>
               <select id="recentPriority" v-model="formData.recentPriority">
@@ -404,7 +426,7 @@ const testing = ref(false)
 
 const defaultFormData = {
   name: '',
-  type: 'qbittorrent' as 'qbittorrent' | 'transmission' | 'sabnzbd' | 'nzbget',
+  type: 'qbittorrent' as 'qbittorrent' | 'transmission' | 'sabnzbd' | 'nzbget' | 'slskd',
   host: '',
   port: 8080,
   username: '',
@@ -427,6 +449,10 @@ const defaultFormData = {
   urlBase: '',
   settings: {},
   remotePathMappingIds: [] as number[],
+  priority: 50,
+  isDefault: false,
+  allowProtocolFallback: false,
+  listenarrSourceRoot: '/slskd-downloads',
 }
 
 const formData = ref({ ...defaultFormData })
@@ -462,7 +488,7 @@ const requiresAuth = computed(() => {
 })
 
 const requiresApiKey = computed(() => {
-  return formData.value.type === 'sabnzbd'
+  return formData.value.type === 'sabnzbd' || formData.value.type === 'slskd'
 })
 
 const getHostPlaceholder = () => {
@@ -513,7 +539,7 @@ const onTypeChange = () => {
   }
   formData.value.port = defaultPorts[formData.value.type] || 8080
 
-  if (formData.value.type === 'sabnzbd') {
+  if (formData.value.type === 'sabnzbd' || formData.value.type === 'slskd') {
     formData.value.username = ''
     formData.value.password = ''
   } else {
@@ -556,6 +582,10 @@ watch(
         settings: newClient.settings || {},
         remotePathMappingIds:
           settings && settings.remotePathMappingIds ? settings.remotePathMappingIds : [],
+        priority: Number(settings?.priority ?? 50),
+        isDefault: Boolean(settings?.isDefault ?? false),
+        allowProtocolFallback: Boolean(settings?.allowProtocolFallback ?? false),
+        listenarrSourceRoot: (settings?.listenarrSourceRoot as string) || '/slskd-downloads',
       }
       // Load available mappings when editing a client so the dropdown can show options
       void loadRemotePathMappings()
@@ -590,7 +620,7 @@ const testConnection = async () => {
       isEnabled: formData.value.isEnabled,
       removeCompletedDownloads: formData.value.removeCompletedDownloads,
       settings: {
-        ...(formData.value.type === 'sabnzbd' && formData.value.apiKey
+        ...((formData.value.type === 'sabnzbd' || formData.value.type === 'slskd') && formData.value.apiKey
           ? { apiKey: formData.value.apiKey }
           : {}),
         ...(formData.value.type === 'transmission' && formData.value.urlBase
@@ -606,6 +636,10 @@ const testConnection = async () => {
         sequentialOrder: formData.value.sequentialOrder,
         firstAndLastFirst: formData.value.firstAndLastFirst,
         contentLayout: formData.value.contentLayout,
+        priority: formData.value.priority,
+        isDefault: formData.value.isDefault,
+        allowProtocolFallback: formData.value.allowProtocolFallback,
+        ...(formData.value.type === 'slskd' ? { listenarrSourceRoot: formData.value.listenarrSourceRoot } : {}),
         ...(formData.value.remotePathMappingIds && formData.value.remotePathMappingIds.length > 0
           ? { remotePathMappingIds: formData.value.remotePathMappingIds }
           : {}),
@@ -650,7 +684,7 @@ const handleSubmit = async () => {
       isEnabled: formData.value.isEnabled,
       removeCompletedDownloads: formData.value.removeCompletedDownloads,
       settings: {
-        ...(formData.value.type === 'sabnzbd' && formData.value.apiKey
+        ...((formData.value.type === 'sabnzbd' || formData.value.type === 'slskd') && formData.value.apiKey
           ? { apiKey: formData.value.apiKey }
           : {}),
         ...(formData.value.type === 'transmission' && formData.value.urlBase
@@ -666,6 +700,10 @@ const handleSubmit = async () => {
         sequentialOrder: formData.value.sequentialOrder,
         firstAndLastFirst: formData.value.firstAndLastFirst,
         contentLayout: formData.value.contentLayout,
+        priority: formData.value.priority,
+        isDefault: formData.value.isDefault,
+        allowProtocolFallback: formData.value.allowProtocolFallback,
+        ...(formData.value.type === 'slskd' ? { listenarrSourceRoot: formData.value.listenarrSourceRoot } : {}),
         ...(formData.value.remotePathMappingIds && formData.value.remotePathMappingIds.length > 0
           ? { remotePathMappingIds: formData.value.remotePathMappingIds }
           : {}),

@@ -27,6 +27,7 @@ namespace Listenarr.Application.Downloads.Import
         IAudiobookFileService audiobookFileService,
         IArchiveExtractor archiveExtractor,
         IConfigurationService configurationService,
+        IRootFolderRepository rootFolderRepository,
         ImportDestinationPlanner destinationPlanner,
         ArchiveImportExtractor archiveImportExtractor,
         ILogger<DownloadImportService> logger) : IDownloadImportService
@@ -43,6 +44,11 @@ namespace Listenarr.Application.Downloads.Import
             }
 
             var settings = await configurationService.GetApplicationSettingsAsync();
+            var configuredRootPaths = (await rootFolderRepository.GetAllAsync())
+                .Where(root => !string.IsNullOrWhiteSpace(root.Path))
+                .Select(root => root.Path)
+                .Append(settings.OutputPath)
+                .ToList();
 
             try
             {
@@ -85,6 +91,7 @@ namespace Listenarr.Application.Downloads.Import
                 var isMultiFileBatch = plannedAudioFiles.Count > 1;
                 var sourceRootPath = FileUtils.GetCommonDirectory(sourceFiles);
                 var usedDestinations = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                string? resolvedBatchDestinationDirectory = null;
 
                 // Order audio files before companion files
                 var orderedFiles = plannedAudioFiles.Select(p => p.FullPath)
@@ -146,9 +153,10 @@ namespace Listenarr.Application.Downloads.Import
                                     ? Path.GetRelativePath(sourceRootPath, file)
                                     : Path.GetFileName(file);
 
-                                if (!destinationPlanner.TryResolve(audiobook.BasePath, relativePath, out var destination))
+                                var companionBasePath = resolvedBatchDestinationDirectory ?? audiobook.BasePath;
+                                if (!destinationPlanner.TryResolve(companionBasePath, relativePath, out var destination))
                                 {
-                                    results.Add(ImportResult.ImportFailure(completedFileAction, file, audiobook.BasePath));
+                                    results.Add(ImportResult.ImportFailure(completedFileAction, file, companionBasePath));
                                     logger.LogWarning(
                                         "Blocked companion import outside audiobook base path. Audiobook {AudiobookId}, Source {Source}, Relative {Relative}, BasePath {BasePath}",
                                         audiobook.Id,
@@ -205,7 +213,7 @@ namespace Listenarr.Application.Downloads.Import
                             }
 
                             // Determine destination directory (prefer audiobook basepath)
-                            string destDirForFile = audiobook.BasePath;
+                            string destDirForFile = resolvedBatchDestinationDirectory ?? audiobook.BasePath;
 
                             // Build naming metadata: prefer audiobook metadata when available, otherwise use extracted candidate metadata
                             var namingMetadata = BuildNamingMetadata(audiobook, candidateMetadata, Path.GetFileNameWithoutExtension(file));
@@ -238,7 +246,9 @@ namespace Listenarr.Application.Downloads.Import
                             };
 
                             var folderRelative = fileNamingService.ApplyNamingPattern(folderPattern, variablesForFile, treatAsFilename: false);
-                            if (string.IsNullOrEmpty(audiobook.BasePath) && !string.IsNullOrWhiteSpace(folderRelative))
+                            if (resolvedBatchDestinationDirectory == null
+                                && configuredRootPaths.Any(rootPath => PathsEqual(audiobook.BasePath, rootPath))
+                                && !string.IsNullOrWhiteSpace(folderRelative))
                             {
                                 if (!destinationPlanner.TryResolve(destDirForFile, folderRelative, out destDirForFile))
                                 {
@@ -252,6 +262,7 @@ namespace Listenarr.Application.Downloads.Import
                                     continue;
                                 }
                             }
+                            resolvedBatchDestinationDirectory ??= destDirForFile;
 
                             var baseFilePattern = isMultiFileBatch ? settings.MultiFileNamingPattern : settings.FileNamingPattern;
 
@@ -450,6 +461,19 @@ namespace Listenarr.Application.Downloads.Import
             }
 
             return trimmedCandidate;
+        }
+
+        private static bool PathsEqual(string? left, string? right)
+        {
+            if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right))
+            {
+                return false;
+            }
+
+            return string.Equals(
+                Path.TrimEndingDirectorySeparator(Path.GetFullPath(left)),
+                Path.TrimEndingDirectorySeparator(Path.GetFullPath(right)),
+                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
         }
 
         private static string FirstNonEmpty(params string?[] candidates)

@@ -1,0 +1,28 @@
+services:
+  listenarr:
+    image: ghcr.io/listenarrs/listenarr:canary
+    ports:
+      - "4545:4545"
+    volumes:
+      - ./data/listenarr:/config
+      - ./data/library:/audiobooks
+      - ./data/slskd/complete:/slskd-downloads
+    depends_on:
+      - slskd
+
+  slskd:
+    image: slskd/slskd:latest
+    ports:
+      - "5030:5030"
+    environment:
+      SLSKD_REMOTE_CONFIGURATION: "true"
+    volumes:
+      - ./data/slskd/app:/app
+      - ./data/slskd/complete:/downloads/complete
+      - ./data/slskd/incomplete:/downloads/incomplete
+
+# Configure slskd's completed-download directory as /downloads/complete.
+# Listenarr submits isolated destinations under listenarr/<reservation-id> and
+# sees the same files beneath /slskd-downloads/listenarr/<reservation-id>.
+# Supply credentials/API keys through your secret-management mechanism rather
+# than committing them to this file.

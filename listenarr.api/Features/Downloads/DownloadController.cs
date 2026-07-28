@@ -32,6 +32,7 @@ namespace Listenarr.Api.Features.Downloads
         private readonly ILogger<DownloadController> _logger;
         private readonly IDownloadReferenceService? _downloadReferenceService;
 
+
         public DownloadController(
             IDownloadService downloadService,
             IDownloadQueueService downloadQueueService,
@@ -44,6 +45,7 @@ namespace Listenarr.Api.Features.Downloads
             _downloadProcessingJobService = downloadProcessingJobService;
             _logger = logger;
             _downloadReferenceService = downloadReferenceService;
+
         }
 
         /// <summary>
@@ -64,6 +66,7 @@ namespace Listenarr.Api.Features.Downloads
                 return StatusCode(500, new { message = "Failed to search and download", error = ex.Message });
             }
         }
+
 
         /// <summary>
         /// Send a specific search result to a download client (torrent or NZB).
@@ -336,6 +339,15 @@ namespace Listenarr.Api.Features.Downloads
     public class SearchAndDownloadRequest
     {
         public int AudiobookId { get; set; }
+    }
+
+    public class SlskdDownloadRequest
+    {
+        public int AudiobookId { get; set; }
+        public string DownloadClientId { get; set; } = string.Empty;
+        public string SearchQuery { get; set; } = string.Empty;
+        public string? Title { get; set; }
+        public string? Author { get; set; }
     }
 
     public class SendDownloadRequest

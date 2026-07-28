@@ -9,6 +9,7 @@
  */
 using System.Net;
 using Listenarr.Infrastructure.Factories;
+using Listenarr.Infrastructure.DownloadClients.Slskd;
 using Listenarr.Infrastructure.Torrents;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -39,6 +40,12 @@ internal static class DownloadClientRegistrationExtensions
         AddAdapterClient(services, DownloadClientTypes.Transmission, useCookies: false, retryPolicy, circuitBreakerPolicy);
         AddAdapterClient(services, DownloadClientTypes.Sabnzbd, useCookies: false, retryPolicy, circuitBreakerPolicy);
         AddAdapterClient(services, DownloadClientTypes.Nzbget, useCookies: false, retryPolicy, circuitBreakerPolicy);
+        // Slskd performs non-idempotent search and batch POSTs. Retrying inside the
+        // handler can duplicate an accepted batch when its response is lost.
+        services.AddHttpClient(DownloadClientTypes.Slskd)
+            .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(30))
+            .ConfigurePrimaryHttpMessageHandler(CreateHandler)
+            .AddPolicyHandler(circuitBreakerPolicy);
         return services;
     }
 
@@ -51,6 +58,7 @@ internal static class DownloadClientRegistrationExtensions
             .ValidateOnStart();
         services.AddSingleton<IValidateOptions<DownloadClientsOptions>, DownloadClientsOptionsValidator>();
         services.TryAddSingleton(TimeProvider.System);
+        services.AddScoped<ISlskdDownloadService, SlskdDownloadService>();
         services.AddScoped<INzbUrlResolver, NzbUrlResolver>();
         services.AddScoped<ITorrentFileDownloader, TorrentFileDownloader>();
 
@@ -90,6 +98,10 @@ internal static class DownloadClientRegistrationExtensions
             sp.GetRequiredService<NzbgetHistoryFetchWorkflow>(),
             sp.GetRequiredService<NzbgetItemFetchWorkflow>(),
             sp.GetRequiredService<NzbgetImportItemResolver>()));
+        services.AddScoped<IDownloadClientAdapter>(sp => new SlskdAdapter(
+            sp.GetRequiredService<IHttpClientFactory>(),
+            sp.GetRequiredService<ILogger<SlskdAdapter>>(),
+            sp.GetRequiredService<IFileSystem>()));
         services.AddScoped<IDownloadClientAdapterFactory, DownloadClientAdapterFactory>();
         services.AddScoped<IDownloadItemService, DownloadItemService>();
         return services;
