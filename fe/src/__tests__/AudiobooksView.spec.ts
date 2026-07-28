@@ -873,5 +873,15 @@ describe('AudiobooksView Date Added sorting', () => {
     vm.sortOrder = 'asc'
     await wrapper.vm.$nextTick()
     expect(vm.audiobooks.map((a) => a.title)).toEqual(['Oldest', 'Middle', 'Newest', 'No File'])
+
+    // Selecting 'date-added' via the toolbar defaults to descending (newest first)
+    const vmProxy = wrapper.vm as unknown as { sortKey: string; sortOrder: string; sortKeyProxy: string }
+    vmProxy.sortKey = 'title'
+    vmProxy.sortOrder = 'asc'
+    await wrapper.vm.$nextTick()
+    vmProxy.sortKeyProxy = 'date-added'
+    await wrapper.vm.$nextTick()
+    expect(vmProxy.sortKey).toBe('date-added')
+    expect(vmProxy.sortOrder).toBe('desc')
   })
 })

@@ -1599,7 +1599,8 @@ const sortKeyProxy = computed<string>({
       sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc'
     } else {
       sortKey.value = val
-      sortOrder.value = 'asc'
+      // "Date Added" is most useful newest-first, so default it to descending.
+      sortOrder.value = val === 'date-added' ? 'desc' : 'asc'
     }
   },
 })
