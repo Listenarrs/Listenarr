@@ -45,6 +45,70 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
         }
 
         [Fact]
+        public async Task SearchAndDownloadAsync_WhenSlskdIsDefault_UsesNativeSearchWithoutQueryingTorrentIndexers()
+        {
+            var slskdService = new Mock<ISlskdDownloadService>(MockBehavior.Strict);
+            var searchService = new Mock<ISearchService>(MockBehavior.Strict);
+            _services.AddSingleton(slskdService.Object);
+            _services.AddSingleton(searchService.Object);
+            Init();
+            await InitData();
+            _audiobook.Title = "Dune";
+            _audiobook.Authors = ["Frank Herbert"];
+            await _audiobookRepository.UpdateAsync(_audiobook);
+            await _downloadRepository.RemoveAsync(_download.Id);
+            var slskd = await _downloadClientConfigurationRepository.SaveAsync(new DownloadClientConfiguration
+            {
+                Id = "slskd-1", Name = "Soulseek", Type = "slskd", Host = "slskd", Port = 5030, IsEnabled = true,
+                Settings = new Dictionary<string, object> { ["isDefault"] = true, ["priority"] = 0 }
+            });
+            slskdService.Setup(service => service.SearchSubmitAndPollAsync(
+                    It.Is<DownloadClientConfiguration>(client => client.Id == slskd.Id),
+                    It.Is<SlskdSubmissionRequest>(request => request.AudiobookId == _audiobook.Id && !string.IsNullOrWhiteSpace(request.SearchQuery)),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new SlskdSubmissionResult("batch-1", "listenarr/book", [], "Pending"));
+
+            var result = await _provider.GetRequiredService<DownloadService>().SearchAndDownloadAsync(_audiobook.Id);
+
+            Assert.True(result.Success);
+            Assert.Equal("batch-1", result.DownloadId);
+            Assert.Equal("slskd-1", result.DownloadClientUsed);
+            slskdService.VerifyAll();
+            searchService.VerifyNoOtherCalls();
+        }
+
+        [Fact]
+        public async Task SearchAndDownloadAsync_WhenNativeSlskdRejectsDuplicate_ReturnsActionableFailureWithoutFallback()
+        {
+            var slskdService = new Mock<ISlskdDownloadService>(MockBehavior.Strict);
+            var searchService = new Mock<ISearchService>(MockBehavior.Strict);
+            _services.AddSingleton(slskdService.Object);
+            _services.AddSingleton(searchService.Object);
+            Init();
+            await InitData();
+            await _downloadRepository.RemoveAsync(_download.Id);
+            var slskd = await _downloadClientConfigurationRepository.SaveAsync(new DownloadClientConfiguration
+            {
+                Id = "slskd-1", Name = "Soulseek", Type = "slskd", Host = "slskd", Port = 5030, IsEnabled = true,
+                Settings = new Dictionary<string, object> { ["isDefault"] = true, ["priority"] = 0, ["allowProtocolFallback"] = true }
+            });
+            slskdService.Setup(service => service.SearchSubmitAndPollAsync(
+                    It.Is<DownloadClientConfiguration>(client => client.Id == slskd.Id),
+                    It.IsAny<SlskdSubmissionRequest>(),
+                    It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new DuplicateDownloadSubmissionException("An audiobook download is already active or imported."));
+
+            var result = await _provider.GetRequiredService<DownloadService>().SearchAndDownloadAsync(_audiobook.Id);
+
+            Assert.False(result.Success);
+            Assert.Contains("already active or imported", result.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal("Slskd", result.IndexerUsed);
+            Assert.Equal(slskd.Id, result.DownloadClientUsed);
+            slskdService.VerifyAll();
+            searchService.VerifyNoOtherCalls();
+        }
+
+        [Fact]
         public async Task SendToDownloadClientAsync_StoresMagnetHashFallback_WhenClientReturnsNoId()
         {
             var gatewayMock = new Mock<IDownloadClientGateway>();

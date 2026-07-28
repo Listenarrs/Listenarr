@@ -37,7 +37,8 @@ namespace Listenarr.Application.Downloads.Submission
         DownloadCachedTorrentStore cachedTorrentStore,
         IDownloadSubmissionPreparer submissionPreparer,
         DirectDownloadWorkflow directDownloadWorkflow,
-        DownloadRemovalWorkflow downloadRemovalWorkflow) : IDownloadService
+        DownloadRemovalWorkflow downloadRemovalWorkflow,
+        NativeSlskdDownloadRouter nativeSlskdDownloadRouter) : IDownloadService
     {
         // Cache expiration constants
         private const int QueueCacheExpirationSeconds = 10;
@@ -128,6 +129,12 @@ namespace Listenarr.Application.Downloads.Submission
                     Success = false,
                     Message = "Audiobook not found"
                 };
+            }
+
+            var nativeSlskdResult = await nativeSlskdDownloadRouter.TryRouteAsync(audiobook);
+            if (nativeSlskdResult is not null)
+            {
+                return nativeSlskdResult;
             }
 
             if (audiobook.QualityProfile == null)
@@ -224,6 +231,7 @@ namespace Listenarr.Application.Downloads.Submission
                 SearchResult = topResult.SearchResult
             };
         }
+
 
         public async Task<string> SendToDownloadClientAsync(SearchResult searchResult, string? downloadClientId = null, int? audiobookId = null)
         {
@@ -431,12 +439,6 @@ namespace Listenarr.Application.Downloads.Submission
         {
             return await downloadRemovalWorkflow.RemoveAsync(downloadId, downloadClientId, force);
         }
-
-        //
-        // Helper stubs added to satisfy callers while refactor completes.
-        // These are conservative, safe no-op / simple implementations.
-        //
-
         private static SearchResult ToSearchResult(
             TrustedDownloadCandidate candidate,
             PreparedDownloadSubmission prepared)
