@@ -97,7 +97,7 @@
 
       <FormRow
         label="Completed File Action"
-        help="Choose whether completed downloads should be moved into the library output path or copied and left in the client's folder."
+        help="Choose whether completed downloads should be moved into the library output path or copied and left in the client's folder. Symbolic Link creates a link instead of copying the file — the source and destination must stay reachable, and the link breaks if the source path disappears (useful for NZBDav, rclone and other virtual filesystems)."
       >
         <select
           :value="settings.completedFileAction"
@@ -106,6 +106,7 @@
           <option value="move">Move</option>
           <option value="copy">Copy</option>
           <option value="hardlink/copy">Hardlink/Copy</option>
+          <option value="symlink">Symbolic Link</option>
         </select>
       </FormRow>
 

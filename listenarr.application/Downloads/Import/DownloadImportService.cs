@@ -61,11 +61,11 @@ namespace Listenarr.Application.Downloads.Import
 
                     files.AddRange(await archiveImportExtractor.ExtractAsync(archives));
 
-                    // We cannot hardlink to temporary files
-                    if (archives.Count > 0 && completedFileAction == FileAction.HardlinkCopy)
+                    // We cannot hardlink or symlink to temporary extracted files
+                    if (archives.Count > 0 && completedFileAction is FileAction.HardlinkCopy or FileAction.SymbolicLink)
                     {
+                        logger.LogWarning($"Audiobook {audiobook.Id} contains archives thus {completedFileAction} mode is impossible: Completed action switched to copy");
                         completedFileAction = FileAction.Copy;
-                        logger.LogWarning($"Audiobook {audiobook.Id} contains archives thus Hard link mode is impossible: Completed action switched to copy");
                     }
                 }
 

@@ -15,6 +15,8 @@ namespace Listenarr.Domain.Audiobooks.Enumerations
         [JsonStringEnumMemberName("copy")]
         Copy = 2,
         [JsonStringEnumMemberName("hardlink/copy")]
-        HardlinkCopy = 3
+        HardlinkCopy = 3,
+        [JsonStringEnumMemberName("symlink")]
+        SymbolicLink = 4
     }
 }

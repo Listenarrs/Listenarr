@@ -155,6 +155,7 @@
             <option value="">Select Import Mode</option>
             <option value="move">Move</option>
             <option value="hardlink/copy">Hardlink/Copy</option>
+            <option value="symlink">Symbolic Link</option>
           </select>
 
           <!-- Show Interactive/Automatic Import when browser is open and not in preview mode -->
@@ -348,7 +349,7 @@ const selectedPath = ref(props.initialPath || '')
 const loading = ref(false)
 const browserMode = ref(false)
 const inputField = ref<string>('')
-const action = ref<'move' | 'hardlink/copy' | ''>('')
+const action = ref<'move' | 'hardlink/copy' | 'symlink' | ''>('')
 
 const showPreview = ref(false)
 interface PreviewItem {

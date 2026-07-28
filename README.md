@@ -396,6 +396,26 @@ Supported download clients:
 - Automatic metadata fetching
 - Library management options
 
+#### Completed File Action
+
+Choose how completed downloads are placed into the library (Settings → File Management → *Completed File Action*):
+
+- **Move** – move the file into the library and remove it from the client's folder.
+- **Copy** – copy the file into the library and leave the original in place.
+- **Hardlink/Copy** – create a hardlink into the library (falls back to a copy when source and destination are on different filesystems).
+- **Symbolic Link** (`symlink`) – create a symbolic link in the library instead of copying the file. The source content is never read or copied and the original source is left untouched. This is primarily useful with virtual filesystems such as **NZBDav**, **rclone** and other WebDAV/FUSE mounts, where a hardlink is impossible (cross-filesystem) and a copy would download the entire file.
+
+  When the source is itself a symlink, Listenarr reads its target and links the library entry **directly** to the final target, avoiding a symlink chain. Both absolute and relative link targets are supported (relative targets are resolved against the source symlink's directory).
+
+  > **Important:** the source and destination paths must stay reachable for the link to work. Because absolute link targets are preserved as-is, the underlying path (e.g. the NZBDav/rclone mount) must be mounted at the **same absolute path** in every container that reads the library — both Listenarr and your audiobook player (e.g. Audiobookshelf). The link will break whenever the source path (mount) is unavailable.
+  >
+  > Example — both containers must expose identical absolute paths:
+  >
+  > ```text
+  > Listenarr:        /mnt/nzbdav   +   /data/media/audiobooks
+  > Audiobookshelf:   /mnt/nzbdav   +   /data/media/audiobooks
+  > ```
+
 ## API Endpoints
 
 ### Search

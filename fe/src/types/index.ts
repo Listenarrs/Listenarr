@@ -325,7 +325,7 @@ export interface ApplicationSettings {
   allowedFileExtensions: string[]
   importBlacklistExtensions?: string[]
   // Action to perform for completed downloads.
-  completedFileAction?: 'none' | 'move' | 'copy' | 'hardlink/copy'
+  completedFileAction?: 'none' | 'move' | 'copy' | 'hardlink/copy' | 'symlink'
   // Show completed external downloads (torrents/NZBs) in the Activity view
   showCompletedExternalDownloads?: boolean
   // Failed download handling
@@ -934,7 +934,7 @@ export interface ManualImportRequestItem {
 export interface ManualImportRequest {
   path: string
   mode?: 'automatic' | 'interactive'
-  action?: 'none' | 'move' | 'copy' | 'hardlink/copy'
+  action?: 'none' | 'move' | 'copy' | 'hardlink/copy' | 'symlink'
   includeCompanionFiles?: boolean
   cleanupEmptySourceFolders?: boolean
   items?: ManualImportRequestItem[]

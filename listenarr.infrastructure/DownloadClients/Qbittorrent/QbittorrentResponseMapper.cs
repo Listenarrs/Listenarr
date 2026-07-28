@@ -147,7 +147,9 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 "forcedMetaDL" => DownloadItemStatus.Downloading,
                 "stalledDL" => DownloadItemStatus.Downloading,
                 "checkingDL" => DownloadItemStatus.Downloading,
+                "pausedDL" => DownloadItemStatus.Paused,
                 "stoppedDL" => DownloadItemStatus.Paused,
+                "pausedUP" => DownloadItemStatus.Paused,
                 "stoppedUP" => DownloadItemStatus.Paused,
                 "queuedDL" => DownloadItemStatus.Queued,
                 "queuedUP" => DownloadItemStatus.Queued,
@@ -162,7 +164,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 _ => DownloadItemStatus.Warning
             };
 
-            if (progress >= 100.0 && (status == DownloadItemStatus.Downloading || state is "uploading" or "stalledUP" or "checkingUP" or "forcedUP" or "stoppedUP"))
+            if (progress >= 100.0 && (status == DownloadItemStatus.Downloading || state is "uploading" or "stalledUP" or "checkingUP" or "forcedUP" or "pausedUP" or "stoppedUP"))
             {
                 return DownloadItemStatus.Completed;
             }

@@ -31,6 +31,7 @@
           <option value="none">Do nothing</option>
           <option value="move">Move</option>
           <option value="hardlink/copy">Hardlink / Copy</option>
+          <option value="symlink">Symbolic Link</option>
         </select>
         <div v-if="store.action != 'none'">
           <label class="footer-label"
