@@ -103,6 +103,124 @@ namespace Listenarr.Tests.Features.Application.Downloads.Import
         }
 
         [Fact]
+        public async Task SlskdImport_WhenAuthorFolderDoesNotExist_UsesCanonicalAuthorTitleFolder()
+        {
+            var libraryRoot = FileService.GetTempDirectory("slskd-missing-author-library");
+            var sourceRoot = FileService.GetTempDirectory("slskd-missing-author-stage");
+            var sourceFile = await FileService.GetFileAsync(sourceRoot, "remote-release.mp3");
+
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Missing Author Folder Book")
+                .WithAuthor("New Author")
+                .WithBasePath(libraryRoot)
+                .Build());
+
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
+                .WithOutputPath(libraryRoot)
+                .WithMoveFileOnCompleted()
+                .WithoutMetadataProcessing()
+                .WithFolderNamingPattern("{Author}/{Title}")
+                .WithFileNamingPattern("{Title}")
+                .WithMultiFileNamingPattern("{Title}")
+                .Build());
+
+            var service = _provider.GetRequiredService<IDownloadImportService>();
+            var results = await service.ImportDownloadFilesAsync(audiobook, [sourceFile]);
+
+            var expected = Path.Join(libraryRoot, "New Author", "Missing Author Folder Book", "Missing Author Folder Book.mp3");
+            Assert.All(results, result => Assert.True(result.Success, result.Message));
+            Assert.True(File.Exists(expected));
+            Assert.False(File.Exists(Path.Join(libraryRoot, "Missing Author Folder Book.mp3")));
+            Assert.False(File.Exists(sourceFile));
+            Assert.Single(await _audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id), file => file.Path == expected);
+        }
+
+        [Fact]
+        public async Task Import_ConfiguredRootFolder_UsesCanonicalAuthorTitleFolder()
+        {
+            var legacyOutput = FileService.GetTempDirectory("legacy-output");
+            var libraryRoot = FileService.GetTempDirectory("configured-library");
+            var sourceFile = await FileService.GetTempFileAsync("configured-root.mp3");
+            await _rootFolderRepository.AddAsync(new RootFolderBuilder()
+                .WithName("Audiobooks")
+                .WithPath(libraryRoot)
+                .Build());
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Configured Root Book")
+                .WithAuthor("Root Author")
+                .WithBasePath(libraryRoot)
+                .Build());
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
+                .WithOutputPath(legacyOutput)
+                .WithMoveFileOnCompleted()
+                .WithoutMetadataProcessing()
+                .WithFolderNamingPattern("{Author}/{Title}")
+                .WithFileNamingPattern("{Title}")
+                .Build());
+
+            var results = await _provider.GetRequiredService<IDownloadImportService>()
+                .ImportDownloadFilesAsync(audiobook, [sourceFile]);
+
+            var expected = Path.Join(libraryRoot, "Root Author", "Configured Root Book", "Configured Root Book.mp3");
+            Assert.All(results, result => Assert.True(result.Success, result.Message));
+            Assert.True(File.Exists(expected));
+        }
+
+        [Fact]
+        public async Task Import_RootWithMissingAuthor_UsesUnknownAuthorAndSanitizedTitle()
+        {
+            var libraryRoot = FileService.GetTempDirectory("unknown-author-library");
+            var sourceFile = await FileService.GetTempFileAsync("unknown-author.mp3");
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Unsafe: Title")
+                .WithBasePath(libraryRoot)
+                .Build());
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
+                .WithOutputPath(libraryRoot)
+                .WithMoveFileOnCompleted()
+                .WithoutMetadataProcessing()
+                .WithFolderNamingPattern("{Author}/{Title}")
+                .WithFileNamingPattern("{Title}")
+                .Build());
+
+            var results = await _provider.GetRequiredService<IDownloadImportService>()
+                .ImportDownloadFilesAsync(audiobook, [sourceFile]);
+
+            var expected = Path.Join(libraryRoot, "Unknown Author", "Unsafe - Title", "Unsafe - Title.mp3");
+            Assert.All(results, result => Assert.True(result.Success, result.Message));
+            Assert.True(File.Exists(expected));
+        }
+
+        [Fact]
+        public async Task Import_MultipleChaptersAtRoot_SharesCanonicalDirectory()
+        {
+            var libraryRoot = FileService.GetTempDirectory("chapter-root-library");
+            var sourceRoot = FileService.GetTempDirectory("chapter-root-stage");
+            var chapter1 = await FileService.GetFileAsync(sourceRoot, "Chapter 1.mp3");
+            var chapter2 = await FileService.GetFileAsync(sourceRoot, "Chapter 2.mp3");
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Chapter Book")
+                .WithAuthor("Chapter Author")
+                .WithBasePath(libraryRoot)
+                .Build());
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
+                .WithOutputPath(libraryRoot)
+                .WithMoveFileOnCompleted()
+                .WithoutMetadataProcessing()
+                .WithFolderNamingPattern("{Author}/{Title}")
+                .WithMultiFileNamingPattern("{Title}-{ChapterNumber:00}")
+                .Build());
+
+            var results = await _provider.GetRequiredService<IDownloadImportService>()
+                .ImportDownloadFilesAsync(audiobook, [chapter1, chapter2]);
+
+            var expectedDirectory = Path.Join(libraryRoot, "Chapter Author", "Chapter Book");
+            Assert.All(results, result => Assert.True(result.Success, result.Message));
+            Assert.Single(results.Select(result => Path.GetDirectoryName(result.FinalPath)).Distinct());
+            Assert.All(results, result => Assert.Equal(expectedDirectory, Path.GetDirectoryName(result.FinalPath)));
+        }
+
+        [Fact]
         public async Task Import_WithMove()
         {
             await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
