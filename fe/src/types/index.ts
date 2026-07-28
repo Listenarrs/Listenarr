@@ -241,7 +241,7 @@ export interface ApiConfiguration {
 export interface DownloadClientConfiguration {
   id: string
   name: string
-  type: 'qbittorrent' | 'transmission' | 'sabnzbd' | 'nzbget'
+  type: 'qbittorrent' | 'transmission' | 'sabnzbd' | 'nzbget' | 'slskd'
   host: string
   port: number
   username: string
@@ -268,6 +268,10 @@ export interface DownloadClientSettings {
   initialState?: string
   sequentialOrder?: boolean
   firstAndLastFirst?: boolean
+  priority?: number
+  isDefault?: boolean
+  allowProtocolFallback?: boolean
+  listenarrSourceRoot?: string
   contentLayout?: string
   // Optional mapping to one or more remote path mapping IDs
   remotePathMappingIds?: number[]
