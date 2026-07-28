@@ -5,8 +5,8 @@ namespace Listenarr.Infrastructure.DownloadClients.Slskd;
 
 internal static partial class SlskdRequestBuilder
 {
-    // This is the remote namespace exposed by the Listenarr container.  Do not
-    // derive it from an arbitrary client setting: queue paths are fed to import.
+    // Portable default for Compose examples. Native and Windows deployments may
+    // configure another absolute path in Listenarr's own runtime namespace.
     public const string NativeDownloadRoot = "/slskd-downloads";
     private static readonly HashSet<string> AudioExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -36,14 +36,13 @@ internal static partial class SlskdRequestBuilder
 
     public static string GetListenarrVisibleSourceRoot(DownloadClientConfiguration client)
     {
-        if (client.Settings.TryGetValue("listenarrSourceRoot", out var configured) &&
-            !string.IsNullOrWhiteSpace(configured?.ToString()) &&
-            !string.Equals(configured.ToString()!.TrimEnd('/', '\\'), NativeDownloadRoot, StringComparison.Ordinal))
-        {
-            throw new ArgumentException($"slskd listenarrSourceRoot must be {NativeDownloadRoot}.", nameof(client));
-        }
-
-        return NativeDownloadRoot;
+        var configured = client.Settings.TryGetValue("listenarrSourceRoot", out var value)
+            ? value?.ToString()?.Trim()
+            : null;
+        var root = string.IsNullOrWhiteSpace(configured) ? NativeDownloadRoot : configured;
+        if (!Path.IsPathFullyQualified(root))
+            throw new ArgumentException("slskd listenarrSourceRoot must be an absolute path in Listenarr's runtime namespace.", nameof(client));
+        return Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
     }
 
     public static string BuildDestination(string audiobookId)

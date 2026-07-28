@@ -5,6 +5,29 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Slskd;
 
 public class SlskdRequestBuilderTests
 {
+    [Fact]
+    public void GetListenarrVisibleSourceRoot_UsesConfiguredAbsoluteRoot()
+    {
+        var root = Path.Combine(Path.GetPathRoot(Environment.CurrentDirectory)!, "mnt", "slskd-complete");
+        var client = new DownloadClientConfiguration
+        {
+            Settings = new Dictionary<string, object> { ["listenarrSourceRoot"] = root }
+        };
+
+        Assert.Equal(Path.GetFullPath(root), SlskdRequestBuilder.GetListenarrVisibleSourceRoot(client));
+    }
+
+    [Fact]
+    public void GetListenarrVisibleSourceRoot_RejectsRelativeRoot()
+    {
+        var client = new DownloadClientConfiguration
+        {
+            Settings = new Dictionary<string, object> { ["listenarrSourceRoot"] = "relative/downloads" }
+        };
+
+        Assert.Throws<ArgumentException>(() => SlskdRequestBuilder.GetListenarrVisibleSourceRoot(client));
+    }
+
     [Theory]
     [InlineData("42", "listenarr/42")]
     [InlineData("book_01", "listenarr/book_01")]
