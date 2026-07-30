@@ -796,3 +796,74 @@ describe('AudiobooksView Grouping', () => {
     expect(wrapper.find('.series-bottom-placard').exists()).toBe(true)
   })
 })
+
+describe('AudiobooksView sort persistence', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    const pinia = createPinia()
+    setActivePinia(pinia)
+  })
+
+  function ensureGlobals() {
+    if (typeof (globalThis as unknown as { ResizeObserver?: unknown }).ResizeObserver === 'undefined') {
+      ;(globalThis as unknown as Record<string, unknown>).ResizeObserver = class {
+        observe() {}
+        disconnect() {}
+      }
+    }
+    if (typeof (globalThis as unknown as { WebSocket?: unknown }).WebSocket === 'undefined') {
+      ;(globalThis as unknown as Record<string, unknown>).WebSocket = function () {}
+    }
+  }
+
+  async function mountView() {
+    ensureGlobals()
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', name: 'home', component: { template: '<div />' } },
+        { path: '/audiobooks', name: 'audiobooks', component: AudiobooksView },
+      ],
+    })
+    await router.push('/audiobooks')
+    await router.isReady().catch(() => {})
+    const store = useLibraryStore()
+    store.audiobooks = [] as unknown as import('@/types').Audiobook[]
+    store.fetchLibrary = vi.fn(async () => undefined)
+    const wrapper = mount(AudiobooksView, {
+      global: {
+        plugins: [pinia, router],
+        stubs: ['BulkEditModal', 'EditAudiobookModal', 'CustomFilterModal', 'FiltersDropdown', 'CustomSelect'],
+      },
+    })
+    await new Promise((r) => setTimeout(r, 0))
+    return wrapper
+  }
+
+  it('persists the chosen sort to localStorage', async () => {
+    const wrapper = await mountView()
+    const vm = wrapper.vm as unknown as { groupBy: string; sortKey: string; sortOrder: string }
+
+    vm.sortKey = 'publisher'
+    vm.sortOrder = 'desc'
+    await wrapper.vm.$nextTick()
+
+    const saved = JSON.parse(localStorage.getItem('listenarr.sortState') || '{}')
+    expect(saved.books).toEqual({ key: 'publisher', order: 'desc' })
+  })
+
+  it('restores the saved sort on mount instead of defaulting to title', async () => {
+    localStorage.setItem(
+      'listenarr.sortState',
+      JSON.stringify({ books: { key: 'publisher', order: 'desc' } }),
+    )
+    const wrapper = await mountView()
+    const vm = wrapper.vm as unknown as { groupBy: string; sortKey: string; sortOrder: string }
+
+    expect(vm.groupBy).toBe('books')
+    expect(vm.sortKey).toBe('publisher')
+    expect(vm.sortOrder).toBe('desc')
+  })
+})
