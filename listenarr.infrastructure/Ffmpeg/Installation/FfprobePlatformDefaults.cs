@@ -25,20 +25,49 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
         {
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
             {
-                if (RuntimeInformation.OSArchitecture == Architecture.Arm64)
-                {
-                    return "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-arm64-static.tar.xz";
-                }
-
-                return "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz";
+                return GetDownloadUrl(OSPlatform.Linux, RuntimeInformation.OSArchitecture);
             }
 
             if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
             {
-                return "https://evermeet.cx/ffmpeg/ffmpeg-6.0.zip";
+                return GetDownloadUrl(OSPlatform.OSX, RuntimeInformation.OSArchitecture);
             }
 
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                return GetDownloadUrl(OSPlatform.Windows, RuntimeInformation.OSArchitecture);
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Resolves the archive URL for an explicit platform, so the mapping for every platform can
+        /// be asserted from a test host running on any one of them.
+        /// </summary>
+        /// <remarks>
+        /// Two constraints apply to anything returned here. The archive has to contain ffprobe:
+        /// the Linux and Windows builds ship a bundle carrying both binaries, but evermeet
+        /// publishes one binary per archive, so macOS needs the ffprobe archive and not the ffmpeg
+        /// one. The URL also has to end in a suffix <see cref="FfprobeArchiveExtractor"/>
+        /// recognises, which rules out endpoints that redirect to the current release without
+        /// naming a file.
+        /// </remarks>
+        internal static string? GetDownloadUrl(OSPlatform platform, Architecture architecture)
+        {
+            if (platform == OSPlatform.Linux)
+            {
+                return architecture == Architecture.Arm64
+                    ? "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-arm64-static.tar.xz"
+                    : "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz";
+            }
+
+            if (platform == OSPlatform.OSX)
+            {
+                return "https://evermeet.cx/ffmpeg/ffprobe-6.0.zip";
+            }
+
+            if (platform == OSPlatform.Windows)
             {
                 return "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip";
             }
