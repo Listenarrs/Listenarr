@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace Listenarr.Application.Downloads.Import;
 
 public partial class DownloadImportService
@@ -50,10 +52,16 @@ public partial class DownloadImportService
                 Series = FirstNonEmpty(
                     audiobook.Series,
                     extractedMetadata?.Series),
+                // Parsed with InvariantCulture: the source value always uses '.' as the
+                // decimal separator, so parsing under the server's culture would read a
+                // position of "1.5" as 15 wherever '.' is the group separator.
                 SeriesPosition = !string.IsNullOrWhiteSpace(audiobook.SeriesNumber)
-                    && decimal.TryParse(audiobook.SeriesNumber, out var seriesPosition)
+                    && decimal.TryParse(audiobook.SeriesNumber, NumberStyles.Number, CultureInfo.InvariantCulture, out var seriesPosition)
                         ? seriesPosition
                         : extractedMetadata?.SeriesPosition,
+                SeriesPositionRaw = FirstNonEmpty(
+                    audiobook.SeriesNumber,
+                    extractedMetadata?.SeriesPositionRaw),
                 Year = !string.IsNullOrWhiteSpace(audiobook.PublishYear)
                     && int.TryParse(audiobook.PublishYear, out var year)
                         ? year
@@ -94,6 +102,26 @@ public partial class DownloadImportService
             AlbumArtist = "Unknown Author"
         };
     }
+
+    /// <summary>
+    /// The {SeriesNumber} token for a file being imported.
+    /// <para>
+    /// Prefers the position exactly as the source gave it. A real but non-numeric position
+    /// (an omnibus at "1-4") does not survive the decimal parse, and falling through to the
+    /// chapter number would write that into the filename as if it were the series number.
+    /// </para>
+    /// <para>
+    /// A parsed position is formatted with InvariantCulture, matching FileNamingService:
+    /// ToString() under the server's culture would put a comma into the filename.
+    /// </para>
+    /// </summary>
+    private static string SeriesNumberToken(
+        AudioMetadata metadata,
+        int? fallbackChapterNumber) =>
+        FirstNonEmpty(
+            metadata.SeriesPositionRaw,
+            metadata.SeriesPosition?.ToString(CultureInfo.InvariantCulture),
+            fallbackChapterNumber?.ToString());
 
     private static string ChooseAuthorFromMetadata(AudioMetadata? metadata)
     {
