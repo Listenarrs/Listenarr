@@ -9,6 +9,7 @@ global using Listenarr.Api.Features.Prowlarr;
 global using Listenarr.Api.Features.Search;
 global using Listenarr.Application.Downloads.Submission;
 global using Listenarr.Application.Audiobooks.Files;
+global using Listenarr.Application.Audiobooks.Goodreads;
 global using Listenarr.Application.Audiobooks.Identifiers;
 global using Listenarr.Application.Audiobooks.Jobs;
 global using Listenarr.Application.Audiobooks.Matching;

@@ -9,6 +9,7 @@
  */
 using Listenarr.Infrastructure.Persistence.Repositories;
 using Microsoft.Extensions.DependencyInjection;
+using System.Net;
 
 namespace Listenarr.Infrastructure.DependencyInjection.Library;
 
@@ -20,6 +21,7 @@ internal static class LibraryRegistrationExtensions
         services.AddScoped<IAuthorCatalogService, AuthorCatalogService>();
         services.AddScoped<ISeriesCatalogService, SeriesCatalogService>();
         services.AddScoped<ILibraryAddService, LibraryAddService>();
+        services.AddScoped<IGoodreadsImportService, GoodreadsImportService>();
         services.AddScoped<IAudiobookFilesystemDeleteService, AudiobookFilesystemDeleteService>();
         services.AddScoped<ILibraryListService, LibraryListService>();
         services.AddScoped<IAuthorMonitoringService, AuthorMonitoringService>();
@@ -39,6 +41,18 @@ internal static class LibraryRegistrationExtensions
         services.AddScoped<IMonitoredAuthorRepository, EfMonitoredAuthorRepository>();
         services.AddScoped<IMonitoredSeriesRepository, EfMonitoredSeriesRepository>();
         services.AddScoped<IRootFolderRepository, EfRootFolderRepository>();
+        return services;
+    }
+
+    public static IServiceCollection AddLibraryHttpClients(this IServiceCollection services)
+    {
+        services.AddHttpClient<IGoodreadsListReader, GoodreadsListReader>()
+            .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(30))
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+            {
+                AutomaticDecompression = DecompressionMethods.All,
+                UseProxy = false
+            });
         return services;
     }
 }

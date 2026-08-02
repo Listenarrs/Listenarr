@@ -406,8 +406,11 @@ Supported download clients:
 - `GET /api/library` - Get all audiobooks
 - `GET /api/library/{id}` - Get specific audiobook
 - `POST /api/library` - Add audiobook
+- `POST /api/v{version}/library/import/goodreads` - Import Goodreads books into the library from either `csvContent` (Goodreads export CSV) or a public Goodreads `url`
 - `PUT /api/library/{id}` - Update audiobook
 - `DELETE /api/library/{id}` - Remove audiobook
+
+Goodreads imports reuse Listenarr's normal library add flow. A CSV payload is the most reliable option because Goodreads exports include ISBN values that Listenarr can use for duplicate detection. Public Goodreads list/shelf URLs are parsed from page HTML as a best-effort fallback and usually include title, author, Goodreads ID, and source URL only. Optional request fields include `monitored`, `qualityProfileId`, `autoSearch`, `destinationPath`, and `limit`.
 
 ### Configuration
 - `GET /api/configuration` - Get all settings
