@@ -9,6 +9,7 @@
  */
 using Listenarr.Infrastructure.DependencyInjection.DownloadClients;
 using Listenarr.Infrastructure.DependencyInjection.Downloads;
+using Listenarr.Infrastructure.DependencyInjection.Library;
 using Listenarr.Infrastructure.DependencyInjection.Metadata;
 using Listenarr.Infrastructure.DependencyInjection.Platform;
 using Microsoft.Extensions.Configuration;
@@ -30,6 +31,7 @@ public static class ServiceRegistrationExtensions
         services.AddDownloadClientHttpClients();
         services.AddDownloadHttpClients();
         services.AddMetadataHttpClients(configuration);
+        services.AddLibraryHttpClients();
         return services;
     }
 

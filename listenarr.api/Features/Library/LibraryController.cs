@@ -40,6 +40,7 @@ namespace Listenarr.Api.Features.Library
         private readonly LibraryPreviewPathWorkflow _previewPathWorkflow;
         private readonly LibraryQueryWorkflow _queryWorkflow;
         private readonly LibraryRenameWorkflow _renameWorkflow;
+        private readonly IGoodreadsImportService _goodreadsImportService;
         /// <summary>Initializes the library transport façade.</summary>
         public LibraryController(
             ILibraryListService libraryListService,
@@ -55,7 +56,8 @@ namespace Listenarr.Api.Features.Library
             LibraryIdentifierWorkflow identifierWorkflow,
             LibraryPreviewPathWorkflow previewPathWorkflow,
             LibraryQueryWorkflow queryWorkflow,
-            LibraryRenameWorkflow renameWorkflow)
+            LibraryRenameWorkflow renameWorkflow,
+            IGoodreadsImportService goodreadsImportService)
         {
             _libraryListService = libraryListService;
             _addWorkflow = addWorkflow;
@@ -71,6 +73,7 @@ namespace Listenarr.Api.Features.Library
             _previewPathWorkflow = previewPathWorkflow;
             _queryWorkflow = queryWorkflow;
             _renameWorkflow = renameWorkflow;
+            _goodreadsImportService = goodreadsImportService;
         }
 
         /// <summary>
@@ -82,6 +85,18 @@ namespace Listenarr.Api.Features.Library
         public async Task<IActionResult> AddToLibrary([FromBody] AddToLibraryRequest request)
         {
             return await _addWorkflow.AddAsync(request);
+        }
+
+        /// <summary>
+        /// Import books from a Goodreads export CSV or a public Goodreads list/shelf URL.
+        /// </summary>
+        /// <param name="request">Goodreads CSV content or URL plus library defaults to apply to imported books.</param>
+        /// <param name="cancellationToken">Request cancellation token.</param>
+        [HttpPost("import/goodreads")]
+        public async Task<IActionResult> ImportGoodreads([FromBody] GoodreadsImportRequest request, CancellationToken cancellationToken)
+        {
+            var result = await _goodreadsImportService.ImportAsync(request, cancellationToken);
+            return Ok(result);
         }
 
         /// <summary>
