@@ -405,6 +405,36 @@ public partial class AudiobookContentMoveServiceTests
         await AssertScaffoldingNotRemovedAsync(state.Request.JobId);
     }
 
+    [LinuxFact]
+    public async Task CleanupTerminalTargetScaffoldingAsync_AmbiguousPersistedMarkerPath_PreservesArtifact()
+    {
+        var state = await CreateQuarantinedTargetScaffoldAsync();
+        var markerPath = Path.Join(state.Quarantine, ".listenarr-scaffold-owner.json");
+        var ambiguousTarget = "/" + Path.GetFullPath(state.Request.Target);
+        Assert.False(FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+            ambiguousTarget,
+            out _));
+        await File.WriteAllTextAsync(
+            markerPath,
+            System.Text.Json.JsonSerializer.Serialize(new
+            {
+                Version = 1,
+                JobId = state.Request.JobId,
+                TargetPath = ambiguousTarget,
+                PublishedRoot = Path.GetFullPath(state.PublishedRoot)
+            }));
+
+        await Assert.ThrowsAsync<MoveNeedsAttentionException>(() =>
+            _provider.GetRequiredService<AudiobookContentMoveService>()
+                .CleanupTerminalTargetScaffoldingAsync(
+                    state.Request,
+                    CancellationToken.None));
+
+        Assert.True(Directory.Exists(state.Quarantine));
+        Assert.True(File.Exists(markerPath));
+        await AssertScaffoldingNotRemovedAsync(state.Request.JobId);
+    }
+
     [DirectoryLinkFact]
     public async Task CleanupTerminalTargetScaffoldingAsync_DanglingQuarantineLink_IsNotTreatedAsRemoved()
     {

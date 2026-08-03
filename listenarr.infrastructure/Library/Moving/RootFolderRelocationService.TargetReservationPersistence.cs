@@ -55,8 +55,8 @@ public sealed partial class RootFolderRelocationService
         else if (existing.Count != plan.Segments.Count
             || existing.Zip(plan.Segments).Any(pair =>
                 !string.Equals(
-                    Path.GetFullPath(pair.First.CanonicalPath),
-                    Path.GetFullPath(pair.Second),
+                    RequireHostReservationPath(pair.First.CanonicalPath),
+                    RequireHostReservationPath(pair.Second),
                     PathComparison)
                 || !Guid.TryParseExact(
                     pair.First.OwnershipToken,
@@ -254,8 +254,8 @@ public sealed partial class RootFolderRelocationService
                 reservation.OwnershipToken,
                 StringComparison.Ordinal)
             || !string.Equals(
-                Path.GetFullPath(payload.CanonicalPath),
-                Path.GetFullPath(reservation.CanonicalPath),
+                RequireHostReservationPath(payload.CanonicalPath),
+                RequireHostReservationPath(reservation.CanonicalPath),
                 PathComparison)
             || !string.Equals(
                 payload.ParentDirectoryIdentity,
@@ -393,8 +393,8 @@ public sealed partial class RootFolderRelocationService
                 reservation.OwnershipToken,
                 StringComparison.Ordinal)
             || !string.Equals(
-                Path.GetFullPath(payload.CanonicalPath),
-                Path.GetFullPath(reservation.CanonicalPath),
+                RequireHostReservationPath(payload.CanonicalPath),
+                RequireHostReservationPath(reservation.CanonicalPath),
                 PathComparison))
         {
             throw new InvalidOperationException(

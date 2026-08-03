@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Listenarr.Domain.Common;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.FileSystem;
@@ -230,7 +231,6 @@ public partial class FileMover
                 || string.IsNullOrWhiteSpace(intent.PhysicalObjectIdentity)
                 || (intent.Version == RegistrationCleanupIntentVersion
                     && (string.IsNullOrWhiteSpace(intent.SourcePath)
-                        || !Path.IsPathFullyQualified(intent.SourcePath)
                         || string.IsNullOrWhiteSpace(
                             intent.SourcePhysicalObjectIdentity))))
             {
@@ -268,8 +268,16 @@ public partial class FileMover
             string? sourcePath = null;
             if (intent.Version == RegistrationCleanupIntentVersion)
             {
-                sourcePath = Path.GetFullPath(intent.SourcePath!);
-                var sourceParentPath = Path.GetDirectoryName(sourcePath);
+                if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                        intent.SourcePath!,
+                        out var canonicalSourcePath,
+                        out _))
+                {
+                    return null;
+                }
+
+                sourcePath = canonicalSourcePath;
+                var sourceParentPath = Path.GetDirectoryName(canonicalSourcePath);
                 if (string.IsNullOrWhiteSpace(sourceParentPath))
                 {
                     return null;
@@ -280,7 +288,7 @@ public partial class FileMover
                         sourceParentPath,
                         createMissing: false);
                 using var source = sourceParent.TryOpenExistingFile(
-                    Path.GetFileName(sourcePath),
+                    Path.GetFileName(canonicalSourcePath),
                     requireDeleteAccess: false);
                 if (source == null
                     || !source.VisiblePathMatches()

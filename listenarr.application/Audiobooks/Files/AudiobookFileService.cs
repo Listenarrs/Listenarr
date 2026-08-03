@@ -186,7 +186,18 @@ namespace Listenarr.Application.Audiobooks.Files
                     if (!string.IsNullOrWhiteSpace(audiobook.FilePath)
                         || !string.IsNullOrWhiteSpace(audiobook.BasePath))
                     {
-                        var normalizedBasePath = ResolveAbsolutePath(audiobook.BasePath);
+                        var normalizedBasePath = ResolveStoredAbsolutePathForHost(
+                            audiobook.BasePath);
+                        if (!string.IsNullOrWhiteSpace(audiobook.BasePath)
+                            && string.IsNullOrWhiteSpace(normalizedBasePath))
+                        {
+                            logger.LogWarning(
+                                "Refusing audiobook file registration because the persisted BasePath is unavailable on this host. AudiobookId={AudiobookId} BasePath={BasePath}",
+                                audiobook.Id,
+                                LogRedaction.SanitizeFilePath(audiobook.BasePath));
+                            return false;
+                        }
+
                         var existingDir = string.IsNullOrWhiteSpace(normalizedBasePath)
                             ? ResolveStoredFileDirectory(audiobook)
                             : string.Empty;

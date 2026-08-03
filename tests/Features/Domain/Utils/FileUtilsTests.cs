@@ -551,6 +551,39 @@ namespace Listenarr.Tests.Features.Domain.Utils
             }
         }
 
+        [WindowsFact]
+        public void TryValidateMutationTarget_ForeignUnixAlias_IsRejectedBeforeWindowsNormalization()
+        {
+            var root = Path.Join(
+                Path.GetTempPath(),
+                "fu-mutation-foreign-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            var nativeTarget = Path.Join(root, "book.m4b");
+            File.WriteAllText(nativeTarget, "audio");
+            var driveRoot = Path.GetPathRoot(nativeTarget)!;
+            var foreignTarget = "/" + nativeTarget[driveRoot.Length..].Replace('\\', '/');
+            Assert.Equal(
+                Path.GetFullPath(nativeTarget),
+                Path.GetFullPath(foreignTarget),
+                StringComparer.OrdinalIgnoreCase);
+
+            try
+            {
+                var fileSystem = new LocalFileSystem();
+                Assert.False(fileSystem.TryValidateMutationTarget(
+                    foreignTarget,
+                    [root],
+                    out _,
+                    out var reason));
+                Assert.Contains("Windows", reason, StringComparison.OrdinalIgnoreCase);
+                Assert.True(File.Exists(nativeTarget));
+            }
+            finally
+            {
+                try { Directory.Delete(root, true); } catch (IOException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); } catch (UnauthorizedAccessException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); }
+            }
+        }
+
         [DirectoryLinkFact]
         public void TryValidateMutationTarget_BlocksDirectorySymlinkEscape()
         {
@@ -993,6 +1026,22 @@ namespace Listenarr.Tests.Features.Domain.Utils
             Assert.True(FileUtils.TryNormalizeUserProvidedDirectoryPathForCurrentOs(path, out var normalizedPath, out var reason));
             Assert.Equal(Path.GetFullPath(path), normalizedPath);
             Assert.Equal(string.Empty, reason);
+        }
+
+        [WindowsFact]
+        public void GetValidMutationRootsForCurrentOs_DoesNotLaunderPersistedUnixRoot()
+        {
+            var nativeRoot = Path.Join(
+                Path.GetPathRoot(Environment.CurrentDirectory)!,
+                "ListenarrLibrary");
+
+            var roots = FileUtils.GetValidMutationRootsForCurrentOs([
+                "/",
+                nativeRoot
+            ]);
+
+            Assert.Single(roots);
+            Assert.Equal(Path.GetFullPath(nativeRoot), roots[0], StringComparer.OrdinalIgnoreCase);
         }
 
         [Theory]

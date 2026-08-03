@@ -1,3 +1,4 @@
+using Listenarr.Domain.Common;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -22,18 +23,30 @@ public sealed class RootFolderObjectIdentityReconciler(
         foreach (var root in roots)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                    root.Path,
+                    out var canonicalRootPath,
+                    out var pathReason))
+            {
+                root.DirectoryObjectIdentityUnavailableReason = pathReason;
+                logger.LogWarning(
+                    "Root folder {RootFolderId} path is unavailable on this host; destructive ownership cleanup is disabled.",
+                    root.Id);
+                continue;
+            }
+
             DirectoryObjectIdentityResolution current;
             if (root.DirectoryObjectIdentityVersion == null
                 || string.IsNullOrWhiteSpace(root.DirectoryObjectIdentity))
             {
                 current = await identityResolver.ResolveAsync(
-                    root.Path,
+                    canonicalRootPath,
                     cancellationToken);
             }
             else if (root.DirectoryObjectIdentityVersion == 1)
             {
                 current = await identityResolver.UpgradeLegacyAsync(
-                    root.Path,
+                    canonicalRootPath,
                     root.DirectoryObjectIdentityVersion.Value,
                     root.DirectoryObjectIdentity,
                     cancellationToken);
@@ -42,7 +55,7 @@ public sealed class RootFolderObjectIdentityReconciler(
                 == ManagedDirectoryIdentity.CurrentVersion)
             {
                 current = await identityResolver.ResolveExistingAsync(
-                    root.Path,
+                    canonicalRootPath,
                     cancellationToken);
             }
             else

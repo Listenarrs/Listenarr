@@ -88,12 +88,13 @@ export const useRootFoldersStore = defineStore('rootFolders', () => {
 
     const requestedMode = payload.caseSensitivityMode ?? current.caseSensitivityMode ?? 'Auto'
     const hasPathChange = rootFolderPathChanged(current, payload.path)
+    let pathChangeError: string | null = null
     if (hasPathChange) {
       if (opts?.pathChangeConfirmed !== true) {
         throw new Error('Root folder path change requires confirmation')
       }
 
-      await apiService.changeRootFolderPath(id, {
+      const result = await apiService.changeRootFolderPath(id, {
         targetPath: payload.path,
         mode: opts?.moveFiles === false ? 'metadataOnly' : 'relocate',
         deleteEmptySource: opts?.deleteEmptySource !== false,
@@ -102,12 +103,22 @@ export const useRootFoldersStore = defineStore('rootFolders', () => {
         targetCaseSensitivityMode: requestedMode,
         expectedCurrentPath: current.path,
       })
+      if (result.status === 'NeedsAttention' || result.status === 'Failed') {
+        pathChangeError =
+          result.error ||
+          (result.status === 'NeedsAttention'
+            ? 'The root folder relocation requires attention.'
+            : 'The root folder relocation failed.')
+      }
     } else {
       // PATCH intentionally preserves the canonical stored path. Equivalent
       // separator/case spelling is not a relocation or a path representation update.
       await apiService.updateRootFolder(id, { ...payload, path: current.path })
     }
     await load()
+    if (pathChangeError) {
+      throw new Error(pathChangeError)
+    }
     return folders.value.find((folder) => folder.id === id) ?? current!
   }
 

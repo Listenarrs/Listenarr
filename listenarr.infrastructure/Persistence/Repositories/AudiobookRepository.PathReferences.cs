@@ -15,14 +15,59 @@ namespace Listenarr.Infrastructure.Persistence.Repositories;
 
 public partial class AudiobookRepository
 {
-    public async Task<bool> RewritePathReferencesAsync(
+    public Task<bool> RewritePathReferencesAsync(
         int audiobookId,
         string? sourceBasePath,
         string targetBasePath,
         FileSystemPathSemantics sourceSemantics,
         FileSystemPathSemantics targetSemantics,
         CancellationToken ct = default,
+        FileSystemCaseSensitivityMode targetCaseSensitivityMode = FileSystemCaseSensitivityMode.Auto) =>
+        RewritePathReferencesCoreAsync(
+            audiobookId,
+            sourceBasePath,
+            targetBasePath,
+            sourceSemantics,
+            targetSemantics,
+            targetCaseSensitivityMode,
+            targetPhysicalObjectIdentities: null,
+            targetPhysicalIdentityObservedAtUtc: null,
+            ct);
+
+    public Task<bool> RewriteMovedPathReferencesAsync(
+        int audiobookId,
+        string? sourceBasePath,
+        string targetBasePath,
+        FileSystemPathSemantics sourceSemantics,
+        FileSystemPathSemantics targetSemantics,
+        IReadOnlyDictionary<string, string> targetPhysicalObjectIdentities,
+        DateTime targetPhysicalIdentityObservedAtUtc,
+        CancellationToken ct = default,
         FileSystemCaseSensitivityMode targetCaseSensitivityMode = FileSystemCaseSensitivityMode.Auto)
+    {
+        ArgumentNullException.ThrowIfNull(targetPhysicalObjectIdentities);
+        return RewritePathReferencesCoreAsync(
+            audiobookId,
+            sourceBasePath,
+            targetBasePath,
+            sourceSemantics,
+            targetSemantics,
+            targetCaseSensitivityMode,
+            targetPhysicalObjectIdentities,
+            targetPhysicalIdentityObservedAtUtc,
+            ct);
+    }
+
+    private async Task<bool> RewritePathReferencesCoreAsync(
+        int audiobookId,
+        string? sourceBasePath,
+        string targetBasePath,
+        FileSystemPathSemantics sourceSemantics,
+        FileSystemPathSemantics targetSemantics,
+        FileSystemCaseSensitivityMode targetCaseSensitivityMode,
+        IReadOnlyDictionary<string, string>? targetPhysicalObjectIdentities,
+        DateTime? targetPhysicalIdentityObservedAtUtc,
+        CancellationToken ct)
     {
         try
         {
@@ -40,7 +85,9 @@ public partial class AudiobookRepository
                 targetBasePath,
                 sourceSemantics,
                 targetSemantics,
-                targetCaseSensitivityMode);
+                targetCaseSensitivityMode,
+                targetPhysicalObjectIdentities,
+                targetPhysicalIdentityObservedAtUtc);
             await _db.SaveChangesAsync(ct);
             return true;
         }

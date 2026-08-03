@@ -58,11 +58,10 @@ namespace Listenarr.Api.Features.Library
 
             if (request.BasePath != null)
             {
-                var requestedBasePath = FileUtils.NormalizeStoredPath(request.BasePath);
-                var existingBasePath = string.IsNullOrEmpty(existingAudiobook.BasePath)
-                    ? string.Empty
-                    : FileUtils.NormalizeStoredPath(existingAudiobook.BasePath);
-                if (!string.Equals(requestedBasePath, existingBasePath, StringComparison.Ordinal))
+                if (!string.Equals(
+                        request.BasePath,
+                        existingAudiobook.BasePath,
+                        StringComparison.Ordinal))
                 {
                     suppressStaleImageUrl = await IsPathInsideBasePathAsync(
                         request.ImageUrl,

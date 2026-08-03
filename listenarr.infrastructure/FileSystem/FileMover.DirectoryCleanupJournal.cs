@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using Listenarr.Domain.Common;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.FileSystem;
@@ -74,8 +75,17 @@ public partial class FileMover
                         "An invalid or modified directory-cleanup journal was preserved for operator review.";
                     return false;
                 }
+                if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                        payload.SourceRoot,
+                        out var payloadSourceRoot,
+                        out _))
+                {
+                    reason =
+                        "A directory-cleanup journal contains a source path that is unavailable on this host.";
+                    return false;
+                }
                 if (string.Equals(
-                        Path.GetFullPath(payload.SourceRoot),
+                        payloadSourceRoot,
                         normalizedSource,
                         OperatingSystem.IsWindows()
                             ? StringComparison.OrdinalIgnoreCase
@@ -117,6 +127,23 @@ public partial class FileMover
         string journalName,
         CleanupJournalPayload payload)
     {
+        if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                payload.SourceRoot,
+                out var canonicalSourceRoot,
+                out _)
+            || !FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                payload.DestinationRoot,
+                out var canonicalDestinationRoot,
+                out _))
+        {
+            return false;
+        }
+
+        payload = payload with
+        {
+            SourceRoot = canonicalSourceRoot,
+            DestinationRoot = canonicalDestinationRoot
+        };
         var expectedQuarantine =
             $"{CopyCleanupMarker}{payload.OperationId:N}.state";
         if (payload.Version is not (1 or 2)

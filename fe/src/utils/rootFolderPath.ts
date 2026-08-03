@@ -26,6 +26,7 @@ export function persistedRootCaseSensitivity(root: RootFolder): PathCaseSensitiv
 export function rootFolderPathChanged(root: RootFolder, candidatePath: string): boolean {
   const sourceKind = persistedRootPathKind(root)
   const candidateKind = detectPathKind(candidatePath, sourceKind)
+  if (sourceKind === 'unknown' && candidateKind !== 'unknown') return true
   if (sourceKind !== 'unknown' && candidateKind !== 'unknown' && sourceKind !== candidateKind) {
     return true
   }

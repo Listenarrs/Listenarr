@@ -72,7 +72,7 @@ internal partial class MoveJobProcessor
         return true;
     }
 
-    private async Task<bool> ValidateSourceStateBeforeMutationAsync(
+    private async Task<Audiobook?> ValidateSourceStateBeforeMutationAsync(
         MoveJob job,
         string source,
         PathIdentitySnapshot sourceIdentity,
@@ -93,7 +93,7 @@ internal partial class MoveJobProcessor
                 "Audiobook not found",
                 cancellationToken);
             metrics.Increment("worker.move.job.failed");
-            return false;
+            return null;
         }
 
         var currentPath = currentAudiobook.BasePath;
@@ -105,7 +105,7 @@ internal partial class MoveJobProcessor
                 job,
                 "The audiobook's current source path is malformed, so the queued move cannot be proven safe.",
                 cancellationToken);
-            return false;
+            return null;
         }
 
         var matchesSource = string.IsNullOrWhiteSpace(currentPath)
@@ -129,7 +129,7 @@ internal partial class MoveJobProcessor
                     job,
                     "The move has durable execution evidence but recovery could not be verified.",
                     cancellationToken);
-                return false;
+                return null;
             }
 
             if (!hasRecoveryEvidence
@@ -145,15 +145,15 @@ internal partial class MoveJobProcessor
                     job,
                     "The audiobook's current tracked-file ownership no longer matches the queued move source manifest.",
                     cancellationToken);
-                return false;
+                return null;
             }
 
-            return true;
+            return currentAudiobook;
         }
 
         if (matchesTarget && hasVerifiedRecovery)
         {
-            return true;
+            return currentAudiobook;
         }
 
         if (matchesTarget
@@ -164,7 +164,7 @@ internal partial class MoveJobProcessor
                 job,
                 "The audiobook points at the requested target, but the target does not exist and no move execution evidence is available.",
                 cancellationToken);
-            return false;
+            return null;
         }
 
         if (hasRecoveryEvidence || hasAdvancedDurablePhase)
@@ -173,7 +173,7 @@ internal partial class MoveJobProcessor
                 job,
                 "The audiobook path changed after filesystem execution began. Recovery evidence was preserved for operator review.",
                 cancellationToken);
-            return false;
+            return null;
         }
 
         await UpdateJobStatusAsync(
@@ -188,7 +188,7 @@ internal partial class MoveJobProcessor
             "Superseded stale move job {JobId} for audiobook {AudiobookId} before filesystem mutation",
             job.Id,
             job.AudiobookId);
-        return false;
+        return null;
     }
 
     private async Task<bool?> HasFilesystemExecutionEvidenceAsync(
@@ -313,7 +313,21 @@ internal partial class MoveJobProcessor
         string endpoint,
         CancellationToken cancellationToken)
     {
-        if (TryResolvePersistedAbsolutePath(path, out var absolutePath, out var reason))
+        PathIdentitySnapshot identity;
+        var hasIdentity = string.Equals(endpoint, "target", StringComparison.Ordinal)
+            ? job.TryGetTargetIdentity(out identity)
+            : job.TryGetSourceIdentity(out identity);
+        var resolved = hasIdentity
+            ? FileSystemPathIdentity.TryCanonicalizeStoredPathWithIdentityForHost(
+                path,
+                identity,
+                out var absolutePath,
+                out var reason)
+            : FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                path,
+                out absolutePath,
+                out reason);
+        if (resolved)
         {
             return absolutePath;
         }
@@ -325,26 +339,6 @@ internal partial class MoveJobProcessor
             cancellationToken);
         metrics.Increment("worker.move.job.needs_attention");
         return null;
-    }
-
-    private static bool TryResolvePersistedAbsolutePath(
-        string path,
-        out string absolutePath,
-        out string reason)
-    {
-        try
-        {
-            absolutePath = Path.GetFullPath(path);
-            reason = string.Empty;
-            return true;
-        }
-        catch (Exception exception) when (exception is
-            ArgumentException or NotSupportedException or PathTooLongException or System.Security.SecurityException)
-        {
-            absolutePath = string.Empty;
-            reason = exception.Message;
-            return false;
-        }
     }
 
     private static bool IsValidAbsolutePath(string path, FileSystemPathSyntax syntax)

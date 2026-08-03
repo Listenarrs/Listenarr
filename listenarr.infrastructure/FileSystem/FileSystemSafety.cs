@@ -79,13 +79,27 @@ internal static partial class FileSystemSafety
                 return false;
             }
 
-            normalizedPath = Path.GetFullPath(targetPath);
+            if (!FileSystemPathIdentity.TryCanonicalizeStoredAbsolutePathForHost(
+                    targetPath,
+                    out normalizedPath,
+                    out var targetReason))
+            {
+                reason = targetReason;
+                return false;
+            }
+
             var normalizedTarget = normalizedPath;
-            var normalizedRoots = allowedRoots
-                .Where(root => !string.IsNullOrWhiteSpace(root))
-                .Select(root => Path.GetFullPath(root!))
-                .Distinct(PathComparer)
-                .ToList();
+            var normalizedRoots = new HashSet<string>(PathComparer);
+            foreach (var root in allowedRoots.Where(root => !string.IsNullOrWhiteSpace(root)))
+            {
+                if (FileSystemPathIdentity.TryCanonicalizeStoredAbsolutePathForHost(
+                        root!,
+                        out var normalizedRoot,
+                        out _))
+                {
+                    normalizedRoots.Add(normalizedRoot);
+                }
+            }
 
             if (normalizedRoots.Count == 0)
             {

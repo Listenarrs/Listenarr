@@ -20,6 +20,73 @@ namespace Listenarr.Tests.Features.Api.Features.Library;
 [Trait("Category", "LibraryController")]
 public sealed class LibraryUpdateWorkflowTests : BaseTests
 {
+    [WindowsFact]
+    public async Task UpdateAsync_ForeignPersistedBasePathAlias_RoutesThroughAuthoritativeRewrite()
+    {
+        var id = 41;
+        var nativeTarget = Path.Join(
+            Path.GetPathRoot(Environment.CurrentDirectory)!,
+            "listenarr-update-foreign-alias",
+            Guid.NewGuid().ToString("N"));
+        var driveRoot = Path.GetPathRoot(nativeTarget)!;
+        var foreignSource = "/" + nativeTarget[driveRoot.Length..].Replace('\\', '/');
+        Assert.Equal(
+            Path.GetFullPath(nativeTarget),
+            Path.GetFullPath(foreignSource),
+            StringComparer.OrdinalIgnoreCase);
+        var before = new Audiobook
+        {
+            Id = id,
+            Title = "Book",
+            BasePath = foreignSource
+        };
+        var after = new Audiobook
+        {
+            Id = id,
+            Title = "Book",
+            BasePath = nativeTarget
+        };
+
+        var repository = new Mock<IAudiobookRepository>(MockBehavior.Strict);
+        repository
+            .SetupSequence(candidate => candidate.GetByIdAsync(id))
+            .ReturnsAsync(before)
+            .ReturnsAsync(after);
+        var rewriteService = new Mock<IAudiobookDestinationRewriteService>(MockBehavior.Strict);
+        rewriteService
+            .Setup(candidate => candidate.RewriteDestinationAsync(
+                id,
+                nativeTarget,
+                foreignSource,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AudiobookDestinationRewriteResult(
+                id,
+                nativeTarget,
+                foreignSource));
+
+        var services = new ServiceCollection();
+        services.AddSingleton(repository.Object);
+        using var provider = services.BuildServiceProvider();
+        using var operationCoordinator = new AudiobookOperationCoordinator();
+        var workflow = new LibraryUpdateWorkflow(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            rewriteService.Object,
+            operationCoordinator,
+            new FileSystemSemanticsResolver(),
+            NullLogger<LibraryUpdateWorkflow>.Instance);
+
+        var result = await workflow.UpdateAsync(
+            id,
+            new AudiobookUpdateRequest { BasePath = nativeTarget });
+
+        Assert.IsType<OkObjectResult>(result);
+        rewriteService.Verify(candidate => candidate.RewriteDestinationAsync(
+            id,
+            nativeTarget,
+            foreignSource,
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     [Fact]
     public async Task UpdateAsync_DestinationOnlyRewrite_DoesNotIssueMetadataWrite()
     {

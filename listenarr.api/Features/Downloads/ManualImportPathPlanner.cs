@@ -206,26 +206,37 @@ public sealed class ManualImportPathPlanner
                 return false;
             }
 
-            var baseFull = FileUtils.NormalizeStoredPath(basePath);
-            var configuredFull = string.IsNullOrWhiteSpace(configuredOutput) ? string.Empty : Path.GetFullPath(configuredOutput);
-            var isCustomBasePath = string.IsNullOrWhiteSpace(configuredFull)
-                || !FileSystemPathIdentity.AreEquivalent(baseFull, configuredFull, destinationSemantics);
+            if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                    basePath,
+                    out var baseFull,
+                    out _))
+            {
+                return true;
+            }
+
+            var configuredFull = string.Empty;
+            var hasConfiguredOutput = !string.IsNullOrWhiteSpace(configuredOutput)
+                && FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                    configuredOutput,
+                    out configuredFull,
+                    out _);
+            var isCustomBasePath = !hasConfiguredOutput
+                || !FileSystemPathIdentity.AreEquivalent(
+                    baseFull,
+                    configuredFull,
+                    destinationSemantics);
 
             if (isCustomBasePath)
             {
-                var isRootFolder = rootFolders.Any(r =>
-                {
-                    try
-                    {
-                        return FileSystemPathIdentity.AreEquivalent(
-                            FileUtils.NormalizeStoredPath(r.Path),
-                            baseFull,
-                            destinationSemantics);
-                    }
-                    catch (ArgumentException) { return false; }
-                    catch (NotSupportedException) { return false; }
-                    catch (PathTooLongException) { return false; }
-                });
+                var isRootFolder = rootFolders.Any(root =>
+                    FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                        root.Path,
+                        out var rootPath,
+                        out _)
+                    && FileSystemPathIdentity.AreEquivalent(
+                        rootPath,
+                        baseFull,
+                        destinationSemantics));
                 if (isRootFolder) isCustomBasePath = false;
             }
 

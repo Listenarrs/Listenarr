@@ -18,20 +18,24 @@ internal static class MovedAudiobookPathRewriter
         IAudiobookRepository audiobookRepository,
         ILogger logger,
         CancellationToken cancellationToken,
+        IReadOnlyDictionary<string, string> targetPhysicalObjectIdentities,
         FileSystemCaseSensitivityMode targetCaseSensitivityMode = FileSystemCaseSensitivityMode.Auto)
     {
         ArgumentNullException.ThrowIfNull(audiobookRepository);
         ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(targetPhysicalObjectIdentities);
 
         bool rewritten;
         try
         {
-            rewritten = await audiobookRepository.RewritePathReferencesAsync(
+            rewritten = await audiobookRepository.RewriteMovedPathReferencesAsync(
                 audiobookId,
                 source,
                 target,
                 sourceSemantics,
                 targetSemantics,
+                targetPhysicalObjectIdentities,
+                DateTime.UtcNow,
                 cancellationToken,
                 targetCaseSensitivityMode);
         }

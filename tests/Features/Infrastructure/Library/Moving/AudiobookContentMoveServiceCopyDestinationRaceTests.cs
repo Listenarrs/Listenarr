@@ -152,6 +152,52 @@ public partial class AudiobookContentMoveServiceTests
     }
 
     [Fact]
+    public async Task MoveContentsAsync_SourceGenerationReplacedAfterManifestValidation_FailsClosed()
+    {
+        var source = FileService.GetTempDirectory("content-move-source-generation-race");
+        var sourceFile = await FileService.GetFileAsync(source, "book.m4b", "verified audio");
+        var target = Path.Join(
+            FileService.GetTempPath(),
+            $"content-move-source-generation-target-{Guid.NewGuid():N}");
+        var request = await CreateLeasedMoveRequestAsync(source, target);
+        string physicalIdentity;
+        using (var parent = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
+            source,
+            createMissing: false))
+        using (var file = parent.OpenExistingFileForStableRead("book.m4b"))
+        {
+            physicalIdentity = file.GetObjectIdentity();
+        }
+        request = request with
+        {
+            SourcePhysicalObjectIdentities = new Dictionary<string, string>(
+                request.SourceSemantics.Comparer)
+            {
+                ["book.m4b"] = physicalIdentity
+            }
+        };
+        var displaced = sourceFile + ".original";
+        var injector = new ReplaceSourceBeforeCopy(
+            sourceFile,
+            displaced,
+            "verified audio");
+        var service = new AudiobookContentMoveService(
+            _provider.GetRequiredService<ILogger<AudiobookContentMoveService>>(),
+            _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>(),
+            TimeProvider.System,
+            injector);
+
+        await Assert.ThrowsAsync<MoveNeedsAttentionException>(() =>
+            service.MoveContentsAsync(request, CancellationToken.None));
+
+        Assert.True(injector.ReplacementRan);
+        Assert.True(File.Exists(sourceFile));
+        Assert.True(File.Exists(displaced));
+        Assert.Equal("verified audio", await File.ReadAllTextAsync(sourceFile));
+        Assert.Equal("verified audio", await File.ReadAllTextAsync(displaced));
+    }
+
+    [Fact]
     public async Task MoveContentsAsync_OwnedTempDisappearsBeforeCopy_DoesNotRecreateUnmarkedDirectory()
     {
         var source = FileService.GetTempDirectory("content-move-temp-disappears-source");
@@ -221,6 +267,29 @@ public partial class AudiobookContentMoveServiceTests
             Assert.True(File.Exists(Path.Join(tempRoot, ".listenarr-temp-owner.json")));
             Directory.Delete(tempRoot, recursive: true);
             DeletionRan = true;
+        }
+    }
+
+    private sealed class ReplaceSourceBeforeCopy(
+        string sourceFile,
+        string displaced,
+        string contents) : IMoveFaultInjector
+    {
+        public bool AllowAtomicRename => false;
+
+        public bool ReplacementRan { get; private set; }
+
+        public void OnCopyMutation(Guid jobId, CopyMutationFaultPoint faultPoint)
+        {
+            if (ReplacementRan
+                || faultPoint != CopyMutationFaultPoint.BeforeCopyRootValidation)
+            {
+                return;
+            }
+
+            File.Move(sourceFile, displaced);
+            File.WriteAllText(sourceFile, contents);
+            ReplacementRan = true;
         }
     }
 

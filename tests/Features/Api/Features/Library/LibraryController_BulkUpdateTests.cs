@@ -868,6 +868,15 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 Path = filePath
             };
             tracked.ApplyPathIdentity(filePath, identity);
+            using (var parent = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
+                Path.GetDirectoryName(filePath)!,
+                createMissing: false))
+            using (var file = parent.OpenExistingFileForStableRead(Path.GetFileName(filePath)))
+            {
+                tracked.ApplyPhysicalObjectIdentity(
+                    file.GetObjectIdentity(),
+                    DateTime.UtcNow);
+            }
             await _audiobookFileRepository.AddAsync(tracked);
         }
 

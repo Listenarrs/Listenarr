@@ -283,8 +283,24 @@ internal sealed partial class AudiobookContentMoveService
 
         try
         {
-            if (!FileSystemPathIdentity.AreEquivalent(marker.Source, source, request.SourceSemantics)
-                || !FileSystemPathIdentity.AreEquivalent(marker.Target, target, request.TargetSemantics))
+            if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                    marker.Source,
+                    out var markerSource,
+                    out _,
+                    request.SourceSemantics.Syntax)
+                || !FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                    marker.Target,
+                    out var markerTarget,
+                    out _,
+                    request.TargetSemantics.Syntax)
+                || !FileSystemPathIdentity.AreEquivalent(
+                    markerSource,
+                    source,
+                    request.SourceSemantics)
+                || !FileSystemPathIdentity.AreEquivalent(
+                    markerTarget,
+                    target,
+                    request.TargetSemantics))
             {
                 throw new MoveNeedsAttentionException(
                     "Move recovery marker source or target identity does not match the persisted job.");

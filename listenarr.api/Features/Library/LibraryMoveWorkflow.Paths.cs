@@ -13,12 +13,10 @@ public sealed partial class LibraryMoveWorkflow
             return null;
         }
 
-        if (FileUtils.TryNormalizeUserProvidedDirectoryPathForCurrentOs(
+        if (FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
             path,
             out var normalizedPath,
-            out var validationReason,
-            allowFileSystemRoot: true,
-            rejectParentTraversal: true))
+            out var validationReason))
         {
             return normalizedPath;
         }

@@ -34,7 +34,10 @@ public partial class AudiobookFileService
         var bestRootLength = -1;
         foreach (var root in rootFolders)
         {
-            if (string.IsNullOrWhiteSpace(root.Path))
+            if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                    root.Path,
+                    out var canonicalRoot,
+                    out _))
             {
                 continue;
             }
@@ -42,26 +45,23 @@ public partial class AudiobookFileService
             try
             {
                 var rootResolution = await semanticsResolver.ResolveAsync(
-                    root.Path,
+                    canonicalRoot,
                     root.CaseSensitivityMode,
                     cancellationToken);
                 if (rootResolution.State != PathIdentityState.Valid
                     || !FileSystemPathIdentity.IsSameOrInside(
                         path,
-                        root.Path,
+                        canonicalRoot,
                         rootResolution.Semantics))
                 {
                     continue;
                 }
 
-                var canonicalRoot = FileSystemPathIdentity.Canonicalize(
-                    root.Path,
-                    rootResolution.Semantics.Syntax);
                 if (canonicalRoot.Length > bestRootLength)
                 {
                     bestResolution = new LibraryPathSemanticsResolution(
                         rootResolution.Semantics,
-                        root.Path);
+                        canonicalRoot);
                     bestRootLength = canonicalRoot.Length;
                 }
             }

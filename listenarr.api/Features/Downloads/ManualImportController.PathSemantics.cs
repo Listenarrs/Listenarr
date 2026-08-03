@@ -59,27 +59,27 @@ public partial class ManualImportController
         var bestRootLength = -1;
         foreach (var root in await _rootFolderService.GetAllAsync())
         {
-            if (string.IsNullOrWhiteSpace(root.Path))
+            if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                    root.Path,
+                    out var canonicalRoot,
+                    out _))
             {
                 continue;
             }
 
             var rootResolution = await _semanticsResolver.ResolveAsync(
-                root.Path,
+                canonicalRoot,
                 root.CaseSensitivityMode,
                 cancellationToken);
             if (rootResolution.State != PathIdentityState.Valid
                 || !FileSystemPathIdentity.IsSameOrInside(
                     basePath,
-                    root.Path,
+                    canonicalRoot,
                     rootResolution.Semantics))
             {
                 continue;
             }
 
-            var canonicalRoot = FileSystemPathIdentity.Canonicalize(
-                root.Path,
-                rootResolution.Semantics.Syntax);
             if (canonicalRoot.Length > bestRootLength)
             {
                 bestRoot = root;
@@ -123,19 +123,22 @@ public partial class ManualImportController
     {
         foreach (var rootFolder in rootFolders)
         {
-            if (string.IsNullOrWhiteSpace(rootFolder.Path))
+            if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                    rootFolder.Path,
+                    out var canonicalRoot,
+                    out _))
             {
                 continue;
             }
 
             var resolution = await _semanticsResolver.ResolveAsync(
-                rootFolder.Path,
+                canonicalRoot,
                 rootFolder.CaseSensitivityMode,
                 cancellationToken);
             if (resolution.State == PathIdentityState.Valid
                 && FileSystemPathIdentity.IsSameOrInside(
                     path,
-                    rootFolder.Path,
+                    canonicalRoot,
                     resolution.Semantics))
             {
                 return true;

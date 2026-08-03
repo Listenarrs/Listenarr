@@ -187,7 +187,11 @@ namespace Listenarr.Infrastructure.Library.Scanning
                     ? audiobook.BasePath
                     : job.Path;
             if (!string.IsNullOrWhiteSpace(requestedScanPath)
-                && !Directory.Exists(requestedScanPath))
+                && FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                    requestedScanPath,
+                    out var hostRequestedScanPath,
+                    out _)
+                && !Directory.Exists(hostRequestedScanPath))
             {
                 var missingError = usedBasePath
                     ? "BasePath unavailable"
@@ -235,6 +239,26 @@ namespace Listenarr.Infrastructure.Library.Scanning
             }
 
             var scanRoot = authorization.Path!;
+            if (!Directory.Exists(scanRoot))
+            {
+                var missingError = usedBasePath
+                    ? "BasePath unavailable"
+                    : "Scan path not found";
+                var missing = await RejectScanAsync(
+                    historyRepository,
+                    job,
+                    audiobook,
+                    missingError,
+                    cancellationToken);
+                return missing with
+                {
+                    BroadcastFailure = usedBasePath,
+                    Metric = usedBasePath
+                        ? "worker.scan.job.failed"
+                        : "worker.scan.job.skipped"
+                };
+            }
+
             var identity = authorization.Identity!.Value;
             var physicalIdentity = authorization.PhysicalIdentity!.Value;
             if (job.PathIdentity.HasValue)

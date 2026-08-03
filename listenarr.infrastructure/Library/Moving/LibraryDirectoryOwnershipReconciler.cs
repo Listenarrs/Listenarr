@@ -1,3 +1,4 @@
+using Listenarr.Domain.Common;
 using Listenarr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -74,6 +75,15 @@ public sealed class LibraryDirectoryOwnershipReconciler(
 
             try
             {
+                if (!FileSystemPathIdentity.TryCanonicalizeStoredPathWithIdentityForHost(
+                        ownership.CanonicalPath,
+                        ownership.GetIdentity(),
+                        out _,
+                        out var pathReason))
+                {
+                    throw new InvalidOperationException(pathReason);
+                }
+
                 if (ownership.State == LibraryDirectoryOwnershipState.Removing
                     && !Directory.Exists(ownership.CanonicalPath)
                     && !Directory.Exists(
@@ -359,13 +369,28 @@ public sealed class LibraryDirectoryOwnershipReconciler(
                 "The retired ownership marker path has not been materialized.");
         }
 
-        var parentPath = Path.GetDirectoryName(evidence.CanonicalMarkerPath)
+        if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                evidence.CanonicalMarkerPath,
+                out var canonicalMarkerPath,
+                out var reason)
+            || !FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+                canonicalMarkerPath,
+                out var markerSyntax)
+            || markerSyntax != evidence.PathSyntax)
+        {
+            throw new InvalidOperationException(
+                string.IsNullOrWhiteSpace(reason)
+                    ? "The retired ownership marker path syntax does not match its persisted evidence."
+                    : reason);
+        }
+
+        var parentPath = Path.GetDirectoryName(canonicalMarkerPath)
             ?? throw new InvalidOperationException(
                 "The retired ownership marker has no parent directory.");
         using var parent =
             PinnedDirectoryCreation.OpenPinnedDirectoryNoFollow(parentPath);
         using var marker = parent.TryOpenExistingFile(
-            Path.GetFileName(evidence.CanonicalMarkerPath),
+            Path.GetFileName(canonicalMarkerPath),
             requireDeleteAccess: true);
         if (marker == null)
         {

@@ -268,6 +268,40 @@ namespace Listenarr.Tests.Features.Api.Services
             Assert.Equal("M4B", result.Format);
         }
 
+        [WindowsFact]
+        public async Task UnmatchedScanProcessor_ForeignRootSyntax_DoesNotScanWindowsAlias()
+        {
+            var root = FileService.GetTempDirectory("unmatched-processor-foreign-root");
+            var file = await FileService.GetFileAsync(root, "Foreign Alias Book.m4b", "audio");
+            await CreateApplicationSettings();
+            var driveRoot = Path.GetPathRoot(root)!;
+            var foreignRoot = "/" + root[driveRoot.Length..].Replace('\\', '/');
+            Assert.Equal(
+                Path.GetFullPath(root),
+                Path.GetFullPath(foreignRoot),
+                StringComparer.OrdinalIgnoreCase);
+            var queue = new UnmatchedScanQueueService(
+                _provider.GetRequiredService<ILogger<UnmatchedScanQueueService>>(),
+                _provider.GetRequiredService<IFileSystemSemanticsResolver>());
+            CreateHubProxy<SettingsHub>(out var hubContext);
+            var processor = new UnmatchedScanProcessor(
+                queue,
+                _provider.GetRequiredService<IServiceScopeFactory>(),
+                _provider.GetRequiredService<ILogger<UnmatchedScanProcessor>>(),
+                hubContext.Object,
+                _provider.GetRequiredService<IFfmpegService>(),
+                _provider.GetRequiredService<IFileSystemSemanticsResolver>());
+            await queue.EnqueueAsync(foreignRoot);
+            Assert.True(queue.Reader.TryRead(out var job));
+
+            await Assert.ThrowsAsync<ArgumentException>(() =>
+                processor.ProcessJobAsync(job, CancellationToken.None));
+
+            Assert.True(File.Exists(file));
+            Assert.True(queue.TryGetJob(job.Id, out var current));
+            Assert.Equal("Processing", current!.Status);
+        }
+
         [Fact]
         public async Task UnmatchedScanProcessor_ProcessJob_MissingRootCompletesEmpty()
         {

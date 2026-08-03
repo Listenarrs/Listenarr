@@ -64,6 +64,39 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
         await base.DisposeAsync();
     }
 
+    [WindowsFact]
+    public async Task BoundaryAuthorizer_ForeignPersistedUnixRoot_CannotAuthorizeWindowsAlias()
+    {
+        var foreignRoot = "/" + Path.GetRelativePath(
+                Path.GetPathRoot(_root)!,
+                _root)
+            .Replace('\\', '/');
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            var root = await db.RootFolders.SingleAsync();
+            root.Path = foreignRoot;
+            await db.SaveChangesAsync();
+        }
+
+        var authorizer = new LibraryDirectoryOwnershipBoundaryAuthorizer(_factory);
+        var semantics = new FileSystemPathSemantics(
+            FileSystemPathSyntax.Unix,
+            FileSystemCaseSensitivity.Sensitive);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            using var authorization = await authorizer.AuthorizeAsync(
+                foreignRoot,
+                semantics,
+                CancellationToken.None);
+        });
+
+        Assert.Contains(
+            "this host uses Windows syntax",
+            exception.Message,
+            StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task RecordCreatedAsync_PersistsIdentityAndMatchingPhysicalMarkers()
     {
@@ -1151,6 +1184,94 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
             "user content",
             await File.ReadAllTextAsync(
                 Path.Join(fixture.DirectoryPath, "foreign.txt")));
+    }
+
+    [WindowsFact]
+    public async Task Reconciler_ForeignRetiredMarkerPath_DoesNotDeleteWindowsAlias()
+    {
+        var directory = Path.Join(_root, "ForeignRetiredMarkerPath");
+        Directory.CreateDirectory(directory);
+        var ownership = await _store.RecordCreatedAsync(
+            new LibraryDirectoryOwnershipClaim(
+                directory,
+                FileSystemPathSemantics.CurrentHostDefault,
+                "test"));
+        var ownershipKey = Assert.IsType<string>(ownership.PathOwnershipKey);
+        await _store.BeginRemovalAsync(ownership.Id, ownershipKey);
+        LibraryDirectoryOwnershipMarker.DeleteInsideMarker(ownership, directory);
+        Directory.Delete(directory);
+        await _store.MarkRemovedAsync(ownership.Id, ownershipKey);
+
+        var siblingMarkerPath =
+            LibraryDirectoryOwnershipMarker.GetMarkerPaths(ownership)[1];
+        Assert.True(File.Exists(siblingMarkerPath));
+        var root = Path.GetPathRoot(siblingMarkerPath)!;
+        var foreignMarkerPath =
+            "/" + siblingMarkerPath[root.Length..].Replace('\\', '/');
+        Assert.Equal(
+            Path.GetFullPath(siblingMarkerPath),
+            Path.GetFullPath(foreignMarkerPath),
+            StringComparer.OrdinalIgnoreCase);
+
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            var evidence = await db.LibraryDirectoryOwnershipRetiredMarkers
+                .SingleAsync(candidate => candidate.OwnershipId == ownership.Id);
+            evidence.CanonicalMarkerPath = foreignMarkerPath;
+            await db.SaveChangesAsync();
+        }
+
+        await CreateOwnershipReconciler().ReconcileAsync();
+
+        Assert.True(File.Exists(siblingMarkerPath));
+        await using var verification = await _factory.CreateDbContextAsync();
+        var persisted = await verification.LibraryDirectoryOwnershipRetiredMarkers
+            .SingleAsync(candidate => candidate.OwnershipId == ownership.Id);
+        Assert.Equal(
+            LibraryDirectoryOwnershipRetiredMarkerState.Pending,
+            persisted.State);
+    }
+
+    [LinuxFact]
+    public async Task TryDeleteRetiredSiblingMarker_AmbiguousPersistedPayload_PreservesMarker()
+    {
+        var directory = Path.Join(_root, "AmbiguousRetiredMarkerPayload");
+        Directory.CreateDirectory(directory);
+        var ownership = await _store.RecordCreatedAsync(
+            new LibraryDirectoryOwnershipClaim(
+                directory,
+                FileSystemPathSemantics.CurrentHostDefault,
+                "test"));
+        var ownershipKey = Assert.IsType<string>(ownership.PathOwnershipKey);
+        await _store.BeginRemovalAsync(ownership.Id, ownershipKey);
+        LibraryDirectoryOwnershipMarker.DeleteInsideMarker(ownership, directory);
+        Directory.Delete(directory);
+        await _store.MarkRemovedAsync(ownership.Id, ownershipKey);
+
+        var siblingMarkerPath =
+            LibraryDirectoryOwnershipMarker.GetMarkerPaths(ownership)[1];
+        Assert.True(File.Exists(siblingMarkerPath));
+        var ambiguousCanonicalPath = "/" + ownership.CanonicalPath;
+        Assert.False(FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+            ambiguousCanonicalPath,
+            out _));
+        File.SetAttributes(siblingMarkerPath, FileAttributes.Normal);
+        await File.WriteAllTextAsync(
+            siblingMarkerPath,
+            LibraryDirectoryOwnershipMarker.SerializePayload(
+                new LibraryDirectoryOwnershipMarker.MarkerPayload(
+                    LibraryDirectoryOwnershipMarker.Version,
+                    ownership.OwnershipToken,
+                    ambiguousCanonicalPath,
+                    ownership.ManagedRootFolderId,
+                    ownership.DirectoryObjectIdentityVersion,
+                    ownership.DirectoryObjectIdentity)));
+
+        Assert.False(LibraryDirectoryOwnershipMarker.TryDeleteRetiredSiblingMarker(
+            ownership,
+            out var reason));
+        Assert.False(string.IsNullOrWhiteSpace(reason));
+        Assert.True(File.Exists(siblingMarkerPath));
     }
 
     [Fact]

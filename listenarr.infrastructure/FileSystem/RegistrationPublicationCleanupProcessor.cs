@@ -181,18 +181,15 @@ public sealed class RegistrationPublicationCleanupProcessor(
                 continue;
             }
 
-            string normalized;
-            try
-            {
-                normalized = FileUtils.NormalizeStoredPath(candidate);
-            }
-            catch (Exception exception) when (exception is not (
-                OperationCanceledException or OutOfMemoryException or StackOverflowException))
+            if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                    candidate,
+                    out var normalized,
+                    out var reason))
             {
                 logger.LogDebug(
-                    exception,
-                    "Skipped invalid registration cleanup root {Path}",
-                    LogRedaction.SanitizeFilePath(candidate));
+                    "Skipped unavailable registration cleanup root {Path}: {Reason}",
+                    LogRedaction.SanitizeFilePath(candidate),
+                    reason);
                 continue;
             }
 
@@ -301,20 +298,14 @@ public sealed class RegistrationPublicationCleanupProcessor(
             }
 
             string physicalPath;
-            try
-            {
-                physicalPath = Path.IsPathFullyQualified(file.Path)
-                    ? FileUtils.NormalizeStoredPath(file.Path)
-                    : FileUtils.CombineWithOptionalBase(
-                        audiobook.BasePath,
-                        file.Path);
-            }
-            catch (Exception exception) when (exception is not (
-                OperationCanceledException or OutOfMemoryException or StackOverflowException))
+            if (!TryResolveRegisteredFilePathForHost(
+                    audiobook,
+                    file.Path,
+                    resolution.Semantics,
+                    out physicalPath))
             {
                 logger.LogDebug(
-                    exception,
-                    "Ignored invalid registered audiobook file path for cleanup candidate {Path}",
+                    "Ignored registered audiobook file path that is unavailable on this host while evaluating cleanup candidate {Path}",
                     LogRedaction.SanitizeFilePath(candidate.DestinationPath));
                 continue;
             }
@@ -341,6 +332,39 @@ public sealed class RegistrationPublicationCleanupProcessor(
         return conflictingPath
             ? RegistrationGenerationState.Conflicting
             : RegistrationGenerationState.Absent;
+    }
+
+    private static bool TryResolveRegisteredFilePathForHost(
+        Audiobook audiobook,
+        string storedPath,
+        FileSystemPathSemantics semantics,
+        out string physicalPath)
+    {
+        if (FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                storedPath,
+                out physicalPath,
+                out _))
+        {
+            return true;
+        }
+
+        if (Path.IsPathRooted(storedPath)
+            || FileSystemPathIdentity.TryDetectAbsoluteSyntax(storedPath, out _)
+            || string.IsNullOrWhiteSpace(audiobook.BasePath)
+            || !FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                audiobook.BasePath,
+                out var basePath,
+                out _))
+        {
+            physicalPath = string.Empty;
+            return false;
+        }
+
+        return FileSystemPathIdentity.TryResolveRelativePathWithinBase(
+            basePath,
+            storedPath,
+            semantics,
+            out physicalPath);
     }
 
     private enum RegistrationGenerationState

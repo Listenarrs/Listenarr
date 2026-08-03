@@ -51,7 +51,11 @@ public sealed class AudiobookFileIdentityReconciler(
                     file.Id,
                     file.Path,
                     file.PathOwnershipKey,
-                    identity));
+                    identity,
+                    physicalObjectIdentity: string.IsNullOrWhiteSpace(
+                        file.PhysicalObjectIdentity)
+                        ? TryResolvePhysicalObjectIdentity(identity)
+                        : null));
             }
             catch (Exception exception) when (exception is
                 ArgumentException or
@@ -164,10 +168,66 @@ public sealed class AudiobookFileIdentityReconciler(
                 else
                 {
                     file.ApplyPathIdentity(plan.StoredPath!, plan.Identity);
+                    if (string.IsNullOrWhiteSpace(file.PhysicalObjectIdentity)
+                        && !string.IsNullOrWhiteSpace(plan.PhysicalObjectIdentity))
+                    {
+                        file.ApplyPhysicalObjectIdentity(
+                            plan.PhysicalObjectIdentity,
+                            DateTime.UtcNow);
+                    }
                 }
             }
 
             await context.SaveChangesAsync(cancellationToken);
+        }
+    }
+
+    private string? TryResolvePhysicalObjectIdentity(
+        AudiobookFilePathIdentity identity)
+    {
+        var pathIdentity = new PathIdentitySnapshot(
+            identity.Syntax,
+            identity.CaseSensitivity,
+            identity.RequestedMode,
+            identity.BoundaryPath);
+        if (identity.State != PathIdentityState.Valid
+            || string.IsNullOrWhiteSpace(identity.CanonicalPath)
+            || !FileSystemPathIdentity.TryCanonicalizeStoredPathWithIdentityForHost(
+                identity.CanonicalPath,
+                pathIdentity,
+                out var canonicalPath,
+                out _))
+        {
+            return null;
+        }
+
+        try
+        {
+            var parentPath = Path.GetDirectoryName(canonicalPath);
+            if (string.IsNullOrWhiteSpace(parentPath))
+            {
+                return null;
+            }
+
+            using var parent = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
+                parentPath,
+                createMissing: false);
+            using var file = parent.OpenExistingFileForStableRead(
+                Path.GetFileName(canonicalPath));
+            return file.VisiblePathMatches()
+                ? file.GetObjectIdentity()
+                : null;
+        }
+        catch (Exception exception) when (exception is
+            IOException or UnauthorizedAccessException
+                or ArgumentException or InvalidOperationException
+                or NotSupportedException or PathTooLongException
+                or System.ComponentModel.Win32Exception)
+        {
+            logger.LogDebug(
+                exception,
+                "Physical identity could not be backfilled during audiobook file reconciliation");
+            return null;
         }
     }
 
@@ -176,13 +236,15 @@ public sealed class AudiobookFileIdentityReconciler(
         string? storedPath,
         string? currentOwnershipKey,
         AudiobookFilePathIdentity? identity,
-        string? unavailableReason = null)
+        string? unavailableReason = null,
+        string? physicalObjectIdentity = null)
     {
         public int FileId { get; } = fileId;
         public string? StoredPath { get; } = storedPath;
         public string? CurrentOwnershipKey { get; } = currentOwnershipKey;
         public AudiobookFilePathIdentity? Identity { get; set; } = identity;
         public string? UnavailableReason { get; } = unavailableReason;
+        public string? PhysicalObjectIdentity { get; } = physicalObjectIdentity;
 
         public static ReconciliationPlan Unavailable(
             AudiobookFile file,

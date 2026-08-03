@@ -230,32 +230,40 @@ namespace Listenarr.Infrastructure.Metadata.Jobs
             IRootFolderService rootFolderService,
             CancellationToken cancellationToken)
         {
+            if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                    path,
+                    out var canonicalPath,
+                    out _))
+            {
+                return null;
+            }
+
             FileSystemPathSemantics? bestSemantics = null;
             var bestRootLength = -1;
             foreach (var root in await rootFolderService.GetAllAsync())
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (string.IsNullOrWhiteSpace(root.Path))
+                if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                        root.Path,
+                        out var canonicalRoot,
+                        out _))
                 {
                     continue;
                 }
 
                 var rootResolution = await semanticsResolver.ResolveAsync(
-                    root.Path,
+                    canonicalRoot,
                     root.CaseSensitivityMode,
                     cancellationToken);
                 if (rootResolution.State != PathIdentityState.Valid
                     || !FileSystemPathIdentity.IsSameOrInside(
-                        path,
-                        root.Path,
+                        canonicalPath,
+                        canonicalRoot,
                         rootResolution.Semantics))
                 {
                     continue;
                 }
 
-                var canonicalRoot = FileSystemPathIdentity.Canonicalize(
-                    root.Path,
-                    rootResolution.Semantics.Syntax);
                 if (canonicalRoot.Length > bestRootLength)
                 {
                     bestSemantics = rootResolution.Semantics;
@@ -268,7 +276,9 @@ namespace Listenarr.Infrastructure.Metadata.Jobs
                 return bestSemantics.Value;
             }
 
-            var resolution = await semanticsResolver.ResolveAsync(path, cancellationToken: cancellationToken);
+            var resolution = await semanticsResolver.ResolveAsync(
+                canonicalPath,
+                cancellationToken: cancellationToken);
             return resolution.State == PathIdentityState.Valid ? resolution.Semantics : null;
         }
     }

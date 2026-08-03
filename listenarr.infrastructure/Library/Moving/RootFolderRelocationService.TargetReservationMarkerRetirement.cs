@@ -23,8 +23,9 @@ public sealed partial class RootFolderRelocationService
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                var parentPath = Path.GetDirectoryName(
-                    reservation.CanonicalPath)
+                var canonicalPath = RequireHostReservationPath(
+                    reservation.CanonicalPath);
+                var parentPath = Path.GetDirectoryName(canonicalPath)
                     ?? throw new InvalidOperationException(
                         "A retained relocation directory has no parent.");
                 using var parent =
@@ -33,7 +34,7 @@ public sealed partial class RootFolderRelocationService
                         createMissing: false);
                 using var publication =
                     parent.TryOpenExistingChildForPublication(
-                        Path.GetFileName(reservation.CanonicalPath));
+                        Path.GetFileName(canonicalPath));
                 if (publication == null)
                 {
                     continue;
@@ -69,10 +70,10 @@ public sealed partial class RootFolderRelocationService
                     reservation,
                     marker);
                 BeforeReservationMarkerRetirementForTest?.Invoke(
-                    reservation.CanonicalPath);
+                    canonicalPath);
                 marker.Delete();
                 AfterReservationMarkerRetiredForTest?.Invoke(
-                    reservation.CanonicalPath);
+                    canonicalPath);
             }
             catch (Exception exception) when (exception is not (
                 OperationCanceledException

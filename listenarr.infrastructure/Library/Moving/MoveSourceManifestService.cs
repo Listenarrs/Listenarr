@@ -39,6 +39,7 @@ internal sealed class MoveSourceManifestService(
             validated.Add(await ValidateFileAsync(
                 trackedFile.Id,
                 path,
+                trackedFile.PhysicalObjectIdentity,
                 cancellationToken));
         }
 
@@ -104,26 +105,23 @@ internal sealed class MoveSourceManifestService(
         AudiobookFile file,
         PathIdentitySnapshot identity)
     {
-        try
-        {
-            var canonical = FileSystemPathIdentity.Canonicalize(
+        if (!FileSystemPathIdentity.TryCanonicalizeStoredPathWithIdentityForHost(
                 file.CanonicalPath!,
-                identity.Syntax);
-            identity.ValidateForPath(canonical);
-            return canonical;
-        }
-        catch (Exception exception) when (exception is
-            ArgumentException or NotSupportedException or PathTooLongException
-            or System.Security.SecurityException)
+                identity,
+                out var canonical,
+                out var reason))
         {
             throw Conflict(
-                $"Tracked file {file.Id} has invalid canonical path identity: {exception.Message}");
+                $"Tracked file {file.Id} cannot be authorized on the current host: {reason}");
         }
+
+        return canonical;
     }
 
     private static async Task<ValidatedTrackedFile> ValidateFileAsync(
         int audiobookFileId,
         string path,
+        string? expectedPhysicalObjectIdentity,
         CancellationToken cancellationToken)
     {
         if (!File.Exists(path))
@@ -132,35 +130,70 @@ internal sealed class MoveSourceManifestService(
                 $"Tracked file {audiobookFileId} is missing from disk and cannot be moved safely.");
         }
 
-        var attributes = File.GetAttributes(path);
-        if ((attributes & FileAttributes.ReparsePoint) != 0
-            || (attributes & FileAttributes.Directory) != 0)
+        if (string.IsNullOrWhiteSpace(expectedPhysicalObjectIdentity))
         {
             throw Conflict(
-                $"Tracked file {audiobookFileId} became linked or changed type.");
+                $"Tracked file {audiobookFileId} has unresolved physical identity and must be rescanned before moving.");
         }
 
-        var before = new FileInfo(path);
-        var length = before.Length;
-        var lastWriteTimeUtc = before.LastWriteTimeUtc;
-        var hash = await ComputeSha256Async(path, cancellationToken);
-        var afterAttributes = File.GetAttributes(path);
-        var after = new FileInfo(path);
-        if ((afterAttributes & FileAttributes.ReparsePoint) != 0
-            || (afterAttributes & FileAttributes.Directory) != 0
-            || after.Length != length
-            || after.LastWriteTimeUtc != lastWriteTimeUtc)
+        var parentPath = Path.GetDirectoryName(path)
+            ?? throw Conflict(
+                $"Tracked file {audiobookFileId} has no containing directory.");
+        try
+        {
+            using var parent = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
+                parentPath,
+                createMissing: false);
+            using var file = parent.OpenExistingFileForStableRead(
+                Path.GetFileName(path));
+            if (!string.Equals(
+                    file.GetObjectIdentity(),
+                    expectedPhysicalObjectIdentity,
+                    StringComparison.Ordinal))
+            {
+                throw Conflict(
+                    $"Tracked file {audiobookFileId} identifies a different physical file generation and must be rescanned before moving.");
+            }
+
+            await using var stream = file.OpenReadStream(
+                bufferSize: 128 * 1024,
+                asynchronous: false);
+            var length = stream.Length;
+            var lastWriteTimeUtc = File.GetLastWriteTimeUtc(path);
+            var hashBytes = await SHA256.HashDataAsync(stream, cancellationToken);
+            var hash = Convert.ToHexString(hashBytes);
+            if (!file.VisiblePathMatches()
+                || !string.Equals(
+                    file.GetObjectIdentity(),
+                    expectedPhysicalObjectIdentity,
+                    StringComparison.Ordinal)
+                || stream.Length != length
+                || File.GetLastWriteTimeUtc(path) != lastWriteTimeUtc)
+            {
+                throw Conflict(
+                    $"Tracked file {audiobookFileId} changed while its move manifest was being created.");
+            }
+
+            return new ValidatedTrackedFile(
+                audiobookFileId,
+                path,
+                length,
+                lastWriteTimeUtc,
+                hash);
+        }
+        catch (ApplicationConflictException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is
+            IOException or UnauthorizedAccessException
+                or ArgumentException or InvalidOperationException
+                or NotSupportedException or PathTooLongException
+                or System.ComponentModel.Win32Exception)
         {
             throw Conflict(
-                $"Tracked file {audiobookFileId} changed while its move manifest was being created.");
+                $"Tracked file {audiobookFileId} could not be pinned to its persisted physical identity: {exception.Message}");
         }
-
-        return new ValidatedTrackedFile(
-            audiobookFileId,
-            path,
-            length,
-            lastWriteTimeUtc,
-            hash);
     }
 
     private static string CalculateSourceRoot(

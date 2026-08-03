@@ -967,6 +967,36 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
             Assert.False(Directory.Exists(target));
         }
 
+        [WindowsFact]
+        public async Task ProcessJobAsync_ForeignPersistedSourceSyntax_CannotAliasWindowsSource()
+        {
+            var source = FileService.GetTempDirectory("move-processor-foreign-endpoint-source");
+            var sourceFile = await FileService.GetFileAsync(source, "book.m4b", "audio");
+            var target = Path.Join(
+                FileService.GetTempPath(),
+                $"move-processor-foreign-endpoint-target-{Guid.NewGuid():N}");
+            var audiobook = await _audiobookRepository.AddAsync(new Audiobook
+            {
+                Title = "Move Processor Foreign Endpoint",
+                BasePath = source
+            });
+            var (queue, job) = await CreateQueuedMoveJobAsync(audiobook, target, source);
+            job.SourcePath = "/" + Path.GetRelativePath(
+                    Path.GetPathRoot(source)!,
+                    source)
+                .Replace('\\', '/');
+
+            await _provider.GetRequiredService<IMoveJobProcessor>()
+                .ProcessJobAsync(job, CancellationToken.None);
+
+            var updatedJob = Assert.IsType<MoveJob>(
+                await queue.GetJobAsync(job.Id));
+            Assert.Equal(MoveJobStatus.NeedsAttention, updatedJob.Status);
+            Assert.Contains("persisted source path", updatedJob.Error, StringComparison.OrdinalIgnoreCase);
+            Assert.True(File.Exists(sourceFile));
+            Assert.False(Directory.Exists(target));
+        }
+
         [Fact]
         public async Task ProcessJobAsync_LegacyJobWithoutSourcePath_RequiresAttentionWithoutMovingCurrentBasePath()
         {
@@ -1208,6 +1238,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                 if (tracked != null)
                 {
                     tracked.ApplyPathIdentity(fullPath, identity);
+                    ApplyTestPhysicalObjectIdentity(tracked, fullPath);
                     await _audiobookFileRepository.UpdateAsync(tracked);
                     continue;
                 }
@@ -1215,10 +1246,31 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                 tracked = AudiobookFile.CreateUnresolved(fullPath);
                 tracked.AudiobookId = audiobook.Id;
                 tracked.ApplyPathIdentity(fullPath, identity);
+                ApplyTestPhysicalObjectIdentity(tracked, fullPath);
                 var claim = await _audiobookFileRepository.ClaimAsync(tracked);
                 Assert.Equal(AudiobookFileClaimOutcome.Created, claim.Outcome);
                 existing.Add(Assert.IsType<AudiobookFile>(claim.File));
             }
+        }
+
+        private static void ApplyTestPhysicalObjectIdentity(
+            AudiobookFile file,
+            string fullPath)
+        {
+            if (!File.Exists(fullPath))
+            {
+                return;
+            }
+
+            var parentPath = Path.GetDirectoryName(fullPath)!;
+            using var parent = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
+                parentPath,
+                createMissing: false);
+            using var entry = parent.OpenExistingFileForStableRead(
+                Path.GetFileName(fullPath));
+            file.ApplyPhysicalObjectIdentity(
+                entry.GetObjectIdentity(),
+                DateTime.UtcNow);
         }
 
         private static async Task<IReadOnlyList<MoveSourceManifestEntry>> BuildMoveManifestAsync(

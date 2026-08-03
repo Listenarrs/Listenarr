@@ -1,4 +1,5 @@
 using Listenarr.Tests.Common;
+using Microsoft.EntityFrameworkCore;
 
 namespace Listenarr.Tests.Features.Infrastructure.Library.Scanning;
 
@@ -30,6 +31,39 @@ public sealed class ScanPathAuthorizationServiceTests : BaseTests
             result.Failure);
         Assert.Null(result.PhysicalIdentity);
         Assert.True(Directory.Exists(outsideBook));
+    }
+
+    [WindowsFact]
+    public async Task AuthorizeAsync_ForeignPersistedRootSyntax_CannotAliasWindowsRoot()
+    {
+        var configuredRoot = FileService.GetTempDirectory(
+            "scan-authorization-foreign-root");
+        var scanRoot = Path.Join(configuredRoot, "Book");
+        Directory.CreateDirectory(scanRoot);
+        await AddAuthorizedRootAsync(configuredRoot);
+        var foreignRoot = "/" + Path.GetRelativePath(
+                Path.GetPathRoot(configuredRoot)!,
+                configuredRoot)
+            .Replace('\\', '/');
+        var factory = _provider.GetRequiredService<
+            IDbContextFactory<ListenArrDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var root = await db.RootFolders.SingleAsync();
+            root.Path = foreignRoot;
+            await db.SaveChangesAsync();
+        }
+        var foreignScanRoot = foreignRoot + "/Book";
+
+        var result = await _provider
+            .GetRequiredService<IScanPathAuthorizationService>()
+            .AuthorizeAsync(foreignScanRoot);
+
+        Assert.False(result.IsAuthorized);
+        Assert.NotEqual(
+            ScanPathAuthorizationFailure.None,
+            result.Failure);
+        Assert.True(Directory.Exists(scanRoot));
     }
 
     [Fact]

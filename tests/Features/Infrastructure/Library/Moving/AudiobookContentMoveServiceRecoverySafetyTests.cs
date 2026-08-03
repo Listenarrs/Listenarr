@@ -162,6 +162,43 @@ public partial class AudiobookContentMoveServiceTests
             service.GetRecoverableMoveAsync(request));
     }
 
+    [LinuxFact]
+    public async Task GetRecoverableMoveAsync_AmbiguousPersistedMarkerPath_RequiresAttention()
+    {
+        var source = FileService.GetTempDirectory("content-move-ambiguous-recovery-src");
+        var sourceFile = await FileService.GetFileAsync(source, "book.m4b", "audio");
+        var target = Path.Join(
+            FileService.GetTempPath(),
+            $"content-move-ambiguous-recovery-dst-{Guid.NewGuid():N}");
+        var jobId = Guid.NewGuid();
+        var request = await CreateLeasedMoveRequestAsync(source, target, jobId);
+        await PersistFileManifestAsync(jobId, "book.m4b", sourceFile);
+        var ambiguousSource = "/" + Path.GetFullPath(source);
+        Assert.False(FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+            ambiguousSource,
+            out _));
+        await File.WriteAllTextAsync(
+            Path.Join(source, $".listenarr-move-{jobId:N}.pending"),
+            JsonSerializer.Serialize(new
+            {
+                Version = 1,
+                JobId = jobId,
+                Source = ambiguousSource,
+                Target = Path.GetFullPath(target),
+                Stage = "atomic-rename-complete"
+            }));
+        Directory.Move(source, target);
+
+        await Assert.ThrowsAsync<MoveNeedsAttentionException>(() =>
+            _provider.GetRequiredService<AudiobookContentMoveService>()
+                .GetRecoverableMoveAsync(request));
+
+        Assert.True(File.Exists(Path.Join(target, "book.m4b")));
+        Assert.True(File.Exists(Path.Join(
+            target,
+            $".listenarr-move-{jobId:N}.pending")));
+    }
+
     [Fact]
     public async Task GetRecoverableMoveAsync_AtomicMarkerWithPersistedManifest_Recovers()
     {

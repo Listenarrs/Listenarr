@@ -149,6 +149,46 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             Assert.Contains("missing from disk", conflict.Value?.ToString() ?? string.Empty);
         }
 
+        [WindowsFact]
+        public async Task MoveAudiobook_PersistedUnixOutputRoot_DoesNotAuthorizeCurrentWindowsDrive()
+        {
+            var moveQueue = new Mock<IMoveQueueService>(MockBehavior.Strict);
+            Init(services => services.WithSingleton(moveQueue.Object));
+            var controller = _provider.GetRequiredService<LibraryController>();
+
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
+                .WithOutputPath("/")
+                .Build());
+
+            var sourcePath = FileService.GetTempDirectory("listenarr-move-foreign-root-source");
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Foreign Configured Root")
+                .WithBasePath(sourcePath)
+                .Build());
+            await AddTrackedFileAsync(audiobook, sourcePath);
+            var targetPath = Path.Join(
+                Path.GetPathRoot(Environment.CurrentDirectory)!,
+                "listenarr-foreign-configured-root",
+                Guid.NewGuid().ToString("N"));
+
+            var result = await controller.EnqueueMove(
+                audiobook.Id,
+                new LibraryController.MoveRequest
+                {
+                    DestinationPath = targetPath,
+                    DeleteEmptySource = false
+                });
+
+            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+            Assert.Contains(
+                "configured root folder or output path",
+                badRequest.Value?.ToString() ?? string.Empty,
+                StringComparison.OrdinalIgnoreCase);
+            moveQueue.Verify(service => service.EnqueueMoveAsync(
+                It.IsAny<MoveEnqueueCommand>(),
+                It.IsAny<CancellationToken>()), Times.Never);
+        }
+
         [Fact]
         [Trait("Method", "EnqueueMove")]
         [Trait("Scenario", "EnqueuesJob_WhenSourceExists")]
@@ -1509,6 +1549,16 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 .WithPath(filePath)
                 .Build();
             tracked.ApplyPathIdentity(filePath, identity);
+            if (File.Exists(filePath))
+            {
+                using var parent = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
+                    Path.GetDirectoryName(filePath)!,
+                    createMissing: false);
+                using var file = parent.OpenExistingFileForStableRead(Path.GetFileName(filePath));
+                tracked.ApplyPhysicalObjectIdentity(
+                    file.GetObjectIdentity(),
+                    DateTime.UtcNow);
+            }
             await _audiobookFileRepository.AddAsync(tracked);
             return filePath;
         }

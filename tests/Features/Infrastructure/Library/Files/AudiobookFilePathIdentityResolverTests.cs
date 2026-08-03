@@ -55,35 +55,27 @@ public sealed class AudiobookFilePathIdentityResolverTests : BaseTests
     }
 
     [Fact]
-    public async Task ResolveAsync_DoubleSlashBaseUsesNativeFilesystemContext()
+    public async Task ResolveAsync_AmbiguousDoubleSlashBase_DoesNotBorrowNativeFilesystemContext()
     {
-        var expectedSyntax = OperatingSystem.IsWindows()
-            ? FileSystemPathSyntax.Windows
-            : FileSystemPathSyntax.Unix;
-        var sensitivity = OperatingSystem.IsWindows()
-            ? FileSystemCaseSensitivity.Insensitive
-            : FileSystemCaseSensitivity.Sensitive;
-        var root = new RootFolder
+        var roots = new Mock<IRootFolderRepository>(MockBehavior.Strict);
+        var semantics = new Mock<IFileSystemSemanticsResolver>(MockBehavior.Strict);
+        var resolver = new AudiobookFilePathIdentityResolver(
+            roots.Object,
+            semantics.Object);
+        var audiobook = new Audiobook
         {
-            Path = "//server/share",
-            CaseSensitivityMode = sensitivity == FileSystemCaseSensitivity.Insensitive
-                ? FileSystemCaseSensitivityMode.Insensitive
-                : FileSystemCaseSensitivityMode.Sensitive,
-            ResolvedCaseSensitivity = sensitivity,
-            PathIdentityState = PathIdentityState.Valid
+            BasePath = "//server/share/Author/Book"
         };
-        var resolver = BuildResolver(root);
-        var audiobook = new Audiobook { BasePath = "//server/share/Author/Book" };
 
-        var identity = await resolver.ResolveAsync(audiobook, "Disc 1/Book.m4b");
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            resolver.ResolveAsync(audiobook, "Disc 1/Book.m4b").AsTask());
 
-        Assert.Equal(PathIdentityState.Valid, identity.State);
-        Assert.Equal(expectedSyntax, identity.Syntax);
-        Assert.Equal(
-            FileSystemPathIdentity.Canonicalize(
-                "//server/share/Author/Book/Disc 1/Book.m4b",
-                expectedSyntax),
-            identity.CanonicalPath);
+        Assert.Contains(
+            "authoritative absolute audiobook base path",
+            exception.Message,
+            StringComparison.OrdinalIgnoreCase);
+        roots.VerifyNoOtherCalls();
+        semantics.VerifyNoOtherCalls();
     }
 
     [Fact]

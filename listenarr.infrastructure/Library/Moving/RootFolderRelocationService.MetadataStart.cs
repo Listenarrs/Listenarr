@@ -32,6 +32,7 @@ public sealed partial class RootFolderRelocationService
         IReadOnlyList<AudiobookPathCandidate> affected,
         IReadOnlyList<AudiobookPathCandidate> invalidStoredBasePaths,
         FileSystemPathSemantics? metadataSourceSemantics,
+        FileSystemPathSemantics? ownershipSourceSemantics,
         int rootFolderId,
         DateTimeOffset now,
         CancellationToken cancellationToken)
@@ -130,7 +131,7 @@ public sealed partial class RootFolderRelocationService
             db,
             metadataRelocation,
             root,
-            metadataSourceSemantics,
+            ownershipSourceSemantics,
             targetResolution.Semantics,
             cancellationToken);
         await db.SaveChangesAsync(cancellationToken);

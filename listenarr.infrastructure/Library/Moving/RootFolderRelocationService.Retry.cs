@@ -101,8 +101,24 @@ public sealed partial class RootFolderRelocationService
         FileSystemSemanticsResolution? targetResolution = null;
         if (needsTargetSemantics)
         {
+            if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                    relocation.TargetPath,
+                    out var canonicalTargetPath,
+                    out var targetPathReason))
+            {
+                relocation.Status = RootFolderRelocationStatus.NeedsAttention;
+                relocation.Error = targetPathReason;
+                relocation.UpdatedAt = now;
+                await db.SaveChangesAsync(cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                await transaction.CommitAsync(CancellationToken.None);
+                var fallbackPath = ResolveCurrentPathFallback(relocation);
+                var unavailableResult = Map(relocation, fallbackPath);
+                return unavailableResult;
+            }
+
             targetResolution = await semanticsResolver.ResolveAsync(
-                relocation.TargetPath,
+                canonicalTargetPath,
                 relocation.TargetCaseSensitivityMode,
                 cancellationToken);
             if (targetResolution.State != PathIdentityState.Valid)
@@ -331,7 +347,16 @@ public sealed partial class RootFolderRelocationService
     {
         try
         {
-            identity.ValidateForPath(path);
+            if (!FileSystemPathIdentity.TryCanonicalizeStoredPathWithIdentityForHost(
+                    path,
+                    identity,
+                    out _,
+                    out var reason))
+            {
+                error = $"The move job has an invalid persisted filesystem identity: {reason}";
+                return false;
+            }
+
             error = null;
             return true;
         }

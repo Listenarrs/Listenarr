@@ -95,6 +95,18 @@ describe('path utils', () => {
     )
     expect(validateLibraryDestinationPath('C:\\')).toBe(null)
     expect(validateLibraryDestinationPath('C:/')).toBe(null)
+    expect(
+      validateLibraryDestinationPath('C:\\', {
+        pathKind: 'windows',
+        allowFileSystemRoot: false,
+      }),
+    ).toContain('filesystem root')
+    expect(
+      validateLibraryDestinationPath('/', {
+        pathKind: 'unix',
+        allowFileSystemRoot: false,
+      }),
+    ).toContain('filesystem root')
     expect(validateLibraryDestinationPath('Books', { requireAbsolute: true })).toContain(
       'absolute directory path',
     )
@@ -178,6 +190,13 @@ describe('path utils', () => {
         requireAbsolute: true,
       }),
     ).toBe(null)
+    expect(
+      validateLibraryDestinationPath('\\\\server\\share', {
+        pathKind: 'windows',
+        requireAbsolute: true,
+        allowFileSystemRoot: false,
+      }),
+    ).toContain('filesystem root')
     expect(
       validateLibraryDestinationPath('\\\\server\\NUL\\Books', {
         pathKind: 'windows',

@@ -229,15 +229,39 @@ namespace Listenarr.Application.Audiobooks.Renaming
             if (string.IsNullOrWhiteSpace(currentBasePath))
             {
                 var defaultRoot = rootFolders.FirstOrDefault(r => r.IsDefault)?.Path;
-                return (NormalizePath(!string.IsNullOrWhiteSpace(defaultRoot) ? defaultRoot : settings.OutputPath), false);
+                var configuredBase = !string.IsNullOrWhiteSpace(defaultRoot)
+                    ? TryResolveStoredAbsolutePathForHost(defaultRoot)
+                    : TryResolveStoredAbsolutePathForHost(settings.OutputPath);
+                if (configuredBase == null)
+                {
+                    throw new InvalidOperationException(
+                        "No configured organize root is available on the current host.");
+                }
+
+                return (configuredBase, false);
             }
 
-            var normalizedCurrent = NormalizePath(currentBasePath);
-            var matchingRoot = rootFolders.Where(r => IsSamePathOrWithin(normalizedCurrent, NormalizePath(r.Path), semantics))
-                .OrderByDescending(r => NormalizePath(r.Path).Length).FirstOrDefault();
-            if (matchingRoot != null) return (NormalizePath(matchingRoot.Path), false);
-            if (!string.IsNullOrWhiteSpace(settings.OutputPath) && IsSamePathOrWithin(normalizedCurrent, NormalizePath(settings.OutputPath), semantics))
-                return (NormalizePath(settings.OutputPath), false);
+            var normalizedCurrent = RequireStoredAbsolutePathForHost(
+                currentBasePath,
+                "The audiobook base path is unavailable on the current host.");
+            var matchingRootPath = rootFolders
+                .Select(root => TryResolveStoredAbsolutePathForHost(root.Path))
+                .Where(path => path != null
+                    && IsSamePathOrWithin(normalizedCurrent, path, semantics))
+                .OrderByDescending(path => path!.Length)
+                .FirstOrDefault();
+            if (matchingRootPath != null)
+            {
+                return (matchingRootPath, false);
+            }
+
+            var outputPath = TryResolveStoredAbsolutePathForHost(settings.OutputPath);
+            if (outputPath != null
+                && IsSamePathOrWithin(normalizedCurrent, outputPath, semantics))
+            {
+                return (outputPath, false);
+            }
+
             return (normalizedCurrent, true);
         }
 
@@ -248,22 +272,33 @@ namespace Listenarr.Application.Audiobooks.Renaming
             FileSystemPathSemantics semantics)
         {
             var configuredRoots = new HashSet<string>(semantics.Comparer);
-            if (!string.IsNullOrWhiteSpace(settings.OutputPath))
+            var outputPath = TryResolveStoredAbsolutePathForHost(settings.OutputPath);
+            if (outputPath != null)
             {
-                configuredRoots.Add(NormalizePath(settings.OutputPath));
+                configuredRoots.Add(outputPath);
             }
 
-            foreach (var root in rootFolders.Where(root => !string.IsNullOrWhiteSpace(root.Path)))
+            foreach (var root in rootFolders)
             {
-                configuredRoots.Add(NormalizePath(root.Path));
+                var rootPath = TryResolveStoredAbsolutePathForHost(root.Path);
+                if (rootPath != null)
+                {
+                    configuredRoots.Add(rootPath);
+                }
             }
 
+            var authorizedCurrentBase = RequireStoredAbsolutePathForHost(
+                currentBasePath,
+                "The audiobook base path is unavailable on the current host.");
             var authoritativeRoot = configuredRoots
-                .Where(root => IsSamePathOrWithin(currentBasePath, root, semantics))
+                .Where(root => IsSamePathOrWithin(
+                    authorizedCurrentBase,
+                    root,
+                    semantics))
                 .OrderByDescending(root => root.Length)
                 .FirstOrDefault();
             return string.IsNullOrWhiteSpace(authoritativeRoot)
-                ? [NormalizePath(currentBasePath)]
+                ? [authorizedCurrentBase]
                 : [authoritativeRoot];
         }
 
@@ -275,20 +310,77 @@ namespace Listenarr.Application.Audiobooks.Renaming
 
         private string ComputeCurrentBasePath(Audiobook audiobook, FileSystemPathSemantics semantics)
         {
-            if (!string.IsNullOrWhiteSpace(audiobook.BasePath)) return NormalizePath(audiobook.BasePath);
-            var filePaths = audiobook.Files?.Where(f => !string.IsNullOrWhiteSpace(f.Path)).Select(f => f.Path!).ToList() ?? new();
-            if (filePaths.Count == 0 && !string.IsNullOrWhiteSpace(audiobook.FilePath)) filePaths.Add(audiobook.FilePath);
+            if (!string.IsNullOrWhiteSpace(audiobook.BasePath))
+            {
+                return RequireStoredAbsolutePathForHost(
+                    audiobook.BasePath,
+                    "The audiobook base path is unavailable on the current host.");
+            }
+
+            var filePaths = new List<string>();
+            foreach (var storedPath in audiobook.Files?
+                .Where(file => !string.IsNullOrWhiteSpace(file.Path))
+                .Select(file => file.Path!) ?? [])
+            {
+                var resolved = ResolveStoredFilePath(
+                    audiobook,
+                    storedPath,
+                    semantics,
+                    "Tracked audiobook file path is missing or invalid.",
+                    out var error);
+                if (error != null)
+                {
+                    throw new InvalidOperationException(error);
+                }
+
+                filePaths.Add(resolved);
+            }
+
+            if (filePaths.Count == 0 && !string.IsNullOrWhiteSpace(audiobook.FilePath))
+            {
+                var resolved = ResolveStoredFilePath(
+                    audiobook,
+                    audiobook.FilePath,
+                    semantics,
+                    "Legacy audiobook file path is missing or invalid.",
+                    out var error);
+                if (error != null)
+                {
+                    throw new InvalidOperationException(error);
+                }
+
+                filePaths.Add(resolved);
+            }
+
             return ComputeCommonBasePath(filePaths, semantics);
         }
 
         private static string ComputeCurrentBasePathSeed(Audiobook audiobook)
         {
-            if (!string.IsNullOrWhiteSpace(audiobook.BasePath)) return NormalizePath(audiobook.BasePath);
-            var firstPath = audiobook.Files?.FirstOrDefault(f => !string.IsNullOrWhiteSpace(f.Path))?.Path;
-            if (string.IsNullOrWhiteSpace(firstPath)) firstPath = audiobook.FilePath;
-            return string.IsNullOrWhiteSpace(firstPath)
-                ? string.Empty
-                : NormalizePath(Path.GetDirectoryName(firstPath) ?? firstPath);
+            if (!string.IsNullOrWhiteSpace(audiobook.BasePath))
+            {
+                return RequireStoredAbsolutePathForHost(
+                    audiobook.BasePath,
+                    "The audiobook base path is unavailable on the current host.");
+            }
+
+            var firstPath = audiobook.Files?
+                .FirstOrDefault(file => !string.IsNullOrWhiteSpace(file.Path))?
+                .Path;
+            if (string.IsNullOrWhiteSpace(firstPath))
+            {
+                firstPath = audiobook.FilePath;
+            }
+            if (string.IsNullOrWhiteSpace(firstPath))
+            {
+                return string.Empty;
+            }
+
+            var absoluteFilePath = RequireStoredAbsolutePathForHost(
+                firstPath,
+                "The audiobook file path is unavailable on the current host.");
+            return Path.GetDirectoryName(absoluteFilePath)
+                ?? absoluteFilePath;
         }
 
         private string ComputeCommonBasePath(

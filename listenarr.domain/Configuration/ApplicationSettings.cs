@@ -7,15 +7,7 @@ namespace Listenarr.Domain.Configuration
     {
         public int Version { get; set; }
         public int Id { get; set; } = 1; // Singleton pattern - only one settings record
-        public string OutputPath
-        {
-            get
-            {
-                // TODO: Should be put on the set operation with appropriate DB migration to normalize existing data
-                return FileUtils.NormalizeStoredPath(field);
-            }
-            set;
-        } = string.Empty;
+        public string OutputPath { get; set; } = string.Empty;
 
         // Folder naming pattern (base directory structure)
         // Available variables:

@@ -164,12 +164,17 @@ public sealed partial class EfMoveQueuePersistence
 
         try
         {
-            var source = string.IsNullOrWhiteSpace(job.SourcePath)
-                ? null
-                : Path.GetFullPath(job.SourcePath);
-            var target = string.IsNullOrWhiteSpace(job.RequestedPath)
-                ? null
-                : Path.GetFullPath(job.RequestedPath);
+            if (!TryResolveRecoveryEvidenceEndpoint(
+                    job,
+                    target: false,
+                    out var source)
+                || !TryResolveRecoveryEvidenceEndpoint(
+                    job,
+                    target: true,
+                    out var target))
+            {
+                return JobEvidenceState.Ambiguous;
+            }
             if (target != null)
             {
                 var targetMarker = Path.Join(
@@ -212,6 +217,41 @@ public sealed partial class EfMoveQueuePersistence
         }
 
         return JobEvidenceState.None;
+    }
+
+    private static bool TryResolveRecoveryEvidenceEndpoint(
+        MoveJob job,
+        bool target,
+        out string? resolvedPath)
+    {
+        var storedPath = target ? job.RequestedPath : job.SourcePath;
+        if (string.IsNullOrWhiteSpace(storedPath))
+        {
+            resolvedPath = null;
+            return true;
+        }
+
+        var hasIdentity = target
+            ? job.TryGetTargetIdentity(out var identity)
+            : job.TryGetSourceIdentity(out identity);
+        if (hasIdentity)
+        {
+            var resolved = FileSystemPathIdentity.TryCanonicalizeStoredPathWithIdentityForHost(
+                storedPath,
+                identity,
+                out var canonicalPath,
+                out _);
+            resolvedPath = resolved ? canonicalPath : null;
+            return resolved;
+        }
+
+        var legacyResolved =
+            FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                storedPath,
+                out var legacyCanonicalPath,
+                out _);
+        resolvedPath = legacyResolved ? legacyCanonicalPath : null;
+        return legacyResolved;
     }
 
     private static bool HasMarkerOrWriteFile(string markerPath)

@@ -38,16 +38,24 @@ public sealed class LibraryDestinationMutationGuard(
             .Where(root => !string.IsNullOrWhiteSpace(root.Path))
             .OrderByDescending(root => root.Path.Length))
         {
+            if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                    root.Path,
+                    out var canonicalRoot,
+                    out _))
+            {
+                continue;
+            }
+
             try
             {
                 var resolution = await semanticsResolver.ResolveAsync(
-                    root.Path,
+                    canonicalRoot,
                     root.CaseSensitivityMode,
                     cancellationToken);
                 if (resolution.State == PathIdentityState.Valid
                     && FileSystemPathIdentity.IsSameOrInside(
                         destinationPath,
-                        root.Path,
+                        canonicalRoot,
                         resolution.Semantics))
                 {
                     return resolution.Semantics;

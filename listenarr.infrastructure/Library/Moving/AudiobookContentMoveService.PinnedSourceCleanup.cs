@@ -48,6 +48,10 @@ internal sealed partial class AudiobookContentMoveService
             using var sourceEntry = sourcePath.Current.OpenExistingFile(
                 fileName,
                 requireDeleteAccess: true);
+            ValidatePinnedSourcePhysicalIdentity(
+                request,
+                manifestEntry,
+                sourceEntry);
             if (!sourceEntry.VisiblePathMatches()
                 || !await sourceEntry.MatchesAsync(
                     manifestEntry.Length,

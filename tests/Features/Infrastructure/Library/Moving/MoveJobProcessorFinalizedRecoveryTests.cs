@@ -5,6 +5,45 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving;
 
 public partial class MoveJobProcessorTests
 {
+    [WindowsFact]
+    public async Task ProcessJobAsync_ForeignBasePathAlias_DoesNotInventFinalizedMoveEvidence()
+    {
+        var source = FileService.GetTempDirectory("move-processor-foreign-base-finalized-src");
+        var sourceFile = await FileService.GetFileAsync(source, "book.m4b", "verified audio");
+        var target = Path.Join(
+            FileService.GetTempPath(),
+            $"move-processor-foreign-base-finalized-dst-{Guid.NewGuid():N}");
+        var audiobook = await _audiobookRepository.AddAsync(new Audiobook
+        {
+            Title = "Foreign Base Finalized Recovery",
+            BasePath = source
+        });
+        var (queue, job) = await CreateQueuedMoveJobAsync(
+            audiobook,
+            target,
+            source,
+            deleteEmptySource: true);
+        Directory.CreateDirectory(target);
+        File.Copy(sourceFile, Path.Join(target, "book.m4b"));
+        Directory.Delete(source, recursive: true);
+        var driveRoot = Path.GetPathRoot(target)!;
+        var foreignTarget = "/" + target[driveRoot.Length..].Replace('\\', '/');
+        Assert.Equal(
+            Path.GetFullPath(target),
+            Path.GetFullPath(foreignTarget),
+            StringComparer.OrdinalIgnoreCase);
+        audiobook.BasePath = foreignTarget;
+        await _audiobookRepository.UpdateAsync(audiobook);
+        Assert.True(job.Phase < MoveJobPhase.Published);
+
+        await _provider.GetRequiredService<IMoveJobProcessor>()
+            .ProcessJobAsync(job, CancellationToken.None);
+
+        var persisted = Assert.IsType<MoveJob>(await queue.GetJobAsync(job.Id));
+        Assert.NotEqual(MoveJobStatus.Completed, persisted.Status);
+        Assert.True(File.Exists(Path.Join(target, "book.m4b")));
+    }
+
     [Fact]
     public async Task ProcessJobAsync_MarkerlessVerifiedCopy_Completes()
     {

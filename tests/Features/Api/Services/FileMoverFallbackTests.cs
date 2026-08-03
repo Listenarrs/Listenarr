@@ -34,6 +34,30 @@ namespace Listenarr.Tests.Features.Api.Services
             Directory.CreateDirectory(_root);
         }
 
+        private static async Task RewriteJournalPathsAsAmbiguousWindowsAliasesAsync(
+            string journalPath,
+            params string[] pathProperties)
+        {
+            var envelope = System.Text.Json.Nodes.JsonNode.Parse(
+                await File.ReadAllTextAsync(journalPath))!;
+            var payloadBytes = Convert.FromBase64String(
+                envelope["PayloadBase64"]!.GetValue<string>());
+            var payload = System.Text.Json.Nodes.JsonNode.Parse(payloadBytes)!;
+            foreach (var property in pathProperties)
+            {
+                var nativePath = payload[property]!.GetValue<string>();
+                payload[property] = "//?/" + nativePath.Replace('\\', '/');
+            }
+
+            var rewrittenPayload = System.Text.Encoding.UTF8.GetBytes(
+                payload.ToJsonString());
+            envelope["PayloadBase64"] = Convert.ToBase64String(rewrittenPayload);
+            envelope["Sha256"] = Convert.ToHexString(
+                System.Security.Cryptography.SHA256.HashData(rewrittenPayload));
+            File.SetAttributes(journalPath, FileAttributes.Normal);
+            await File.WriteAllTextAsync(journalPath, envelope.ToJsonString());
+        }
+
         public void Dispose()
         {
             try
@@ -1176,6 +1200,47 @@ namespace Listenarr.Tests.Features.Api.Services
                 _root,
                 ".listenarr-directory-rename-*.journal",
                 SearchOption.TopDirectoryOnly));
+        }
+
+        [WindowsFact]
+        public async Task MoveDirectoryAsync_ForeignPersistedRenameJournalAlias_FailsClosed()
+        {
+            var source = Path.Join(_root, $"journal-foreign-source-{Guid.NewGuid():N}");
+            var destination = Path.Join(
+                _root,
+                $"journal-foreign-destination-{Guid.NewGuid():N}");
+            Directory.CreateDirectory(source);
+            await File.WriteAllTextAsync(Path.Join(source, "book.m4b"), "audio");
+            var crashingMover = new FileMover(
+                new NullLogger<FileMover>(),
+                semanticsResolver: new FileSystemSemanticsResolver())
+            {
+                AfterDirectoryRenameJournalPublishedForTest = _ =>
+                {
+                    Directory.Move(source, destination);
+                    throw new OperationCanceledException("simulated process termination after rename");
+                }
+            };
+            await Assert.ThrowsAsync<OperationCanceledException>(() =>
+                crashingMover.MoveDirectoryAsync(source, destination));
+            var journalPath = Assert.Single(Directory.EnumerateFiles(
+                _root,
+                ".listenarr-directory-rename-*.journal",
+                SearchOption.TopDirectoryOnly));
+            await RewriteJournalPathsAsAmbiguousWindowsAliasesAsync(
+                journalPath,
+                "SourcePath",
+                "DestinationPath");
+
+            await Assert.ThrowsAsync<IOException>(() =>
+                new FileMover(
+                    new NullLogger<FileMover>(),
+                    semanticsResolver: new FileSystemSemanticsResolver())
+                    .MoveDirectoryAsync(source, destination));
+
+            Assert.False(Directory.Exists(source));
+            Assert.True(Directory.Exists(destination));
+            Assert.True(File.Exists(journalPath));
         }
 
         [Fact]
@@ -2943,6 +3008,51 @@ namespace Listenarr.Tests.Features.Api.Services
                 _root,
                 ".listenarr-copy-cleanup-*.journal",
                 SearchOption.TopDirectoryOnly));
+        }
+
+        [WindowsFact]
+        public async Task CleanupCopiedSourceTreeAsync_ForeignPersistedJournalAliases_FailClosed()
+        {
+            var source = Path.Join(_root, "cleanup-foreign-journal-source");
+            var destination = Path.Join(_root, "cleanup-foreign-journal-target");
+            Directory.CreateDirectory(source);
+            Directory.CreateDirectory(destination);
+            await File.WriteAllTextAsync(Path.Join(source, "book.m4b"), "audio");
+            await File.WriteAllTextAsync(Path.Join(destination, "book.m4b"), "audio");
+            var interrupted = new FileMover(new NullLogger<FileMover>())
+            {
+                AfterCleanupDestinationPinnedForTestAsync = _ =>
+                    throw new IOException("simulated cleanup interruption")
+            };
+
+            var cleanup = await interrupted.CleanupCopiedSourceTreeAsync(
+                source,
+                destination);
+            Assert.True(cleanup.DestinationVerified);
+            Assert.False(cleanup.SourceRemoved);
+            var journalPath = Assert.Single(Directory.EnumerateFiles(
+                _root,
+                ".listenarr-copy-cleanup-*.journal",
+                SearchOption.TopDirectoryOnly));
+            var quarantine = Assert.Single(Directory.EnumerateDirectories(
+                _root,
+                ".listenarr-copy-cleanup-*.state",
+                SearchOption.TopDirectoryOnly));
+            await RewriteJournalPathsAsAmbiguousWindowsAliasesAsync(
+                journalPath,
+                "SourceRoot",
+                "DestinationRoot");
+
+            var recovered = new FileMover(new NullLogger<FileMover>())
+                .TryRecoverInterruptedCopiedSourceCleanup(
+                    source,
+                    out var recoveryReason);
+
+            Assert.False(recovered);
+            Assert.Contains("unavailable", recoveryReason, StringComparison.OrdinalIgnoreCase);
+            Assert.True(File.Exists(journalPath));
+            Assert.True(Directory.Exists(quarantine));
+            Assert.Equal("audio", await File.ReadAllTextAsync(Path.Join(destination, "book.m4b")));
         }
 
         [Fact]

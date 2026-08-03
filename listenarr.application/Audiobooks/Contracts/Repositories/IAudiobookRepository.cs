@@ -59,6 +59,16 @@ namespace Listenarr.Application.Audiobooks.Contracts.Repositories
             FileSystemPathSemantics targetSemantics,
             CancellationToken ct = default,
             FileSystemCaseSensitivityMode targetCaseSensitivityMode = FileSystemCaseSensitivityMode.Auto);
+        Task<bool> RewriteMovedPathReferencesAsync(
+            int audiobookId,
+            string? sourceBasePath,
+            string targetBasePath,
+            FileSystemPathSemantics sourceSemantics,
+            FileSystemPathSemantics targetSemantics,
+            IReadOnlyDictionary<string, string> targetPhysicalObjectIdentities,
+            DateTime targetPhysicalIdentityObservedAtUtc,
+            CancellationToken ct = default,
+            FileSystemCaseSensitivityMode targetCaseSensitivityMode = FileSystemCaseSensitivityMode.Auto);
         Task<bool> DeleteByIdAsync(int id);
         Task SaveChangesAsync(CancellationToken ct = default);
         Task<bool> UpdateWithIdentifierReplaceAsync(Audiobook audiobook, List<AudiobookExternalIdentifier> newIdentifiers, CancellationToken ct = default);

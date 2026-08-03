@@ -29,6 +29,7 @@ export interface DestinationPathValidationOptions {
   caseSensitivity?: PathCaseSensitivity
   sourcePath?: string | null
   requireAbsolute?: boolean
+  allowFileSystemRoot?: boolean
 }
 
 const WINDOWS_RESERVED_DEVICE_PATTERN =
@@ -158,6 +159,27 @@ export function isAbsolutePath(s: string, pathKind: PathKind = 'unknown'): boole
     return /^[a-zA-Z]:[\\/]/.test(s) || /^[\\/]{2}/.test(s) || /^[\\/]$/.test(s)
   }
   return /^([a-zA-Z]:[\\/]|[\\/])/.test(s)
+}
+
+export function isFileSystemRoot(
+  s: string | null | undefined,
+  pathKind: PathKind = 'unknown',
+): boolean {
+  const value = s || ''
+  const kind = pathKind === 'unknown' ? detectPathKind(value) : pathKind
+  if (kind === 'unix') return /^\/+$/u.test(value)
+  if (kind !== 'windows') return false
+
+  const normalized = value.replace(/\\/g, '/')
+  if (normalized === '/') return true
+  if (/^[a-zA-Z]:\/+$/u.test(normalized)) return true
+  if (!normalized.startsWith('//')) return false
+
+  const segments = normalized
+    .slice(2)
+    .split('/')
+    .filter((segment) => segment.length > 0)
+  return segments.length === 2
 }
 
 export function hasRelativePathSegment(
@@ -305,6 +327,10 @@ export function validateLibraryDestinationPath(
 
   if (options.requireAbsolute && !isAbsolutePath(s, pathKind)) {
     return 'Destination folder must be an absolute directory path.'
+  }
+
+  if (options.allowFileSystemRoot === false && isFileSystemRoot(s, pathKind)) {
+    return 'Destination folder cannot be the filesystem root.'
   }
 
   if (hasParentTraversalSegment(s, pathKind)) {

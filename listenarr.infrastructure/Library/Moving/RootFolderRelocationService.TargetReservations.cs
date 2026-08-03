@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Listenarr.Domain.Common;
 using Listenarr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -53,8 +54,9 @@ public sealed partial class RootFolderRelocationService
                 continue;
             }
 
-            var parentPath = Path.GetDirectoryName(
-                reservation.CanonicalPath)
+            var canonicalPath = RequireHostReservationPath(
+                reservation.CanonicalPath);
+            var parentPath = Path.GetDirectoryName(canonicalPath)
                 ?? throw new InvalidOperationException(
                     "A relocation directory reservation has no parent.");
             using var parent =
@@ -63,7 +65,7 @@ public sealed partial class RootFolderRelocationService
                     createMissing: false);
             using var publication =
                 parent.TryOpenExistingChildForPublication(
-                    Path.GetFileName(reservation.CanonicalPath));
+                    Path.GetFileName(canonicalPath));
             if (publication == null)
             {
                 if (reservation.State ==
@@ -133,11 +135,11 @@ public sealed partial class RootFolderRelocationService
                 directory);
             ManagedDirectoryEnrollment.RetireValidMarker(directory);
             var entries = Directory.EnumerateFileSystemEntries(
-                    reservation.CanonicalPath)
+                    canonicalPath)
                 .Take(2)
                 .ToList();
             var markerPath = Path.Join(
-                reservation.CanonicalPath,
+                canonicalPath,
                 RelocationReservationMarkerName);
             if (entries.Count != 1
                 || !string.Equals(
@@ -178,7 +180,7 @@ public sealed partial class RootFolderRelocationService
             }
 
             if (Directory.EnumerateFileSystemEntries(
-                    reservation.CanonicalPath).Any()
+                    canonicalPath).Any()
                 || !directory.VisiblePathMatches())
             {
                 throw new InvalidOperationException(
@@ -186,7 +188,7 @@ public sealed partial class RootFolderRelocationService
             }
 
             publication.DeletePinnedEmptyDirectory(
-                Path.GetFileName(reservation.CanonicalPath));
+                Path.GetFileName(canonicalPath));
             reservation.State =
                 RootFolderRelocationCreatedDirectoryState.Removed;
             reservation.UpdatedAt =
@@ -220,8 +222,9 @@ public sealed partial class RootFolderRelocationService
                     "A successful relocation has an incomplete target directory reservation.");
             }
 
-            var parentPath = Path.GetDirectoryName(
-                reservation.CanonicalPath)
+            var canonicalPath = RequireHostReservationPath(
+                reservation.CanonicalPath);
+            var parentPath = Path.GetDirectoryName(canonicalPath)
                 ?? throw new InvalidOperationException(
                     "A relocation directory reservation has no parent.");
             using var parent =
@@ -230,7 +233,7 @@ public sealed partial class RootFolderRelocationService
                     createMissing: false);
             using var publication =
                 parent.TryOpenExistingChildForPublication(
-                    Path.GetFileName(reservation.CanonicalPath))
+                    Path.GetFileName(canonicalPath))
                 ?? throw new InvalidOperationException(
                     "A relocation-created target directory disappeared before finalization.");
             using var directory =
@@ -283,6 +286,7 @@ public sealed partial class RootFolderRelocationService
             .Where(candidate => candidate.RelocationId == relocationId)
             .OrderBy(candidate => candidate.CanonicalPath.Length)
             .ToListAsync(cancellationToken);
+        existingAncestor = RequireHostReservationPath(existingAncestor);
         var current =
             PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
                 existingAncestor,
@@ -300,8 +304,9 @@ public sealed partial class RootFolderRelocationService
                         "A terminal relocation target reservation cannot be reused.");
                 }
 
-                var childName = Path.GetFileName(
+                var canonicalPath = RequireHostReservationPath(
                     reservation.CanonicalPath);
+                var childName = Path.GetFileName(canonicalPath);
                 var parentIdentity =
                     current.GetDirectoryObjectIdentity();
                 if (reservation.State ==
@@ -428,6 +433,19 @@ public sealed partial class RootFolderRelocationService
         {
             current.Dispose();
         }
+    }
+
+    private static string RequireHostReservationPath(string path)
+    {
+        if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                path,
+                out var canonicalPath,
+                out var reason))
+        {
+            throw new InvalidOperationException(reason);
+        }
+
+        return canonicalPath;
     }
 
     private async Task MarkPrecommittedRelocationNeedsAttentionAsync(

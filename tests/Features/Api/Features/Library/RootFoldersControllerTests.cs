@@ -188,6 +188,32 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         }
 
         [Fact]
+        public async Task GetAll_AmbiguousPersistedRoot_DoesNotExposeBorrowedHostSyntax()
+        {
+            var svc = new FakeService();
+            svc.Store.Add(new RootFolder
+            {
+                Id = 7,
+                Name = "Ambiguous",
+                Path = "//server/share/library",
+                PathIdentityState = PathIdentityState.Unavailable
+            });
+            using var db = CreateDb();
+            var controller = new RootFoldersController(
+                svc,
+                _fakeQueue,
+                new EfAudiobookFileRepository(db),
+                new AudiobookRepository(db),
+                new LocalFileSystem());
+
+            var result = await controller.GetAll();
+
+            var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(result);
+            var root = Assert.Single(Assert.IsAssignableFrom<List<RootFolderDto>>(ok.Value));
+            Assert.Null(root.PathSyntax);
+        }
+
+        [Fact]
         public void GetUnmatchedResults_RedactsInternalFailureDetails()
         {
             var queue = new FakeUnmatchedQueue

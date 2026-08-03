@@ -110,7 +110,7 @@ namespace Listenarr.Application.Audiobooks.RootFolders
             await EnsureNoActiveRelocationAsync(root.Id);
             await EnsureNoNonRemovedDirectoryOwnershipAsync(root.Id);
 
-            var sourceSemantics = await ResolveSemanticsAsync(root.Path, root.CaseSensitivityMode);
+            var sourceSemantics = await ResolvePersistedSemanticsAsync(root.Path, root.CaseSensitivityMode);
             await EnsureNoActiveMoveJobsTouchRootAsync(root.Path, sourceSemantics.Semantics);
             var hasReferenced = await _repo.HasAudiobooksUnderPathAsync(root.Path, sourceSemantics.Semantics);
             if (hasReferenced && !reassignRootId.HasValue)
@@ -123,7 +123,7 @@ namespace Listenarr.Application.Audiobooks.RootFolders
                 var newRoot = await _repo.GetByIdAsync(reassignRootId!.Value);
                 if (newRoot == null) throw new KeyNotFoundException("Reassign root not found");
                 await EnsureNoActiveRelocationAsync(newRoot.Id);
-                var targetSemantics = await ResolveSemanticsAsync(newRoot.Path, newRoot.CaseSensitivityMode);
+                var targetSemantics = await ResolvePersistedSemanticsAsync(newRoot.Path, newRoot.CaseSensitivityMode);
                 await EnsureNoActiveMoveJobsTouchRootAsync(newRoot.Path, targetSemantics.Semantics);
                 var audiobookIds = await _repo.GetAllAudiobookIdsAsync();
                 await _audiobookOperationCoordinator.ExecuteExclusiveAsync(
@@ -163,7 +163,7 @@ namespace Listenarr.Application.Audiobooks.RootFolders
             if (existing == null) throw new KeyNotFoundException("Root folder not found");
             await EnsureNoActiveRelocationAsync(existing.Id);
 
-            var existingResolution = await ResolveSemanticsAsync(
+            var existingResolution = await ResolvePersistedSemanticsAsync(
                 existing.Path,
                 existing.CaseSensitivityMode);
             if (!FileSystemPathIdentity.AreEquivalent(
@@ -180,7 +180,7 @@ namespace Listenarr.Application.Audiobooks.RootFolders
             existing.Name = root.Name;
             existing.IsDefault = root.IsDefault;
             existing.CaseSensitivityMode = root.CaseSensitivityMode;
-            var resolution = await ResolveSemanticsAsync(existing.Path, root.CaseSensitivityMode);
+            var resolution = await ResolvePersistedSemanticsAsync(existing.Path, root.CaseSensitivityMode);
             var conflict = await FindConflictingRootFolderAsync(
                 existing.Path,
                 resolution.Semantics,
@@ -291,6 +291,21 @@ namespace Listenarr.Application.Audiobooks.RootFolders
             return resolution;
         }
 
+        private async Task<FileSystemSemanticsResolution> ResolvePersistedSemanticsAsync(
+            string path,
+            FileSystemCaseSensitivityMode mode)
+        {
+            if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                    path,
+                    out var canonicalPath,
+                    out var reason))
+            {
+                throw new InvalidOperationException(reason);
+            }
+
+            return await ResolveSemanticsAsync(canonicalPath, mode);
+        }
+
         private static void ApplyIdentity(
             RootFolder root,
             FileSystemSemanticsResolution resolution)
@@ -327,8 +342,16 @@ namespace Listenarr.Application.Audiobooks.RootFolders
                     "Root folder physical identity cannot be validated.");
             }
 
+            if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                    root.Path,
+                    out var canonicalRootPath,
+                    out var pathReason))
+            {
+                throw new InvalidOperationException(pathReason);
+            }
+
             var current = await _directoryObjectIdentityResolver.ResolveExistingAsync(
-                root.Path);
+                canonicalRootPath);
             if (!current.IsAvailable
                 || current.Version != root.DirectoryObjectIdentityVersion
                 || !string.Equals(

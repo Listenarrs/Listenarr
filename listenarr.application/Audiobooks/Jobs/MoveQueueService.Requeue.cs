@@ -51,7 +51,7 @@ public partial class MoveQueueService
             PathIdentitySnapshot sourceIdentity;
             if (!job.TryGetSourceIdentity(out sourceIdentity))
             {
-                if (!FileSystemPathIdentity.TryCanonicalizeStoredAbsolutePathForHost(
+                if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
                     sourcePath,
                     out sourcePath,
                     out var sourceReason))
@@ -90,7 +90,7 @@ public partial class MoveQueueService
             PathIdentitySnapshot targetIdentity;
             if (!job.TryGetTargetIdentity(out targetIdentity))
             {
-                if (!FileSystemPathIdentity.TryCanonicalizeStoredAbsolutePathForHost(
+                if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
                     targetPath,
                     out targetPath,
                     out var targetReason))

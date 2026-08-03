@@ -18,6 +18,7 @@
 
 using System.Text.Json;
 using Listenarr.Application.Common.Exceptions;
+using Listenarr.Domain.Common;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Configuration.Core
@@ -33,114 +34,6 @@ namespace Listenarr.Application.Configuration.Core
         ISecretProtector secretProtector) : IConfigurationService
     {
         private static readonly SemaphoreSlim ApplicationSettingsInitializationLock = new(1, 1);
-
-        // API Configuration methods
-        public async Task<List<ApiConfiguration>> GetApiConfigurationsAsync()
-        {
-            try
-            {
-                return await apiConfigRepository.GetAllAsync();
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                logger.LogError(ex, "Error loading API configurations from database");
-                return new List<ApiConfiguration>();
-            }
-        }
-
-        public async Task<ApiConfiguration?> GetApiConfigurationAsync(string id)
-        {
-            try
-            {
-                return await apiConfigRepository.GetByIdAsync(id);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                logger.LogError(ex, "Error loading API configuration {Id} from database", id);
-                return null;
-            }
-        }
-
-        public async Task<string> SaveApiConfigurationAsync(ApiConfiguration config)
-        {
-            try
-            {
-                var saved = await apiConfigRepository.SaveAsync(config);
-                return saved.Id;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                logger.LogError(ex, "Error saving API configuration to database");
-                throw;
-            }
-        }
-
-        public async Task<bool> DeleteApiConfigurationAsync(string id)
-        {
-            try
-            {
-                return await apiConfigRepository.DeleteAsync(id);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                logger.LogError(ex, "Error deleting API configuration from database");
-                return false;
-            }
-        }
-
-        // Download Client Configuration methods
-        public async Task<List<DownloadClientConfiguration>> GetDownloadClientConfigurationsAsync()
-        {
-            try
-            {
-                return await downloadClientRepository.GetAllAsync();
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                logger.LogError(ex, "Error loading download client configurations from database");
-                return new List<DownloadClientConfiguration>();
-            }
-        }
-
-        public async Task<DownloadClientConfiguration?> GetDownloadClientConfigurationAsync(string id)
-        {
-            try
-            {
-                return await downloadClientRepository.GetByIdAsync(id);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                logger.LogError(ex, "Error loading download client configuration {Id} from database", id);
-                return null;
-            }
-        }
-
-        public async Task<string> SaveDownloadClientConfigurationAsync(DownloadClientConfiguration config)
-        {
-            try
-            {
-                var saved = await downloadClientRepository.SaveAsync(config);
-                return saved.Id;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                logger.LogError(ex, "Error saving download client configuration to database");
-                throw;
-            }
-        }
-
-        public async Task<bool> DeleteDownloadClientConfigurationAsync(string id)
-        {
-            try
-            {
-                return await downloadClientRepository.DeleteAsync(id);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                logger.LogError(ex, "Error deleting download client configuration from database");
-                return false;
-            }
-        }
 
         // Application Settings methods
         public async Task<ApplicationSettings> GetApplicationSettingsAsync()
@@ -264,6 +157,27 @@ namespace Listenarr.Application.Configuration.Core
                         settings.EnabledNotificationTriggers = existing.EnabledNotificationTriggers;
                     if (settings.Webhooks == null)
                         settings.Webhooks = existing.Webhooks;
+                }
+
+                if (!string.IsNullOrWhiteSpace(settings.OutputPath)
+                    && !string.Equals(
+                        settings.OutputPath,
+                        existing?.OutputPath,
+                        StringComparison.Ordinal))
+                {
+                    if (!FileUtils.TryNormalizeUserProvidedDirectoryPathForCurrentOs(
+                            settings.OutputPath,
+                            out var normalizedOutputPath,
+                            out var outputPathReason,
+                            allowFileSystemRoot: true,
+                            rejectParentTraversal: true))
+                    {
+                        throw new ArgumentException(
+                            $"OutputPath is invalid: {outputPathReason}",
+                            nameof(settings));
+                    }
+
+                    settings.OutputPath = normalizedOutputPath;
                 }
 
                 try

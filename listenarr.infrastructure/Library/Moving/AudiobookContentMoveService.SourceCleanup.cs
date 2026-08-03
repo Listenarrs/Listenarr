@@ -16,6 +16,7 @@ internal sealed partial class AudiobookContentMoveService
         FileSystemPathSemantics targetSemantics,
         LibraryDirectoryOwnership? targetDirectoryOwnership,
         string? sourceCleanupBoundary,
+        IReadOnlyDictionary<string, string>? sourcePhysicalObjectIdentities,
         CancellationToken cancellationToken)
     {
         var sourceExists = Directory.Exists(source);
@@ -47,7 +48,8 @@ internal sealed partial class AudiobookContentMoveService
             targetSemantics,
             leaseToken,
             sourceCleanupBoundary,
-            targetDirectoryOwnership);
+            targetDirectoryOwnership,
+            sourcePhysicalObjectIdentities);
         var ownedSourceDirectories = await LoadOwnedSourceDirectoriesForCleanupAsync(
             source,
             sourceSemantics,

@@ -18,6 +18,20 @@ public sealed class RootFolderRelocationStateTests : BaseTests
     }
 
     [Fact]
+    public void PersistedSemantics_AmbiguousDoubleSlashPath_RequiresFilesystemContext()
+    {
+        var root = new RootFolder
+        {
+            Path = "//server/share/Library",
+            CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto,
+            ResolvedCaseSensitivity = FileSystemCaseSensitivity.Insensitive,
+            PathIdentityState = PathIdentityState.Valid
+        };
+
+        Assert.Null(RootFolderPathSemantics.ResolvePersisted(root));
+    }
+
+    [Fact]
     public void PersistedSemantics_ExplicitModeOverridesStaleResolvedSensitivity()
     {
         var root = new RootFolder

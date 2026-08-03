@@ -262,6 +262,307 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             Assert.False(Directory.Exists(extrasFolder));
         }
 
+        [WindowsFact]
+        public async Task DeleteAudiobook_ForeignTrackedPathUnderProtectedRoot_PreservesWindowsAlias()
+        {
+            var tempRoot = FileService.GetTempDirectory("listenarr-delete-foreign-tracked");
+            var bookFolder = Path.Join(tempRoot, "Foreign Book");
+            var audioPath = Path.Join(bookFolder, "track.m4b");
+            Directory.CreateDirectory(bookFolder);
+            await File.WriteAllTextAsync(audioPath, "audio");
+            var driveRoot = Path.GetPathRoot(audioPath)!;
+            var foreignAudioPath = "/" + audioPath[driveRoot.Length..].Replace('\\', '/');
+            Assert.Equal(
+                Path.GetFullPath(audioPath),
+                Path.GetFullPath(foreignAudioPath),
+                StringComparer.OrdinalIgnoreCase);
+            await AddAuthorizedRootAsync(new RootFolderBuilder()
+                .WithId(500)
+                .WithPath(tempRoot)
+                .Build());
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithId(500)
+                .WithTitle("Foreign Book")
+                .WithBasePath(tempRoot)
+                .Build());
+            await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
+                .WithAudiobook(audiobook)
+                .WithPath(foreignAudioPath)
+                .Build());
+
+            var result = await _provider.GetRequiredService<LibraryController>()
+                .DeleteAudiobook(
+                    audiobook.Id,
+                    deleteFiles: true,
+                    deleteFolder: false);
+
+            Assert.IsType<OkObjectResult>(result);
+            Assert.True(File.Exists(audioPath));
+            Assert.True(Directory.Exists(tempRoot));
+        }
+
+        [WindowsFact]
+        public async Task DeleteAudiobook_ForeignTrackedPathUnderBookFolder_DoesNotDeleteAliasedContent()
+        {
+            var tempRoot = FileService.GetTempDirectory("listenarr-delete-foreign-book-folder");
+            var bookFolder = Path.Join(tempRoot, "Foreign Book Folder");
+            var audioPath = Path.Join(bookFolder, "track.m4b");
+            Directory.CreateDirectory(bookFolder);
+            await File.WriteAllTextAsync(audioPath, "audio");
+            var driveRoot = Path.GetPathRoot(audioPath)!;
+            var foreignAudioPath = "/" + audioPath[driveRoot.Length..].Replace('\\', '/');
+            Assert.Equal(
+                Path.GetFullPath(audioPath),
+                Path.GetFullPath(foreignAudioPath),
+                StringComparer.OrdinalIgnoreCase);
+            await AddAuthorizedRootAsync(new RootFolderBuilder()
+                .WithId(504)
+                .WithPath(tempRoot)
+                .Build());
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithId(504)
+                .WithTitle("Foreign Book Folder")
+                .WithBasePath(bookFolder)
+                .Build());
+            await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
+                .WithAudiobook(audiobook)
+                .WithPath(foreignAudioPath)
+                .Build());
+
+            var result = await _provider.GetRequiredService<LibraryController>()
+                .DeleteAudiobook(
+                    audiobook.Id,
+                    deleteFiles: true,
+                    deleteFolder: false);
+
+            var ok = Assert.IsType<OkObjectResult>(result);
+            var warnings = ok.Value?.GetType()
+                .GetProperty("warnings")?
+                .GetValue(ok.Value) as IEnumerable<string>;
+            Assert.True(File.Exists(audioPath));
+            Assert.True(Directory.Exists(bookFolder));
+            Assert.Contains(warnings ?? [], warning =>
+                warning.Contains("unavailable", StringComparison.OrdinalIgnoreCase));
+        }
+
+        [WindowsFact]
+        public async Task DeleteAudiobook_ForeignBasePath_DoesNotAuthorizeWindowsAliasFolderContents()
+        {
+            var tempRoot = FileService.GetTempDirectory("listenarr-delete-foreign-base");
+            var bookFolder = Path.Join(tempRoot, "Foreign Base Book");
+            var audioPath = Path.Join(bookFolder, "track.m4b");
+            var sidecarPath = Path.Join(bookFolder, "notes.txt");
+            Directory.CreateDirectory(bookFolder);
+            await File.WriteAllTextAsync(audioPath, "audio");
+            await File.WriteAllTextAsync(sidecarPath, "notes");
+            var driveRoot = Path.GetPathRoot(bookFolder)!;
+            var foreignBasePath = "/" + bookFolder[driveRoot.Length..].Replace('\\', '/');
+            Assert.Equal(
+                Path.GetFullPath(bookFolder),
+                Path.GetFullPath(foreignBasePath),
+                StringComparer.OrdinalIgnoreCase);
+            await AddAuthorizedRootAsync(new RootFolderBuilder()
+                .WithId(505)
+                .WithPath(tempRoot)
+                .Build());
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithId(505)
+                .WithTitle("Foreign Base Book")
+                .WithBasePath(foreignBasePath)
+                .WithFilePath(audioPath)
+                .Build());
+            await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
+                .WithAudiobook(audiobook)
+                .WithPath(audioPath)
+                .Build());
+
+            var result = await _provider.GetRequiredService<LibraryController>()
+                .DeleteAudiobook(
+                    audiobook.Id,
+                    deleteFiles: true,
+                    deleteFolder: false);
+
+            Assert.IsType<OkObjectResult>(result);
+            Assert.True(File.Exists(audioPath));
+            Assert.True(File.Exists(sidecarPath));
+            Assert.True(Directory.Exists(bookFolder));
+        }
+
+        [WindowsFact]
+        public async Task DeleteAudiobook_AmbiguousPersistedBasePath_DoesNotProbeWindowsDeviceAlias()
+        {
+            var probedBoundaries = new List<string>();
+            var semanticsResolver = new FileSystemSemanticsResolver
+            {
+                BeforeProbeForTest = path => probedBoundaries.Add(Path.GetFullPath(path))
+            };
+            Init(builder => builder.WithSingleton<IFileSystemSemanticsResolver>(semanticsResolver));
+            var tempRoot = FileService.GetTempDirectory("listenarr-delete-ambiguous-base");
+            var bookFolder = Path.Join(tempRoot, "Ambiguous Base Book");
+            var audioPath = Path.Join(bookFolder, "track.m4b");
+            var sidecarPath = Path.Join(bookFolder, "notes.txt");
+            Directory.CreateDirectory(bookFolder);
+            await File.WriteAllTextAsync(audioPath, "audio");
+            await File.WriteAllTextAsync(sidecarPath, "notes");
+            var ambiguousBasePath = "//?/" + Path.GetFullPath(bookFolder).Replace('\\', '/');
+            Assert.False(FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+                ambiguousBasePath,
+                out _));
+            Assert.True(Directory.Exists(ambiguousBasePath));
+            await AddAuthorizedRootAsync(new RootFolderBuilder()
+                .WithId(509)
+                .WithPath(tempRoot)
+                .Build());
+            probedBoundaries.Clear();
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithId(509)
+                .WithTitle("Ambiguous Base Book")
+                .WithBasePath(ambiguousBasePath)
+                .WithFilePath(audioPath)
+                .Build());
+            await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
+                .WithAudiobook(audiobook)
+                .WithPath(audioPath)
+                .Build());
+
+            var result = await _provider.GetRequiredService<LibraryController>()
+                .DeleteAudiobook(
+                    audiobook.Id,
+                    deleteFiles: true,
+                    deleteFolder: true);
+
+            Assert.IsType<OkObjectResult>(result);
+            Assert.True(File.Exists(audioPath));
+            Assert.True(File.Exists(sidecarPath));
+            Assert.True(Directory.Exists(bookFolder));
+            var ambiguousNativeAlias = Path.GetFullPath(ambiguousBasePath);
+            Assert.DoesNotContain(probedBoundaries, path => string.Equals(
+                path,
+                ambiguousNativeAlias,
+                StringComparison.OrdinalIgnoreCase));
+        }
+
+        [WindowsFact]
+        public async Task DeleteAudiobook_ForeignConfiguredOutputPath_DoesNotProtectWindowsAliasFolder()
+        {
+            var tempRoot = FileService.GetTempDirectory("listenarr-delete-foreign-output-root");
+            var bookFolder = Path.Join(tempRoot, "Native Book");
+            var audioPath = Path.Join(bookFolder, "track.m4b");
+            Directory.CreateDirectory(bookFolder);
+            await File.WriteAllTextAsync(audioPath, "audio");
+            var driveRoot = Path.GetPathRoot(bookFolder)!;
+            var foreignOutputPath = "/" + bookFolder[driveRoot.Length..].Replace('\\', '/');
+            Assert.Equal(
+                Path.GetFullPath(bookFolder),
+                Path.GetFullPath(foreignOutputPath),
+                StringComparer.OrdinalIgnoreCase);
+            await _applicationSettingsRepository.SaveAsync(
+                new ApplicationSettingsBuilder()
+                    .WithOutputPath(foreignOutputPath)
+                    .Build());
+            await AddAuthorizedRootAsync(new RootFolderBuilder()
+                .WithId(506)
+                .WithPath(tempRoot)
+                .Build());
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithId(506)
+                .WithTitle("Native Book")
+                .WithBasePath(bookFolder)
+                .WithFilePath(audioPath)
+                .Build());
+            await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
+                .WithAudiobook(audiobook)
+                .WithPath(audioPath)
+                .Build());
+
+            var result = await _provider.GetRequiredService<LibraryController>()
+                .DeleteAudiobook(
+                    audiobook.Id,
+                    deleteFiles: true,
+                    deleteFolder: true);
+
+            Assert.IsType<OkObjectResult>(result);
+            Assert.False(File.Exists(audioPath));
+            Assert.False(Directory.Exists(bookFolder));
+        }
+
+        [WindowsFact]
+        public async Task DeleteAudiobook_ForeignPersistedRoot_DoesNotProtectWindowsAliasFolder()
+        {
+            var tempRoot = FileService.GetTempDirectory("listenarr-delete-foreign-protected-root");
+            var bookFolder = Path.Join(tempRoot, "Native Root Book");
+            var audioPath = Path.Join(bookFolder, "track.m4b");
+            Directory.CreateDirectory(bookFolder);
+            await File.WriteAllTextAsync(audioPath, "audio");
+            var driveRoot = Path.GetPathRoot(bookFolder)!;
+            var foreignRootPath = "/" + bookFolder[driveRoot.Length..].Replace('\\', '/');
+            Assert.Equal(
+                Path.GetFullPath(bookFolder),
+                Path.GetFullPath(foreignRootPath),
+                StringComparer.OrdinalIgnoreCase);
+            await _rootFolderRepository.AddAsync(new RootFolderBuilder()
+                .WithId(507)
+                .WithPath(foreignRootPath)
+                .Build());
+            await AddAuthorizedRootAsync(new RootFolderBuilder()
+                .WithId(508)
+                .WithPath(tempRoot)
+                .Build());
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithId(507)
+                .WithTitle("Native Root Book")
+                .WithBasePath(bookFolder)
+                .WithFilePath(audioPath)
+                .Build());
+            await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
+                .WithAudiobook(audiobook)
+                .WithPath(audioPath)
+                .Build());
+
+            var result = await _provider.GetRequiredService<LibraryController>()
+                .DeleteAudiobook(
+                    audiobook.Id,
+                    deleteFiles: true,
+                    deleteFolder: true);
+
+            Assert.IsType<OkObjectResult>(result);
+            Assert.False(File.Exists(audioPath));
+            Assert.False(Directory.Exists(bookFolder));
+        }
+
+        [Fact]
+        public async Task DeleteAudiobook_RelativeTrackedPathUnderProtectedRoot_DeletesResolvedFileOnly()
+        {
+            var tempRoot = FileService.GetTempDirectory("listenarr-delete-relative");
+            var bookFolder = Path.Join(tempRoot, "Relative Book");
+            var audioPath = Path.Join(bookFolder, "track.m4b");
+            Directory.CreateDirectory(bookFolder);
+            await File.WriteAllTextAsync(audioPath, "audio");
+            await AddAuthorizedRootAsync(new RootFolderBuilder()
+                .WithId(501)
+                .WithPath(tempRoot)
+                .Build());
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithId(501)
+                .WithTitle("Relative Book")
+                .WithBasePath(tempRoot)
+                .Build());
+            await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
+                .WithAudiobook(audiobook)
+                .WithPath(Path.Join("Relative Book", "track.m4b"))
+                .Build());
+
+            var result = await _provider.GetRequiredService<LibraryController>()
+                .DeleteAudiobook(
+                    audiobook.Id,
+                    deleteFiles: true,
+                    deleteFolder: false);
+
+            Assert.IsType<OkObjectResult>(result);
+            Assert.False(File.Exists(audioPath));
+            Assert.True(Directory.Exists(tempRoot));
+        }
+
         [Fact]
         [Trait("Method", "DeleteAudiobook")]
         [Trait("Scenario", "DeleteFilesAndFolder_RemovesTrackedFilesAndDirectory")]
@@ -359,6 +660,66 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             Assert.False(deletedFolder ?? true);
             Assert.NotNull(warnings);
             Assert.NotEmpty(warnings!);
+        }
+
+        [WindowsFact]
+        public async Task DeleteAudiobook_DeleteFolder_ForeignOtherAudiobookPathBlocksRecursiveDelete()
+        {
+            var tempRoot = FileService.GetTempDirectory("listenarr-delete-foreign-other");
+            var sharedFolder = Path.Join(tempRoot, "Shared");
+            var currentAudioPath = Path.Join(sharedFolder, "current.mp3");
+            var otherAudioPath = Path.Join(sharedFolder, "other.mp3");
+            Directory.CreateDirectory(sharedFolder);
+            await File.WriteAllTextAsync(currentAudioPath, "current");
+            await File.WriteAllTextAsync(otherAudioPath, "other");
+            await AddAuthorizedRootAsync(new RootFolderBuilder()
+                .WithId(502)
+                .WithPath(tempRoot)
+                .Build());
+
+            var current = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithId(502)
+                .WithTitle("Current")
+                .WithBasePath(sharedFolder)
+                .WithFilePath(currentAudioPath)
+                .Build());
+            var driveRoot = Path.GetPathRoot(sharedFolder)!;
+            var foreignSharedFolder = "/" + sharedFolder[driveRoot.Length..].Replace('\\', '/');
+            var foreignOtherPath = foreignSharedFolder + "/other.mp3";
+            Assert.Equal(
+                Path.GetFullPath(otherAudioPath),
+                Path.GetFullPath(foreignOtherPath),
+                StringComparer.OrdinalIgnoreCase);
+            var other = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithId(503)
+                .WithTitle("Other")
+                .WithBasePath(foreignSharedFolder)
+                .WithFilePath(foreignOtherPath)
+                .Build());
+            await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
+                .WithAudiobook(current)
+                .WithPath(currentAudioPath)
+                .Build());
+            await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
+                .WithAudiobook(other)
+                .WithPath(foreignOtherPath)
+                .Build());
+
+            var result = await _provider.GetRequiredService<LibraryController>()
+                .DeleteAudiobook(
+                    current.Id,
+                    deleteFiles: true,
+                    deleteFolder: true);
+
+            var ok = Assert.IsType<OkObjectResult>(result);
+            var warnings = ok.Value?.GetType()
+                .GetProperty("warnings")?
+                .GetValue(ok.Value) as IEnumerable<string>;
+            Assert.False(File.Exists(currentAudioPath));
+            Assert.True(File.Exists(otherAudioPath));
+            Assert.True(Directory.Exists(sharedFolder));
+            Assert.Contains(warnings ?? [], warning =>
+                warning.Contains("unresolved", StringComparison.OrdinalIgnoreCase));
         }
 
         [Fact]
@@ -504,6 +865,76 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             Assert.False(Directory.Exists(authorFolder));
             Assert.True(Directory.Exists(tempRoot));
             Assert.True(deletedParentFolderValue is true);
+        }
+
+        [WindowsFact]
+        public async Task DeleteAudiobook_DeleteFolder_PreservesOwnedAuthorFolderWhenOtherAudiobookBasePathIsAmbiguous()
+        {
+            var tempRoot = FileService.GetTempDirectory("listenarr-delete-owned-parent-ambiguous-peer");
+            var authorFolder = Path.Join(tempRoot, "Roger Zelazny");
+            var bookFolder = Path.Join(authorFolder, "Jack of Shadows");
+            var audioPath = Path.Join(bookFolder, "Jack of Shadows.mp3");
+            var unrelatedFolder = Path.Join(tempRoot, "Other Author", "Other Book");
+            Directory.CreateDirectory(bookFolder);
+            Directory.CreateDirectory(unrelatedFolder);
+            await File.WriteAllTextAsync(audioPath, "audio");
+            await AddAuthorizedRootAsync(new RootFolder
+            {
+                Name = "Library",
+                Path = tempRoot,
+                IsDefault = true
+            });
+            var ownershipStore = _provider.GetRequiredService<ILibraryDirectoryOwnershipStore>();
+            await ownershipStore.RecordCreatedAsync(
+                new LibraryDirectoryOwnershipClaim(
+                    authorFolder,
+                    FileSystemPathSemantics.CurrentHostDefault,
+                    "test-fixture",
+                    Guid.NewGuid()));
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithId(1201)
+                .WithTitle("Jack of Shadows")
+                .WithAuthor("Roger Zelazny")
+                .WithBasePath(bookFolder)
+                .WithFilePath(audioPath)
+                .Build());
+            await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
+                .WithAudiobook(audiobook)
+                .WithPath(audioPath)
+                .Build());
+            var ambiguousPeerBasePath = "//?/" + Path.GetFullPath(unrelatedFolder).Replace('\\', '/');
+            Assert.False(FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+                ambiguousPeerBasePath,
+                out _));
+            Assert.True(Directory.Exists(ambiguousPeerBasePath));
+            var peer = new AudiobookBuilder()
+                .WithId(1202)
+                .WithTitle("Other Book")
+                .WithAuthor("Other Author")
+                .WithBasePath(ambiguousPeerBasePath)
+                .Build();
+            var audiobookRepository = new Mock<IAudiobookRepository>();
+            audiobookRepository
+                .SetupSequence(repository => repository.GetAllAsync())
+                .ReturnsAsync([audiobook])
+                .ReturnsAsync([audiobook, peer]);
+            var service = new AudiobookFilesystemDeleteService(
+                audiobookRepository.Object,
+                _provider.GetRequiredService<IAudiobookFileRepository>(),
+                _provider.GetRequiredService<IRootFolderService>(),
+                _provider.GetRequiredService<IConfigurationService>(),
+                _provider.GetRequiredService<IFileSystemSemanticsResolver>(),
+                ownershipStore,
+                _provider.GetRequiredService<ILogger<AudiobookFilesystemDeleteService>>(),
+                _provider.GetRequiredService<LibraryDirectoryOwnershipBoundaryAuthorizer>());
+
+            var result = await service.DeleteAsync(audiobook, deleteFolder: true);
+
+            var deletedParentFolderValue = result.DeletedParentFolder;
+            Assert.False(File.Exists(audioPath));
+            Assert.False(Directory.Exists(bookFolder));
+            Assert.True(Directory.Exists(authorFolder));
+            Assert.False(deletedParentFolderValue is true);
         }
 
         [Fact]

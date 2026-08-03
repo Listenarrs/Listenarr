@@ -13,7 +13,9 @@ internal static class AudiobookPathReferenceRewriter
         string targetBasePath,
         FileSystemPathSemantics sourceSemantics,
         FileSystemPathSemantics targetSemantics,
-        FileSystemCaseSensitivityMode targetCaseSensitivityMode = FileSystemCaseSensitivityMode.Auto)
+        FileSystemCaseSensitivityMode targetCaseSensitivityMode = FileSystemCaseSensitivityMode.Auto,
+        IReadOnlyDictionary<string, string>? targetPhysicalObjectIdentities = null,
+        DateTime? targetPhysicalIdentityObservedAtUtc = null)
     {
         ArgumentNullException.ThrowIfNull(audiobook);
         ArgumentException.ThrowIfNullOrWhiteSpace(targetBasePath);
@@ -25,9 +27,21 @@ internal static class AudiobookPathReferenceRewriter
             sourceSemantics,
             targetSemantics);
 
+        if (targetPhysicalObjectIdentities != null
+            && targetPhysicalIdentityObservedAtUtc is not { Kind: DateTimeKind.Utc })
+        {
+            throw new ArgumentException(
+                "Moved physical identity observation time must be UTC.",
+                nameof(targetPhysicalIdentityObservedAtUtc));
+        }
+
         var filePath = audiobook.FilePath;
         var imageUrl = audiobook.ImageUrl;
-        var rewrittenFiles = new List<(AudiobookFile File, string Path, AudiobookFilePathIdentity Identity)>();
+        var rewrittenFiles = new List<(
+            AudiobookFile File,
+            string Path,
+            AudiobookFilePathIdentity Identity,
+            string? PhysicalObjectIdentity)>();
 
         if (!string.IsNullOrWhiteSpace(sourceBasePath))
         {
@@ -74,14 +88,26 @@ internal static class AudiobookPathReferenceRewriter
                     || !StoredPathsMatch(file.Path!, rewrittenPath)
                     || isAlreadyUnderTarget)
                 {
+                    var targetIdentity = CreateTargetIdentity(
+                        rewrittenPath,
+                        targetBasePath,
+                        targetSemantics,
+                        targetCaseSensitivityMode);
+                    string? targetPhysicalObjectIdentity = null;
+                    if (targetPhysicalObjectIdentities != null
+                        && !targetPhysicalObjectIdentities.TryGetValue(
+                            targetIdentity.CanonicalPath,
+                            out targetPhysicalObjectIdentity))
+                    {
+                        throw new AudiobookPathRewriteException(
+                            "A moved tracked audiobook file has no verified target physical generation.");
+                    }
+
                     rewrittenFiles.Add((
                         file,
                         rewrittenPath,
-                        CreateTargetIdentity(
-                            rewrittenPath,
-                            targetBasePath,
-                            targetSemantics,
-                            targetCaseSensitivityMode)));
+                        targetIdentity,
+                        targetPhysicalObjectIdentity));
                 }
             }
         }
@@ -90,9 +116,15 @@ internal static class AudiobookPathReferenceRewriter
         // one bad stored value cannot leave the audiobook half-rebased.
         audiobook.FilePath = filePath;
         audiobook.ImageUrl = imageUrl;
-        foreach (var (file, path, identity) in rewrittenFiles)
+        foreach (var (file, path, identity, physicalObjectIdentity) in rewrittenFiles)
         {
             file.ApplyPathIdentity(path, identity);
+            if (physicalObjectIdentity != null)
+            {
+                file.ApplyPhysicalObjectIdentity(
+                    physicalObjectIdentity,
+                    targetPhysicalIdentityObservedAtUtc!.Value);
+            }
         }
 
         audiobook.BasePath = targetBasePath;
@@ -136,11 +168,7 @@ internal static class AudiobookPathReferenceRewriter
     }
 
     private static bool StoredPathsMatch(string currentPath, string expectedPath) =>
-        string.Equals(currentPath, expectedPath, StringComparison.Ordinal)
-        || string.Equals(
-            currentPath,
-            FileUtils.NormalizeStoredPath(expectedPath),
-            StringComparison.Ordinal);
+        string.Equals(currentPath, expectedPath, StringComparison.Ordinal);
 
     private static bool IsSameOrInside(
         string path,

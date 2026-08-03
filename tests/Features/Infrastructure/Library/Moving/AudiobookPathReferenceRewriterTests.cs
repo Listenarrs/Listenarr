@@ -10,6 +10,38 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving;
 [Trait("Category", "Infrastructure")]
 public sealed class AudiobookPathReferenceRewriterTests : BaseTests
 {
+    [WindowsFact]
+    public void Rewrite_ForeignSourceAlias_DoesNotMatchNativeCurrentBasePath()
+    {
+        var current = Path.Join(
+            Path.GetPathRoot(Environment.CurrentDirectory)!,
+            "listenarr-rewriter-native",
+            Guid.NewGuid().ToString("N"));
+        var driveRoot = Path.GetPathRoot(current)!;
+        var foreignSource = "/" + current[driveRoot.Length..].Replace('\\', '/');
+        var target = Path.Join(
+            Path.GetPathRoot(Environment.CurrentDirectory)!,
+            "listenarr-rewriter-target",
+            Guid.NewGuid().ToString("N"));
+        Assert.Equal(
+            Path.GetFullPath(current),
+            Path.GetFullPath(foreignSource),
+            StringComparer.OrdinalIgnoreCase);
+        var audiobook = new Audiobook { BasePath = current };
+        var semantics = FileSystemPathSemantics.CurrentHostDefault;
+
+        var exception = Assert.Throws<AudiobookPathRewriteException>(() =>
+            AudiobookPathReferenceRewriter.Rewrite(
+                audiobook,
+                foreignSource,
+                target,
+                semantics,
+                semantics));
+
+        Assert.Contains("path changed", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(current, audiobook.BasePath);
+    }
+
     [Fact]
     public void Rewrite_UsesSourceAndTargetSyntaxWithoutHostPathConversion()
     {

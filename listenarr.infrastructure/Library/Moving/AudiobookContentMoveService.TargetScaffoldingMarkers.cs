@@ -123,8 +123,18 @@ internal sealed partial class AudiobookContentMoveService
         if (marker == null
             || marker.Version != ScaffoldMarkerVersion
             || marker.JobId != jobId
-            || !FileSystemPathIdentity.AreEquivalent(marker.TargetPath, target, semantics)
-            || !FileSystemPathIdentity.AreEquivalent(marker.PublishedRoot, publishedRoot, semantics))
+            || !FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                marker.TargetPath,
+                out var markerTargetPath,
+                out _,
+                semantics.Syntax)
+            || !FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                marker.PublishedRoot,
+                out var markerPublishedRoot,
+                out _,
+                semantics.Syntax)
+            || !FileSystemPathIdentity.AreEquivalent(markerTargetPath, target, semantics)
+            || !FileSystemPathIdentity.AreEquivalent(markerPublishedRoot, publishedRoot, semantics))
         {
             throw new MoveNeedsAttentionException(
                 "The target scaffold ownership marker does not match this move job.");

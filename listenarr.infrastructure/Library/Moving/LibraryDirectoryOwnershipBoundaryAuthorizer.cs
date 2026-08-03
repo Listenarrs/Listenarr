@@ -30,7 +30,7 @@ public sealed class LibraryDirectoryOwnershipBoundaryAuthorizer(
         FileSystemPathSemantics semantics,
         CancellationToken cancellationToken)
     {
-        var canonicalPath = FileSystemPathIdentity.Canonicalize(path, semantics.Syntax);
+        var canonicalPath = CanonicalizeHostAuthorizedPath(path, semantics);
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var roots = await db.RootFolders.AsNoTracking().ToListAsync(cancellationToken);
         var root = roots
@@ -86,9 +86,9 @@ public sealed class LibraryDirectoryOwnershipBoundaryAuthorizer(
         FileSystemPathSemantics semantics,
         CancellationToken cancellationToken)
     {
-        var canonicalBoundary = FileSystemPathIdentity.Canonicalize(
+        var canonicalBoundary = CanonicalizeHostAuthorizedPath(
             boundaryPath,
-            semantics.Syntax);
+            semantics);
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var roots = await db.RootFolders.AsNoTracking().ToListAsync(cancellationToken);
         var root = roots.SingleOrDefault(candidate =>
@@ -131,7 +131,7 @@ public sealed class LibraryDirectoryOwnershipBoundaryAuthorizer(
         int rootFolderId,
         CancellationToken cancellationToken)
     {
-        var canonicalPath = FileSystemPathIdentity.Canonicalize(path, semantics.Syntax);
+        var canonicalPath = CanonicalizeHostAuthorizedPath(path, semantics);
         var parentPath = Path.GetDirectoryName(canonicalPath)
             ?? throw new InvalidOperationException(
                 "The authorized directory has no parent.");
@@ -201,6 +201,9 @@ public sealed class LibraryDirectoryOwnershipBoundaryAuthorizer(
             string? identityUnavailableReason,
             CancellationToken cancellationToken)
     {
+        boundaryPath = CanonicalizeHostAuthorizedPath(
+            boundaryPath,
+            semantics);
         var parentPath = Path.GetDirectoryName(canonicalPath)
             ?? throw new InvalidOperationException(
                 "The authorized directory has no parent.");
@@ -262,9 +265,35 @@ public sealed class LibraryDirectoryOwnershipBoundaryAuthorizer(
         }
     }
 
+    private static string CanonicalizeHostAuthorizedPath(
+        string path,
+        FileSystemPathSemantics semantics)
+    {
+        if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                path,
+                out var canonicalPath,
+                out var reason))
+        {
+            throw new InvalidOperationException(reason);
+        }
+
+        if (!FileSystemPathIdentity.TryDetectAbsoluteSyntaxForHost(
+                canonicalPath,
+                out var hostSyntax)
+            || hostSyntax != semantics.Syntax)
+        {
+            throw new InvalidOperationException(
+                "The authorized path semantics do not match the current host filesystem syntax.");
+        }
+
+        return canonicalPath;
+    }
+
     private static bool HasCompatibleSyntax(
         string path,
         FileSystemPathSyntax expectedSyntax) =>
-        FileSystemPathIdentity.TryDetectAbsoluteSyntax(path, out var syntax)
+        FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+            path,
+            out var syntax)
         && syntax == expectedSyntax;
 }

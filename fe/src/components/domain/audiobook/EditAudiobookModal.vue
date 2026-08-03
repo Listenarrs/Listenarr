@@ -1607,6 +1607,7 @@ const destinationPathValidationError = computed(() => {
     pathKind,
     caseSensitivity: selectedDestinationCaseSensitivity(),
     sourcePath: basePathChanged ? source : null,
+    allowFileSystemRoot: false,
   })
 })
 
@@ -1755,6 +1756,7 @@ async function handleSave() {
     pathKind,
     caseSensitivity: selectedDestinationCaseSensitivity(),
     sourcePath: basePathChanged ? originalBase : null,
+    allowFileSystemRoot: false,
   })
   if (destinationValidationMessage) {
     toast.error('Invalid destination', destinationValidationMessage)

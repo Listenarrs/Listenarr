@@ -143,6 +143,7 @@ namespace Listenarr.Infrastructure.Metadata.Parsing
         public static async Task<PathParsedMetadata> ReadEmbeddedTagsAsync(
             string filePath, string ffprobePath, CancellationToken ct = default)
         {
+            ct.ThrowIfCancellationRequested();
             var result = new PathParsedMetadata();
             try
             {
@@ -168,6 +169,10 @@ namespace Listenarr.Infrastructure.Metadata.Parsing
 
                 var doc = JsonSerializer.Deserialize<JsonElement>(stdout);
                 result = ParseEmbeddedTagsFromFfprobeJson(doc);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex) when (ex is not OutOfMemoryException && ex is not StackOverflowException) { /* silently skip - ffprobe unavailable or file unreadable */ }
             return result;

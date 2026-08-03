@@ -70,7 +70,7 @@ public sealed partial class EfMoveQueuePersistence
                             throw new InvalidOperationException($"Source path cannot be reconciled: {sourceReason}");
                         }
                     }
-                    else if (!FileSystemPathIdentity.TryCanonicalizeStoredAbsolutePathForHost(
+                    else if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
                         sourcePath,
                         out sourcePath,
                         out var sourceReason))
@@ -90,7 +90,7 @@ public sealed partial class EfMoveQueuePersistence
                             throw new InvalidOperationException($"Target path cannot be reconciled: {targetReason}");
                         }
                     }
-                    else if (!FileSystemPathIdentity.TryCanonicalizeStoredAbsolutePathForHost(
+                    else if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
                         targetPath,
                         out targetPath,
                         out var targetReason))

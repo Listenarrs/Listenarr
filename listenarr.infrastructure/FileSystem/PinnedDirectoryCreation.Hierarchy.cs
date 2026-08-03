@@ -10,7 +10,7 @@ internal sealed partial class PinnedDirectoryCreation
 
     internal static PinnedDirectoryAnchor OpenPinnedBoundary(string boundaryPath)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(boundaryPath);
+        RequireFullyQualifiedPath(boundaryPath);
         ExclusiveDirectoryCreator.InvokeBeforeOpenParentHook(boundaryPath);
         var handle = OperatingSystem.IsWindows()
             ? OpenDirectoryWindows(boundaryPath, openReparsePoint: false)
@@ -33,7 +33,7 @@ internal sealed partial class PinnedDirectoryCreation
         string path,
         bool createMissing)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        RequireFullyQualifiedPath(path);
         var fullPath = Path.GetFullPath(path);
         var root = Path.GetPathRoot(fullPath);
         if (string.IsNullOrWhiteSpace(root))
@@ -79,6 +79,17 @@ internal sealed partial class PinnedDirectoryCreation
         {
             current.Dispose();
             throw;
+        }
+    }
+
+    private static void RequireFullyQualifiedPath(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        if (!Path.IsPathFullyQualified(path))
+        {
+            throw new ArgumentException(
+                "Pinned filesystem operations require a fully qualified native path.",
+                nameof(path));
         }
     }
 

@@ -25,7 +25,8 @@ internal sealed record AudiobookContentMoveRequest(
     FileSystemPathSemantics TargetSemantics,
     MoveLeaseToken LeaseToken,
     string? SourceCleanupBoundary = null,
-    LibraryDirectoryOwnership? TargetDirectoryOwnership = null)
+    LibraryDirectoryOwnership? TargetDirectoryOwnership = null,
+    IReadOnlyDictionary<string, string>? SourcePhysicalObjectIdentities = null)
 {
     public string LeaseOwner => LeaseToken.Owner;
     public int LeaseGeneration => LeaseToken.Generation;
@@ -37,7 +38,8 @@ internal sealed record AudiobookContentMoveResult(
     bool TargetInsideSource,
     bool SourceInsideTarget,
     string RecoveryMarkerPath,
-    bool SourceCleanupCompleted);
+    bool SourceCleanupCompleted,
+    IReadOnlyDictionary<string, string> TargetPhysicalObjectIdentities);
 
 internal sealed class MoveNeedsAttentionException(string message) : IOException(message);
 
@@ -405,6 +407,7 @@ internal sealed partial class AudiobookContentMoveService(
                 targetSemantics,
                 request.TargetDirectoryOwnership,
                 request.SourceCleanupBoundary,
+                request.SourcePhysicalObjectIdentities,
                 cancellationToken);
             VerifySourceCleanupState(request, source, target, manifest);
             await UpdateJobPhaseAsync(request.JobId, request.LeaseToken, MoveJobPhase.Finalizing, cancellationToken);
@@ -416,6 +419,12 @@ internal sealed partial class AudiobookContentMoveService(
                 target,
                 SourceCleanupCompletedStage,
                 cancellationToken);
+            var targetPhysicalObjectIdentities =
+                await CapturePublishedTargetPhysicalIdentitiesAsync(
+                    target,
+                    manifest,
+                    targetSemantics,
+                    cancellationToken);
 
             return new AudiobookContentMoveResult(
                 source,
@@ -423,7 +432,8 @@ internal sealed partial class AudiobookContentMoveService(
                 targetInsideSource,
                 sourceInsideTarget,
                 recoveryMarkerPath,
-                SourceCleanupCompleted: true);
+                SourceCleanupCompleted: true,
+                targetPhysicalObjectIdentities);
         }
         catch (Exception exception) when (exception is MoveLeaseLostException or PersistenceException)
         {

@@ -25,6 +25,45 @@ namespace Listenarr.Tests.Features.Application.Configuration.Core
     [Trait("Category", "ConfigurationService")]
     public class ConfigurationServiceTests : BaseTests
     {
+        [WindowsFact]
+        public async Task SaveApplicationSettings_ChangedOutputPath_NormalizesCurrentHostUserInputBeforePersistence()
+        {
+            var svc = _provider.GetRequiredService<IConfigurationService>();
+            var settings = await svc.GetApplicationSettingsAsync();
+            settings.OutputPath = "/";
+
+            await svc.SaveApplicationSettingsAsync(settings);
+
+            var stored = await _applicationSettingsRepository.GetAsync();
+            Assert.NotNull(stored);
+            Assert.Equal(
+                Path.GetPathRoot(Environment.CurrentDirectory),
+                stored!.OutputPath,
+                StringComparer.OrdinalIgnoreCase);
+        }
+
+        [WindowsFact]
+        public async Task SaveApplicationSettings_UnchangedForeignOutputPath_PreservesPersistedSyntax()
+        {
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettings
+            {
+                Id = 1,
+                OutputPath = "/",
+                ShowCompletedExternalDownloads = false
+            });
+            var svc = _provider.GetRequiredService<IConfigurationService>();
+            var settings = await svc.GetApplicationSettingsAsync();
+            Assert.Equal("/", settings.OutputPath);
+            settings.ShowCompletedExternalDownloads = true;
+
+            await svc.SaveApplicationSettingsAsync(settings);
+
+            var stored = await _applicationSettingsRepository.GetAsync();
+            Assert.NotNull(stored);
+            Assert.Equal("/", stored!.OutputPath);
+            Assert.True(stored.ShowCompletedExternalDownloads);
+        }
+
         [Fact]
         public async Task SaveApplicationSettings_PersistsChanges()
         {

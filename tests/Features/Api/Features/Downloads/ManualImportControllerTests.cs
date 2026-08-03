@@ -17,6 +17,7 @@
  */
 using Microsoft.Extensions.Logging.Abstractions;
 using Listenarr.Api.Dtos.ManualImport;
+using Listenarr.Tests.Common;
 
 namespace Listenarr.Tests.Features.Api.Features.Downloads
 {
@@ -60,6 +61,55 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
             _tempDirectories.Add(directory);
 
             return directory;
+        }
+
+        [WindowsFact]
+        public async Task GeneratePathAsync_ForeignConfiguredOutputAlias_DoesNotReclassifyCustomBasePath()
+        {
+            var broadRoot = CreateTempDirectory("manual-import-foreign-output-root");
+            var customBasePath = Path.Join(broadRoot, "Custom Book Folder");
+            var driveRoot = Path.GetPathRoot(customBasePath)!;
+            var foreignOutputPath = "/" + customBasePath[driveRoot.Length..].Replace('\\', '/');
+            Assert.Equal(
+                Path.GetFullPath(customBasePath),
+                Path.GetFullPath(foreignOutputPath),
+                StringComparer.OrdinalIgnoreCase);
+
+            var settings = new ApplicationSettings
+            {
+                OutputPath = foreignOutputPath,
+                FolderNamingPattern = "{Author}/{Title}",
+                FileNamingPattern = "{Title}"
+            };
+            var audiobook = new Audiobook
+            {
+                Title = "Book",
+                Authors = ["Author"],
+                BasePath = customBasePath
+            };
+            var metadata = audiobook.CreateBasicAudioMetadata();
+            var item = new ManualImportItemDto
+            {
+                FullPath = Path.Join(broadRoot, "incoming.m4b"),
+                MatchedAudiobookId = 1
+            };
+            var planner = new ManualImportPathPlanner(new FileNamingService(
+                Mock.Of<IConfigurationService>(),
+                NullLogger<FileNamingService>.Instance));
+
+            var plan = await planner.GeneratePathAsync(
+                audiobook,
+                metadata,
+                item,
+                customBasePath,
+                [new RootFolder { Id = 1, Name = "Library", Path = broadRoot }],
+                settings,
+                new FileSystemPathSemantics(
+                    FileSystemPathSyntax.Windows,
+                    FileSystemCaseSensitivity.Insensitive));
+
+            Assert.Equal(Path.Join(customBasePath, "Book.m4b"), plan.DestinationPath);
+            Assert.Equal(customBasePath, plan.AudiobookBasePath);
         }
 
         public static Mock<IAudiobookRepository> GetRepoMock(Audiobook book)

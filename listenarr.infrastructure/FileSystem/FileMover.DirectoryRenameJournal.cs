@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Listenarr.Domain.Common;
 
 namespace Listenarr.Infrastructure.FileSystem;
 
@@ -155,19 +156,31 @@ public partial class FileMover
                 requireDeleteAccess: false);
             var payload = ReadDirectoryRenameJournal(journal);
             if (payload == null
+                || !FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                    payload.SourcePath,
+                    out var payloadSource,
+                    out _)
+                || !FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                    payload.DestinationPath,
+                    out var payloadDestination,
+                    out _)
                 || !string.Equals(
-                    Path.GetFullPath(payload.SourcePath),
+                    payloadSource,
                     source,
                     comparison)
                 || !string.Equals(
-                    Path.GetFullPath(payload.DestinationPath),
+                    payloadDestination,
                     destination,
                     comparison))
             {
                 return PinnedDirectoryMoveOutcome.Indeterminate;
             }
 
-            matches.Add((name, payload));
+            matches.Add((name, payload with
+            {
+                SourcePath = payloadSource,
+                DestinationPath = payloadDestination
+            }));
         }
 
         if (matches.Count == 0)

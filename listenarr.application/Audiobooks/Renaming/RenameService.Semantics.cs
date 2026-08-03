@@ -9,7 +9,8 @@ public partial class RenameService
         List<RootFolder> rootFolders,
         CancellationToken cancellationToken)
     {
-        var boundaryPath = !string.IsNullOrWhiteSpace(path)
+        var boundaryFromPersistedRoot = string.IsNullOrWhiteSpace(path);
+        var boundaryPath = !boundaryFromPersistedRoot
             ? path
             : rootFolders.FirstOrDefault(root => root.IsDefault)?.Path
                 ?? rootFolders.FirstOrDefault(root => !string.IsNullOrWhiteSpace(root.Path))?.Path;
@@ -19,27 +20,41 @@ public partial class RenameService
                 "Filesystem semantics are required for organize operations.");
         }
 
+        if (boundaryFromPersistedRoot
+            && !FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                boundaryPath,
+                out boundaryPath,
+                out var boundaryReason))
+        {
+            throw new InvalidOperationException(boundaryReason);
+        }
+
         RenamePathResolution? bestMatch = null;
         foreach (var root in rootFolders.Where(root => !string.IsNullOrWhiteSpace(root.Path)))
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                    root.Path,
+                    out var canonicalRoot,
+                    out _))
+            {
+                continue;
+            }
+
             var rootResolution = await _semanticsResolver.ResolveAsync(
-                root.Path,
+                canonicalRoot,
                 root.CaseSensitivityMode,
                 cancellationToken);
             if (rootResolution.State != PathIdentityState.Valid
                 || rootResolution.Semantics.CaseSensitivity == FileSystemCaseSensitivity.Unknown
                 || !FileSystemPathIdentity.IsSameOrInside(
                     boundaryPath,
-                    root.Path,
+                    canonicalRoot,
                     rootResolution.Semantics))
             {
                 continue;
             }
 
-            var canonicalRoot = FileSystemPathIdentity.Canonicalize(
-                root.Path,
-                rootResolution.Semantics.Syntax);
             var candidate = new RenamePathResolution(
                 rootResolution.Semantics,
                 root.CaseSensitivityMode,

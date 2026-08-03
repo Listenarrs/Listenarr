@@ -77,11 +77,20 @@ namespace Listenarr.Application.Common
             {
                 if (!string.IsNullOrWhiteSpace(outputPath) && !string.IsNullOrWhiteSpace(settings.OutputPath))
                 {
-                    var requestedRoot = Path.GetFullPath(outputPath);
-                    var configuredRoot = Path.GetFullPath(settings.OutputPath);
-                    if (!await AreEquivalentOutputRootsAsync(requestedRoot, configuredRoot))
+                    var requestedIsHostPath = FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                        outputPath,
+                        out var requestedRoot,
+                        out _);
+                    var configuredIsHostPath = FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                        settings.OutputPath,
+                        out var configuredRoot,
+                        out _);
+                    if (requestedIsHostPath
+                        && (!configuredIsHostPath
+                            || !await AreEquivalentOutputRootsAsync(requestedRoot, configuredRoot)))
                     {
-                        // Caller provided a custom base path (e.g., audiobook BasePath) -> skip folder pattern
+                        // Caller provided a custom base path (e.g., audiobook BasePath) -> skip folder pattern.
+                        // A configured root from another host cannot authorize the current native path.
                         effectiveFolderPattern = string.Empty;
                     }
                 }

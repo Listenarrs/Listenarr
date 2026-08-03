@@ -61,20 +61,7 @@ namespace Listenarr.Domain.Downloads
         /// The path as seen by Listenarr (e.g., "/server/downloads/complete/listenarr/")
         /// </summary>
         [Required]
-        public string LocalPath
-        {
-            get
-            {
-                // FIXME: Previous version did not save normalized paths
-                var normalizedValue = FileUtils.NormalizeStoredPath(field);
-                return FileUtils.EnsureTrailingSeparator(normalizedValue);
-            }
-            set
-            {
-                value = FileUtils.NormalizeStoredPath(value);
-                field = FileUtils.EnsureTrailingSeparator(value);
-            }
-        } = string.Empty;
+        public string LocalPath { get; set; } = string.Empty;
 
         /// <summary>
         /// When this mapping was created
@@ -109,22 +96,25 @@ namespace Listenarr.Domain.Downloads
         public void NormalizePaths()
         {
             RemotePath = NormalizeRemotePath(RemotePath);
-            LocalPath = NormalizePath(LocalPath);
+            LocalPath = NormalizeLocalPathForHost(LocalPath);
         }
 
-        private static string NormalizePath(string path)
+        private static string NormalizeLocalPathForHost(string path)
         {
             if (string.IsNullOrEmpty(path))
+            {
                 return path;
+            }
 
-            // Replace backslashes with forward slashes
-            path = path.Replace('\\', '/');
+            if (!FileSystemPathIdentity.TryCanonicalizeStoredAbsolutePathForHost(
+                    path,
+                    out var canonicalPath,
+                    out var reason))
+            {
+                throw new ArgumentException(reason, nameof(path));
+            }
 
-            // Ensure trailing slash
-            if (!path.EndsWith('/'))
-                path += '/';
-
-            return path;
+            return FileUtils.EnsureTrailingSeparator(canonicalPath);
         }
 
         private static string NormalizeRemotePath(string path)
@@ -134,11 +124,19 @@ namespace Listenarr.Domain.Downloads
                 return path;
             }
 
-            var windowsSyntax = path.Length >= 2 && char.IsLetter(path[0]) && path[1] == ':'
-                || path.StartsWith("\\\\", StringComparison.Ordinal)
-                || path.StartsWith("//", StringComparison.Ordinal);
-            var normalized = windowsSyntax ? path.Replace('\\', '/') : path;
-            return normalized.EndsWith('/') ? normalized : normalized + '/';
+            if (path.StartsWith("\\\\", StringComparison.Ordinal))
+            {
+                var uncPath = path.Replace('/', '\\');
+                return uncPath.EndsWith('\\') ? uncPath : uncPath + "\\";
+            }
+
+            if (path.Length >= 2 && char.IsLetter(path[0]) && path[1] == ':')
+            {
+                var drivePath = path.Replace('\\', '/');
+                return drivePath.EndsWith('/') ? drivePath : drivePath + '/';
+            }
+
+            return path.EndsWith('/') ? path : path + '/';
         }
     }
 }

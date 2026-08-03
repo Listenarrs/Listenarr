@@ -58,6 +58,43 @@ describe('root folder relocation store actions', () => {
     )
   })
 
+  it('surfaces a synchronous relocation attention result instead of reporting success', async () => {
+    const current = {
+      id: 3,
+      name: 'Library',
+      path: '/srv/Old',
+      isDefault: false,
+      caseSensitivityMode: 'Auto' as const,
+    }
+    const updated = { ...current, path: '/srv/New' }
+    vi.mocked(apiService.changeRootFolderPath).mockResolvedValueOnce({
+      relocationId: 'relocation-1',
+      rootFolderId: 3,
+      currentPath: current.path,
+      targetPath: updated.path,
+      status: 'NeedsAttention',
+      totalJobs: 1,
+      completedJobs: 0,
+      error:
+        'The relocation requires attention. Review the affected move jobs and retry after resolving the underlying issue.',
+      targetIdentityEnrollmentState: 'Authorized',
+    })
+    vi.mocked(apiService.getRootFolders).mockResolvedValueOnce([current])
+    const store = useRootFoldersStore()
+    store.folders = [current]
+
+    await expect(
+      store.update(3, updated, {
+        expectedCurrentPath: current.path,
+        pathChangeConfirmed: true,
+        moveFiles: true,
+        deleteEmptySource: true,
+      }),
+    ).rejects.toThrow('relocation requires attention')
+
+    expect(apiService.getRootFolders).toHaveBeenCalledTimes(1)
+  })
+
   it('passes the exact confirmed target path and reloads root folders', async () => {
     const targetPath = '/srv/Audiobooks '
     const result: RootFolderPathChangeResult = {

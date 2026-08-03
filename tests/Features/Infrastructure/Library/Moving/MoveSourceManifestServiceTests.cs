@@ -154,6 +154,141 @@ public sealed class MoveSourceManifestServiceTests : BaseTests
         Assert.Contains("no validated tracked files", exception.Message);
     }
 
+    [WindowsFact]
+    public async Task BuildAsync_ForeignPersistedUnixPath_IsRejectedBeforeNativeAliasProbe()
+    {
+        var root = FileService.GetTempDirectory("move-manifest-foreign-persisted-path");
+        var nativePath = await FileService.GetFileAsync(root, "Book.m4b", "audio");
+        var driveRoot = Path.GetPathRoot(root)!;
+        var foreignRoot = "/" + root[driveRoot.Length..].Replace('\\', '/');
+        var foreignPath = "/" + nativePath[driveRoot.Length..].Replace('\\', '/');
+        Assert.Equal(
+            Path.GetFullPath(nativePath),
+            Path.GetFullPath(foreignPath),
+            StringComparer.OrdinalIgnoreCase);
+        Assert.True(File.Exists(foreignPath));
+
+        var audiobook = await _audiobookRepository.AddAsync(
+            new AudiobookBuilder()
+                .WithTitle("Foreign Persisted Path")
+                .WithBasePath(foreignRoot)
+                .Build());
+        var foreignSemantics = new FileSystemPathSemantics(
+            FileSystemPathSyntax.Unix,
+            FileSystemCaseSensitivity.Sensitive);
+        var identity = AudiobookFilePathIdentity.CreateValid(
+            foreignPath,
+            foreignSemantics,
+            FileSystemCaseSensitivityMode.Sensitive,
+            foreignRoot);
+        var tracked = new AudiobookFileBuilder()
+            .WithAudiobook(audiobook)
+            .WithPath(foreignPath)
+            .Build();
+        tracked.ApplyPathIdentity(foreignPath, identity);
+        using (var parent = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
+            Path.GetDirectoryName(nativePath)!,
+            createMissing: false))
+        using (var file = parent.OpenExistingFileForStableRead(Path.GetFileName(nativePath)))
+        {
+            tracked.ApplyPhysicalObjectIdentity(
+                file.GetObjectIdentity(),
+                DateTime.UtcNow);
+        }
+        await _audiobookFileRepository.AddAsync(tracked);
+
+        var exception = await Assert.ThrowsAsync<ApplicationConflictException>(() =>
+            _provider.GetRequiredService<IMoveSourceManifestService>()
+                .BuildAsync(audiobook));
+
+        Assert.Equal("move_source_unverified", exception.Code);
+        Assert.Contains("current host", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("audio", await File.ReadAllTextAsync(nativePath));
+    }
+
+    [Fact]
+    public async Task BuildAsync_ReplacedTrackedPhysicalGeneration_FailsClosed()
+    {
+        var root = FileService.GetTempDirectory("move-manifest-replaced-generation");
+        var path = await FileService.GetFileAsync(root, "Book.m4b", "original");
+        var audiobook = await _audiobookRepository.AddAsync(
+            new AudiobookBuilder()
+                .WithTitle("Replaced Generation")
+                .WithBasePath(root)
+                .Build());
+        var semantics = FileSystemPathSemantics.CurrentHostDefault;
+        var identity = AudiobookFilePathIdentity.CreateValid(
+            path,
+            semantics,
+            FileSystemCaseSensitivityMode.Auto,
+            root);
+        var tracked = new AudiobookFileBuilder()
+            .WithAudiobook(audiobook)
+            .WithPath(path)
+            .Build();
+        tracked.ApplyPathIdentity(path, identity);
+        using (var parent = PinnedDirectoryCreation.OpenPinnedDirectoryNoFollow(root))
+        using (var file = parent.OpenExistingFileForStableRead(Path.GetFileName(path)))
+        {
+            tracked.ApplyPhysicalObjectIdentity(
+                file.GetObjectIdentity(),
+                DateTime.UtcNow);
+        }
+        await _audiobookFileRepository.AddAsync(tracked);
+
+        var displaced = path + ".original";
+        File.Move(path, displaced);
+        await File.WriteAllTextAsync(path, "replacement");
+        using (var parent = PinnedDirectoryCreation.OpenPinnedDirectoryNoFollow(root))
+        using (var replacement = parent.OpenExistingFileForStableRead(Path.GetFileName(path)))
+        {
+            Assert.NotEqual(
+                tracked.PhysicalObjectIdentity,
+                replacement.GetObjectIdentity());
+        }
+
+        var exception = await Assert.ThrowsAsync<ApplicationConflictException>(() =>
+            _provider.GetRequiredService<IMoveSourceManifestService>()
+                .BuildAsync(audiobook));
+
+        Assert.Equal("move_source_unverified", exception.Code);
+        Assert.Contains("physical", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("replacement", await File.ReadAllTextAsync(path));
+        Assert.Equal("original", await File.ReadAllTextAsync(displaced));
+    }
+
+    [Fact]
+    public async Task BuildAsync_MissingTrackedPhysicalIdentity_FailsClosed()
+    {
+        var root = FileService.GetTempDirectory("move-manifest-missing-physical");
+        var path = await FileService.GetFileAsync(root, "Book.m4b", "audio");
+        var audiobook = await _audiobookRepository.AddAsync(
+            new AudiobookBuilder()
+                .WithTitle("Missing Physical Identity")
+                .WithBasePath(root)
+                .Build());
+        var semantics = FileSystemPathSemantics.CurrentHostDefault;
+        var identity = AudiobookFilePathIdentity.CreateValid(
+            path,
+            semantics,
+            FileSystemCaseSensitivityMode.Auto,
+            root);
+        var tracked = new AudiobookFileBuilder()
+            .WithAudiobook(audiobook)
+            .WithPath(path)
+            .Build();
+        tracked.ApplyPathIdentity(path, identity);
+        await _audiobookFileRepository.AddAsync(tracked);
+
+        var exception = await Assert.ThrowsAsync<ApplicationConflictException>(() =>
+            _provider.GetRequiredService<IMoveSourceManifestService>()
+                .BuildAsync(audiobook));
+
+        Assert.Equal("move_source_unverified", exception.Code);
+        Assert.Contains("physical identity", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.True(File.Exists(path));
+    }
+
     [Fact]
     public async Task BuildAsync_MissingTrackedFile_FailsClosed()
     {
@@ -190,6 +325,17 @@ public sealed class MoveSourceManifestServiceTests : BaseTests
             .WithPath(path)
             .Build();
         tracked.ApplyPathIdentity(path, identity);
+        if (File.Exists(path))
+        {
+            var parentPath = Path.GetDirectoryName(path)!;
+            using var parent = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
+                parentPath,
+                createMissing: false);
+            using var file = parent.OpenExistingFileForStableRead(Path.GetFileName(path));
+            tracked.ApplyPhysicalObjectIdentity(
+                file.GetObjectIdentity(),
+                DateTime.UtcNow);
+        }
         await _audiobookFileRepository.AddAsync(tracked);
     }
 }

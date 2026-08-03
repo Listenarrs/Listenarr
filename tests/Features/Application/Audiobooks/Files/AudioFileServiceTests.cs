@@ -469,6 +469,34 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Files
             Assert.False(await _provider.GetRequiredService<IAudiobookFileService>().EnsureAudiobookFileAsync(audiobook, Path.Join(basePath, "linked", "outside.m4b"), "test-scan"));
         }
 
+        [WindowsFact]
+        public async Task EnsureAudiobookFileAsync_ForeignPersistedBasePath_DoesNotAuthorizeWindowsAlias()
+        {
+            var nativeBase = FileService.GetTempDirectory(
+                "audio-file-foreign-persisted-base");
+            var candidate = Path.Join(nativeBase, "track.m4b");
+            await File.WriteAllTextAsync(candidate, "audio");
+            var driveRoot = Path.GetPathRoot(nativeBase)!;
+            var foreignBase = "/" + nativeBase[driveRoot.Length..].Replace('\\', '/');
+            Assert.Equal(
+                Path.GetFullPath(nativeBase),
+                Path.GetFullPath(foreignBase),
+                StringComparer.OrdinalIgnoreCase);
+            var audiobook = await _audiobookRepository.AddAsync(new Audiobook
+            {
+                Title = "Foreign Persisted Base",
+                BasePath = foreignBase
+            });
+
+            var created = await _provider.GetRequiredService<IAudiobookFileService>()
+                .EnsureAudiobookFileAsync(audiobook, candidate, "test-scan");
+
+            Assert.False(created);
+            Assert.True(File.Exists(candidate));
+            Assert.Empty(
+                await _audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id));
+        }
+
         [Fact]
         public async Task EnsureAudiobookFileAsync_InvalidStoredContainmentPath_FailsClosed()
         {

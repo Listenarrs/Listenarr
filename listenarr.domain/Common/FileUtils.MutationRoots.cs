@@ -24,12 +24,10 @@ public static partial class FileUtils
         foreach (var path in paths)
         {
             if (string.IsNullOrWhiteSpace(path)
-                || !TryNormalizeUserProvidedDirectoryPathForCurrentOs(
+                || !FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
                     path,
                     out var normalizedPath,
-                    out _,
-                    allowFileSystemRoot: true,
-                    rejectParentTraversal: true))
+                    out _))
             {
                 continue;
             }

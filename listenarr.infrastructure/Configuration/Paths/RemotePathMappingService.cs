@@ -45,6 +45,7 @@ namespace Listenarr.Infrastructure.Configuration.Paths
         public async Task<RemotePathMapping> CreateAsync(RemotePathMapping mapping)
         {
             mapping.NormalizePaths();
+            RequireUsableRemotePath(mapping.RemotePath);
             mapping.CreatedAt = DateTime.UtcNow;
             mapping.UpdatedAt = DateTime.UtcNow;
 
@@ -73,6 +74,7 @@ namespace Listenarr.Infrastructure.Configuration.Paths
             }
 
             mapping.NormalizePaths();
+            RequireUsableRemotePath(mapping.RemotePath);
             mapping.CreatedAt = existing.CreatedAt;
             mapping.UpdatedAt = DateTime.UtcNow;
 
@@ -124,7 +126,30 @@ namespace Listenarr.Infrastructure.Configuration.Paths
             var mappings = await GetPathMappingByClientAsync(client);
             foreach (var mapping in mappings)
             {
-                var remoteSemantics = GetRemoteSemantics(mapping.RemotePath);
+                if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                        mapping.LocalPath,
+                        out var localRoot,
+                        out var localReason))
+                {
+                    logger.LogWarning(
+                        "Remote path mapping {MappingId} has a local root that is unavailable on this host and was ignored for client {ClientId}: {Reason}",
+                        mapping.Id,
+                        client.Id,
+                        localReason);
+                    continue;
+                }
+
+                if (!TryGetRemoteSemantics(
+                        mapping.RemotePath,
+                        out var remoteSemantics))
+                {
+                    logger.LogWarning(
+                        "Remote path mapping {MappingId} has ambiguous or non-absolute remote syntax and was ignored for client {ClientId}",
+                        mapping.Id,
+                        client.Id);
+                    continue;
+                }
+
                 if (!FileSystemPathIdentity.TryGetRelativePathWithinBase(
                     mapping.RemotePath,
                     remotePath,
@@ -136,7 +161,7 @@ namespace Listenarr.Infrastructure.Configuration.Paths
 
                 if (string.IsNullOrEmpty(relativePath))
                 {
-                    return FileUtils.NormalizeStoredPath(mapping.LocalPath);
+                    return FileUtils.EnsureTrailingSeparator(localRoot);
                 }
 
                 var remoteSeparators = remoteSemantics.Syntax == FileSystemPathSyntax.Windows
@@ -146,7 +171,7 @@ namespace Listenarr.Infrastructure.Configuration.Paths
                     Path.DirectorySeparatorChar,
                     relativePath.Split(remoteSeparators, StringSplitOptions.RemoveEmptyEntries));
                 if (FileSystemPathIdentity.TryResolveRelativePathWithinBase(
-                    mapping.LocalPath,
+                    localRoot,
                     localRelativePath,
                     FileSystemPathSemantics.CurrentHostDefault,
                     out var mappedPath))
@@ -163,19 +188,43 @@ namespace Listenarr.Infrastructure.Configuration.Paths
             return remotePath;
         }
 
-        private static FileSystemPathSemantics GetRemoteSemantics(string remotePath)
+        private static void RequireUsableRemotePath(string remotePath)
         {
-            var windowsSyntax = remotePath.Length >= 3
+            if (!TryGetRemoteSemantics(remotePath, out _))
+            {
+                throw new ArgumentException(
+                    "RemotePath must use an unambiguous absolute Windows or Unix path syntax.",
+                    nameof(remotePath));
+            }
+        }
+
+        private static bool TryGetRemoteSemantics(
+            string remotePath,
+            out FileSystemPathSemantics semantics)
+        {
+            if (remotePath.Length >= 3
                 && char.IsLetter(remotePath[0])
                 && remotePath[1] == ':'
                 && remotePath[2] is '/' or '\\'
-                || remotePath.StartsWith("\\\\", StringComparison.Ordinal)
-                || remotePath.StartsWith("//", StringComparison.Ordinal);
-            return new FileSystemPathSemantics(
-                windowsSyntax ? FileSystemPathSyntax.Windows : FileSystemPathSyntax.Unix,
-                windowsSyntax
-                    ? FileSystemCaseSensitivity.Insensitive
-                    : FileSystemCaseSensitivity.Sensitive);
+                || remotePath.StartsWith("\\\\", StringComparison.Ordinal))
+            {
+                semantics = new FileSystemPathSemantics(
+                    FileSystemPathSyntax.Windows,
+                    FileSystemCaseSensitivity.Insensitive);
+                return true;
+            }
+
+            if (remotePath.StartsWith("//", StringComparison.Ordinal)
+                || !remotePath.StartsWith("/", StringComparison.Ordinal))
+            {
+                semantics = default;
+                return false;
+            }
+
+            semantics = new FileSystemPathSemantics(
+                FileSystemPathSyntax.Unix,
+                FileSystemCaseSensitivity.Sensitive);
+            return true;
         }
     }
 }

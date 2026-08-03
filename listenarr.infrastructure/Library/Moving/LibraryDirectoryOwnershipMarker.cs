@@ -3,7 +3,7 @@ using Listenarr.Domain.Common;
 
 namespace Listenarr.Infrastructure.Library.Moving;
 
-internal static class LibraryDirectoryOwnershipMarker
+internal static partial class LibraryDirectoryOwnershipMarker
 {
     internal const string FileName = ".listenarr-directory-owner.json";
     internal const int Version = 2;
@@ -282,7 +282,7 @@ internal static class LibraryDirectoryOwnershipMarker
             ownership.DirectoryObjectIdentity);
         var semantics = ownership.GetIdentity().Semantics;
         var pathsMatch = marker != null
-            && FileSystemPathIdentity.AreEquivalent(
+            && MarkerPathMatches(
                 marker.CanonicalPath,
                 expected.CanonicalPath,
                 semantics);
@@ -345,7 +345,7 @@ internal static class LibraryDirectoryOwnershipMarker
 
         var pathsMatch = semantics.HasValue
             ? marker != null
-                && FileSystemPathIdentity.AreEquivalent(
+                && MarkerPathMatches(
                     marker.CanonicalPath,
                     expected.CanonicalPath,
                     semantics.Value)
@@ -448,44 +448,4 @@ internal static class LibraryDirectoryOwnershipMarker
         }
     }
 
-    internal static bool MatchesLegacyPayload(
-        LibraryDirectoryOwnership ownership,
-        MarkerPayload payload) =>
-        payload.Version == 1
-        && string.Equals(
-            payload.OwnershipToken,
-            ownership.OwnershipToken,
-            StringComparison.Ordinal)
-        && FileSystemPathIdentity.AreEquivalent(
-            payload.CanonicalPath,
-            ownership.CanonicalPath,
-            ownership.GetIdentity().Semantics);
-
-    internal static bool MatchesCurrentPayload(
-        LibraryDirectoryOwnership ownership,
-        MarkerPayload payload) =>
-        payload.Version == Version
-        && string.Equals(
-            payload.OwnershipToken,
-            ownership.OwnershipToken,
-            StringComparison.Ordinal)
-        && FileSystemPathIdentity.AreEquivalent(
-            payload.CanonicalPath,
-            ownership.CanonicalPath,
-            ownership.GetIdentity().Semantics)
-        && payload.ManagedRootFolderId == ownership.ManagedRootFolderId
-        && payload.DirectoryObjectIdentityVersion
-            == ownership.DirectoryObjectIdentityVersion
-        && string.Equals(
-            payload.DirectoryObjectIdentity,
-            ownership.DirectoryObjectIdentity,
-            StringComparison.Ordinal);
-
-    internal sealed record MarkerPayload(
-        int Version,
-        string OwnershipToken,
-        string CanonicalPath,
-        int? ManagedRootFolderId = null,
-        int? DirectoryObjectIdentityVersion = null,
-        string? DirectoryObjectIdentity = null);
 }

@@ -86,6 +86,7 @@ internal static class MoveJobTestFactory
             if (tracked != null)
             {
                 tracked.ApplyPathIdentity(fullPath, identity);
+                ApplyPhysicalObjectIdentity(tracked, fullPath);
                 await repository.UpdateAsync(tracked);
                 continue;
             }
@@ -93,6 +94,7 @@ internal static class MoveJobTestFactory
             tracked = AudiobookFile.CreateUnresolved(fullPath);
             tracked.AudiobookId = audiobookId;
             tracked.ApplyPathIdentity(fullPath, identity);
+            ApplyPhysicalObjectIdentity(tracked, fullPath);
             var claim = await repository.ClaimAsync(tracked);
             if (claim.Outcome != AudiobookFileClaimOutcome.Created
                 || claim.File == null)
@@ -104,6 +106,25 @@ internal static class MoveJobTestFactory
 
             existing.Add(claim.File);
         }
+    }
+
+    private static void ApplyPhysicalObjectIdentity(
+        AudiobookFile file,
+        string fullPath)
+    {
+        if (!File.Exists(fullPath))
+        {
+            return;
+        }
+
+        using var parent = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
+            Path.GetDirectoryName(fullPath)!,
+            createMissing: false);
+        using var entry = parent.OpenExistingFileForStableRead(
+            Path.GetFileName(fullPath));
+        file.ApplyPhysicalObjectIdentity(
+            entry.GetObjectIdentity(),
+            DateTime.UtcNow);
     }
 
     private static async Task<IReadOnlyList<MoveSourceManifestEntry>> BuildManifestAsync(

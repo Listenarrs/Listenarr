@@ -44,6 +44,19 @@ namespace Listenarr.Tests.Features.Infrastructure.Metadata.Parsing
         }
 
         [Fact]
+        public async Task ReadEmbeddedTagsAsync_CanceledToken_PropagatesCancellation()
+        {
+            using var cancellation = new CancellationTokenSource();
+            await cancellation.CancelAsync();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                PathMetadataParser.ReadEmbeddedTagsAsync(
+                    "book.m4b",
+                    "ffprobe-does-not-need-to-exist-for-canceled-work",
+                    cancellation.Token));
+        }
+
+        [Fact]
         public void ParseEmbeddedTagsFromFfprobeJson_ParsesStandardAsinTag()
         {
             var doc = JsonDocument.Parse("""

@@ -56,6 +56,63 @@ public sealed class AudiobookFileIdentityReconcilerTests : BaseTests
     }
 
     [Fact]
+    public async Task ReconcileAsync_LegacyFileBackfillsPhysicalIdentityWithoutReplacingKnownGeneration()
+    {
+        var root = FileService.GetTempDirectory("audiobook-file-identity-physical-backfill");
+        var legacyPath = await FileService.GetFileAsync(root, "legacy.m4b", "legacy");
+        var knownPath = await FileService.GetFileAsync(root, "known.m4b", "known");
+        var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+        const string knownPhysicalIdentity = "persisted-known-generation";
+        await using (var setup = new ListenArrDbContext(options))
+        {
+            var legacy = BuildAudiobook(20, root, Path.GetFileName(legacyPath));
+            var known = BuildAudiobook(21, root, Path.GetFileName(knownPath));
+            known.Files[0].ApplyPhysicalObjectIdentity(
+                knownPhysicalIdentity,
+                DateTime.UtcNow);
+            setup.Audiobooks.AddRange(legacy, known);
+            await setup.SaveChangesAsync();
+        }
+
+        var identityResolver = new Mock<IAudiobookFilePathIdentityResolver>(MockBehavior.Strict);
+        identityResolver.Setup(resolver => resolver.ResolveAsync(
+                It.IsAny<Audiobook>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .Returns<Audiobook, string, CancellationToken>((audiobook, path, _) =>
+            {
+                var semantics = FileSystemPathSemantics.CurrentHostDefault;
+                Assert.True(FileSystemPathIdentity.TryResolveRelativePathWithinBase(
+                    audiobook.BasePath!,
+                    path,
+                    semantics,
+                    out var absolutePath));
+                return ValueTask.FromResult(AudiobookFilePathIdentity.CreateValid(
+                    absolutePath,
+                    semantics,
+                    FileSystemCaseSensitivityMode.Auto,
+                    audiobook.BasePath!));
+            });
+        var reconciler = new AudiobookFileIdentityReconciler(
+            new TestDbContextFactory(options),
+            identityResolver.Object,
+            NullLogger<AudiobookFileIdentityReconciler>.Instance);
+
+        await reconciler.ReconcileAsync();
+
+        await using var verification = new ListenArrDbContext(options);
+        var files = await verification.AudiobookFiles
+            .AsNoTracking()
+            .OrderBy(file => file.AudiobookId)
+            .ToListAsync();
+        Assert.False(string.IsNullOrWhiteSpace(files[0].PhysicalObjectIdentity));
+        Assert.NotNull(files[0].PhysicalIdentityObservedAtUtc);
+        Assert.Equal(knownPhysicalIdentity, files[1].PhysicalObjectIdentity);
+    }
+
+    [Fact]
     public async Task ReconcileAsync_ForeignHostPaths_AreUnavailableWithoutPerFileWarning()
     {
         var foreignBasePath = OperatingSystem.IsWindows()

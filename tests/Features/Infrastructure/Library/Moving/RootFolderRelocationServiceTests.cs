@@ -334,6 +334,131 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
         });
     }
 
+    [WindowsFact]
+    public async Task ReconcileActive_ForeignPersistedReservationPath_DoesNotTouchWindowsAlias()
+    {
+        var source = Path.Join(
+            TempRoot,
+            $"reservation-foreign-source-{Guid.NewGuid():N}");
+        var target = Path.Join(
+            TempRoot,
+            $"reservation-foreign-target-{Guid.NewGuid():N}",
+            "nested");
+        Directory.CreateDirectory(source);
+        int rootId;
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            var root = new RootFolder
+            {
+                Name = "Library",
+                Path = source
+            };
+            db.RootFolders.Add(root);
+            await db.SaveChangesAsync();
+            rootId = root.Id;
+        }
+
+        var interrupted = CreateService();
+        interrupted.BeforeReservationMarkerRetirementForTest = _ =>
+            throw new IOException(
+                "Injected crash before post-commit marker retirement.");
+        var result = await interrupted.StartAsync(
+            rootId,
+            BuildRelocationCommand(target));
+        Assert.Equal(RootFolderRelocationStatus.Completed, result.Status);
+
+        List<string> nativeMarkerPaths;
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            var reservations = await db.RootFolderRelocationCreatedDirectories
+                .ToListAsync();
+            nativeMarkerPaths = reservations
+                .Select(reservation => Path.Join(
+                    reservation.CanonicalPath,
+                    ".listenarr-relocation-directory.json"))
+                .ToList();
+            Assert.All(nativeMarkerPaths, path => Assert.True(File.Exists(path)));
+
+            foreach (var reservation in reservations)
+            {
+                reservation.CanonicalPath = "/" + Path.GetRelativePath(
+                        Path.GetPathRoot(reservation.CanonicalPath)!,
+                        reservation.CanonicalPath)
+                    .Replace('\\', '/');
+            }
+            await db.SaveChangesAsync();
+        }
+
+        await CreateService().ReconcileActiveAsync();
+
+        Assert.All(nativeMarkerPaths, path => Assert.True(
+            File.Exists(path),
+            $"Foreign persisted reservation path touched Windows alias: {path}"));
+    }
+
+    [LinuxFact]
+    public async Task ReconcileActive_AmbiguousPersistedReservationPath_PreservesMarker()
+    {
+        var source = Path.Join(
+            TempRoot,
+            $"reservation-ambiguous-source-{Guid.NewGuid():N}");
+        var target = Path.Join(
+            TempRoot,
+            $"reservation-ambiguous-target-{Guid.NewGuid():N}",
+            "nested");
+        Directory.CreateDirectory(source);
+        int rootId;
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            var root = new RootFolder
+            {
+                Name = "Library",
+                Path = source
+            };
+            db.RootFolders.Add(root);
+            await db.SaveChangesAsync();
+            rootId = root.Id;
+        }
+
+        var interrupted = CreateService();
+        interrupted.BeforeReservationMarkerRetirementForTest = _ =>
+            throw new IOException(
+                "Injected crash before post-commit marker retirement.");
+        var result = await interrupted.StartAsync(
+            rootId,
+            BuildRelocationCommand(target));
+        Assert.Equal(RootFolderRelocationStatus.Completed, result.Status);
+
+        List<string> nativeMarkerPaths;
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            var reservations = await db.RootFolderRelocationCreatedDirectories
+                .ToListAsync();
+            nativeMarkerPaths = reservations
+                .Select(reservation => Path.Join(
+                    reservation.CanonicalPath,
+                    ".listenarr-relocation-directory.json"))
+                .ToList();
+            Assert.All(nativeMarkerPaths, path => Assert.True(File.Exists(path)));
+
+            foreach (var reservation in reservations)
+            {
+                var ambiguousPath = "/" + reservation.CanonicalPath;
+                Assert.False(FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+                    ambiguousPath,
+                    out _));
+                reservation.CanonicalPath = ambiguousPath;
+            }
+            await db.SaveChangesAsync();
+        }
+
+        await CreateService().ReconcileActiveAsync();
+
+        Assert.All(nativeMarkerPaths, path => Assert.True(
+            File.Exists(path),
+            $"Ambiguous persisted reservation path retired marker: {path}"));
+    }
+
     [Fact]
     public async Task ReconcileActive_FailedNestedTarget_RemovesOnlyReservedEmptyDirectories()
     {
@@ -1260,6 +1385,135 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
             unrelatedBasePath,
             (await verification.Audiobooks.SingleAsync(audiobook => audiobook.Title == "Unrelated")).BasePath);
         Assert.Empty(await verification.RootFolderRelocations.ToListAsync());
+    }
+
+    [Fact]
+    public async Task MetadataOnlyPathChange_AmbiguousStoredRoot_RewritesAffectedAudiobookPathsUsingConfirmedTargetSyntax()
+    {
+        var target = Path.Join(Path.GetTempPath(), $"repair-ambiguous-root-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(target);
+        var sourceRoot = $"//legacy/library-{Guid.NewGuid():N}";
+        var sourceBook = sourceRoot + "/Author/Title";
+        var sourceFile = sourceBook + "/book.m4b";
+        Assert.False(FileSystemPathIdentity.TryDetectAbsoluteSyntax(sourceRoot, out _));
+        int rootId;
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            var root = new RootFolder
+            {
+                Name = "Ambiguous",
+                Path = sourceRoot,
+                PathIdentityState = PathIdentityState.Unavailable
+            };
+            db.RootFolders.Add(root);
+            db.Audiobooks.Add(new Audiobook
+            {
+                Title = "Affected",
+                BasePath = sourceBook,
+                FilePath = sourceFile,
+                Files = [new AudiobookFile { Path = sourceFile }]
+            });
+            await db.SaveChangesAsync();
+            rootId = root.Id;
+        }
+
+        var result = await CreateService().StartAsync(
+            rootId,
+            new RootFolderPathChangeCommand(
+                target,
+                RootFolderRelocationMode.MetadataOnly,
+                false,
+                "Repaired Ambiguous Root",
+                false,
+                FileSystemCaseSensitivityMode.Auto));
+
+        Assert.Equal(RootFolderRelocationStatus.Completed, result.Status);
+        Assert.Equal(1, result.TotalJobs);
+        Assert.Equal(1, result.CompletedJobs);
+        await using var verification = await _factory.CreateDbContextAsync();
+        Assert.Equal(target, (await verification.RootFolders.SingleAsync()).Path);
+        var affected = await verification.Audiobooks
+            .Include(audiobook => audiobook.Files)
+            .SingleAsync();
+        var expectedBasePath = Path.Join(target, "Author", "Title");
+        Assert.Equal(expectedBasePath, affected.BasePath);
+        Assert.Equal(Path.Join(expectedBasePath, "book.m4b"), affected.FilePath);
+        Assert.Equal(Path.Join(expectedBasePath, "book.m4b"), Assert.Single(affected.Files!).Path);
+        Assert.Empty(await verification.RootFolderRelocations.ToListAsync());
+    }
+
+    [Fact]
+    public async Task MetadataOnlyPathChange_AmbiguousStoredRootWithLiveOwnership_RemainsBlocked()
+    {
+        var nativeSource = Path.Join(TempRoot, $"ambiguous-owned-source-{Guid.NewGuid():N}");
+        var target = Path.Join(TempRoot, $"ambiguous-owned-target-{Guid.NewGuid():N}");
+        var ownedDirectory = Path.Join(nativeSource, "Author");
+        Directory.CreateDirectory(ownedDirectory);
+        Directory.CreateDirectory(target);
+        var ambiguousSource = OperatingSystem.IsWindows()
+            ? "//?/" + Path.GetFullPath(nativeSource).Replace('\\', '/')
+            : "/" + Path.GetFullPath(nativeSource);
+        Assert.False(FileSystemPathIdentity.TryDetectAbsoluteSyntax(ambiguousSource, out _));
+        var ambiguousBook = ambiguousSource.TrimEnd('/') + "/Author/Title";
+        var semantics = FileSystemPathSemantics.CurrentHostDefault;
+        int rootId;
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            var root = new RootFolder
+            {
+                Name = "Ambiguous Owned",
+                Path = ambiguousSource,
+                PathIdentityState = PathIdentityState.Unavailable
+            };
+            db.RootFolders.Add(root);
+            await db.SaveChangesAsync();
+            rootId = root.Id;
+            db.Audiobooks.Add(new Audiobook
+            {
+                Title = "Affected",
+                BasePath = ambiguousBook
+            });
+            db.LibraryDirectoryOwnerships.Add(new LibraryDirectoryOwnership
+            {
+                Path = ownedDirectory,
+                CanonicalPath = ownedDirectory,
+                PathSyntax = semantics.Syntax,
+                PathCaseSensitivity = semantics.CaseSensitivity,
+                PathCaseSensitivityMode = FileSystemCaseSensitivityMode.Auto,
+                PathIdentityBoundary = nativeSource,
+                PathIdentityLookupKey = FileSystemPathIdentity.CreateLookupKey(
+                    "library-directory",
+                    ownedDirectory,
+                    semantics.Syntax),
+                PathOwnershipKey = FileSystemPathIdentity.CreateKey(
+                    "library-directory",
+                    ownedDirectory,
+                    semantics),
+                OwnershipToken = Guid.NewGuid().ToString("N"),
+                CreationWorkflow = "test-fixture",
+                ManagedRootFolderId = rootId,
+                State = LibraryDirectoryOwnershipState.Owned
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            CreateService().StartAsync(
+                rootId,
+                new RootFolderPathChangeCommand(
+                    target,
+                    RootFolderRelocationMode.MetadataOnly,
+                    false,
+                    "Repaired Ambiguous Owned Root",
+                    false,
+                    FileSystemCaseSensitivityMode.Auto)));
+
+        Assert.Contains("source path semantics", exception.Message, StringComparison.OrdinalIgnoreCase);
+        await using var verification = await _factory.CreateDbContextAsync();
+        Assert.Equal(ambiguousSource, (await verification.RootFolders.SingleAsync()).Path);
+        Assert.Equal(ambiguousBook, (await verification.Audiobooks.SingleAsync()).BasePath);
+        Assert.Empty(await verification.RootFolderRelocations.ToListAsync());
+        Assert.Empty(await verification.LibraryDirectoryOwnershipPathMigrations.ToListAsync());
     }
 
     [Fact]
@@ -2986,6 +3240,49 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
         Assert.Contains("tracked-file source manifest", rejected.Error, StringComparison.OrdinalIgnoreCase);
     }
 
+    [WindowsFact]
+    public async Task RetryAsync_ForeignPersistedSourceIdentity_RemainsNeedsAttention()
+    {
+        var (rootId, _, _, target) = await SeedRelocationScenarioAsync();
+        var service = CreateService();
+        var started = await service.StartAsync(
+            rootId,
+            BuildRelocationCommand(target));
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            var relocation = await db.RootFolderRelocations.SingleAsync();
+            var job = await db.MoveJobs.SingleAsync();
+            var nativeSource = Assert.IsType<string>(job.SourcePath);
+            var driveRoot = Path.GetPathRoot(nativeSource)!;
+            var foreignSource = "/" + nativeSource[driveRoot.Length..].Replace('\\', '/');
+            Assert.Equal(
+                Path.GetFullPath(nativeSource),
+                Path.GetFullPath(foreignSource),
+                StringComparer.OrdinalIgnoreCase);
+            job.SourcePath = foreignSource;
+            job.SourcePathSyntax = FileSystemPathSyntax.Unix;
+            job.SourceCaseSensitivity = FileSystemCaseSensitivity.Sensitive;
+            job.SourceCaseSensitivityMode = FileSystemCaseSensitivityMode.Auto;
+            job.SourceIdentityBoundary = foreignSource;
+            job.Status = MoveJobStatus.Failed;
+            job.ActiveDeduplicationKey = null;
+            relocation.Status = RootFolderRelocationStatus.NeedsAttention;
+            await db.SaveChangesAsync();
+        }
+
+        var result = await service.RetryAsync(started.RelocationId!.Value);
+
+        Assert.Equal(RootFolderRelocationStatus.NeedsAttention, result.Status);
+        await using var verification = await _factory.CreateDbContextAsync();
+        var rejected = await verification.MoveJobs.SingleAsync();
+        Assert.Equal(MoveJobStatus.NeedsAttention, rejected.Status);
+        Assert.Null(rejected.ActiveDeduplicationKey);
+        Assert.Contains(
+            "invalid persisted filesystem identity",
+            rejected.Error ?? string.Empty,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public async Task RetryAsync_InvalidPersistedSourceBoundary_RemainsNeedsAttention()
     {
@@ -4513,6 +4810,15 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
         var trackedFile = AudiobookFile.CreateUnresolved(path);
         trackedFile.AudiobookId = audiobook.Id;
         trackedFile.ApplyPathIdentity(path, identity);
+        using (var parent = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
+            Path.GetDirectoryName(path)!,
+            createMissing: false))
+        using (var file = parent.OpenExistingFileForStableRead(Path.GetFileName(path)))
+        {
+            trackedFile.ApplyPhysicalObjectIdentity(
+                file.GetObjectIdentity(),
+                DateTime.UtcNow);
+        }
         db.AudiobookFiles.Add(trackedFile);
         await db.SaveChangesAsync();
     }

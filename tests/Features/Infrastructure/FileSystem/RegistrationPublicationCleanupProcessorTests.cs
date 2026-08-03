@@ -7,6 +7,84 @@ namespace Listenarr.Tests.Features.Infrastructure.FileSystem;
 [Trait("Category", "Infrastructure")]
 public sealed class RegistrationPublicationCleanupProcessorTests : BaseTests
 {
+    [WindowsFact]
+    public async Task RunCycleAsync_ForeignPersistedRoot_DoesNotProcessWindowsAliasCleanup()
+    {
+        var root = FileService.GetTempDirectory("registration-cleanup-foreign-root");
+        var pending = await CreatePendingCleanupAsync(root, audiobookId: 40);
+        var driveRoot = Path.GetPathRoot(root)!;
+        var foreignRoot = "/" + root[driveRoot.Length..].Replace('\\', '/');
+        Assert.Equal(
+            Path.GetFullPath(root),
+            Path.GetFullPath(foreignRoot),
+            StringComparer.OrdinalIgnoreCase);
+        using var provider = BuildProvider(
+            foreignRoot,
+            pending,
+            registeredPhysicalIdentity: null);
+        var processor = CreateProcessor(provider);
+
+        await processor.RunCycleAsync(CancellationToken.None);
+
+        Assert.True(Directory.Exists(pending.StateDirectoryPath));
+        Assert.Equal("audio", await File.ReadAllTextAsync(pending.DestinationPath));
+        Assert.Equal("audio", await File.ReadAllTextAsync(pending.SourcePath));
+    }
+
+    [WindowsFact]
+    public async Task CleanupIntent_ForeignPersistedSourceAlias_IsRejectedBeforeRecovery()
+    {
+        var root = FileService.GetTempDirectory("registration-cleanup-foreign-intent-source");
+        var pending = await CreatePendingCleanupAsync(root, audiobookId: 49);
+        var intentPath = Path.Join(
+            pending.StateDirectoryPath,
+            "registration.cleanup.json");
+        var intent = System.Text.Json.Nodes.JsonNode.Parse(
+            await File.ReadAllTextAsync(intentPath))!;
+        var sourceFullPath = Path.GetFullPath(pending.SourcePath);
+        var foreignSource = "//?/" + sourceFullPath.Replace('\\', '/');
+        Assert.True(File.Exists(foreignSource));
+        Assert.Equal("audio", await File.ReadAllTextAsync(foreignSource));
+        intent["SourcePath"] = foreignSource;
+        await File.WriteAllTextAsync(intentPath, intent.ToJsonString());
+        var mover = new FileMover(
+            NullLogger<FileMover>.Instance,
+            semanticsResolver: new FileSystemSemanticsResolver());
+
+        var candidate = mover.TryReadRegistrationPublicationCleanupCandidate(
+            pending.StateDirectoryPath);
+
+        Assert.Null(candidate);
+        Assert.True(Directory.Exists(pending.StateDirectoryPath));
+        Assert.Equal("audio", await File.ReadAllTextAsync(pending.SourcePath));
+        Assert.Equal("audio", await File.ReadAllTextAsync(pending.DestinationPath));
+    }
+
+    [WindowsFact]
+    public async Task RunCycleAsync_ForeignRegisteredPathAlias_DoesNotProveCommittedRegistration()
+    {
+        var root = FileService.GetTempDirectory("registration-cleanup-foreign-registration");
+        var pending = await CreatePendingCleanupAsync(root, audiobookId: 48);
+        var driveRoot = Path.GetPathRoot(pending.DestinationPath)!;
+        var foreignDestination = "/" + pending.DestinationPath[driveRoot.Length..].Replace('\\', '/');
+        Assert.Equal(
+            Path.GetFullPath(pending.DestinationPath),
+            Path.GetFullPath(foreignDestination),
+            StringComparer.OrdinalIgnoreCase);
+        using var provider = BuildProvider(
+            root,
+            pending,
+            registeredPhysicalIdentity: pending.PhysicalObjectIdentity,
+            registeredPath: foreignDestination);
+        var processor = CreateProcessor(provider);
+
+        await processor.RunCycleAsync(CancellationToken.None);
+
+        Assert.False(Directory.Exists(pending.StateDirectoryPath));
+        Assert.False(File.Exists(pending.DestinationPath));
+        Assert.Equal("audio", await File.ReadAllTextAsync(pending.SourcePath));
+    }
+
     [Fact]
     public async Task RunCycleAsync_ExactCommittedGeneration_RetiresPendingCleanup()
     {
@@ -177,7 +255,8 @@ public sealed class RegistrationPublicationCleanupProcessorTests : BaseTests
         PendingCleanup pending,
         string? registeredPhysicalIdentity,
         FileMover? recoveryMover = null,
-        bool audiobookExists = true)
+        bool audiobookExists = true,
+        string? registeredPath = null)
     {
         var rootRepository = new Mock<IRootFolderRepository>(MockBehavior.Strict);
         rootRepository.Setup(repository => repository.GetAllAsync())
@@ -208,7 +287,8 @@ public sealed class RegistrationPublicationCleanupProcessorTests : BaseTests
         var files = new List<AudiobookFile>();
         if (!string.IsNullOrWhiteSpace(registeredPhysicalIdentity))
         {
-            var file = AudiobookFile.CreateUnresolved(pending.DestinationPath);
+            var file = AudiobookFile.CreateUnresolved(
+                registeredPath ?? pending.DestinationPath);
             file.Id = 1;
             file.AudiobookId = pending.AudiobookId;
             file.ApplyPhysicalObjectIdentity(

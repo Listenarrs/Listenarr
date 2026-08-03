@@ -52,7 +52,7 @@ namespace Listenarr.Api.Features.Library
     [ApiController]
     [Route("api/v{version:apiVersion}/rootfolders")]
     [Tags("Root Folders")]
-    public class RootFoldersController : ControllerBase
+    public partial class RootFoldersController : ControllerBase
     {
         private readonly IRootFolderService _service;
         private readonly IUnmatchedScanQueueService _unmatchedQueue;
@@ -434,37 +434,6 @@ namespace Listenarr.Api.Features.Library
             return Ok(new { lastScannedAt = (DateTime?)null, items = new List<UnmatchedFileResult>() });
         }
 
-        private async Task<FileSystemPathSemantics> ResolveFolderSemanticsAsync(RootFolder folder)
-        {
-            var resolution = await _semanticsResolver.ResolveAsync(folder.Path, folder.CaseSensitivityMode);
-            if (resolution.State != PathIdentityState.Valid)
-            {
-                throw new InvalidOperationException(
-                    resolution.Reason ?? "Root folder filesystem identity could not be resolved.");
-            }
-
-            return resolution.Semantics;
-        }
-
-        private static string? TryCanonicalizePathForComparison(
-            string? path,
-            FileSystemPathSemantics semantics)
-        {
-            if (string.IsNullOrWhiteSpace(path))
-            {
-                return null;
-            }
-
-            try
-            {
-                return FileSystemPathIdentity.Canonicalize(path, semantics.Syntax);
-            }
-            catch (ArgumentException)
-            {
-                return null;
-            }
-        }
-
         private async Task<RootFolderDto> MapAsync(RootFolder root)
         {
             RootFolderPathChangeResult? active = null;
@@ -481,7 +450,7 @@ namespace Listenarr.Api.Features.Library
                 root.Id,
                 root.Name,
                 root.Path,
-                FileSystemPathIdentity.TryDetectAbsoluteSyntaxForHost(
+                FileSystemPathIdentity.TryDetectAbsoluteSyntax(
                     root.Path,
                     out var pathSyntax)
                         ? pathSyntax.ToString()

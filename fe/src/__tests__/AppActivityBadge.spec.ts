@@ -154,7 +154,7 @@ describe('App.vue activity badge', () => {
     const vm = wrapper.vm as unknown as { activityCount: number }
     // The badge should reflect the single active DDL download
     expect(vm.activityCount).toBe(1)
-  }, 20000)
+  })
 
   it('counts DDL downloads regardless of downloadClientId casing', async () => {
     // downloads list contains a DDL downloadClientId in lowercase
@@ -267,7 +267,7 @@ describe('App.vue activity badge', () => {
     const vm = wrapper.vm as unknown as { activityCount: number }
     // With zero active downloads and two queue items, activityCount should reflect the queue
     expect(vm.activityCount).toBe(2)
-  }, 20000)
+  })
 
   it('derives wantedCount from the hydrated library store without polling timers', async () => {
     const setIntervalSpy = vi.spyOn(window, 'setInterval')

@@ -21,6 +21,7 @@ internal sealed partial class AudiobookContentMoveService
             || targetInsideSource
             || sourceInsideTarget
             || (faultInjector != null && !faultInjector.AllowAtomicRename)
+            || request.SourcePhysicalObjectIdentities is { Count: > 0 }
             || !request.DeleteEmptySource
             || IsSourceCleanupBoundary(source, request.SourceCleanupBoundary, sourceSemantics)
             || Directory.Exists(target)
@@ -204,13 +205,20 @@ internal sealed partial class AudiobookContentMoveService
             request.LeaseToken,
             MoveJobPhase.Finalizing,
             cancellationToken);
+        var targetPhysicalObjectIdentities =
+            await CapturePublishedTargetPhysicalIdentitiesAsync(
+                target,
+                manifest,
+                targetSemantics,
+                cancellationToken);
         return new AudiobookContentMoveResult(
             source,
             target,
             false,
             false,
             GetRecoveryMarkerPath(target, request.JobId),
-            SourceCleanupCompleted: true);
+            SourceCleanupCompleted: true,
+            targetPhysicalObjectIdentities);
     }
 
     private async Task DeleteFailedAtomicMarkerAsync(

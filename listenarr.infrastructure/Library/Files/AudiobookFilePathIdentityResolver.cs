@@ -92,10 +92,14 @@ public sealed class AudiobookFilePathIdentityResolver(
         foreach (var root in roots.Where(candidate => !string.IsNullOrWhiteSpace(candidate.Path)))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (!FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+            if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
                     root.Path,
-                    syntax,
-                    out var rootSyntax))
+                    out var canonicalRoot,
+                    out _)
+                || !FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+                    canonicalRoot,
+                    out var rootSyntax)
+                || rootSyntax != syntax)
             {
                 continue;
             }
@@ -107,12 +111,12 @@ public sealed class AudiobookFilePathIdentityResolver(
                 resolution = new FileSystemSemanticsResolution(
                     new FileSystemPathSemantics(rootSyntax, root.ResolvedCaseSensitivity),
                     PathIdentityState.Valid,
-                    FileSystemPathIdentity.Canonicalize(root.Path, rootSyntax));
+                    canonicalRoot);
             }
             else
             {
                 resolution = await semanticsResolver.ResolveAsync(
-                    root.Path,
+                    canonicalRoot,
                     root.CaseSensitivityMode,
                     cancellationToken);
             }
@@ -121,13 +125,12 @@ public sealed class AudiobookFilePathIdentityResolver(
                 || resolution.Semantics.Syntax != syntax
                 || !FileSystemPathIdentity.IsSameOrInside(
                     canonicalPath,
-                    root.Path,
+                    canonicalRoot,
                     resolution.Semantics))
             {
                 continue;
             }
 
-            var canonicalRoot = FileSystemPathIdentity.Canonicalize(root.Path, rootSyntax);
             if (best == null || canonicalRoot.Length > best.CanonicalRootLength)
             {
                 best = new RootMatch(root, resolution, canonicalRoot.Length);
@@ -150,30 +153,16 @@ public sealed class AudiobookFilePathIdentityResolver(
         string path,
         out FileSystemPathSyntax syntax)
     {
-        var hostSyntax = OperatingSystem.IsWindows()
-            ? FileSystemPathSyntax.Windows
-            : FileSystemPathSyntax.Unix;
         FileSystemPathSyntax? baseSyntax = null;
-        if (!string.IsNullOrWhiteSpace(audiobook.BasePath))
+        if (!string.IsNullOrWhiteSpace(audiobook.BasePath)
+            && FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+                audiobook.BasePath,
+                out var detectedBaseSyntax))
         {
-            if (FileSystemPathIdentity.TryDetectAbsoluteSyntax(
-                    audiobook.BasePath,
-                    hostSyntax,
-                    out var contextualBaseSyntax)
-                || FileSystemPathIdentity.TryDetectAbsoluteSyntax(
-                    audiobook.BasePath,
-                    out contextualBaseSyntax))
-            {
-                baseSyntax = contextualBaseSyntax;
-            }
+            baseSyntax = detectedBaseSyntax;
         }
 
-        var preferredSyntax = baseSyntax ?? hostSyntax;
-        if (FileSystemPathIdentity.TryDetectAbsoluteSyntax(
-                path,
-                preferredSyntax,
-                out syntax)
-            || FileSystemPathIdentity.TryDetectAbsoluteSyntax(path, out syntax))
+        if (FileSystemPathIdentity.TryDetectAbsoluteSyntax(path, out syntax))
         {
             return FileSystemPathIdentity.Canonicalize(path, syntax);
         }

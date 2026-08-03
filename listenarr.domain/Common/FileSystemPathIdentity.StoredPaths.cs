@@ -37,6 +37,36 @@ public static partial class FileSystemPathIdentity
         }
     }
 
+    public static bool TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+        string path,
+        out string canonicalPath,
+        out string reason,
+        FileSystemPathSyntax? hostSyntax = null)
+    {
+        canonicalPath = string.Empty;
+        reason = string.Empty;
+        var effectiveHostSyntax = ResolveHostSyntax(hostSyntax);
+        if (!TryDetectAbsoluteSyntax(path, out var detectedSyntax))
+        {
+            reason = IsForwardSlashUncPath(path)
+                ? "The persisted path does not have an unambiguous absolute filesystem syntax."
+                : "The persisted path is not absolute and cannot be resolved without changing its identity.";
+            return false;
+        }
+
+        if (detectedSyntax != effectiveHostSyntax)
+        {
+            reason = $"The persisted path uses {detectedSyntax} filesystem syntax, but this host uses {effectiveHostSyntax} syntax.";
+            return false;
+        }
+
+        return TryCanonicalizeStoredAbsolutePathForHost(
+            path,
+            out canonicalPath,
+            out reason,
+            effectiveHostSyntax);
+    }
+
     public static bool TryCanonicalizeStoredPathWithIdentityForHost(
         string path,
         PathIdentitySnapshot identity,

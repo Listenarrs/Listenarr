@@ -59,12 +59,12 @@ namespace Listenarr.Infrastructure.Library.Moving
         {
             cancellationToken.ThrowIfCancellationRequested();
             var result = new AudiobookFilesystemDeleteResult();
-            var trackedFilePaths = CollectTrackedFilePaths(audiobook);
+            var storedTrackedFilePaths = CollectStoredTrackedFilePaths(audiobook);
             var boundaryPath = !string.IsNullOrWhiteSpace(audiobook.BasePath)
                 ? audiobook.BasePath
                 : !string.IsNullOrWhiteSpace(audiobook.FilePath)
                     ? audiobook.FilePath
-                    : trackedFilePaths.FirstOrDefault();
+                    : storedTrackedFilePaths.FirstOrDefault();
             var semantics = await ResolveDeleteSemanticsAsync(
                 boundaryPath,
                 result,
@@ -75,12 +75,20 @@ namespace Listenarr.Infrastructure.Library.Moving
             }
 
             var deleteSemantics = semantics.Value;
-            var deleteTarget = await ResolveDeleteFolderTargetAsync(
+            var trackedFilePaths = ResolveTrackedFilePaths(
                 audiobook,
-                trackedFilePaths,
+                storedTrackedFilePaths,
                 deleteSemantics,
                 result,
-                cancellationToken);
+                out var hasUnresolvedTrackedPaths);
+            var deleteTarget = hasUnresolvedTrackedPaths
+                ? null
+                : await ResolveDeleteFolderTargetAsync(
+                    audiobook,
+                    trackedFilePaths,
+                    deleteSemantics,
+                    result,
+                    cancellationToken);
 
             if (deleteTarget != null)
             {
@@ -171,6 +179,16 @@ namespace Listenarr.Infrastructure.Library.Moving
                 return null;
             }
 
+            if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                    boundaryPath,
+                    out var canonicalBoundaryPath,
+                    out _))
+            {
+                result.Warnings.Add(
+                    "The audiobook filesystem path is unavailable on the current host, so deletion was blocked.");
+                return null;
+            }
+
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -178,27 +196,27 @@ namespace Listenarr.Infrastructure.Library.Moving
                 var bestRootLength = -1;
                 foreach (var root in await _rootFolderService.GetAllAsync())
                 {
-                    if (string.IsNullOrWhiteSpace(root.Path))
+                    if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                            root.Path,
+                            out var canonicalRoot,
+                            out _))
                     {
                         continue;
                     }
 
                     var rootResolution = await _semanticsResolver.ResolveAsync(
-                        root.Path,
+                        canonicalRoot,
                         root.CaseSensitivityMode,
                         cancellationToken);
                     if (rootResolution.State != PathIdentityState.Valid
                         || !FileSystemPathIdentity.IsSameOrInside(
-                            boundaryPath,
-                            root.Path,
+                            canonicalBoundaryPath,
+                            canonicalRoot,
                             rootResolution.Semantics))
                     {
                         continue;
                     }
 
-                    var canonicalRoot = FileSystemPathIdentity.Canonicalize(
-                        root.Path,
-                        rootResolution.Semantics.Syntax);
                     if (canonicalRoot.Length > bestRootLength)
                     {
                         bestSemantics = rootResolution.Semantics;
@@ -217,7 +235,7 @@ namespace Listenarr.Infrastructure.Library.Moving
             }
 
             var resolution = await _semanticsResolver.ResolveAsync(
-                boundaryPath,
+                canonicalBoundaryPath,
                 cancellationToken: cancellationToken);
             if (resolution.State == PathIdentityState.Valid)
             {
@@ -229,30 +247,92 @@ namespace Listenarr.Infrastructure.Library.Moving
             return null;
         }
 
-        private static IReadOnlyList<string> CollectTrackedFilePaths(Audiobook audiobook)
+        private static IReadOnlyList<string> CollectStoredTrackedFilePaths(Audiobook audiobook)
         {
             var paths = new HashSet<string>(StringComparer.Ordinal);
 
             if (!string.IsNullOrWhiteSpace(audiobook.FilePath))
             {
-                var normalizedLegacy = NormalizePath(audiobook.FilePath);
-                if (!string.IsNullOrWhiteSpace(normalizedLegacy))
-                {
-                    paths.Add(normalizedLegacy);
-                }
+                paths.Add(audiobook.FilePath);
             }
 
             if (audiobook.Files != null)
             {
-                foreach (var normalizedTracked in audiobook.Files
-                    .Select(file => NormalizePath(file.Path))
-                    .Where(normalizedTracked => !string.IsNullOrWhiteSpace(normalizedTracked)))
+                foreach (var storedPath in audiobook.Files
+                    .Select(file => file.Path)
+                    .Where(path => !string.IsNullOrWhiteSpace(path)))
                 {
-                    paths.Add(normalizedTracked!);
+                    paths.Add(storedPath!);
                 }
             }
 
             return paths.ToList();
+        }
+
+        private static IReadOnlyList<string> ResolveTrackedFilePaths(
+            Audiobook audiobook,
+            IEnumerable<string> storedPaths,
+            FileSystemPathSemantics semantics,
+            AudiobookFilesystemDeleteResult result,
+            out bool hasUnresolved)
+        {
+            var paths = new HashSet<string>(semantics.Comparer);
+            hasUnresolved = false;
+            foreach (var storedPath in storedPaths)
+            {
+                if (TryResolveStoredFilePath(
+                        audiobook,
+                        storedPath,
+                        semantics,
+                        out var resolvedPath))
+                {
+                    paths.Add(resolvedPath);
+                }
+                else
+                {
+                    hasUnresolved = true;
+                }
+            }
+
+            if (hasUnresolved)
+            {
+                result.Warnings.Add(
+                    "One or more tracked audiobook file paths are unavailable on the current host and were preserved.");
+            }
+
+            return paths.ToList();
+        }
+
+        private static bool TryResolveStoredFilePath(
+            Audiobook audiobook,
+            string storedPath,
+            FileSystemPathSemantics semantics,
+            out string resolvedPath)
+        {
+            resolvedPath = string.Empty;
+            if (FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                    storedPath,
+                    out resolvedPath,
+                    out _))
+            {
+                return true;
+            }
+
+            if (FileSystemPathIdentity.TryDetectAbsoluteSyntax(storedPath, out _)
+                || !FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                    audiobook.BasePath ?? string.Empty,
+                    out var basePath,
+                    out _))
+            {
+                resolvedPath = string.Empty;
+                return false;
+            }
+
+            return FileSystemPathIdentity.TryResolveRelativePathWithinBase(
+                basePath,
+                storedPath,
+                semantics,
+                out resolvedPath);
         }
 
         private void TryDeleteFile(

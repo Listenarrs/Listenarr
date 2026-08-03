@@ -128,6 +128,12 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                 audiobook,
                 chapterPath,
                 FileService.GetTempPath());
+            var originalPhysicalIdentities = (await _audiobookFileRepository
+                    .GetByAudiobookIdAsync(audiobook.Id))
+                .ToDictionary(
+                    file => file.Path!,
+                    file => file.PhysicalObjectIdentity!,
+                    StringComparer.Ordinal);
             var (queue, job) = await EnqueueProductionManifestMoveAsync(
                 audiobook,
                 target);
@@ -150,8 +156,14 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
             Assert.Equal(Path.GetFullPath(target), updatedAudiobook.FilePath);
             var updatedFiles = Assert.IsAssignableFrom<ICollection<AudiobookFile>>(
                 updatedAudiobook.Files);
-            Assert.Contains(updatedFiles, file => file.Path == Path.Join(target, "book.m4b"));
-            Assert.Contains(updatedFiles, file => file.Path == Path.Join(target, "extras", "chapter2.mp3"));
+            var movedBookPath = Path.Join(target, "book.m4b");
+            var movedChapterPath = Path.Join(target, "extras", "chapter2.mp3");
+            var movedBook = Assert.Single(updatedFiles, file => file.Path == movedBookPath);
+            var movedChapter = Assert.Single(updatedFiles, file => file.Path == movedChapterPath);
+            Assert.Equal(GetPhysicalObjectIdentity(movedBookPath), movedBook.PhysicalObjectIdentity);
+            Assert.Equal(GetPhysicalObjectIdentity(movedChapterPath), movedChapter.PhysicalObjectIdentity);
+            Assert.NotEqual(originalPhysicalIdentities[bookPath], movedBook.PhysicalObjectIdentity);
+            Assert.NotEqual(originalPhysicalIdentities[chapterPath], movedChapter.PhysicalObjectIdentity);
             Assert.DoesNotContain(
                 updatedFiles,
                 file => file.Path?.StartsWith(source, StringComparison.Ordinal) == true);
@@ -202,7 +214,27 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
             var tracked = AudiobookFile.CreateUnresolved(path);
             tracked.AudiobookId = audiobook.Id;
             tracked.ApplyPathIdentity(path, identity);
+            if (File.Exists(path))
+            {
+                using var parent = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
+                    Path.GetDirectoryName(path)!,
+                    createMissing: false);
+                using var file = parent.OpenExistingFileForStableRead(
+                    Path.GetFileName(path));
+                tracked.ApplyPhysicalObjectIdentity(
+                    file.GetObjectIdentity(),
+                    DateTime.UtcNow);
+            }
             await _audiobookFileRepository.AddAsync(tracked);
+        }
+
+        private static string GetPhysicalObjectIdentity(string path)
+        {
+            using var parent = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
+                Path.GetDirectoryName(path)!,
+                createMissing: false);
+            using var file = parent.OpenExistingFileForStableRead(Path.GetFileName(path));
+            return file.GetObjectIdentity();
         }
 
         private static async Task PrepareJobForProcessingAsync(IMoveQueueService queue, MoveJob job)

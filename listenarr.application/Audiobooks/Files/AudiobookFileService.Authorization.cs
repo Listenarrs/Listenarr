@@ -29,7 +29,14 @@ public partial class AudiobookFileService
             }
 
             var candidatePath = ResolveAbsolutePath(physicalPath);
-            var basePath = ResolveAbsolutePath(audiobook.BasePath);
+            var basePath = ResolveStoredAbsolutePathForHost(audiobook.BasePath);
+            if (!string.IsNullOrWhiteSpace(audiobook.BasePath)
+                && string.IsNullOrWhiteSpace(basePath))
+            {
+                return AuthorizedClaimPath.Failed(
+                    "The audiobook base path is unavailable on the current host.");
+            }
+
             var existingDirectory = string.IsNullOrWhiteSpace(basePath)
                 ? ResolveStoredFileDirectory(audiobook)
                 : string.Empty;
@@ -123,15 +130,12 @@ public partial class AudiobookFileService
             return string.Empty;
         }
 
-        var nativeSyntax = OperatingSystem.IsWindows()
-            ? FileSystemPathSyntax.Windows
-            : FileSystemPathSyntax.Unix;
-        if (FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+        if (FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
                 audiobook.FilePath,
-                nativeSyntax,
+                out var absoluteFilePath,
                 out _))
         {
-            return ResolveAbsolutePath(Path.GetDirectoryName(audiobook.FilePath));
+            return Path.GetDirectoryName(absoluteFilePath) ?? string.Empty;
         }
         if (FileSystemPathIdentity.TryDetectAbsoluteSyntax(
                 audiobook.FilePath,
@@ -140,23 +144,42 @@ public partial class AudiobookFileService
             return string.Empty;
         }
 
-        if (string.IsNullOrWhiteSpace(audiobook.BasePath)
-            || !FileSystemPathIdentity.TryDetectAbsoluteSyntax(
-                audiobook.BasePath,
-                nativeSyntax,
-                out var baseSyntax)
-            || !FileSystemPathIdentity.TryResolveRelativePathWithinBase(
-                audiobook.BasePath,
-                audiobook.FilePath,
-                new FileSystemPathSemantics(
-                    baseSyntax,
-                    FileSystemCaseSensitivity.Sensitive),
-                out var absoluteFilePath))
+        var basePath = ResolveStoredAbsolutePathForHost(audiobook.BasePath);
+        if (string.IsNullOrWhiteSpace(basePath))
         {
             return string.Empty;
         }
 
-        return ResolveAbsolutePath(Path.GetDirectoryName(absoluteFilePath));
+        var semantics = new FileSystemPathSemantics(
+            OperatingSystem.IsWindows()
+                ? FileSystemPathSyntax.Windows
+                : FileSystemPathSyntax.Unix,
+            FileSystemCaseSensitivity.Sensitive);
+        if (!FileSystemPathIdentity.TryResolveRelativePathWithinBase(
+                basePath,
+                audiobook.FilePath,
+                semantics,
+                out absoluteFilePath))
+        {
+            return string.Empty;
+        }
+
+        return Path.GetDirectoryName(absoluteFilePath) ?? string.Empty;
+    }
+
+    private static string ResolveStoredAbsolutePathForHost(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return string.Empty;
+        }
+
+        return FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+            path,
+            out var canonicalPath,
+            out _)
+            ? canonicalPath
+            : string.Empty;
     }
 
     private sealed record AuthorizedClaimPath(

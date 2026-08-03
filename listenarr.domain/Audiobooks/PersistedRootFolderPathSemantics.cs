@@ -12,25 +12,55 @@ public static class RootFolderPathSemantics
     {
         ArgumentNullException.ThrowIfNull(root);
 
-        FileSystemPathSyntax syntax;
-        if (root.Path.StartsWith("/", StringComparison.Ordinal))
-        {
-            syntax = FileSystemPathSyntax.Unix;
-        }
-        else if (
-            (root.Path.Length >= 3
-                && char.IsAsciiLetter(root.Path[0])
-                && root.Path[1] == ':'
-                && root.Path[2] is '\\' or '/')
-            || root.Path.StartsWith(@"\\", StringComparison.Ordinal))
-        {
-            syntax = FileSystemPathSyntax.Windows;
-        }
-        else
+        if (!FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+                root.Path,
+                out var syntax))
         {
             return null;
         }
 
+        return CreatePersistedSemantics(root, syntax);
+    }
+
+    public static PersistedRootFolderPathSemantics? ResolveForMetadataRepair(
+        RootFolder root,
+        FileSystemPathSyntax confirmedSyntax)
+    {
+        ArgumentNullException.ThrowIfNull(root);
+        var persisted = ResolvePersisted(root);
+        if (persisted.HasValue)
+        {
+            return persisted;
+        }
+
+        if (!root.Path.StartsWith("//", StringComparison.Ordinal)
+            || !FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+                root.Path,
+                confirmedSyntax,
+                out var detectedSyntax)
+            || detectedSyntax != confirmedSyntax)
+        {
+            return null;
+        }
+
+        // This interpretation is only for explicit metadata-only repair. The
+        // persisted spelling remains unavailable for filesystem authorization.
+        var sensitivity = root.CaseSensitivityMode switch
+        {
+            FileSystemCaseSensitivityMode.Sensitive => FileSystemCaseSensitivity.Sensitive,
+            FileSystemCaseSensitivityMode.Insensitive => FileSystemCaseSensitivity.Insensitive,
+            _ => FileSystemCaseSensitivity.Sensitive
+        };
+        return new PersistedRootFolderPathSemantics(
+            new FileSystemPathSemantics(confirmedSyntax, sensitivity),
+            DetectAmbiguousCaseMatches:
+                root.CaseSensitivityMode == FileSystemCaseSensitivityMode.Auto);
+    }
+
+    private static PersistedRootFolderPathSemantics CreatePersistedSemantics(
+        RootFolder root,
+        FileSystemPathSyntax syntax)
+    {
         var sensitivity = root.CaseSensitivityMode switch
         {
             FileSystemCaseSensitivityMode.Sensitive => FileSystemCaseSensitivity.Sensitive,

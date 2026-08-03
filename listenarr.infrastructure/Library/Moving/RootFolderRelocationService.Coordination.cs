@@ -4,6 +4,24 @@ namespace Listenarr.Infrastructure.Library.Moving;
 
 public sealed partial class RootFolderRelocationService
 {
+    public async Task<RootFolderPathChangeResult> StartAsync(
+        int rootFolderId,
+        RootFolderPathChangeCommand command,
+        CancellationToken cancellationToken = default)
+    {
+        var outcome = await _mutationCoordinator.ExecuteExclusiveAsync(
+            token => ExecuteWithAllAudiobookLocksAsync(
+                lockedToken => StartCoreAsync(rootFolderId, command, lockedToken),
+                token),
+            cancellationToken);
+        if (outcome.Broadcast)
+        {
+            await BroadcastAsync(outcome.Result, cancellationToken);
+        }
+
+        return outcome.Result;
+    }
+
     private async Task<T> ExecuteWithAllAudiobookLocksAsync<T>(
         Func<CancellationToken, Task<T>> operation,
         CancellationToken cancellationToken)

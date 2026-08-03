@@ -167,8 +167,16 @@ namespace Listenarr.Infrastructure.Library.Scanning
             var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
             var appSettings = await configService.GetApplicationSettingsAsync();
             var concurrency = Math.Clamp(appSettings?.UnmatchedScanConcurrency ?? 2, 1, 8);
+            if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                    rootFolderPath,
+                    out var canonicalRootFolderPath,
+                    out var pathReason))
+            {
+                throw new ArgumentException(pathReason, nameof(rootFolderPath));
+            }
+
             var semanticsResolution = await _semanticsResolver.ResolveAsync(
-                rootFolderPath,
+                canonicalRootFolderPath,
                 cancellationToken: ct);
             if (semanticsResolution.State != PathIdentityState.Valid)
             {
@@ -194,7 +202,7 @@ namespace Listenarr.Infrastructure.Library.Scanning
                 semantics.Comparer);
 
             // Walk the root folder tree
-            var candidates = CollectAudioFiles(rootFolderPath, semantics);
+            var candidates = CollectAudioFiles(canonicalRootFolderPath, semantics);
 
             // Filter to untracked files
             var unmatched = candidates
@@ -210,7 +218,7 @@ namespace Listenarr.Infrastructure.Library.Scanning
             //    attached when there is only one primary book group in the folder.
             var folderGroups = unmatched
                 .GroupBy(
-                    f => Path.GetFullPath(Path.GetDirectoryName(f) ?? rootFolderPath),
+                    f => Path.GetFullPath(Path.GetDirectoryName(f) ?? canonicalRootFolderPath),
                     semantics.Comparer)
                 .ToList();
 

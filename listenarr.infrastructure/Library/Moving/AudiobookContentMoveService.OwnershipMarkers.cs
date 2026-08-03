@@ -236,16 +236,48 @@ internal sealed partial class AudiobookContentMoveService
 
         try
         {
-            if (!FileSystemPathIdentity.AreEquivalent(marker.Source, expected.Source, sourceSemantics)
-                || !FileSystemPathIdentity.AreEquivalent(marker.Target, expected.Target, targetSemantics)
-                || !FileSystemPathIdentity.AreEquivalent(
+            if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                    marker.Source,
+                    out var markerSource,
+                    out _,
+                    sourceSemantics.Syntax)
+                || !FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                    marker.Target,
+                    out var markerTarget,
+                    out _,
+                    targetSemantics.Syntax)
+                || !FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
                     marker.DirectoryPath,
+                    out var markerDirectory,
+                    out _,
+                    directorySemantics.Syntax))
+            {
+                throw new MoveNeedsAttentionException(
+                    "The ownership marker contains a path that is unavailable on this host.");
+            }
+
+            string? markerOwnedDirectory = null;
+            if (marker.OwnedDirectoryPath != null
+                && !FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                    marker.OwnedDirectoryPath,
+                    out markerOwnedDirectory,
+                    out _,
+                    directorySemantics.Syntax))
+            {
+                throw new MoveNeedsAttentionException(
+                    "The ownership marker contains an owned-directory path that is unavailable on this host.");
+            }
+
+            if (!FileSystemPathIdentity.AreEquivalent(markerSource, expected.Source, sourceSemantics)
+                || !FileSystemPathIdentity.AreEquivalent(markerTarget, expected.Target, targetSemantics)
+                || !FileSystemPathIdentity.AreEquivalent(
+                    markerDirectory,
                     expected.DirectoryPath,
                     directorySemantics)
-                || (marker.OwnedDirectoryPath != null
+                || (markerOwnedDirectory != null
                     && expected.OwnedDirectoryPath != null
                     && !FileSystemPathIdentity.AreEquivalent(
-                        marker.OwnedDirectoryPath,
+                        markerOwnedDirectory,
                         expected.OwnedDirectoryPath,
                         directorySemantics)))
             {

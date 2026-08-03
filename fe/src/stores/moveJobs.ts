@@ -185,6 +185,8 @@ export const useMoveJobsStore = defineStore('moveJobs', () => {
 
     if (status === 'Completed') {
       toast.success('Move completed', `Files moved to ${next.target || 'selected destination'}`)
+    } else if (status === 'Superseded') {
+      toast.info('Move superseded', 'A newer library state replaced this queued move.')
     } else {
       toast.error(
         status === 'NeedsAttention' ? 'Move needs attention' : 'Move failed',

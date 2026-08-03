@@ -225,6 +225,71 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
             Assert.False(File.Exists(sourcePath));
         }
 
+        [WindowsFact]
+        public async Task ExecuteRename_ForeignUnixBasePath_DoesNotAuthorizeWindowsAlias()
+        {
+            var nativeBase = Path.Join(_tempRoot, "cross-host-organize");
+            var nativeSource = Path.Join(nativeBase, "wrong-name.m4b");
+            var nativeTarget = Path.Join(nativeBase, "Dune.m4b");
+            Directory.CreateDirectory(nativeBase);
+            await File.WriteAllTextAsync(nativeSource, "audio");
+
+            var root = Path.GetPathRoot(nativeBase)!;
+            var foreignBase = "/" + nativeBase[root.Length..].Replace('\\', '/');
+            Assert.Equal(
+                Path.GetFullPath(nativeBase),
+                Path.GetFullPath(foreignBase),
+                StringComparer.OrdinalIgnoreCase);
+
+            var configuredOutput = Path.Join(_tempRoot, "configured-library");
+            var (service, db, _) = BuildService(new ApplicationSettings
+            {
+                OutputPath = configuredOutput,
+                FolderNamingPattern = "{Author}/{Title}",
+                FileNamingPattern = "{Title}"
+            });
+            db.Audiobooks.Add(new Audiobook
+            {
+                Id = 21,
+                Title = "Dune",
+                Authors = ["Frank Herbert"],
+                BasePath = foreignBase,
+                Files =
+                [
+                    new AudiobookFile
+                    {
+                        Id = 211,
+                        AudiobookId = 21,
+                        Path = nativeSource,
+                        Format = "m4b"
+                    }
+                ]
+            });
+            await db.SaveChangesAsync();
+
+            var result = Assert.Single(await service.ExecuteRenameAsync(
+            [
+                new RenameOperation
+                {
+                    AudiobookId = 21,
+                    CurrentFolderSemantics = ExpectedSemantics(nativeBase),
+                    FileRenames =
+                    [
+                        new FileRenameOperation
+                        {
+                            FileId = 211,
+                            CurrentPath = nativeSource,
+                            NewPath = nativeTarget
+                        }
+                    ]
+                }
+            ]));
+
+            Assert.False(result.Success);
+            Assert.True(File.Exists(nativeSource));
+            Assert.False(File.Exists(nativeTarget));
+        }
+
         [Fact]
         public async Task ExecuteRename_RejectsPathsOutsideAllowedRoots()
         {

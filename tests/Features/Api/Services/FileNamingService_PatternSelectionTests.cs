@@ -15,6 +15,8 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using Listenarr.Tests.Common;
+
 namespace Listenarr.Tests.Features.Api.Services
 {
     /// <summary>
@@ -75,6 +77,41 @@ namespace Listenarr.Tests.Features.Api.Services
             var result = await service.GenerateFilePathAsync(metadata, requestedRoot, ".m4b");
 
             Assert.Equal(shouldUseFolderPattern, result.Contains(Path.Join("Author", "Book"), StringComparison.Ordinal));
+        }
+
+        [WindowsFact]
+        public async Task GenerateFilePathAsync_ForeignConfiguredRootAlias_DoesNotOwnNativeCustomBase()
+        {
+            var requestedRoot = Path.GetFullPath(Path.Join(
+                Path.GetTempPath(),
+                $"listenarr-naming-foreign-root-{Guid.NewGuid():N}"));
+            var driveRoot = Path.GetPathRoot(requestedRoot)!;
+            var foreignConfiguredRoot = "/" + requestedRoot[driveRoot.Length..].Replace('\\', '/');
+            Assert.Equal(
+                requestedRoot,
+                Path.GetFullPath(foreignConfiguredRoot),
+                StringComparer.OrdinalIgnoreCase);
+            var settings = new ApplicationSettings
+            {
+                OutputPath = foreignConfiguredRoot,
+                FolderNamingPattern = "{Author}/{Title}",
+                FileNamingPattern = "{Title}"
+            };
+            _mockConfigService.Setup(c => c.GetApplicationSettingsAsync()).ReturnsAsync(settings);
+            var metadata = new AudioMetadata
+            {
+                Title = "Book",
+                Artist = "Author"
+            };
+
+            var result = await _service.GenerateFilePathAsync(
+                metadata,
+                requestedRoot,
+                ".m4b");
+
+            Assert.Equal(
+                Path.Join(requestedRoot, "Book.m4b"),
+                result);
         }
 
         [Fact]

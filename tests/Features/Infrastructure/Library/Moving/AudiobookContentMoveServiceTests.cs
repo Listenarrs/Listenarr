@@ -1618,7 +1618,8 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                     false,
                     false,
                     Path.Join(target, $".listenarr-move-{jobId:N}.pending"),
-                    false),
+                    false,
+                    new Dictionary<string, string>()),
                 CancellationToken.None);
 
             Assert.True(resumed.SourceCleanupCompleted);
@@ -1685,7 +1686,8 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                     false,
                     false,
                     Path.Join(target, $".listenarr-move-{jobId:N}.pending"),
-                    false),
+                    false,
+                    new Dictionary<string, string>()),
                 CancellationToken.None);
 
             Assert.True(resumed.SourceCleanupCompleted);
@@ -1763,7 +1765,8 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                     false,
                     false,
                     Path.Join(target, $".listenarr-move-{jobId:N}.pending"),
-                    false),
+                    false,
+                    new Dictionary<string, string>()),
                 CancellationToken.None));
 
             Assert.True(File.Exists(sourceFile));

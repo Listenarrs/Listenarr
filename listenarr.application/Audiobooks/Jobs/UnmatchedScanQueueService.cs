@@ -154,7 +154,15 @@ namespace Listenarr.Application.Audiobooks.Jobs
         {
             try
             {
-                var resolution = await _semanticsResolver.ResolveAsync(path);
+                if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                        path,
+                        out var canonicalPath,
+                        out _))
+                {
+                    return null;
+                }
+
+                var resolution = await _semanticsResolver.ResolveAsync(canonicalPath);
                 return resolution.State == PathIdentityState.Valid ? resolution.Semantics : null;
             }
             catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))

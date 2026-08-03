@@ -830,6 +830,7 @@ const destinationPathValidationError = computed(() => {
   if (serverDestinationValidationError.value) return serverDestinationValidationError.value
   return validateLibraryDestinationPath(estimatedFullPath.value, {
     pathKind: detectPathKind(estimatedFullPath.value),
+    allowFileSystemRoot: false,
   })
 })
 

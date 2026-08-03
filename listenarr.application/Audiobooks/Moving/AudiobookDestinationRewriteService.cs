@@ -258,12 +258,10 @@ public sealed class AudiobookDestinationRewriteService : IAudiobookDestinationRe
             return null;
         }
 
-        if (FileUtils.TryNormalizeUserProvidedDirectoryPathForCurrentOs(
+        if (FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
             path,
             out var normalizedPath,
-            out var validationReason,
-            allowFileSystemRoot: true,
-            rejectParentTraversal: true))
+            out var validationReason))
         {
             return normalizedPath;
         }
@@ -359,27 +357,13 @@ public sealed class AudiobookDestinationRewriteService : IAudiobookDestinationRe
         catch (Exception exception) when (exception is
             ArgumentException or NotSupportedException or PathTooLongException or System.Security.SecurityException)
         {
-            // If a legacy stored path cannot be canonicalized, keep stale-source protection by
-            // accepting only the exact value the caller read before submitting the repair. The
-            // legacy entity getter may normalize relative stored paths, so also accept the same
-            // normalized storage value that legacy update callers already send.
-            if (string.Equals(expectedSourcePath, sourceBasePath, StringComparison.Ordinal))
-            {
-                return true;
-            }
-
-            try
-            {
-                return string.Equals(
-                    FileUtils.NormalizeStoredPath(expectedSourcePath),
-                    sourceBasePath,
-                    StringComparison.Ordinal);
-            }
-            catch (Exception normalizeException) when (normalizeException is
-                ArgumentException or NotSupportedException or PathTooLongException or System.Security.SecurityException)
-            {
-                return false;
-            }
+            // If a legacy stored path cannot be canonicalized, preserve stale-source
+            // protection by accepting only the exact persisted value the caller observed.
+            // Never reinterpret stored syntax through the current host.
+            return string.Equals(
+                expectedSourcePath,
+                sourceBasePath,
+                StringComparison.Ordinal);
         }
     }
 

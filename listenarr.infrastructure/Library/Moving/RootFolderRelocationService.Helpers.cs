@@ -65,35 +65,49 @@ public sealed partial class RootFolderRelocationService
         string RequestedPath,
         PathIdentitySnapshot TargetIdentity);
 
-    private static bool IsStoredWindowsAbsolutePath(string path) =>
-        (path.Length >= 3
-            && char.IsAsciiLetter(path[0])
-            && path[1] == ':'
-            && path[2] is '\\' or '/')
-        || path.StartsWith(@"\\", StringComparison.Ordinal);
-
     private static (
         List<AudiobookPathCandidate> Affected,
         List<AudiobookPathCandidate> InvalidStoredBasePaths) DiscoverAffectedAudiobooks(
         IEnumerable<AudiobookPathCandidate> audiobooks,
         string sourceRootPath,
         FileSystemPathSemantics sourceSemantics,
-        bool detectAmbiguousCaseMatches)
+        bool detectAmbiguousCaseMatches,
+        bool allowContextualAmbiguousSyntax = false)
     {
         var affected = new List<AudiobookPathCandidate>();
         var invalidStoredBasePaths = new List<AudiobookPathCandidate>();
 
         foreach (var audiobook in audiobooks)
         {
-            var usesWindowsSyntax = IsStoredWindowsAbsolutePath(audiobook.StoredBasePath);
-            var usesUnixSyntax = audiobook.StoredBasePath.StartsWith("/", StringComparison.Ordinal);
-            if ((sourceSemantics.Syntax == FileSystemPathSyntax.Windows && usesUnixSyntax)
-                || (sourceSemantics.Syntax == FileSystemPathSyntax.Unix && usesWindowsSyntax))
+            if (!FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+                    audiobook.StoredBasePath,
+                    out var storedSyntax))
+            {
+                if (!allowContextualAmbiguousSyntax
+                    || !audiobook.StoredBasePath.StartsWith("//", StringComparison.Ordinal)
+                    || !FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+                        audiobook.StoredBasePath,
+                        sourceSemantics.Syntax,
+                        out storedSyntax))
+                {
+                    invalidStoredBasePaths.Add(audiobook);
+                    continue;
+                }
+            }
+
+            if (storedSyntax != sourceSemantics.Syntax)
             {
                 continue;
             }
 
-            if (!usesWindowsSyntax && !usesUnixSyntax)
+            string canonicalStoredBasePath;
+            try
+            {
+                canonicalStoredBasePath = FileSystemPathIdentity.Canonicalize(
+                    audiobook.StoredBasePath,
+                    storedSyntax);
+            }
+            catch (ArgumentException)
             {
                 invalidStoredBasePaths.Add(audiobook);
                 continue;
@@ -102,7 +116,7 @@ public sealed partial class RootFolderRelocationService
             try
             {
                 if (FileSystemPathIdentity.IsSameOrInside(
-                    audiobook.StoredBasePath,
+                    canonicalStoredBasePath,
                     sourceRootPath,
                     sourceSemantics))
                 {
@@ -112,7 +126,7 @@ public sealed partial class RootFolderRelocationService
 
                 if (detectAmbiguousCaseMatches
                     && FileSystemPathIdentity.IsSameOrInside(
-                        audiobook.StoredBasePath,
+                        canonicalStoredBasePath,
                         sourceRootPath,
                         new FileSystemPathSemantics(
                             sourceSemantics.Syntax,
@@ -151,86 +165,6 @@ public sealed partial class RootFolderRelocationService
         }
     }
 
-    private static bool RootBoundaryConflictsWithTarget(
-        RootFolder candidate,
-        string targetPath,
-        string targetIdentityKey,
-        FileSystemPathSemantics targetSemantics)
-    {
-        var candidateSemantics = FileSystemPathIdentity.ResolveComparisonSemantics(
-            candidate.ResolvedCaseSensitivity,
-            targetSemantics);
-        try
-        {
-            return candidate.PathIdentityKey == targetIdentityKey
-                || FileSystemPathIdentity.EvaluateBoundaryConflict(
-                    targetPath,
-                    targetSemantics,
-                    candidate.Path,
-                    candidateSemantics) != FileSystemPathBoundaryConflict.None;
-        }
-        catch (ArgumentException)
-        {
-            return candidate.PathIdentityKey == targetIdentityKey;
-        }
-    }
-
-    private async Task<bool> ActiveBoundaryConflictsWithTargetAsync(
-        string targetPath,
-        FileSystemPathSemantics targetSemantics,
-        string boundaryPath,
-        FileSystemCaseSensitivityMode boundaryMode,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            if (FileSystemPathIdentity.EvaluateBoundaryConflict(
-                    targetPath,
-                    targetSemantics,
-                    boundaryPath,
-                    targetSemantics) != FileSystemPathBoundaryConflict.None)
-            {
-                return true;
-            }
-        }
-        catch (ArgumentException)
-        {
-            return false;
-        }
-
-        FileSystemSemanticsResolution boundaryResolution;
-        try
-        {
-            boundaryResolution = await semanticsResolver.ResolveAsync(
-                boundaryPath,
-                boundaryMode,
-                cancellationToken);
-        }
-        catch (ArgumentException)
-        {
-            return false;
-        }
-        if (boundaryResolution.State == PathIdentityState.Valid)
-        {
-            return FileSystemPathIdentity.EvaluateBoundaryConflict(
-                targetPath,
-                targetSemantics,
-                boundaryPath,
-                boundaryResolution.Semantics) != FileSystemPathBoundaryConflict.None;
-        }
-
-        // If an in-flight relocation boundary cannot be resolved, over-block
-        // case-only overlaps rather than allowing a second relocation to race it.
-        var insensitiveTargetSemantics = new FileSystemPathSemantics(
-            targetSemantics.Syntax,
-            FileSystemCaseSensitivity.Insensitive);
-        return FileSystemPathIdentity.EvaluateBoundaryConflict(
-            targetPath,
-            insensitiveTargetSemantics,
-            boundaryPath,
-            insensitiveTargetSemantics) != FileSystemPathBoundaryConflict.None;
-    }
-
     private async Task FinalizeCompletedRelocationAsync(
         ListenArrDbContext db,
         RootFolderRelocation relocation,
@@ -238,8 +172,18 @@ public sealed partial class RootFolderRelocationService
         DateTime now,
         CancellationToken cancellationToken)
     {
+        if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                relocation.TargetPath,
+                out var canonicalTargetPath,
+                out _))
+        {
+            relocation.Status = RootFolderRelocationStatus.NeedsAttention;
+            relocation.Error = "Target filesystem identity became unavailable during finalization.";
+            return;
+        }
+
         var resolution = await semanticsResolver.ResolveAsync(
-            relocation.TargetPath,
+            canonicalTargetPath,
             relocation.TargetCaseSensitivityMode,
             cancellationToken);
         if (resolution.State != PathIdentityState.Valid)
@@ -250,7 +194,7 @@ public sealed partial class RootFolderRelocationService
         }
         var currentObjectIdentity =
             await ResolveExistingDirectoryObjectIdentityAsync(
-                relocation.TargetPath,
+                canonicalTargetPath,
                 cancellationToken);
         if (!relocation.TargetDirectoryObjectIdentityVersion.HasValue
             || !currentObjectIdentity.IsAvailable
@@ -268,7 +212,7 @@ public sealed partial class RootFolderRelocationService
         }
 
         var command = new RootFolderPathChangeCommand(
-            relocation.TargetPath,
+            canonicalTargetPath,
             relocation.Mode,
             relocation.DeleteEmptySource,
             relocation.DesiredName,
@@ -277,9 +221,9 @@ public sealed partial class RootFolderRelocationService
         ApplyRootMetadata(
             root,
             command,
-            relocation.TargetPath,
+            canonicalTargetPath,
             resolution,
-            FileSystemPathIdentity.CreateKey("root", relocation.TargetPath, resolution.Semantics));
+            FileSystemPathIdentity.CreateKey("root", canonicalTargetPath, resolution.Semantics));
         root.DirectoryObjectIdentityVersion = currentObjectIdentity.Version;
         root.DirectoryObjectIdentity = currentObjectIdentity.Value;
         root.DirectoryObjectIdentityUnavailableReason =
@@ -334,8 +278,21 @@ public sealed partial class RootFolderRelocationService
         FileSystemPathSemantics targetSemantics,
         CancellationToken cancellationToken)
     {
+        if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                relocation.SourcePath,
+                out var canonicalSourcePath,
+                out var sourcePathReason))
+        {
+            foreach (var skippedItem in relocation.SkippedItems)
+            {
+                skippedItem.Reason = sourcePathReason;
+            }
+
+            return;
+        }
+
         var sourceResolution = await semanticsResolver.ResolveAsync(
-            relocation.SourcePath,
+            canonicalSourcePath,
             relocation.SourceCaseSensitivityMode,
             cancellationToken);
         if (sourceResolution.State != PathIdentityState.Valid)

@@ -484,6 +484,60 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Scanning
             Assert.Single(files);
         }
 
+        [WindowsFact]
+        public async Task ProcessJobAsync_ForeignPersistedBasePath_IsAuthorizedBeforeAnyNativeProbe()
+        {
+            var audiobook = new AudiobookBuilder()
+                .WithId(809)
+                .WithTitle("Foreign Scan Base")
+                .WithBasePath($"/listenarr-foreign-scan-{Guid.NewGuid():N}")
+                .Build();
+            Assert.False(Directory.Exists(Path.GetFullPath(audiobook.BasePath!)));
+            var audiobookRepository = new Mock<IAudiobookRepository>();
+            audiobookRepository.Setup(repository => repository.GetByIdAsync(audiobook.Id))
+                .ReturnsAsync(audiobook);
+            var historyRepository = new Mock<IHistoryRepository>();
+            historyRepository.Setup(repository => repository.AddAsync(
+                    It.IsAny<History>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync((History entry, CancellationToken _) => entry);
+            var authorizationService = new Mock<IScanPathAuthorizationService>();
+            authorizationService.Setup(service => service.ResolveDefaultAsync(
+                    audiobook.BasePath,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(ScanPathAuthorizationResult.Rejected(
+                    ScanPathAuthorizationFailure.InvalidPath,
+                    "Foreign persisted scan path rejected."));
+            await using var services = new ServiceCollection()
+                .AddSingleton(audiobookRepository.Object)
+                .AddSingleton(historyRepository.Object)
+                .AddSingleton(new Mock<IAudiobookScanService>().Object)
+                .AddSingleton(authorizationService.Object)
+                .BuildServiceProvider();
+            var queue = Assert.IsType<ScanQueueService>(
+                _provider.GetRequiredService<IScanQueueService>());
+            var jobId = await queue.EnqueueScanAsync(audiobook);
+            Assert.True(queue.Reader.TryRead(out var job));
+            Assert.Equal(jobId, job.Id);
+            var processor = new ScanJobProcessor(
+                queue,
+                services.GetRequiredService<IServiceScopeFactory>(),
+                _provider.GetRequiredService<ILogger<ScanJobProcessor>>(),
+                _provider.GetRequiredService<IHubContext<DownloadHub>>(),
+                _provider.GetRequiredService<IAppMetricsService>(),
+                _provider.GetRequiredService<IFileSystemSemanticsResolver>(),
+                _provider.GetRequiredService<IFilesystemMutationCoordinator>(),
+                _provider.GetRequiredService<IAudiobookOperationCoordinator>());
+
+            await processor.ProcessJobAsync(job, CancellationToken.None);
+
+            authorizationService.Verify(service => service.ResolveDefaultAsync(
+                audiobook.BasePath,
+                It.IsAny<CancellationToken>()), Times.Once);
+            var updated = GetRequiredJob(queue, job.Id);
+            Assert.Equal("Failed", updated.Status);
+        }
+
         [Fact]
         public async Task ProcessJobAsync_AudiobookDeletedBeforeCompletion_MarksMoveScanFailed()
         {

@@ -6,6 +6,44 @@ namespace Listenarr.Tests.Features.Domain.Utils;
 [Trait("Category", "Domain")]
 public sealed class FileSystemPathIdentityTests : BaseTests
 {
+    [Theory]
+    [InlineData(nameof(FileSystemPathSyntax.Unix))]
+    [InlineData(nameof(FileSystemPathSyntax.Windows))]
+    public void UnambiguousStoredAbsolutePath_DoubleForwardSlashIsRejected(
+        string hostSyntaxName)
+    {
+        var accepted = FileSystemPathIdentity
+            .TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                "//server/share/Book",
+                out var canonicalPath,
+                out var reason,
+                Enum.Parse<FileSystemPathSyntax>(hostSyntaxName));
+
+        Assert.False(accepted);
+        Assert.Empty(canonicalPath);
+        Assert.Contains("unambiguous", reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("/library/Book", nameof(FileSystemPathSyntax.Unix), "/library/Book")]
+    [InlineData(@"C:\Library\Book", nameof(FileSystemPathSyntax.Windows), @"C:\Library\Book")]
+    [InlineData(@"\\server\share\Book", nameof(FileSystemPathSyntax.Windows), @"\\server\share\Book")]
+    public void UnambiguousStoredAbsolutePath_ExplicitSyntaxIsAccepted(
+        string path,
+        string hostSyntaxName,
+        string expected)
+    {
+        var accepted = FileSystemPathIdentity
+            .TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                path,
+                out var canonicalPath,
+                out var reason,
+                Enum.Parse<FileSystemPathSyntax>(hostSyntaxName));
+
+        Assert.True(accepted, reason);
+        Assert.Equal(expected, canonicalPath);
+    }
+
     [Fact]
     public void UnixIdentity_PreservesLiteralBackslash()
     {

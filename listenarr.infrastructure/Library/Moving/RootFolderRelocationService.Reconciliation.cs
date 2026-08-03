@@ -228,8 +228,16 @@ public sealed partial class RootFolderRelocationService
             {
                 try
                 {
+                    if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                            root.Path,
+                            out var canonicalRootPath,
+                            out var pathReason))
+                    {
+                        throw new InvalidOperationException(pathReason);
+                    }
+
                     var resolution = await semanticsResolver.ResolveAsync(
-                        root.Path,
+                        canonicalRootPath,
                         root.CaseSensitivityMode,
                         cancellationToken);
                     root.ResolvedCaseSensitivity = resolution.Semantics.CaseSensitivity;
@@ -238,7 +246,10 @@ public sealed partial class RootFolderRelocationService
                     {
                         resolvedRoots.Add((
                             root,
-                            FileSystemPathIdentity.CreateKey("root", root.Path, resolution.Semantics)));
+                            FileSystemPathIdentity.CreateKey(
+                                "root",
+                                canonicalRootPath,
+                                resolution.Semantics)));
                     }
                 }
                 catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)

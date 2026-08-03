@@ -165,6 +165,12 @@ namespace Listenarr.Infrastructure.Library.Moving
                 source,
                 target,
                 targetSemantics);
+            var targetPhysicalObjectIdentities =
+                await contentMoveService.CapturePublishedTargetPhysicalIdentitiesAsync(
+                    job.Id,
+                    target,
+                    targetSemantics,
+                    cancellationToken);
             return new FinalizedMoveRecoveryOutcome(
                 Handled: false,
                 new AudiobookContentMoveResult(
@@ -173,7 +179,8 @@ namespace Listenarr.Infrastructure.Library.Moving
                     targetInsideSource,
                     sourceInsideTarget,
                     Path.Join(target, $".listenarr-move-{job.Id:N}.pending"),
-                    SourceCleanupCompleted: true));
+                    SourceCleanupCompleted: true,
+                    targetPhysicalObjectIdentities));
         }
 
         private static bool HasFinalizedMoveEvidence(
@@ -192,12 +199,19 @@ namespace Listenarr.Infrastructure.Library.Moving
                 return false;
             }
 
+            if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                    audiobook.BasePath,
+                    out var currentBasePath,
+                    out _))
+            {
+                return false;
+            }
+
             try
             {
                 return FileSystemPathIdentity.AreEquivalent(
-                    Path.GetFullPath(audiobook.BasePath)
-                        .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
-                    target.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                    currentBasePath,
+                    target,
                     targetSemantics);
             }
             catch (Exception exception) when (exception is

@@ -70,8 +70,24 @@ public sealed partial class RootFolderRelocationService
                 nameof(confirmedTargetPath));
         }
 
+        var targetPathAvailable =
+            FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                relocation.TargetPath,
+                out var canonicalTargetPath,
+                out var targetPathReason);
+        var sourcePathAvailable =
+            FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                relocation.SourcePath,
+                out var canonicalSourcePath,
+                out var sourcePathReason);
+        if (!targetPathAvailable || !sourcePathAvailable)
+        {
+            throw new InvalidOperationException(
+                $"The relocation paths are unavailable for reauthorization: {targetPathReason}{sourcePathReason}");
+        }
+
         var targetResolution = await semanticsResolver.ResolveAsync(
-            relocation.TargetPath,
+            canonicalTargetPath,
             relocation.TargetCaseSensitivityMode,
             cancellationToken);
         if (targetResolution.State != PathIdentityState.Valid)
@@ -81,7 +97,7 @@ public sealed partial class RootFolderRelocationService
                     ?? "The relocation target filesystem identity is unavailable.");
         }
         var sourceResolution = await semanticsResolver.ResolveAsync(
-            relocation.SourcePath,
+            canonicalSourcePath,
             relocation.SourceCaseSensitivityMode,
             cancellationToken);
         if (sourceResolution.State != PathIdentityState.Valid)
@@ -92,7 +108,7 @@ public sealed partial class RootFolderRelocationService
         }
 
         using var target =
-            PinnedDirectoryCreation.OpenPinnedBoundary(relocation.TargetPath);
+            PinnedDirectoryCreation.OpenPinnedBoundary(canonicalTargetPath);
         if (!target.VisiblePathMatches())
         {
             throw new InvalidOperationException(

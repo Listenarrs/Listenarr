@@ -252,16 +252,17 @@ describe('move jobs store', () => {
     expect(toastMocks.error).not.toHaveBeenCalled()
   })
 
-  it('shows terminal error toast and clears tracked job on Superseded', () => {
+  it('shows informational terminal toast and clears tracked job on Superseded', () => {
     const store = useMoveJobsStore()
     store.trackQueuedJob({ jobId: 'job-1', target: '/library/book' })
 
     signalRMocks.callback?.({ jobId: 'job-1', status: 'Superseded', target: '/library/book' })
 
-    expect(toastMocks.error).toHaveBeenCalledWith(
-      'Move failed',
-      'Move job did not complete. Check the move queue.',
+    expect(toastMocks.info).toHaveBeenCalledWith(
+      'Move superseded',
+      'A newer library state replaced this queued move.',
     )
+    expect(toastMocks.error).not.toHaveBeenCalled()
     expect(store.trackedById['job-1']).toBeUndefined()
   })
 })

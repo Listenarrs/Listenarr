@@ -23,7 +23,8 @@ public sealed class LibraryPreviewPathWorkflow(
         try
         {
             var settings = await configurationService.GetApplicationSettingsAsync();
-            var root = !string.IsNullOrEmpty(request.DestinationRoot)
+            var explicitRoot = !string.IsNullOrEmpty(request.DestinationRoot);
+            var root = explicitRoot
                 ? request.DestinationRoot
                 : settings.OutputPath;
             var audiobook = request.Metadata.ToAudiobook();
@@ -45,15 +46,28 @@ public sealed class LibraryPreviewPathWorkflow(
             var relativePath = fullPath;
             if (!string.IsNullOrEmpty(root))
             {
-                var resolution = await semanticsResolver.ResolveAsync(root);
-                if (resolution.State == PathIdentityState.Valid
-                    && FileSystemPathIdentity.TryGetRelativePathWithinBase(
+                var semanticsRoot = root;
+                if (!explicitRoot
+                    && !FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
                         root,
-                        fullPath,
-                        resolution.Semantics,
-                        out var resolvedRelativePath))
+                        out semanticsRoot,
+                        out _))
                 {
-                    relativePath = resolvedRelativePath;
+                    semanticsRoot = null;
+                }
+
+                if (!string.IsNullOrWhiteSpace(semanticsRoot))
+                {
+                    var resolution = await semanticsResolver.ResolveAsync(semanticsRoot);
+                    if (resolution.State == PathIdentityState.Valid
+                        && FileSystemPathIdentity.TryGetRelativePathWithinBase(
+                            semanticsRoot,
+                            fullPath,
+                            resolution.Semantics,
+                            out var resolvedRelativePath))
+                    {
+                        relativePath = resolvedRelativePath;
+                    }
                 }
             }
 

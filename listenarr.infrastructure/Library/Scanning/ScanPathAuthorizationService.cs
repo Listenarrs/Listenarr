@@ -87,7 +87,14 @@ internal sealed class ScanPathAuthorizationService(
     {
         if (!string.IsNullOrWhiteSpace(preferredPath))
         {
-            return await AuthorizeAsync(preferredPath, cancellationToken);
+            if (!TryGetStoredFullPath(preferredPath, out var storedPreferredPath))
+            {
+                return ScanPathAuthorizationResult.Rejected(
+                    ScanPathAuthorizationFailure.InvalidPath,
+                    "The persisted scan path is unavailable on this host.");
+            }
+
+            return await AuthorizeAsync(storedPreferredPath, cancellationToken);
         }
 
         ApplicationSettings? settings;
@@ -112,7 +119,14 @@ internal sealed class ScanPathAuthorizationService(
                 "No default scan path is configured.");
         }
 
-        return await AuthorizeAsync(settings.OutputPath, cancellationToken);
+        if (!TryGetStoredFullPath(settings.OutputPath, out var storedOutputPath))
+        {
+            return ScanPathAuthorizationResult.Rejected(
+                ScanPathAuthorizationFailure.InvalidPath,
+                "The configured output path is unavailable on this host.");
+        }
+
+        return await AuthorizeAsync(storedOutputPath, cancellationToken);
     }
 
     private async Task<IReadOnlyList<AuthorizedRoot>> LoadAuthorizedRootsAsync(
@@ -136,7 +150,7 @@ internal sealed class ScanPathAuthorizationService(
         foreach (var candidate in candidates)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (!TryGetFullPath(candidate.Path, out var fullPath))
+            if (!TryGetStoredFullPath(candidate.Path, out var fullPath))
             {
                 logger.LogWarning(
                     "Ignoring invalid configured scan root {Path}",
@@ -302,22 +316,23 @@ internal sealed class ScanPathAuthorizationService(
         out string fullPath)
     {
         fullPath = string.Empty;
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return false;
-        }
+        return !string.IsNullOrWhiteSpace(path)
+            && FileSystemPathIdentity.TryCanonicalizeStoredAbsolutePathForHost(
+                path,
+                out fullPath,
+                out _);
+    }
 
-        try
-        {
-            fullPath = Path.GetFullPath(path);
-            return true;
-        }
-        catch (Exception exception) when (exception is
-            ArgumentException or NotSupportedException or PathTooLongException
-            or System.Security.SecurityException)
-        {
-            return false;
-        }
+    private static bool TryGetStoredFullPath(
+        string? path,
+        out string fullPath)
+    {
+        fullPath = string.Empty;
+        return !string.IsNullOrWhiteSpace(path)
+            && FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                path,
+                out fullPath,
+                out _);
     }
 
     private sealed record RootCandidate(

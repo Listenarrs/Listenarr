@@ -175,7 +175,7 @@ internal partial class MoveJobProcessor
 
                 hasFilesystemExecutionEvidence = executionEvidence.Value;
                 if (!hasFilesystemExecutionEvidence
-                    && !await ValidateSourceStateBeforeMutationAsync(
+                    && await ValidateSourceStateBeforeMutationAsync(
                         job,
                         source,
                         recoverySourceIdentity.Value,
@@ -183,7 +183,7 @@ internal partial class MoveJobProcessor
                         targetIdentity,
                         recoveredMove: null,
                         hasFilesystemExecutionEvidence: false,
-                        stoppingToken))
+                        stoppingToken) == null)
                 {
                     return;
                 }
@@ -233,17 +233,40 @@ internal partial class MoveJobProcessor
                 return;
             }
 
-            if (!await ValidateSourceStateBeforeMutationAsync(
-                    job,
-                    source,
-                    sourceIdentity,
-                    target,
-                    targetIdentity,
-                    recoveredMove,
-                    hasFilesystemExecutionEvidence,
-                    stoppingToken))
+            var currentAudiobook = await ValidateSourceStateBeforeMutationAsync(
+                job,
+                source,
+                sourceIdentity,
+                target,
+                targetIdentity,
+                recoveredMove,
+                hasFilesystemExecutionEvidence,
+                stoppingToken);
+            if (currentAudiobook == null)
             {
                 return;
+            }
+
+            audiobook = currentAudiobook;
+            IReadOnlyDictionary<string, string>? sourcePhysicalObjectIdentities = null;
+            if (recoveredMove?.SourceCleanupCompleted != true)
+            {
+                try
+                {
+                    sourcePhysicalObjectIdentities = BuildSourcePhysicalObjectIdentities(
+                        audiobook,
+                        job,
+                        source,
+                        sourceIdentity.Semantics);
+                }
+                catch (MoveNeedsAttentionException exception)
+                {
+                    await MarkSourceStateNeedsAttentionAsync(
+                        job,
+                        exception.Message,
+                        stoppingToken);
+                    return;
+                }
             }
 
             if (recoveredMove == null && !Directory.Exists(source))
@@ -284,6 +307,7 @@ internal partial class MoveJobProcessor
                 targetSemantics,
                 cleanupBoundaryResolution,
                 recoveredMove,
+                sourcePhysicalObjectIdentities,
                 scope,
                 registerPostCommit,
                 stoppingToken);
@@ -318,6 +342,7 @@ internal partial class MoveJobProcessor
         FileSystemPathSemantics targetSemantics,
         MoveCleanupBoundaryResolution cleanupBoundaryResolution,
         AudiobookContentMoveResult? recoveredMove,
+        IReadOnlyDictionary<string, string>? sourcePhysicalObjectIdentities,
         IServiceScope scope,
         Action<MovePostCommitContext> registerPostCommit,
         CancellationToken stoppingToken)
@@ -333,7 +358,8 @@ internal partial class MoveJobProcessor
                 sourceSemantics,
                 targetSemantics,
                 CreateLeaseToken(job),
-                cleanupBoundaryResolution.Boundary);
+                cleanupBoundaryResolution.Boundary,
+                SourcePhysicalObjectIdentities: sourcePhysicalObjectIdentities);
             var moveResult = recoveredMove ?? await contentMoveService.MoveContentsAsync(moveRequest, stoppingToken);
             moveResult = await contentMoveService.ResumeSourceCleanupAsync(moveRequest, moveResult, stoppingToken);
             source = moveResult.Source;
@@ -354,6 +380,7 @@ internal partial class MoveJobProcessor
                     rewriteRepository,
                     logger,
                     stoppingToken,
+                    moveResult.TargetPhysicalObjectIdentities,
                     targetCaseSensitivityMode);
             }
 

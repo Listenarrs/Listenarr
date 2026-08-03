@@ -107,13 +107,20 @@ internal sealed partial class AudiobookContentMoveService
                 manifest,
                 targetSemantics,
                 cancellationToken);
+            var atomicTargetPhysicalObjectIdentities =
+                await CapturePublishedTargetPhysicalIdentitiesAsync(
+                    target,
+                    manifest,
+                    targetSemantics,
+                    cancellationToken);
             return new AudiobookContentMoveResult(
                 source,
                 target,
                 TargetInsideSource: false,
                 SourceInsideTarget: false,
                 recoveryMarkerPath,
-                SourceCleanupCompleted: true);
+                SourceCleanupCompleted: true,
+                atomicTargetPhysicalObjectIdentities);
         }
 
         if (manifest.Count == 0)
@@ -180,13 +187,20 @@ internal sealed partial class AudiobookContentMoveService
                 manifest);
         }
 
+        var targetPhysicalObjectIdentities =
+            await CapturePublishedTargetPhysicalIdentitiesAsync(
+                target,
+                manifest,
+                targetSemantics,
+                cancellationToken);
         return new AudiobookContentMoveResult(
             source,
             target,
             targetInsideSource,
             sourceInsideTarget,
             recoveryMarkerPath,
-            sourceCleanupCompleted);
+            sourceCleanupCompleted,
+            targetPhysicalObjectIdentities);
     }
 
     public async Task<AudiobookContentMoveResult> ResumeSourceCleanupAsync(
@@ -223,6 +237,7 @@ internal sealed partial class AudiobookContentMoveService
             request.TargetSemantics,
             request.TargetDirectoryOwnership,
             request.SourceCleanupBoundary,
+            request.SourcePhysicalObjectIdentities,
             cancellationToken);
         VerifySourceCleanupState(
             request,
@@ -236,6 +251,16 @@ internal sealed partial class AudiobookContentMoveService
             result.Target,
             SourceCleanupCompletedStage,
             cancellationToken);
-        return result with { SourceCleanupCompleted = true };
+        var targetPhysicalObjectIdentities =
+            await CapturePublishedTargetPhysicalIdentitiesAsync(
+                result.Target,
+                manifest,
+                request.TargetSemantics,
+                cancellationToken);
+        return result with
+        {
+            SourceCleanupCompleted = true,
+            TargetPhysicalObjectIdentities = targetPhysicalObjectIdentities
+        };
     }
 }

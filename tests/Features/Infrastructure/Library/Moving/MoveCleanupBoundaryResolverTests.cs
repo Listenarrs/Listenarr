@@ -62,6 +62,32 @@ public sealed class MoveCleanupBoundaryResolverTests : BaseTests
         Assert.Contains("no longer contains", result.Reason, StringComparison.OrdinalIgnoreCase);
     }
 
+    [WindowsFact]
+    public async Task ResolveAsync_AmbiguousPersistedBoundaryAlias_IsUnavailable()
+    {
+        var configuredRoot = FileService.GetTempDirectory("move-boundary-foreign-persisted");
+        var source = Path.Join(configuredRoot, "Author", "Title", "test");
+        var target = Path.Join(
+            FileService.GetTempDirectory("move-boundary-foreign-persisted-target"),
+            "Author",
+            "Title",
+            "test");
+        var persistedBoundary = Path.Join(configuredRoot, "Author");
+        var ambiguousBoundary = "//?/" + persistedBoundary.Replace('\\', '/');
+        Assert.True(Directory.Exists("//?/" + configuredRoot.Replace('\\', '/')));
+        var resolver = CreateResolver();
+
+        var result = await resolver.ResolveAsync(
+            source,
+            target,
+            [],
+            ambiguousBoundary);
+
+        Assert.False(result.IsAvailable);
+        Assert.Equal(MoveCleanupBoundaryKind.Unavailable, result.Kind);
+        Assert.Contains("unambiguous", result.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public async Task ResolveAsync_BroadPersistedBoundary_IsNarrowedToConfiguredRoot()
     {

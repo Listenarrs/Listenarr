@@ -8,11 +8,19 @@ public partial class DownloadImportService
         string basePath,
         CancellationToken cancellationToken)
     {
+        if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                basePath,
+                out var canonicalBasePath,
+                out var reason))
+        {
+            throw new InvalidOperationException(reason);
+        }
+
         var mode = await ResolveDestinationCaseSensitivityModeAsync(
-            basePath,
+            canonicalBasePath,
             cancellationToken);
         var resolution = await semanticsResolver.ResolveAsync(
-            basePath,
+            canonicalBasePath,
             mode,
             cancellationToken);
         return resolution.State == PathIdentityState.Valid
@@ -31,34 +39,37 @@ public partial class DownloadImportService
         foreach (var root in await rootFolderService.GetAllAsync())
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (string.IsNullOrWhiteSpace(root.Path))
+            if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                    root.Path,
+                    out var canonicalRoot,
+                    out _))
             {
                 continue;
             }
 
             var rootResolution = await semanticsResolver.ResolveAsync(
-                root.Path,
+                canonicalRoot,
                 root.CaseSensitivityMode,
                 cancellationToken);
             if (rootResolution.State != PathIdentityState.Valid
                 || rootResolution.Semantics != destinationResolution.Semantics
                 || !FileSystemPathIdentity.IsSameOrInside(
                     basePath,
-                    root.Path,
+                    canonicalRoot,
                     rootResolution.Semantics))
             {
                 continue;
             }
 
-            var canonicalRoot = FileSystemPathIdentity.Canonicalize(
+            var canonicalBoundaryRoot = FileSystemPathIdentity.Canonicalize(
                 string.IsNullOrWhiteSpace(rootResolution.CanonicalPath)
-                    ? root.Path
+                    ? canonicalRoot
                     : rootResolution.CanonicalPath,
                 rootResolution.Semantics.Syntax);
-            if (canonicalRoot.Length > bestLength)
+            if (canonicalBoundaryRoot.Length > bestLength)
             {
-                bestBoundary = canonicalRoot;
-                bestLength = canonicalRoot.Length;
+                bestBoundary = canonicalBoundaryRoot;
+                bestLength = canonicalBoundaryRoot.Length;
             }
         }
 
@@ -83,27 +94,27 @@ public partial class DownloadImportService
         foreach (var root in await rootFolderService.GetAllAsync())
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (string.IsNullOrWhiteSpace(root.Path))
+            if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                    root.Path,
+                    out var canonicalRoot,
+                    out _))
             {
                 continue;
             }
 
             var resolution = await semanticsResolver.ResolveAsync(
-                root.Path,
+                canonicalRoot,
                 root.CaseSensitivityMode,
                 cancellationToken);
             if (resolution.State != PathIdentityState.Valid
                 || !FileSystemPathIdentity.IsSameOrInside(
                     basePath,
-                    root.Path,
+                    canonicalRoot,
                     resolution.Semantics))
             {
                 continue;
             }
 
-            var canonicalRoot = FileSystemPathIdentity.Canonicalize(
-                root.Path,
-                resolution.Semantics.Syntax);
             if (canonicalRoot.Length > bestRootLength)
             {
                 bestRoot = root;

@@ -75,6 +75,60 @@ public partial class AudiobookContentMoveServiceTests
             ".listenarr-quarantine-owner.json")));
     }
 
+    [LinuxFact]
+    public async Task ResumeSourceCleanup_AmbiguousPersistedQuarantineMarkerPath_PreservesMatchingFile()
+    {
+        var source = FileService.GetTempDirectory("content-move-ambiguous-quarantine-src");
+        var target = FileService.GetTempDirectory("content-move-ambiguous-quarantine-dst");
+        var jobId = Guid.NewGuid();
+        var quarantineRoot = Path.Join(
+            Path.GetDirectoryName(source)!,
+            $".listenarr-quarantine-{jobId:N}");
+        Directory.CreateDirectory(quarantineRoot);
+        var ambiguousSource = "/" + Path.GetFullPath(source);
+        Assert.False(FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+            ambiguousSource,
+            out _));
+        await File.WriteAllTextAsync(
+            Path.Join(quarantineRoot, ".listenarr-quarantine-owner.json"),
+            System.Text.Json.JsonSerializer.Serialize(new
+            {
+                Version = 1,
+                ArtifactType = "quarantine-directory",
+                JobId = jobId,
+                Source = ambiguousSource,
+                Target = Path.GetFullPath(target),
+                DirectoryPath = Path.GetFullPath(quarantineRoot),
+                OwnedArtifactType = (string?)null
+            }));
+        var destination = await FileService.GetFileAsync(
+            target,
+            "book.m4b",
+            "verified audio");
+        var quarantineFile = await FileService.GetFileAsync(
+            quarantineRoot,
+            "book.m4b",
+            "verified audio");
+        await PersistQuarantinedEntryAsync(
+            jobId,
+            source,
+            target,
+            "book.m4b",
+            destination);
+
+        await Assert.ThrowsAsync<MoveNeedsAttentionException>(() =>
+            _provider.GetRequiredService<AudiobookContentMoveService>()
+                .ResumeSourceCleanupAsync(
+                    CreateCleanupRequest(source, target, jobId),
+                    CreateIncompleteCleanupResult(source, target, jobId),
+                    CancellationToken.None));
+
+        Assert.True(File.Exists(quarantineFile));
+        Assert.True(File.Exists(Path.Join(
+            quarantineRoot,
+            ".listenarr-quarantine-owner.json")));
+    }
+
     [Fact]
     public async Task ResumeSourceCleanup_UnexpectedOwnedQuarantineContent_PreservesOwnershipEvidence()
     {
@@ -308,5 +362,6 @@ public partial class AudiobookContentMoveServiceTests
             false,
             false,
             Path.Join(target, $".listenarr-move-{jobId:N}.pending"),
-            false);
+            false,
+            new Dictionary<string, string>());
 }

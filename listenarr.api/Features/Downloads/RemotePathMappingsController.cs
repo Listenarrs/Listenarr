@@ -46,7 +46,7 @@ public class RemotePathMappingsController(
         catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
         {
             logger.LogError(ex, "Failed to retrieve remote path mappings");
-            return StatusCode(500, new { error = "Failed to retrieve remote path mappings", details = ex.Message });
+            return StatusCode(500, new { error = "Failed to retrieve remote path mappings" });
         }
     }
 
@@ -70,7 +70,7 @@ public class RemotePathMappingsController(
         catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
         {
             logger.LogError(ex, "Failed to retrieve remote path mapping {MappingId}", id);
-            return StatusCode(500, new { error = "Failed to retrieve remote path mapping", details = ex.Message });
+            return StatusCode(500, new { error = "Failed to retrieve remote path mapping" });
         }
     }
 
@@ -95,7 +95,7 @@ public class RemotePathMappingsController(
         catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
         {
             logger.LogError(ex, "Failed to retrieve remote path mappings for client {ClientId}", downloadClientId);
-            return StatusCode(500, new { error = "Failed to retrieve remote path mappings", details = ex.Message });
+            return StatusCode(500, new { error = "Failed to retrieve remote path mappings" });
         }
     }
 
@@ -127,10 +127,15 @@ public class RemotePathMappingsController(
             var created = await remotePathMappingService.CreateAsync(mapping);
             return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
         }
+        catch (ArgumentException ex)
+        {
+            logger.LogWarning(ex, "Rejected invalid remote path mapping");
+            return BadRequest(new { error = "Remote path mapping is invalid for this host." });
+        }
         catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
         {
             logger.LogError(ex, "Failed to create remote path mapping");
-            return StatusCode(500, new { error = "Failed to create remote path mapping", details = ex.Message });
+            return StatusCode(500, new { error = "Failed to create remote path mapping" });
         }
     }
 
@@ -170,12 +175,18 @@ public class RemotePathMappingsController(
         }
         catch (KeyNotFoundException ex)
         {
-            return NotFound(new { error = ex.Message });
+            logger.LogInformation(ex, "Remote path mapping {MappingId} was not found during update", id);
+            return NotFound(new { error = $"Remote path mapping with ID {id} not found" });
+        }
+        catch (ArgumentException ex)
+        {
+            logger.LogWarning(ex, "Rejected invalid remote path mapping {MappingId}", id);
+            return BadRequest(new { error = "Remote path mapping is invalid for this host." });
         }
         catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
         {
             logger.LogError(ex, "Failed to update remote path mapping {MappingId}", id);
-            return StatusCode(500, new { error = "Failed to update remote path mapping", details = ex.Message });
+            return StatusCode(500, new { error = "Failed to update remote path mapping" });
         }
     }
 
@@ -199,7 +210,7 @@ public class RemotePathMappingsController(
         catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
         {
             logger.LogError(ex, "Failed to delete remote path mapping {MappingId}", id);
-            return StatusCode(500, new { error = "Failed to delete remote path mapping", details = ex.Message });
+            return StatusCode(500, new { error = "Failed to delete remote path mapping" });
         }
     }
 
@@ -240,7 +251,7 @@ public class RemotePathMappingsController(
         catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
         {
             logger.LogError(ex, "Failed to translate path");
-            return StatusCode(500, new { error = "Failed to translate path", details = ex.Message });
+            return StatusCode(500, new { error = "Failed to translate path" });
         }
     }
 

@@ -199,8 +199,24 @@ public sealed partial class RootFolderRelocationService
         var targetSemantics = new FileSystemPathSemantics(
             plans[0].Journal.TargetPathSyntax,
             plans[0].Journal.TargetCaseSensitivity);
+        var sourcePathAvailable =
+            FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                relocation.SourcePath,
+                out var canonicalSourcePath,
+                out var sourceReason);
+        var targetPathAvailable =
+            FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                relocation.TargetPath,
+                out var canonicalTargetPath,
+                out var targetReason);
+        if (!sourcePathAvailable || !targetPathAvailable)
+        {
+            throw new InvalidOperationException(
+                $"The relocation path is unavailable for ownership recovery: {sourceReason}{targetReason}");
+        }
+
         var targetResolution = await semanticsResolver.ResolveAsync(
-            relocation.TargetPath,
+            canonicalTargetPath,
             relocation.TargetCaseSensitivityMode,
             cancellationToken);
         if (targetResolution.State != PathIdentityState.Valid
@@ -233,7 +249,7 @@ public sealed partial class RootFolderRelocationService
             .ToList();
         var (affected, invalid) = DiscoverAffectedAudiobooks(
             candidates,
-            relocation.SourcePath,
+            canonicalSourcePath,
             sourceSemantics,
             detectAmbiguousCaseMatches: false);
 

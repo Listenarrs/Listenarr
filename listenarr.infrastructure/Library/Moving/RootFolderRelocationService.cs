@@ -25,24 +25,6 @@ public sealed partial class RootFolderRelocationService(
     private readonly IDirectoryObjectIdentityResolver? _directoryObjectIdentityResolver =
         directoryObjectIdentityResolver;
     private bool _rootIdentitiesReconciled;
-    public async Task<RootFolderPathChangeResult> StartAsync(
-        int rootFolderId,
-        RootFolderPathChangeCommand command,
-        CancellationToken cancellationToken = default)
-    {
-        var outcome = await _mutationCoordinator.ExecuteExclusiveAsync(
-            token => ExecuteWithAllAudiobookLocksAsync(
-                lockedToken => StartCoreAsync(rootFolderId, command, lockedToken),
-                token),
-            cancellationToken);
-        if (outcome.Broadcast)
-        {
-            await BroadcastAsync(outcome.Result, cancellationToken);
-        }
-
-        return outcome.Result;
-    }
-
     private async Task<StartOutcome> StartCoreAsync(
         int rootFolderId,
         RootFolderPathChangeCommand command,
@@ -92,13 +74,19 @@ public sealed partial class RootFolderRelocationService(
         FileSystemSemanticsResolution? sourceResolution = null;
         try
         {
-            var resolvedSource = await semanticsResolver.ResolveAsync(
-                root.Path,
-                root.CaseSensitivityMode,
-                cancellationToken);
-            if (resolvedSource.State == PathIdentityState.Valid)
+            if (FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                    root.Path,
+                    out var canonicalSourcePath,
+                    out _))
             {
-                sourceResolution = resolvedSource;
+                var resolvedSource = await semanticsResolver.ResolveAsync(
+                    canonicalSourcePath,
+                    root.CaseSensitivityMode,
+                    cancellationToken);
+                if (resolvedSource.State == PathIdentityState.Valid)
+                {
+                    sourceResolution = resolvedSource;
+                }
             }
         }
         catch (Exception exception) when (exception is
@@ -115,8 +103,12 @@ public sealed partial class RootFolderRelocationService(
                 "The current root folder path is invalid or unavailable; use metadata-only path change to repair it before relocating files.");
         }
 
-        var sourceOperationSemantics = RootFolderPathSemantics.ResolvePersisted(root)?.Semantics
-            ?? sourceResolution?.Semantics;
+        var sourcePathSemantics = ResolveStartSourcePathSemantics(
+            root,
+            sourceResolution,
+            command.Mode,
+            targetResolution.Semantics.Syntax);
+        var sourceOperationSemantics = sourcePathSemantics.SourceOperationSemantics;
         if (sourceOperationSemantics.HasValue
             && command.Mode != RootFolderRelocationMode.MetadataOnly
             && sourceOperationSemantics.Value.Syntax == targetResolution.Semantics.Syntax
@@ -130,16 +122,11 @@ public sealed partial class RootFolderRelocationService(
                 nameof(command));
         }
 
-        var storedSourcePathSemantics = RootFolderPathSemantics.ResolvePersisted(root)
-            ?? (sourceResolution == null
-                ? null
-                : new PersistedRootFolderPathSemantics(sourceResolution.Semantics, false));
-        var sourceCaseSensitivityMode = sourceOperationSemantics?.CaseSensitivity switch
-        {
-            FileSystemCaseSensitivity.Sensitive => FileSystemCaseSensitivityMode.Sensitive,
-            FileSystemCaseSensitivity.Insensitive => FileSystemCaseSensitivityMode.Insensitive,
-            _ => root.CaseSensitivityMode
-        };
+        var storedSourcePathSemantics = sourcePathSemantics.StoredSourcePathSemantics;
+        var metadataSourcePathSemantics = sourcePathSemantics.MetadataSourcePathSemantics;
+        var allowContextualAmbiguousMetadataSyntax =
+            sourcePathSemantics.AllowContextualAmbiguousMetadataSyntax;
+        var sourceCaseSensitivityMode = sourcePathSemantics.SourceCaseSensitivityMode;
 
         var targetIdentityKey = FileSystemPathIdentity.CreateKey(
             "root",
@@ -202,13 +189,14 @@ public sealed partial class RootFolderRelocationService(
         var audiobooks = audiobookRows
             .Select(row => new AudiobookPathCandidate(row.Audiobook, row.StoredBasePath))
             .ToList();
-        var (affected, invalidStoredBasePaths) = storedSourcePathSemantics == null
+        var (affected, invalidStoredBasePaths) = metadataSourcePathSemantics == null
             ? (new List<AudiobookPathCandidate>(), new List<AudiobookPathCandidate>())
             : DiscoverAffectedAudiobooks(
                 audiobooks,
                 root.Path,
-                storedSourcePathSemantics.Value.Semantics,
-                storedSourcePathSemantics.Value.DetectAmbiguousCaseMatches);
+                metadataSourcePathSemantics.Value.Semantics,
+                metadataSourcePathSemantics.Value.DetectAmbiguousCaseMatches,
+                allowContextualAmbiguousMetadataSyntax);
 
         if (command.Mode != RootFolderRelocationMode.MetadataOnly && invalidStoredBasePaths.Count > 0)
         {
@@ -359,6 +347,7 @@ public sealed partial class RootFolderRelocationService(
                     sourceCaseSensitivityMode,
                     affected,
                     invalidStoredBasePaths,
+                    metadataSourcePathSemantics?.Semantics,
                     storedSourcePathSemantics?.Semantics,
                     rootFolderId,
                     now,
@@ -491,6 +480,4 @@ public sealed partial class RootFolderRelocationService(
             throw;
         }
     }
-
-    private sealed record StartOutcome(RootFolderPathChangeResult Result, bool Broadcast);
 }

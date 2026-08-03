@@ -161,13 +161,15 @@ internal sealed partial class MoveCleanupBoundaryResolver(
     {
         try
         {
-            if (!Path.IsPathFullyQualified(persistedBoundary))
+            if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                    persistedBoundary,
+                    out var boundary,
+                    out var boundaryReason,
+                    semantics.Syntax))
             {
                 return Unavailable(
-                    "The persisted source cleanup boundary is not an absolute path for this host.");
+                    $"The persisted source cleanup boundary is unavailable on this host: {boundaryReason}");
             }
-
-            var boundary = Path.GetFullPath(persistedBoundary);
             if (!FileSystemPathIdentity.IsSameOrInside(sourceParent, boundary, semantics))
             {
                 return Unavailable(
@@ -195,11 +197,14 @@ internal sealed partial class MoveCleanupBoundaryResolver(
         var candidates = new List<ConfiguredRootCandidate>();
         foreach (var root in configuredRoots)
         {
-            if (string.IsNullOrWhiteSpace(root.Path)
-                || !FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+            if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
                     root.Path,
-                    sourceSemantics.Syntax,
-                    out var rootSyntax))
+                    out var canonicalRoot,
+                    out _)
+                || !FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+                    canonicalRoot,
+                    out var rootSyntax)
+                || rootSyntax != sourceSemantics.Syntax)
             {
                 continue;
             }
@@ -217,15 +222,13 @@ internal sealed partial class MoveCleanupBoundaryResolver(
             {
                 if (!FileSystemPathIdentity.IsSameOrInside(
                         source,
-                        root.Path,
+                        canonicalRoot,
                         potentialSemantics))
                 {
                     continue;
                 }
 
-                canonicalLength = FileSystemPathIdentity.Canonicalize(
-                    root.Path,
-                    rootSyntax).Length;
+                canonicalLength = canonicalRoot.Length;
             }
             catch (ArgumentException)
             {
@@ -236,7 +239,7 @@ internal sealed partial class MoveCleanupBoundaryResolver(
             try
             {
                 rootResolution = await semanticsResolver.ResolveAsync(
-                    root.Path,
+                    canonicalRoot,
                     root.CaseSensitivityMode,
                     cancellationToken);
             }
@@ -265,7 +268,7 @@ internal sealed partial class MoveCleanupBoundaryResolver(
             {
                 if (!FileSystemPathIdentity.IsSameOrInside(
                         source,
-                        root.Path,
+                        canonicalRoot,
                         rootResolution.Semantics))
                 {
                     // Auto mode can conservatively look like a match before probing and then
@@ -275,7 +278,7 @@ internal sealed partial class MoveCleanupBoundaryResolver(
 
                 if (!TryDerivePhysicalBoundary(
                         source,
-                        root.Path,
+                        canonicalRoot,
                         sourceSemantics,
                         rootResolution.Semantics,
                         out var physicalBoundary))
