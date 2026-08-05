@@ -397,8 +397,8 @@ jobs:
       docker_tags: |
         docker.io/therobbiedavis/listenarr:canary
         docker.io/therobbiedavis/listenarr:canary-${{ needs.canary-build.outputs.version }}
-        ghcr.io/Thylocine/listenarr:canary
-        ghcr.io/Thylocine/listenarr:canary-${{ needs.canary-build.outputs.version }}
+        ghcr.io/thylocine/listenarr:canary
+        ghcr.io/thylocine/listenarr:canary-${{ needs.canary-build.outputs.version }}
         atcr.io/therobbiedavis.com/listenarr:canary
         atcr.io/therobbiedavis.com/listenarr:canary-${{ needs.canary-build.outputs.version }}
     secrets:
