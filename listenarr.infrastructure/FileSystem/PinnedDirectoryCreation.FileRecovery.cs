@@ -11,11 +11,6 @@ internal sealed partial class PinnedDirectoryCreation
             ThrowIfDisposed();
             ArgumentNullException.ThrowIfNull(destinationParent);
             ValidateLeafName(destinationName);
-            if (OperatingSystem.IsWindows())
-            {
-                throw new PlatformNotSupportedException(
-                    "Unlinked pinned-file recovery is only required on Unix-like platforms.");
-            }
             if (!destinationParent.VisiblePathMatches())
             {
                 return false;

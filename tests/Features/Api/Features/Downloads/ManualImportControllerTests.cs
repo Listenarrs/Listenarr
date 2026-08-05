@@ -17,6 +17,7 @@
  */
 using Microsoft.Extensions.Logging.Abstractions;
 using Listenarr.Api.Dtos.ManualImport;
+using Listenarr.Application.Common.Exceptions;
 using Listenarr.Tests.Common;
 
 namespace Listenarr.Tests.Features.Api.Features.Downloads
@@ -66,14 +67,13 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
         [WindowsFact]
         public async Task GeneratePathAsync_ForeignConfiguredOutputAlias_DoesNotReclassifyCustomBasePath()
         {
-            var broadRoot = CreateTempDirectory("manual-import-foreign-output-root");
+            var broadRoot = WindowsPathTestFixture
+                .CreateRootRelativeAliasCompatibleDirectory(
+                    "manual-import-foreign-output-root");
+            _tempDirectories.Add(broadRoot);
             var customBasePath = Path.Join(broadRoot, "Custom Book Folder");
-            var driveRoot = Path.GetPathRoot(customBasePath)!;
-            var foreignOutputPath = "/" + customBasePath[driveRoot.Length..].Replace('\\', '/');
-            Assert.Equal(
-                Path.GetFullPath(customBasePath),
-                Path.GetFullPath(foreignOutputPath),
-                StringComparer.OrdinalIgnoreCase);
+            var foreignOutputPath = WindowsPathTestFixture
+                .GetRootRelativeForeignAlias(customBasePath);
 
             var settings = new ApplicationSettings
             {
@@ -142,7 +142,8 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
             IFileSystemSemanticsResolver semanticsResolver = null,
             IFilesystemMutationCoordinator filesystemMutationCoordinator = null,
             ILibraryDirectoryOwnershipStore directoryOwnershipStore = null,
-            Mock<IMetadataService> metadataMock = null)
+            Mock<IMetadataService> metadataMock = null,
+            IMoveQueueService moveQueueServiceOverride = null)
         {
             repoMock ??= GetRepoMock(book);
             scanMock ??= GetScanMock();
@@ -228,7 +229,9 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                 .ReturnsAsync(new AudioMetadata { Title = "Different Book", Album = "Different Book", Artist = "Author A", Format = "mp3" });
             metadataMock.Setup(m => m.ExtractFileMetadataAsync(It.Is<string>(path => path.EndsWith("Track 01.mp3", StringComparison.OrdinalIgnoreCase))))
                 .ReturnsAsync(new AudioMetadata { Title = "Companion Book", Format = "mp3", BitRate = 128000 });
-            metadataMock.Setup(m => m.WriteAsinTagAsync(It.IsAny<string>(), It.IsAny<string>()))
+            metadataMock.Setup(m => m.WriteAsinTagAsync(
+                    It.IsAny<IAudiobookFileRegistrationLease>(),
+                    It.IsAny<string>()))
                 .Returns(Task.CompletedTask);
 
             var configMock = new Mock<IConfigurationService>();
@@ -282,9 +285,18 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                         It.IsAny<Guid?>(),
                         It.IsAny<int?>(),
                         It.IsAny<CancellationToken>()))
+                    .Callback<string, string, FileSystemPathSemantics, string, Guid?, int?, CancellationToken>(
+                        (destinationDirectory, _, _, _, _, _, _) =>
+                            Directory.CreateDirectory(destinationDirectory))
                     .ReturnsAsync([]);
                 directoryOwnershipStore = directoryOwnershipStoreMock.Object;
             }
+
+            var moveQueueService = new Mock<IMoveQueueService>();
+            moveQueueService.Setup(service => service.EnsureFilesystemMutationAllowedAsync(
+                    It.IsAny<int>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
 
             return new ManualImportController(
                 Mock.Of<Microsoft.Extensions.Logging.ILogger<ManualImportController>>(),
@@ -301,8 +313,59 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                 semanticsResolver,
                 filesystemMutationCoordinator ?? new FilesystemMutationCoordinator(),
                 _operationCoordinator,
+                moveQueueServiceOverride ?? moveQueueService.Object,
                 directoryOwnershipStore
             );
+        }
+
+        [Fact]
+        public async Task Start_UnresolvedMoveExecution_BlocksBeforeFilesystemImport()
+        {
+            var basePath = CreateTempDirectory("listenarr-manual-unresolved-destination");
+            var sourceDirectory = CreateTempDirectory("listenarr-manual-unresolved-source");
+            var sourceFile = Path.Join(sourceDirectory, "chapter.mp3");
+            await File.WriteAllTextAsync(sourceFile, "audio");
+            var book = new Audiobook
+            {
+                Id = 40,
+                Title = "Unresolved Manual Import",
+                BasePath = basePath
+            };
+            var moveQueue = new Mock<IMoveQueueService>(MockBehavior.Strict);
+            moveQueue.Setup(service => service.EnsureFilesystemMutationAllowedAsync(
+                    book.Id,
+                    It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new ApplicationConflictException(
+                    "move_recovery_required",
+                    "An interrupted move still owns this audiobook's filesystem state."));
+            var fileMover = new Mock<IFileMover>(MockBehavior.Strict);
+            var controller = GetController(
+                book,
+                new ApplicationSettings { OutputPath = basePath },
+                fileMover: fileMover.Object,
+                moveQueueServiceOverride: moveQueue.Object);
+            var request = new ManualImportRequestDto
+            {
+                Path = sourceDirectory,
+                Mode = "interactive",
+                Action = FileAction.Copy,
+                Items =
+                [
+                    new ManualImportItemDto
+                    {
+                        FullPath = sourceFile,
+                        MatchedAudiobookId = book.Id
+                    }
+                ]
+            };
+
+            var result = await controller.Start(request);
+
+            var conflict = Assert.IsType<Microsoft.AspNetCore.Mvc.ConflictObjectResult>(result.Result);
+            var payload = System.Text.Json.JsonSerializer.Serialize(conflict.Value);
+            Assert.Contains("move_recovery_required", payload, StringComparison.Ordinal);
+            Assert.True(File.Exists(sourceFile));
+            fileMover.VerifyNoOtherCalls();
         }
 
         [Fact]
@@ -1036,7 +1099,7 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                     BitRate = 128000
                 });
             metadata.Setup(service => service.WriteAsinTagAsync(
-                    It.IsAny<string>(),
+                    It.IsAny<IAudiobookFileRegistrationLease>(),
                     book.Asin))
                 .ThrowsAsync(new IOException("simulated tag failure"));
             var controller = GetController(
@@ -1083,8 +1146,11 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                 await File.ReadAllTextAsync(
                     Path.Join(destinationRoot, "Tagged Book.mp3")));
             metadata.Verify(service => service.WriteAsinTagAsync(
-                Path.Join(destinationRoot, "Tagged Book.mp3"),
+                It.IsAny<IAudiobookFileRegistrationLease>(),
                 book.Asin), Times.Once);
+            metadata.Verify(service => service.WriteAsinTagAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>()), Times.Never);
         }
 
         [Fact]
@@ -1131,7 +1197,7 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
         }
 
         [Fact]
-        public async Task InteractiveManualImport_RequestCancelledAfterFileMutationStillQueuesFocusedScan()
+        public async Task InteractiveManualImport_RequestCancelledAfterCommittedMutationReturnsCommittedResultAndQueuesFocusedScan()
         {
             var basePath = CreateTempDirectory("listenarr-manual-post-mutation-cancel-dst");
             var srcDir = CreateTempDirectory("listenarr-manual-post-mutation-cancel-src");
@@ -1189,9 +1255,26 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                 ]
             };
 
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-                controller.Start(request, cancellation.Token));
+            var action = await controller.Start(request, cancellation.Token);
 
+            var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(
+                action.Result);
+            Assert.NotNull(ok.Value);
+            var payload = ok.Value!;
+            Assert.Equal(
+                1,
+                Assert.IsType<int>(payload.GetType()
+                    .GetProperty("importedCount")!
+                    .GetValue(payload)));
+            Assert.Equal(
+                1,
+                Assert.IsType<int>(payload.GetType()
+                    .GetProperty("totalCount")!
+                    .GetValue(payload)));
+            Assert.True(
+                Assert.IsType<bool>(payload.GetType()
+                    .GetProperty("stoppedByCancellation")!
+                    .GetValue(payload)));
             Assert.True(File.Exists(Path.Join(
                 basePath,
                 "Post Mutation Cancellation.mp3")));
@@ -1201,6 +1284,219 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                     && command.Path == basePath
                     && command.PathIdentity.HasValue
                     && command.PhysicalIdentity.HasValue
+                    && !command.IsAuthoritativeScope)), Times.Once);
+        }
+
+        [Fact]
+        public async Task InteractiveManualImport_FocusedScanCancellationAfterCommittedMutation_ReturnsCommittedResult()
+        {
+            var basePath = CreateTempDirectory("listenarr-manual-scan-cancel-dst");
+            var srcDir = CreateTempDirectory("listenarr-manual-scan-cancel-src");
+            var source = Path.Join(srcDir, "book.mp3");
+            await File.WriteAllTextAsync(source, "audio");
+            var book = new Audiobook
+            {
+                Id = 504,
+                Title = "Post Commit Scan Cancellation",
+                BasePath = basePath
+            };
+            var scanMock = GetScanMock();
+            scanMock.Setup(service => service.EnqueueScanAsync(
+                    It.IsAny<ScanEnqueueCommand>()))
+                .ThrowsAsync(new TaskCanceledException(
+                    "Injected post-commit focused scan cancellation."));
+            var controller = GetController(
+                book,
+                new ApplicationSettings
+                {
+                    OutputPath = basePath,
+                    FolderNamingPattern = "",
+                    FileNamingPattern = "{Title}"
+                },
+                scanMock: scanMock);
+            var request = new ManualImportRequestDto
+            {
+                Path = srcDir,
+                Mode = "interactive",
+                Action = FileAction.Copy,
+                Items =
+                [
+                    new ManualImportItemDto
+                    {
+                        FullPath = source,
+                        MatchedAudiobookId = book.Id
+                    }
+                ]
+            };
+
+            var action = await controller.Start(request);
+
+            var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(
+                action.Result);
+            Assert.NotNull(ok.Value);
+            var payload = ok.Value!;
+            Assert.Equal(
+                1,
+                Assert.IsType<int>(payload.GetType()
+                    .GetProperty("importedCount")!
+                    .GetValue(payload)));
+            Assert.True(File.Exists(Path.Join(
+                basePath,
+                "Post Commit Scan Cancellation.mp3")));
+            scanMock.Verify(service => service.EnqueueScanAsync(
+                It.Is<ScanEnqueueCommand>(command =>
+                    command.Audiobook.Id == book.Id
+                    && !command.IsAuthoritativeScope)), Times.Once);
+        }
+
+        [Fact]
+        public async Task InteractiveManualImport_RequestCancelledAfterFirstCommittedItem_ReturnsPartialCommitAndDoesNotStartSecondItem()
+        {
+            var basePath = CreateTempDirectory("listenarr-manual-partial-cancel-dst");
+            var srcDir = CreateTempDirectory("listenarr-manual-partial-cancel-src");
+            var firstSource = Path.Join(srcDir, "first.mp3");
+            var secondSource = Path.Join(srcDir, "second.mp3");
+            await File.WriteAllTextAsync(firstSource, "first-audio");
+            await File.WriteAllTextAsync(secondSource, "second-audio");
+            var book = new Audiobook
+            {
+                Id = 502,
+                Title = "Partial Cancellation",
+                BasePath = basePath
+            };
+            using var cancellation = new CancellationTokenSource();
+            var actualMover = new FileMover(
+                NullLogger<FileMover>.Instance,
+                semanticsResolver: new FileSystemSemanticsResolver());
+            var prepareCount = 0;
+            var fileMover = new Mock<IFileMover>(MockBehavior.Strict);
+            fileMover.Setup(mover => mover.PrepareActionForRegistrationAsync(
+                    FileAction.Copy,
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<Guid?>()))
+                .Returns<FileAction, string, string, Guid?>(async (action, sourcePath, destination, operationId) =>
+                {
+                    prepareCount++;
+                    return await actualMover.PrepareActionForRegistrationAsync(
+                        action,
+                        sourcePath,
+                        destination,
+                        operationId);
+                });
+            var fileService = new Mock<IAudiobookFileService>(MockBehavior.Strict);
+            fileService.Setup(service => service.CheckAudiobookFileOwnershipAsync(
+                    It.IsAny<Audiobook>(),
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new AudiobookFileOwnershipCheckResult(
+                    AudiobookFileOwnershipCheckOutcome.Available));
+            var registrationCount = 0;
+            fileService.Setup(service => service.RegisterPublishedGenerationWithBasePathAsync(
+                    It.IsAny<Audiobook>(),
+                    It.IsAny<AudiobookFileOwnershipCheckResult>(),
+                    It.IsAny<IAudiobookFileRegistrationLease>(),
+                    It.IsAny<string>(),
+                    It.IsAny<string?>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync((
+                    Audiobook audiobook,
+                    AudiobookFileOwnershipCheckResult _,
+                    IAudiobookFileRegistrationLease registrationLease,
+                    string authoritativeBasePath,
+                    string? _,
+                    CancellationToken _) =>
+                {
+                    registrationCount++;
+                    if (!registrationLease.PrepareCleanupRecovery(audiobook.Id))
+                    {
+                        return false;
+                    }
+
+                    audiobook.BasePath = authoritativeBasePath;
+                    if (registrationCount == 1)
+                    {
+                        cancellation.Cancel();
+                    }
+                    return true;
+                });
+            var metadata = new Mock<IMetadataService>();
+            metadata.Setup(service => service.ExtractFileMetadataAsync(firstSource))
+                .ReturnsAsync(new AudioMetadata
+                {
+                    Title = book.Title,
+                    Format = "mp3",
+                    TrackNumber = 1
+                });
+            metadata.Setup(service => service.ExtractFileMetadataAsync(secondSource))
+                .ReturnsAsync(new AudioMetadata
+                {
+                    Title = book.Title,
+                    Format = "mp3",
+                    TrackNumber = 2
+                });
+            var scanMock = GetScanMock();
+            var controller = GetController(
+                book,
+                new ApplicationSettings
+                {
+                    OutputPath = basePath,
+                    FolderNamingPattern = "",
+                    FileNamingPattern = "{Title}",
+                    MultiFileNamingPattern = "{Title} - {ChapterNumber}"
+                },
+                scanMock: scanMock,
+                fileMover: fileMover.Object,
+                audiobookFileService: fileService.Object,
+                metadataMock: metadata);
+            var request = new ManualImportRequestDto
+            {
+                Path = srcDir,
+                Mode = "interactive",
+                Action = FileAction.Copy,
+                Items =
+                [
+                    new ManualImportItemDto
+                    {
+                        FullPath = firstSource,
+                        MatchedAudiobookId = book.Id
+                    },
+                    new ManualImportItemDto
+                    {
+                        FullPath = secondSource,
+                        MatchedAudiobookId = book.Id
+                    }
+                ]
+            };
+
+            var action = await controller.Start(request, cancellation.Token);
+
+            var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(
+                action.Result);
+            Assert.NotNull(ok.Value);
+            var payload = ok.Value!;
+            Assert.Equal(
+                1,
+                Assert.IsType<int>(payload.GetType()
+                    .GetProperty("importedCount")!
+                    .GetValue(payload)));
+            Assert.Equal(
+                2,
+                Assert.IsType<int>(payload.GetType()
+                    .GetProperty("totalCount")!
+                    .GetValue(payload)));
+            Assert.True(
+                Assert.IsType<bool>(payload.GetType()
+                    .GetProperty("stoppedByCancellation")!
+                    .GetValue(payload)));
+            Assert.Equal(1, prepareCount);
+            Assert.Equal(1, registrationCount);
+            Assert.Equal("second-audio", await File.ReadAllTextAsync(secondSource));
+            scanMock.Verify(service => service.EnqueueScanAsync(
+                It.Is<ScanEnqueueCommand>(command =>
+                    command.Audiobook.Id == book.Id
+                    && command.Path == basePath
                     && !command.IsAuthoritativeScope)), Times.Once);
         }
 

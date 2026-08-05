@@ -28,6 +28,22 @@ namespace Listenarr.Tests.Features.Api.Features.Library
     [Trait("Category", "LibraryController")]
     public class LibraryController_MoveTests : BaseTests
     {
+        private static Mock<IMoveQueueService> CreateMoveQueueMock(
+            MockBehavior behavior = MockBehavior.Loose)
+        {
+            var moveQueue = new Mock<IMoveQueueService>(behavior);
+            moveQueue.Setup(service => service.GetActiveJobsAsync(It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Array.Empty<MoveJob>());
+            moveQueue.Setup(service => service.GetRecoveryStateForAudiobookAsync(
+                    It.IsAny<int>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(MoveRecoveryState.None);
+            return moveQueue;
+        }
+
+        private static Mock<IMoveQueueService> CreateStrictMoveQueueMock() =>
+            CreateMoveQueueMock(MockBehavior.Strict);
+
         [Fact]
         public async Task GetMoveJobStatus_ReturnsPublicContractWithoutWorkerInternals()
         {
@@ -71,7 +87,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                     }
                 ]
             };
-            var moveQueue = new Mock<IMoveQueueService>(MockBehavior.Strict);
+            var moveQueue = CreateStrictMoveQueueMock();
             moveQueue.Setup(service => service.GetJobAsync(
                     jobId,
                     It.IsAny<CancellationToken>()))
@@ -116,6 +132,50 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         }
 
         [Fact]
+        public async Task GetMoveJobStatus_NeedsAttentionVerification_ReportsOperatorRepairNotRetryable()
+        {
+            var jobId = Guid.NewGuid();
+            var job = new MoveJob
+            {
+                Id = jobId,
+                AudiobookId = 42,
+                RequestedPath = "/library/Author/Title",
+                SourcePath = "/incoming/Author/Title",
+                Status = MoveJobStatus.NeedsAttention,
+                Phase = MoveJobPhase.CleaningSource,
+                Error = "Persisted generation changed.",
+                FailureKind = MoveFailureKind.Verification,
+                Entries =
+                [
+                    new MoveJobEntry
+                    {
+                        RelativePath = "book.m4b",
+                        EntryType = MoveJobEntryType.File,
+                        CopyState = MoveJobEntryCopyState.Verified,
+                        CleanupState = MoveJobEntryCleanupState.Quarantined
+                    }
+                ]
+            };
+            var moveQueue = CreateStrictMoveQueueMock();
+            moveQueue.Setup(service => service.GetJobAsync(
+                    jobId,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(job);
+            Init(services => services.WithSingleton(moveQueue.Object));
+
+            var result = await _provider.GetRequiredService<LibraryController>()
+                .GetMoveJobStatus(jobId.ToString("D"), CancellationToken.None);
+
+            var ok = Assert.IsType<OkObjectResult>(result);
+            var json = JsonSerializer.Serialize(ok.Value);
+            Assert.Contains(
+                "\"RecoveryDisposition\":\"OperatorRepairRequired\"",
+                json,
+                StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"CanRetry\":false", json, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
         [Trait("Method", "EnqueueMove")]
         [Trait("Scenario", "ReturnsConflict_WhenTrackedSourceDoesNotExist")]
         public async Task MoveAudiobook_ReturnsConflict_WhenTrackedSourceDoesNotExist()
@@ -149,10 +209,85 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             Assert.Contains("missing from disk", conflict.Value?.ToString() ?? string.Empty);
         }
 
+        [Fact]
+        public async Task MoveAudiobook_UnresolvedPublishedMove_BlocksBeforeFreshManifestValidation()
+        {
+            var manifestService = new Mock<IMoveSourceManifestService>(MockBehavior.Strict);
+            Init(services => services.WithSingleton(manifestService.Object));
+            var missingSource = Path.Join(
+                FileService.GetTempPath(),
+                $"listenarr-interrupted-move-source-{Guid.NewGuid():N}");
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Interrupted Physical Move")
+                .WithBasePath(missingSource)
+                .Build());
+            await AddTrackedFileAsync(
+                audiobook,
+                missingSource,
+                createFile: false);
+            var jobId = Guid.NewGuid();
+            var target = Path.Join(
+                FileService.GetTempPath(),
+                $"listenarr-interrupted-move-target-{Guid.NewGuid():N}");
+            var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+            await using (var db = await factory.CreateDbContextAsync())
+            {
+                db.MoveJobs.Add(new MoveJob
+                {
+                    Id = jobId,
+                    AudiobookId = audiobook.Id,
+                    SourcePath = missingSource,
+                    RequestedPath = target,
+                    Status = MoveJobStatus.Failed,
+                    Phase = MoveJobPhase.Published,
+                    FailureKind = MoveFailureKind.Unknown,
+                    Error = "Interrupted after published source cleanup",
+                    Entries =
+                    [
+                        new MoveJobEntry
+                        {
+                            RelativePath = "book.m4b",
+                            EntryType = MoveJobEntryType.File,
+                            Length = 5,
+                            LastWriteTimeUtc = DateTime.UtcNow,
+                            Sha256 = new string('A', 64),
+                            CopyState = MoveJobEntryCopyState.Verified,
+                            CleanupState = MoveJobEntryCleanupState.Deleted
+                        }
+                    ]
+                });
+                await db.SaveChangesAsync();
+            }
+
+            var result = await _provider.GetRequiredService<LibraryController>()
+                .EnqueueMove(
+                    audiobook.Id,
+                    new LibraryController.MoveRequest
+                    {
+                        DestinationPath = target,
+                        SourcePath = missingSource,
+                        MoveFiles = true,
+                        DeleteEmptySource = true
+                    });
+
+            var conflict = Assert.IsType<ConflictObjectResult>(result);
+            var payload = JsonSerializer.Serialize(conflict.Value);
+            Assert.Contains("move_recovery_required", payload, StringComparison.Ordinal);
+            Assert.Contains(jobId.ToString("D"), payload, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("move_source_unverified", payload, StringComparison.Ordinal);
+            manifestService.Verify(service => service.BuildAsync(
+                It.IsAny<Audiobook>(),
+                It.IsAny<CancellationToken>()), Times.Never);
+            await using var verification = await factory.CreateDbContextAsync();
+            Assert.Single(await verification.MoveJobs
+                .Where(job => job.AudiobookId == audiobook.Id)
+                .ToListAsync());
+        }
+
         [WindowsFact]
         public async Task MoveAudiobook_PersistedUnixOutputRoot_DoesNotAuthorizeCurrentWindowsDrive()
         {
-            var moveQueue = new Mock<IMoveQueueService>(MockBehavior.Strict);
+            var moveQueue = CreateStrictMoveQueueMock();
             Init(services => services.WithSingleton(moveQueue.Object));
             var controller = _provider.GetRequiredService<LibraryController>();
 
@@ -195,7 +330,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         public async Task MoveAudiobook_EnqueuesJob_WhenSourceExists()
         {
             // Given
-            var mockMoveQueue = new Mock<IMoveQueueService>();
+            var mockMoveQueue = CreateMoveQueueMock();
             var expectedId = Guid.NewGuid();
             mockMoveQueue.Setup(m => m.EnqueueMoveAsync(
                     It.IsAny<MoveEnqueueCommand>(),
@@ -245,7 +380,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         public async Task MoveAudiobook_BroadBasePath_QueuesOnlyTrackedBookManifest()
         {
             MoveEnqueueCommand? captured = null;
-            var moveQueue = new Mock<IMoveQueueService>();
+            var moveQueue = CreateMoveQueueMock();
             moveQueue.Setup(service => service.EnqueueMoveAsync(
                     It.IsAny<MoveEnqueueCommand>(),
                     It.IsAny<CancellationToken>()))
@@ -302,7 +437,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         public async Task MoveAudiobook_SharedFlatFolder_QueuesOnlyTrackedFile()
         {
             MoveEnqueueCommand? captured = null;
-            var moveQueue = new Mock<IMoveQueueService>();
+            var moveQueue = CreateMoveQueueMock();
             moveQueue.Setup(service => service.EnqueueMoveAsync(
                     It.IsAny<MoveEnqueueCommand>(),
                     It.IsAny<CancellationToken>()))
@@ -349,7 +484,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         [Fact]
         public async Task MoveAudiobook_NoTrackedFiles_RequiresRepair()
         {
-            var moveQueue = new Mock<IMoveQueueService>(MockBehavior.Strict);
+            var moveQueue = CreateStrictMoveQueueMock();
             Init(services => services.WithSingleton(moveQueue.Object));
             var outputPath = FileService.GetTempDirectory("listenarr-move-output");
             await _applicationSettingsRepository.SaveAsync(
@@ -383,7 +518,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         [Fact]
         public async Task MoveAudiobook_InvalidSourcePath_IsBoundToSourceField()
         {
-            var moveQueue = new Mock<IMoveQueueService>(MockBehavior.Strict);
+            var moveQueue = CreateStrictMoveQueueMock();
             Init(services => services.WithSingleton(moveQueue.Object));
             var outputPath = FileService.GetTempDirectory("listenarr-move-output");
             await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
@@ -424,7 +559,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         [Trait("Scenario", "RejectsStalePhysicalSourcePath")]
         public async Task MoveAudiobook_PhysicalMoveRejectsStaleExistingSourcePath()
         {
-            var moveQueue = new Mock<IMoveQueueService>(MockBehavior.Strict);
+            var moveQueue = CreateStrictMoveQueueMock();
             Init(services => services.WithSingleton(moveQueue.Object));
             var outputPath = FileService.GetTempDirectory("listenarr-move-output");
             await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
@@ -461,7 +596,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         [Fact]
         public async Task MoveAudiobook_SourceChangesAfterPreflight_RejectsBeforeQueuePersistence()
         {
-            var moveQueue = new Mock<IMoveQueueService>(MockBehavior.Strict);
+            var moveQueue = CreateStrictMoveQueueMock();
             var updatedSource = FileService.GetTempDirectory("listenarr-updated-source");
             using var coordinator = new BeforeExecuteAudiobookCoordinator(async () =>
             {
@@ -509,7 +644,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         [Fact]
         public async Task MoveAudiobook_UnavailableTargetAncestor_ReturnsStructuredDestinationError()
         {
-            var moveQueue = new Mock<IMoveQueueService>(MockBehavior.Strict);
+            var moveQueue = CreateStrictMoveQueueMock();
             var fileSystem = new Mock<IFileSystem>(MockBehavior.Strict);
             var validationCalls = 0;
             fileSystem.Setup(system => system.TryValidateMutationTarget(
@@ -569,7 +704,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         [Trait("Scenario", "RejectsCustomPhysicalDestinationOutsideConfiguredRoots")]
         public async Task MoveAudiobook_MoveFilesTrue_RejectsCustomDestinationOutsideConfiguredRoots()
         {
-            var mockMoveQueue = new Mock<IMoveQueueService>();
+            var mockMoveQueue = CreateMoveQueueMock();
             Init(services => services.WithSingleton(mockMoveQueue.Object));
             var configuredOutputPath = FileService.GetTempDirectory("listenarr-move-output");
             await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
@@ -614,7 +749,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         [Fact]
         public async Task MoveAudiobook_CustomSiblingMove_PersistsCommonSeriesCleanupBoundary()
         {
-            var moveQueue = new Mock<IMoveQueueService>();
+            var moveQueue = CreateMoveQueueMock();
             moveQueue.Setup(service => service.EnqueueMoveAsync(
                     It.IsAny<MoveEnqueueCommand>(),
                     It.IsAny<CancellationToken>()))
@@ -662,7 +797,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         [Fact]
         public async Task MoveAudiobook_RelocationConflictReturnsConflict()
         {
-            var moveQueue = new Mock<IMoveQueueService>();
+            var moveQueue = CreateMoveQueueMock();
             moveQueue.Setup(service => service.EnqueueMoveAsync(
                     It.IsAny<MoveEnqueueCommand>(),
                     It.IsAny<CancellationToken>()))
@@ -886,7 +1021,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         public async Task MoveAudiobook_PhysicalPreflightWaitsForFilesystemMutationCoordinator()
         {
             var coordinator = new FilesystemMutationCoordinator();
-            var moveQueue = new Mock<IMoveQueueService>();
+            var moveQueue = CreateMoveQueueMock();
             moveQueue.Setup(service => service.EnqueueMoveAsync(
                     It.IsAny<MoveEnqueueCommand>(),
                     It.IsAny<CancellationToken>()))
@@ -935,10 +1070,71 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         }
 
         [Fact]
+        public async Task MoveAudiobook_ActiveMoveRejectsBeforeWaitingForFilesystemMutationCoordinator()
+        {
+            var coordinator = new FilesystemMutationCoordinator();
+            var activeJob = new MoveJob
+            {
+                Id = Guid.NewGuid(),
+                AudiobookId = 42,
+                SourcePath = "C:\\source",
+                RequestedPath = "C:\\target",
+                Status = MoveJobStatus.Running,
+                Phase = MoveJobPhase.Copying,
+                EnqueuedAt = DateTime.UtcNow
+            };
+            var moveQueue = CreateMoveQueueMock(MockBehavior.Strict);
+            moveQueue.Setup(service => service.GetRecoveryStateForAudiobookAsync(
+                    activeJob.AudiobookId,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new MoveRecoveryState(
+                    MoveRecoveryDisposition.InProgress,
+                    activeJob.Id,
+                    activeJob.Status,
+                    activeJob.Phase,
+                    activeJob.RequestedPath,
+                    activeJob.Error,
+                    [activeJob.Id]));
+            Init(services => services
+                .WithSingleton(moveQueue.Object)
+                .WithSingleton<IFilesystemMutationCoordinator>(coordinator));
+            var lockEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseLock = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var lockTask = coordinator.ExecuteExclusiveAsync(async _ =>
+            {
+                lockEntered.SetResult();
+                await releaseLock.Task;
+            });
+            await lockEntered.Task;
+
+            var moveTask = _provider.GetRequiredService<LibraryController>().EnqueueMove(
+                activeJob.AudiobookId,
+                new LibraryController.MoveRequest
+                {
+                    DestinationPath = "C:\\target",
+                    SourcePath = "C:\\source",
+                    MoveFiles = true
+                });
+
+            var completed = await Task.WhenAny(moveTask, Task.Delay(TimeSpan.FromSeconds(1)));
+            Assert.Same(moveTask, completed);
+            var conflict = Assert.IsType<ConflictObjectResult>(await moveTask);
+            var payload = JsonSerializer.Serialize(conflict.Value);
+            Assert.Contains("move_already_active", payload, StringComparison.Ordinal);
+            Assert.Contains(activeJob.Id.ToString(), payload, StringComparison.OrdinalIgnoreCase);
+
+            releaseLock.SetResult();
+            await lockTask;
+            moveQueue.Verify(service => service.GetRecoveryStateForAudiobookAsync(
+                activeJob.AudiobookId,
+                It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [Fact]
         public async Task MoveAudiobook_CancelledWhileWaitingForFilesystemMutationDoesNotEnqueue()
         {
             var coordinator = new FilesystemMutationCoordinator();
-            var moveQueue = new Mock<IMoveQueueService>();
+            var moveQueue = CreateMoveQueueMock();
             Init(services => services
                 .WithSingleton(moveQueue.Object)
                 .WithSingleton<IFilesystemMutationCoordinator>(coordinator));
@@ -1333,7 +1529,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         public async Task MoveAudiobook_AllowsCaseOnlyDestinationDifference_OnCaseSensitiveHosts()
         {
 
-            var mockMoveQueue = new Mock<IMoveQueueService>();
+            var mockMoveQueue = CreateMoveQueueMock();
             var expectedId = Guid.NewGuid();
             mockMoveQueue.Setup(m => m.EnqueueMoveAsync(
                     It.IsAny<MoveEnqueueCommand>(),
@@ -1378,7 +1574,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         [Trait("Scenario", "TreatsCaseOnlyDestinationAsIdentical_OnCaseInsensitiveRoot")]
         public async Task MoveAudiobook_TreatsCaseOnlyDestinationAsIdentical_OnCaseInsensitiveRoot()
         {
-            var mockMoveQueue = new Mock<IMoveQueueService>();
+            var mockMoveQueue = CreateMoveQueueMock();
             Init(services => services.WithSingleton(mockMoveQueue.Object));
             var rootPath = FileService.GetTempDirectory("listenarr-move-insensitive-root");
             await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
@@ -1422,7 +1618,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         [Trait("Scenario", "AllowsCaseOnlyDestination_OnExplicitlyCaseSensitiveRoot")]
         public async Task MoveAudiobook_AllowsCaseOnlyDestination_OnExplicitlyCaseSensitiveRoot()
         {
-            var mockMoveQueue = new Mock<IMoveQueueService>();
+            var mockMoveQueue = CreateMoveQueueMock();
             var expectedId = Guid.NewGuid();
             mockMoveQueue.Setup(m => m.EnqueueMoveAsync(
                     It.IsAny<MoveEnqueueCommand>(),
@@ -1475,7 +1671,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         [Fact]
         public async Task MoveAudiobook_NestedExplicitRoot_OverridesBroaderOutputPathSemantics()
         {
-            var mockMoveQueue = new Mock<IMoveQueueService>();
+            var mockMoveQueue = CreateMoveQueueMock();
             mockMoveQueue.Setup(service => service.EnqueueMoveAsync(
                     It.IsAny<MoveEnqueueCommand>(),
                     It.IsAny<CancellationToken>()))

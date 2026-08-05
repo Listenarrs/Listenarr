@@ -26,6 +26,7 @@ namespace Listenarr.Infrastructure.Library.Moving
         private static bool TryValidatePinnedDirectoryTree(
             PinnedDirectoryCreation.PinnedDirectoryAnchor rootAuthorization,
             PinnedDirectoryCreation.PinnedDirectoryAnchor currentDirectory,
+            IReadOnlyDictionary<string, string> trackedPhysicalObjectIdentities,
             IDictionary<string, string> preflightIdentities,
             out string reason)
         {
@@ -80,6 +81,7 @@ namespace Listenarr.Infrastructure.Library.Moving
                         if (!TryValidatePinnedDirectoryTree(
                                 rootAuthorization,
                                 child,
+                                trackedPhysicalObjectIdentities,
                                 preflightIdentities,
                                 out reason))
                         {
@@ -92,9 +94,23 @@ namespace Listenarr.Infrastructure.Library.Moving
                     using var file = currentDirectory.OpenExistingFile(
                         entryName,
                         requireDeleteAccess: false);
+                    var physicalObjectIdentity = file.GetObjectIdentity();
+                    if (trackedPhysicalObjectIdentities.TryGetValue(
+                            entryPath,
+                            out var expectedTrackedPhysicalObjectIdentity)
+                        && !string.Equals(
+                            physicalObjectIdentity,
+                            expectedTrackedPhysicalObjectIdentity,
+                            StringComparison.Ordinal))
+                    {
+                        reason =
+                            "A tracked audiobook file physical generation changed before recursive-delete preflight.";
+                        return false;
+                    }
+
                     preflightIdentities[Path.GetRelativePath(
                         rootAuthorization.FullPath,
-                        entryPath)] = file.GetObjectIdentity();
+                        entryPath)] = physicalObjectIdentity;
                     if (!rootAuthorization.VisiblePathMatches()
                         || !currentDirectory.VisiblePathMatches()
                         || !file.VisiblePathMatches())
@@ -219,9 +235,8 @@ namespace Listenarr.Infrastructure.Library.Moving
                                 return false;
                             }
 
-                            childPublication.DeletePinnedEmptyDirectory(
-                                entryName,
-                                immediateWindows: true);
+                            childPublication.RetirePinnedEmptyDirectoryFromNamespace(
+                                entryName);
                         }
 
                         continue;

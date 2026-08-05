@@ -179,10 +179,18 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
             }
 
             await mutation(ctx, ct);
-            await ctx.SaveChangesAsync(ct);
-            if (transaction != null)
+            if (transaction == null)
             {
-                await transaction.CommitAsync(ct);
+                var completionToken =
+                    RequestCancellationBoundary.EnterNonCancelablePhase(ct);
+                await ctx.SaveChangesAsync(completionToken);
+            }
+            else
+            {
+                await ctx.SaveChangesAsync(ct);
+                var completionToken =
+                    RequestCancellationBoundary.EnterNonCancelablePhase(ct);
+                await transaction.CommitAsync(completionToken);
             }
         }
 

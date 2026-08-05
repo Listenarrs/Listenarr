@@ -10,6 +10,63 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving;
 public sealed class EfMoveExecutionStoreTests : BaseTests
 {
     [Fact]
+    public async Task SourceManifestOperations_ExcludeTargetBoundaryAuthorization()
+    {
+        var jobId = Guid.NewGuid();
+        var lease = new MoveLeaseToken("worker", 1);
+        var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.MoveJobs.Add(new MoveJob
+            {
+                Id = jobId,
+                AudiobookId = 1,
+                RequestedPath = Path.Join(FileService.GetTempPath(), "target"),
+                SourcePath = Path.Join(FileService.GetTempPath(), "source"),
+                Status = MoveJobStatus.Running,
+                LeaseOwner = lease.Owner,
+                LeaseGeneration = lease.Generation,
+                LeaseExpiresAt = DateTime.UtcNow.AddMinutes(5),
+                ActiveDeduplicationKey = $"test:{jobId:N}",
+                Entries =
+                [
+                    new MoveJobEntry
+                    {
+                        RelativePath = "book.m4b",
+                        EntryType = MoveJobEntryType.File,
+                        Length = 5,
+                        Sha256 = new string('A', 64)
+                    },
+                    MoveManifestIdentity.CreateTargetBoundaryAuthorization(
+                        2,
+                        "test-target-generation")
+                ]
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var store = new EfMoveExecutionStore(factory, TimeProvider.System);
+        var manifest = await store.LoadManifestAsync(jobId, CancellationToken.None);
+
+        var sourceEntry = Assert.Single(manifest);
+        Assert.Equal("book.m4b", sourceEntry.RelativePath);
+
+        await store.UpdateCopyStateAsync(jobId, lease, CancellationToken.None);
+
+        await using var verification = await factory.CreateDbContextAsync();
+        var entries = await verification.MoveJobEntries
+            .AsNoTracking()
+            .Where(entry => entry.MoveJobId == jobId)
+            .ToListAsync();
+        Assert.Equal(
+            MoveJobEntryCopyState.Verified,
+            entries.Single(entry => entry.RelativePath == "book.m4b").CopyState);
+        Assert.Equal(
+            MoveJobEntryCopyState.Pending,
+            entries.Single(MoveManifestIdentity.IsTargetBoundaryAuthorization).CopyState);
+    }
+
+    [Fact]
     public async Task ProviderFailures_AreTranslatedAcrossMoveExecutionBoundary()
     {
         var store = new EfMoveExecutionStore(

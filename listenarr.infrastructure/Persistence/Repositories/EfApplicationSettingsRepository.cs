@@ -35,6 +35,45 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
             return await _db.ApplicationSettings.AsNoTracking().FirstOrDefaultAsync(s => s.Id == 1, ct);
         }
 
+        public async Task<ApplicationSettings> InitializeIfMissingAsync(
+            ApplicationSettings defaults,
+            CancellationToken ct = default)
+        {
+            ArgumentNullException.ThrowIfNull(defaults);
+            defaults.Id = 1;
+
+            await SingletonSettingsWriteLock.WaitAsync(ct);
+            try
+            {
+                var existing = await _db.ApplicationSettings
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(settings => settings.Id == 1, ct);
+                if (existing != null)
+                {
+                    return existing;
+                }
+
+                defaults.Version = 1;
+                _db.ApplicationSettings.Add(defaults);
+                try
+                {
+                    await _db.SaveChangesAsync(ct);
+                    return defaults;
+                }
+                catch (UniqueConstraintViolationException)
+                {
+                    _db.Entry(defaults).State = EntityState.Detached;
+                    return await _db.ApplicationSettings
+                        .AsNoTracking()
+                        .SingleAsync(settings => settings.Id == 1, ct);
+                }
+            }
+            finally
+            {
+                SingletonSettingsWriteLock.Release();
+            }
+        }
+
         public async Task<ApplicationSettings> SaveAsync(ApplicationSettings settings, CancellationToken ct = default)
         {
             settings.Id = 1;
@@ -57,24 +96,25 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
                         await _db.SaveChangesAsync(ct);
                         return settings;
                     }
-                    catch (UniqueConstraintViolationException)
+                    catch (UniqueConstraintViolationException exception)
                     {
                         _db.Entry(settings).State = EntityState.Detached;
-                        var racedExisting = await _db.ApplicationSettings.FindAsync([1], ct);
-                        if (racedExisting != null)
-                        {
-                            return racedExisting;
-                        }
-
-                        throw;
+                        throw new ApplicationConflictException(
+                            "settings_concurrency_conflict",
+                            "Application settings were initialized by another request. Reload and try again.",
+                            exception);
                     }
                 }
 
                 var persistedVersion = existing.Version;
-                var expectedVersion = settings.Version == 0
-                    ? persistedVersion
-                    : settings.Version;
+                if (settings.Version <= 0)
+                {
+                    throw new ApplicationConflictException(
+                        "settings_concurrency_conflict",
+                        "Application settings must include the current version. Reload and try again.");
+                }
 
+                var expectedVersion = settings.Version;
                 if (expectedVersion != persistedVersion)
                 {
                     throw new ApplicationConflictException(

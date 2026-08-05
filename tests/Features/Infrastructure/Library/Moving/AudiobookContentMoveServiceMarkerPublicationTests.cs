@@ -85,6 +85,53 @@ public partial class AudiobookContentMoveServiceTests
     }
 
     [Fact]
+    public async Task MoveContentsAsync_RecoveryMarkerReplacedBeforePinnedRead_IsPreservedAndRequiresAttention()
+    {
+        var source = FileService.GetTempDirectory("content-move-marker-read-swap-src");
+        var sourceFile = await FileService.GetFileAsync(source, "book.m4b", "verified audio");
+        var target = FileService.GetTempDirectory("content-move-marker-read-swap-dst");
+        var jobId = Guid.NewGuid();
+        var request = await CreateLeasedMoveRequestAsync(source, target, jobId);
+        await PersistFileManifestAsync(jobId, "book.m4b", sourceFile);
+        await WriteRecoveryMarkerAsync(target, jobId, source, target, "copy-started");
+        var markerPath = Path.Join(target, $".listenarr-move-{jobId:N}.pending");
+        var replacement = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            Version = 1,
+            JobId = Guid.NewGuid(),
+            Source = Path.GetFullPath(source),
+            Target = Path.GetFullPath(target),
+            Stage = "copy-started"
+        });
+        var replaced = false;
+        using var hook = ExclusiveDirectoryCreator.PushBeforeOpenParentHook(path =>
+        {
+            if (replaced
+                || !string.Equals(
+                    Path.GetFullPath(path),
+                    Path.GetFullPath(target),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            replaced = true;
+            File.Delete(markerPath);
+            File.WriteAllText(markerPath, replacement);
+        });
+        var service = _provider.GetRequiredService<AudiobookContentMoveService>();
+
+        var exception = await Assert.ThrowsAsync<MoveNeedsAttentionException>(() =>
+            service.MoveContentsAsync(request, CancellationToken.None));
+
+        Assert.True(replaced);
+        Assert.Contains("different job", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(replacement, await File.ReadAllTextAsync(markerPath));
+        Assert.True(File.Exists(sourceFile));
+        Assert.False(File.Exists(Path.Join(target, "book.m4b")));
+    }
+
+    [Fact]
     public async Task MoveContentsAsync_RecoveryMarkerReplacedBeforeStageUpdate_IsPreservedAndRequiresAttention()
     {
         var source = FileService.GetTempDirectory("content-move-marker-swap-src");

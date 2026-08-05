@@ -92,6 +92,17 @@ internal static partial class FileSystemSafety
     public static bool TryDeleteFile(
         string filePath,
         IEnumerable<string?> allowedRoots,
+        out string reason) =>
+        TryDeleteFile(
+            filePath,
+            allowedRoots,
+            expectedPhysicalObjectIdentity: null,
+            out reason);
+
+    public static bool TryDeleteFile(
+        string filePath,
+        IEnumerable<string?> allowedRoots,
+        string? expectedPhysicalObjectIdentity,
         out string reason)
     {
         reason = string.Empty;
@@ -126,6 +137,17 @@ internal static partial class FileSystemSafety
             using var entry = parent.OpenExistingFile(
                 fileName,
                 requireDeleteAccess: true);
+            if (!string.IsNullOrWhiteSpace(expectedPhysicalObjectIdentity)
+                && !string.Equals(
+                    entry.GetObjectIdentity(),
+                    expectedPhysicalObjectIdentity,
+                    StringComparison.Ordinal))
+            {
+                reason =
+                    "File deletion was blocked because the target physical generation no longer matches the tracked audiobook file.";
+                return false;
+            }
+
             if (!TryValidateMutationTarget(
                     normalizedFile,
                     roots,

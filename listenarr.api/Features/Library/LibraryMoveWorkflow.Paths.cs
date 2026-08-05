@@ -32,7 +32,12 @@ public sealed partial class LibraryMoveWorkflow
         List<MoveRootBoundary> allowedRoots,
         string? normalizedRoot,
         FileSystemCaseSensitivityMode caseSensitivityMode,
-        CancellationToken cancellationToken)
+        IDirectoryObjectIdentityResolver directoryIdentityResolver,
+        CancellationToken cancellationToken,
+        int? expectedDirectoryIdentityVersion = null,
+        string? expectedDirectoryIdentity = null,
+        string? directoryIdentityUnavailableReason = null,
+        FileSystemPathSemantics? persistedSemantics = null)
     {
         if (string.IsNullOrEmpty(normalizedRoot))
         {
@@ -43,7 +48,10 @@ public sealed partial class LibraryMoveWorkflow
             normalizedRoot,
             caseSensitivityMode,
             cancellationToken);
-        if (resolution.State != PathIdentityState.Valid)
+        var semantics = resolution.State == PathIdentityState.Valid
+            ? resolution.Semantics
+            : persistedSemantics;
+        if (!semantics.HasValue)
         {
             _logger.LogWarning(
                 "Skipping move boundary {Root}: {Reason}",
@@ -52,19 +60,53 @@ public sealed partial class LibraryMoveWorkflow
             return;
         }
 
+        var hasPersistedDirectoryIdentity =
+            expectedDirectoryIdentityVersion.HasValue
+            || !string.IsNullOrWhiteSpace(expectedDirectoryIdentity)
+            || !string.IsNullOrWhiteSpace(directoryIdentityUnavailableReason);
+        DirectoryObjectIdentityResolution directoryIdentity;
+        if (hasPersistedDirectoryIdentity)
+        {
+            var current = await directoryIdentityResolver.ResolveExistingAsync(
+                normalizedRoot,
+                cancellationToken);
+            directoryIdentity = current.IsAvailable
+                && current.Version == expectedDirectoryIdentityVersion
+                && string.Equals(
+                    current.Value,
+                    expectedDirectoryIdentity,
+                    StringComparison.Ordinal)
+                && string.IsNullOrWhiteSpace(directoryIdentityUnavailableReason)
+                    ? current
+                    : DirectoryObjectIdentityResolution.Unavailable(
+                        current.UnavailableReason
+                            ?? directoryIdentityUnavailableReason
+                            ?? "The configured root no longer identifies its enrolled physical generation.");
+        }
+        else
+        {
+            directoryIdentity = await directoryIdentityResolver.ResolveAsync(
+                normalizedRoot,
+                cancellationToken);
+        }
+
         var existingIndex = allowedRoots.FindIndex(root => FileSystemPathIdentity.AreEquivalent(
             root.Path,
             normalizedRoot,
-            resolution.Semantics));
+            semantics.Value));
         if (existingIndex >= 0)
         {
-            if (caseSensitivityMode != FileSystemCaseSensitivityMode.Auto
-                && allowedRoots[existingIndex].CaseSensitivityMode == FileSystemCaseSensitivityMode.Auto)
+            if (hasPersistedDirectoryIdentity
+                || (caseSensitivityMode != FileSystemCaseSensitivityMode.Auto
+                    && allowedRoots[existingIndex].CaseSensitivityMode
+                        == FileSystemCaseSensitivityMode.Auto))
             {
                 allowedRoots[existingIndex] = new MoveRootBoundary(
                     normalizedRoot,
-                    resolution.Semantics,
-                    caseSensitivityMode);
+                    semantics.Value,
+                    caseSensitivityMode,
+                    directoryIdentity,
+                    hasPersistedDirectoryIdentity);
             }
 
             return;
@@ -72,8 +114,10 @@ public sealed partial class LibraryMoveWorkflow
 
         allowedRoots.Add(new MoveRootBoundary(
             normalizedRoot,
-            resolution.Semantics,
-            caseSensitivityMode));
+            semantics.Value,
+            caseSensitivityMode,
+            directoryIdentity,
+            hasPersistedDirectoryIdentity));
     }
 
     private string? TryFindNearestExistingDirectory(string path)
@@ -93,7 +137,7 @@ public sealed partial class LibraryMoveWorkflow
         }
         catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
         {
-            _logger.LogDebug(ex, "Unable to resolve nearest existing custom move destination directory.");
+            _logger.LogDebug(ex, "Unable to resolve nearest existing move destination directory.");
         }
 
         return null;
@@ -110,6 +154,9 @@ public sealed partial class LibraryMoveWorkflow
             .OrderByDescending(root => FileSystemPathIdentity.Canonicalize(
                 root.Path,
                 root.Semantics.Syntax).Length)
+            // If OutputPath aliases a configured RootFolder, the persisted managed-root
+            // generation is the stronger authority and must win an equal-depth tie.
+            .ThenByDescending(root => root.IsManagedRoot)
             .FirstOrDefault();
 
     private static bool SourceStateMatches(
@@ -145,7 +192,9 @@ public sealed partial class LibraryMoveWorkflow
     private sealed record MoveRootBoundary(
         string Path,
         FileSystemPathSemantics Semantics,
-        FileSystemCaseSensitivityMode CaseSensitivityMode);
+        FileSystemCaseSensitivityMode CaseSensitivityMode,
+        DirectoryObjectIdentityResolution DirectoryIdentity,
+        bool IsManagedRoot);
 
     private static BadRequestObjectResult ValidationResult(
         string code,

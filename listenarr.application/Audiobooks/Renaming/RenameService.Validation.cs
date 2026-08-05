@@ -39,21 +39,14 @@ public partial class RenameService
             }
         }
 
-        if (!string.IsNullOrWhiteSpace(operation.NewFolderPath)
-            && fileOperations.Count > 0)
+        if (!string.IsNullOrWhiteSpace(operation.NewFolderPath))
         {
-            var expectedFileIds = audiobook.Files is { Count: > 0 }
-                ? audiobook.Files
-                    .Where(file => !string.IsNullOrWhiteSpace(file.Path))
-                    .Select(file => file.Id)
-                    .ToHashSet()
-                : !string.IsNullOrWhiteSpace(audiobook.FilePath)
-                    ? new HashSet<int> { 0 }
-                    : [];
+            var expectedFileIds = GetTrackedFileIdsForFolderChange(audiobook);
             var requestedFileIds = fileOperations
                 .Select(file => file.FileId)
                 .ToHashSet();
-            if (!expectedFileIds.SetEquals(requestedFileIds))
+            if (expectedFileIds.Count == 0
+                || !expectedFileIds.SetEquals(requestedFileIds))
             {
                 result.Error = "A folder-changing organize request must include every tracked audiobook file.";
                 result.Conflict = true;

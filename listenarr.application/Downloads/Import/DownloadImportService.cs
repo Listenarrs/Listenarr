@@ -34,6 +34,7 @@ namespace Listenarr.Application.Downloads.Import
         IAudiobookRepository audiobookRepository,
         IFilesystemMutationCoordinator filesystemMutationCoordinator,
         IAudiobookOperationCoordinator audiobookOperationCoordinator,
+        IMoveQueueService moveQueueService,
         ILibraryDirectoryOwnershipStore directoryOwnershipStore,
         ILogger<DownloadImportService> logger) : IDownloadImportService
     {

@@ -20,6 +20,44 @@ namespace Listenarr.Tests.Features.Infrastructure.Metadata.Jobs
     public sealed class MetadataRescanProcessorTests : BaseTests
     {
         [Fact]
+        public async Task RunCycleAsync_UnresolvedMoveExecution_SkipsCandidateBeforeExtraction()
+        {
+            var metadataService = new Mock<IMetadataService>(MockBehavior.Strict);
+            Init(builder => builder.WithSingleton(metadataService.Object));
+            var audioPath = await FileService.GetFileAsync(
+                FileService.GetTempDirectory("metadata-rescan-unresolved-move"),
+                "book.m4b",
+                "audio");
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Metadata Move Fence")
+                .WithBasePath(Path.GetDirectoryName(audioPath)!)
+                .Build());
+            var file = await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
+                .WithAudiobook(audiobook)
+                .WithPath(audioPath)
+                .Build());
+            await MoveJobTestFactory.SeedUnresolvedExecutionAsync(
+                _provider,
+                audiobook.Id,
+                audiobook.BasePath!,
+                Path.Join(FileService.GetTempPath(), $"metadata-move-target-{Guid.NewGuid():N}"));
+
+            var processor = new MetadataRescanProcessor(
+                _provider.GetRequiredService<IServiceScopeFactory>(),
+                _provider.GetRequiredService<IAudiobookOperationCoordinator>(),
+                _provider.GetRequiredService<IMoveQueueService>(),
+                NullLogger<MetadataRescanProcessor>.Instance);
+            await processor.RunCycleAsync(CancellationToken.None);
+
+            var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+            await using var verification = await factory.CreateDbContextAsync();
+            var persisted = await verification.AudiobookFiles.SingleAsync(candidate => candidate.Id == file.Id);
+            Assert.Null(persisted.DurationSeconds);
+            Assert.Null(persisted.Format);
+            metadataService.VerifyNoOtherCalls();
+        }
+
+        [Fact]
         public async Task RunCycleAsync_PathChangesDuringExtraction_DiscardsStaleMetadataResult()
         {
             var extractionStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -58,6 +96,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Metadata.Jobs
             var processor = new MetadataRescanProcessor(
                 _provider.GetRequiredService<IServiceScopeFactory>(),
                 _provider.GetRequiredService<IAudiobookOperationCoordinator>(),
+                _provider.GetRequiredService<IMoveQueueService>(),
                 NullLogger<MetadataRescanProcessor>.Instance);
             var cycle = processor.RunCycleAsync(CancellationToken.None);
             await extractionStarted.Task;
@@ -140,6 +179,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Metadata.Jobs
             var processor = new MetadataRescanProcessor(
                 _provider.GetRequiredService<IServiceScopeFactory>(),
                 _provider.GetRequiredService<IAudiobookOperationCoordinator>(),
+                _provider.GetRequiredService<IMoveQueueService>(),
                 NullLogger<MetadataRescanProcessor>.Instance);
             await processor.RunCycleAsync(CancellationToken.None);
 
@@ -196,6 +236,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Metadata.Jobs
             var processor = new MetadataRescanProcessor(
                 _provider.GetRequiredService<IServiceScopeFactory>(),
                 _provider.GetRequiredService<IAudiobookOperationCoordinator>(),
+                _provider.GetRequiredService<IMoveQueueService>(),
                 NullLogger<MetadataRescanProcessor>.Instance);
             await processor.RunCycleAsync(CancellationToken.None);
 
@@ -242,6 +283,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Metadata.Jobs
             var processor = new MetadataRescanProcessor(
                 _provider.GetRequiredService<IServiceScopeFactory>(),
                 _provider.GetRequiredService<IAudiobookOperationCoordinator>(),
+                _provider.GetRequiredService<IMoveQueueService>(),
                 NullLogger<MetadataRescanProcessor>.Instance);
             await processor.RunCycleAsync(CancellationToken.None);
 
@@ -292,6 +334,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Metadata.Jobs
             var processor = new MetadataRescanProcessor(
                 _provider.GetRequiredService<IServiceScopeFactory>(),
                 _provider.GetRequiredService<IAudiobookOperationCoordinator>(),
+                _provider.GetRequiredService<IMoveQueueService>(),
                 NullLogger<MetadataRescanProcessor>.Instance);
             await processor.RunCycleAsync(CancellationToken.None);
 

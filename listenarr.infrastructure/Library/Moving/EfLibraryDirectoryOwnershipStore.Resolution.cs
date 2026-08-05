@@ -120,26 +120,33 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
         {
             try
             {
-                using var live = PinnedDirectoryCreation.OpenPinnedVisibleDirectory(
-                    resolved.CanonicalPath);
+                var parentPath = Path.GetDirectoryName(resolved.CanonicalPath)
+                    ?? throw new InvalidOperationException(
+                        "The owned directory has no parent for durable proof validation.");
+                using var parent = PinnedDirectoryCreation.OpenPinnedBoundary(parentPath);
+                using var live = parent.OpenExistingChild(
+                    Path.GetFileName(resolved.CanonicalPath));
                 if (!ManagedDirectoryIdentity.Matches(
                         resolved.DirectoryObjectIdentityVersion,
                         resolved.DirectoryObjectIdentity,
                         resolved.OwnershipToken,
                         live.GetDirectoryObjectIdentity())
-                    || !live.VisiblePathMatches())
+                    || !live.VisiblePathMatches()
+                    || !parent.VisiblePathMatches())
                 {
                     throw new InvalidOperationException(
                         "The owned directory no longer matches its enrolled physical identity.");
                 }
+                AfterOwnedDirectoryPhysicalIdentityPinnedForTest?.Invoke();
                 LibraryDirectoryOwnershipMarker.Validate(
                     resolved,
-                    resolved.CanonicalPath);
+                    live,
+                    parent);
             }
             catch (Exception exception) when (exception is
                 ArgumentException or IOException or UnauthorizedAccessException
                     or InvalidOperationException or NotSupportedException
-                    or PathTooLongException)
+                    or PathTooLongException or System.ComponentModel.Win32Exception)
             {
                 return new LibraryDirectoryOwnershipResolution(
                     LibraryDirectoryOwnershipResolutionState.Unavailable,

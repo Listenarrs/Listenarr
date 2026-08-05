@@ -37,6 +37,7 @@ namespace Listenarr.Application.Audiobooks.Renaming
         private readonly IFileSystemSemanticsResolver _semanticsResolver;
         private readonly IHistoryRepository? _historyRepository;
         private readonly IAudiobookOperationCoordinator _audiobookOperationCoordinator;
+        private readonly IMoveQueueService _moveQueueService;
         private readonly ILibraryDirectoryOwnershipStore _directoryOwnershipStore;
 
         public RenameService(
@@ -51,6 +52,7 @@ namespace Listenarr.Application.Audiobooks.Renaming
             ILogger<RenameService> logger,
             IFileSystemSemanticsResolver semanticsResolver,
             IAudiobookOperationCoordinator audiobookOperationCoordinator,
+            IMoveQueueService moveQueueService,
             ILibraryDirectoryOwnershipStore directoryOwnershipStore,
             IRootFolderService? rootFolderService = null,
             IHistoryRepository? historyRepository = null)
@@ -68,6 +70,7 @@ namespace Listenarr.Application.Audiobooks.Renaming
             _rootFolderService = rootFolderService;
             _historyRepository = historyRepository;
             _audiobookOperationCoordinator = audiobookOperationCoordinator ?? throw new ArgumentNullException(nameof(audiobookOperationCoordinator));
+            _moveQueueService = moveQueueService ?? throw new ArgumentNullException(nameof(moveQueueService));
             _directoryOwnershipStore = directoryOwnershipStore ?? throw new ArgumentNullException(nameof(directoryOwnershipStore));
         }
 
@@ -100,6 +103,15 @@ namespace Listenarr.Application.Audiobooks.Renaming
                     operations.Select(operation => operation.AudiobookId),
                     async keyedToken =>
                     {
+                        foreach (var audiobookId in operations
+                            .Select(operation => operation.AudiobookId)
+                            .Distinct())
+                        {
+                            await _moveQueueService.EnsureFilesystemMutationAllowedAsync(
+                                audiobookId,
+                                keyedToken);
+                        }
+
                         var settings = await _configService.GetApplicationSettingsAsync();
                         var rootFolders = await LoadRootFoldersAsync();
                         var results = new List<RenameResult>(operations.Count);
@@ -255,7 +267,6 @@ namespace Listenarr.Application.Audiobooks.Renaming
                 var mutationToken = RequestCancellationBoundary.EnterNonCancelablePhase(ct);
                 var result = new RenameResult { AudiobookId = operation.AudiobookId };
                 var audiobookRollbackState = CaptureAudiobookPathRollbackState(audiobook);
-                DirectoryRollbackState? directoryRollbackState = null;
                 foreach (var fileOperation in operation.FileRenames ?? [])
                 {
                     var fileResult = await ExecuteFileRenameAsync(
@@ -280,33 +291,7 @@ namespace Listenarr.Application.Audiobooks.Renaming
                     }
                 }
 
-                if (!hasFileOperations
-                    && folderRequested
-                    && !PathsEqual(currentBasePath, operation.NewFolderPath, semantics))
-                {
-                    directoryRollbackState = CaptureDirectoryRollbackState(
-                        audiobook,
-                        currentBasePath,
-                        NormalizePath(operation.NewFolderPath));
-                    var directoryMove = await ExecuteDirectoryMoveAsync(
-                        audiobook,
-                        operation.NewFolderPath!,
-                        allowedRoots,
-                        rootFolders,
-                        semantics,
-                        mutationToken);
-                    result.Success = directoryMove.Success;
-                    result.Error = directoryMove.Error;
-                    result.Conflict = directoryMove.Conflict;
-                    if (!directoryMove.Success)
-                    {
-                        return result;
-                    }
-                }
-                else
-                {
-                    result.Success = true;
-                }
+                result.Success = true;
 
                 if (hasFileOperations || folderRequested)
                 {
@@ -321,21 +306,13 @@ namespace Listenarr.Application.Audiobooks.Renaming
                     catch (Exception persistenceException) when (persistenceException is not OutOfMemoryException
                         && persistenceException is not StackOverflowException)
                     {
-                        var rollbackSucceeded = hasFileOperations
-                            ? await RollBackFileRenamesAsync(
-                                audiobook,
-                                result.RenamedFiles,
-                                audiobookRollbackState,
-                                allowedRoots,
-                                semantics,
-                                CancellationToken.None)
-                            : directoryRollbackState != null
-                                && await RollBackDirectoryMoveAsync(
-                                    audiobook,
-                                    directoryRollbackState,
-                                    allowedRoots,
-                                    semantics,
-                                    CancellationToken.None);
+                        var rollbackSucceeded = await RollBackFileRenamesAsync(
+                            audiobook,
+                            result.RenamedFiles,
+                            audiobookRollbackState,
+                            allowedRoots,
+                            semantics,
+                            CancellationToken.None);
 
                         if (!rollbackSucceeded)
                         {

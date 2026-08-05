@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
+using Listenarr.Application.Common.Exceptions;
 
 using Listenarr.Tests.Common;
 
@@ -9,6 +10,56 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Files;
 [Trait("Category", "Application")]
 public sealed class AudiobookFileServiceCoordinationTests : BaseTests
 {
+    [Fact]
+    public async Task ClaimAudiobookFileAsync_UnresolvedMoveExecution_BlocksBeforeCatalogOrFilesystemClaim()
+    {
+        var audiobook = new Audiobook
+        {
+            Id = 41,
+            Title = "Claim Move Fence",
+            BasePath = Path.GetTempPath()
+        };
+        var moveQueueService = new Mock<IMoveQueueService>(MockBehavior.Strict);
+        moveQueueService.Setup(service => service.EnsureFilesystemMutationAllowedAsync(
+                audiobook.Id,
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ApplicationConflictException(
+                "move_recovery_required",
+                "An interrupted move still owns this audiobook's filesystem state."));
+        var audiobookRepository = new Mock<IAudiobookRepository>(MockBehavior.Strict);
+        var fileRepository = new Mock<IAudiobookFileRepository>(MockBehavior.Strict);
+        using var memoryCache = new MemoryCache(new MemoryCacheOptions());
+        var service = new AudiobookFileService(
+            memoryCache,
+            new MetadataExtractionLimiter(),
+            audiobookRepository.Object,
+            fileRepository.Object,
+            Mock.Of<IHistoryRepository>(),
+            Mock.Of<IMetadataService>(),
+            Mock.Of<IToastService>(),
+            Mock.Of<IFfmpegService>(),
+            Mock.Of<IFileSystem>(),
+            Mock.Of<IFileSystemSemanticsResolver>(),
+            Mock.Of<IAudiobookFilePathIdentityResolver>(),
+            Mock.Of<IRootFolderService>(),
+            NullLogger<AudiobookFileService>.Instance,
+            new FilesystemMutationCoordinator(),
+            new AudiobookOperationCoordinator(),
+            moveQueueService.Object);
+        var file = AudiobookFile.CreateUnresolved(
+            Path.Join(Path.GetTempPath(), "claim-move-fence.m4b"));
+
+        var exception = await Assert.ThrowsAsync<ApplicationConflictException>(() =>
+            service.ClaimAudiobookFileAsync(
+                audiobook,
+                file,
+                file.Path!));
+
+        Assert.Equal("move_recovery_required", exception.Code);
+        audiobookRepository.VerifyNoOtherCalls();
+        fileRepository.VerifyNoOtherCalls();
+    }
+
     [Fact]
     public async Task ClaimAudiobookFileAsync_AcquiresGlobalBoundaryBeforeAudiobookLock()
     {
@@ -71,6 +122,11 @@ public sealed class AudiobookFileServiceCoordinationTests : BaseTests
                 basePath));
         var rootFolderService = new Mock<IRootFolderService>(MockBehavior.Strict);
         rootFolderService.Setup(service => service.GetAllAsync()).ReturnsAsync([]);
+        var moveQueueService = new Mock<IMoveQueueService>(MockBehavior.Strict);
+        moveQueueService.Setup(service => service.EnsureFilesystemMutationAllowedAsync(
+                audiobook.Id,
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
         using var memoryCache = new MemoryCache(new MemoryCacheOptions());
         var service = new AudiobookFileService(
             memoryCache,
@@ -87,7 +143,8 @@ public sealed class AudiobookFileServiceCoordinationTests : BaseTests
             rootFolderService.Object,
             NullLogger<AudiobookFileService>.Instance,
             globalCoordinator,
-            audiobookCoordinator);
+            audiobookCoordinator,
+            moveQueueService.Object);
 
         var result = await service.ClaimAudiobookFileAsync(
             audiobook,

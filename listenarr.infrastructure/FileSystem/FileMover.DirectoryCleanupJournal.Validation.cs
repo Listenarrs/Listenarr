@@ -249,9 +249,8 @@ public partial class FileMover
                 {
                     return false;
                 }
-                childPublication.DeletePinnedEmptyDirectory(
-                    name,
-                    immediateWindows: true);
+                childPublication.RetirePinnedEmptyDirectoryFromNamespace(
+                    name);
                 continue;
             }
             var isRecoveryFile = false;

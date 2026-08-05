@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Microsoft.AspNetCore.Mvc;
+using Listenarr.Application.Common.Exceptions;
 using Listenarr.Domain.Common;
 using Listenarr.Api.Dtos.ManualImport;
 
@@ -40,6 +41,7 @@ public partial class ManualImportController : ControllerBase
     private readonly IFileSystemSemanticsResolver _semanticsResolver;
     private readonly IFilesystemMutationCoordinator _filesystemMutationCoordinator;
     private readonly IAudiobookOperationCoordinator _audiobookOperationCoordinator;
+    private readonly IMoveQueueService _moveQueueService;
     private readonly ManualImportPathPlanner _pathPlanner;
     private readonly ManualImportCompanionImporter _companionImporter;
     private readonly ILibraryDirectoryOwnershipStore _directoryOwnershipStore;
@@ -59,6 +61,7 @@ public partial class ManualImportController : ControllerBase
         IFileSystemSemanticsResolver semanticsResolver,
         IFilesystemMutationCoordinator filesystemMutationCoordinator,
         IAudiobookOperationCoordinator audiobookOperationCoordinator,
+        IMoveQueueService moveQueueService,
         ILibraryDirectoryOwnershipStore directoryOwnershipStore,
         ManualImportPathPlanner? pathPlanner = null,
         ManualImportCompanionImporter? companionImporter = null)
@@ -78,6 +81,7 @@ public partial class ManualImportController : ControllerBase
         _semanticsResolver = semanticsResolver;
         _filesystemMutationCoordinator = filesystemMutationCoordinator ?? throw new ArgumentNullException(nameof(filesystemMutationCoordinator));
         _audiobookOperationCoordinator = audiobookOperationCoordinator ?? throw new ArgumentNullException(nameof(audiobookOperationCoordinator));
+        _moveQueueService = moveQueueService ?? throw new ArgumentNullException(nameof(moveQueueService));
         _directoryOwnershipStore = directoryOwnershipStore ?? throw new ArgumentNullException(nameof(directoryOwnershipStore));
         _pathPlanner = pathPlanner ?? new ManualImportPathPlanner(fileNamingService);
         _companionImporter = companionImporter ?? new ManualImportCompanionImporter(
@@ -201,12 +205,12 @@ public partial class ManualImportController : ControllerBase
                 : Array.Empty<FileUtils.AudioMatchProfile>();
 
             _logger.LogDebug("Manual import batch: {ItemCount} items", orderedItems.Count);
+            var stoppedByCancellation = false;
 
             await ExecuteWithAudiobookLocksAsync(
                 orderedItems.Select(item => item.MatchedAudiobookId),
                 async operationToken =>
                 {
-                    OperationCanceledException? postMutationCancellation = null;
                     var planningBasePaths = new Dictionary<int, string>();
                     try
                     {
@@ -265,10 +269,10 @@ public partial class ManualImportController : ControllerBase
                             _fileSystem.DeleteEmptyDirectories(sourceDirectory);
                         }
                     }
-                    catch (OperationCanceledException exception) when (
+                    catch (OperationCanceledException) when (
                         results.Any(result => result.Success))
                     {
-                        postMutationCancellation = exception;
+                        stoppedByCancellation = true;
                     }
 
                     var hasSuccessfulMutation = results.Any(result => result.Success);
@@ -278,14 +282,15 @@ public partial class ManualImportController : ControllerBase
                             ? CancellationToken.None
                             : operationToken);
 
-                    if (postMutationCancellation != null)
+                    if (hasSuccessfulMutation
+                        && operationToken.IsCancellationRequested)
                     {
-                        System.Runtime.ExceptionServices.ExceptionDispatchInfo
-                            .Capture(postMutationCancellation)
-                            .Throw();
+                        stoppedByCancellation = true;
                     }
-
-                    operationToken.ThrowIfCancellationRequested();
+                    else
+                    {
+                        operationToken.ThrowIfCancellationRequested();
+                    }
                 },
                 cancellationToken);
 
@@ -294,8 +299,17 @@ public partial class ManualImportController : ControllerBase
             return Ok(new
             {
                 importedCount = successCount,
-                totalCount = results.Count,
+                totalCount = orderedItems.Count,
+                stoppedByCancellation,
                 results = results
+            });
+        }
+        catch (ApplicationConflictException exception)
+        {
+            return Conflict(new
+            {
+                error = exception.SafeDetail,
+                code = exception.Code
             });
         }
         catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)

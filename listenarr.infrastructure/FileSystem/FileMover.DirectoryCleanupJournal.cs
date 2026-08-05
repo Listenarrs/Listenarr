@@ -191,6 +191,21 @@ public partial class FileMover
             }
         }
 
+        using var journal = parent.OpenExistingFile(
+            journalName,
+            requireDeleteAccess: true);
+        var currentJournal = await ReadCleanupJournalAsync(journal);
+        if (currentJournal == null
+            || currentJournal.OperationId != payload.OperationId
+            || !string.Equals(
+                currentJournal.ManifestHash,
+                payload.ManifestHash,
+                StringComparison.Ordinal)
+            || !journal.VisiblePathMatches())
+        {
+            return false;
+        }
+
         if (!await ValidateCleanupManifestAsync(
                 payload,
                 quarantine.FullPath,
@@ -202,15 +217,12 @@ public partial class FileMover
         {
             return false;
         }
-        quarantinePublication.DeletePinnedEmptyDirectory(
-            payload.QuarantineName,
-            immediateWindows: true);
+        quarantinePublication.RetirePinnedEmptyDirectoryFromNamespace(
+            payload.QuarantineName);
         FlushFileMoveDirectory(
             parent,
             "recovered directory cleanup quarantine retirement");
-        using var journal = parent.OpenExistingFile(
-            journalName,
-            requireDeleteAccess: true);
+        AfterCleanupQuarantineRetiredForTest?.Invoke(journal.FullPath);
         journal.Delete(immediateWindows: true);
         FlushFileMoveDirectory(
             parent,
@@ -426,9 +438,8 @@ public partial class FileMover
                     false,
                     "The quarantined source changed during retirement; recovery evidence was preserved.");
             }
-            quarantinePublication.DeletePinnedEmptyDirectory(
-                quarantineName,
-                immediateWindows: true);
+            quarantinePublication.RetirePinnedEmptyDirectoryFromNamespace(
+                quarantineName);
             FlushFileMoveDirectory(
                 sourceParent,
                 "directory cleanup quarantine retirement");

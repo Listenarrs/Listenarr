@@ -17,32 +17,34 @@ public sealed partial class EfMoveQueuePersistence
 
         try
         {
-            if ((File.GetAttributes(target) & FileAttributes.ReparsePoint) != 0)
+            using var targetAnchor = PinnedDirectoryCreation.OpenPinnedDirectoryNoFollow(target);
+            if (!targetAnchor.VisiblePathMatches())
             {
-                return OwnershipEvidenceResult.Ambiguous("The move target is a symbolic link or reparse point.");
+                return OwnershipEvidenceResult.Ambiguous(
+                    "The move target changed while ownership evidence was being inspected.");
             }
 
-            var markerPath = Path.Join(target, ".listenarr-temp-owner.json");
-            if (File.Exists(markerPath))
+            const string markerName = ".listenarr-temp-owner.json";
+            using var markerEntry = targetAnchor.TryOpenExistingFile(
+                markerName,
+                requireDeleteAccess: false);
+            if (markerEntry != null)
             {
-                if ((File.GetAttributes(markerPath) & FileAttributes.ReparsePoint) != 0)
+                if (!markerEntry.VisiblePathMatches())
                 {
-                    return OwnershipEvidenceResult.Ambiguous("The target ownership marker is linked.");
+                    return OwnershipEvidenceResult.Ambiguous(
+                        "The target ownership marker changed while it was being inspected.");
                 }
 
-                var markerInfo = new FileInfo(markerPath);
-                if (markerInfo.Length <= 0 || markerInfo.Length > MaximumOwnershipMarkerBytes)
+                using var stream = markerEntry.OpenReadStream(
+                    bufferSize: 4096,
+                    asynchronous: false);
+                if (stream.Length <= 0 || stream.Length > MaximumOwnershipMarkerBytes)
                 {
                     return OwnershipEvidenceResult.Ambiguous("The target ownership marker has an invalid size.");
                 }
 
-                using var stream = new FileStream(
-                    markerPath,
-                    FileMode.Open,
-                    FileAccess.Read,
-                    FileShare.Read,
-                    4096,
-                    FileOptions.SequentialScan);
+                stream.Position = 0;
                 var marker = JsonSerializer.Deserialize<OwnershipMarkerIdentity>(stream);
                 if (marker == null
                     || marker.Version != 1
@@ -107,40 +109,17 @@ public sealed partial class EfMoveQueuePersistence
                 return OwnershipEvidenceResult.Valid(marker.JobId);
             }
 
-            var writeOwners = new HashSet<Guid>();
-            foreach (var writePath in Directory.EnumerateFiles(
-                target,
-                ".listenarr-temp-owner.json.writing-*",
-                SearchOption.TopDirectoryOnly))
+            if (Directory.EnumerateFiles(
+                    target,
+                    ".listenarr-temp-owner.json.writing-*",
+                    SearchOption.TopDirectoryOnly)
+                .Any())
             {
-                if ((File.GetAttributes(writePath) & FileAttributes.ReparsePoint) != 0)
-                {
-                    return OwnershipEvidenceResult.Ambiguous("A target ownership-marker write file is linked.");
-                }
-
-                var fileName = Path.GetFileName(writePath);
-                var owners = candidates
-                    .Where(candidate => fileName.Contains(
-                        $"writing-{candidate.Job.Id:N}-",
-                        StringComparison.Ordinal))
-                    .Select(candidate => candidate.Job.Id)
-                    .ToList();
-                if (owners.Count != 1)
-                {
-                    return OwnershipEvidenceResult.Ambiguous(
-                        "A target ownership-marker write file cannot be attributed to one active move job.");
-                }
-
-                writeOwners.Add(owners[0]);
+                return OwnershipEvidenceResult.Ambiguous(
+                    "An incomplete target ownership-marker publication exists and cannot establish an owner.");
             }
 
-            return writeOwners.Count switch
-            {
-                0 => OwnershipEvidenceResult.None,
-                1 => OwnershipEvidenceResult.Valid(writeOwners.Single()),
-                _ => OwnershipEvidenceResult.Ambiguous(
-                    "Multiple move jobs have incomplete target ownership-marker publications.")
-            };
+            return OwnershipEvidenceResult.None;
         }
         catch (Exception exception) when (exception is
             IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or PathTooLongException or JsonException)
@@ -189,7 +168,7 @@ public sealed partial class EfMoveQueuePersistence
                             Path.GetFileName(target) + ".tmp-" + job.Id.ToString("N"))))
                     || HasOwnedPartialFile(target, job.Id))
                 {
-                    return JobEvidenceState.Owned;
+                    return JobEvidenceState.Ambiguous;
                 }
             }
 
@@ -206,7 +185,7 @@ public sealed partial class EfMoveQueuePersistence
                             sourceParent,
                             $".listenarr-quarantine-{job.Id:N}"))))
                 {
-                    return JobEvidenceState.Owned;
+                    return JobEvidenceState.Ambiguous;
                 }
             }
         }

@@ -28,12 +28,8 @@ public sealed class LibraryUpdateWorkflowTests : BaseTests
             Path.GetPathRoot(Environment.CurrentDirectory)!,
             "listenarr-update-foreign-alias",
             Guid.NewGuid().ToString("N"));
-        var driveRoot = Path.GetPathRoot(nativeTarget)!;
-        var foreignSource = "/" + nativeTarget[driveRoot.Length..].Replace('\\', '/');
-        Assert.Equal(
-            Path.GetFullPath(nativeTarget),
-            Path.GetFullPath(foreignSource),
-            StringComparer.OrdinalIgnoreCase);
+        var foreignSource = TempFileService
+            .GetWindowsRootRelativeForeignAlias(nativeTarget);
         var before = new Audiobook
         {
             Id = id,

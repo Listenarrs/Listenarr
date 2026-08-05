@@ -43,6 +43,61 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             await _rootFolderRepository.AddAsync(root);
         }
 
+        private async Task<AudiobookFile> AddTrackedGenerationAsync(
+            Audiobook audiobook,
+            string storedPath)
+        {
+            var identity = await _provider
+                .GetRequiredService<IAudiobookFilePathIdentityResolver>()
+                .ResolveAsync(audiobook, storedPath);
+            Assert.Equal(PathIdentityState.Valid, identity.State);
+            var file = AudiobookFile.CreateUnresolved(storedPath);
+            file.AudiobookId = audiobook.Id;
+            file.ApplyPathIdentity(storedPath, identity);
+            using (var lease = PinnedAudiobookFileRegistrationLease.Open(
+                identity.CanonicalPath))
+            {
+                file.ApplyPhysicalObjectIdentity(
+                    lease.PhysicalObjectIdentity,
+                    DateTime.UtcNow);
+            }
+
+            return await _audiobookFileRepository.AddAsync(file);
+        }
+
+        [Fact]
+        public async Task DeleteAudiobook_UnresolvedMoveExecution_BlocksBeforeCatalogDeletion()
+        {
+            var source = FileService.GetTempDirectory("delete-unresolved-move-source");
+            var target = Path.Join(
+                FileService.GetTempPath(),
+                $"delete-unresolved-move-target-{Guid.NewGuid():N}");
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Unresolved Move Delete Fence")
+                .WithBasePath(source)
+                .Build());
+            var move = await MoveJobTestFactory.SeedUnresolvedExecutionAsync(
+                _provider,
+                audiobook.Id,
+                source,
+                target);
+
+            var result = await _provider.GetRequiredService<LibraryController>()
+                .DeleteAudiobook(
+                    audiobook.Id,
+                    deleteFiles: false,
+                    deleteFolder: false);
+
+            var conflict = Assert.IsType<ConflictObjectResult>(result);
+            var payload = System.Text.Json.JsonSerializer.Serialize(conflict.Value);
+            Assert.Contains("move_recovery_required", payload, StringComparison.Ordinal);
+            Assert.NotNull(await _audiobookRepository.GetByIdAsync(audiobook.Id));
+            Assert.Equal(
+                move.Id,
+                (await _provider.GetRequiredService<IMoveQueueService>()
+                    .GetRecoveryStateForAudiobookAsync(audiobook.Id)).JobId);
+        }
+
         [Fact]
         public async Task DeleteAudiobook_DatabaseFailure_PreservesCachedImage()
         {
@@ -53,7 +108,9 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 Asin = "B000DELETE"
             };
             var repository = new Mock<IAudiobookRepository>(MockBehavior.Strict);
-            repository.Setup(service => service.GetByIdAsync(audiobook.Id))
+            repository.Setup(service => service.GetByIdSnapshotAsync(
+                    audiobook.Id,
+                    It.IsAny<CancellationToken>()))
                 .ReturnsAsync(audiobook);
             repository.Setup(service => service.DeleteByIdAsync(audiobook.Id))
                 .ReturnsAsync(false);
@@ -75,7 +132,9 @@ namespace Listenarr.Tests.Features.Api.Features.Library
 
             var failure = Assert.IsType<ObjectResult>(result);
             Assert.Equal(500, failure.StatusCode);
-            repository.Verify(service => service.GetByIdAsync(audiobook.Id), Times.Once);
+            repository.Verify(service => service.GetByIdSnapshotAsync(
+                audiobook.Id,
+                It.IsAny<CancellationToken>()), Times.Once);
             repository.Verify(service => service.DeleteByIdAsync(audiobook.Id), Times.Once);
             imageCache.VerifyNoOtherCalls();
             filesystemDelete.VerifyNoOtherCalls();
@@ -91,7 +150,9 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 Title = "Delete Files Commit Failure"
             };
             var repository = new Mock<IAudiobookRepository>(MockBehavior.Strict);
-            repository.Setup(service => service.GetByIdAsync(audiobook.Id))
+            repository.Setup(service => service.GetByIdSnapshotAsync(
+                    audiobook.Id,
+                    It.IsAny<CancellationToken>()))
                 .ReturnsAsync(audiobook);
             repository.Setup(service => service.DeleteByIdAsync(audiobook.Id))
                 .ReturnsAsync(false);
@@ -119,6 +180,102 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         }
 
         [Fact]
+        public async Task DeleteAudiobook_RequestCanceledWhilePreflightCompletes_DoesNotCommit()
+        {
+            var audiobook = new Audiobook
+            {
+                Id = 9905,
+                Title = "Cancelable Delete Preflight"
+            };
+            var preflightStarted = new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var releasePreflight = new TaskCompletionSource<Audiobook?>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var repository = new Mock<IAudiobookRepository>(MockBehavior.Strict);
+            repository.Setup(service => service.GetByIdSnapshotAsync(
+                    audiobook.Id,
+                    It.IsAny<CancellationToken>()))
+                .Returns(async () =>
+                {
+                    preflightStarted.SetResult();
+                    return await releasePreflight.Task;
+                });
+            repository.Setup(service => service.DeleteByIdAsync(audiobook.Id))
+                .ReturnsAsync(true);
+            var imageCache = new Mock<IImageCacheService>(MockBehavior.Strict);
+            var filesystemDelete = new Mock<IAudiobookFilesystemDeleteService>(
+                MockBehavior.Strict);
+            var fileSystem = new Mock<IFileSystem>(MockBehavior.Strict);
+            Init(services => services
+                .WithSingleton<IAudiobookRepository>(repository.Object)
+                .WithSingleton<IImageCacheService>(imageCache.Object)
+                .WithSingleton<IAudiobookFilesystemDeleteService>(filesystemDelete.Object)
+                .WithSingleton<IFileSystem>(fileSystem.Object));
+            using var cancellation = new CancellationTokenSource();
+
+            var deletion = _provider.GetRequiredService<LibraryController>()
+                .DeleteAudiobook(
+                    audiobook.Id,
+                    deleteFiles: false,
+                    deleteFolder: false,
+                    cancellation.Token);
+            await preflightStarted.Task;
+            cancellation.Cancel();
+            releasePreflight.SetResult(audiobook);
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => deletion);
+            repository.Verify(service => service.DeleteByIdAsync(audiobook.Id), Times.Never);
+            imageCache.VerifyNoOtherCalls();
+            filesystemDelete.VerifyNoOtherCalls();
+            fileSystem.VerifyNoOtherCalls();
+        }
+
+        [Fact]
+        public async Task DeleteAudiobook_RequestCanceledAfterCommitBoundary_RemainsSuccessful()
+        {
+            var audiobook = new Audiobook
+            {
+                Id = 9906,
+                Title = "Committed Delete Request Cancellation"
+            };
+            using var cancellation = new CancellationTokenSource();
+            var repository = new Mock<IAudiobookRepository>(MockBehavior.Strict);
+            repository.Setup(service => service.GetByIdSnapshotAsync(
+                    audiobook.Id,
+                    cancellation.Token))
+                .ReturnsAsync(audiobook);
+            repository.Setup(service => service.DeleteByIdAsync(audiobook.Id))
+                .Returns(() =>
+                {
+                    cancellation.Cancel();
+                    return Task.FromResult(true);
+                });
+            var imageCache = new Mock<IImageCacheService>(MockBehavior.Strict);
+            var filesystemDelete = new Mock<IAudiobookFilesystemDeleteService>(
+                MockBehavior.Strict);
+            var fileSystem = new Mock<IFileSystem>(MockBehavior.Strict);
+            Init(services => services
+                .WithSingleton<IAudiobookRepository>(repository.Object)
+                .WithSingleton<IImageCacheService>(imageCache.Object)
+                .WithSingleton<IAudiobookFilesystemDeleteService>(filesystemDelete.Object)
+                .WithSingleton<IFileSystem>(fileSystem.Object));
+
+            var result = await _provider.GetRequiredService<LibraryController>()
+                .DeleteAudiobook(
+                    audiobook.Id,
+                    deleteFiles: false,
+                    deleteFolder: false,
+                    cancellation.Token);
+
+            Assert.IsType<OkObjectResult>(result);
+            Assert.True(cancellation.IsCancellationRequested);
+            repository.Verify(service => service.DeleteByIdAsync(audiobook.Id), Times.Once);
+            imageCache.VerifyNoOtherCalls();
+            filesystemDelete.VerifyNoOtherCalls();
+            fileSystem.VerifyNoOtherCalls();
+        }
+
+        [Fact]
         public async Task DeleteAudiobook_CanceledImageCleanupAfterCommit_RemainsSuccessful()
         {
             var audiobook = new Audiobook
@@ -128,7 +285,9 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 Asin = "B000CANCEL"
             };
             var repository = new Mock<IAudiobookRepository>(MockBehavior.Strict);
-            repository.Setup(service => service.GetByIdAsync(audiobook.Id))
+            repository.Setup(service => service.GetByIdSnapshotAsync(
+                    audiobook.Id,
+                    It.IsAny<CancellationToken>()))
                 .ReturnsAsync(audiobook);
             repository.Setup(service => service.DeleteByIdAsync(audiobook.Id))
                 .ReturnsAsync(true);
@@ -167,7 +326,9 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             };
             var deleteCommitted = false;
             var repository = new Mock<IAudiobookRepository>(MockBehavior.Strict);
-            repository.Setup(service => service.GetByIdAsync(audiobook.Id))
+            repository.Setup(service => service.GetByIdSnapshotAsync(
+                    audiobook.Id,
+                    It.IsAny<CancellationToken>()))
                 .ReturnsAsync(audiobook);
             repository.Setup(service => service.DeleteByIdAsync(audiobook.Id))
                 .ReturnsAsync(() =>
@@ -242,10 +403,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 .WithFilePath(audioPath)
                 .Build());
 
-            await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
-                .WithAudiobook(audiobook)
-                .WithPath(audioPath)
-                .Build());
+            await AddTrackedGenerationAsync(audiobook, audioPath);
 
             var controller = _provider.GetRequiredService<LibraryController>();
 
@@ -265,17 +423,13 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         [WindowsFact]
         public async Task DeleteAudiobook_ForeignTrackedPathUnderProtectedRoot_PreservesWindowsAlias()
         {
-            var tempRoot = FileService.GetTempDirectory("listenarr-delete-foreign-tracked");
+            var tempRoot = FileService.GetWindowsRootRelativeTempDirectory("listenarr-delete-foreign-tracked");
             var bookFolder = Path.Join(tempRoot, "Foreign Book");
             var audioPath = Path.Join(bookFolder, "track.m4b");
             Directory.CreateDirectory(bookFolder);
             await File.WriteAllTextAsync(audioPath, "audio");
-            var driveRoot = Path.GetPathRoot(audioPath)!;
-            var foreignAudioPath = "/" + audioPath[driveRoot.Length..].Replace('\\', '/');
-            Assert.Equal(
-                Path.GetFullPath(audioPath),
-                Path.GetFullPath(foreignAudioPath),
-                StringComparer.OrdinalIgnoreCase);
+            var foreignAudioPath = TempFileService
+                .GetWindowsRootRelativeForeignAlias(audioPath);
             await AddAuthorizedRootAsync(new RootFolderBuilder()
                 .WithId(500)
                 .WithPath(tempRoot)
@@ -304,17 +458,13 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         [WindowsFact]
         public async Task DeleteAudiobook_ForeignTrackedPathUnderBookFolder_DoesNotDeleteAliasedContent()
         {
-            var tempRoot = FileService.GetTempDirectory("listenarr-delete-foreign-book-folder");
+            var tempRoot = FileService.GetWindowsRootRelativeTempDirectory("listenarr-delete-foreign-book-folder");
             var bookFolder = Path.Join(tempRoot, "Foreign Book Folder");
             var audioPath = Path.Join(bookFolder, "track.m4b");
             Directory.CreateDirectory(bookFolder);
             await File.WriteAllTextAsync(audioPath, "audio");
-            var driveRoot = Path.GetPathRoot(audioPath)!;
-            var foreignAudioPath = "/" + audioPath[driveRoot.Length..].Replace('\\', '/');
-            Assert.Equal(
-                Path.GetFullPath(audioPath),
-                Path.GetFullPath(foreignAudioPath),
-                StringComparer.OrdinalIgnoreCase);
+            var foreignAudioPath = TempFileService
+                .GetWindowsRootRelativeForeignAlias(audioPath);
             await AddAuthorizedRootAsync(new RootFolderBuilder()
                 .WithId(504)
                 .WithPath(tempRoot)
@@ -348,19 +498,15 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         [WindowsFact]
         public async Task DeleteAudiobook_ForeignBasePath_DoesNotAuthorizeWindowsAliasFolderContents()
         {
-            var tempRoot = FileService.GetTempDirectory("listenarr-delete-foreign-base");
+            var tempRoot = FileService.GetWindowsRootRelativeTempDirectory("listenarr-delete-foreign-base");
             var bookFolder = Path.Join(tempRoot, "Foreign Base Book");
             var audioPath = Path.Join(bookFolder, "track.m4b");
             var sidecarPath = Path.Join(bookFolder, "notes.txt");
             Directory.CreateDirectory(bookFolder);
             await File.WriteAllTextAsync(audioPath, "audio");
             await File.WriteAllTextAsync(sidecarPath, "notes");
-            var driveRoot = Path.GetPathRoot(bookFolder)!;
-            var foreignBasePath = "/" + bookFolder[driveRoot.Length..].Replace('\\', '/');
-            Assert.Equal(
-                Path.GetFullPath(bookFolder),
-                Path.GetFullPath(foreignBasePath),
-                StringComparer.OrdinalIgnoreCase);
+            var foreignBasePath = TempFileService
+                .GetWindowsRootRelativeForeignAlias(bookFolder);
             await AddAuthorizedRootAsync(new RootFolderBuilder()
                 .WithId(505)
                 .WithPath(tempRoot)
@@ -445,17 +591,13 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         [WindowsFact]
         public async Task DeleteAudiobook_ForeignConfiguredOutputPath_DoesNotProtectWindowsAliasFolder()
         {
-            var tempRoot = FileService.GetTempDirectory("listenarr-delete-foreign-output-root");
+            var tempRoot = FileService.GetWindowsRootRelativeTempDirectory("listenarr-delete-foreign-output-root");
             var bookFolder = Path.Join(tempRoot, "Native Book");
             var audioPath = Path.Join(bookFolder, "track.m4b");
             Directory.CreateDirectory(bookFolder);
             await File.WriteAllTextAsync(audioPath, "audio");
-            var driveRoot = Path.GetPathRoot(bookFolder)!;
-            var foreignOutputPath = "/" + bookFolder[driveRoot.Length..].Replace('\\', '/');
-            Assert.Equal(
-                Path.GetFullPath(bookFolder),
-                Path.GetFullPath(foreignOutputPath),
-                StringComparer.OrdinalIgnoreCase);
+            var foreignOutputPath = TempFileService
+                .GetWindowsRootRelativeForeignAlias(bookFolder);
             await _applicationSettingsRepository.SaveAsync(
                 new ApplicationSettingsBuilder()
                     .WithOutputPath(foreignOutputPath)
@@ -470,10 +612,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 .WithBasePath(bookFolder)
                 .WithFilePath(audioPath)
                 .Build());
-            await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
-                .WithAudiobook(audiobook)
-                .WithPath(audioPath)
-                .Build());
+            await AddTrackedGenerationAsync(audiobook, audioPath);
 
             var result = await _provider.GetRequiredService<LibraryController>()
                 .DeleteAudiobook(
@@ -489,17 +628,13 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         [WindowsFact]
         public async Task DeleteAudiobook_ForeignPersistedRoot_DoesNotProtectWindowsAliasFolder()
         {
-            var tempRoot = FileService.GetTempDirectory("listenarr-delete-foreign-protected-root");
+            var tempRoot = FileService.GetWindowsRootRelativeTempDirectory("listenarr-delete-foreign-protected-root");
             var bookFolder = Path.Join(tempRoot, "Native Root Book");
             var audioPath = Path.Join(bookFolder, "track.m4b");
             Directory.CreateDirectory(bookFolder);
             await File.WriteAllTextAsync(audioPath, "audio");
-            var driveRoot = Path.GetPathRoot(bookFolder)!;
-            var foreignRootPath = "/" + bookFolder[driveRoot.Length..].Replace('\\', '/');
-            Assert.Equal(
-                Path.GetFullPath(bookFolder),
-                Path.GetFullPath(foreignRootPath),
-                StringComparer.OrdinalIgnoreCase);
+            var foreignRootPath = TempFileService
+                .GetWindowsRootRelativeForeignAlias(bookFolder);
             await _rootFolderRepository.AddAsync(new RootFolderBuilder()
                 .WithId(507)
                 .WithPath(foreignRootPath)
@@ -514,10 +649,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 .WithBasePath(bookFolder)
                 .WithFilePath(audioPath)
                 .Build());
-            await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
-                .WithAudiobook(audiobook)
-                .WithPath(audioPath)
-                .Build());
+            await AddTrackedGenerationAsync(audiobook, audioPath);
 
             var result = await _provider.GetRequiredService<LibraryController>()
                 .DeleteAudiobook(
@@ -547,10 +679,9 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 .WithTitle("Relative Book")
                 .WithBasePath(tempRoot)
                 .Build());
-            await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
-                .WithAudiobook(audiobook)
-                .WithPath(Path.Join("Relative Book", "track.m4b"))
-                .Build());
+            await AddTrackedGenerationAsync(
+                audiobook,
+                Path.Join("Relative Book", "track.m4b"));
 
             var result = await _provider.GetRequiredService<LibraryController>()
                 .DeleteAudiobook(
@@ -589,10 +720,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 .WithFilePath(audioPath)
                 .Build());
 
-            await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
-                .WithAudiobook(audiobook)
-                .WithPath(audioPath)
-                .Build());
+            await AddTrackedGenerationAsync(audiobook, audioPath);
 
             var controller = _provider.GetRequiredService<LibraryController>();
 
@@ -634,14 +762,8 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 .WithFilePath(otherAudioPath)
                 .Build());
 
-            await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
-                .WithAudiobook(current)
-                .WithPath(currentAudioPath)
-                .Build());
-            await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
-                .WithAudiobook(other)
-                .WithPath(otherAudioPath)
-                .Build());
+            await AddTrackedGenerationAsync(current, currentAudioPath);
+            await AddTrackedGenerationAsync(other, otherAudioPath);
 
             var controller = _provider.GetRequiredService<LibraryController>();
 
@@ -665,7 +787,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         [WindowsFact]
         public async Task DeleteAudiobook_DeleteFolder_ForeignOtherAudiobookPathBlocksRecursiveDelete()
         {
-            var tempRoot = FileService.GetTempDirectory("listenarr-delete-foreign-other");
+            var tempRoot = FileService.GetWindowsRootRelativeTempDirectory("listenarr-delete-foreign-other");
             var sharedFolder = Path.Join(tempRoot, "Shared");
             var currentAudioPath = Path.Join(sharedFolder, "current.mp3");
             var otherAudioPath = Path.Join(sharedFolder, "other.mp3");
@@ -683,23 +805,17 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 .WithBasePath(sharedFolder)
                 .WithFilePath(currentAudioPath)
                 .Build());
-            var driveRoot = Path.GetPathRoot(sharedFolder)!;
-            var foreignSharedFolder = "/" + sharedFolder[driveRoot.Length..].Replace('\\', '/');
-            var foreignOtherPath = foreignSharedFolder + "/other.mp3";
-            Assert.Equal(
-                Path.GetFullPath(otherAudioPath),
-                Path.GetFullPath(foreignOtherPath),
-                StringComparer.OrdinalIgnoreCase);
+            var foreignSharedFolder = TempFileService
+                .GetWindowsRootRelativeForeignAlias(sharedFolder);
+            var foreignOtherPath = TempFileService
+                .GetWindowsRootRelativeForeignAlias(otherAudioPath);
             var other = await _audiobookRepository.AddAsync(new AudiobookBuilder()
                 .WithId(503)
                 .WithTitle("Other")
                 .WithBasePath(foreignSharedFolder)
                 .WithFilePath(foreignOtherPath)
                 .Build());
-            await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
-                .WithAudiobook(current)
-                .WithPath(currentAudioPath)
-                .Build());
+            await AddTrackedGenerationAsync(current, currentAudioPath);
             await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
                 .WithAudiobook(other)
                 .WithPath(foreignOtherPath)
@@ -750,10 +866,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 .WithFilePath(audioPath)
                 .Build());
 
-            await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
-                .WithAudiobook(audiobook)
-                .WithPath(audioPath)
-                .Build());
+            await AddTrackedGenerationAsync(audiobook, audioPath);
 
             var controller = _provider.GetRequiredService<LibraryController>();
 
@@ -795,10 +908,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 .WithBasePath(bookFolder)
                 .WithFilePath(audioPath)
                 .Build());
-            await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
-                .WithAudiobook(audiobook)
-                .WithPath(audioPath)
-                .Build());
+            await AddTrackedGenerationAsync(audiobook, audioPath);
             var controller = _provider.GetRequiredService<LibraryController>();
 
             var result = await controller.DeleteAudiobook(
@@ -846,10 +956,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 .WithBasePath(bookFolder)
                 .WithFilePath(audioPath)
                 .Build());
-            await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
-                .WithAudiobook(audiobook)
-                .WithPath(audioPath)
-                .Build());
+            await AddTrackedGenerationAsync(audiobook, audioPath);
             var controller = _provider.GetRequiredService<LibraryController>();
 
             var result = await controller.DeleteAudiobook(
@@ -898,10 +1005,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 .WithBasePath(bookFolder)
                 .WithFilePath(audioPath)
                 .Build());
-            await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
-                .WithAudiobook(audiobook)
-                .WithPath(audioPath)
-                .Build());
+            await AddTrackedGenerationAsync(audiobook, audioPath);
             var ambiguousPeerBasePath = "//?/" + Path.GetFullPath(unrelatedFolder).Replace('\\', '/');
             Assert.False(FileSystemPathIdentity.TryDetectAbsoluteSyntax(
                 ambiguousPeerBasePath,
@@ -972,10 +1076,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 .WithBasePath(bookFolder)
                 .WithFilePath(audioPath)
                 .Build());
-            await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
-                .WithAudiobook(audiobook)
-                .WithPath(audioPath)
-                .Build());
+            await AddTrackedGenerationAsync(audiobook, audioPath);
             var controller = _provider.GetRequiredService<LibraryController>();
 
             var result = await controller.DeleteAudiobook(
@@ -1003,6 +1104,318 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 Assert.All(
                     LibraryDirectoryOwnershipMarker.GetMarkerPaths(ownership),
                     markerPath => Assert.False(File.Exists(markerPath))));
+        }
+
+        [Fact]
+        public async Task FilesystemDelete_LegacyTrackedFileWithoutPhysicalIdentity_ReplacedBeforeDelete_PreservesReplacement()
+        {
+            var tempRoot = FileService.GetTempDirectory(
+                "listenarr-delete-legacy-unproven-generation");
+            var bookFolder = Path.Join(tempRoot, "Book");
+            var audioPath = Path.Join(bookFolder, "book.mp3");
+            var displacedPath = Path.Join(bookFolder, "book-original.mp3");
+            Directory.CreateDirectory(bookFolder);
+            await File.WriteAllTextAsync(audioPath, "owned audio");
+            await AddAuthorizedRootAsync(new RootFolderBuilder()
+                .WithName("Library")
+                .WithPath(tempRoot)
+                .WithCaseSensitivityMode(FileSystemCaseSensitivityMode.Auto)
+                .WithIsDefault()
+                .Build());
+
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithId(904)
+                .WithTitle("Legacy Unproven Tracked Generation Book")
+                .WithBasePath(bookFolder)
+                .WithFilePath(audioPath)
+                .Build());
+            var trackedFile = AudiobookFile.CreateUnresolved(audioPath);
+            trackedFile.AudiobookId = audiobook.Id;
+            var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+            await using (var db = await factory.CreateDbContextAsync())
+            {
+                db.AudiobookFiles.Add(trackedFile);
+                await db.SaveChangesAsync();
+            }
+
+            File.Move(audioPath, displacedPath);
+            await File.WriteAllTextAsync(audioPath, "replacement audio");
+            var snapshot = await _audiobookRepository.GetByIdSnapshotAsync(audiobook.Id);
+            Assert.NotNull(snapshot);
+            Assert.Equal(
+                PathIdentityState.Unavailable,
+                snapshot!.Files!.Single().PathIdentityState);
+            Assert.Null(snapshot.Files!.Single().PhysicalObjectIdentity);
+
+            var service = _provider.GetRequiredService<IAudiobookFilesystemDeleteService>();
+            var result = await service.DeleteAsync(snapshot, deleteFolder: false);
+
+            Assert.True(File.Exists(audioPath));
+            Assert.Equal("replacement audio", await File.ReadAllTextAsync(audioPath));
+            Assert.True(File.Exists(displacedPath));
+            Assert.Equal("owned audio", await File.ReadAllTextAsync(displacedPath));
+            Assert.Equal(0, result.DeletedFiles);
+            Assert.Contains(result.Warnings, warning =>
+                warning.Contains("physical", StringComparison.OrdinalIgnoreCase)
+                || warning.Contains("generation", StringComparison.OrdinalIgnoreCase));
+        }
+
+        [Fact]
+        public async Task FilesystemDelete_TrackedFileWithoutPhysicalIdentity_ReplacedBeforeDelete_PreservesReplacement()
+        {
+            var tempRoot = FileService.GetTempDirectory(
+                "listenarr-delete-unproven-tracked-generation");
+            var bookFolder = Path.Join(tempRoot, "Book");
+            var audioPath = Path.Join(bookFolder, "book.mp3");
+            var displacedPath = Path.Join(bookFolder, "book-original.mp3");
+            Directory.CreateDirectory(bookFolder);
+            await File.WriteAllTextAsync(audioPath, "owned audio");
+            await AddAuthorizedRootAsync(new RootFolderBuilder()
+                .WithName("Library")
+                .WithPath(tempRoot)
+                .WithCaseSensitivityMode(FileSystemCaseSensitivityMode.Auto)
+                .WithIsDefault()
+                .Build());
+
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithId(902)
+                .WithTitle("Unproven Tracked Generation Book")
+                .WithBasePath(bookFolder)
+                .WithFilePath(audioPath)
+                .Build());
+            var trackedFile = AudiobookFile.CreateUnresolved(audioPath);
+            trackedFile.AudiobookId = audiobook.Id;
+            trackedFile.ApplyPathIdentity(
+                audioPath,
+                AudiobookFilePathIdentity.CreateValid(
+                    audioPath,
+                    FileSystemPathSemantics.CurrentHostDefault,
+                    FileSystemCaseSensitivityMode.Auto,
+                    tempRoot));
+            var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+            await using (var db = await factory.CreateDbContextAsync())
+            {
+                db.AudiobookFiles.Add(trackedFile);
+                await db.SaveChangesAsync();
+            }
+
+            File.Move(audioPath, displacedPath);
+            await File.WriteAllTextAsync(audioPath, "replacement audio");
+            var snapshot = await _audiobookRepository.GetByIdSnapshotAsync(audiobook.Id);
+            Assert.NotNull(snapshot);
+            Assert.Null(snapshot!.Files!.Single().PhysicalObjectIdentity);
+
+            var service = _provider.GetRequiredService<IAudiobookFilesystemDeleteService>();
+            var result = await service.DeleteAsync(snapshot, deleteFolder: false);
+
+            Assert.True(File.Exists(audioPath));
+            Assert.Equal("replacement audio", await File.ReadAllTextAsync(audioPath));
+            Assert.True(File.Exists(displacedPath));
+            Assert.Equal("owned audio", await File.ReadAllTextAsync(displacedPath));
+            Assert.Equal(0, result.DeletedFiles);
+            Assert.Contains(result.Warnings, warning =>
+                warning.Contains("physical", StringComparison.OrdinalIgnoreCase)
+                || warning.Contains("generation", StringComparison.OrdinalIgnoreCase));
+        }
+
+        [Fact]
+        public async Task FilesystemDelete_TrackedFileReplacedBeforeDelete_PreservesReplacementGeneration()
+        {
+            var tempRoot = FileService.GetTempDirectory(
+                "listenarr-delete-tracked-generation");
+            var bookFolder = Path.Join(tempRoot, "Book");
+            var audioPath = Path.Join(bookFolder, "book.mp3");
+            var displacedPath = Path.Join(bookFolder, "book-original.mp3");
+            Directory.CreateDirectory(bookFolder);
+            await File.WriteAllTextAsync(audioPath, "owned audio");
+            await AddAuthorizedRootAsync(new RootFolderBuilder()
+                .WithName("Library")
+                .WithPath(tempRoot)
+                .WithCaseSensitivityMode(FileSystemCaseSensitivityMode.Auto)
+                .WithIsDefault()
+                .Build());
+
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithId(900)
+                .WithTitle("Tracked Generation Book")
+                .WithBasePath(bookFolder)
+                .WithFilePath(audioPath)
+                .Build());
+            var trackedFile = AudiobookFile.CreateUnresolved(audioPath);
+            trackedFile.AudiobookId = audiobook.Id;
+            trackedFile.ApplyPathIdentity(
+                audioPath,
+                AudiobookFilePathIdentity.CreateValid(
+                    audioPath,
+                    FileSystemPathSemantics.CurrentHostDefault,
+                    FileSystemCaseSensitivityMode.Auto,
+                    tempRoot));
+            using (var lease = PinnedAudiobookFileRegistrationLease.Open(audioPath))
+            {
+                trackedFile.ApplyPhysicalObjectIdentity(
+                    lease.PhysicalObjectIdentity,
+                    DateTime.UtcNow);
+            }
+
+            var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+            await using (var db = await factory.CreateDbContextAsync())
+            {
+                db.AudiobookFiles.Add(trackedFile);
+                await db.SaveChangesAsync();
+            }
+
+            File.Move(audioPath, displacedPath);
+            await File.WriteAllTextAsync(audioPath, "replacement audio");
+            var snapshot = await _audiobookRepository.GetByIdSnapshotAsync(audiobook.Id);
+            Assert.NotNull(snapshot);
+            Assert.Single(snapshot!.Files!);
+            Assert.False(string.IsNullOrWhiteSpace(
+                snapshot.Files!.Single().PhysicalObjectIdentity));
+
+            var service = _provider.GetRequiredService<IAudiobookFilesystemDeleteService>();
+            var result = await service.DeleteAsync(snapshot, deleteFolder: false);
+
+            Assert.True(File.Exists(audioPath));
+            Assert.Equal("replacement audio", await File.ReadAllTextAsync(audioPath));
+            Assert.True(File.Exists(displacedPath));
+            Assert.Equal("owned audio", await File.ReadAllTextAsync(displacedPath));
+            Assert.Equal(0, result.DeletedFiles);
+            Assert.Contains(result.Warnings, warning =>
+                warning.Contains("generation", StringComparison.OrdinalIgnoreCase)
+                || warning.Contains("physical", StringComparison.OrdinalIgnoreCase));
+        }
+
+        [Fact]
+        public async Task FilesystemDelete_FallbackTrackedFileWithoutPhysicalIdentity_ReplacedBeforeDelete_PreservesReplacement()
+        {
+            var tempRoot = FileService.GetTempDirectory(
+                "listenarr-delete-fallback-unproven-generation");
+            var bookFolder = Path.Join(tempRoot, "Book");
+            var audioPath = Path.Join(bookFolder, "book.mp3");
+            var displacedPath = Path.Join(bookFolder, "book-original.mp3");
+            Directory.CreateDirectory(bookFolder);
+            await File.WriteAllTextAsync(audioPath, "owned audio");
+            await AddAuthorizedRootAsync(new RootFolderBuilder()
+                .WithName("Library")
+                .WithPath(tempRoot)
+                .WithCaseSensitivityMode(FileSystemCaseSensitivityMode.Auto)
+                .WithIsDefault()
+                .Build());
+
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithId(903)
+                .WithTitle("Fallback Unproven Tracked Generation Book")
+                .WithBasePath(bookFolder)
+                .Build());
+            var trackedFile = AudiobookFile.CreateUnresolved(audioPath);
+            trackedFile.AudiobookId = audiobook.Id;
+            trackedFile.ApplyPathIdentity(
+                audioPath,
+                AudiobookFilePathIdentity.CreateValid(
+                    audioPath,
+                    FileSystemPathSemantics.CurrentHostDefault,
+                    FileSystemCaseSensitivityMode.Auto,
+                    tempRoot));
+            var unresolvedFile = AudiobookFile.CreateUnresolved(
+                OperatingSystem.IsWindows()
+                    ? "/foreign/unresolved.mp3"
+                    : @"C:\foreign\unresolved.mp3");
+            unresolvedFile.AudiobookId = audiobook.Id;
+            var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+            await using (var db = await factory.CreateDbContextAsync())
+            {
+                db.AudiobookFiles.AddRange(trackedFile, unresolvedFile);
+                await db.SaveChangesAsync();
+            }
+
+            File.Move(audioPath, displacedPath);
+            await File.WriteAllTextAsync(audioPath, "replacement audio");
+            var snapshot = await _audiobookRepository.GetByIdSnapshotAsync(audiobook.Id);
+            Assert.NotNull(snapshot);
+            Assert.Null(snapshot!.Files!.Single(file => file.Path == audioPath).PhysicalObjectIdentity);
+
+            var service = _provider.GetRequiredService<IAudiobookFilesystemDeleteService>();
+            var result = await service.DeleteAsync(snapshot, deleteFolder: false);
+
+            Assert.True(File.Exists(audioPath));
+            Assert.Equal("replacement audio", await File.ReadAllTextAsync(audioPath));
+            Assert.True(File.Exists(displacedPath));
+            Assert.Equal("owned audio", await File.ReadAllTextAsync(displacedPath));
+            Assert.Equal(0, result.DeletedFiles);
+            Assert.Contains(result.Warnings, warning =>
+                warning.Contains("physical", StringComparison.OrdinalIgnoreCase)
+                || warning.Contains("generation", StringComparison.OrdinalIgnoreCase));
+        }
+
+        [Fact]
+        public async Task FilesystemDelete_FallbackTrackedFileReplacedBeforeDelete_PreservesReplacementGeneration()
+        {
+            var tempRoot = FileService.GetTempDirectory(
+                "listenarr-delete-fallback-generation");
+            var bookFolder = Path.Join(tempRoot, "Book");
+            var audioPath = Path.Join(bookFolder, "book.mp3");
+            var displacedPath = Path.Join(bookFolder, "book-original.mp3");
+            Directory.CreateDirectory(bookFolder);
+            await File.WriteAllTextAsync(audioPath, "owned audio");
+            await AddAuthorizedRootAsync(new RootFolderBuilder()
+                .WithName("Library")
+                .WithPath(tempRoot)
+                .WithCaseSensitivityMode(FileSystemCaseSensitivityMode.Auto)
+                .WithIsDefault()
+                .Build());
+
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithId(899)
+                .WithTitle("Fallback Tracked Generation Book")
+                .WithBasePath(bookFolder)
+                .Build());
+            var trackedFile = AudiobookFile.CreateUnresolved(audioPath);
+            trackedFile.AudiobookId = audiobook.Id;
+            trackedFile.ApplyPathIdentity(
+                audioPath,
+                AudiobookFilePathIdentity.CreateValid(
+                    audioPath,
+                    FileSystemPathSemantics.CurrentHostDefault,
+                    FileSystemCaseSensitivityMode.Auto,
+                    tempRoot));
+            using (var lease = PinnedAudiobookFileRegistrationLease.Open(audioPath))
+            {
+                trackedFile.ApplyPhysicalObjectIdentity(
+                    lease.PhysicalObjectIdentity,
+                    DateTime.UtcNow);
+            }
+
+            var unresolvedFile = AudiobookFile.CreateUnresolved(
+                OperatingSystem.IsWindows()
+                    ? "/foreign/unresolved.mp3"
+                    : @"C:\foreign\unresolved.mp3");
+            unresolvedFile.AudiobookId = audiobook.Id;
+            var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+            await using (var db = await factory.CreateDbContextAsync())
+            {
+                db.AudiobookFiles.AddRange(trackedFile, unresolvedFile);
+                await db.SaveChangesAsync();
+            }
+
+            File.Move(audioPath, displacedPath);
+            await File.WriteAllTextAsync(audioPath, "replacement audio");
+            var snapshot = await _audiobookRepository.GetByIdSnapshotAsync(audiobook.Id);
+            Assert.NotNull(snapshot);
+            Assert.Equal(2, snapshot!.Files!.Count);
+
+            var service = _provider.GetRequiredService<IAudiobookFilesystemDeleteService>();
+            var result = await service.DeleteAsync(snapshot, deleteFolder: false);
+
+            Assert.True(File.Exists(audioPath));
+            Assert.Equal("replacement audio", await File.ReadAllTextAsync(audioPath));
+            Assert.True(File.Exists(displacedPath));
+            Assert.Equal("owned audio", await File.ReadAllTextAsync(displacedPath));
+            Assert.Equal(0, result.DeletedFiles);
+            Assert.Contains(result.Warnings, warning =>
+                warning.Contains("unavailable", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(result.Warnings, warning =>
+                warning.Contains("generation", StringComparison.OrdinalIgnoreCase)
+                || warning.Contains("physical", StringComparison.OrdinalIgnoreCase));
         }
 
         [LinuxFact]
@@ -1162,10 +1575,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 .WithBasePath(bookFolder)
                 .WithFilePath(audioPath)
                 .Build());
-            await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
-                .WithAudiobook(audiobook)
-                .WithPath(audioPath)
-                .Build());
+            await AddTrackedGenerationAsync(audiobook, audioPath);
             var failingService = new AudiobookFilesystemDeleteService(
                 _provider.GetRequiredService<IAudiobookRepository>(),
                 _provider.GetRequiredService<IAudiobookFileRepository>(),
@@ -1236,10 +1646,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 .WithBasePath(bookFolder)
                 .WithFilePath(audioPath)
                 .Build());
-            await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
-                .WithAudiobook(audiobook)
-                .WithPath(audioPath)
-                .Build());
+            await AddTrackedGenerationAsync(audiobook, audioPath);
             using var cancellation = new CancellationTokenSource();
             var cancelled = false;
             using var hook = ExclusiveDirectoryCreator.PushBeforeOpenParentHook(path =>
@@ -1293,10 +1700,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 .WithBasePath(bookFolder)
                 .WithFilePath(audioPath)
                 .Build());
-            await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
-                .WithAudiobook(audiobook)
-                .WithPath(audioPath)
-                .Build());
+            await AddTrackedGenerationAsync(audiobook, audioPath);
             using var cancellation = new CancellationTokenSource();
             var service = new AudiobookFilesystemDeleteService(
                 _provider.GetRequiredService<IAudiobookRepository>(),
@@ -1389,10 +1793,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 .WithBasePath(folder)
                 .WithFilePath(audioPath)
                 .Build());
-            await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
-                .WithAudiobook(audiobook)
-                .WithPath(audioPath)
-                .Build());
+            await AddTrackedGenerationAsync(audiobook, audioPath);
             var filesystemCoordinator = _provider.GetRequiredService<IFilesystemMutationCoordinator>();
             var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

@@ -42,10 +42,7 @@ public class LibraryController_DeleteLinkSafetyTests : BaseTests
             .WithBasePath(bookFolder)
             .WithFilePath(localFile)
             .Build());
-        await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
-            .WithAudiobook(audiobook)
-            .WithPath(localFile)
-            .Build());
+        await AddTrackedGenerationAsync(audiobook, localFile);
 
         var service = _provider.GetRequiredService<IAudiobookFilesystemDeleteService>();
         var result = await service.DeleteAsync(audiobook, deleteFolder: true);
@@ -89,10 +86,7 @@ public class LibraryController_DeleteLinkSafetyTests : BaseTests
             .WithBasePath(bookFolder)
             .WithFilePath(localFile)
             .Build());
-        await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
-            .WithAudiobook(audiobook)
-            .WithPath(localFile)
-            .Build());
+        await AddTrackedGenerationAsync(audiobook, localFile);
 
         var service = _provider.GetRequiredService<IAudiobookFilesystemDeleteService>();
         var result = await service.DeleteAsync(audiobook, deleteFolder: true);
@@ -126,10 +120,7 @@ public class LibraryController_DeleteLinkSafetyTests : BaseTests
             .WithBasePath(bookFolder)
             .WithFilePath(localFile)
             .Build());
-        await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
-            .WithAudiobook(audiobook)
-            .WithPath(localFile)
-            .Build());
+        await AddTrackedGenerationAsync(audiobook, localFile);
 
         var replaced = false;
         using var hook = ExclusiveDirectoryCreator.PushBeforeOpenParentHook(path =>
@@ -185,11 +176,7 @@ public class LibraryController_DeleteLinkSafetyTests : BaseTests
                 .WithBasePath(bookFolder)
                 .WithFilePath(localFile)
                 .Build());
-        await _audiobookFileRepository.AddAsync(
-            new AudiobookFileBuilder()
-                .WithAudiobook(audiobook)
-                .WithPath(localFile)
-                .Build());
+        await AddTrackedGenerationAsync(audiobook, localFile);
 
         var replaced = false;
         using var hook = ExclusiveDirectoryCreator.PushBeforeOpenParentHook(path =>
@@ -239,10 +226,7 @@ public class LibraryController_DeleteLinkSafetyTests : BaseTests
             .WithBasePath(bookFolder)
             .WithFilePath(localFile)
             .Build());
-        await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
-            .WithAudiobook(audiobook)
-            .WithPath(localFile)
-            .Build());
+        await AddTrackedGenerationAsync(audiobook, localFile);
 
         var replaced = false;
         using var hook = ExclusiveDirectoryCreator.PushBeforeOpenParentHook(path =>
@@ -270,6 +254,24 @@ public class LibraryController_DeleteLinkSafetyTests : BaseTests
             warning.Contains("delete", StringComparison.OrdinalIgnoreCase));
         File.Delete(bookFolder);
         Directory.Move(displacedFolder, bookFolder);
+    }
+
+    private async Task AddTrackedGenerationAsync(
+        Audiobook audiobook,
+        string path)
+    {
+        var tracked = new AudiobookFileBuilder()
+            .WithAudiobook(audiobook)
+            .WithPath(path)
+            .Build();
+        using (var lease = PinnedAudiobookFileRegistrationLease.Open(path))
+        {
+            tracked.ApplyPhysicalObjectIdentity(
+                lease.PhysicalObjectIdentity,
+                DateTime.UtcNow);
+        }
+
+        await _audiobookFileRepository.AddAsync(tracked);
     }
 
     private static bool TryCreateDirectoryLink(string linkPath, string targetPath)

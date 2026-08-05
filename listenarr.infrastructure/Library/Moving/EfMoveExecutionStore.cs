@@ -149,7 +149,13 @@ internal sealed partial class EfMoveExecutionStore(
                         && job.LeaseGeneration == leaseToken.Generation
                         && job.LeaseExpiresAt != null
                         && job.LeaseExpiresAt > nowUtc)
-                    .Select(job => new { job.SourcePath, job.RequestedPath })
+                    .Select(job => new
+                    {
+                        job.SourcePath,
+                        job.RequestedPath,
+                        job.TargetIdentityBoundary,
+                        job.RelocationId
+                    })
                     .SingleOrDefaultAsync(cancellationToken);
                 if (state == null)
                 {
@@ -175,6 +181,25 @@ internal sealed partial class EfMoveExecutionStore(
                     targetSemantics,
                     "Persisted move identity changed before a filesystem mutation.",
                     "Persisted move identity became invalid before a filesystem mutation.");
+                if (string.IsNullOrWhiteSpace(state.TargetIdentityBoundary))
+                {
+                    throw new MoveNeedsAttentionException(
+                        "The move target has no durable authorization boundary.");
+                }
+                await EnsureTargetBoundaryGenerationAuthorizedAsync(
+                    db,
+                    jobId,
+                    state.TargetIdentityBoundary,
+                    cancellationToken);
+                if (state.RelocationId.HasValue)
+                {
+                    await EnsureRelocationTargetGenerationAuthorizedAsync(
+                        db,
+                        state.RelocationId.Value,
+                        target,
+                        targetSemantics,
+                        cancellationToken);
+                }
             },
             cancellationToken);
 
@@ -186,11 +211,15 @@ internal sealed partial class EfMoveExecutionStore(
             async () =>
             {
                 await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-                return await db.MoveJobEntries
+                var entries = await db.MoveJobEntries
                     .AsNoTracking()
                     .Where(entry => entry.MoveJobId == jobId)
                     .OrderBy(entry => entry.Id)
                     .ToListAsync(cancellationToken);
+                return entries
+                    .Where(entry =>
+                        !MoveManifestIdentity.IsTargetBoundaryAuthorization(entry))
+                    .ToList();
             },
             cancellationToken);
 
@@ -325,7 +354,8 @@ internal sealed partial class EfMoveExecutionStore(
                 if (!db.Database.IsRelational())
                 {
                     var entries = await db.MoveJobEntries
-                        .Where(entry => entry.MoveJobId == jobId)
+                        .Where(entry => entry.MoveJobId == jobId
+                            && entry.RelativePath != string.Empty)
                         .ToListAsync(cancellationToken);
                     foreach (var entry in entries)
                     {
@@ -337,6 +367,7 @@ internal sealed partial class EfMoveExecutionStore(
 
                 var affected = await db.MoveJobEntries
                     .Where(entry => entry.MoveJobId == jobId
+                        && entry.RelativePath != string.Empty
                         && entry.MoveJob.Status == MoveJobStatus.Running
                         && entry.MoveJob.LeaseOwner == leaseToken.Owner
                         && entry.MoveJob.LeaseGeneration == leaseToken.Generation
@@ -348,7 +379,8 @@ internal sealed partial class EfMoveExecutionStore(
                             MoveJobEntryCopyState.Verified),
                         cancellationToken);
                 var expected = await db.MoveJobEntries.CountAsync(
-                    entry => entry.MoveJobId == jobId,
+                    entry => entry.MoveJobId == jobId
+                        && entry.RelativePath != string.Empty,
                     cancellationToken);
                 if (affected != expected)
                 {

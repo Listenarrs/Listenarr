@@ -34,14 +34,14 @@ internal sealed partial class AudiobookContentMoveService
         }
 
         var sourceExists = Directory.Exists(request.Source);
+        if (File.Exists(request.Source))
+        {
+            throw new MoveNeedsAttentionException(
+                "The source path was recreated as a file while empty-source cleanup state exists; both were preserved.");
+        }
         if (!Directory.Exists(statePath))
         {
             return sourceExists;
-        }
-        if (sourceExists)
-        {
-            throw new MoveNeedsAttentionException(
-                "Both the source directory and its interrupted cleanup claim exist; both were preserved.");
         }
 
         using var state = PinnedDirectoryCreation.OpenExistingForPublication(
@@ -63,15 +63,25 @@ internal sealed partial class AudiobookContentMoveService
                 request.Source,
                 request.Target,
                 cancellationToken);
-            if (Directory.Exists(request.Source)
+            if (File.Exists(request.Source)
+                || Directory.Exists(request.Source) != sourceExists
                 || !stateAnchor.VisiblePathMatches())
             {
                 throw new MoveNeedsAttentionException(
                     "The source or empty-source cleanup state changed before recovery.");
             }
 
-            state.DeletePinnedEmptyDirectory(EmptySourceQuarantineDirectoryName);
-            return false;
+            DeleteEmptySourcePrivateDirectory(
+                request,
+                state,
+                EmptySourceQuarantineDirectoryName,
+                SourceCleanupFaultPoint.BeforeEmptySourceStateDelete);
+            return sourceExists;
+        }
+        if (sourceExists)
+        {
+            throw new MoveNeedsAttentionException(
+                "Both the source directory and its interrupted cleanup claim exist; both were preserved.");
         }
         if (entries.Count != 1
             || !string.Equals(
@@ -121,10 +131,18 @@ internal sealed partial class AudiobookContentMoveService
                 "The source path or empty-source claim changed before deletion.");
         }
 
-        claim.DeletePinnedEmptyDirectory(EmptySourceClaimDirectoryName);
+        DeleteEmptySourcePrivateDirectory(
+            request,
+            claim,
+            EmptySourceClaimDirectoryName,
+            SourceCleanupFaultPoint.BeforeEmptySourceClaimDelete);
         claimAnchor.Dispose();
         claim.Dispose();
-        state.DeletePinnedEmptyDirectory(EmptySourceQuarantineDirectoryName);
+        DeleteEmptySourcePrivateDirectory(
+            request,
+            state,
+            EmptySourceQuarantineDirectoryName,
+            SourceCleanupFaultPoint.BeforeEmptySourceStateDelete);
         return false;
     }
 
@@ -175,19 +193,7 @@ internal sealed partial class AudiobookContentMoveService
             throw new MoveNeedsAttentionException(
                 "The empty-source private cleanup state could not be created exclusively.");
         }
-        if (!OperatingSystem.IsWindows())
-        {
-            File.SetUnixFileMode(
-                statePath,
-                UnixFileMode.UserRead
-                | UnixFileMode.UserWrite
-                | UnixFileMode.UserExecute);
-        }
-        if (!state.VisiblePathMatches())
-        {
-            throw new MoveNeedsAttentionException(
-                "The empty-source cleanup state changed while permissions were restricted.");
-        }
+        state.RestrictToCurrentUser();
 
         using var stateAnchor = state.OpenCreatedDirectoryAnchor();
         await EnsureMutationAuthorizedAsync(
@@ -239,12 +245,20 @@ internal sealed partial class AudiobookContentMoveService
                 "The source path or empty-source claim changed before deletion.");
         }
 
-        claim.DeletePinnedEmptyDirectory(EmptySourceClaimDirectoryName);
+        DeleteEmptySourcePrivateDirectory(
+            request,
+            claim,
+            EmptySourceClaimDirectoryName,
+            SourceCleanupFaultPoint.BeforeEmptySourceClaimDelete);
         claimAnchor.Dispose();
         claim.Dispose();
         sourceAnchor.Dispose();
         source.Dispose();
-        state.DeletePinnedEmptyDirectory(EmptySourceQuarantineDirectoryName);
+        DeleteEmptySourcePrivateDirectory(
+            request,
+            state,
+            EmptySourceQuarantineDirectoryName,
+            SourceCleanupFaultPoint.BeforeEmptySourceStateDelete);
     }
 
     private async Task RestorePinnedEmptySourceClaimAsync(
@@ -276,6 +290,30 @@ internal sealed partial class AudiobookContentMoveService
                 "The empty-source claim could not be restored to the source path.");
         }
 
-        state.DeletePinnedEmptyDirectory(EmptySourceQuarantineDirectoryName);
+        DeleteEmptySourcePrivateDirectory(
+            request,
+            state,
+            EmptySourceQuarantineDirectoryName,
+            SourceCleanupFaultPoint.BeforeEmptySourceStateDelete);
+    }
+
+    private void DeleteEmptySourcePrivateDirectory(
+        AudiobookContentMoveRequest request,
+        PinnedDirectoryCreation directory,
+        string directoryName,
+        SourceCleanupFaultPoint faultPoint)
+    {
+        try
+        {
+            faultInjector?.OnSourceCleanupMutation(request.JobId, faultPoint);
+            directory.RetirePinnedEmptyDirectoryFromNamespace(
+                directoryName);
+        }
+        catch (System.ComponentModel.Win32Exception exception)
+        {
+            throw new IOException(
+                "Verified empty-source cleanup state could not be retired; durable recovery state was preserved for retry.",
+                exception);
+        }
     }
 }

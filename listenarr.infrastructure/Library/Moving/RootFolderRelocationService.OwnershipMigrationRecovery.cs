@@ -50,6 +50,12 @@ public sealed partial class RootFolderRelocationService
             var plans = RehydrateOwnershipMigrationPlans(relocation);
             try
             {
+                await RequireTargetDirectoryGenerationAsync(
+                    relocation.TargetPath,
+                    relocation.TargetDirectoryObjectIdentityVersion,
+                    relocation.TargetDirectoryObjectIdentity,
+                    relocation.TargetDirectoryObjectIdentityUnavailableReason,
+                    cancellationToken);
                 var preparedPlans = plans
                     .Where(plan => plan.Journal.State
                         == LibraryDirectoryOwnershipPathMigrationState.Prepared)
@@ -102,10 +108,14 @@ public sealed partial class RootFolderRelocationService
                         relocation.TargetPath,
                         CancellationToken.None,
                         allowPublication: false);
-                    RetireOwnershipMigrationSources(
+                    await RetireOwnershipMigrationSourcesAsync(
                         plans,
                         relocation.SourcePath,
-                        relocation.TargetPath);
+                        relocation.TargetPath,
+                        relocation.TargetDirectoryObjectIdentityVersion,
+                        relocation.TargetDirectoryObjectIdentity,
+                        relocation.TargetDirectoryObjectIdentityUnavailableReason,
+                        CancellationToken.None);
                     db.LibraryDirectoryOwnershipPathMigrations
                         .RemoveRange(plans.Select(plan => plan.Journal));
                     FinalizeRecoveredMetadataOnlyRelocation(

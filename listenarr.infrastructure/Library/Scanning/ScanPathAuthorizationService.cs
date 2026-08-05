@@ -62,23 +62,22 @@ internal sealed class ScanPathAuthorizationService(
             boundary.RequestedMode,
             boundary.Path,
             fullPath);
-        if (!TryCapturePhysicalIdentity(
-                boundary.Path,
-                fullPath,
-                boundary.Semantics,
-                out var physicalIdentity,
-                out var physicalError))
+        var physicalCapture = await TryCapturePhysicalIdentityAsync(
+            boundary,
+            fullPath,
+            cancellationToken);
+        if (!physicalCapture.Success)
         {
             return ScanPathAuthorizationResult.Rejected(
                 ScanPathAuthorizationFailure.IdentityUnavailable,
-                physicalError
+                physicalCapture.Error
                     ?? "The scan path physical identity could not be established safely.");
         }
 
         return ScanPathAuthorizationResult.Authorized(
             fullPath,
             identity,
-            physicalIdentity);
+            physicalCapture.Identity);
     }
 
     public async Task<ScanPathAuthorizationResult> ResolveDefaultAsync(
@@ -137,13 +136,21 @@ internal sealed class ScanPathAuthorizationService(
         var candidates = configuredRoots
             .Select(root => new RootCandidate(
                 root.Path,
-                root.CaseSensitivityMode))
+                root.CaseSensitivityMode,
+                RequiresEnrollment: true,
+                root.DirectoryObjectIdentityVersion,
+                root.DirectoryObjectIdentity,
+                root.DirectoryObjectIdentityUnavailableReason))
             .ToList();
         if (!string.IsNullOrWhiteSpace(settings?.OutputPath))
         {
             candidates.Add(new RootCandidate(
                 settings.OutputPath,
-                FileSystemCaseSensitivityMode.Auto));
+                FileSystemCaseSensitivityMode.Auto,
+                RequiresEnrollment: false,
+                DirectoryObjectIdentityVersion: null,
+                DirectoryObjectIdentity: null,
+                DirectoryObjectIdentityUnavailableReason: null));
         }
 
         var roots = new List<AuthorizedRoot>();
@@ -207,32 +214,39 @@ internal sealed class ScanPathAuthorizationService(
             roots.Add(new AuthorizedRoot(
                 canonical,
                 resolution.Semantics,
-                candidate.RequestedMode));
+                candidate.RequestedMode,
+                candidate.RequiresEnrollment,
+                candidate.DirectoryObjectIdentityVersion,
+                candidate.DirectoryObjectIdentity,
+                candidate.DirectoryObjectIdentityUnavailableReason));
         }
 
         return roots;
     }
 
-    private static bool TryCapturePhysicalIdentity(
-        string boundaryPath,
+    private static async Task<PhysicalIdentityCapture> TryCapturePhysicalIdentityAsync(
+        AuthorizedRoot authorizedRoot,
         string scanPath,
-        FileSystemPathSemantics semantics,
-        out ScanPathPhysicalIdentity identity,
-        out string? error)
+        CancellationToken cancellationToken)
     {
-        identity = default;
-        error = null;
         try
         {
             var canonicalBoundary = FileSystemPathIdentity.Canonicalize(
-                boundaryPath,
-                semantics.Syntax);
+                authorizedRoot.Path,
+                authorizedRoot.Semantics.Syntax);
             var canonicalScanPath = FileSystemPathIdentity.Canonicalize(
                 scanPath,
-                semantics.Syntax);
+                authorizedRoot.Semantics.Syntax);
             using var boundary = PinnedDirectoryCreation.OpenPinnedBoundary(
                 canonicalBoundary);
-            var boundaryIdentity = boundary.GetDirectoryObjectIdentity();
+            var boundaryIdentity = authorizedRoot.RequiresEnrollment
+                ? await ManagedDirectoryEnrollment.RequireMatchingEnrollmentAsync(
+                    boundary,
+                    authorizedRoot.DirectoryObjectIdentityVersion,
+                    authorizedRoot.DirectoryObjectIdentity,
+                    authorizedRoot.DirectoryObjectIdentityUnavailableReason,
+                    cancellationToken)
+                : boundary.GetDirectoryObjectIdentity();
             using var scanRoot = OpenRelativeScanRoot(
                 boundary,
                 canonicalBoundary,
@@ -240,26 +254,27 @@ internal sealed class ScanPathAuthorizationService(
             if (!boundary.VisiblePathMatches()
                 || !scanRoot.VisiblePathMatches())
             {
-                error = "The configured scan boundary changed while its physical identity was being captured.";
-                return false;
+                return PhysicalIdentityCapture.Failed(
+                    "The configured scan boundary changed while its physical identity was being captured.");
             }
 
-            identity = new ScanPathPhysicalIdentity(
-                boundaryIdentity,
-                scanRoot.GetDirectoryObjectIdentity());
-            return true;
+            return PhysicalIdentityCapture.Captured(
+                new ScanPathPhysicalIdentity(
+                    boundaryIdentity,
+                    scanRoot.GetDirectoryObjectIdentity()));
         }
         catch (Exception exception) when (exception is not (
             OperationCanceledException or OutOfMemoryException or StackOverflowException))
         {
-            error = exception switch
+            return PhysicalIdentityCapture.Failed(exception switch
             {
                 DirectoryNotFoundException =>
                     "The scan path no longer exists beneath its configured root.",
+                _ when authorizedRoot.RequiresEnrollment =>
+                    "The configured scan root no longer identifies its enrolled physical generation.",
                 _ =>
                     "The scan path contains a linked, replaced, or unavailable directory component."
-            };
-            return false;
+            });
         }
     }
 
@@ -337,10 +352,31 @@ internal sealed class ScanPathAuthorizationService(
 
     private sealed record RootCandidate(
         string Path,
-        FileSystemCaseSensitivityMode RequestedMode);
+        FileSystemCaseSensitivityMode RequestedMode,
+        bool RequiresEnrollment,
+        int? DirectoryObjectIdentityVersion,
+        string? DirectoryObjectIdentity,
+        string? DirectoryObjectIdentityUnavailableReason);
 
     private sealed record AuthorizedRoot(
         string Path,
         FileSystemPathSemantics Semantics,
-        FileSystemCaseSensitivityMode RequestedMode);
+        FileSystemCaseSensitivityMode RequestedMode,
+        bool RequiresEnrollment,
+        int? DirectoryObjectIdentityVersion,
+        string? DirectoryObjectIdentity,
+        string? DirectoryObjectIdentityUnavailableReason);
+
+    private sealed record PhysicalIdentityCapture(
+        bool Success,
+        ScanPathPhysicalIdentity Identity,
+        string? Error)
+    {
+        public static PhysicalIdentityCapture Captured(
+            ScanPathPhysicalIdentity identity) =>
+            new(true, identity, null);
+
+        public static PhysicalIdentityCapture Failed(string error) =>
+            new(false, default, error);
+    }
 }

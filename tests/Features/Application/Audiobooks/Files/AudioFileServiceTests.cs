@@ -472,16 +472,12 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Files
         [WindowsFact]
         public async Task EnsureAudiobookFileAsync_ForeignPersistedBasePath_DoesNotAuthorizeWindowsAlias()
         {
-            var nativeBase = FileService.GetTempDirectory(
+            var nativeBase = FileService.GetWindowsRootRelativeTempDirectory(
                 "audio-file-foreign-persisted-base");
             var candidate = Path.Join(nativeBase, "track.m4b");
             await File.WriteAllTextAsync(candidate, "audio");
-            var driveRoot = Path.GetPathRoot(nativeBase)!;
-            var foreignBase = "/" + nativeBase[driveRoot.Length..].Replace('\\', '/');
-            Assert.Equal(
-                Path.GetFullPath(nativeBase),
-                Path.GetFullPath(foreignBase),
-                StringComparer.OrdinalIgnoreCase);
+            var foreignBase = TempFileService
+                .GetWindowsRootRelativeForeignAlias(nativeBase);
             var audiobook = await _audiobookRepository.AddAsync(new Audiobook
             {
                 Title = "Foreign Persisted Base",

@@ -307,9 +307,8 @@ public partial class FileMover
                 }
 
                 child.Dispose();
-                directory.DeletePinnedEmptyDirectory(
-                    childName,
-                    immediateWindows: true);
+                directory.RetirePinnedEmptyDirectoryFromNamespace(
+                    childName);
             }
 
             if (Directory.EnumerateFileSystemEntries(stagingAnchor.FullPath).Any()
@@ -320,9 +319,8 @@ public partial class FileMover
             }
 
             stagingAnchor.Dispose();
-            stagingPublication.DeletePinnedEmptyDirectory(
-                stagingName,
-                immediateWindows: true);
+            stagingPublication.RetirePinnedEmptyDirectoryFromNamespace(
+                stagingName);
         }
         catch (Exception exception) when (exception is not (
             OperationCanceledException or OutOfMemoryException or StackOverflowException))

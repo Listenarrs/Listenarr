@@ -152,9 +152,8 @@ public partial class FileMover
             }
 
             state.Dispose();
-            statePublication.DeletePinnedEmptyDirectory(
-                current.StateName,
-                immediateWindows: true);
+            statePublication.RetirePinnedEmptyDirectoryFromNamespace(
+                current.StateName);
             FlushFileMoveDirectory(
                 destinationParent,
                 "uncommitted registration state rollback");

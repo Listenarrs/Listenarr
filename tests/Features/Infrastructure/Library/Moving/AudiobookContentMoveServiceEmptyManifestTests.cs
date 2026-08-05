@@ -27,7 +27,13 @@ public partial class AudiobookContentMoveServiceTests
         Assert.True(Directory.Exists(source));
         Assert.Empty(Directory.EnumerateFileSystemEntries(source));
         Assert.False(Directory.Exists(target));
-        Assert.Empty(await LoadPersistedManifestAsync(request.JobId));
+        var persistedEntries = await LoadPersistedManifestAsync(request.JobId);
+        Assert.Single(
+            persistedEntries,
+            MoveManifestIdentity.IsTargetBoundaryAuthorization);
+        Assert.DoesNotContain(
+            persistedEntries,
+            entry => !MoveManifestIdentity.IsTargetBoundaryAuthorization(entry));
     }
 
     private async Task<List<MoveJobEntry>> LoadPersistedManifestAsync(Guid jobId)

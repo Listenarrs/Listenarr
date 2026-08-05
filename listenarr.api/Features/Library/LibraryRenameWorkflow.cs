@@ -7,6 +7,7 @@
  * by the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  */
+using Listenarr.Application.Common.Exceptions;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Api.Features.Library;
@@ -55,8 +56,15 @@ public sealed class LibraryRenameWorkflow(IRenameService? renameService = null)
             return new BadRequestObjectResult(new { message = "Cannot execute more than 500 rename operations at once" });
         }
 
-        return new OkObjectResult(
-            await renameService.ExecuteRenameAsync(request.Operations, cancellationToken));
+        try
+        {
+            return new OkObjectResult(
+                await renameService.ExecuteRenameAsync(request.Operations, cancellationToken));
+        }
+        catch (ApplicationConflictException exception)
+        {
+            return MoveConflict(exception);
+        }
     }
 
     public async Task<IActionResult> PreviewSingleAsync(
@@ -91,12 +99,26 @@ public sealed class LibraryRenameWorkflow(IRenameService? renameService = null)
         }
 
         operation.AudiobookId = id;
-        var result = (await renameService.ExecuteRenameAsync([operation], cancellationToken))
-            .FirstOrDefault();
-        return result == null
-            ? new NotFoundObjectResult(new { message = "Audiobook not found" })
-            : new OkObjectResult(result);
+        try
+        {
+            var result = (await renameService.ExecuteRenameAsync([operation], cancellationToken))
+                .FirstOrDefault();
+            return result == null
+                ? new NotFoundObjectResult(new { message = "Audiobook not found" })
+                : new OkObjectResult(result);
+        }
+        catch (ApplicationConflictException exception)
+        {
+            return MoveConflict(exception);
+        }
     }
+
+    private static ConflictObjectResult MoveConflict(ApplicationConflictException exception) =>
+        new(new
+        {
+            message = exception.SafeDetail,
+            code = exception.Code
+        });
 
     private static ObjectResult Unavailable() =>
         new(new { message = "Rename service not available" })

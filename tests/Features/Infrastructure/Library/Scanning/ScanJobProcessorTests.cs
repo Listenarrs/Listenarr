@@ -30,6 +30,30 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Scanning
         }
 
         [Fact]
+        public async Task ProcessJobAsync_UnresolvedMoveExecution_BlocksBeforeScanReconciliation()
+        {
+            var basePath = FileService.GetTempDirectory("scan-processor-unresolved-move");
+            _ = await FileService.GetFileAsync(basePath, "Scan Book.m4b", "audio");
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Scan Move Fence")
+                .WithBasePath(basePath)
+                .Build());
+            await MoveJobTestFactory.SeedUnresolvedExecutionAsync(
+                _provider,
+                audiobook.Id,
+                basePath,
+                Path.Join(FileService.GetTempPath(), $"scan-move-target-{Guid.NewGuid():N}"));
+            var (queue, job) = await CreateQueuedScanJobAsync(audiobook);
+
+            await _provider.GetRequiredService<IScanJobProcessor>()
+                .ProcessJobAsync(job, CancellationToken.None);
+
+            var updatedJob = GetRequiredJob(queue, job.Id);
+            Assert.Equal("Failed", updatedJob.Status);
+            Assert.Empty(await _audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id));
+        }
+
+        [Fact]
         public async Task ProcessJobAsync_HappyPath_ReconcilesFilesAndCompletesJob()
         {
             var basePath = FileService.GetTempDirectory("scan-processor-happy");
@@ -130,10 +154,11 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Scanning
             var bookPath = Path.Join(originalRoot, "Author", "Book");
             Directory.CreateDirectory(bookPath);
             _ = await FileService.GetFileAsync(bookPath, "Book.m4b", "audio");
-            await _applicationSettingsRepository.SaveAsync(
-                new ApplicationSettingsBuilder()
-                    .WithOutputPath(originalRoot)
-                    .Build());
+            var settings = await _applicationSettingsRepository.GetAsync()
+                ?? await _applicationSettingsRepository.InitializeIfMissingAsync(
+                    new ApplicationSettingsBuilder().Build());
+            settings.OutputPath = originalRoot;
+            settings = await _applicationSettingsRepository.SaveAsync(settings);
             var audiobook = await _audiobookRepository.AddAsync(
                 new AudiobookBuilder()
                     .WithTitle("Book")
@@ -152,10 +177,8 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Scanning
                 AuthorizationMode: ScanAuthorizationMode.PreauthorizedPath));
             Assert.True(queue.Reader.TryRead(out var job));
             Assert.Equal(jobId, job.Id);
-            await _applicationSettingsRepository.SaveAsync(
-                new ApplicationSettingsBuilder()
-                    .WithOutputPath(replacementRoot)
-                    .Build());
+            settings.OutputPath = replacementRoot;
+            await _applicationSettingsRepository.SaveAsync(settings);
 
             await _provider.GetRequiredService<IScanJobProcessor>()
                 .ProcessJobAsync(job, CancellationToken.None);
@@ -527,7 +550,8 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Scanning
                 _provider.GetRequiredService<IAppMetricsService>(),
                 _provider.GetRequiredService<IFileSystemSemanticsResolver>(),
                 _provider.GetRequiredService<IFilesystemMutationCoordinator>(),
-                _provider.GetRequiredService<IAudiobookOperationCoordinator>());
+                _provider.GetRequiredService<IAudiobookOperationCoordinator>(),
+                _provider.GetRequiredService<IMoveQueueService>());
 
             await processor.ProcessJobAsync(job, CancellationToken.None);
 
@@ -607,7 +631,8 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Scanning
                 _provider.GetRequiredService<IAppMetricsService>(),
                 _provider.GetRequiredService<IFileSystemSemanticsResolver>(),
                 _provider.GetRequiredService<IFilesystemMutationCoordinator>(),
-                _provider.GetRequiredService<IAudiobookOperationCoordinator>());
+                _provider.GetRequiredService<IAudiobookOperationCoordinator>(),
+                _provider.GetRequiredService<IMoveQueueService>());
 
             await processor.ProcessJobAsync(job, CancellationToken.None);
 

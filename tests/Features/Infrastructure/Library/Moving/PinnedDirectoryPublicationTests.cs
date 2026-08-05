@@ -6,8 +6,34 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving;
 [Trait("Area", "Library")]
 [Trait("Name", "PinnedDirectoryCreationTests")]
 [Trait("Category", "Infrastructure")]
-public sealed class PinnedDirectoryCreationTests : BaseTests
+public sealed partial class PinnedDirectoryCreationTests : BaseTests
 {
+    [WindowsFact]
+    public void RetirePinnedEmptyDirectoryFromNamespace_NestedLiveAnchors_RetiresChildBeforeParent()
+    {
+        var parent = FileService.GetTempDirectory(
+            "pinned-directory-immediate-nested-retirement");
+        var statePath = Path.Join(parent, "state");
+        var claimPath = Path.Join(statePath, "claim");
+        using var parentAnchor = PinnedDirectoryCreation.OpenPinnedDirectoryNoFollow(parent);
+        using var state = parentAnchor.TryCreateChildForPublication("state");
+        Assert.True(state.Created);
+        using var stateAnchor = state.OpenCreatedDirectoryAnchor();
+        using var claim = stateAnchor.TryCreateChildForPublication("claim");
+        Assert.True(claim.Created);
+        using var claimAnchor = claim.OpenCreatedDirectoryAnchor();
+        Assert.True(claimAnchor.VisiblePathMatches());
+        Assert.True(stateAnchor.VisiblePathMatches());
+
+        claim.RetirePinnedEmptyDirectoryFromNamespace("claim");
+
+        Assert.False(Directory.Exists(claimPath));
+        Assert.True(stateAnchor.VisiblePathMatches());
+        state.RetirePinnedEmptyDirectoryFromNamespace("state");
+
+        Assert.False(Directory.Exists(statePath));
+    }
+
     [Fact]
     public void PublishCreatedDirectoryAs_EmptyDirectory_PublishesWithinPinnedParent()
     {
@@ -20,6 +46,118 @@ public sealed class PinnedDirectoryCreationTests : BaseTests
         Assert.False(Directory.Exists(Path.Join(parent, "prepared")));
         Assert.True(Directory.Exists(Path.Join(parent, "published")));
         Assert.True(published.VisiblePathMatches());
+    }
+
+    [DirectoryLinkFact]
+    public void RestrictToCurrentUser_PublicPathReplacedWithLink_DoesNotMutateReplacementTarget()
+    {
+        var parent = FileService.GetTempDirectory(
+            "pinned-directory-permissions-parent");
+        var replacementTarget = FileService.GetTempDirectory(
+            "pinned-directory-permissions-external");
+        using var creation = PinnedDirectoryCreation.TryCreateForPublication(
+            parent,
+            "private-state");
+        Assert.True(creation.Created);
+        var displaced = Path.Join(parent, "private-state-original");
+        UnixFileMode? replacementMode = null;
+        if (!OperatingSystem.IsWindows())
+        {
+            replacementMode = UnixFileMode.UserRead
+                | UnixFileMode.UserWrite
+                | UnixFileMode.UserExecute
+                | UnixFileMode.GroupRead
+                | UnixFileMode.GroupExecute
+                | UnixFileMode.OtherRead
+                | UnixFileMode.OtherExecute;
+            File.SetUnixFileMode(replacementTarget, replacementMode.Value);
+        }
+
+        Directory.Move(creation.FullPath, displaced);
+        Directory.CreateSymbolicLink(creation.FullPath, replacementTarget);
+        try
+        {
+            Assert.ThrowsAny<Exception>(() => creation.RestrictToCurrentUser());
+
+            Assert.True(Directory.Exists(displaced));
+            if (!OperatingSystem.IsWindows())
+            {
+                Assert.Equal(
+                    replacementMode!.Value,
+                    File.GetUnixFileMode(replacementTarget));
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(creation.FullPath))
+            {
+                Directory.Delete(creation.FullPath);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task CreateHardLinkTo_SamePinnedParent_CreatesGenerationWitness()
+    {
+        var parent = FileService.GetTempDirectory(
+            "pinned-hardlink-same-parent");
+        using var parentAnchor =
+            PinnedDirectoryCreation.OpenPinnedDirectoryNoFollow(parent);
+        using var source = parentAnchor.CreateNewFile("source.stage");
+        await using (var stream = source.OpenWriteStream(4096, asynchronous: false))
+        {
+            await stream.WriteAsync("owned audio"u8.ToArray());
+            await stream.FlushAsync();
+            stream.Flush(flushToDisk: true);
+        }
+
+        using var claim = source.CreateHardLinkTo(
+            parentAnchor,
+            "destination.published.claim");
+
+        Assert.True(source.IdentifiesSameEntry(claim));
+        Assert.True(claim.VisiblePathMatches());
+    }
+
+    [Fact]
+    public async Task CreateHardLinkTo_DestinationReplacedBeforeVerification_PreservesReplacementGeneration()
+    {
+        var parent = FileService.GetTempDirectory(
+            "pinned-hardlink-verification-replacement");
+        var sourcePath = await FileService.GetFileAsync(
+            parent,
+            "source.m4b",
+            "owned audio");
+        var destinationPath = Path.Join(parent, "destination.m4b");
+        var displacedLinkPath = Path.Join(parent, "destination-created.m4b");
+        using (var parentAnchor =
+            PinnedDirectoryCreation.OpenPinnedDirectoryNoFollow(parent))
+        using (var sourceEntry = parentAnchor.OpenExistingFile(
+            Path.GetFileName(sourcePath),
+            requireDeleteAccess: true))
+        {
+            Assert.ThrowsAny<Exception>(() =>
+                sourceEntry.CreateHardLinkTo(
+                    parentAnchor,
+                    Path.GetFileName(destinationPath),
+                    () =>
+                    {
+                        File.Move(destinationPath, displacedLinkPath);
+                        File.WriteAllText(destinationPath, "replacement audio");
+                    }).Dispose());
+        }
+
+        Assert.True(File.Exists(destinationPath));
+        Assert.Equal(
+            "replacement audio",
+            await File.ReadAllTextAsync(destinationPath));
+        Assert.True(File.Exists(displacedLinkPath));
+        Assert.Equal(
+            "owned audio",
+            await File.ReadAllTextAsync(displacedLinkPath));
+        Assert.Equal(
+            "owned audio",
+            await File.ReadAllTextAsync(sourcePath));
     }
 
     [Fact]
@@ -157,6 +295,50 @@ public sealed class PinnedDirectoryCreationTests : BaseTests
 
         Assert.Equal("verified audio", await File.ReadAllTextAsync(publicPath));
         Assert.False(File.Exists(retentionPath));
+    }
+
+    [WindowsFact]
+    public async Task DestinationRetentionGuard_WindowsReleasesPublicHandleOnlyAfterRetentionRetired()
+    {
+        var parent = FileService.GetTempDirectory(
+            "pinned-destination-retention-release-order");
+        var publicPath = await FileService.GetFileAsync(
+            parent,
+            "book.m4b",
+            "verified audio");
+        var displacedPath = Path.Join(parent, "book-displaced.m4b");
+        var operationId = Guid.NewGuid();
+        var retentionName = PinnedDestinationRetentionGuard.CreateRetentionName(
+            operationId,
+            "book.m4b");
+        var retentionPath = Path.Join(parent, retentionName);
+        var expectedBytes = await File.ReadAllBytesAsync(publicPath);
+        var expectedHash = Convert.ToHexString(SHA256.HashData(expectedBytes));
+        using var anchor = PinnedDirectoryCreation.OpenPinnedDirectoryNoFollow(
+            parent);
+        using var guard = await PinnedDestinationRetentionGuard.OpenOrCreateAsync(
+            anchor,
+            "book.m4b",
+            retentionName,
+            expectedBytes.LongLength,
+            expectedHash,
+            CancellationToken.None);
+        Assert.NotNull(guard);
+        Assert.True(File.Exists(retentionPath));
+        Assert.True(await guard.TryLinearizePublicationAsync(
+            CancellationToken.None));
+        guard.AfterWindowsPublicTargetReleasedForTest = () =>
+        {
+            Assert.False(File.Exists(retentionPath));
+            File.Move(publicPath, displacedPath);
+            File.WriteAllText(publicPath, "replacement audio");
+        };
+
+        Assert.True(await guard.CompleteAsync(CancellationToken.None));
+
+        Assert.False(File.Exists(retentionPath));
+        Assert.Equal("verified audio", await File.ReadAllTextAsync(displacedPath));
+        Assert.Equal("replacement audio", await File.ReadAllTextAsync(publicPath));
     }
 
     [Fact]

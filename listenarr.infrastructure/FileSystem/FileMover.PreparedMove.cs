@@ -218,7 +218,13 @@ public partial class FileMover
             return false;
         }
 
-        if (!await RegistrationLeaseMatchesFileAsync(
+        if (string.IsNullOrWhiteSpace(
+                registrationLease.SourcePhysicalObjectIdentity)
+            || !string.Equals(
+                claim.GetObjectIdentity(),
+                registrationLease.SourcePhysicalObjectIdentity,
+                StringComparison.Ordinal)
+            || !await RegistrationLeaseMatchesFileAsync(
                 registrationLease,
                 claim)
             || !claim.VisiblePathMatches()
@@ -229,42 +235,54 @@ public partial class FileMover
         }
 
         claim.Delete(immediateWindows: true);
-        FlushFileMoveDirectory(
-            gate.SourceParent,
-            "recovered prepared move source retirement");
-        if (AfterPreparedMoveSourceDeletedForTestAsync != null)
+        try
         {
-            await AfterPreparedMoveSourceDeletedForTestAsync(
-                gate.DestinationPath);
-        }
+            FlushFileMoveDirectory(
+                gate.SourceParent,
+                "recovered prepared move source retirement");
+            if (AfterPreparedMoveSourceDeletedForTestAsync != null)
+            {
+                await AfterPreparedMoveSourceDeletedForTestAsync(
+                    gate.DestinationPath);
+            }
 
-        var recreatedOutcome =
-            gate.SourceParent.TryOpenExistingFileWithOutcome(
-                gate.SourceName,
-                requireDeleteAccess: false,
-                out var recreatedSource);
-        recreatedSource?.Dispose();
-        if (recreatedOutcome != PinnedFileOpenOutcome.NotFound)
-        {
-            _ = await TryPreserveDeletedPreparedMoveSourceAsync(
-                gate,
-                claim,
-                claim.FileName,
-                preferVisibleSource: false);
-            return false;
-        }
+            var recreatedOutcome =
+                gate.SourceParent.TryOpenExistingFileWithOutcome(
+                    gate.SourceName,
+                    requireDeleteAccess: false,
+                    out var recreatedSource);
+            recreatedSource?.Dispose();
+            if (recreatedOutcome != PinnedFileOpenOutcome.NotFound)
+            {
+                _ = await TryPreserveDeletedPreparedMoveSourceAsync(
+                    gate,
+                    claim,
+                    claim.FileName,
+                    preferVisibleSource: false);
+                return false;
+            }
 
-        if (!registrationLease.MatchesCurrentPublication())
+            if (!registrationLease.MatchesCurrentPublication())
+            {
+                _ = await TryPreserveDeletedPreparedMoveSourceAsync(
+                    gate,
+                    claim,
+                    claim.FileName,
+                    preferVisibleSource: true);
+                return false;
+            }
+
+            return true;
+        }
+        catch
         {
             _ = await TryPreserveDeletedPreparedMoveSourceAsync(
                 gate,
                 claim,
                 claim.FileName,
                 preferVisibleSource: true);
-            return false;
+            throw;
         }
-
-        return true;
     }
 
     private static async Task<bool> RegistrationLeaseMatchesFileAsync(
@@ -285,11 +303,6 @@ public partial class FileMover
         string claimName,
         bool preferVisibleSource)
     {
-        if (OperatingSystem.IsWindows())
-        {
-            return false;
-        }
-
         if (preferVisibleSource
             && await sourceEntry.TryRestoreUnlinkedCopyToAsync(
                 gate.SourceParent,

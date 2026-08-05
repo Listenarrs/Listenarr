@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using Listenarr.Application.Common;
 using Listenarr.Application.Common.Exceptions;
 using Listenarr.Domain.Common;
 using Microsoft.AspNetCore.Mvc;
@@ -38,7 +39,19 @@ namespace Listenarr.Api.Features.Library
         DateTime EnqueuedAt,
         DateTime? UpdatedAt,
         DateTime? NextAttemptAt,
+        string RecoveryDisposition,
         bool CanRetry);
+
+    internal sealed record MoveRecoveryStateResponse(
+        bool HasUnresolvedMove,
+        string Disposition,
+        Guid? JobId,
+        MoveJobStatus? Status,
+        MoveJobPhase? Phase,
+        string? RequestedPath,
+        string? Error,
+        bool CanRetry,
+        IReadOnlyList<Guid> BlockingJobIds);
 
     public sealed partial class LibraryMoveWorkflow
     {
@@ -127,6 +140,25 @@ namespace Listenarr.Api.Features.Library
                 }
             }
 
+            try
+            {
+                var recovery = await _moveQueueService.GetRecoveryStateForAudiobookAsync(
+                    id,
+                    cancellationToken);
+                if (recovery.BlocksFilesystemMutation)
+                {
+                    return MoveRecoveryConflict(recovery);
+                }
+            }
+            catch (PersistenceException ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "Move queue persistence failed while checking unresolved move state for audiobook {AudiobookId}",
+                    id);
+                return MoveQueuePersistenceUnavailableResult();
+            }
+
             return await _mutationCoordinator.ExecuteExclusiveAsync(
                 token => EnqueuePhysicalAsync(id, request, token),
                 cancellationToken);
@@ -148,8 +180,60 @@ namespace Listenarr.Api.Features.Library
             return new NotFoundObjectResult(new { message = "Job not found" });
         }
 
-        private static MoveJobStatusResponse ToStatusResponse(MoveJob job) =>
-            new(
+        private static ConflictObjectResult MoveRecoveryConflict(MoveRecoveryState recovery)
+        {
+            var (code, message) = recovery.Disposition switch
+            {
+                MoveRecoveryDisposition.InProgress => (
+                    "move_already_active",
+                    "A move is already in progress for this audiobook. Wait for it to finish before changing the destination again."),
+                MoveRecoveryDisposition.RetryAvailable => (
+                    "move_recovery_required",
+                    "An interrupted move still owns this audiobook's filesystem state. Resume that move before changing the destination again."),
+                MoveRecoveryDisposition.OperatorRepairRequired => (
+                    "move_repair_required",
+                    "A previous move left unresolved filesystem state that requires repair before another move can start."),
+                MoveRecoveryDisposition.Ambiguous => (
+                    "move_recovery_ambiguous",
+                    "Multiple move jobs contain unresolved filesystem state. Operator reconciliation is required before another move can start."),
+                _ => (
+                    "move_recovery_required",
+                    "An unresolved move must be completed before another move can start.")
+            };
+
+            return new ConflictObjectResult(new
+            {
+                message,
+                code,
+                jobId = recovery.JobId,
+                status = recovery.Status,
+                requestedPath = recovery.RequestedPath,
+                recoveryDisposition = recovery.Disposition.ToString(),
+                canRetry = recovery.CanRetry,
+                blockingJobIds = recovery.BlockingJobIds
+            });
+        }
+
+        private sealed class MoveRecoveryConflictException(MoveRecoveryState recovery)
+            : Exception("An unresolved move blocks a new physical move.")
+        {
+            public MoveRecoveryState Recovery { get; } = recovery;
+        }
+
+        private static ObjectResult MoveQueuePersistenceUnavailableResult() =>
+            new(new
+            {
+                message = "Move queue persistence is unavailable. Check database migrations.",
+                code = "move_queue_persistence_unavailable"
+            })
+            {
+                StatusCode = StatusCodes.Status500InternalServerError
+            };
+
+        private static MoveJobStatusResponse ToStatusResponse(MoveJob job)
+        {
+            var disposition = MoveRecoveryPolicy.GetDisposition(job);
+            return new MoveJobStatusResponse(
                 job.Id,
                 job.AudiobookId,
                 job.Status,
@@ -160,7 +244,35 @@ namespace Listenarr.Api.Features.Library
                 job.EnqueuedAt,
                 job.UpdatedAt,
                 job.NextAttemptAt,
-                job.Status is MoveJobStatus.Failed or MoveJobStatus.NeedsAttention);
+                disposition.ToString(),
+                disposition == MoveRecoveryDisposition.RetryAvailable);
+        }
+
+        public async Task<IActionResult> GetRecoveryStateAsync(
+            int audiobookId,
+            CancellationToken cancellationToken = default)
+        {
+            if (_moveQueueService == null)
+            {
+                return new NotFoundObjectResult(new { message = "Move queue not available" });
+            }
+
+            var recovery = await _moveQueueService.GetRecoveryStateForAudiobookAsync(
+                audiobookId,
+                cancellationToken);
+            return new OkObjectResult(new MoveRecoveryStateResponse(
+                recovery.BlocksFilesystemMutation,
+                recovery.Disposition.ToString(),
+                recovery.JobId,
+                recovery.Status,
+                recovery.Phase,
+                recovery.RequestedPath,
+                recovery.Error == null
+                    ? null
+                    : MoveJobPublicProjection.ToError(recovery.Error, MoveFailureKind.Unknown),
+                recovery.CanRetry,
+                recovery.BlockingJobIds));
+        }
 
         public async Task<IActionResult> RequeueAsync(
             string jobId,
@@ -172,6 +284,27 @@ namespace Listenarr.Api.Features.Library
             Guid? newJobId;
             try
             {
+                var existing = await _moveQueueService.GetJobAsync(gid, cancellationToken);
+                if (existing == null)
+                {
+                    return new NotFoundObjectResult(new { message = "Move job not found" });
+                }
+
+                var disposition = MoveRecoveryPolicy.GetDisposition(existing);
+                if (existing.Status != MoveJobStatus.Queued
+                    && disposition != MoveRecoveryDisposition.RetryAvailable)
+                {
+                    return new ConflictObjectResult(new
+                    {
+                        message = "This move cannot be retried automatically because its persisted recovery evidence requires operator repair.",
+                        code = "move_repair_required",
+                        jobId = existing.Id,
+                        status = existing.Status,
+                        recoveryDisposition = disposition.ToString(),
+                        canRetry = false
+                    });
+                }
+
                 newJobId = await _moveQueueService.RequeueMoveAsync(
                     gid,
                     cancellationToken);

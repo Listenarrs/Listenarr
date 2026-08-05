@@ -180,11 +180,18 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                 .GetRequiredService<IFileSystemSemanticsResolver>()
                 .ResolveAsync(target);
             Assert.Equal(PathIdentityState.Valid, targetResolution.State);
+            var targetBoundary = FileService.GetTempPath();
             var targetIdentity = PathIdentitySnapshot.FromResolution(
                 targetResolution.Semantics,
                 FileSystemCaseSensitivityMode.Auto,
-                targetResolution.BoundaryPath,
+                targetBoundary,
                 target);
+            var targetDirectoryIdentity = await _provider
+                .GetRequiredService<IDirectoryObjectIdentityResolver>()
+                .ResolveAsync(targetBoundary);
+            Assert.True(
+                targetDirectoryIdentity.IsAvailable,
+                targetDirectoryIdentity.UnavailableReason);
             var queue = _provider.GetRequiredService<IMoveQueueService>();
             var jobId = await queue.EnqueueMoveAsync(new MoveEnqueueCommand(
                 audiobook.Id,
@@ -193,6 +200,8 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                 manifest.Entries,
                 target,
                 targetIdentity,
+                targetDirectoryIdentity.Version!.Value,
+                targetDirectoryIdentity.Value!,
                 DeleteEmptySource: true));
             var job = Assert.IsType<MoveJob>(
                 await queue.GetJobAsync(jobId));

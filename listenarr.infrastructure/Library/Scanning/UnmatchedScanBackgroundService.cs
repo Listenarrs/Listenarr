@@ -165,25 +165,26 @@ namespace Listenarr.Infrastructure.Library.Scanning
             var fileRepository = scope.ServiceProvider.GetRequiredService<IAudiobookFileRepository>();
             var audiobookRepository = scope.ServiceProvider.GetRequiredService<IAudiobookRepository>();
             var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
+            var scanAuthorizationService = scope.ServiceProvider
+                .GetRequiredService<IScanPathAuthorizationService>();
+            var fileSystem = scope.ServiceProvider.GetRequiredService<IFileSystem>();
             var appSettings = await configService.GetApplicationSettingsAsync();
             var concurrency = Math.Clamp(appSettings?.UnmatchedScanConcurrency ?? 2, 1, 8);
-            if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
-                    rootFolderPath,
-                    out var canonicalRootFolderPath,
-                    out var pathReason))
-            {
-                throw new ArgumentException(pathReason, nameof(rootFolderPath));
-            }
-
-            var semanticsResolution = await _semanticsResolver.ResolveAsync(
-                canonicalRootFolderPath,
-                cancellationToken: ct);
-            if (semanticsResolution.State != PathIdentityState.Valid)
+            var authorization = await scanAuthorizationService.AuthorizeAsync(
+                rootFolderPath,
+                ct);
+            if (!authorization.IsAuthorized
+                || authorization.Path == null
+                || !authorization.Identity.HasValue
+                || !authorization.PhysicalIdentity.HasValue)
             {
                 throw new InvalidOperationException(
-                    semanticsResolution.Reason ?? "Root filesystem identity is unavailable.");
+                    authorization.Error
+                        ?? "The unmatched scan root could not be authorized safely.");
             }
-            var semantics = semanticsResolution.Semantics;
+
+            var canonicalRootFolderPath = authorization.Path;
+            var semantics = authorization.Identity.Value.Semantics;
 
             // Load all tracked file paths (normalized) from DB.
             // Check BOTH AudiobookFiles (multi-file imports) AND Audiobook.FilePath (single-file imports)
@@ -201,8 +202,34 @@ namespace Listenarr.Infrastructure.Library.Scanning
                     .Select(path => NormalizePath(path, semantics.Syntax)),
                 semantics.Comparer);
 
-            // Walk the root folder tree
-            var candidates = CollectAudioFiles(canonicalRootFolderPath, semantics);
+            // Walk the root folder tree through the same pinned/generation-aware
+            // enumeration primitive used by authoritative audiobook scans.
+            using var pinnedRoot = PinnedDirectoryCreation.OpenPinnedBoundary(
+                canonicalRootFolderPath);
+            if (!pinnedRoot.VisiblePathMatches()
+                || !string.Equals(
+                    pinnedRoot.GetDirectoryObjectIdentity(),
+                    authorization.PhysicalIdentity.Value.ScanRootObjectIdentity,
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "The unmatched scan root changed after authorization.");
+            }
+            var enumeration = ScanFileDiscovery.CollectCandidates(
+                fileSystem,
+                canonicalRootFolderPath,
+                jobId: Guid.Empty,
+                _logger,
+                semantics,
+                pinnedRoot);
+            if (enumeration.Issues.Any(issue => issue.Kind is
+                    ScanDiscoveryIssueKind.DirectoryGenerationChanged
+                    or ScanDiscoveryIssueKind.EnumerationFailure))
+            {
+                throw new InvalidOperationException(
+                    "The unmatched scan root changed or became unavailable during enumeration.");
+            }
+            var candidates = enumeration.Candidates.ToList();
 
             // Filter to untracked files
             var unmatched = candidates

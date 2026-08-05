@@ -281,7 +281,8 @@ internal sealed partial class PinnedDirectoryCreation
 
         internal PinnedFileEntry CreateHardLinkTo(
             PinnedDirectoryAnchor destinationParent,
-            string destinationName)
+            string destinationName,
+            Action? afterLinkCreatedForTest = null)
         {
             ThrowIfDisposed();
             ArgumentNullException.ThrowIfNull(destinationParent);
@@ -313,6 +314,8 @@ internal sealed partial class PinnedDirectoryCreation
                     "Could not create a hardlink between pinned filesystem endpoints.");
             }
 
+            afterLinkCreatedForTest?.Invoke();
+
             PinnedFileEntry? linked = null;
             try
             {
@@ -329,7 +332,9 @@ internal sealed partial class PinnedDirectoryCreation
             }
             catch
             {
-                if (linked != null && linked.VisiblePathMatches())
+                if (linked != null
+                    && linked.VisiblePathMatches()
+                    && IdentifiesSameEntry(linked))
                 {
                     linked.Delete(immediateWindows: true);
                 }

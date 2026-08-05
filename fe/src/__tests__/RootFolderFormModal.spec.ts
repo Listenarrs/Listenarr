@@ -238,7 +238,7 @@ describe('RootFolderFormModal', () => {
     expect(relocate).not.toHaveBeenCalled()
   })
 
-  it('uses metadata update when an insensitive persisted root changes only by case', async () => {
+  it('migrates semantics without path confirmation when an insensitive root changes only by case', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const store = useRootFoldersStore()
@@ -251,10 +251,24 @@ describe('RootFolderFormModal', () => {
       caseSensitivityMode: 'Insensitive' as const,
       resolvedCaseSensitivity: 'Insensitive' as const,
     }
+    const updated = {
+      ...root,
+      caseSensitivityMode: 'Sensitive' as const,
+      resolvedCaseSensitivity: 'Sensitive' as const,
+    }
     store.folders = [root]
-    const updateMetadata = vi.spyOn(apiService, 'updateRootFolder').mockResolvedValue(root)
-    const relocate = vi.spyOn(apiService, 'changeRootFolderPath')
-    vi.spyOn(apiService, 'getRootFolders').mockResolvedValue([root])
+    const updateMetadata = vi.spyOn(apiService, 'updateRootFolder')
+    const relocate = vi.spyOn(apiService, 'changeRootFolderPath').mockResolvedValue({
+      relocationId: null,
+      rootFolderId: 18,
+      currentPath: root.path,
+      targetPath: root.path,
+      status: 'Completed',
+      totalJobs: 0,
+      completedJobs: 0,
+      targetIdentityEnrollmentState: 'Authorized',
+    })
+    vi.spyOn(apiService, 'getRootFolders').mockResolvedValue([updated])
     const wrapper = mount(RootFolderFormModal, {
       props: { root },
       global: {
@@ -268,14 +282,16 @@ describe('RootFolderFormModal', () => {
     await (wrapper.vm as unknown as { save: () => Promise<void> }).save()
 
     expect((wrapper.vm as unknown as { showConfirm: boolean }).showConfirm).toBe(false)
-    expect(updateMetadata).toHaveBeenCalledWith(
-      18,
-      expect.objectContaining({
-        path: 'C:\\Library',
-        caseSensitivityMode: 'Sensitive',
-      }),
-    )
-    expect(relocate).not.toHaveBeenCalled()
+    expect(updateMetadata).not.toHaveBeenCalled()
+    expect(relocate).toHaveBeenCalledWith(18, {
+      targetPath: root.path,
+      mode: 'metadataOnly',
+      deleteEmptySource: false,
+      desiredName: root.name,
+      desiredIsDefault: false,
+      targetCaseSensitivityMode: 'Sensitive',
+      expectedCurrentPath: root.path,
+    })
   })
 
   it('fails closed when the current root is missing after reload', async () => {

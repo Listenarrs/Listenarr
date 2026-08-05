@@ -33,6 +33,95 @@ namespace Listenarr.Tests.Features.Api
         }
 
         [Fact]
+        public async Task RescanMetadata_UnresolvedMoveExecution_BlocksMetadataCommit()
+        {
+            var metadataMock = new Mock<IAudiobookMetadataService>();
+            metadataMock
+                .Setup(service => service.GetMetadataAsync("B0MOVEFENC", "us", false))
+                .ReturnsAsync(new
+                {
+                    metadata = new AudibleBookResponse
+                    {
+                        Asin = "B0MOVEFENC",
+                        Title = "Provider Title"
+                    },
+                    source = "Audible",
+                    sourceUrl = "https://audible.com"
+                });
+            var factory = _factory.WithWebHostBuilder(builder =>
+            {
+                builder.ConfigureServices(services =>
+                {
+                    services.RemoveAll<IAudiobookMetadataService>();
+                    services.AddSingleton(metadataMock.Object);
+                });
+            });
+            int audiobookId;
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                var source = Path.Join(Path.GetTempPath(), $"metadata-move-source-{Guid.NewGuid():N}");
+                var target = Path.Join(Path.GetTempPath(), $"metadata-move-target-{Guid.NewGuid():N}");
+                var audiobook = new Audiobook
+                {
+                    Title = "Catalog Title",
+                    BasePath = source,
+                    Asin = "B0MOVEFENC",
+                    ExternalIdentifiers =
+                    [
+                        new AudiobookExternalIdentifier
+                        {
+                            Type = AudiobookExternalIdentifierType.Asin,
+                            ValueRaw = "B0MOVEFENC",
+                            ValueNormalized = "B0MOVEFENC",
+                            Region = "us",
+                            IsPrimary = true,
+                            Source = AudiobookExternalIdentifierSource.Manual
+                        }
+                    ]
+                };
+                db.Audiobooks.Add(audiobook);
+                await db.SaveChangesAsync();
+                audiobookId = audiobook.Id;
+                db.MoveJobs.Add(new MoveJob
+                {
+                    AudiobookId = audiobookId,
+                    SourcePath = source,
+                    RequestedPath = target,
+                    Status = MoveJobStatus.Failed,
+                    Phase = MoveJobPhase.Published,
+                    FailureKind = MoveFailureKind.Unknown,
+                    Entries =
+                    [
+                        new MoveJobEntry
+                        {
+                            RelativePath = "book.m4b",
+                            EntryType = MoveJobEntryType.File,
+                            Length = 1,
+                            LastWriteTimeUtc = DateTime.UnixEpoch,
+                            Sha256 = new string('A', 64),
+                            CopyState = MoveJobEntryCopyState.Verified,
+                            CleanupState = MoveJobEntryCleanupState.Deleted
+                        }
+                    ]
+                });
+                await db.SaveChangesAsync();
+            }
+
+            using var client = factory.CreateClient();
+            var response = await PostRescanAsync(client, audiobookId);
+
+            Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+            var payload = await response.Content.ReadAsStringAsync();
+            Assert.Contains("move_recovery_required", payload, StringComparison.Ordinal);
+            using var verificationScope = factory.Services.CreateScope();
+            var verification = verificationScope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+            Assert.Equal(
+                "Catalog Title",
+                (await verification.Audiobooks.SingleAsync(book => book.Id == audiobookId)).Title);
+        }
+
+        [Fact]
         public async Task RescanMetadata_UsesIdentifiersAndUpdatesAudiobook()
         {
             var metadataMock = new Mock<IAudiobookMetadataService>();

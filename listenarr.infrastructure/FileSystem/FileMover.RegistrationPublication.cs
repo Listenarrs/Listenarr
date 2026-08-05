@@ -35,7 +35,6 @@ public partial class FileMover
         using var gate = await TryAcquireFileMoveGateAsync(
             source,
             destination,
-            createDestinationParent: true,
             allowExistingAliasForRecovery: true);
         if (gate == null)
         {
@@ -357,9 +356,8 @@ public partial class FileMover
     {
         try
         {
-            statePublication.DeletePinnedEmptyDirectory(
-                stateName,
-                immediateWindows: true);
+            statePublication.RetirePinnedEmptyDirectoryFromNamespace(
+                stateName);
             FlushFileMoveDirectory(
                 destinationParent,
                 "abandoned registration-publication state retirement");

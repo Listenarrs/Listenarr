@@ -54,10 +54,18 @@ public partial class EfAudiobookFileRepository
         _db.AudiobookFiles.Add(file);
         try
         {
-            await _db.SaveChangesAsync(ct);
-            if (transaction != null)
+            if (transaction == null)
             {
-                await transaction.CommitAsync(ct);
+                var completionToken =
+                    RequestCancellationBoundary.EnterNonCancelablePhase(ct);
+                await _db.SaveChangesAsync(completionToken);
+            }
+            else
+            {
+                await _db.SaveChangesAsync(ct);
+                var completionToken =
+                    RequestCancellationBoundary.EnterNonCancelablePhase(ct);
+                await transaction.CommitAsync(completionToken);
             }
 
             return new AudiobookFileClaimResult(
@@ -86,6 +94,8 @@ public partial class EfAudiobookFileRepository
         ValidateBasePathMutation(basePathMutation.AudiobookId, basePathMutation);
         if (_db.Database.IsRelational())
         {
+            var completionToken =
+                RequestCancellationBoundary.EnterNonCancelablePhase(ct);
             var updated = await _db.Audiobooks
                 .Where(candidate =>
                     candidate.Id == basePathMutation.AudiobookId
@@ -94,7 +104,7 @@ public partial class EfAudiobookFileRepository
                     setters => setters.SetProperty(
                         candidate => candidate.BasePath,
                         basePathMutation.ResultingBasePath),
-                    ct);
+                    completionToken);
             if (updated == 1)
             {
                 SynchronizeTrackedBasePath(basePathMutation);
@@ -134,7 +144,9 @@ public partial class EfAudiobookFileRepository
         }
 
         audiobook.BasePath = basePathMutation.ResultingBasePath;
-        await _db.SaveChangesAsync(ct);
+        var nonCancelableToken =
+            RequestCancellationBoundary.EnterNonCancelablePhase(ct);
+        await _db.SaveChangesAsync(nonCancelableToken);
         return true;
     }
 
@@ -173,7 +185,9 @@ public partial class EfAudiobookFileRepository
 
             audiobook.BasePath = basePathMutation.ResultingBasePath;
             ApplyPhysicalGeneration(existing, replacement);
-            await _db.SaveChangesAsync(ct);
+            var nonRelationalCompletionToken =
+                RequestCancellationBoundary.EnterNonCancelablePhase(ct);
+            await _db.SaveChangesAsync(nonRelationalCompletionToken);
             return true;
         }
 
@@ -230,7 +244,9 @@ public partial class EfAudiobookFileRepository
             return false;
         }
 
-        await transaction.CommitAsync(ct);
+        var completionToken =
+            RequestCancellationBoundary.EnterNonCancelablePhase(ct);
+        await transaction.CommitAsync(completionToken);
         SynchronizeTrackedBasePath(basePathMutation);
         SynchronizeTrackedPhysicalGeneration(fileId, replacement);
         return true;
@@ -268,7 +284,9 @@ public partial class EfAudiobookFileRepository
 
             audiobook.BasePath = basePathMutation.ResultingBasePath;
             _db.AudiobookFiles.Remove(file);
-            await _db.SaveChangesAsync(ct);
+            var nonRelationalCompletionToken =
+                RequestCancellationBoundary.EnterNonCancelablePhase(ct);
+            await _db.SaveChangesAsync(nonRelationalCompletionToken);
             return true;
         }
 
@@ -303,7 +321,9 @@ public partial class EfAudiobookFileRepository
             return false;
         }
 
-        await transaction.CommitAsync(ct);
+        var completionToken =
+            RequestCancellationBoundary.EnterNonCancelablePhase(ct);
+        await transaction.CommitAsync(completionToken);
         var trackedFile = _db.ChangeTracker.Entries<AudiobookFile>()
             .FirstOrDefault(entry => entry.Entity.Id == fileId);
         if (trackedFile != null)

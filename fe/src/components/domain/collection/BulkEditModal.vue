@@ -88,16 +88,11 @@
             </label>
 
             <div v-if="formData.rootChangeEnabled" class="mt-md">
-              <RootFolderSelect
-                v-model:rootId="formData.rootId"
-                v-model:customPath="formData.rootCustomPath"
-                data-cy="bulk-root-select"
-              />
+              <RootFolderSelect v-model:rootId="formData.rootId" data-cy="bulk-root-select" />
 
               <p class="help-text">
-                Select a named root or provide an absolute custom root within a configured root
-                folder or output path. If you choose "Use default" and no named default exists, the
-                application default output path will be used.
+                Select a configured root. If you choose "Use default" and no named default exists,
+                the application default output path will be used.
               </p>
               <p v-if="resolvedRootPath" class="help-text" data-testid="effective-destination-root">
                 Destination root: <code>{{ resolvedRootPath }}</code>
@@ -195,8 +190,7 @@ interface FormData {
   qualityProfileId: number | null
   // root change controls
   rootChangeEnabled: boolean
-  rootId: number | null | 0
-  rootCustomPath: string | null
+  rootId: number | null
 }
 
 const props = defineProps<Props>()
@@ -206,7 +200,6 @@ const emit = defineEmits<{
 }>()
 
 const qualityProfiles = ref<QualityProfile[]>([])
-const rootFolders = ref<string[]>([])
 const rootStore = useRootFoldersStore()
 const moveJobsStore = useMoveJobsStore()
 const saving = ref(false)
@@ -231,15 +224,10 @@ const formData = ref<FormData>({
   qualityProfileId: null,
   rootChangeEnabled: false,
   rootId: null,
-  rootCustomPath: null,
 })
 
 const resolvedRootPath = computed(() => {
   if (!formData.value.rootChangeEnabled) return null
-  if (formData.value.rootId === 0) {
-    const customPath = formData.value.rootCustomPath
-    return customPath && customPath.trim().length > 0 ? customPath : null
-  }
   if (formData.value.rootId && formData.value.rootId > 0) {
     return rootStore.folders.find((folder) => folder.id === formData.value.rootId)?.path ?? null
   }
@@ -250,9 +238,7 @@ const hasChanges = computed(() => {
   return (
     formData.value.monitored !== null ||
     formData.value.qualityProfileId !== null ||
-    (formData.value.rootChangeEnabled === true &&
-      (formData.value.rootId !== null ||
-        (formData.value.rootCustomPath && formData.value.rootCustomPath.length > 0)))
+    formData.value.rootChangeEnabled === true
   )
 })
 
@@ -281,16 +267,12 @@ async function loadData() {
     // Load root folders from configuration
     await rootStore.load()
     if (rootStore.folders.length > 0) {
-      rootFolders.value = rootStore.folders.map((f) => f.path)
       // Capture default output path for fallback when user picks "Use default"
       const def = rootStore.folders.find((f) => f.isDefault)
       defaultOutputPath.value = def?.path ?? null
     } else {
       const appSettings = await apiService.getApplicationSettings()
-      if (appSettings.outputPath) {
-        rootFolders.value = [appSettings.outputPath]
-        defaultOutputPath.value = appSettings.outputPath
-      }
+      defaultOutputPath.value = appSettings.outputPath || null
     }
   } catch (error) {
     console.error('Failed to load bulk edit data:', error)
@@ -303,7 +285,6 @@ function resetForm() {
     qualityProfileId: null,
     rootChangeEnabled: false,
     rootId: null,
-    rootCustomPath: null,
   }
 }
 

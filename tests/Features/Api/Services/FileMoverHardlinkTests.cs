@@ -62,7 +62,7 @@ namespace Listenarr.Tests.Features.Api.Services
         }
 
         [Fact]
-        public async Task HardlinkFileAsync_CreatesDestinationDirectory_WhenMissing()
+        public async Task HardlinkFileAsync_MissingDestinationDirectory_FailsClosedWithoutCreatingHierarchy()
         {
             // Arrange
             var sourceFile = Path.Join(_root, "source.mp3");
@@ -76,9 +76,10 @@ namespace Listenarr.Tests.Features.Api.Services
             var result = await _mover.HardlinkFileAsync(sourceFile, destFile);
 
             // Assert
-            Assert.True(result, "HardlinkFileAsync should succeed");
-            Assert.True(Directory.Exists(destDir), "Destination directory should be created");
-            Assert.True(File.Exists(destFile), "Destination file should exist");
+            Assert.False(result, "HardlinkFileAsync must not create an unenrolled destination hierarchy");
+            Assert.False(Directory.Exists(destDir), "Destination directory must not be created");
+            Assert.False(File.Exists(destFile), "Destination file must not be published");
+            Assert.True(File.Exists(sourceFile), "Source file must be preserved");
         }
 
         [Fact]

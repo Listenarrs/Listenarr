@@ -14,15 +14,6 @@ public partial class RenameService
             (audiobook.Files ?? [])
                 .ToDictionary(file => file.Id, file => file.CapturePathState()));
 
-    private static DirectoryRollbackState CaptureDirectoryRollbackState(
-        Audiobook audiobook,
-        string sourcePath,
-        string targetPath) =>
-        new(
-            sourcePath,
-            targetPath,
-            CaptureAudiobookPathRollbackState(audiobook));
-
     private static void RestoreAudiobookPathState(
         Audiobook audiobook,
         AudiobookPathRollbackState rollbackState)
@@ -36,75 +27,6 @@ public partial class RenameService
             {
                 file.RestorePathState(fileState);
             }
-        }
-    }
-
-    private async Task<bool> RollBackDirectoryMoveAsync(
-        Audiobook audiobook,
-        DirectoryRollbackState rollbackState,
-        IReadOnlyCollection<string> allowedRoots,
-        FileSystemPathSemantics semantics,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            if (!_fileSystem.TryValidateMutationTarget(
-                    rollbackState.TargetPath,
-                    allowedRoots,
-                    out var rollbackSource,
-                    out _)
-                || !_fileSystem.TryValidateMutationTarget(
-                    rollbackState.SourcePath,
-                    allowedRoots,
-                    out var rollbackDestination,
-                    out _))
-            {
-                return false;
-            }
-
-            if (_fileSystem.DirectoryExists(rollbackSource))
-            {
-                if (_fileSystem.DirectoryExists(rollbackDestination))
-                {
-                    return false;
-                }
-
-                var parent = Path.GetDirectoryName(rollbackDestination);
-                if (!string.IsNullOrWhiteSpace(parent))
-                {
-                    await EnsureOwnedRenameHierarchyAsync(
-                        parent,
-                        allowedRoots,
-                        semantics,
-                        audiobook.Id,
-                        Guid.NewGuid(),
-                        cancellationToken);
-                }
-
-                if (!await _fileMover.MoveDirectoryAsync(
-                        rollbackSource,
-                        rollbackDestination))
-                {
-                    return false;
-                }
-            }
-            else if (!_fileSystem.DirectoryExists(rollbackDestination))
-            {
-                return false;
-            }
-
-            RestoreAudiobookPathState(audiobook, rollbackState.AudiobookState);
-            return true;
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException
-            && exception is not OutOfMemoryException
-            && exception is not StackOverflowException)
-        {
-            _logger.LogError(
-                exception,
-                "Failed to roll back folder organize operation for audiobook {AudiobookId}",
-                audiobook.Id);
-            return false;
         }
     }
 
@@ -166,16 +88,41 @@ public partial class RenameService
                             cancellationToken);
                     }
 
-                    var moved = await _fileMover.PerformActionOn(
-                        FileAction.Move,
+                    var rollbackOperationId = FileMoveOperationIdentity.Create(
+                        "audiobook-file-rename-rollback",
+                        audiobook.Id,
+                        item.FileId,
                         rollbackSource,
-                        rollbackDestination,
-                        FileMoveOperationIdentity.Create(
-                            "audiobook-file-rename-rollback",
-                            audiobook.Id,
-                            item.FileId,
+                        rollbackDestination);
+                    bool moved;
+                    if (item.FileId == 0)
+                    {
+                        moved = await _fileMover.PerformActionOn(
+                            FileAction.Move,
                             rollbackSource,
-                            rollbackDestination));
+                            rollbackDestination,
+                            rollbackOperationId);
+                    }
+                    else
+                    {
+                        var trackedFile = audiobook.Files?.FirstOrDefault(
+                            candidate => candidate.Id == item.FileId);
+                        if (string.IsNullOrWhiteSpace(
+                                trackedFile?.PhysicalObjectIdentity))
+                        {
+                            rollbackSucceeded = false;
+                            item.Error =
+                                "Rollback could not prove the tracked file generation.";
+                            continue;
+                        }
+
+                        moved = await _fileMover
+                            .MoveFilePreservingPhysicalIdentityAsync(
+                                rollbackSource,
+                                rollbackDestination,
+                                trackedFile.PhysicalObjectIdentity,
+                                rollbackOperationId);
+                    }
                     if (!moved)
                     {
                         rollbackSucceeded = false;
@@ -250,9 +197,4 @@ public partial class RenameService
         string? LegacyFilePath,
         long? FileSize,
         IReadOnlyDictionary<int, AudiobookFilePathState> FileStates);
-
-    private sealed record DirectoryRollbackState(
-        string SourcePath,
-        string TargetPath,
-        AudiobookPathRollbackState AudiobookState);
 }

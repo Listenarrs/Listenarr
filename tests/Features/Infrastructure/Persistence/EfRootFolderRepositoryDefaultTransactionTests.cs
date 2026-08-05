@@ -3,6 +3,7 @@ using Listenarr.Infrastructure.Persistence.Repositories;
 using Listenarr.Tests.Common;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 
 namespace Listenarr.Tests.Features.Infrastructure.Persistence;
 
@@ -63,6 +64,44 @@ public sealed class EfRootFolderRepositoryDefaultTransactionTests : BaseTests
         Assert.True(roots.Single(root => root.Id == 1).IsDefault);
         Assert.False(roots.Single(root => root.Id == 2).IsDefault);
         Assert.Equal(Path.GetFullPath("candidate"), roots.Single(root => root.Id == 2).Path);
+    }
+
+    [Fact]
+    public async Task AddAndSetDefaultAsync_CancelledDuringCommit_CommitsUnambiguously()
+    {
+        await using var connection = await OpenDatabaseAsync();
+        var interceptor = new CancelDuringCommitInterceptor();
+        var options = CreateOptions(connection, interceptor);
+        await SeedAsync(
+            options,
+            new RootFolder
+            {
+                Id = 1,
+                Name = "Current",
+                Path = Path.GetFullPath("commit-cancel-current"),
+                IsDefault = true
+            });
+        using var cancellation = new CancellationTokenSource();
+        interceptor.Arm(cancellation);
+        var repository = CreateRepository(options);
+        var replacementPath = Path.GetFullPath("commit-cancel-replacement");
+
+        await repository.AddAndSetDefaultAsync(
+            new RootFolder
+            {
+                Name = "Replacement",
+                Path = replacementPath,
+                IsDefault = true
+            },
+            expectedCurrentDefaultId: 1,
+            cancellation.Token);
+
+        Assert.True(cancellation.IsCancellationRequested);
+        await using var verification = new ListenArrDbContext(options);
+        var roots = await verification.RootFolders.AsNoTracking().ToListAsync();
+        Assert.Equal(2, roots.Count);
+        Assert.False(roots.Single(root => root.Id == 1).IsDefault);
+        Assert.True(roots.Single(root => root.Path == replacementPath).IsDefault);
     }
 
     [Fact]
@@ -199,10 +238,19 @@ public sealed class EfRootFolderRepositoryDefaultTransactionTests : BaseTests
         return connection;
     }
 
-    private static DbContextOptions<ListenArrDbContext> CreateOptions(SqliteConnection connection) =>
-        new DbContextOptionsBuilder<ListenArrDbContext>()
-            .UseSqlite(connection)
-            .Options;
+    private static DbContextOptions<ListenArrDbContext> CreateOptions(
+        SqliteConnection connection,
+        IInterceptor? interceptor = null)
+    {
+        var builder = new DbContextOptionsBuilder<ListenArrDbContext>()
+            .UseSqlite(connection);
+        if (interceptor != null)
+        {
+            builder.AddInterceptors(interceptor);
+        }
+
+        return builder.Options;
+    }
 
     private static async Task SeedAsync(
         DbContextOptions<ListenArrDbContext> options,
@@ -218,6 +266,24 @@ public sealed class EfRootFolderRepositoryDefaultTransactionTests : BaseTests
         new(
             new TestDbContextFactory(options),
             Mock.Of<ILogger<EfRootFolderRepository>>());
+
+    private sealed class CancelDuringCommitInterceptor : IDbTransactionInterceptor
+    {
+        private CancellationTokenSource? _cancellation;
+
+        public void Arm(CancellationTokenSource cancellation) =>
+            _cancellation = cancellation;
+
+        public ValueTask<InterceptionResult> TransactionCommittingAsync(
+            System.Data.Common.DbTransaction transaction,
+            TransactionEventData eventData,
+            InterceptionResult result,
+            CancellationToken cancellationToken = default)
+        {
+            Interlocked.Exchange(ref _cancellation, null)?.Cancel();
+            return ValueTask.FromResult(result);
+        }
+    }
 
     private sealed class TestDbContextFactory(DbContextOptions<ListenArrDbContext> options)
         : IDbContextFactory<ListenArrDbContext>

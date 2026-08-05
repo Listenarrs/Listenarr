@@ -11,10 +11,24 @@ public partial class ManualImportController
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(operation);
+        var lockedAudiobookIds = audiobookIds
+            .Distinct()
+            .OrderBy(id => id)
+            .ToArray();
         return _filesystemMutationCoordinator.ExecuteExclusiveAsync(
             globalToken => _audiobookOperationCoordinator.ExecuteExclusiveAsync(
-                audiobookIds,
-                operation,
+                lockedAudiobookIds,
+                async operationToken =>
+                {
+                    foreach (var audiobookId in lockedAudiobookIds)
+                    {
+                        await _moveQueueService.EnsureFilesystemMutationAllowedAsync(
+                            audiobookId,
+                            operationToken);
+                    }
+
+                    await operation(operationToken);
+                },
                 globalToken),
             cancellationToken);
     }
@@ -98,6 +112,14 @@ public partial class ManualImportController
                             group.Count());
                     },
                     cancellationToken);
+            }
+            catch (OperationCanceledException exception) when (
+                !cancellationToken.CanBeCanceled)
+            {
+                _logger.LogWarning(
+                    exception,
+                    "Manual import completed for audiobook {AudiobookId}, but its focused scan was canceled after commit",
+                    group.Key);
             }
             catch (Exception exception) when (
                 WorkerExceptionClassifier.IsNonFatal(exception))

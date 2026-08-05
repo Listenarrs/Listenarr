@@ -16,6 +16,8 @@ internal sealed class PinnedDestinationRetentionGuard : IDisposable
     private bool _linearized;
     private bool _completed;
 
+    internal Action? AfterWindowsPublicTargetReleasedForTest { get; set; }
+
     private PinnedDestinationRetentionGuard(
         PinnedDirectoryCreation.PinnedDirectoryAnchor parent,
         PinnedDirectoryCreation.PinnedFileEntry retention,
@@ -377,14 +379,6 @@ internal sealed class PinnedDestinationRetentionGuard : IDisposable
             return false;
         }
 
-        if (OperatingSystem.IsWindows())
-        {
-            // The stable public handle defines the Windows commit point by denying
-            // delete and rename sharing. Release it only after publication has been
-            // proven so the sibling retention link can be retired.
-            _publicTarget?.Dispose();
-        }
-
         if (!OperatingSystem.IsWindows())
         {
             var retirementName =
@@ -403,6 +397,14 @@ internal sealed class PinnedDestinationRetentionGuard : IDisposable
         }
 
         _completed = true;
+        if (OperatingSystem.IsWindows())
+        {
+            // The stable public handle is the Windows linearization guard. Keep it
+            // alive until the recovery copy has been retired and its directory entry
+            // flushed so no replacement pathname can appear inside the commit window.
+            _publicTarget?.Dispose();
+            AfterWindowsPublicTargetReleasedForTest?.Invoke();
+        }
         return true;
     }
 

@@ -73,19 +73,7 @@ public partial class FileMover
                 throw new IOException(
                     "The deterministic file-move state directory is already occupied.");
             }
-            if (!OperatingSystem.IsWindows())
-            {
-                File.SetUnixFileMode(
-                    creation.FullPath,
-                    UnixFileMode.UserRead
-                    | UnixFileMode.UserWrite
-                    | UnixFileMode.UserExecute);
-                if (!creation.VisiblePathMatches())
-                {
-                    throw new IOException(
-                        "The file-move state directory changed while permissions were restricted.");
-                }
-            }
+            creation.RestrictToCurrentUser();
 
             return creation;
         }
@@ -125,9 +113,8 @@ public partial class FileMover
         }
         try
         {
-            publication.DeletePinnedEmptyDirectory(
-                stateName,
-                immediateWindows: true);
+            publication.RetirePinnedEmptyDirectoryFromNamespace(
+                stateName);
         }
         catch (Exception exception) when (exception is
             IOException or UnauthorizedAccessException

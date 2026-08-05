@@ -90,13 +90,26 @@ namespace Listenarr.Application.Audiobooks.Jobs
                 target,
                 command.TargetIdentity,
                 command.SourceEntries);
+            if (command.TargetBoundaryDirectoryObjectIdentityVersion <= 0
+                || string.IsNullOrWhiteSpace(
+                    command.TargetBoundaryDirectoryObjectIdentity))
+            {
+                throw new InvalidOperationException(
+                    "A physical move requires durable target-boundary generation authorization.");
+            }
+
+            var persistedEntries = manifest.Entries.ToList();
+            persistedEntries.Add(
+                MoveManifestIdentity.CreateTargetBoundaryAuthorization(
+                    command.TargetBoundaryDirectoryObjectIdentityVersion,
+                    command.TargetBoundaryDirectoryObjectIdentity));
             var deduplicationKey = MoveManifestIdentity.CreateDeduplicationKey(
                 command.AudiobookId,
                 source,
                 command.SourceIdentity,
                 target,
                 command.TargetIdentity,
-                manifest.Entries);
+                persistedEntries);
 
             MoveJob? jobToSchedule = null;
             var jobId = await _mutationCoordinator.ExecuteExclusiveAsync(async token =>
@@ -133,7 +146,7 @@ namespace Listenarr.Application.Audiobooks.Jobs
                     SourceCleanupBoundary = command.SourceCleanupBoundary,
                     DeleteEmptySource = command.DeleteEmptySource,
                     RelocationId = command.RelocationId,
-                    Entries = manifest.Entries.ToList()
+                    Entries = persistedEntries
                 };
                 job.SetSourceIdentity(command.SourceIdentity);
                 job.SetTargetIdentity(command.TargetIdentity);
@@ -169,10 +182,11 @@ namespace Listenarr.Application.Audiobooks.Jobs
             if (jobToSchedule != null)
             {
                 await ScheduleAsync(jobToSchedule);
-                await NotifyPersistedJobStateAsync(
+                await NotifyCommittedJobStateAsync(
                     jobToSchedule.Id,
                     jobToSchedule.Status,
-                    jobToSchedule.Error);
+                    jobToSchedule.Error,
+                    CancellationToken.None);
             }
 
             return jobId;

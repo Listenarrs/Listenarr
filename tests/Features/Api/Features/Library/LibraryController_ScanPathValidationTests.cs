@@ -85,6 +85,33 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         }
 
         [Fact]
+        public async Task ScanAudiobook_UnresolvedMoveExecution_BlocksBeforeScanPlanning()
+        {
+            var source = FileService.GetTempDirectory("scan-unresolved-move-source");
+            var target = Path.Join(
+                FileService.GetTempPath(),
+                $"scan-unresolved-move-target-{Guid.NewGuid():N}");
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Unresolved Move Scan Fence")
+                .WithBasePath(source)
+                .Build());
+            await MoveJobTestFactory.SeedUnresolvedExecutionAsync(
+                _provider,
+                audiobook.Id,
+                source,
+                target);
+
+            var result = await _provider.GetRequiredService<LibraryController>()
+                .ScanAudiobookFiles(
+                    audiobook.Id,
+                    new LibraryController.ScanRequest { Path = source });
+
+            var conflict = Assert.IsType<ConflictObjectResult>(result);
+            var payload = JsonSerializer.Serialize(conflict.Value);
+            Assert.Contains("move_recovery_required", payload, StringComparison.Ordinal);
+        }
+
+        [Fact]
         public async Task ScanAudiobook_PathAuthorizationFailure_DoesNotExposeInternalReason()
         {
             const string secret = "C:\\private\\identity-secret";
@@ -133,7 +160,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             var tempRoot = FileService.GetTempDirectory("listenarr-test-root");
             Init(services => services.Without<IScanQueueService>());
             var controller = _provider.GetRequiredService<LibraryController>();
-            await _rootFolderRepository.AddAsync(new RootFolder { Name = "root", Path = tempRoot });
+            await AddAuthorizedRootAsync(tempRoot);
             await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder().WithOutputPath(FileService.GetTempPath()).Build());
             var ab = await _audiobookRepository.AddAsync(new AudiobookBuilder().WithTitle("Test").Build());
             var result = await controller.ScanAudiobookFiles(ab.Id, new LibraryController.ScanRequest { Path = tempRoot });
@@ -151,11 +178,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             var requestedPath = Path.Join(configuredRoot, "Author", "Book");
             Directory.CreateDirectory(requestedPath);
             var controller = _provider.GetRequiredService<LibraryController>();
-            await _rootFolderRepository.AddAsync(new RootFolder
-            {
-                Name = "root",
-                Path = configuredRoot
-            });
+            await AddAuthorizedRootAsync(configuredRoot);
             await _applicationSettingsRepository.SaveAsync(
                 new ApplicationSettingsBuilder()
                     .WithOutputPath(configuredRoot)
@@ -204,11 +227,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                     $"Unknown relationship fixture: {relationship}")
             };
             Directory.CreateDirectory(requestedPath);
-            await _rootFolderRepository.AddAsync(new RootFolder
-            {
-                Name = "root",
-                Path = configuredRoot
-            });
+            await AddAuthorizedRootAsync(configuredRoot);
             await _applicationSettingsRepository.SaveAsync(
                 new ApplicationSettingsBuilder()
                     .WithOutputPath(configuredRoot)
@@ -239,7 +258,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             var fileService = new Mock<IAudiobookFileService>(MockBehavior.Strict);
             Init(services => services.Without<IScanQueueService>().WithSingleton<IAudiobookFileService>(fileService.Object));
             var controller = _provider.GetRequiredService<LibraryController>();
-            await _rootFolderRepository.AddAsync(new RootFolder { Name = "root", Path = tempRoot });
+            await AddAuthorizedRootAsync(tempRoot);
             await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder().WithOutputPath(tempRoot).Build());
             var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder().WithTitle("Test").Build());
             fileService.Setup(service => service.EnsureAudiobookFileAsync(
@@ -273,7 +292,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             var audioPath = await FileService.GetFileAsync(tempRoot, "Test.m4b");
             Init(services => services.Without<IScanQueueService>());
             var controller = _provider.GetRequiredService<LibraryController>();
-            await _rootFolderRepository.AddAsync(new RootFolder { Name = "root", Path = tempRoot });
+            await AddAuthorizedRootAsync(tempRoot);
             await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder().WithOutputPath(tempRoot).Build());
             var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder().WithTitle("Test").WithBasePath(tempRoot).Build());
             var resolution = await _provider.GetRequiredService<IFileSystemSemanticsResolver>().ResolveAsync(tempRoot);

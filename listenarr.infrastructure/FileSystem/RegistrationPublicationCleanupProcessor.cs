@@ -124,6 +124,14 @@ public sealed class RegistrationPublicationCleanupProcessor(
             audiobook,
             files,
             cancellationToken);
+        if (registrationState == RegistrationGenerationState.Unavailable)
+        {
+            logger.LogWarning(
+                "Preserved registration cleanup state {StatePath} because the committed registration state could not be resolved for audiobook {AudiobookId}",
+                LogRedaction.SanitizeFilePath(candidate.StateDirectoryPath),
+                candidate.AudiobookId);
+            return;
+        }
         if (registrationState == RegistrationGenerationState.Conflicting)
         {
             logger.LogWarning(
@@ -285,7 +293,7 @@ public sealed class RegistrationPublicationCleanupProcessor(
             cancellationToken: cancellationToken);
         if (resolution.State != PathIdentityState.Valid)
         {
-            return RegistrationGenerationState.Absent;
+            return RegistrationGenerationState.Unavailable;
         }
 
         var conflictingPath = false;
@@ -371,6 +379,7 @@ public sealed class RegistrationPublicationCleanupProcessor(
     {
         Absent,
         Exact,
-        Conflicting
+        Conflicting,
+        Unavailable
     }
 }

@@ -58,6 +58,82 @@ describe('root folder relocation store actions', () => {
     )
   })
 
+  it('routes case-sensitivity changes through metadata-only path migration', async () => {
+    const current = {
+      id: 3,
+      name: 'Library',
+      path: '/srv/Library',
+      isDefault: false,
+      caseSensitivityMode: 'Sensitive' as const,
+    }
+    const updated = {
+      ...current,
+      name: 'Renamed',
+      caseSensitivityMode: 'Insensitive' as const,
+    }
+    vi.mocked(apiService.changeRootFolderPath).mockResolvedValueOnce({
+      relocationId: null,
+      rootFolderId: 3,
+      currentPath: current.path,
+      targetPath: current.path,
+      status: 'Completed',
+      totalJobs: 0,
+      completedJobs: 0,
+      targetIdentityEnrollmentState: 'Authorized',
+    })
+    vi.mocked(apiService.getRootFolders).mockResolvedValueOnce([updated])
+    const store = useRootFoldersStore()
+    store.folders = [current]
+
+    await store.update(3, updated)
+
+    expect(apiService.updateRootFolder).not.toHaveBeenCalled()
+    expect(apiService.changeRootFolderPath).toHaveBeenCalledWith(3, {
+      targetPath: current.path,
+      mode: 'metadataOnly',
+      deleteEmptySource: false,
+      desiredName: updated.name,
+      desiredIsDefault: false,
+      targetCaseSensitivityMode: 'Insensitive',
+      expectedCurrentPath: current.path,
+    })
+    expect(apiService.getRootFolders).toHaveBeenCalledTimes(1)
+  })
+
+  it('surfaces semantics-migration attention instead of reporting success', async () => {
+    const current = {
+      id: 3,
+      name: 'Library',
+      path: '/srv/Library',
+      isDefault: false,
+      caseSensitivityMode: 'Sensitive' as const,
+    }
+    const updated = {
+      ...current,
+      caseSensitivityMode: 'Insensitive' as const,
+    }
+    vi.mocked(apiService.changeRootFolderPath).mockResolvedValueOnce({
+      relocationId: 'relocation-semantics',
+      rootFolderId: 3,
+      currentPath: current.path,
+      targetPath: current.path,
+      status: 'NeedsAttention',
+      totalJobs: 0,
+      completedJobs: 0,
+      error:
+        'The relocation requires attention. Review the affected move jobs and retry after resolving the underlying issue.',
+      targetIdentityEnrollmentState: 'Authorized',
+    })
+    vi.mocked(apiService.getRootFolders).mockResolvedValueOnce([updated])
+    const store = useRootFoldersStore()
+    store.folders = [current]
+
+    await expect(store.update(3, updated)).rejects.toThrow('relocation requires attention')
+
+    expect(apiService.updateRootFolder).not.toHaveBeenCalled()
+    expect(apiService.getRootFolders).toHaveBeenCalledTimes(1)
+  })
+
   it('surfaces a synchronous relocation attention result instead of reporting success', async () => {
     const current = {
       id: 3,

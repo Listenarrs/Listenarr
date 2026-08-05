@@ -256,6 +256,12 @@
         v-if="activeTab === 'notifications' && settings"
         ref="notificationsRef"
         :settings="settings"
+        @update:settings="
+          (v) => {
+            settings = v
+            configStore.applicationSettings = v
+          }
+        "
       />
     </div>
 
@@ -440,15 +446,6 @@ const router = useRouter()
 const configStore = useConfigurationStore()
 const auth = useAuthStore()
 const toast = useToast()
-// Debug environment markers (Vitest exposes import.meta.vitest / import.meta.env.VITEST)
-logger.debug(
-  '[test-debug] import.meta.vitest:',
-  (import.meta as unknown as { vitest?: unknown }).vitest,
-  'env.VITEST:',
-  (import.meta as unknown as { env?: Record<string, unknown> }).env?.VITEST,
-  '__vitest_global__:',
-  (globalThis as unknown as { __vitest?: unknown }).__vitest,
-)
 const activeTab = ref<
   'rootfolders' | 'indexers' | 'clients' | 'quality-profiles' | 'notifications' | 'bot' | 'general'
 >('rootfolders')
@@ -804,25 +801,11 @@ const saveSettings = async () => {
 
     // No PascalCase keys are produced anymore; we only send camelCase properties.
 
-    // Resolve the configuration store at call-time to ensure tests that set up Pinia
-    // before mounting (or that replace the store) receive the correct instance.
-    const runtimeConfigStore = useConfigurationStore()
-    // Debug: log when saveSettings is invoked in tests to help diagnose test failures
-    // (will be removed once tests are stable)
-    logger.debug('[test-debug] saveSettings invoked', settingsToSave)
-    // Call the runtime store save method. Some test setups replace the store
-    // instance or spy on the store returned from `useConfigurationStore()` at
-    // different times; call both if they differ to ensure the spy is observed.
-    await runtimeConfigStore.saveApplicationSettings(settingsToSave)
-    if (
-      configStore !== runtimeConfigStore &&
-      typeof configStore.saveApplicationSettings === 'function'
-    ) {
-      // If the module-level `configStore` differs (older test setups), call it too
-      // so tests that replaced/observed that instance receive the call.
-      // Avoid failing if the method isn't a function.
-      configStore.saveApplicationSettings(settingsToSave)
-    }
+    // The backend uses an optimistic-concurrency version for the singleton settings row.
+    // Submit exactly once through this component's store instance so the same versioned
+    // payload cannot race itself and produce a false stale-write conflict.
+    const savedSettings = await configStore.saveApplicationSettings(settingsToSave)
+    settings.value = savedSettings
     toast.success('Settings', 'Settings saved successfully')
     // If user toggled the authEnabled, attempt to save to startup config
     try {
@@ -951,6 +934,16 @@ const saveSettings = async () => {
       component: 'SettingsView',
       operation: 'saveSettings',
     })
+
+    // The backend intentionally preserves non-admin settings if admin provisioning
+    // fails after the singleton settings row commits. A stale-version conflict can
+    // likewise mean another writer already advanced the row. Reload before the next
+    // edit so this view never retries with a concurrency token that may be obsolete.
+    const reloadedSettings = await configStore.loadApplicationSettings()
+    if (reloadedSettings) {
+      settings.value = reloadedSettings
+    }
+
     const errorMessage = formatApiError(error)
     toast.error('Save failed', errorMessage)
   }

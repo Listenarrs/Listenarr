@@ -67,15 +67,12 @@ public sealed class AudiobookDestinationRewriteServiceTests : BaseTests
     [WindowsFact]
     public async Task RewriteDestinationAsync_ForeignExpectedSourceAlias_DoesNotMatchNativeCurrentSource()
     {
-        var rootPath = FileService.GetTempDirectory("destination-rewrite-foreign-expected");
+        var rootPath = FileService.GetWindowsRootRelativeTempDirectory(
+            "destination-rewrite-foreign-expected");
         var sourcePath = Path.Join(rootPath, "Author", "Old Title");
         var destinationPath = Path.Join(rootPath, "Author", "New Title");
-        var driveRoot = Path.GetPathRoot(sourcePath)!;
-        var foreignExpectedSource = "/" + sourcePath[driveRoot.Length..].Replace('\\', '/');
-        Assert.Equal(
-            Path.GetFullPath(sourcePath),
-            Path.GetFullPath(foreignExpectedSource),
-            StringComparer.OrdinalIgnoreCase);
+        var foreignExpectedSource = TempFileService
+            .GetWindowsRootRelativeForeignAlias(sourcePath);
 
         var repository = new Mock<IAudiobookRepository>(MockBehavior.Strict);
         var settings = new Mock<IConfigurationService>(MockBehavior.Strict);
@@ -154,12 +151,110 @@ public sealed class AudiobookDestinationRewriteServiceTests : BaseTests
     }
 
     [Fact]
+    public async Task RewriteDestinationAsync_SourceOutsideConfiguredRoots_DoesNotUseTargetSemanticsForStaleToken()
+    {
+        var rootPath = Path.Join(
+            Path.GetTempPath(),
+            $"listenarr-rewrite-insensitive-target-{Guid.NewGuid():N}");
+        var destinationPath = Path.Join(rootPath, "Author", "New Title");
+        var sourcePath = OperatingSystem.IsWindows()
+            ? @"Z:\Legacy\Author\Book"
+            : "/legacy/Author/Book";
+        var staleExpectedSource = OperatingSystem.IsWindows()
+            ? @"Z:\Legacy\Author\book"
+            : "/legacy/Author/book";
+        var targetSemantics = new FileSystemPathSemantics(
+            FileSystemPathSemantics.CurrentHostDefault.Syntax,
+            FileSystemCaseSensitivity.Insensitive);
+        var repository = new Mock<IAudiobookRepository>(MockBehavior.Strict);
+        var settings = new Mock<IConfigurationService>(MockBehavior.Strict);
+        var rootFolders = new Mock<IRootFolderService>(MockBehavior.Strict);
+        var fileSystem = new Mock<IFileSystem>(MockBehavior.Strict);
+        var semanticsResolver = new Mock<IFileSystemSemanticsResolver>(MockBehavior.Strict);
+        var relocationService = new Mock<IRootFolderRelocationService>(MockBehavior.Strict);
+
+        settings.Setup(service => service.GetApplicationSettingsAsync())
+            .ReturnsAsync(new ApplicationSettings { OutputPath = rootPath });
+        rootFolders.Setup(service => service.GetAllAsync())
+            .ReturnsAsync([]);
+        semanticsResolver.Setup(service => service.ResolveAsync(
+                rootPath,
+                FileSystemCaseSensitivityMode.Auto,
+                It.IsAny<CancellationToken>()))
+            .Returns(new ValueTask<FileSystemSemanticsResolution>(
+                new FileSystemSemanticsResolution(
+                    targetSemantics,
+                    PathIdentityState.Valid,
+                    rootPath)));
+        string normalizedTarget = destinationPath;
+        string validationReason = string.Empty;
+        fileSystem.Setup(service => service.TryValidateMutationTarget(
+                destinationPath,
+                It.IsAny<IEnumerable<string?>>(),
+                out normalizedTarget,
+                out validationReason))
+            .Returns(true);
+        repository.Setup(repo => repo.GetByIdAsync(88))
+            .ReturnsAsync(new Audiobook
+            {
+                Id = 88,
+                Title = "Book",
+                BasePath = sourcePath
+            });
+        relocationService.Setup(service => service.IsBoundaryProtectedAsync(
+                It.IsAny<string>(),
+                It.IsAny<FileSystemPathSemantics>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        repository.Setup(repo => repo.RewritePathReferencesAsync(
+                It.IsAny<int>(),
+                It.IsAny<string?>(),
+                It.IsAny<string>(),
+                It.IsAny<FileSystemPathSemantics>(),
+                It.IsAny<FileSystemPathSemantics>(),
+                It.IsAny<CancellationToken>(),
+                It.IsAny<FileSystemCaseSensitivityMode>()))
+            .ReturnsAsync(true);
+
+        using var operationCoordinator = new AudiobookOperationCoordinator();
+        var service = new AudiobookDestinationRewriteService(
+            repository.Object,
+            settings.Object,
+            rootFolders.Object,
+            fileSystem.Object,
+            semanticsResolver.Object,
+            Mock.Of<ILogger<AudiobookDestinationRewriteService>>(),
+            relocationService.Object,
+            new FilesystemMutationCoordinator(),
+            operationCoordinator);
+
+        var exception = await Assert.ThrowsAsync<ApplicationConflictException>(() =>
+            service.RewriteDestinationAsync(
+                88,
+                destinationPath,
+                expectedSourcePath: staleExpectedSource));
+
+        Assert.Equal("source_path_changed", exception.Code);
+        repository.Verify(repo => repo.RewritePathReferencesAsync(
+            It.IsAny<int>(),
+            It.IsAny<string?>(),
+            It.IsAny<string>(),
+            It.IsAny<FileSystemPathSemantics>(),
+            It.IsAny<FileSystemPathSemantics>(),
+            It.IsAny<CancellationToken>(),
+            It.IsAny<FileSystemCaseSensitivityMode>()), Times.Never);
+    }
+
+    [Fact]
     public async Task RewriteDestinationAsync_RepairsLegacyInvalidBasePathWhenExpectedSourceMatchesExactly()
     {
         var rootPath = Path.Join(Path.GetTempPath(), $"listenarr-root-{Guid.NewGuid():N}");
         var destinationPath = Path.Join(rootPath, "Author", "Valid Title");
         const string legacyInvalidSourcePath = "\0invalid";
         var normalizedLegacySourcePath = FileUtils.NormalizeStoredPath(legacyInvalidSourcePath);
+        var conservativeSourceSemantics = new FileSystemPathSemantics(
+            FileSystemPathSemantics.CurrentHostDefault.Syntax,
+            FileSystemCaseSensitivity.Sensitive);
         var repository = new Mock<IAudiobookRepository>(MockBehavior.Strict);
         var settings = new Mock<IConfigurationService>(MockBehavior.Strict);
         var rootFolders = new Mock<IRootFolderService>(MockBehavior.Strict);
@@ -211,7 +306,7 @@ public sealed class AudiobookDestinationRewriteServiceTests : BaseTests
                 85,
                 normalizedLegacySourcePath,
                 destinationPath,
-                rootSemantics,
+                conservativeSourceSemantics,
                 rootSemantics,
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);

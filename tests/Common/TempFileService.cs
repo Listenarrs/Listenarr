@@ -3,6 +3,7 @@ namespace Listenarr.Tests.Common
     public class TempFileService : IAsyncLifetime
     {
         private string? _tempFolder = null;
+        private readonly List<string> _additionalTempFolders = [];
 
         public TempFileService()
         {
@@ -16,16 +17,14 @@ namespace Listenarr.Tests.Common
 
         public async Task DisposeAsync()
         {
-            if (_tempFolder != null && Directory.Exists(_tempFolder))
+            if (_tempFolder != null)
             {
-                try
-                {
-                    Directory.Delete(_tempFolder, true);
-                }
-                catch (IOException)
-                {
-                    // FIXME: Folder is probably not deleted
-                }
+                TryDeleteTempFolder(_tempFolder);
+            }
+
+            foreach (var additionalTempFolder in _additionalTempFolders)
+            {
+                TryDeleteTempFolder(additionalTempFolder);
             }
         }
 
@@ -53,7 +52,8 @@ namespace Listenarr.Tests.Common
 
         public async Task<string> GetFileAsync(string directory, string filename, string content = "test")
         {
-            if (!directory.StartsWith(GetTempPath()))
+            if (!Path.IsPathFullyQualified(directory)
+                && !directory.StartsWith(GetTempPath(), StringComparison.Ordinal))
             {
                 directory = Path.Join(GetTempPath(), directory);
             }
@@ -67,6 +67,41 @@ namespace Listenarr.Tests.Common
         public async Task<string> GetTempFileAsync(string filename)
         {
             return await GetFileAsync(GetTempPath(), filename);
+        }
+
+        public string GetWindowsRootRelativeTempPath(string name)
+        {
+            var target = WindowsPathTestFixture
+                .GetRootRelativeAliasCompatiblePath(name);
+            _additionalTempFolders.Add(target);
+            return target;
+        }
+
+        public string GetWindowsRootRelativeTempDirectory(string directory)
+        {
+            var target = GetWindowsRootRelativeTempPath(directory);
+            Directory.CreateDirectory(target);
+            return target;
+        }
+
+        public static string GetWindowsRootRelativeForeignAlias(string nativePath) =>
+            WindowsPathTestFixture.GetRootRelativeForeignAlias(nativePath);
+
+        private static void TryDeleteTempFolder(string directory)
+        {
+            if (!Directory.Exists(directory))
+            {
+                return;
+            }
+
+            try
+            {
+                Directory.Delete(directory, true);
+            }
+            catch (IOException)
+            {
+                // FIXME: Folder is probably not deleted
+            }
         }
     }
 }

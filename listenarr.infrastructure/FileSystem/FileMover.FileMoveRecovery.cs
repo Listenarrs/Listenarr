@@ -69,7 +69,8 @@ public partial class FileMover
                     && !AnchoredStateContainsOnly(
                         destinationState,
                         "destination.stage",
-                        "destination.previous")))
+                        "destination.previous",
+                        "destination.published.claim")))
             {
                 return FileMoveClaimRecoveryOutcome.Blocked;
             }
@@ -86,6 +87,10 @@ public partial class FileMover
             using var destinationPrevious = destinationState?.TryOpenExistingFile(
                 "destination.previous",
                 requireDeleteAccess: true);
+            using var destinationPublicationClaim =
+                destinationState?.TryOpenExistingFile(
+                    "destination.published.claim",
+                    requireDeleteAccess: true);
             using var generationFence = sourceState?.TryOpenExistingFile(
                 "replacement-generation.fence",
                 requireDeleteAccess: true);
@@ -109,6 +114,17 @@ public partial class FileMover
                 }
             }
 
+            if (!RecoveryArtifactsMatchPersistedGeneration(
+                    persistedFence,
+                    sourceClaim,
+                    destinationStage,
+                    destinationPrevious,
+                    destinationPublicationClaim,
+                    sourceRetirementCommitted: generationFence != null))
+            {
+                return FileMoveClaimRecoveryOutcome.Blocked;
+            }
+
             if (generationFence == null)
             {
                 using var publicSource = lease.SourceParent.TryOpenExistingFile(
@@ -120,8 +136,34 @@ public partial class FileMover
                         requireDeleteAccess: false);
                 if (sourceClaim != null)
                 {
-                    if (publicSource != null
+                    if (persistedFence is not { Version: >= 2 } rollbackFence
+                        || publicSource != null
                         || (destinationPrevious != null && publicDestination != null))
+                    {
+                        return FileMoveClaimRecoveryOutcome.Blocked;
+                    }
+                    if (publicDestination != null)
+                    {
+                        if (string.IsNullOrWhiteSpace(
+                                rollbackFence.DestinationPreviousObjectIdentity)
+                            || !string.Equals(
+                                publicDestination.GetObjectIdentity(),
+                                rollbackFence.DestinationPreviousObjectIdentity,
+                                StringComparison.Ordinal))
+                        {
+                            return FileMoveClaimRecoveryOutcome.Blocked;
+                        }
+                    }
+                    else if (destinationPrevious == null
+                        && !string.IsNullOrWhiteSpace(
+                            rollbackFence.DestinationPreviousObjectIdentity))
+                    {
+                        return FileMoveClaimRecoveryOutcome.Blocked;
+                    }
+                    if (!rollbackFence.NativeRename
+                        && !string.IsNullOrWhiteSpace(
+                            rollbackFence.DestinationStageObjectIdentity)
+                        && destinationStage == null)
                     {
                         return FileMoveClaimRecoveryOutcome.Blocked;
                     }
@@ -134,6 +176,14 @@ public partial class FileMover
                     FlushFileMoveDirectory(
                         sourceState!,
                         "interrupted source claim retirement");
+                    if (destinationPublicationClaim != null)
+                    {
+                        destinationPublicationClaim.Delete(immediateWindows: true);
+                        destinationPublicationClaim.Dispose();
+                        FlushFileMoveDirectory(
+                            destinationState!,
+                            "interrupted publication claim retirement");
+                    }
                     destinationStage?.Delete(immediateWindows: true);
                     destinationStage?.Dispose();
                     if (destinationPrevious != null)
@@ -153,7 +203,9 @@ public partial class FileMover
                             "interrupted destination state rollback");
                     }
                 }
-                else if (destinationStage != null || destinationPrevious != null)
+                else if (destinationStage != null
+                    || destinationPrevious != null
+                    || destinationPublicationClaim != null)
                 {
                     return FileMoveClaimRecoveryOutcome.Blocked;
                 }
@@ -187,22 +239,17 @@ public partial class FileMover
                 return FileMoveClaimRecoveryOutcome.Ready;
             }
 
-            var nativeRename = false;
-            FileMoveContent committedContent;
-            if (persistedFence.HasValue)
+            if (persistedFence is not { Version: >= 2 } committedFenceState)
             {
-                nativeRename = persistedFence.Value.NativeRename;
-                committedContent = persistedFence.Value.Content;
+                return FileMoveClaimRecoveryOutcome.Blocked;
             }
-            else
+            var nativeRename = committedFenceState.NativeRename;
+            var committedContent = committedFenceState.Content;
+            if (destinationPublicationClaim == null
+                && string.IsNullOrWhiteSpace(
+                    committedFenceState.PublishedDestinationObjectIdentity))
             {
-                var legacyContent = await ReadLegacyFileMoveContentAsync(
-                    generationFence);
-                if (!legacyContent.HasValue)
-                {
-                    return FileMoveClaimRecoveryOutcome.Blocked;
-                }
-                committedContent = legacyContent.Value;
+                return FileMoveClaimRecoveryOutcome.Blocked;
             }
 
             if (nativeRename && destinationStage != null)
@@ -289,9 +336,65 @@ public partial class FileMover
                     lease.DestinationName,
                     requireDeleteAccess: false);
             if (publishedDestination == null
-                || !await FileMatchesMoveContentAsync(
+                || !publishedDestination.VisiblePathMatches())
+            {
+                return FileMoveClaimRecoveryOutcome.Blocked;
+            }
+            if (!await FileMatchesMoveContentAsync(
                     publishedDestination,
                     committedContent))
+            {
+                return FileMoveClaimRecoveryOutcome.Blocked;
+            }
+
+            var publishedObjectIdentity = publishedDestination.GetObjectIdentity();
+            if (destinationPublicationClaim != null)
+            {
+                if (!destinationPublicationClaim.VisiblePathMatches()
+                    || !destinationPublicationClaim.IdentifiesSameEntry(
+                        publishedDestination))
+                {
+                    return FileMoveClaimRecoveryOutcome.Blocked;
+                }
+                if (!string.IsNullOrWhiteSpace(
+                        committedFenceState.PublishedDestinationObjectIdentity)
+                    && !string.Equals(
+                        committedFenceState.PublishedDestinationObjectIdentity,
+                        publishedObjectIdentity,
+                        StringComparison.Ordinal))
+                {
+                    return FileMoveClaimRecoveryOutcome.Blocked;
+                }
+                if (operationState == null)
+                {
+                    return FileMoveClaimRecoveryOutcome.Blocked;
+                }
+
+                await WriteFileMoveContentAsync(
+                    operationState,
+                    committedContent,
+                    committedFenceState.OperationId,
+                    committedFenceState.SourceIdentity,
+                    committedFenceState.DestinationIdentity,
+                    committedFenceState.SourceObjectIdentity!,
+                    committedFenceState.DestinationStageObjectIdentity,
+                    committedFenceState.DestinationPreviousObjectIdentity,
+                    publishedObjectIdentity,
+                    nativeRename);
+                FlushFileMoveDirectory(
+                    sourceState!,
+                    "recovered published destination generation evidence");
+                committedFenceState = committedFenceState with
+                {
+                    PublishedDestinationObjectIdentity = publishedObjectIdentity
+                };
+            }
+            else if (string.IsNullOrWhiteSpace(
+                    committedFenceState.PublishedDestinationObjectIdentity)
+                || !string.Equals(
+                    committedFenceState.PublishedDestinationObjectIdentity,
+                    publishedObjectIdentity,
+                    StringComparison.Ordinal))
             {
                 return FileMoveClaimRecoveryOutcome.Blocked;
             }
@@ -303,6 +406,34 @@ public partial class FileMover
                 FlushFileMoveDirectory(
                     destinationState,
                     "previous destination recovery retirement");
+            }
+
+            if (destinationPublicationClaim != null)
+            {
+                if (!destinationPublicationClaim.VisiblePathMatches()
+                    || !publishedDestination.VisiblePathMatches()
+                    || !destinationPublicationClaim.IdentifiesSameEntry(
+                        publishedDestination))
+                {
+                    return FileMoveClaimRecoveryOutcome.Blocked;
+                }
+                destinationPublicationClaim.Delete(immediateWindows: true);
+                destinationPublicationClaim.Dispose();
+                FlushFileMoveDirectory(
+                    destinationState!,
+                    "destination publication claim recovery retirement");
+            }
+
+            if (!publishedDestination.VisiblePathMatches()
+                || !string.Equals(
+                    publishedDestination.GetObjectIdentity(),
+                    committedFenceState.PublishedDestinationObjectIdentity,
+                    StringComparison.Ordinal)
+                || !await FileMatchesMoveContentAsync(
+                    publishedDestination,
+                    committedContent))
+            {
+                return FileMoveClaimRecoveryOutcome.Blocked;
             }
 
             using var publishedSource = lease.SourceParent.TryOpenExistingFile(

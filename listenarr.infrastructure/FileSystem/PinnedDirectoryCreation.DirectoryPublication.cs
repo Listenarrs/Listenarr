@@ -105,9 +105,15 @@ internal sealed partial class PinnedDirectoryCreation
             "The republished directory does not identify the pinned directory.");
     }
 
-    internal void DeletePinnedEmptyDirectory(
+    internal void DeletePinnedEmptyDirectory(string currentName) =>
+        DeletePinnedEmptyDirectoryCore(currentName, requireImmediateNamespaceRetirement: false);
+
+    internal void RetirePinnedEmptyDirectoryFromNamespace(string currentName) =>
+        DeletePinnedEmptyDirectoryCore(currentName, requireImmediateNamespaceRetirement: true);
+
+    private void DeletePinnedEmptyDirectoryCore(
         string currentName,
-        bool immediateWindows = false)
+        bool requireImmediateNamespaceRetirement)
     {
         ThrowIfDisposed();
         ValidateLeafName(currentName);
@@ -118,25 +124,62 @@ internal sealed partial class PinnedDirectoryCreation
         }
 
         var currentPath = Path.Join(_parentPath, currentName);
-        using var currentAnchor = new PinnedDirectoryAnchor(
+        using (var currentAnchor = new PinnedDirectoryAnchor(
             DuplicateSafeHandle(_directoryHandle),
             currentPath,
-            followVisibleFinalLink: false);
-        if (!currentAnchor.VisiblePathMatches())
+            followVisibleFinalLink: false))
         {
-            throw new InvalidOperationException(
-                "The directory changed before pinned deletion.");
+            if (!currentAnchor.VisiblePathMatches())
+            {
+                throw new InvalidOperationException(
+                    "The directory changed before pinned deletion.");
+            }
         }
+
         if (OperatingSystem.IsWindows())
         {
-            if (immediateWindows)
-            {
-                DeleteOpenedFileImmediatelyWindows(_directoryHandle);
-            }
-            else
+            if (!requireImmediateNamespaceRetirement)
             {
                 DeleteOpenedFileWindows(_directoryHandle);
+                return;
             }
+
+            // POSIX delete semantics are applied through a distinct file object. Closing
+            // that handle before returning is the namespace-retirement boundary; using a
+            // duplicate of _directoryHandle would keep cleanup tied to the original file
+            // object's lifetime and could leave a child delete-pending while its parent is
+            // retired immediately afterwards.
+            using (var retirementHandle = OpenRelativeDirectoryWindows(
+                _parentHandle,
+                currentName,
+                currentPath,
+                requireDeleteAccess: true))
+            {
+                if (!HandlesIdentifySameDirectory(_directoryHandle, retirementHandle))
+                {
+                    throw new InvalidOperationException(
+                        "The directory changed before immediate pinned retirement.");
+                }
+
+                DeleteOpenedFileImmediatelyWindows(
+                    retirementHandle,
+                    allowLegacyFallback: false);
+            }
+
+            if (Directory.Exists(currentPath))
+            {
+                using var visible = OpenRelativeDirectoryWindows(
+                    _parentHandle,
+                    currentName,
+                    currentPath);
+                if (HandlesIdentifySameDirectory(_directoryHandle, visible))
+                {
+                    throw new System.ComponentModel.Win32Exception(
+                        145,
+                        "The verified empty directory remained visible after immediate retirement.");
+                }
+            }
+
             return;
         }
 

@@ -38,7 +38,8 @@ namespace Listenarr.Application.Audiobooks.Files
         IRootFolderService rootFolderService,
         ILogger<AudiobookFileService> logger,
         IFilesystemMutationCoordinator filesystemMutationCoordinator,
-        IAudiobookOperationCoordinator audiobookOperationCoordinator) : IAudiobookFileService
+        IAudiobookOperationCoordinator audiobookOperationCoordinator,
+        IMoveQueueService moveQueueService) : IAudiobookFileService
     {
         public Task<bool> EnsureAudiobookFileAsync(
             Audiobook audiobook,
@@ -114,6 +115,9 @@ namespace Listenarr.Application.Audiobooks.Files
                     audiobook.Id,
                     async token =>
                     {
+                        await moveQueueService.EnsureFilesystemMutationAllowedAsync(
+                            audiobook.Id,
+                            token);
                         var currentAudiobook = await audiobookRepository.GetByIdSnapshotAsync(audiobook.Id, token);
                         if (currentAudiobook == null)
                         {

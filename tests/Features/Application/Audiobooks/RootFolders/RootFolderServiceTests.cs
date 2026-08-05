@@ -133,7 +133,83 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
         }
 
         [Fact]
-        public async Task Update_InsensitiveOverrideRejectsCaseVariantIdentityConflict()
+        public async Task Update_CaseSensitivityChange_RequiresIdentityMigrationWorkflow()
+        {
+            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+            var repository = new EfRootFolderRepository(
+                new TestDbFactory(options),
+                Mock.Of<ILogger<EfRootFolderRepository>>());
+            var root = new RootFolder
+            {
+                Name = "Library",
+                Path = rootPath,
+                CaseSensitivityMode = FileSystemCaseSensitivityMode.Sensitive,
+                ResolvedCaseSensitivity = FileSystemCaseSensitivity.Sensitive,
+                PathIdentityState = PathIdentityState.Valid
+            };
+            await repository.AddAsync(root);
+            var service = new RootFolderService(repository, null);
+
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.UpdateAsync(new RootFolder
+                {
+                    Id = root.Id,
+                    Name = root.Name,
+                    Path = root.Path,
+                    IsDefault = root.IsDefault,
+                    CaseSensitivityMode = FileSystemCaseSensitivityMode.Insensitive
+                }));
+
+            Assert.Contains("path-change", exception.Message, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public async Task Update_MetadataOnlyPreservesPersistedAutoSemantics()
+        {
+            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+            var repository = new EfRootFolderRepository(
+                new TestDbFactory(options),
+                Mock.Of<ILogger<EfRootFolderRepository>>());
+            var semantics = new FileSystemPathSemantics(
+                FileSystemPathSemantics.CurrentHostDefault.Syntax,
+                FileSystemCaseSensitivity.Sensitive);
+            var root = new RootFolder
+            {
+                Name = "Library",
+                Path = rootPath,
+                CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto,
+                ResolvedCaseSensitivity = FileSystemCaseSensitivity.Sensitive,
+                PathIdentityState = PathIdentityState.Valid,
+                PathIdentityKey = FileSystemPathIdentity.CreateKey("root", rootPath, semantics)
+            };
+            await repository.AddAsync(root);
+            var resolver = new Mock<IFileSystemSemanticsResolver>(MockBehavior.Strict);
+            var service = new RootFolderService(
+                repository,
+                null,
+                semanticsResolver: resolver.Object);
+
+            var updated = await service.UpdateAsync(new RootFolder
+            {
+                Id = root.Id,
+                Name = "Renamed",
+                Path = root.Path,
+                IsDefault = root.IsDefault,
+                CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto
+            });
+
+            Assert.Equal("Renamed", updated.Name);
+            Assert.Equal(FileSystemCaseSensitivity.Sensitive, updated.ResolvedCaseSensitivity);
+            Assert.Equal(root.PathIdentityKey, updated.PathIdentityKey);
+            resolver.VerifyNoOtherCalls();
+        }
+
+        [Fact]
+        public async Task Update_InsensitiveOverrideRequiresIdentityMigrationWorkflow()
         {
             var options = new DbContextOptionsBuilder<ListenArrDbContext>()
                 .UseInMemoryDatabase(Guid.NewGuid().ToString())
@@ -178,7 +254,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
                     CaseSensitivityMode = FileSystemCaseSensitivityMode.Insensitive
                 }));
 
-            Assert.Contains("already", exception.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("path-changes", exception.Message, StringComparison.OrdinalIgnoreCase);
         }
 
         [Fact]
@@ -355,6 +431,79 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
                 service.CreateAsync(new RootFolder { Name = "Nested", Path = Path.Join(rootPath, "Audiobooks") }));
 
             Assert.Contains("nested", exception.Message, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public async Task Create_NestedRejectedRoot_DoesNotEnrollCandidateDirectory()
+        {
+            var tempRoot = Path.Join(
+                Path.GetTempPath(),
+                "listenarr-root-create-rejected-" + Guid.NewGuid().ToString("N"));
+            var nestedPath = Path.Join(tempRoot, "Nested");
+            Directory.CreateDirectory(nestedPath);
+            try
+            {
+                var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+                    .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                    .Options;
+                await using (var db = new ListenArrDbContext(options))
+                {
+                    db.RootFolders.Add(new RootFolder
+                    {
+                        Name = "Existing",
+                        Path = tempRoot,
+                        ResolvedCaseSensitivity =
+                            FileSystemPathSemantics.CurrentHostDefault.CaseSensitivity,
+                        PathIdentityState = PathIdentityState.Valid
+                    });
+                    await db.SaveChangesAsync();
+                }
+
+                var repository = new EfRootFolderRepository(
+                    new TestDbFactory(options),
+                    Mock.Of<ILogger<EfRootFolderRepository>>());
+                var relocation = new Mock<IRootFolderRelocationService>();
+                relocation.Setup(service => service.IsBoundaryProtectedAsync(
+                        It.IsAny<string>(),
+                        It.IsAny<FileSystemPathSemantics>(),
+                        It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(false);
+                var service = new AppRootFolderService(
+                    repository,
+                    null,
+                    new FileSystemSemanticsResolver(),
+                    Mock.Of<IMoveQueueService>(),
+                    relocation.Object,
+                    new FilesystemMutationCoordinator(),
+                    new AudiobookOperationCoordinator(),
+                    new DirectoryObjectIdentityResolver());
+                var enrollmentPath = Path.Join(
+                    nestedPath,
+                    ManagedDirectoryEnrollment.FileName);
+                Assert.False(File.Exists(enrollmentPath));
+
+                await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                    service.CreateAsync(new RootFolder
+                    {
+                        Name = "Nested",
+                        Path = nestedPath
+                    }));
+
+                Assert.False(File.Exists(enrollmentPath));
+            }
+            finally
+            {
+                try
+                {
+                    Directory.Delete(tempRoot, recursive: true);
+                }
+                catch (IOException)
+                {
+                }
+                catch (UnauthorizedAccessException)
+                {
+                }
+            }
         }
 
         [LinuxFact]
@@ -752,7 +901,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
             await db.SaveChangesAsync();
             var repo = new EfRootFolderRepository(new TestDbFactory(options), Mock.Of<ILogger<EfRootFolderRepository>>());
             var moveQueue = new Mock<IMoveQueueService>();
-            moveQueue.Setup(queue => queue.GetActiveJobsAsync(It.IsAny<CancellationToken>()))
+            moveQueue.Setup(queue => queue.GetFilesystemBlockingJobsAsync(It.IsAny<CancellationToken>()))
                 .ReturnsAsync([
                     new MoveJob
                     {
@@ -765,7 +914,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
 
             var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => service.DeleteAsync(root.Id));
 
-            Assert.Contains("active move job", exception.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("unresolved move job", exception.Message, StringComparison.OrdinalIgnoreCase);
         }
 
         [Fact]
@@ -780,7 +929,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
             await db.SaveChangesAsync();
             var repo = new EfRootFolderRepository(new TestDbFactory(options), Mock.Of<ILogger<EfRootFolderRepository>>());
             var moveQueue = new Mock<IMoveQueueService>();
-            moveQueue.Setup(queue => queue.GetActiveJobsAsync(It.IsAny<CancellationToken>()))
+            moveQueue.Setup(queue => queue.GetFilesystemBlockingJobsAsync(It.IsAny<CancellationToken>()))
                 .ReturnsAsync([
                     new MoveJob
                     {
@@ -793,7 +942,43 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
 
             var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => service.DeleteAsync(root.Id));
 
-            Assert.Contains("active move job", exception.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("unresolved move job", exception.Message, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public async Task Delete_Throws_WhenFailedPublishedMoveStillOwnsRootFilesystemState()
+        {
+            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+            var db = new ListenArrDbContext(options);
+            var root = new RootFolder { Name = "R", Path = rootPath };
+            db.RootFolders.Add(root);
+            await db.SaveChangesAsync();
+            var repo = new EfRootFolderRepository(
+                new TestDbFactory(options),
+                Mock.Of<ILogger<EfRootFolderRepository>>());
+            var moveQueue = new Mock<IMoveQueueService>();
+            var failedJob = new MoveJob
+            {
+                Id = Guid.NewGuid(),
+                SourcePath = Path.Join(rootPath, "Author", "Title"),
+                RequestedPath = Path.Join(newRootPath, "Author", "Title"),
+                Status = MoveJobStatus.Failed,
+                Phase = MoveJobPhase.Published,
+                FailureKind = MoveFailureKind.Unknown
+            };
+            moveQueue.Setup(queue => queue.GetFilesystemBlockingJobsAsync(
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync([failedJob]);
+            var service = new RootFolderService(repo, null!, moveQueue.Object);
+
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.DeleteAsync(root.Id));
+
+            Assert.Contains("unresolved move job", exception.Message, StringComparison.OrdinalIgnoreCase);
+            await using var verification = new ListenArrDbContext(options);
+            Assert.Single(verification.RootFolders);
         }
 
         [Fact]
@@ -808,15 +993,8 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
             await db.SaveChangesAsync();
             var repo = new EfRootFolderRepository(new TestDbFactory(options), Mock.Of<ILogger<EfRootFolderRepository>>());
             var moveQueue = new Mock<IMoveQueueService>();
-            moveQueue.Setup(queue => queue.GetActiveJobsAsync(It.IsAny<CancellationToken>()))
-                .ReturnsAsync([
-                    new MoveJob
-                    {
-                        SourcePath = Path.Join(rootPath, "Author", "Title"),
-                        RequestedPath = Path.Join(newRootPath, "Author", "Title"),
-                        Status = MoveJobStatus.Completed
-                    }
-                ]);
+            moveQueue.Setup(queue => queue.GetFilesystemBlockingJobsAsync(It.IsAny<CancellationToken>()))
+                .ReturnsAsync([]);
             var service = new RootFolderService(repo, null!, moveQueue.Object);
 
             await service.DeleteAsync(root.Id);
@@ -837,7 +1015,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
             await db.SaveChangesAsync();
             var repo = new EfRootFolderRepository(new TestDbFactory(options), Mock.Of<ILogger<EfRootFolderRepository>>());
             var moveQueue = new Mock<IMoveQueueService>();
-            moveQueue.Setup(queue => queue.GetActiveJobsAsync(It.IsAny<CancellationToken>()))
+            moveQueue.Setup(queue => queue.GetFilesystemBlockingJobsAsync(It.IsAny<CancellationToken>()))
                 .ReturnsAsync([
                     new MoveJob
                     {
@@ -866,7 +1044,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
             await db.SaveChangesAsync();
             var repo = new EfRootFolderRepository(new TestDbFactory(options), Mock.Of<ILogger<EfRootFolderRepository>>());
             var moveQueue = new Mock<IMoveQueueService>();
-            moveQueue.Setup(queue => queue.GetActiveJobsAsync(It.IsAny<CancellationToken>()))
+            moveQueue.Setup(queue => queue.GetFilesystemBlockingJobsAsync(It.IsAny<CancellationToken>()))
                 .ReturnsAsync([
                     new MoveJob
                     {
@@ -976,7 +1154,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
         }
 
         [LinuxFact]
-        public async Task Update_CaseOnlyRenameOnCaseSensitiveHost_MigratesAudiobookPaths()
+        public async Task Update_CaseOnlyRenameOnCaseSensitiveHost_RequiresPathChangeWorkflow()
         {
 
             var options = new DbContextOptionsBuilder<ListenArrDbContext>()

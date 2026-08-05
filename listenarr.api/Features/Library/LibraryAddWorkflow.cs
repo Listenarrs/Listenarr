@@ -197,7 +197,7 @@ namespace Listenarr.Api.Features.Library
                 }
 
                 audiobook.BasePath = normalizedDestinationPath;
-                _logger.LogInformation("Using custom destination path for audiobook '{Title}': {BasePath}",
+                _logger.LogInformation("Using requested destination path for audiobook '{Title}': {BasePath}",
                     audiobook.Title, audiobook.BasePath);
             }
 

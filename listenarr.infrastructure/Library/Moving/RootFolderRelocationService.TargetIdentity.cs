@@ -1,3 +1,5 @@
+using Listenarr.Domain.Common;
+
 namespace Listenarr.Infrastructure.Library.Moving;
 
 public sealed partial class RootFolderRelocationService
@@ -26,6 +28,54 @@ public sealed partial class RootFolderRelocationService
                 nameof(targetPath));
         }
     }
+
+    private static async Task RequireTargetDirectoryGenerationAsync(
+        string targetPath,
+        int? expectedVersion,
+        string? expectedValue,
+        string? unavailableReason,
+        CancellationToken cancellationToken)
+    {
+        if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                targetPath,
+                out var canonicalTargetPath,
+                out var pathReason))
+        {
+            throw new InvalidOperationException(pathReason);
+        }
+
+        try
+        {
+            using var target = PinnedDirectoryCreation.OpenPinnedBoundary(
+                canonicalTargetPath);
+            await ManagedDirectoryEnrollment.RequireMatchingEnrollmentAsync(
+                target,
+                expectedVersion,
+                expectedValue,
+                unavailableReason,
+                cancellationToken);
+        }
+        catch (Exception exception) when (exception is
+            IOException or UnauthorizedAccessException
+                or InvalidOperationException or NotSupportedException
+                or System.ComponentModel.Win32Exception)
+        {
+            throw new InvalidOperationException(
+                "The relocation target no longer identifies its authorized physical directory generation.",
+                exception);
+        }
+    }
+
+    private static Task RequireTargetDirectoryGenerationAsync(
+        string targetPath,
+        DirectoryObjectIdentityResolution expectedIdentity,
+        CancellationToken cancellationToken) =>
+        RequireTargetDirectoryGenerationAsync(
+            targetPath,
+            expectedIdentity.Version,
+            expectedIdentity.Value,
+            expectedIdentity.UnavailableReason,
+            cancellationToken);
 
     private static void ApplyRootDirectoryObjectIdentity(
         RootFolder root,
@@ -89,16 +139,39 @@ public sealed partial class RootFolderRelocationService
         }
     }
 
-    private async Task<DirectoryObjectIdentityResolution>
+    private Task<DirectoryObjectIdentityResolution>
+        ResolveOrEnrollDirectoryObjectIdentityAsync(
+            string path,
+            CancellationToken cancellationToken) =>
+        ResolveDirectoryObjectIdentityAsync(
+            path,
+            enrollIfMissing: true,
+            cancellationToken);
+
+    private Task<DirectoryObjectIdentityResolution>
         ResolveExistingDirectoryObjectIdentityAsync(
             string path,
+            CancellationToken cancellationToken) =>
+        ResolveDirectoryObjectIdentityAsync(
+            path,
+            enrollIfMissing: false,
+            cancellationToken);
+
+    private async Task<DirectoryObjectIdentityResolution>
+        ResolveDirectoryObjectIdentityAsync(
+            string path,
+            bool enrollIfMissing,
             CancellationToken cancellationToken)
     {
         if (_directoryObjectIdentityResolver != null)
         {
-            return await _directoryObjectIdentityResolver.ResolveAsync(
-                path,
-                cancellationToken);
+            return enrollIfMissing
+                ? await _directoryObjectIdentityResolver.ResolveAsync(
+                    path,
+                    cancellationToken)
+                : await _directoryObjectIdentityResolver.ResolveExistingAsync(
+                    path,
+                    cancellationToken);
         }
 
         try
@@ -108,7 +181,7 @@ public sealed partial class RootFolderRelocationService
             return await ManagedDirectoryEnrollment.ResolveAsync(
                 anchor,
                 nativeIdentity,
-                enrollIfMissing: true,
+                enrollIfMissing,
                 cancellationToken);
         }
         catch (Exception exception) when (exception is

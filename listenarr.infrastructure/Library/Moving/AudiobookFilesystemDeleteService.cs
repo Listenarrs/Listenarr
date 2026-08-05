@@ -81,6 +81,18 @@ namespace Listenarr.Infrastructure.Library.Moving
                 deleteSemantics,
                 result,
                 out var hasUnresolvedTrackedPaths);
+            var trackedPhysicalObjectIdentities = ResolveTrackedPhysicalObjectIdentities(
+                audiobook,
+                deleteSemantics,
+                result,
+                out var hasConflictingTrackedPhysicalIdentities,
+                out var hasUnprovenTrackedPhysicalIdentities);
+            if (hasConflictingTrackedPhysicalIdentities
+                || hasUnprovenTrackedPhysicalIdentities)
+            {
+                return result;
+            }
+
             var deleteTarget = hasUnresolvedTrackedPaths
                 ? null
                 : await ResolveDeleteFolderTargetAsync(
@@ -115,6 +127,7 @@ namespace Listenarr.Infrastructure.Library.Moving
                     contentsDeleted = TryDeleteFolderContents(
                         deleteTarget,
                         targetAuthorization,
+                        trackedPhysicalObjectIdentities,
                         result);
                 }
 
@@ -139,7 +152,14 @@ namespace Listenarr.Infrastructure.Library.Moving
                     cancellationToken);
                 foreach (var trackedFilePath in trackedFilePaths)
                 {
-                    TryDeleteFile(trackedFilePath, result, allowedRoots);
+                    trackedPhysicalObjectIdentities.TryGetValue(
+                        trackedFilePath,
+                        out var expectedPhysicalObjectIdentity);
+                    TryDeleteFile(
+                        trackedFilePath,
+                        expectedPhysicalObjectIdentity,
+                        result,
+                        allowedRoots);
                 }
 
                 if (deleteFolder)
@@ -303,6 +323,54 @@ namespace Listenarr.Infrastructure.Library.Moving
             return paths.ToList();
         }
 
+        private static IReadOnlyDictionary<string, string> ResolveTrackedPhysicalObjectIdentities(
+            Audiobook audiobook,
+            FileSystemPathSemantics semantics,
+            AudiobookFilesystemDeleteResult result,
+            out bool hasConflict,
+            out bool hasUnprovenTrackedPhysicalIdentities)
+        {
+            var identities = new Dictionary<string, string>(semantics.Comparer);
+            hasConflict = false;
+            hasUnprovenTrackedPhysicalIdentities = false;
+            foreach (var file in audiobook.Files ?? [])
+            {
+                if (string.IsNullOrWhiteSpace(file.Path)
+                    || !TryResolveStoredFilePath(
+                        audiobook,
+                        file.Path,
+                        semantics,
+                        out var resolvedPath))
+                {
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(file.PhysicalObjectIdentity))
+                {
+                    hasUnprovenTrackedPhysicalIdentities = true;
+                    result.Warnings.Add(
+                        "A tracked audiobook file has no persisted physical generation, so filesystem deletion was blocked.");
+                    continue;
+                }
+
+                if (identities.TryGetValue(resolvedPath, out var existingIdentity)
+                    && !string.Equals(
+                        existingIdentity,
+                        file.PhysicalObjectIdentity,
+                        StringComparison.Ordinal))
+                {
+                    hasConflict = true;
+                    result.Warnings.Add(
+                        "Conflicting tracked physical generations reference the same audiobook file path, so filesystem deletion was blocked.");
+                    return identities;
+                }
+
+                identities[resolvedPath] = file.PhysicalObjectIdentity;
+            }
+
+            return identities;
+        }
+
         private static bool TryResolveStoredFilePath(
             Audiobook audiobook,
             string storedPath,
@@ -337,6 +405,7 @@ namespace Listenarr.Infrastructure.Library.Moving
 
         private void TryDeleteFile(
             string path,
+            string? expectedPhysicalObjectIdentity,
             AudiobookFilesystemDeleteResult result,
             IEnumerable<string> allowedRoots)
         {
@@ -348,9 +417,13 @@ namespace Listenarr.Infrastructure.Library.Moving
             if (!FileSystemSafety.TryDeleteFile(
                     path,
                     allowedRoots,
+                    expectedPhysicalObjectIdentity,
                     out var reason))
             {
-                var warning = $"Could not delete file '{Path.GetFileName(path)}'.";
+                var warning = !string.IsNullOrWhiteSpace(expectedPhysicalObjectIdentity)
+                    && reason.Contains("physical generation", StringComparison.OrdinalIgnoreCase)
+                        ? $"Could not delete file '{Path.GetFileName(path)}' because its tracked physical generation changed."
+                        : $"Could not delete file '{Path.GetFileName(path)}'.";
                 result.Warnings.Add(warning);
                 _logger.LogWarning(
                     "Blocked audiobook file delete for {Path}: {Reason}",
@@ -368,6 +441,7 @@ namespace Listenarr.Infrastructure.Library.Moving
         private bool TryDeleteFolderContents(
             DeleteFolderTarget deleteTarget,
             PinnedDirectoryCreation.PinnedDirectoryAnchor targetAuthorization,
+            IReadOnlyDictionary<string, string> trackedPhysicalObjectIdentities,
             AudiobookFilesystemDeleteResult result)
         {
             var folderPath = deleteTarget.FolderPath;
@@ -384,6 +458,7 @@ namespace Listenarr.Infrastructure.Library.Moving
             if (!TryValidatePinnedDirectoryTree(
                     targetAuthorization,
                     targetAuthorization,
+                    trackedPhysicalObjectIdentities,
                     preflightIdentities,
                     out var reason))
             {

@@ -161,6 +161,18 @@ export function isAbsolutePath(s: string, pathKind: PathKind = 'unknown'): boole
   return /^([a-zA-Z]:[\\/]|[\\/])/.test(s)
 }
 
+/**
+ * Returns true when an input begins from a filesystem root rather than being
+ * relative to a selected authority. Windows root-relative values such as
+ * `\\Author\\Title` count as rooted even though they do not include a drive.
+ */
+export function isRootedPath(s: string, pathKind: PathKind = 'unknown'): boolean {
+  const kind = pathKind === 'unknown' ? detectPathKind(s) : pathKind
+  if (kind === 'unix') return s.startsWith('/')
+  if (kind === 'windows') return /^[a-zA-Z]:[\\/]/.test(s) || /^[\\/]/.test(s)
+  return /^([a-zA-Z]:[\\/]|[\\/])/.test(s)
+}
+
 export function isFileSystemRoot(
   s: string | null | undefined,
   pathKind: PathKind = 'unknown',

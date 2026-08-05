@@ -28,6 +28,7 @@ public partial class FileMover
     internal bool DisableNativeFileRenameForTest { get; init; }
     internal Action<string>? BeforeFileMoveDurabilityBarrierForTest { get; init; }
     internal Action<string>? AfterDirectoryRenameJournalPublishedForTest { get; init; }
+    internal Action<string>? BeforeDirectoryRenameJournalRetirementForTest { get; init; }
     internal Func<string, Task>? AfterDirectoryCopyStagingDirectoriesCreatedForTestAsync { get; init; }
     internal Func<string, Task>? BeforeDirectoryCopyPublicationForTestAsync { get; init; }
     internal Func<string, Task>? BeforeDirectoryCopyStagingCleanupForTestAsync { get; init; }
@@ -35,6 +36,7 @@ public partial class FileMover
     internal Func<string, Task>? AfterCleanupSourceFileRetiredForTestAsync { get; init; }
     internal Func<string, Task>? BeforeCleanupSourceRecoveryDeleteForTestAsync { get; init; }
     internal Func<string, Task>? AfterCleanupSourceRecoveryDeleteForTestAsync { get; init; }
+    internal Action<string>? AfterCleanupQuarantineRetiredForTest { get; init; }
     internal int DirectoryCleanupJournalVersionForTest { get; init; } = 2;
     internal string? FileMoveLockDirectoryForTest { get; init; }
 }

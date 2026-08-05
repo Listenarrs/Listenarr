@@ -319,18 +319,23 @@ public sealed partial class EfMoveScanHandoffStore(
                     cancellationToken);
                 return null;
             }
-            var targetManifest = await db.MoveJobEntries
+            var persistedEntries = await db.MoveJobEntries
                 .AsNoTracking()
                 .Where(entry => entry.MoveJobId == claimed.MoveJobId)
                 .OrderBy(entry => entry.Id)
                 .ToListAsync(cancellationToken);
-            if (targetManifest.Count == 0)
+            var targetManifest = persistedEntries
+                .Where(entry =>
+                    !MoveManifestIdentity.IsTargetBoundaryAuthorization(entry))
+                .ToList();
+            if (!targetManifest.Any(entry =>
+                    entry.EntryType == MoveJobEntryType.File))
             {
                 await FailUndispatchableClaimAsync(
                     claimed.Id,
                     claimed.AttemptGeneration,
                     claimed.TargetPath,
-                    "The completed move has no durable target manifest.",
+                    "The completed move has no durable target manifest with tracked-file evidence.",
                     now,
                     cancellationToken);
                 return null;

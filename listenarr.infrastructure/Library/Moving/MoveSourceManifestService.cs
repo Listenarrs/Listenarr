@@ -5,7 +5,9 @@ using Listenarr.Domain.Common;
 namespace Listenarr.Infrastructure.Library.Moving;
 
 internal sealed class MoveSourceManifestService(
-    IAudiobookFileRepository fileRepository) : IMoveSourceManifestService
+    IAudiobookFileRepository fileRepository,
+    LibraryDirectoryOwnershipBoundaryAuthorizer? ownershipAuthorizer = null,
+    IAudiobookRepository? audiobookRepository = null) : IMoveSourceManifestService
 {
     public async Task<MoveSourceManifest> BuildAsync(
         Audiobook audiobook,
@@ -68,6 +70,19 @@ internal sealed class MoveSourceManifestService(
         var entries = BuildEntries(
             sourceRoot,
             validated,
+            identitySnapshot.Semantics);
+        var companionEntries = await MoveSourceCompanionManifestBuilder.BuildAsync(
+            audiobook,
+            sourceRoot,
+            identitySnapshot,
+            validated.Select(file => file.Path).ToList(),
+            ownershipAuthorizer,
+            audiobookRepository,
+            fileRepository,
+            cancellationToken);
+        entries = MergeEntries(
+            entries,
+            companionEntries,
             identitySnapshot.Semantics);
         var sourceIdentity = new PathIdentitySnapshot(
             identitySnapshot.Syntax,
@@ -384,6 +399,35 @@ internal sealed class MoveSourceManifestService(
             });
         return directoryEntries
             .Concat(fileEntries.OrderBy(entry => entry.RelativePath, semantics.Comparer))
+            .ToList();
+    }
+
+    private static IReadOnlyList<MoveSourceManifestEntry> MergeEntries(
+        IReadOnlyList<MoveSourceManifestEntry> trackedEntries,
+        IReadOnlyList<MoveSourceManifestEntry> companionEntries,
+        FileSystemPathSemantics semantics)
+    {
+        var merged = new Dictionary<string, MoveSourceManifestEntry>(
+            semantics.Comparer);
+        foreach (var entry in trackedEntries.Concat(companionEntries))
+        {
+            if (merged.TryGetValue(entry.RelativePath, out var existing))
+            {
+                if (existing.EntryType != entry.EntryType)
+                {
+                    throw Conflict(
+                        $"Move manifest path changed type while companion files were being captured: {entry.RelativePath}");
+                }
+
+                continue;
+            }
+
+            merged.Add(entry.RelativePath, entry);
+        }
+
+        return merged.Values
+            .OrderBy(entry => entry.EntryType == MoveJobEntryType.Directory ? 0 : 1)
+            .ThenBy(entry => entry.RelativePath, semantics.Comparer)
             .ToList();
     }
 

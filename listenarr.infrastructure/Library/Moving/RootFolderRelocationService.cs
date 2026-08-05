@@ -51,11 +51,6 @@ public sealed partial class RootFolderRelocationService(
             throw new InvalidOperationException(
                 targetResolution.Reason ?? "Target filesystem semantics are unavailable; select an explicit override.");
         }
-        var targetObjectIdentity =
-            await ResolveExistingDirectoryObjectIdentityAsync(
-                targetPath,
-                cancellationToken);
-
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var root = await db.RootFolders.SingleOrDefaultAsync(
@@ -205,24 +200,14 @@ public sealed partial class RootFolderRelocationService(
         }
 
         var affectedAudiobookIds = affected.Select(candidate => candidate.Audiobook.Id).ToHashSet();
-        var activeMoveJobs = await db.MoveJobs
-            .Where(job => job.Status == MoveJobStatus.Queued
-                || job.Status == MoveJobStatus.Running
-                || job.Status == MoveJobStatus.RetryScheduled)
-            .AsNoTracking()
-            .ToListAsync(cancellationToken);
-        var conflictingMoveJob = activeMoveJobs.FirstOrDefault(job =>
-            affectedAudiobookIds.Contains(job.AudiobookId)
-            || (sourceOperationSemantics.HasValue
-                && (PathTouchesBoundary(job.SourcePath, root.Path, sourceOperationSemantics.Value)
-                    || PathTouchesBoundary(job.RequestedPath, root.Path, sourceOperationSemantics.Value)))
-            || PathTouchesBoundary(job.SourcePath, targetPath, targetResolution.Semantics)
-            || PathTouchesBoundary(job.RequestedPath, targetPath, targetResolution.Semantics));
-        if (conflictingMoveJob != null)
-        {
-            throw new InvalidOperationException(
-                $"Active move job {conflictingMoveJob.Id} overlaps this root folder relocation; wait for it to finish before starting the relocation.");
-        }
+        await EnsureNoUnresolvedMoveConflictsAsync(
+            db,
+            affectedAudiobookIds,
+            root.Path,
+            sourceOperationSemantics,
+            targetPath,
+            targetResolution.Semantics,
+            cancellationToken);
 
         var movePlans = new List<RelocationMovePlan>();
         if (sourceResolution != null
@@ -272,6 +257,14 @@ public sealed partial class RootFolderRelocationService(
 
             RejectDuplicateRelocationTargets(movePlans, targetResolution.Semantics);
         }
+
+        // Directory enrollment is a filesystem mutation. Keep it behind every
+        // read-only request/root/source/conflict/manifest validation so a rejected
+        // path-change request cannot leave Listenarr metadata in an unadopted target.
+        var targetObjectIdentity =
+            await ResolveOrEnrollDirectoryObjectIdentityAsync(
+                targetPath,
+                cancellationToken);
 
         RootFolderRelocation? relocation = null;
         var relocationWasPrecommitted = false;
@@ -386,6 +379,12 @@ public sealed partial class RootFolderRelocationService(
             foreach (var plan in movePlans)
             {
                 var audiobook = plan.Candidate.Audiobook;
+                if (!targetObjectIdentity.IsAvailable)
+                {
+                    throw new InvalidOperationException(
+                        "Relocation move jobs require durable target-boundary generation authorization.");
+                }
+
                 var entries = plan.Manifest.Entries
                     .Select(entry => new MoveJobEntry
                     {
@@ -398,6 +397,10 @@ public sealed partial class RootFolderRelocationService(
                         CleanupState = MoveJobEntryCleanupState.Pending
                     })
                     .ToList();
+                entries.Add(
+                    MoveManifestIdentity.CreateTargetBoundaryAuthorization(
+                        targetObjectIdentity.Version!.Value,
+                        targetObjectIdentity.Value!));
                 var moveJob = new MoveJob
                 {
                     AudiobookId = audiobook.Id,
@@ -427,6 +430,10 @@ public sealed partial class RootFolderRelocationService(
             await db.SaveChangesAsync(cancellationToken);
             if (affected.Count == 0)
             {
+                await RequireTargetDirectoryGenerationAsync(
+                    targetPath,
+                    targetObjectIdentity,
+                    cancellationToken);
                 ApplyRootMetadata(root, command, targetPath, targetResolution, targetIdentityKey);
                 ApplyRootDirectoryObjectIdentity(root, targetObjectIdentity);
                 if (command.DesiredIsDefault)

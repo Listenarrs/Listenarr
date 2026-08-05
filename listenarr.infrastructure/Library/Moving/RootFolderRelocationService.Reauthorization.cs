@@ -133,6 +133,14 @@ public sealed partial class RootFolderRelocationService
                     ?? "The relocation target changed while its enrollment identity was captured.");
         }
 
+        foreach (var job in relocation.MoveJobs)
+        {
+            job.Entries.Add(
+                MoveManifestIdentity.CreateTargetBoundaryAuthorization(
+                    targetObjectIdentity.Version!.Value,
+                    targetObjectIdentity.Value!));
+        }
+
         relocation.TargetDirectoryObjectIdentityVersion =
             targetObjectIdentity.Version;
         relocation.TargetDirectoryObjectIdentity = targetObjectIdentity.Value;
@@ -154,6 +162,15 @@ public sealed partial class RootFolderRelocationService
     {
         foreach (var job in relocation.MoveJobs)
         {
+            if (MoveManifestIdentity.TryGetTargetBoundaryAuthorization(
+                    job.Entries,
+                    out _,
+                    out _))
+            {
+                throw new InvalidOperationException(
+                    "A legacy move job already contains target-boundary authorization evidence and cannot be reauthorized automatically.");
+            }
+
             if (string.IsNullOrWhiteSpace(job.SourcePath)
                 || string.IsNullOrWhiteSpace(job.RequestedPath)
                 || !job.TryGetSourceIdentity(out var sourceIdentity)

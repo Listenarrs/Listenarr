@@ -142,7 +142,10 @@ public partial class FileMover
             PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
                 sourceParentPath,
                 createMissing: false);
-        var matches = new List<(string Name, DirectoryRenameJournalPayload Payload)>();
+        var matches = new List<(
+            string Name,
+            string ObjectIdentity,
+            DirectoryRenameJournalPayload Payload)>();
         var journalPattern =
             $"{GetDirectoryRenameJournalStem(source, destination)}-*.journal";
         foreach (var path in Directory.EnumerateFiles(
@@ -176,11 +179,14 @@ public partial class FileMover
                 return PinnedDirectoryMoveOutcome.Indeterminate;
             }
 
-            matches.Add((name, payload with
-            {
-                SourcePath = payloadSource,
-                DestinationPath = payloadDestination
-            }));
+            matches.Add((
+                name,
+                journal.GetObjectIdentity(),
+                payload with
+                {
+                    SourcePath = payloadSource,
+                    DestinationPath = payloadDestination
+                }));
         }
 
         if (matches.Count == 0)
@@ -240,12 +246,18 @@ public partial class FileMover
             return outcome;
         }
 
+        BeforeDirectoryRenameJournalRetirementForTest?.Invoke(
+            Path.Join(sourceParent.FullPath, match.Name));
         using var journalForDelete = sourceParent.OpenExistingFile(
             match.Name,
             requireDeleteAccess: true);
         var revalidated = ReadDirectoryRenameJournal(journalForDelete);
         if (revalidated == null
             || revalidated.OperationId != match.Payload.OperationId
+            || !string.Equals(
+                journalForDelete.GetObjectIdentity(),
+                match.ObjectIdentity,
+                StringComparison.Ordinal)
             || !journalForDelete.VisiblePathMatches())
         {
             return PinnedDirectoryMoveOutcome.Indeterminate;

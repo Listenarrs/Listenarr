@@ -47,7 +47,9 @@ public partial class FileMover
 
     private async Task<VerifiedFileMoveRemovalOutcome> TryRemoveVerifiedFileMoveSourceWithClaimsAsync(
         FileMoveGateLease lease,
-        Guid? operationId)
+        Guid? operationId,
+        string? expectedSourcePhysicalObjectIdentity = null,
+        bool requirePhysicalIdentityPreservation = false)
     {
         var sourceFile = lease.SourcePath;
         var destinationFile = lease.DestinationPath;
@@ -87,6 +89,21 @@ public partial class FileMover
             {
                 return VerifiedFileMoveRemovalOutcome.NotRemoved;
             }
+            if (!string.IsNullOrWhiteSpace(expectedSourcePhysicalObjectIdentity)
+                && !string.Equals(
+                    initialSource.GetObjectIdentity(),
+                    expectedSourcePhysicalObjectIdentity,
+                    StringComparison.Ordinal))
+            {
+                return VerifiedFileMoveRemovalOutcome.NotRemoved;
+            }
+            if (requirePhysicalIdentityPreservation
+                && (DisableNativeFileRenameForTest
+                    || !initialSource.IsOnSameVolume(
+                        lease.DestinationParent)))
+            {
+                return VerifiedFileMoveRemovalOutcome.NotRemoved;
+            }
             FlushFileMoveDirectory(
                 lease.SourceParent,
                 "source durability capability");
@@ -104,6 +121,9 @@ public partial class FileMover
             }
 
             var sourceSnapshot = await CaptureFileMoveContentAsync(initialSource);
+            var sourceObjectIdentity = initialSource.GetObjectIdentity();
+            var destinationPreviousObjectIdentity =
+                initialDestination?.GetObjectIdentity();
             var useNativeRename = !DisableNativeFileRenameForTest
                 && initialSource.IsOnSameVolume(
                     lease.DestinationParent);
@@ -122,6 +142,10 @@ public partial class FileMover
                 operationId,
                 sourceIdentity,
                 destinationIdentity,
+                sourceObjectIdentity,
+                destinationStageObjectIdentity: null,
+                destinationPreviousObjectIdentity,
+                publishedDestinationObjectIdentity: null,
                 useNativeRename);
             FlushFileMoveDirectory(sourceState, "source operation state");
             FlushFileMoveDirectory(lease.SourceParent, "source state publication");
@@ -166,7 +190,6 @@ public partial class FileMover
                 initialDestination.MoveTo(
                     destinationState,
                     "destination.previous");
-                initialDestination.Dispose();
                 FlushFileMoveDirectory(
                     lease.DestinationParent,
                     "previous destination quarantine removal");
@@ -175,6 +198,7 @@ public partial class FileMover
                     "previous destination quarantine publication");
             }
             PinnedDirectoryCreation.PinnedFileEntry? destinationStage = null;
+            string? destinationStageObjectIdentity = null;
             try
             {
                 if (!useNativeRename)
@@ -198,6 +222,22 @@ public partial class FileMover
                     FlushFileMoveDirectory(
                         destinationState,
                         "destination stage bytes and metadata");
+                    destinationStageObjectIdentity =
+                        destinationStage.GetObjectIdentity();
+                    await WriteFileMoveContentAsync(
+                        operationState,
+                        sourceSnapshot,
+                        operationId,
+                        sourceIdentity,
+                        destinationIdentity,
+                        sourceObjectIdentity,
+                        destinationStageObjectIdentity,
+                        destinationPreviousObjectIdentity,
+                        publishedDestinationObjectIdentity: null,
+                        nativeRename: false);
+                    FlushFileMoveDirectory(
+                        sourceState,
+                        "destination stage generation evidence");
                 }
 
                 if (AfterDestinationQuarantinedForTestAsync != null)
@@ -220,6 +260,17 @@ public partial class FileMover
                     throw new IOException(
                         "The verified source or destination stage changed before source retirement.");
                 }
+
+                using var publicationClaim = useNativeRename
+                    ? sourceClaim.CreateHardLinkTo(
+                        destinationState,
+                        "destination.published.claim")
+                    : destinationStage!.CreateHardLinkTo(
+                        destinationState,
+                        "destination.published.claim");
+                FlushFileMoveDirectory(
+                    destinationState,
+                    "destination publication generation claim");
 
                 using var generationFence = sourceState.CreateNewFile(
                     "replacement-generation.fence");
@@ -267,6 +318,31 @@ public partial class FileMover
                 FlushFileMoveDirectory(
                     lease.DestinationParent,
                     "destination publication");
+                using var publishedDestination =
+                    lease.DestinationParent.TryOpenExistingFile(
+                        lease.DestinationName,
+                        requireDeleteAccess: false);
+                if (publishedDestination == null
+                    || !publicationClaim.VisiblePathMatches()
+                    || !publishedDestination.VisiblePathMatches()
+                    || !publicationClaim.IdentifiesSameEntry(publishedDestination))
+                {
+                    return VerifiedFileMoveRemovalOutcome.NotRemoved;
+                }
+                await WriteFileMoveContentAsync(
+                    operationState,
+                    sourceSnapshot,
+                    operationId,
+                    sourceIdentity,
+                    destinationIdentity,
+                    sourceObjectIdentity,
+                    destinationStageObjectIdentity,
+                    destinationPreviousObjectIdentity,
+                    publishedDestination.GetObjectIdentity(),
+                    useNativeRename);
+                FlushFileMoveDirectory(
+                    sourceState,
+                    "published destination generation evidence");
                 if (!useNativeRename)
                 {
                     FlushFileMoveDirectory(
@@ -278,14 +354,28 @@ public partial class FileMover
                     await AfterDestinationPublishedForTestAsync(destinationFile);
                 }
 
-                using var previous = destinationState.TryOpenExistingFile(
-                    "destination.previous",
-                    requireDeleteAccess: true);
-                previous?.Delete(immediateWindows: true);
-                previous?.Dispose();
+                if (initialDestination != null)
+                {
+                    if (!initialDestination.VisiblePathMatches())
+                    {
+                        return VerifiedFileMoveRemovalOutcome.NotRemoved;
+                    }
+
+                    initialDestination.Delete(immediateWindows: true);
+                    initialDestination.Dispose();
+                }
                 FlushFileMoveDirectory(
                     destinationState,
                     "previous destination retirement");
+                if (!publicationClaim.VisiblePathMatches())
+                {
+                    return VerifiedFileMoveRemovalOutcome.NotRemoved;
+                }
+                publicationClaim.Delete(immediateWindows: true);
+                publicationClaim.Dispose();
+                FlushFileMoveDirectory(
+                    destinationState,
+                    "destination publication claim retirement");
                 using var recreatedSource = lease.SourceParent.TryOpenExistingFile(
                     lease.SourceName,
                     requireDeleteAccess: false);
@@ -302,13 +392,11 @@ public partial class FileMover
                 destinationState.Dispose();
                 if (!sourcePathWasRecreated)
                 {
-                    sourceStatePublication.DeletePinnedEmptyDirectory(
-                        Path.GetFileName(state.SourceStateDirectory),
-                        immediateWindows: true);
+                    sourceStatePublication.RetirePinnedEmptyDirectoryFromNamespace(
+                        Path.GetFileName(state.SourceStateDirectory));
                 }
-                destinationStatePublication.DeletePinnedEmptyDirectory(
-                    Path.GetFileName(state.DestinationStateDirectory),
-                    immediateWindows: true);
+                destinationStatePublication.RetirePinnedEmptyDirectoryFromNamespace(
+                    Path.GetFileName(state.DestinationStateDirectory));
                 FlushFileMoveDirectory(
                     lease.DestinationParent,
                     "destination state retirement");

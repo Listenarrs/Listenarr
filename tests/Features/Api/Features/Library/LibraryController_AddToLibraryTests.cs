@@ -444,10 +444,12 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         [Fact]
         public async Task AddToLibrary_WithGeneratedPathFromSanitizedMetadata_Succeeds()
         {
-            await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
-                .WithFolderNamingPattern("{Author}/{Title}")
-                .WithFileNamingPattern("{Title}")
-                .Build());
+            var settings = await _applicationSettingsRepository.GetAsync()
+                ?? await _applicationSettingsRepository.InitializeIfMissingAsync(
+                    new ApplicationSettingsBuilder().Build());
+            settings.FolderNamingPattern = "{Author}/{Title}";
+            settings.FileNamingPattern = "{Title}";
+            await _applicationSettingsRepository.SaveAsync(settings);
             var controller = _provider.GetRequiredService<LibraryController>();
 
             var request = new LibraryController.AddToLibraryRequest

@@ -5,7 +5,7 @@ namespace Listenarr.Infrastructure.Library.Scanning;
 
 internal static partial class ScanFileDiscovery
 {
-    private static EnumerationResult CollectCandidates(
+    internal static EnumerationResult CollectCandidates(
         IFileSystem fileSystem,
         string scanRoot,
         Guid jobId,
@@ -262,7 +262,7 @@ internal static partial class ScanFileDiscovery
         PinnedDirectoryCreation.PinnedDirectoryAnchor Anchor,
         string ObjectIdentity);
 
-    private sealed record EnumerationResult(
+    internal sealed record EnumerationResult(
         IReadOnlyList<string> Candidates,
         IReadOnlyList<string> EnumeratedDirectories,
         IReadOnlyDictionary<string, string> DirectoryObjectIdentities,

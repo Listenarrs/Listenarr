@@ -69,7 +69,6 @@ namespace Listenarr.Application.Audiobooks.RootFolders
 
             var resolution = await ResolveSemanticsAsync(root.Path, root.CaseSensitivityMode);
             ApplyIdentity(root, resolution);
-            await CaptureInitialDirectoryObjectIdentityAsync(root);
             if (await _relocationService.IsBoundaryProtectedAsync(root.Path, resolution.Semantics))
             {
                 throw new InvalidOperationException(
@@ -81,6 +80,8 @@ namespace Listenarr.Application.Audiobooks.RootFolders
             {
                 throw new InvalidOperationException(BuildRootFolderConflictMessage(conflict));
             }
+
+            await CaptureInitialDirectoryObjectIdentityAsync(root);
 
             if (root.IsDefault)
             {
@@ -163,34 +164,39 @@ namespace Listenarr.Application.Audiobooks.RootFolders
             if (existing == null) throw new KeyNotFoundException("Root folder not found");
             await EnsureNoActiveRelocationAsync(existing.Id);
 
-            var existingResolution = await ResolvePersistedSemanticsAsync(
-                existing.Path,
-                existing.CaseSensitivityMode);
+            if (existing.CaseSensitivityMode != root.CaseSensitivityMode)
+            {
+                throw new InvalidOperationException(
+                    "Root filesystem semantics cannot be changed by metadata updates; use the path-changes endpoint so persisted identities are migrated.");
+            }
+
+            var persistedSemantics = RootFolderPathSemantics.ResolvePersisted(existing)
+                ?? throw new InvalidOperationException(
+                    "Root filesystem semantics are unavailable; use the path-changes endpoint to repair persisted identities.");
             if (!FileSystemPathIdentity.AreEquivalent(
                 existing.Path,
                 root.Path,
-                existingResolution.Semantics))
+                persistedSemantics.Semantics))
             {
                 throw new InvalidOperationException(
                     "Root paths cannot be changed by metadata updates; use the path-changes endpoint.");
             }
 
-            await EnsureNoActiveMoveJobsTouchRootAsync(existing.Path, existingResolution.Semantics);
+            await EnsureNoActiveMoveJobsTouchRootAsync(
+                existing.Path,
+                persistedSemantics.Semantics);
             await ValidateExistingDirectoryObjectIdentityAsync(existing);
             existing.Name = root.Name;
             existing.IsDefault = root.IsDefault;
-            existing.CaseSensitivityMode = root.CaseSensitivityMode;
-            var resolution = await ResolvePersistedSemanticsAsync(existing.Path, root.CaseSensitivityMode);
             var conflict = await FindConflictingRootFolderAsync(
                 existing.Path,
-                resolution.Semantics,
+                persistedSemantics.Semantics,
                 existing.Id);
             if (conflict != null)
             {
                 throw new InvalidOperationException(BuildRootFolderConflictMessage(conflict));
             }
 
-            ApplyIdentity(existing, resolution);
             existing.UpdatedAt = DateTime.UtcNow;
             if (root.IsDefault)
             {
@@ -259,13 +265,13 @@ namespace Listenarr.Application.Audiobooks.RootFolders
             string rootPath,
             FileSystemPathSemantics semantics)
         {
-            var activeJobsTask = _moveQueue.GetActiveJobsAsync();
-            IReadOnlyList<MoveJob>? activeJobs = activeJobsTask == null
+            var blockingJobsTask = _moveQueue.GetFilesystemBlockingJobsAsync();
+            IReadOnlyList<MoveJob>? blockingJobs = blockingJobsTask == null
                 ? Array.Empty<MoveJob>()
-                : await activeJobsTask;
-            activeJobs ??= Array.Empty<MoveJob>();
+                : await blockingJobsTask;
+            blockingJobs ??= Array.Empty<MoveJob>();
 
-            var conflictingJob = activeJobs.FirstOrDefault(job =>
+            var conflictingJob = blockingJobs.FirstOrDefault(job =>
                 MoveJobBoundaryConflict.TouchesBoundary(job, rootPath, semantics));
 
             if (conflictingJob == null)
@@ -274,7 +280,7 @@ namespace Listenarr.Application.Audiobooks.RootFolders
             }
 
             throw new InvalidOperationException(
-                $"Root folder has active move job {conflictingJob.Id}; wait for queued or processing moves touching this root to finish before deleting or reassigning it.");
+                $"Root folder has unresolved move job {conflictingJob.Id}; resolve moves touching this root before deleting or reassigning it.");
         }
 
         private async Task<FileSystemSemanticsResolution> ResolveSemanticsAsync(

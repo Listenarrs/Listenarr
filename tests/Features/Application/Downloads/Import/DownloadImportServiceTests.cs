@@ -15,6 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using Listenarr.Application.Common.Exceptions;
 using Listenarr.Tests.Common;
 using Listenarr.Tests.Builders;
 using System.Runtime.InteropServices;
@@ -72,6 +73,29 @@ namespace Listenarr.Tests.Features.Application.Downloads.Import
 
             Assert.True(resolved);
             Assert.Equal("/library/ Disc 1/Chapter 01.mp3 ", destination);
+        }
+
+        [Fact]
+        public async Task ImportDownloadFilesAsync_UnresolvedMoveExecution_BlocksBeforeDestinationPlanning()
+        {
+            var basePath = FileService.GetTempDirectory("download-import-unresolved-move");
+            var sourceFile = await FileService.GetTempFileAsync("unresolved-import.mp3");
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Import Move Fence")
+                .WithBasePath(basePath)
+                .Build());
+            await MoveJobTestFactory.SeedUnresolvedExecutionAsync(
+                _provider,
+                audiobook.Id,
+                basePath,
+                Path.Join(FileService.GetTempPath(), $"download-import-target-{Guid.NewGuid():N}"));
+
+            var exception = await Assert.ThrowsAsync<ApplicationConflictException>(() =>
+                _provider.GetRequiredService<IDownloadImportService>()
+                    .ImportDownloadFilesAsync(audiobook, [sourceFile]));
+
+            Assert.Equal("move_recovery_required", exception.Code);
+            Assert.True(File.Exists(sourceFile));
         }
 
         [Fact]

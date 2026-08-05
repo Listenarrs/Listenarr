@@ -179,6 +179,27 @@ namespace Listenarr.Tests.Features.Application.Downloads.Common
             Assert.Equal(["1"], downloadClientAdapterMock.LastRequestedQueueIds);
         }
 
+        [LinuxFact]
+        public async Task GetQueueItemAsync_AmbiguousDoubleSlashPath_IsRejectedAsForeignSyntax()
+        {
+            var ambiguousPath = "//server/share/audiobooks/Book";
+            var adapter = (DownloadCLientAdapterMock)((DownloadClientGateway)downloadClientGateway)
+                .ResolveAdapter(client);
+            adapter.QueueItemMock = new QueueItemBuilder()
+                .WithRemotePath(ambiguousPath)
+                .WithContentPath(ambiguousPath)
+                .WithStatus("completed")
+                .Build();
+
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                downloadClientGateway.GetQueueItemAsync(
+                    client,
+                    new DownloadBuilder().Build(),
+                    new QueueItem()));
+
+            Assert.Contains("remote path mappings", exception.Message, StringComparison.OrdinalIgnoreCase);
+        }
+
         [Fact]
         [Trait("Method", "GetQueueItemAsync")]
         [Trait("Scenario", "Check SourceFiles is empty when adapter gives null for both source files and content path")]

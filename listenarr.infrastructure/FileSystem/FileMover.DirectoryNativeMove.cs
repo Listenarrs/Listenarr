@@ -36,7 +36,7 @@ public partial class FileMover
             using var destinationParent =
                 PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
                     destinationParentPath,
-                    createMissing: true);
+                    createMissing: false);
             using var sourcePublication =
                 sourceParent.OpenExistingChildForPublication(
                     Path.GetFileName(source));

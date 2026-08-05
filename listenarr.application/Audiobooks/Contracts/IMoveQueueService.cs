@@ -26,6 +26,8 @@ namespace Listenarr.Application.Audiobooks.Contracts
         IReadOnlyList<MoveSourceManifestEntry> SourceEntries,
         string TargetPath,
         PathIdentitySnapshot TargetIdentity,
+        int TargetBoundaryDirectoryObjectIdentityVersion,
+        string TargetBoundaryDirectoryObjectIdentity,
         bool DeleteEmptySource = true,
         string? SourceCleanupBoundary = null,
         Guid? RelocationId = null);
@@ -57,6 +59,14 @@ namespace Listenarr.Application.Audiobooks.Contracts
         Task<MoveHeartbeatOutcome> HeartbeatJobAsync(Guid jobId, string leaseOwner, int leaseGeneration, CancellationToken cancellationToken = default);
         Task RecoverActiveJobsAsync(CancellationToken cancellationToken = default);
         Task<IReadOnlyList<MoveJob>> GetActiveJobsAsync(CancellationToken cancellationToken = default);
+        Task<MoveRecoveryState> GetRecoveryStateForAudiobookAsync(
+            int audiobookId,
+            CancellationToken cancellationToken = default);
+        Task<IReadOnlyList<MoveJob>> GetFilesystemBlockingJobsAsync(
+            CancellationToken cancellationToken = default);
+        Task EnsureFilesystemMutationAllowedAsync(
+            int audiobookId,
+            CancellationToken cancellationToken = default);
         Task<MoveQueueHealthSnapshot> GetQueueHealthAsync(CancellationToken cancellationToken = default);
         Task<MoveJob?> GetJobAsync(Guid id, CancellationToken cancellationToken = default);
         Task IncrementAttemptAsync(Guid id, string leaseOwner, int leaseGeneration, CancellationToken cancellationToken = default);

@@ -377,21 +377,9 @@
                 <div class="destination-display">
                   <div class="destination-row">
                     <div class="root-select">
-                      <RootFolderSelect
-                        v-model:rootId="selectedRootId"
-                        v-model:customPath="customRootPath"
-                        hideLabel
-                      />
+                      <RootFolderSelect v-model:rootId="selectedRootId" hideLabel />
                     </div>
                     <input
-                      v-if="selectedRootId === 0"
-                      type="text"
-                      v-model="customRootPath"
-                      class="form-input custom-path-input"
-                      placeholder="e.g. C:\\Audiobooks or /mnt/audiobooks"
-                    />
-                    <input
-                      v-else
                       type="text"
                       v-model="options.relativePath"
                       class="form-input relative-input"
@@ -399,12 +387,8 @@
                       @input="onRelativePathInput"
                     />
                   </div>
-                  <small class="form-help" v-if="selectedRootId === 0">
-                    Enter an absolute destination within a configured root folder or output path.
-                  </small>
-                  <small class="form-help" v-else>
-                    Select a named root (or custom path) and edit the path relative to it on the
-                    right.
+                  <small class="form-help">
+                    Select a configured root and edit the path relative to it on the right.
                   </small>
                   <div
                     v-if="estimatedFullPath"
@@ -495,6 +479,7 @@ import {
   toForward,
   normalizeForCompare,
   detectPathKind,
+  isRootedPath,
   validateLibraryDestinationPath,
 } from '@/utils/path'
 import { formatDate } from '@/utils/searchResultFormatting'
@@ -796,7 +781,6 @@ const displaySeriesMemberships = computed(() =>
 
 const rootStore = useRootFoldersStore()
 const selectedRootId = ref<number | null>(null)
-const customRootPath = ref<string | null>(null)
 
 const rootPath = ref<string>('')
 const previewFull = ref<string>('')
@@ -805,17 +789,13 @@ const previewRelative = ref<string>('')
 // Path length check — reactively compute the full destination path
 const estimatedFullPath = computed(() => {
   let root = ''
-  if (selectedRootId.value === 0) {
-    const customPath = customRootPath.value || ''
-    root = customPath.trim().length > 0 ? customPath : ''
-  } else if (selectedRootId.value && selectedRootId.value > 0) {
+  if (selectedRootId.value && selectedRootId.value > 0) {
     const found = rootStore.folders.find((f) => f.id === selectedRootId.value)
     root = found?.path || ''
   } else {
     const defaultRoot = rootStore.folders.find((f) => f.isDefault)
     root = defaultRoot?.path || configStore.applicationSettings?.outputPath || ''
   }
-  if (selectedRootId.value === 0) return root
   const relativePath = options.value.relativePath || ''
   const rel = relativePath.trim().length > 0 ? relativePath : ''
   if (!root) return rel
@@ -828,6 +808,14 @@ const serverDestinationValidationError = ref<string | null>(null)
 const { pathLengthWarning: destinationPathWarning } = usePathLengthCheck(estimatedFullPath)
 const destinationPathValidationError = computed(() => {
   if (serverDestinationValidationError.value) return serverDestinationValidationError.value
+
+  const relativePath = options.value.relativePath || ''
+  const selectedRoot = resolvePreviewRoot() || ''
+  const pathKind = detectPathKind(selectedRoot || relativePath)
+  if (relativePath && isRootedPath(relativePath, pathKind)) {
+    return 'Enter a path relative to the selected configured root folder.'
+  }
+
   return validateLibraryDestinationPath(estimatedFullPath.value, {
     pathKind: detectPathKind(estimatedFullPath.value),
     allowFileSystemRoot: false,
@@ -966,7 +954,6 @@ const mapAudibleToAudible = (
 }
 
 function resolvePreviewRoot(): string | undefined {
-  if (selectedRootId.value === 0) return undefined
   if (selectedRootId.value && selectedRootId.value > 0) {
     const found = rootStore.folders.find((folder) => folder.id === selectedRootId.value)
     return found?.path || undefined
@@ -976,7 +963,7 @@ function resolvePreviewRoot(): string | undefined {
 }
 
 async function refreshPreviewFromMetadata(force = false) {
-  if (!props.visible || selectedRootId.value === 0) return
+  if (!props.visible) return
   if (!force && relativePathManuallyEdited.value) return
 
   const metadataForPreview = buildMetadataPayload()
@@ -1251,6 +1238,10 @@ onBeforeUnmount(() => {
 
 const addToLibrary = async () => {
   if (!props.book) return
+  if (destinationPathValidationError.value) {
+    toast.error('Invalid destination', destinationPathValidationError.value)
+    return
+  }
 
   isAdding.value = true
   try {

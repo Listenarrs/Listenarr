@@ -46,6 +46,7 @@ namespace Listenarr.Infrastructure.Metadata.Jobs
     public class MetadataRescanProcessor(
         IServiceScopeFactory scopeFactory,
         IAudiobookOperationCoordinator audiobookOperationCoordinator,
+        IMoveQueueService moveQueueService,
         ILogger<MetadataRescanProcessor> logger) : IMetadataRescanProcessor
     {
         private readonly AsyncNonKeyedLocker _sem = new(2); // bound concurrent extractions
@@ -71,6 +72,19 @@ namespace Listenarr.Infrastructure.Metadata.Jobs
                     {
                         using var taskScope = scopeFactory.CreateScope();
                         var taskFileRepository = taskScope.ServiceProvider.GetRequiredService<IAudiobookFileRepository>();
+
+                        var recovery = await moveQueueService.GetRecoveryStateForAudiobookAsync(
+                            candidate.AudiobookId,
+                            cancellationToken);
+                        if (recovery.BlocksFilesystemMutation)
+                        {
+                            logger.LogDebug(
+                                "Skipping metadata rescan for file id={Id}; audiobook {AudiobookId} has unresolved move state {Disposition}",
+                                candidate.Id,
+                                candidate.AudiobookId,
+                                recovery.Disposition);
+                            return;
+                        }
 
                         var file = await taskFileRepository.GetByIdAsync(candidate.Id, cancellationToken);
                         if (file == null)
@@ -145,6 +159,9 @@ namespace Listenarr.Infrastructure.Metadata.Jobs
                 audiobookId,
                 async token =>
                 {
+                    await moveQueueService.EnsureFilesystemMutationAllowedAsync(
+                        audiobookId,
+                        token);
                     using var applyScope = scopeFactory.CreateScope();
                     var fileRepository = applyScope.ServiceProvider.GetRequiredService<IAudiobookFileRepository>();
                     var audiobookRepository = applyScope.ServiceProvider.GetRequiredService<IAudiobookRepository>();

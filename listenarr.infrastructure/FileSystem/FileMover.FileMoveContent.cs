@@ -11,6 +11,10 @@ public partial class FileMover
         Guid? OperationId,
         string SourceIdentity,
         string DestinationIdentity,
+        string? SourceObjectIdentity,
+        string? DestinationStageObjectIdentity,
+        string? DestinationPreviousObjectIdentity,
+        string? PublishedDestinationObjectIdentity,
         bool NativeRename,
         FileMoveContent Content);
 
@@ -68,14 +72,23 @@ public partial class FileMover
         Guid? operationId,
         string sourceIdentity,
         string destinationIdentity,
+        string sourceObjectIdentity,
+        string? destinationStageObjectIdentity,
+        string? destinationPreviousObjectIdentity,
+        string? publishedDestinationObjectIdentity,
         bool nativeRename)
     {
-        const int version = 1;
+        const int version = 2;
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceObjectIdentity);
         var body =
             $"version={version}\n"
             + $"operationId={operationId?.ToString("D") ?? string.Empty}\n"
             + $"sourceIdentity={sourceIdentity}\n"
             + $"destinationIdentity={destinationIdentity}\n"
+            + $"sourceObjectIdentity={sourceObjectIdentity}\n"
+            + $"destinationStageObjectIdentity={destinationStageObjectIdentity ?? string.Empty}\n"
+            + $"destinationPreviousObjectIdentity={destinationPreviousObjectIdentity ?? string.Empty}\n"
+            + $"publishedDestinationObjectIdentity={publishedDestinationObjectIdentity ?? string.Empty}\n"
             + $"mode={(nativeRename ? "native" : "copy")}\n"
             + $"length={content.Length.ToString(System.Globalization.CultureInfo.InvariantCulture)}\n"
             + $"sha256={content.Sha256}\n";
@@ -86,6 +99,8 @@ public partial class FileMover
         await using var stream = entry.OpenWriteStream(
             bufferSize: 4096,
             asynchronous: false);
+        stream.SetLength(0);
+        stream.Position = 0;
         await stream.WriteAsync(payload);
         await stream.FlushAsync();
         stream.Flush(flushToDisk: true);
@@ -116,35 +131,50 @@ public partial class FileMover
 
         var parts = Encoding.UTF8.GetString(payload)
             .Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length != 8
-            || parts[0] != "version=1"
+        var version = parts.Length > 0 && parts[0] == "version=2"
+            ? 2
+            : parts.Length > 0 && parts[0] == "version=1"
+                ? 1
+                : 0;
+        var modeIndex = version == 2 ? 8 : 4;
+        var lengthIndex = version == 2 ? 9 : 5;
+        var shaIndex = version == 2 ? 10 : 6;
+        var checksumIndex = version == 2 ? 11 : 7;
+        var expectedPartCount = version == 2 ? 12 : 8;
+        if (version == 0
+            || parts.Length != expectedPartCount
             || !parts[1].StartsWith("operationId=", StringComparison.Ordinal)
             || !parts[2].StartsWith("sourceIdentity=", StringComparison.Ordinal)
             || !parts[3].StartsWith("destinationIdentity=", StringComparison.Ordinal)
-            || parts[4] is not ("mode=native" or "mode=copy")
-            || !parts[5].StartsWith("length=", StringComparison.Ordinal)
-            || !parts[6].StartsWith("sha256=", StringComparison.Ordinal)
-            || !parts[7].StartsWith("checksum=", StringComparison.Ordinal)
+            || (version == 2
+                && (!parts[4].StartsWith("sourceObjectIdentity=", StringComparison.Ordinal)
+                    || !parts[5].StartsWith("destinationStageObjectIdentity=", StringComparison.Ordinal)
+                    || !parts[6].StartsWith("destinationPreviousObjectIdentity=", StringComparison.Ordinal)
+                    || !parts[7].StartsWith("publishedDestinationObjectIdentity=", StringComparison.Ordinal)))
+            || parts[modeIndex] is not ("mode=native" or "mode=copy")
+            || !parts[lengthIndex].StartsWith("length=", StringComparison.Ordinal)
+            || !parts[shaIndex].StartsWith("sha256=", StringComparison.Ordinal)
+            || !parts[checksumIndex].StartsWith("checksum=", StringComparison.Ordinal)
             || !long.TryParse(
-                parts[5]["length=".Length..],
+                parts[lengthIndex]["length=".Length..],
                 System.Globalization.NumberStyles.None,
                 System.Globalization.CultureInfo.InvariantCulture,
                 out var length)
             || length < 0
-            || parts[6].Length != "sha256=".Length + 64
-            || parts[6]["sha256=".Length..].Any(character => !Uri.IsHexDigit(character))
-            || parts[7].Length != "checksum=".Length + 64
-            || parts[7]["checksum=".Length..].Any(character => !Uri.IsHexDigit(character)))
+            || parts[shaIndex].Length != "sha256=".Length + 64
+            || parts[shaIndex]["sha256=".Length..].Any(character => !Uri.IsHexDigit(character))
+            || parts[checksumIndex].Length != "checksum=".Length + 64
+            || parts[checksumIndex]["checksum=".Length..].Any(character => !Uri.IsHexDigit(character)))
         {
             return null;
         }
 
-        var body = string.Join('\n', parts[..7]) + "\n";
+        var body = string.Join('\n', parts[..checksumIndex]) + "\n";
         var expectedChecksum = Convert.ToHexString(
             SHA256.HashData(Encoding.UTF8.GetBytes(body)));
         if (!string.Equals(
                 expectedChecksum,
-                parts[7]["checksum=".Length..],
+                parts[checksumIndex]["checksum=".Length..],
                 StringComparison.OrdinalIgnoreCase))
         {
             return null;
@@ -162,23 +192,51 @@ public partial class FileMover
         }
         var sourceIdentity = parts[2]["sourceIdentity=".Length..];
         var destinationIdentity = parts[3]["destinationIdentity=".Length..];
+        var sourceObjectIdentity = version == 2
+            ? parts[4]["sourceObjectIdentity=".Length..]
+            : null;
+        var destinationStageObjectIdentity = version == 2
+            ? parts[5]["destinationStageObjectIdentity=".Length..]
+            : null;
+        var destinationPreviousObjectIdentity = version == 2
+            ? parts[6]["destinationPreviousObjectIdentity=".Length..]
+            : null;
+        var publishedDestinationObjectIdentity = version == 2
+            ? parts[7]["publishedDestinationObjectIdentity=".Length..]
+            : null;
         if (sourceIdentity.Length == 0
             || destinationIdentity.Length == 0
             || sourceIdentity.Contains('\r')
-            || destinationIdentity.Contains('\r'))
+            || destinationIdentity.Contains('\r')
+            || (version == 2
+                && (string.IsNullOrWhiteSpace(sourceObjectIdentity)
+                    || sourceObjectIdentity.Contains('\r')
+                    || destinationStageObjectIdentity!.Contains('\r')
+                    || destinationPreviousObjectIdentity!.Contains('\r')
+                    || publishedDestinationObjectIdentity!.Contains('\r'))))
         {
             return null;
         }
 
         return new FileMoveFence(
-            Version: 1,
+            version,
             operationId,
             sourceIdentity,
             destinationIdentity,
-            NativeRename: parts[4] == "mode=native",
+            sourceObjectIdentity,
+            string.IsNullOrEmpty(destinationStageObjectIdentity)
+                ? null
+                : destinationStageObjectIdentity,
+            string.IsNullOrEmpty(destinationPreviousObjectIdentity)
+                ? null
+                : destinationPreviousObjectIdentity,
+            string.IsNullOrEmpty(publishedDestinationObjectIdentity)
+                ? null
+                : publishedDestinationObjectIdentity,
+            NativeRename: parts[modeIndex] == "mode=native",
             new FileMoveContent(
                 length,
-                parts[6]["sha256=".Length..].ToUpperInvariant()));
+                parts[shaIndex]["sha256=".Length..].ToUpperInvariant()));
     }
 
     private static async Task<FileMoveContent?> ReadLegacyFileMoveContentAsync(

@@ -11,11 +11,11 @@ public static class MoveJobBoundaryConflict
     {
         ArgumentNullException.ThrowIfNull(job);
         ArgumentException.ThrowIfNullOrWhiteSpace(boundaryPath);
-        if (!job.Status.IsActive())
-        {
-            return false;
-        }
 
+        // This primitive answers path geometry only. Callers own the lifecycle policy
+        // that decides which move jobs are relevant (active, unresolved, historical,
+        // etc.); hiding an active-status filter here caused unresolved terminal moves
+        // to bypass root-folder mutation fences.
         return EndpointTouchesBoundary(
                 job.SourcePath,
                 job.TryGetSourceIdentity(out var sourceIdentity)
@@ -62,8 +62,8 @@ public static class MoveJobBoundaryConflict
             ArgumentException or InvalidOperationException or NotSupportedException
                 or PathTooLongException)
         {
-            // Active jobs with malformed or incomplete endpoint identity must block a
-            // destructive root mutation until the job is reconciled or repaired.
+            // A caller that selected this job as relevant must fail closed when its
+            // endpoint identity is malformed or incomplete.
             return true;
         }
     }

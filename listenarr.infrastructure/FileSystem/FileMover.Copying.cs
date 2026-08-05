@@ -7,20 +7,6 @@ using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.FileSystem
 {
-    internal enum IdempotentFileMoveOutcome
-    {
-        NotApplicable,
-        Completed,
-        SourcePathRecreated
-    }
-
-    internal enum SameContentShortcutOutcome
-    {
-        NotApplicable,
-        Completed,
-        Blocked
-    }
-
     public partial class FileMover : IFileMover
     {
         public async Task<bool> CopyDirectoryAsync(string sourceDir, string destDir)
@@ -144,17 +130,6 @@ namespace Listenarr.Infrastructure.FileSystem
         {
             try
             {
-                if (await IsFilesystemAliasAsync(sourceFile, destFile))
-                {
-                    LogMutation(
-                        FileMutationOutcome.Blocked,
-                        action,
-                        sourceFile,
-                        destFile,
-                        "Source and destination are linked aliases of the same file");
-                    return false;
-                }
-
                 if (await IsSameFilesystemPathAsync(sourceFile, destFile))
                 {
                     if (capturePublication != null)
@@ -170,6 +145,44 @@ namespace Listenarr.Infrastructure.FileSystem
                         destFile,
                         "Source and destination identify the same file");
                     return true;
+                }
+
+                using var lease = await TryAcquireFileMoveGateAsync(
+                    sourceFile,
+                    destFile,
+                    allowExistingAliasForRecovery: true);
+                if (lease == null)
+                {
+                    return false;
+                }
+
+                var publicationStateName =
+                    await GetPreparedFilePublicationStateNameAsync(destFile);
+                var recovery = await RecoverPreparedFilePublicationAsync(
+                    lease.DestinationParent,
+                    lease.DestinationName,
+                    publicationStateName);
+                if (recovery.Outcome
+                    == PreparedPublicationRecoveryOutcome.Completed)
+                {
+                    return TryCompleteRecoveredPreparedPublication(
+                        recovery,
+                        lease,
+                        action,
+                        sourceFile,
+                        destFile,
+                        capturePublication);
+                }
+
+                if (await IsFilesystemAliasAsync(sourceFile, destFile))
+                {
+                    LogMutation(
+                        FileMutationOutcome.Blocked,
+                        action,
+                        sourceFile,
+                        destFile,
+                        "Source and destination are linked aliases of the same file");
+                    return false;
                 }
 
                 if (!TryValidateUnlinkedFileOperationEndpoints(
@@ -193,22 +206,6 @@ namespace Listenarr.Infrastructure.FileSystem
                         sourceFile,
                         destFile);
                 }
-
-                using var lease = await TryAcquireFileMoveGateAsync(
-                    sourceFile,
-                    destFile,
-                    createDestinationParent: true);
-                if (lease == null)
-                {
-                    return false;
-                }
-
-                var publicationStateName =
-                    await GetPreparedFilePublicationStateNameAsync(destFile);
-                RecoverPreparedFilePublication(
-                    lease.DestinationParent,
-                    lease.DestinationName,
-                    publicationStateName);
 
                 if (AfterFileEndpointsPinnedForTestAsync != null)
                 {
@@ -362,6 +359,7 @@ namespace Listenarr.Infrastructure.FileSystem
                     $".listenarr-file-copy-{Guid.NewGuid():N}.tmp";
                 PinnedDirectoryCreation.PinnedFileEntry? prepared = null;
                 var published = false;
+                var durablePublicationOwnsPrepared = false;
                 try
                 {
                     if (preferHardlink
@@ -441,10 +439,12 @@ namespace Listenarr.Infrastructure.FileSystem
                     {
                         await PublishPreparedFileReplacingCapturedDestinationAsync(
                             prepared,
+                            sourceEntry.GetObjectIdentity(),
                             lease.DestinationParent,
                             lease.DestinationName,
                             destinationEntry,
-                            publicationStateName);
+                            publicationStateName,
+                            () => durablePublicationOwnsPrepared = true);
                     }
                     published = true;
                     if (capturePublication != null)
@@ -470,6 +470,7 @@ namespace Listenarr.Infrastructure.FileSystem
                 finally
                 {
                     if (!published
+                        && !durablePublicationOwnsPrepared
                         && prepared != null
                         && prepared.VisiblePathMatches())
                     {

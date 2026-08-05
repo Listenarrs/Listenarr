@@ -19,6 +19,7 @@ using System.Text.Json;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace Listenarr.Tests.Features.Api.Features.Library
 {
@@ -26,6 +27,47 @@ namespace Listenarr.Tests.Features.Api.Features.Library
     [Trait("Category", "LibraryController")]
     public sealed class LibraryController_BulkUpdateTests : BaseTests
     {
+        private static Mock<IMoveQueueService> CreateMoveQueueMock()
+        {
+            var moveQueue = new Mock<IMoveQueueService>();
+            moveQueue.Setup(service => service.GetRecoveryStateForAudiobookAsync(
+                    It.IsAny<int>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(MoveRecoveryState.None);
+            moveQueue.Setup(service => service.EnsureFilesystemMutationAllowedAsync(
+                    It.IsAny<int>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+            return moveQueue;
+        }
+
+        [Fact]
+        public async Task BulkDelete_UnresolvedMoveExecution_BlocksBeforeCatalogDeletion()
+        {
+            Init();
+            var source = FileService.GetTempDirectory("bulk-delete-unresolved-source");
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Bulk Delete Move Fence")
+                .WithBasePath(source)
+                .Build());
+            await MoveJobTestFactory.SeedUnresolvedExecutionAsync(
+                _provider,
+                audiobook.Id,
+                source,
+                Path.Join(FileService.GetTempPath(), $"bulk-delete-target-{Guid.NewGuid():N}"));
+
+            var result = await _provider.GetRequiredService<LibraryController>()
+                .BulkDeleteAudiobooks(new LibraryController.BulkDeleteRequest
+                {
+                    Ids = [audiobook.Id]
+                });
+
+            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+            var json = JsonSerializer.Serialize(badRequest.Value);
+            Assert.Contains("interrupted move", json, StringComparison.OrdinalIgnoreCase);
+            Assert.NotNull(await _audiobookRepository.GetByIdAsync(audiobook.Id));
+        }
+
         [Fact]
         public async Task BulkDelete_DatabaseFailure_PreservesCachedImageAndDoesNotWriteDeletionHistory()
         {
@@ -36,7 +78,9 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 Asin = "B000DELETE"
             };
             var repository = new Mock<IAudiobookRepository>(MockBehavior.Strict);
-            repository.Setup(service => service.GetByIdAsync(audiobook.Id))
+            repository.Setup(service => service.GetByIdSnapshotAsync(
+                    audiobook.Id,
+                    It.IsAny<CancellationToken>()))
                 .ReturnsAsync(audiobook);
             repository.Setup(service => service.DeleteByIdAsync(audiobook.Id))
                 .ReturnsAsync(false);
@@ -61,7 +105,9 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 $"Failed to delete audiobook with ID {audiobook.Id}",
                 json,
                 StringComparison.Ordinal);
-            repository.Verify(service => service.GetByIdAsync(audiobook.Id), Times.Once);
+            repository.Verify(service => service.GetByIdSnapshotAsync(
+                audiobook.Id,
+                It.IsAny<CancellationToken>()), Times.Once);
             repository.Verify(service => service.DeleteByIdAsync(audiobook.Id), Times.Once);
             repository.VerifyNoOtherCalls();
             imageCache.VerifyNoOtherCalls();
@@ -274,11 +320,74 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         }
 
         [Fact]
+        public async Task BulkUpdate_PhysicalPathChange_UnresolvedMoveExecution_BlocksBeforeMetadataOrMoveMutation()
+        {
+            Init();
+            var destinationRoot = FileService.GetTempDirectory("bulk-unresolved-destination");
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
+                .WithOutputPath(destinationRoot)
+                .WithFileNamingPattern("{Author}/{Title}")
+                .Build());
+            var sourceBasePath = FileService.GetTempDirectory("bulk-unresolved-source");
+            var sourceFilePath = await FileService.GetFileAsync(sourceBasePath, "book.m4b", "audio");
+            var audiobook = await _audiobookRepository.AddAsync(new Audiobook
+            {
+                Title = "Bulk Move Fence",
+                Authors = ["Physical Author"],
+                Monitored = false,
+                BasePath = sourceBasePath,
+                FilePath = sourceFilePath
+            });
+            await AddTrackedFileAsync(audiobook, sourceFilePath);
+            var move = await MoveJobTestFactory.SeedUnresolvedExecutionAsync(
+                _provider,
+                audiobook.Id,
+                sourceBasePath,
+                Path.Join(destinationRoot, "Existing", "Interrupted"));
+
+            var actionResult = await _provider.GetRequiredService<LibraryController>()
+                .BulkUpdateAudiobooks(new LibraryController.BulkUpdateRequest
+                {
+                    Ids = [audiobook.Id],
+                    Updates = new Dictionary<string, object>
+                    {
+                        ["monitored"] = true
+                    },
+                    PathChange = new LibraryController.BulkPathChangeRequest
+                    {
+                        Mode = LibraryController.BulkPathChangeMode.Physical,
+                        DestinationRootOrPath = destinationRoot,
+                        DeleteEmptySource = false
+                    }
+                });
+
+            var ok = Assert.IsType<OkObjectResult>(actionResult);
+            using var document = JsonDocument.Parse(JsonSerializer.Serialize(ok.Value));
+            var item = Assert.Single(document.RootElement.GetProperty("results").EnumerateArray());
+            Assert.False(item.GetProperty("success").GetBoolean());
+            Assert.Contains(
+                "interrupted move",
+                item.GetProperty("errors")[0].GetString() ?? string.Empty,
+                StringComparison.OrdinalIgnoreCase);
+            var stored = Assert.IsType<Audiobook>(await GetFreshAudiobookAsync(audiobook.Id));
+            Assert.False(stored.Monitored);
+            Assert.Equal(sourceBasePath, stored.BasePath);
+            var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+            await using var verification = await factory.CreateDbContextAsync();
+            Assert.Equal(
+                [move.Id],
+                await verification.MoveJobs
+                    .Where(job => job.AudiobookId == audiobook.Id)
+                    .Select(job => job.Id)
+                    .ToListAsync());
+        }
+
+        [Fact]
         public async Task BulkUpdate_PhysicalPathChange_EnqueuesFromAuthoritativeSourceWithoutRewritingPaths()
         {
             MoveEnqueueCommand? captured = null;
             var jobId = Guid.NewGuid();
-            var moveQueue = new Mock<IMoveQueueService>();
+            var moveQueue = CreateMoveQueueMock();
             moveQueue.Setup(service => service.EnqueueMoveAsync(
                     It.IsAny<MoveEnqueueCommand>(),
                     It.IsAny<CancellationToken>()))
@@ -352,7 +461,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         {
             MoveEnqueueCommand? captured = null;
             var jobId = Guid.NewGuid();
-            var moveQueue = new Mock<IMoveQueueService>();
+            var moveQueue = CreateMoveQueueMock();
             moveQueue.Setup(service => service.EnqueueMoveAsync(
                     It.IsAny<MoveEnqueueCommand>(),
                     It.IsAny<CancellationToken>()))
@@ -407,7 +516,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         public async Task BulkUpdate_PhysicalPathChange_WithoutMetadata_EnqueuesAndReportsNoMetadataUpdate()
         {
             var jobId = Guid.NewGuid();
-            var moveQueue = new Mock<IMoveQueueService>();
+            var moveQueue = CreateMoveQueueMock();
             moveQueue.Setup(service => service.EnqueueMoveAsync(
                     It.IsAny<MoveEnqueueCommand>(),
                     It.IsAny<CancellationToken>()))
@@ -458,7 +567,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         [Fact]
         public async Task BulkUpdate_PhysicalPathChange_EmptyJobIdFailsClosed()
         {
-            var moveQueue = new Mock<IMoveQueueService>();
+            var moveQueue = CreateMoveQueueMock();
             moveQueue.Setup(service => service.EnqueueMoveAsync(
                     It.IsAny<MoveEnqueueCommand>(),
                     It.IsAny<CancellationToken>()))
@@ -508,7 +617,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         [Fact]
         public async Task BulkUpdate_PhysicalPathChange_EnqueueFailureIsReturnedPerItem()
         {
-            var moveQueue = new Mock<IMoveQueueService>();
+            var moveQueue = CreateMoveQueueMock();
             moveQueue.Setup(service => service.EnqueueMoveAsync(
                     It.IsAny<MoveEnqueueCommand>(),
                     It.IsAny<CancellationToken>()))
@@ -615,7 +724,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         [Fact]
         public async Task BulkUpdate_PhysicalPathChange_DoesNotEnqueueWhenRequestedMetadataIsInvalid()
         {
-            var moveQueue = new Mock<IMoveQueueService>();
+            var moveQueue = CreateMoveQueueMock();
             moveQueue.Setup(service => service.EnqueueMoveAsync(
                     It.IsAny<MoveEnqueueCommand>(),
                     It.IsAny<CancellationToken>()))

@@ -801,10 +801,11 @@ public sealed class AudiobookScanServiceTests : BaseTests
         string scanRoot,
         bool isAuthoritativeScope = true)
     {
-        await _applicationSettingsRepository.SaveAsync(
-            new ApplicationSettingsBuilder()
-                .WithOutputPath(scanRoot)
-                .Build());
+        var settings = await _applicationSettingsRepository.GetAsync()
+            ?? await _applicationSettingsRepository.InitializeIfMissingAsync(
+                new ApplicationSettingsBuilder().Build());
+        settings.OutputPath = scanRoot;
+        await _applicationSettingsRepository.SaveAsync(settings);
         var authorization = await _provider
             .GetRequiredService<IScanPathAuthorizationService>()
             .AuthorizeAsync(scanRoot);

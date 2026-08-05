@@ -176,7 +176,7 @@ public sealed class MoveScanHandoffRecoveryServiceTests : BaseTests
             .SingleAsync(candidate => candidate.Id == handoff.Id);
         Assert.Equal(MoveScanHandoffStatus.Pending, persisted.Status);
         Assert.Contains(
-            "verification",
+            "physical generation",
             persisted.LastError ?? string.Empty,
             StringComparison.OrdinalIgnoreCase);
         Assert.Equal(
@@ -220,6 +220,13 @@ public sealed class MoveScanHandoffRecoveryServiceTests : BaseTests
         string targetPath,
         MoveScanHandoffStatus status)
     {
+        Directory.CreateDirectory(targetPath);
+        var manifestFile = Path.Join(targetPath, "handoff.m4b");
+        if (!File.Exists(manifestFile))
+        {
+            await File.WriteAllTextAsync(manifestFile, "completed move content");
+        }
+
         await using var db = await GetFactory().CreateDbContextAsync();
         var resolution = await _provider
             .GetRequiredService<IFileSystemSemanticsResolver>()
@@ -252,8 +259,11 @@ public sealed class MoveScanHandoffRecoveryServiceTests : BaseTests
         db.MoveJobEntries.Add(new MoveJobEntry
         {
             MoveJobId = moveJob.Id,
-            RelativePath = string.Empty,
-            EntryType = MoveJobEntryType.Directory
+            RelativePath = Path.GetFileName(manifestFile),
+            EntryType = MoveJobEntryType.File,
+            Length = new FileInfo(manifestFile).Length,
+            Sha256 = Convert.ToHexString(
+                SHA256.HashData(await File.ReadAllBytesAsync(manifestFile)))
         });
         db.MoveScanHandoffs.Add(handoff);
         await db.SaveChangesAsync();

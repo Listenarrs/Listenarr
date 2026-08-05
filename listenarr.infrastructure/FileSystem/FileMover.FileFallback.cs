@@ -13,7 +13,9 @@ public partial class FileMover
 
     private async Task<FileMoveFallbackOutcome> TryManagedFileMoveFallbackAsync(
         FileMoveGateLease lease,
-        Guid? operationId)
+        Guid? operationId,
+        string? expectedSourcePhysicalObjectIdentity = null,
+        bool requirePhysicalIdentityPreservation = false)
     {
         var sourceFile = lease.SourcePath;
         var destinationFile = lease.DestinationPath;
@@ -27,7 +29,9 @@ public partial class FileMover
         {
             return await TryRemoveVerifiedFileMoveSourceAsync(
                 lease,
-                operationId);
+                operationId,
+                expectedSourcePhysicalObjectIdentity,
+                requirePhysicalIdentityPreservation);
         }
         catch (Exception exception) when (exception is not (
             OperationCanceledException or OutOfMemoryException or StackOverflowException))
@@ -43,13 +47,17 @@ public partial class FileMover
 
     private async Task<FileMoveFallbackOutcome> TryRemoveVerifiedFileMoveSourceAsync(
         FileMoveGateLease lease,
-        Guid? operationId)
+        Guid? operationId,
+        string? expectedSourcePhysicalObjectIdentity = null,
+        bool requirePhysicalIdentityPreservation = false)
     {
         var sourceFile = lease.SourcePath;
         var destinationFile = lease.DestinationPath;
         var removalOutcome = await TryRemoveVerifiedFileMoveSourceWithClaimsAsync(
             lease,
-            operationId);
+            operationId,
+            expectedSourcePhysicalObjectIdentity,
+            requirePhysicalIdentityPreservation);
         if (removalOutcome == VerifiedFileMoveRemovalOutcome.Removed)
         {
             return FileMoveFallbackOutcome.Success;

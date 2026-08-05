@@ -75,6 +75,125 @@ public sealed class MoveSourceManifestServiceTests : BaseTests
     }
 
     [Fact]
+    public async Task BuildAsync_ManagedAudiobookFolder_IncludesNonAudioCompanionButNotUntrackedAudio()
+    {
+        var root = FileService.GetTempDirectory("move-manifest-companion-root");
+        await AddAuthorizedRootAsync(root);
+        var book = Path.Join(root, "Author", "Book");
+        Directory.CreateDirectory(book);
+        var trackedAudio = await FileService.GetFileAsync(
+            book,
+            "Book.m4b",
+            "tracked audio");
+        _ = await FileService.GetFileAsync(
+            book,
+            "cover.jpg",
+            "cover image");
+        _ = await FileService.GetFileAsync(
+            book,
+            "untracked-bonus.m4b",
+            "foreign audio");
+        var audiobook = await _audiobookRepository.AddAsync(
+            new AudiobookBuilder()
+                .WithTitle("Book")
+                .WithBasePath(book)
+                .Build());
+        // Scans may persist the audiobook directory itself as the file identity
+        // boundary rather than the configured library root. Companion ownership
+        // must come from the managed-root authorizer, not this path identity field.
+        await AddTrackedFileAsync(audiobook, trackedAudio, book);
+
+        var manifest = await _provider
+            .GetRequiredService<IMoveSourceManifestService>()
+            .BuildAsync(audiobook);
+
+        Assert.Equal(book, manifest.SourceRoot);
+        var files = manifest.Entries
+            .Where(entry => entry.EntryType == MoveJobEntryType.File)
+            .OrderBy(entry => entry.RelativePath, StringComparer.Ordinal)
+            .ToList();
+        Assert.Equal(["Book.m4b", "cover.jpg"], files.Select(entry => entry.RelativePath));
+        Assert.DoesNotContain(files, entry =>
+            string.Equals(entry.RelativePath, "untracked-bonus.m4b", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task BuildAsync_AudiobookAtConfiguredRoot_DoesNotClaimRootCompanion()
+    {
+        var root = FileService.GetTempDirectory("move-manifest-root-level-companion");
+        await AddAuthorizedRootAsync(root);
+        var trackedAudio = await FileService.GetFileAsync(
+            root,
+            "Book.m4b",
+            "tracked audio");
+        _ = await FileService.GetFileAsync(
+            root,
+            "cover.jpg",
+            "root-level cover");
+        var audiobook = await _audiobookRepository.AddAsync(
+            new AudiobookBuilder()
+                .WithTitle("Root Book")
+                .WithBasePath(root)
+                .Build());
+        await AddTrackedFileAsync(audiobook, trackedAudio, root);
+
+        var manifest = await _provider
+            .GetRequiredService<IMoveSourceManifestService>()
+            .BuildAsync(audiobook);
+
+        var file = Assert.Single(
+            manifest.Entries,
+            entry => entry.EntryType == MoveJobEntryType.File);
+        Assert.Equal("Book.m4b", file.RelativePath);
+        Assert.DoesNotContain(manifest.Entries, entry =>
+            string.Equals(entry.RelativePath, "cover.jpg", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task BuildAsync_SharedAudiobookFolder_DoesNotClaimNonAudioCompanion()
+    {
+        var root = FileService.GetTempDirectory("move-manifest-shared-companion-root");
+        await AddAuthorizedRootAsync(root);
+        var shared = Path.Join(root, "Shared");
+        Directory.CreateDirectory(shared);
+        var requestedAudio = await FileService.GetFileAsync(
+            shared,
+            "Book One.m4b",
+            "requested");
+        var otherAudio = await FileService.GetFileAsync(
+            shared,
+            "Book Two.m4b",
+            "other");
+        _ = await FileService.GetFileAsync(
+            shared,
+            "cover.jpg",
+            "ambiguous cover");
+        var requested = await _audiobookRepository.AddAsync(
+            new AudiobookBuilder()
+                .WithTitle("Book One")
+                .WithBasePath(shared)
+                .Build());
+        var other = await _audiobookRepository.AddAsync(
+            new AudiobookBuilder()
+                .WithTitle("Book Two")
+                .WithBasePath(shared)
+                .Build());
+        await AddTrackedFileAsync(requested, requestedAudio, root);
+        await AddTrackedFileAsync(other, otherAudio, root);
+
+        var manifest = await _provider
+            .GetRequiredService<IMoveSourceManifestService>()
+            .BuildAsync(requested);
+
+        var file = Assert.Single(
+            manifest.Entries,
+            entry => entry.EntryType == MoveJobEntryType.File);
+        Assert.Equal("Book One.m4b", file.RelativePath);
+        Assert.DoesNotContain(manifest.Entries, entry =>
+            string.Equals(entry.RelativePath, "cover.jpg", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task BuildAsync_NestedDiscs_UsesCommonBookDirectory()
     {
         var root = FileService.GetTempDirectory("move-manifest-discs");
@@ -157,15 +276,13 @@ public sealed class MoveSourceManifestServiceTests : BaseTests
     [WindowsFact]
     public async Task BuildAsync_ForeignPersistedUnixPath_IsRejectedBeforeNativeAliasProbe()
     {
-        var root = FileService.GetTempDirectory("move-manifest-foreign-persisted-path");
+        var root = FileService.GetWindowsRootRelativeTempDirectory(
+            "move-manifest-foreign-persisted-path");
         var nativePath = await FileService.GetFileAsync(root, "Book.m4b", "audio");
-        var driveRoot = Path.GetPathRoot(root)!;
-        var foreignRoot = "/" + root[driveRoot.Length..].Replace('\\', '/');
-        var foreignPath = "/" + nativePath[driveRoot.Length..].Replace('\\', '/');
-        Assert.Equal(
-            Path.GetFullPath(nativePath),
-            Path.GetFullPath(foreignPath),
-            StringComparer.OrdinalIgnoreCase);
+        var foreignRoot = TempFileService
+            .GetWindowsRootRelativeForeignAlias(root);
+        var foreignPath = TempFileService
+            .GetWindowsRootRelativeForeignAlias(nativePath);
         Assert.True(File.Exists(foreignPath));
 
         var audiobook = await _audiobookRepository.AddAsync(

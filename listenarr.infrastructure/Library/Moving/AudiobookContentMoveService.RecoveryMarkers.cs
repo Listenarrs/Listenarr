@@ -141,34 +141,59 @@ internal sealed partial class AudiobookContentMoveService
 
     private ParsedRecoveryMarker? ReadRecoveryMarker(string markerPath)
     {
-        if (!File.Exists(markerPath))
+        var markerDirectory = Path.GetDirectoryName(Path.GetFullPath(markerPath));
+        if (string.IsNullOrWhiteSpace(markerDirectory)
+            || !Directory.Exists(markerDirectory))
         {
             return null;
         }
 
-        if ((File.GetAttributes(markerPath) & FileAttributes.ReparsePoint) != 0)
-        {
-            throw new MoveNeedsAttentionException(
-                "The move recovery marker is a symbolic link or reparse point.");
-        }
-
         try
         {
-            var fileInfo = new FileInfo(markerPath);
-            if (fileInfo.Length > MaximumMarkerLength)
+            using var directoryAnchor =
+                PinnedDirectoryCreation.OpenPinnedDirectoryNoFollow(markerDirectory);
+            if (!directoryAnchor.VisiblePathMatches())
             {
                 throw new MoveNeedsAttentionException(
-                    "The move recovery marker exceeds the supported size and was preserved.");
+                    "The move recovery marker directory changed while it was being inspected.");
             }
 
-            var content = File.ReadAllText(markerPath).Trim();
-            return ParseRecoveryMarkerContent(content);
+            PinnedDirectoryCreation.PinnedFileEntry markerEntry;
+            try
+            {
+                markerEntry = directoryAnchor.OpenExistingFileForStableRead(
+                    Path.GetFileName(markerPath));
+            }
+            catch (System.ComponentModel.Win32Exception exception) when (
+                exception.NativeErrorCode is 2 or 3)
+            {
+                return null;
+            }
+            catch (FileNotFoundException)
+            {
+                return null;
+            }
+            catch (DirectoryNotFoundException)
+            {
+                return null;
+            }
+            using (markerEntry)
+            {
+                if (!markerEntry.VisiblePathMatches())
+                {
+                    throw new MoveNeedsAttentionException(
+                        "The move recovery marker changed while it was being inspected.");
+                }
+
+                return ReadRecoveryMarker(markerEntry, markerPath);
+            }
         }
         catch (MoveNeedsAttentionException)
         {
             throw;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (exception is
+            IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
         {
             logger.LogWarning(
                 exception,

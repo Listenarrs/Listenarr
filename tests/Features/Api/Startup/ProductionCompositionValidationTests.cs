@@ -39,6 +39,8 @@ public sealed class ProductionCompositionValidationTests : BaseTests
             [
                 typeof(TimeProvider),
                 typeof(IFilesystemMutationCoordinator),
+                typeof(IDirectoryObjectIdentityResolver),
+                typeof(LibraryDirectoryOwnershipBoundaryAuthorizer),
                 typeof(IAudiobookOperationCoordinator),
                 typeof(IAudiobookUpdatePublisher),
                 typeof(IRootFolderRelocationService),
@@ -73,6 +75,18 @@ public sealed class ProductionCompositionValidationTests : BaseTests
                 Assert.Equal(ServiceLifetime.Singleton, descriptor.Lifetime);
             }
 
+            Type[] affectedScopedServiceTypes =
+            [
+                typeof(IAudiobookDeletionCommitService)
+            ];
+            foreach (var serviceType in affectedScopedServiceTypes)
+            {
+                var descriptor = Assert.Single(
+                    builder.Services,
+                    candidate => candidate.ServiceType == serviceType);
+                Assert.Equal(ServiceLifetime.Scoped, descriptor.Lifetime);
+            }
+
             Type[] affectedHostedServiceTypes =
             [
                 typeof(ScanBackgroundService),
@@ -95,6 +109,13 @@ public sealed class ProductionCompositionValidationTests : BaseTests
             foreach (var serviceType in affectedSingletonServiceTypes)
             {
                 Assert.NotNull(provider.GetRequiredService(serviceType));
+            }
+            using (var scope = provider.CreateScope())
+            {
+                foreach (var serviceType in affectedScopedServiceTypes)
+                {
+                    Assert.NotNull(scope.ServiceProvider.GetRequiredService(serviceType));
+                }
             }
 
             var hostedServices = provider.GetServices<IHostedService>().ToList();

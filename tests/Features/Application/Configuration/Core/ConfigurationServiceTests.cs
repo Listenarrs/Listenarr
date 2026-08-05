@@ -25,6 +25,25 @@ namespace Listenarr.Tests.Features.Application.Configuration.Core
     [Trait("Category", "ConfigurationService")]
     public class ConfigurationServiceTests : BaseTests
     {
+        [Fact]
+        public async Task GetApplicationSettings_RepositoryFailure_PropagatesInsteadOfFabricatingEditableDefaults()
+        {
+            var repository = new Mock<IApplicationSettingsRepository>(MockBehavior.Strict);
+            repository.Setup(candidate => candidate.GetAsync(It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new IOException("simulated settings read failure"));
+            Init(builder => builder.WithScoped<IApplicationSettingsRepository>(_ => repository.Object));
+            var service = _provider.GetRequiredService<IConfigurationService>();
+
+            var exception = await Assert.ThrowsAsync<IOException>(() =>
+                service.GetApplicationSettingsAsync());
+
+            Assert.Equal("simulated settings read failure", exception.Message);
+            repository.Verify(
+                candidate => candidate.GetAsync(It.IsAny<CancellationToken>()),
+                Times.Once);
+            repository.VerifyNoOtherCalls();
+        }
+
         [WindowsFact]
         public async Task SaveApplicationSettings_ChangedOutputPath_NormalizesCurrentHostUserInputBeforePersistence()
         {
@@ -103,7 +122,12 @@ namespace Listenarr.Tests.Features.Application.Configuration.Core
             Assert.Single(saved.Webhooks!);
             Assert.Equal("UnitWebhook", saved.Webhooks![0].Name);
 
-            var partial = new ApplicationSettings { Id = 1, OutputPath = partialUpdatePath };
+            var partial = new ApplicationSettings
+            {
+                Id = 1,
+                Version = saved.Version,
+                OutputPath = partialUpdatePath
+            };
             await svc.SaveApplicationSettingsAsync(partial);
 
             var afterPartial = await svc.GetApplicationSettingsAsync();
@@ -179,9 +203,11 @@ namespace Listenarr.Tests.Features.Application.Configuration.Core
                 TagFilter = "audiobooks"
             });
 
+            var current = await svc.GetApplicationSettingsAsync();
             await svc.SaveApplicationSettingsAsync(new ApplicationSettings
             {
                 Id = 1,
+                Version = current.Version,
                 OutputPath = FileUtils.GetAbsolutePath("updated-output")
             });
 

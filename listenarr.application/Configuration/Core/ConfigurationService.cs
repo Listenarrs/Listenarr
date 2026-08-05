@@ -47,8 +47,8 @@ namespace Listenarr.Application.Configuration.Core
 
                     if (settings == null)
                     {
-                        settings = new ApplicationSettings();
-                        await settingsRepository.SaveAsync(settings);
+                        settings = await settingsRepository.InitializeIfMissingAsync(
+                            new ApplicationSettings());
                     }
 
                     ApplyRuntimeDefaults(settings);
@@ -62,7 +62,7 @@ namespace Listenarr.Application.Configuration.Core
             catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
             {
                 logger.LogError(exception, "Error loading application settings from database (no runtime ALTERs will be attempted)");
-                return new ApplicationSettings();
+                throw;
             }
         }
 
@@ -140,6 +140,13 @@ namespace Listenarr.Application.Configuration.Core
                 // Preserve fields from existing settings when the incoming payload omits them.
                 // Must run before normalization so null-checks catch truly absent fields.
                 var existing = await settingsRepository.GetAsync();
+                if (existing != null && settings.Version <= 0)
+                {
+                    throw new ApplicationConflictException(
+                        "settings_concurrency_conflict",
+                        "Application settings must include the current version. Reload and try again.");
+                }
+
                 if (existing != null)
                 {
                     if (settings.ProwlarrUrl == null)

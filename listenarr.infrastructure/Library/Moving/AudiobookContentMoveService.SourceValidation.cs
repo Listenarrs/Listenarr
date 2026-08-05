@@ -76,7 +76,7 @@ internal sealed partial class AudiobookContentMoveService
                 }
 
                 var entryName = Path.GetFileName(entry);
-                if (IsReservedMoveArtifactName(entryName))
+                if (MoveFilesystemArtifactNames.IsReserved(entryName))
                 {
                     if (!string.IsNullOrWhiteSpace(ownedRecoveryMarkerPath)
                         && FileSystemPathIdentity.AreEquivalent(
@@ -131,18 +131,6 @@ internal sealed partial class AudiobookContentMoveService
             entry.RelativePath,
             RootManifestRelativePath,
             StringComparison.Ordinal);
-
-    private static bool IsReservedMoveArtifactName(string name) =>
-        name.StartsWith(".listenarr-move-", StringComparison.Ordinal)
-        || name.StartsWith(".listenarr-quarantine-", StringComparison.Ordinal)
-        || name.StartsWith(".listenarr-temporary-directory-", StringComparison.Ordinal)
-        || string.Equals(name, ".listenarr-temp-owner.json", StringComparison.Ordinal)
-        || string.Equals(name, ".listenarr-quarantine-owner.json", StringComparison.Ordinal)
-        || string.Equals(name, LibraryDirectoryOwnershipMarker.FileName, StringComparison.Ordinal)
-        || name.StartsWith(".listenarr-directory-owner-", StringComparison.Ordinal)
-            && name.EndsWith(".json", StringComparison.Ordinal)
-        || name.Contains(".listenarr-", StringComparison.Ordinal)
-            && name.EndsWith(".partial", StringComparison.Ordinal);
 
     private static async Task<List<MoveJobEntry>> BuildManifestAsync(
         Guid jobId,

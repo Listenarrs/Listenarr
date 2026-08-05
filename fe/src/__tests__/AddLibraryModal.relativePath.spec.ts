@@ -72,7 +72,63 @@ describe('AddLibraryModal relative path derivation', () => {
     )
   })
 
-  it('submits an exact Unix destination whose trailing whitespace is significant', async () => {
+  it('submits a configured-root relative destination whose Unix trailing whitespace is significant', async () => {
+    const { apiService } = await import('@/services/api')
+    vi.mocked(apiService.addToLibrary).mockClear()
+    vi.mocked(apiService.getApplicationSettings).mockResolvedValueOnce({ outputPath: '/library' })
+    vi.mocked(apiService.previewLibraryPath).mockResolvedValueOnce({
+      fullPath: '/library/Author/Title',
+      relativePath: 'Author/Title',
+    })
+    const wrapper = mount(AddLibraryModal, {
+      props: {
+        visible: false,
+        book: fakeBook,
+      },
+      attachTo: document.body,
+      global: {
+        plugins: [(await import('pinia')).createPinia()],
+      },
+    })
+
+    await wrapper.setProps({ visible: true })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const vm = wrapper.vm as unknown as {
+      options: { relativePath: string }
+      addToLibrary: () => Promise<void>
+    }
+    vm.options.relativePath = 'Author/Title '
+    await wrapper.vm.$nextTick()
+    await vm.addToLibrary()
+
+    expect(apiService.addToLibrary).toHaveBeenCalledTimes(1)
+    expect(apiService.addToLibrary).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ destinationPath: '/library/Author/Title ' }),
+    )
+    wrapper.unmount()
+  })
+
+  it('does not offer an arbitrary custom-path destination', async () => {
+    const wrapper = mount(AddLibraryModal, {
+      props: {
+        visible: false,
+        book: fakeBook,
+      },
+      attachTo: document.body,
+      global: {
+        plugins: [(await import('pinia')).createPinia()],
+      },
+    })
+
+    await wrapper.setProps({ visible: true })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    expect(wrapper.text()).not.toContain('Custom path')
+    expect(wrapper.find('.custom-path-input').exists()).toBe(false)
+  })
+
+  it('rejects rooted input instead of treating it as a hidden custom destination', async () => {
     const { apiService } = await import('@/services/api')
     vi.mocked(apiService.addToLibrary).mockClear()
     const wrapper = mount(AddLibraryModal, {
@@ -88,17 +144,15 @@ describe('AddLibraryModal relative path derivation', () => {
 
     await wrapper.setProps({ visible: true })
     await new Promise((resolve) => setTimeout(resolve, 10))
-    ;(wrapper.vm as unknown as { selectedRootId: number }).selectedRootId = 0
-    ;(wrapper.vm as unknown as { customRootPath: string }).customRootPath = '/library/Author/Title '
+    const input = wrapper.get('input.relative-input')
+    await input.setValue('C:\\root\\Author\\Title')
     await wrapper.vm.$nextTick()
-    await (wrapper.vm as unknown as { addToLibrary: () => Promise<void> }).addToLibrary()
 
-    expect(apiService.addToLibrary).toHaveBeenCalledTimes(1)
-    expect(apiService.addToLibrary).toHaveBeenCalledWith(
-      expect.any(Object),
-      expect.objectContaining({ destinationPath: '/library/Author/Title ' }),
+    expect(wrapper.text()).toContain(
+      'Enter a path relative to the selected configured root folder.',
     )
-    wrapper.unmount()
+    await (wrapper.vm as unknown as { addToLibrary: () => Promise<void> }).addToLibrary()
+    expect(apiService.addToLibrary).not.toHaveBeenCalled()
   })
 
   it('shows relative path (full minus root) when preview returns fullPath and root configured', async () => {

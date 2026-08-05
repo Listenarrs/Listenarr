@@ -25,6 +25,16 @@ internal static partial class PinnedLibraryDirectoryOwnershipMarker
         }
 
         var targetNativeIdentity = directory.GetDirectoryObjectIdentity();
+        if (!ManagedDirectoryIdentity.Matches(
+                source.DirectoryObjectIdentityVersion,
+                source.DirectoryObjectIdentity,
+                source.OwnershipToken,
+                targetNativeIdentity))
+        {
+            throw new InvalidOperationException(
+                "Metadata-only relocation cannot transfer destructive directory ownership to a different physical directory generation.");
+        }
+
         target.DirectoryObjectIdentityVersion =
             ManagedDirectoryIdentity.CurrentVersion;
         target.DirectoryObjectIdentity = ManagedDirectoryIdentity.Create(

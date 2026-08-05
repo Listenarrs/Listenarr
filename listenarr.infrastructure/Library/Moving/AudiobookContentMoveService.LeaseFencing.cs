@@ -4,6 +4,15 @@ namespace Listenarr.Infrastructure.Library.Moving;
 
 internal sealed partial class AudiobookContentMoveService
 {
+    internal Task EnsureMutationAuthorizedAsync(
+        AudiobookContentMoveRequest request,
+        CancellationToken cancellationToken) =>
+        EnsureMutationAuthorizedAsync(
+            request,
+            request.Source,
+            request.Target,
+            cancellationToken);
+
     private Task EnsureMutationAuthorizedAsync(
         AudiobookContentMoveRequest request,
         string source,

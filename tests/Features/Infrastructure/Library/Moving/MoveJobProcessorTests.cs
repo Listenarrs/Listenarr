@@ -38,6 +38,91 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
         }
 
         [Fact]
+        public async Task ProcessJobAsync_UntrackedNonAudioCompanionInManagedAudiobookFolder_MovesWithTrackedAudio()
+        {
+            var sourceRoot = FileService.GetTempDirectory("move-processor-companion-source-root");
+            await AddAuthorizedRootAsync(sourceRoot, "Companion Source Root");
+            var source = Path.Join(sourceRoot, "Author", "Book");
+            Directory.CreateDirectory(source);
+            var audioPath = await FileService.GetFileAsync(source, "book.m4b", "audio");
+            var coverPath = await FileService.GetFileAsync(source, "cover.jpg", "cover");
+            var audiobook = await _audiobookRepository.AddAsync(new Audiobook
+            {
+                Title = "Companion Move",
+                BasePath = source
+            });
+            var sourceSemantics = FileSystemPathSemantics.CurrentHostDefault;
+            var audioIdentity = AudiobookFilePathIdentity.CreateValid(
+                audioPath,
+                sourceSemantics,
+                FileSystemCaseSensitivityMode.Auto,
+                source);
+            var trackedAudio = AudiobookFile.CreateUnresolved(audioPath);
+            trackedAudio.AudiobookId = audiobook.Id;
+            trackedAudio.ApplyPathIdentity(audioPath, audioIdentity);
+            ApplyTestPhysicalObjectIdentity(trackedAudio, audioPath);
+            var audioClaim = await _audiobookFileRepository.ClaimAsync(trackedAudio);
+            Assert.Equal(AudiobookFileClaimOutcome.Created, audioClaim.Outcome);
+
+            var manifest = await _provider
+                .GetRequiredService<IMoveSourceManifestService>()
+                .BuildAsync(audiobook);
+            Assert.Contains(manifest.Entries, entry =>
+                entry.EntryType == MoveJobEntryType.File
+                && string.Equals(entry.RelativePath, "cover.jpg", StringComparison.Ordinal));
+            Assert.DoesNotContain(
+                await _audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id),
+                file => string.Equals(file.Path, coverPath, StringComparison.Ordinal));
+
+            var targetRoot = FileService.GetTempDirectory("move-processor-companion-target-root");
+            var targetRootFolder = await AddAuthorizedRootAsync(
+                targetRoot,
+                "Companion Target Root");
+            var target = Path.Join(targetRoot, "Author", "Book");
+            var targetResolution = await _provider
+                .GetRequiredService<IFileSystemSemanticsResolver>()
+                .ResolveAsync(targetRoot);
+            Assert.Equal(PathIdentityState.Valid, targetResolution.State);
+            var targetIdentity = PathIdentitySnapshot.FromResolution(
+                targetResolution.Semantics,
+                targetRootFolder.CaseSensitivityMode,
+                targetRoot,
+                target);
+            var queue = _provider.GetRequiredService<IMoveQueueService>();
+            var jobId = await queue.EnqueueMoveAsync(
+                new MoveEnqueueCommand(
+                    audiobook.Id,
+                    manifest.SourceRoot,
+                    manifest.SourceIdentity,
+                    manifest.Entries,
+                    target,
+                    targetIdentity,
+                    targetRootFolder.DirectoryObjectIdentityVersion!.Value,
+                    targetRootFolder.DirectoryObjectIdentity!,
+                    true,
+                    sourceRoot));
+            var job = Assert.IsType<MoveJob>(await queue.GetJobAsync(jobId));
+            await PrepareJobForProcessingAsync(queue, job);
+
+            await _provider.GetRequiredService<IMoveJobProcessor>()
+                .ProcessJobAsync(job, CancellationToken.None);
+
+            var completed = Assert.IsType<MoveJob>(await queue.GetJobAsync(jobId));
+            Assert.True(
+                completed.Status == MoveJobStatus.Completed,
+                completed.Error ?? $"Unexpected move status: {completed.Status}");
+            Assert.False(File.Exists(coverPath));
+            Assert.True(File.Exists(Path.Join(target, "book.m4b")));
+            Assert.Equal("cover", await File.ReadAllTextAsync(Path.Join(target, "cover.jpg")));
+            var persistedFiles = await _audiobookFileRepository
+                .GetByAudiobookIdAsync(audiobook.Id);
+            Assert.Single(persistedFiles);
+            Assert.Equal(
+                Path.Join(target, "book.m4b"),
+                persistedFiles[0].CanonicalPath ?? persistedFiles[0].Path);
+        }
+
+        [Fact]
         public async Task ProcessJobAsync_RemovesEmptySourceAncestorsWithinConfiguredRoot()
         {
             var sourceRoot = FileService.GetTempDirectory("move-processor-cleanup-root");
@@ -189,6 +274,68 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
             metrics.Verify(
                 service => service.Increment("worker.move.job.completed", It.IsAny<double>()),
                 Times.Once);
+        }
+
+        [Fact]
+        public async Task ProcessDurableJobAsync_TerminalStateNotificationCancellation_DoesNotEscapeCommit()
+        {
+            var job = new MoveJob
+            {
+                Id = Guid.NewGuid(),
+                AudiobookId = int.MaxValue,
+                RequestedPath = Path.Join(FileService.GetTempPath(), "missing-audiobook-target"),
+                Status = MoveJobStatus.Running,
+                LeaseOwner = LeaseOwner,
+                LeaseGeneration = 1,
+                LeaseExpiresAt = DateTime.UtcNow.AddMinutes(1)
+            };
+            var queue = new Mock<IMoveQueueService>(MockBehavior.Strict);
+            queue.Setup(service => service.UpdateJobStatusAsync(
+                    job.Id,
+                    LeaseOwner,
+                    job.LeaseGeneration,
+                    MoveJobStatus.Running,
+                    null,
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+            queue.Setup(service => service.UpdateJobStatusWithoutNotificationAsync(
+                    job.Id,
+                    LeaseOwner,
+                    job.LeaseGeneration,
+                    MoveJobStatus.Failed,
+                    "Audiobook not found",
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+            queue.Setup(service => service.NotifyPersistedJobStateAsync(
+                    job.Id,
+                    MoveJobStatus.Failed,
+                    "Audiobook not found",
+                    It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new TaskCanceledException(
+                    "Injected terminal-state notification cancellation."));
+            var processor = ActivatorUtilities.CreateInstance<MoveJobProcessor>(
+                _provider,
+                queue.Object);
+
+            var postCommit = await processor.ProcessDurableJobAsync(
+                job,
+                CancellationToken.None);
+
+            Assert.Null(postCommit);
+            Assert.Equal(MoveJobStatus.Failed, job.Status);
+            Assert.Equal("Audiobook not found", job.Error);
+            queue.Verify(service => service.UpdateJobStatusWithoutNotificationAsync(
+                job.Id,
+                LeaseOwner,
+                job.LeaseGeneration,
+                MoveJobStatus.Failed,
+                "Audiobook not found",
+                It.IsAny<CancellationToken>()), Times.Once);
+            queue.Verify(service => service.NotifyPersistedJobStateAsync(
+                job.Id,
+                MoveJobStatus.Failed,
+                "Audiobook not found",
+                It.IsAny<CancellationToken>()), Times.Once);
         }
 
         [Fact]
@@ -423,6 +570,48 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                 MoveJobStatus.Failed,
                 It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()), Times.Never);
+        }
+
+        [Fact]
+        public async Task ProcessJobAsync_LeaseExpiresAfterFilesystemCleanup_DoesNotRewriteAudiobookMetadata()
+        {
+            var source = FileService.GetTempDirectory(
+                "move-processor-expired-before-rewrite-src");
+            await FileService.GetFileAsync(source, "book.m4b", "audio");
+            var target = Path.Join(
+                FileService.GetTempPath(),
+                $"move-processor-expired-before-rewrite-dst-{Guid.NewGuid():N}");
+            var audiobook = await _audiobookRepository.AddAsync(new Audiobook
+            {
+                Title = "Move Processor Expired Before Rewrite",
+                BasePath = source
+            });
+            var (queue, job) = await CreateQueuedMoveJobAsync(audiobook, target, source);
+            var factory = _provider
+                .GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+            var processor = _provider.GetRequiredService<MoveJobProcessor>();
+            processor.AfterSourceCleanupBeforeMetadataRewriteForTest = async observedJob =>
+            {
+                await using var db = await factory.CreateDbContextAsync();
+                var persisted = await db.MoveJobs.SingleAsync(candidate =>
+                    candidate.Id == observedJob.Id);
+                persisted.LeaseExpiresAt = DateTime.UtcNow.AddMinutes(-1);
+                await db.SaveChangesAsync();
+            };
+
+            await Assert.ThrowsAsync<MoveLeaseLostException>(() =>
+                processor.ProcessJobAsync(job, CancellationToken.None));
+
+            await using var verification = await factory.CreateDbContextAsync();
+            var audiobookAfter = await verification.Audiobooks
+                .AsNoTracking()
+                .SingleAsync(candidate => candidate.Id == audiobook.Id);
+            Assert.Equal(source, audiobookAfter.BasePath);
+            Assert.True(File.Exists(Path.Join(target, "book.m4b")));
+            var persistedJob = await verification.MoveJobs
+                .AsNoTracking()
+                .SingleAsync(candidate => candidate.Id == job.Id);
+            Assert.Equal(MoveJobStatus.Running, persistedJob.Status);
         }
 
         [Fact]
@@ -1182,11 +1371,20 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                 FileSystemCaseSensitivityMode.Auto,
                 sourceResolution.BoundaryPath,
                 sourcePath);
+            var targetBoundary = FindTargetBoundary(
+                requestedPath,
+                targetResolution.Semantics);
             var targetIdentity = PathIdentitySnapshot.FromResolution(
                 targetResolution.Semantics,
                 FileSystemCaseSensitivityMode.Auto,
-                targetResolution.BoundaryPath,
+                targetBoundary,
                 requestedPath);
+            var targetDirectoryIdentity = await _provider
+                .GetRequiredService<IDirectoryObjectIdentityResolver>()
+                .ResolveAsync(targetBoundary);
+            Assert.True(
+                targetDirectoryIdentity.IsAvailable,
+                targetDirectoryIdentity.UnavailableReason);
             var manifest = await BuildMoveManifestAsync(sourcePath);
             await EnsureTrackedManifestRowsAsync(
                 audiobook,
@@ -1201,11 +1399,41 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                     manifest,
                     requestedPath,
                     targetIdentity,
+                    targetDirectoryIdentity.Version!.Value,
+                    targetDirectoryIdentity.Value!,
                     deleteEmptySource));
             var job = Assert.IsType<MoveJob>(
                 await queue.GetJobAsync(jobId));
             await PrepareJobForProcessingAsync(queue, job);
             return (queue, job);
+        }
+
+        private string FindTargetBoundary(
+            string targetPath,
+            FileSystemPathSemantics targetSemantics)
+        {
+            var target = Path.GetFullPath(targetPath);
+            var managedRoot = Path.GetFullPath(FileService.GetTempPath());
+            if (FileSystemPathIdentity.IsSameOrInside(
+                    target,
+                    managedRoot,
+                    targetSemantics))
+            {
+                return managedRoot;
+            }
+
+            var current = Path.GetDirectoryName(target);
+            while (!string.IsNullOrWhiteSpace(current))
+            {
+                if (Directory.Exists(current))
+                {
+                    return current;
+                }
+                current = Path.GetDirectoryName(current);
+            }
+
+            throw new InvalidOperationException(
+                "Move test target has no existing authorization boundary.");
         }
 
         private async Task EnsureTrackedManifestRowsAsync(

@@ -43,16 +43,7 @@ internal sealed partial class PinnedDirectoryCreation
                     "Could not create an exclusive private retirement directory.");
             }
 
-            File.SetUnixFileMode(
-                retirementDirectory.FullPath,
-                System.IO.UnixFileMode.UserRead
-                | System.IO.UnixFileMode.UserWrite
-                | System.IO.UnixFileMode.UserExecute);
-            if (!retirementDirectory.VisiblePathMatches())
-            {
-                throw new InvalidOperationException(
-                    "The private retirement directory changed while its permissions were restricted.");
-            }
+            retirementDirectory.RestrictToCurrentUser();
 
             {
                 using var retirementAnchor = retirementDirectory.OpenCreatedDirectoryAnchor();
@@ -165,7 +156,9 @@ internal sealed partial class PinnedDirectoryCreation
         }
     }
 
-    private static void DeleteOpenedFileImmediatelyWindows(SafeFileHandle fileHandle)
+    private static void DeleteOpenedFileImmediatelyWindows(
+        SafeFileHandle fileHandle,
+        bool allowLegacyFallback = true)
     {
         const int fileDispositionDelete = 0x1;
         const int fileDispositionPosixSemantics = 0x2;
@@ -188,7 +181,7 @@ internal sealed partial class PinnedDirectoryCreation
             }
 
             var error = Marshal.GetLastWin32Error();
-            if (error is 1 or 50 or 87)
+            if (allowLegacyFallback && error is 1 or 50 or 87)
             {
                 DeleteOpenedFileWindows(fileHandle);
                 return;

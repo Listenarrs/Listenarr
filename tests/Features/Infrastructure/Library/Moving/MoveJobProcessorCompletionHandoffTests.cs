@@ -126,6 +126,59 @@ public partial class MoveJobProcessorTests
     }
 
     [Fact]
+    public async Task RunPostCompletionEffectsAsync_MoveNotificationCancellation_StillAttemptsDurableScanHandoff()
+    {
+        var context = new MovePostCommitContext(
+            Guid.NewGuid(),
+            int.MaxValue,
+            "Post Commit Notification Cancellation",
+            Path.Join(FileService.GetTempPath(), "post-commit-source"),
+            Path.Join(FileService.GetTempPath(), "post-commit-target"),
+            Guid.NewGuid(),
+            MoveHistoryId: 0,
+            MoveHistoryCreated: false);
+        var moveQueue = new Mock<IMoveQueueService>(MockBehavior.Strict);
+        moveQueue.Setup(service => service.NotifyPersistedJobStateAsync(
+                context.JobId,
+                MoveJobStatus.Completed,
+                null,
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TaskCanceledException(
+                "Injected completed-move notification cancellation."));
+        var handoffStore = new Mock<IMoveScanHandoffStore>(MockBehavior.Strict);
+        handoffStore.Setup(store => store.TryClaimAsync(
+                context.HandoffId,
+                It.IsAny<string>(),
+                It.IsAny<DateTimeOffset>(),
+                It.IsAny<DateTimeOffset>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((MoveScanHandoffClaim?)null);
+        var scanQueue = new Mock<IScanQueueService>(MockBehavior.Strict);
+        var processor = ActivatorUtilities.CreateInstance<MoveJobProcessor>(
+            _provider,
+            moveQueue.Object,
+            handoffStore.Object,
+            scanQueue.Object);
+
+        await processor.RunPostCompletionEffectsAsync(
+            context,
+            CancellationToken.None);
+
+        moveQueue.Verify(service => service.NotifyPersistedJobStateAsync(
+            context.JobId,
+            MoveJobStatus.Completed,
+            null,
+            It.IsAny<CancellationToken>()), Times.Once);
+        handoffStore.Verify(store => store.TryClaimAsync(
+            context.HandoffId,
+            It.IsAny<string>(),
+            It.IsAny<DateTimeOffset>(),
+            It.IsAny<DateTimeOffset>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+        scanQueue.VerifyNoOtherCalls();
+    }
+
+    [Fact]
     public async Task ProcessJobAsync_DurableScanFailure_DoesNotReplayHandoff()
     {
         var state = await CreateMarkerlessFinalizedCopyStateAsync();

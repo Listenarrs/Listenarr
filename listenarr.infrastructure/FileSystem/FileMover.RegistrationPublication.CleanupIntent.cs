@@ -276,33 +276,12 @@ public partial class FileMover
                     return null;
                 }
 
+                // A committed move intentionally retires the source before the
+                // registration-publication state is cleaned up. Candidate discovery
+                // therefore validates only the persisted source-path syntax here.
+                // Any destructive rollback reopens and verifies the exact source
+                // generation again in TryRollbackUncommittedRegistrationPublication.
                 sourcePath = canonicalSourcePath;
-                var sourceParentPath = Path.GetDirectoryName(canonicalSourcePath);
-                if (string.IsNullOrWhiteSpace(sourceParentPath))
-                {
-                    return null;
-                }
-
-                using var sourceParent =
-                    PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
-                        sourceParentPath,
-                        createMissing: false);
-                using var source = sourceParent.TryOpenExistingFile(
-                    Path.GetFileName(canonicalSourcePath),
-                    requireDeleteAccess: false);
-                if (source == null
-                    || !source.VisiblePathMatches()
-                    || !string.Equals(
-                        source.GetObjectIdentity(),
-                        intent.SourcePhysicalObjectIdentity,
-                        StringComparison.Ordinal)
-                    || (published != null
-                        && !source.IdentifiesSameEntry(published))
-                    || (claim != null
-                        && !source.IdentifiesSameEntry(claim)))
-                {
-                    return null;
-                }
             }
             else if (published == null)
             {
@@ -383,16 +362,34 @@ public partial class FileMover
         }
     }
 
-    private bool DeleteRegistrationCleanupIntentIfPresent(
-        PinnedDirectoryCreation.PinnedDirectoryAnchor state)
+    private static bool RegistrationCleanupIntentMatchesPublication(
+        PinnedDirectoryCreation.PinnedFileEntry intentEntry,
+        string destinationName,
+        string expectedPhysicalObjectIdentity)
     {
-        using var intent = state.TryOpenExistingFile(
-            RegistrationCleanupIntentName,
-            requireDeleteAccess: true);
-        if (intent == null)
+        if (!intentEntry.VisiblePathMatches())
         {
-            return true;
+            return false;
         }
+
+        var intent = ReadRegistrationCleanupIntent(intentEntry);
+        return intent != null
+            && intent.Version is 1 or RegistrationCleanupIntentVersion
+            && string.Equals(
+                intent.DestinationName,
+                destinationName,
+                StringComparison.Ordinal)
+            && string.Equals(
+                intent.PhysicalObjectIdentity,
+                expectedPhysicalObjectIdentity,
+                StringComparison.Ordinal)
+            && intentEntry.VisiblePathMatches();
+    }
+
+    private bool DeletePinnedRegistrationCleanupIntent(
+        PinnedDirectoryCreation.PinnedDirectoryAnchor state,
+        PinnedDirectoryCreation.PinnedFileEntry intent)
+    {
         if (!intent.VisiblePathMatches())
         {
             return false;

@@ -17,6 +17,7 @@
  */
 
 using System.Text.RegularExpressions;
+using Listenarr.Application.Common.Exceptions;
 using Listenarr.Domain.Common;
 using Microsoft.AspNetCore.Mvc;
 
@@ -24,7 +25,9 @@ namespace Listenarr.Api.Features.Library
 {
     public sealed partial class LibraryBulkEditWorkflow
     {
-        public async Task<IActionResult> BulkDeleteAsync(LibraryController.BulkDeleteRequest request)
+        public async Task<IActionResult> BulkDeleteAsync(
+            LibraryController.BulkDeleteRequest request,
+            CancellationToken cancellationToken = default)
         {
             if (request.Ids == null || !request.Ids.Any())
             {
@@ -38,9 +41,23 @@ namespace Listenarr.Api.Features.Library
 
             foreach (var id in request.Ids.Distinct())
             {
-                var outcome = await _audiobookOperationCoordinator.ExecuteExclusiveAsync(
-                    id,
-                    _ => DeleteOneAsync(id));
+                BulkDeleteOutcome outcome;
+                try
+                {
+                    outcome = await _filesystemMutationCoordinator.ExecuteExclusiveAsync(
+                        globalToken => _audiobookOperationCoordinator.ExecuteExclusiveAsync(
+                            id,
+                            audiobookToken => DeleteOneAsync(id, audiobookToken),
+                            globalToken),
+                        cancellationToken);
+                }
+                catch (OperationCanceledException) when (deletedCount > 0)
+                {
+                    errors.Add(
+                        "Bulk deletion stopped after request cancellation; no additional audiobooks were deleted.");
+                    break;
+                }
+
                 deletedImagesCount += outcome.DeletedImages;
                 if (outcome.Deleted)
                 {
@@ -78,19 +95,29 @@ namespace Listenarr.Api.Features.Library
             return new OkObjectResult(result);
         }
 
-        private async Task<BulkDeleteOutcome> DeleteOneAsync(int id)
+        private async Task<BulkDeleteOutcome> DeleteOneAsync(
+            int id,
+            CancellationToken cancellationToken)
         {
             try
             {
+                await _moveQueueService.EnsureFilesystemMutationAllowedAsync(
+                    id,
+                    cancellationToken);
+
                 using var scope = _scopeFactory.CreateScope();
-                var repository = scope.ServiceProvider.GetRequiredService<IAudiobookRepository>();
-                var audiobook = await repository.GetByIdAsync(id);
-                if (audiobook == null)
+                var deletionCommitService = scope.ServiceProvider
+                    .GetRequiredService<IAudiobookDeletionCommitService>();
+                var commit = await deletionCommitService.DeleteAsync(
+                    id,
+                    cancellationToken);
+                if (commit.Outcome == AudiobookDeletionCommitOutcome.NotFound)
                 {
                     return new BulkDeleteOutcome(false, 0, $"Audiobook with ID {id} not found");
                 }
 
-                if (!await repository.DeleteByIdAsync(id))
+                if (commit.Outcome != AudiobookDeletionCommitOutcome.Deleted
+                    || commit.Audiobook == null)
                 {
                     return new BulkDeleteOutcome(
                         false,
@@ -98,6 +125,7 @@ namespace Listenarr.Api.Features.Library
                         $"Failed to delete audiobook with ID {id}");
                 }
 
+                var audiobook = commit.Audiobook;
                 var deletedImages = await DeleteCachedImageAsync(audiobook);
                 try
                 {
@@ -112,7 +140,7 @@ namespace Listenarr.Api.Features.Library
                     });
                 }
                 catch (Exception historyException) when (historyException is not (
-                    OperationCanceledException or OutOfMemoryException or StackOverflowException))
+                    OutOfMemoryException or StackOverflowException))
                 {
                     _logger.LogWarning(
                         historyException,
@@ -126,9 +154,12 @@ namespace Listenarr.Api.Features.Library
                     id);
                 return new BulkDeleteOutcome(true, deletedImages, null);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException
-                && ex is not OutOfMemoryException
-                && ex is not StackOverflowException)
+            catch (ApplicationConflictException exception)
+            {
+                return new BulkDeleteOutcome(false, 0, exception.SafeDetail);
+            }
+            catch (Exception ex) when (ex is not (
+                OperationCanceledException or OutOfMemoryException or StackOverflowException))
             {
                 _logger.LogError(ex, "Error during bulk delete for ID {Id}", id);
                 return new BulkDeleteOutcome(
@@ -170,7 +201,8 @@ namespace Listenarr.Api.Features.Library
                     return await DeleteCachedImageFromUrlAsync(audiobook);
                 }
             }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            catch (Exception ex) when (ex is not (
+                OutOfMemoryException or StackOverflowException))
             {
                 _logger.LogWarning(ex, "Failed to delete cached image for audiobook id {Id}", audiobook.Id);
             }
@@ -221,7 +253,8 @@ namespace Listenarr.Api.Features.Library
                     }
                 }
             }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            catch (Exception ex) when (ex is not (
+                OutOfMemoryException or StackOverflowException))
             {
                 _logger.LogWarning(ex, "Failed to delete cached image based on stored ImageUrl for audiobook id {Id}", audiobook.Id);
             }

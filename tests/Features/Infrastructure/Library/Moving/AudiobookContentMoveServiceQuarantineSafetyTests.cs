@@ -337,6 +337,7 @@ public partial class AudiobookContentMoveServiceTests
             CleanupState = MoveJobEntryCleanupState.Quarantined
         });
         await db.SaveChangesAsync();
+        await AuthorizeExistingMoveJobTargetAsync(jobId, target);
     }
 
     private static AudiobookContentMoveRequest CreateCleanupRequest(

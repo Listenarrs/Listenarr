@@ -38,6 +38,22 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
     public string PhysicalObjectIdentity { get; }
     public string? SourcePhysicalObjectIdentity { get; }
 
+    public Stream OpenMetadataReadStream()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return _file.OpenIndependentReadStream(
+            bufferSize: 128 * 1024,
+            asynchronous: false);
+    }
+
+    public Stream OpenMetadataWriteStream()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return _file.OpenIndependentWriteStream(
+            bufferSize: 128 * 1024,
+            asynchronous: false);
+    }
+
     internal static PinnedAudiobookFileRegistrationLease Open(
         string publicPath,
         string? expectedPhysicalObjectIdentity = null,

@@ -405,6 +405,47 @@ public partial class AudiobookContentMoveServiceTests
         await AssertScaffoldingNotRemovedAsync(state.Request.JobId);
     }
 
+    [Fact]
+    public async Task CleanupTerminalTargetScaffoldingAsync_MarkerReplacedBeforePinnedRead_PreservesArtifact()
+    {
+        var state = await CreateQuarantinedTargetScaffoldAsync();
+        var markerPath = Path.Join(state.Quarantine, ".listenarr-scaffold-owner.json");
+        var replacement = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            Version = 1,
+            JobId = Guid.NewGuid(),
+            TargetPath = state.Request.Target,
+            PublishedRoot = state.PublishedRoot
+        });
+        var replaced = false;
+        using var hook = ExclusiveDirectoryCreator.PushBeforeOpenParentHook(path =>
+        {
+            if (replaced
+                || !string.Equals(
+                    Path.GetFullPath(path),
+                    Path.GetFullPath(state.Quarantine),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            replaced = true;
+            File.Delete(markerPath);
+            File.WriteAllText(markerPath, replacement);
+        });
+
+        await Assert.ThrowsAsync<MoveNeedsAttentionException>(() =>
+            _provider.GetRequiredService<AudiobookContentMoveService>()
+                .CleanupTerminalTargetScaffoldingAsync(
+                    state.Request,
+                    CancellationToken.None));
+
+        Assert.True(replaced);
+        Assert.Equal(replacement, await File.ReadAllTextAsync(markerPath));
+        Assert.True(Directory.Exists(state.Quarantine));
+        await AssertScaffoldingNotRemovedAsync(state.Request.JobId);
+    }
+
     [LinuxFact]
     public async Task CleanupTerminalTargetScaffoldingAsync_AmbiguousPersistedMarkerPath_PreservesArtifact()
     {

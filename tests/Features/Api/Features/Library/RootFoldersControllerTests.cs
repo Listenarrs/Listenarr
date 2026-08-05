@@ -680,7 +680,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         }
 
         [Fact]
-        public async Task Update_CaseOnlyEditOnInsensitivePersistedRoot_PreservesCanonicalSpelling()
+        public async Task Update_CaseSensitivityChangeOnEquivalentPath_MigratesIdentitiesAndPreservesCanonicalSpelling()
         {
             var sourcePath = FileUtils.GetAbsolutePath("LegacyCaseRoot");
             var targetPath = sourcePath.ToLowerInvariant();
@@ -693,6 +693,26 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 CaseSensitivityMode = FileSystemCaseSensitivityMode.Insensitive
             });
             var relocationService = new Mock<IRootFolderRelocationService>();
+            relocationService.Setup(service => service.StartAsync(
+                    1,
+                    It.IsAny<RootFolderPathChangeCommand>(),
+                    It.IsAny<CancellationToken>()))
+                .Callback<int, RootFolderPathChangeCommand, CancellationToken>((_, command, _) =>
+                {
+                    var stored = svc.Store.Single();
+                    stored.Name = command.DesiredName;
+                    stored.IsDefault = command.DesiredIsDefault;
+                    stored.CaseSensitivityMode = command.TargetCaseSensitivityMode;
+                })
+                .ReturnsAsync(new RootFolderPathChangeResult(
+                    null,
+                    1,
+                    sourcePath,
+                    sourcePath,
+                    RootFolderRelocationStatus.Completed,
+                    0,
+                    0,
+                    null));
             var db = CreateDb();
             var controller = new RootFoldersController(
                 svc,
@@ -716,6 +736,112 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             var payload = Assert.IsType<RootFolderDto>(ok.Value);
             Assert.Equal(sourcePath, payload.Path);
             Assert.Equal("Renamed", payload.Name);
+            Assert.Equal("Sensitive", payload.CaseSensitivityMode);
+            relocationService.Verify(service => service.StartAsync(
+                1,
+                It.Is<RootFolderPathChangeCommand>(command =>
+                    command.TargetPath == sourcePath
+                    && command.Mode == RootFolderRelocationMode.MetadataOnly
+                    && command.TargetCaseSensitivityMode == FileSystemCaseSensitivityMode.Sensitive),
+                It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [Fact]
+        public async Task Update_SynchronousNeedsAttention_ReturnsRecoveryResultInsteadOfRootSuccess()
+        {
+            var sourcePath = FileUtils.GetAbsolutePath("AttentionSourceRoot");
+            var targetPath = FileUtils.GetAbsolutePath("AttentionTargetRoot");
+            var svc = new FakeService();
+            svc.Store.Add(new RootFolder
+            {
+                Id = 1,
+                Name = "Root",
+                Path = sourcePath,
+                CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto
+            });
+            var relocationId = Guid.NewGuid();
+            var relocationService = new Mock<IRootFolderRelocationService>();
+            relocationService.Setup(service => service.StartAsync(
+                    1,
+                    It.IsAny<RootFolderPathChangeCommand>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new RootFolderPathChangeResult(
+                    relocationId,
+                    1,
+                    sourcePath,
+                    targetPath,
+                    RootFolderRelocationStatus.NeedsAttention,
+                    0,
+                    0,
+                    $"Internal failure at {targetPath}",
+                    TargetIdentityEnrollmentState.Authorized));
+            var db = CreateDb();
+            var controller = new RootFoldersController(
+                svc,
+                _fakeQueue,
+                new EfAudiobookFileRepository(db),
+                new AudiobookRepository(db),
+                new LocalFileSystem(),
+                relocationService: relocationService.Object);
+
+            var result = await controller.Update(
+                1,
+                new RootFolder
+                {
+                    Id = 1,
+                    Name = "Renamed",
+                    Path = targetPath,
+                    CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto
+                });
+
+            var conflict = Assert.IsType<Microsoft.AspNetCore.Mvc.ConflictObjectResult>(result);
+            var payload = Assert.IsType<RootFolderPathChangeResult>(conflict.Value);
+            Assert.Equal(relocationId, payload.RelocationId);
+            Assert.Equal(RootFolderRelocationStatus.NeedsAttention, payload.Status);
+            Assert.DoesNotContain(targetPath, payload.Error, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("requires attention", payload.Error!, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public async Task Patch_CaseSensitivityChange_RequiresPathChangeEndpoint()
+        {
+            var sourcePath = FileUtils.GetAbsolutePath("PatchSemanticsRoot");
+            var svc = new FakeService();
+            svc.Store.Add(new RootFolder
+            {
+                Id = 1,
+                Name = "Root",
+                Path = sourcePath,
+                CaseSensitivityMode = FileSystemCaseSensitivityMode.Sensitive,
+                ResolvedCaseSensitivity = FileSystemCaseSensitivity.Sensitive
+            });
+            var relocationService = new Mock<IRootFolderRelocationService>();
+            var db = CreateDb();
+            var controller = new RootFoldersController(
+                svc,
+                _fakeQueue,
+                new EfAudiobookFileRepository(db),
+                new AudiobookRepository(db),
+                new LocalFileSystem(),
+                relocationService: relocationService.Object);
+
+            var result = await controller.Patch(
+                1,
+                new RootFolderMetadataUpdateRequest(
+                    "Renamed",
+                    true,
+                    FileSystemCaseSensitivityMode.Insensitive));
+
+            var conflict = Assert.IsType<Microsoft.AspNetCore.Mvc.ConflictObjectResult>(result);
+            Assert.Contains(
+                "path-changes",
+                conflict.Value!.ToString(),
+                StringComparison.OrdinalIgnoreCase);
+            Assert.Equal("Root", svc.Store.Single().Name);
+            Assert.False(svc.Store.Single().IsDefault);
+            Assert.Equal(
+                FileSystemCaseSensitivityMode.Sensitive,
+                svc.Store.Single().CaseSensitivityMode);
             relocationService.Verify(service => service.StartAsync(
                 It.IsAny<int>(),
                 It.IsAny<RootFolderPathChangeCommand>(),
@@ -1065,6 +1191,68 @@ namespace Listenarr.Tests.Features.Api.Features.Library
 
             Assert.IsType<Microsoft.AspNetCore.Mvc.BadRequestObjectResult>(result);
             relocationService.VerifyNoOtherCalls();
+        }
+
+        [Theory]
+        [InlineData(RootFolderRelocationStatus.Completed, typeof(Microsoft.AspNetCore.Mvc.OkObjectResult))]
+        [InlineData(RootFolderRelocationStatus.NeedsAttention, typeof(Microsoft.AspNetCore.Mvc.ConflictObjectResult))]
+        public async Task ChangePath_RelocateTerminalResult_UsesTerminalHttpStatus(
+            RootFolderRelocationStatus status,
+            Type expectedResultType)
+        {
+            var relocationId = Guid.NewGuid();
+            var sourcePath = FileUtils.GetAbsolutePath("terminal-relocate-source");
+            var targetPath = FileUtils.GetAbsolutePath("terminal-relocate-target");
+            var relocationService = new Mock<IRootFolderRelocationService>();
+            relocationService.Setup(service => service.StartAsync(
+                    1,
+                    It.IsAny<RootFolderPathChangeCommand>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new RootFolderPathChangeResult(
+                    relocationId,
+                    1,
+                    sourcePath,
+                    targetPath,
+                    status,
+                    0,
+                    0,
+                    status == RootFolderRelocationStatus.NeedsAttention
+                        ? $"Internal failure at {targetPath}"
+                        : null,
+                    TargetIdentityEnrollmentState.Authorized));
+            var db = CreateDb();
+            var controller = new RootFoldersController(
+                new FakeService(),
+                _fakeQueue,
+                new EfAudiobookFileRepository(db),
+                new AudiobookRepository(db),
+                new LocalFileSystem(),
+                relocationService: relocationService.Object);
+            var request = new RootFolderPathChangeRequest(
+                targetPath,
+                "relocate",
+                false,
+                "Root",
+                false,
+                FileSystemCaseSensitivityMode.Auto,
+                sourcePath);
+
+            var result = await controller.ChangePath(1, request, CancellationToken.None);
+
+            Assert.IsType(expectedResultType, result);
+            var value = result switch
+            {
+                Microsoft.AspNetCore.Mvc.OkObjectResult ok => ok.Value,
+                Microsoft.AspNetCore.Mvc.ConflictObjectResult conflict => conflict.Value,
+                _ => null
+            };
+            var payload = Assert.IsType<RootFolderPathChangeResult>(value);
+            Assert.Equal(status, payload.Status);
+            if (status == RootFolderRelocationStatus.NeedsAttention)
+            {
+                Assert.DoesNotContain(targetPath, payload.Error, StringComparison.OrdinalIgnoreCase);
+                Assert.Contains("requires attention", payload.Error!, StringComparison.OrdinalIgnoreCase);
+            }
         }
 
         [Theory]

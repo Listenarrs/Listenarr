@@ -149,6 +149,32 @@ internal static class MoveScanHandoffDispatchWorkflow
         {
             throw;
         }
+        catch (OperationCanceledException exception)
+        {
+            logger.LogWarning(
+                exception,
+                "Move scan handoff {HandoffId} dispatch was canceled internally; releasing the claim for recovery",
+                claim.HandoffId);
+            try
+            {
+                await handoffStore.ReleaseClaimAsync(
+                    claim.HandoffId,
+                    claim.LeaseOwner,
+                    claim.LeaseGeneration,
+                    exception.Message,
+                    timeProvider.GetUtcNow(),
+                    CancellationToken.None);
+            }
+            catch (Exception releaseException) when (WorkerExceptionClassifier.IsNonFatal(releaseException))
+            {
+                logger.LogDebug(
+                    releaseException,
+                    "Unable to release internally canceled move scan handoff {HandoffId}; waiting for lease expiry",
+                    claim.HandoffId);
+            }
+
+            return new MoveScanDispatchResult(MoveScanDispatchOutcome.Failed);
+        }
         catch (Exception exception) when (WorkerExceptionClassifier.IsNonFatal(exception))
         {
             logger.LogWarning(

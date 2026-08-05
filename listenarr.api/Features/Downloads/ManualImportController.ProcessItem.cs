@@ -237,6 +237,25 @@ public partial class ManualImportController
                     };
                 }
 
+                if (!string.IsNullOrWhiteSpace(audiobook.Asin))
+                {
+                    try
+                    {
+                        await _metadataService.WriteAsinTagAsync(
+                            registrationLease,
+                            audiobook.Asin);
+                    }
+                    catch (Exception exception) when (exception is not (
+                        OutOfMemoryException or StackOverflowException))
+                    {
+                        _logger.LogWarning(
+                            exception,
+                            "Manual import completed, but generation-bound ASIN tag enrichment failed for audiobook {AudiobookId} at {Path}",
+                            audiobook.Id,
+                            LogRedaction.SanitizeFilePath(destinationPath));
+                    }
+                }
+
                 var completion = registrationLease.CompletePublication();
                 if (completion
                     == RegistrationPublicationCompletion.CommittedCleanupPending)
@@ -249,24 +268,6 @@ public partial class ManualImportController
             }
 
             destinationTracker.Commit(destinationReservation);
-            if (!string.IsNullOrWhiteSpace(audiobook.Asin))
-            {
-                try
-                {
-                    await _metadataService.WriteAsinTagAsync(
-                        destinationPath,
-                        audiobook.Asin);
-                }
-                catch (Exception exception) when (exception is not (
-                    OutOfMemoryException or StackOverflowException))
-                {
-                    _logger.LogWarning(
-                        exception,
-                        "Manual import completed, but ASIN tag enrichment failed for audiobook {AudiobookId} at {Path}",
-                        audiobook.Id,
-                        LogRedaction.SanitizeFilePath(destinationPath));
-                }
-            }
 
             return new ManualImportResultDto
             {

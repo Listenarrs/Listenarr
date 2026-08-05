@@ -111,16 +111,39 @@ public partial class RenameService
 
             if (!PathsEqual(source, destination, semantics))
             {
-                var moved = await _fileMover.PerformActionOn(
-                    FileAction.Move,
+                var operationId = FileMoveOperationIdentity.Create(
+                    "audiobook-file-rename",
+                    audiobook.Id,
+                    fileOperation.FileId,
                     source,
-                    destination,
-                    FileMoveOperationIdentity.Create(
-                        "audiobook-file-rename",
-                        audiobook.Id,
-                        fileOperation.FileId,
+                    destination);
+                bool moved;
+                if (databaseFile != null)
+                {
+                    if (string.IsNullOrWhiteSpace(
+                            databaseFile.PhysicalObjectIdentity))
+                    {
+                        item.Error =
+                            "Tracked source physical identity is unavailable.";
+                        return item;
+                    }
+
+                    moved = await _fileMover
+                        .MoveFilePreservingPhysicalIdentityAsync(
+                            source,
+                            destination,
+                            databaseFile.PhysicalObjectIdentity,
+                            operationId);
+                }
+                else
+                {
+                    moved = await _fileMover.PerformActionOn(
+                        FileAction.Move,
                         source,
-                        destination));
+                        destination,
+                        operationId);
+                }
+
                 if (!moved)
                 {
                     item.Error = "File move operation failed.";
@@ -153,116 +176,5 @@ public partial class RenameService
         }
 
         return item;
-    }
-
-    private async Task<(bool Success, bool Conflict, string? Error)> ExecuteDirectoryMoveAsync(
-        Audiobook audiobook,
-        string newFolderPath,
-        IReadOnlyCollection<string> allowedRoots,
-        List<RootFolder> rootFolders,
-        FileSystemPathSemantics sourceSemantics,
-        CancellationToken cancellationToken)
-    {
-        var currentBase = ComputeCurrentBasePath(audiobook, sourceSemantics);
-        if (string.IsNullOrWhiteSpace(currentBase))
-        {
-            return (false, true, "The audiobook current folder is unavailable.");
-        }
-
-        var normalizedCurrent = NormalizePath(currentBase);
-        var normalizedNew = NormalizePath(newFolderPath);
-        if (!IsPathWithinAllowedRoots(
-                normalizedCurrent,
-                allowedRoots,
-                sourceSemantics)
-            || !IsPathWithinAllowedRoots(
-                normalizedNew,
-                allowedRoots,
-                sourceSemantics))
-        {
-            return (false, false, "Destination path is outside the allowed library roots.");
-        }
-
-        if (!_fileSystem.TryValidateMutationTarget(
-                normalizedNew,
-                allowedRoots,
-                out var validatedNew,
-                out _))
-        {
-            return (
-                false,
-                false,
-                "Destination path could not be resolved safely within the allowed library roots.");
-        }
-
-        if (!_fileSystem.TryValidateMutationTarget(
-                normalizedCurrent,
-                allowedRoots,
-                out var validatedCurrent,
-                out _))
-        {
-            return (
-                false,
-                true,
-                "Source path could not be resolved safely within the allowed library roots.");
-        }
-
-        normalizedCurrent = validatedCurrent;
-        normalizedNew = validatedNew;
-        if (!_fileSystem.DirectoryExists(normalizedCurrent))
-        {
-            return (false, true, "Source folder not found.");
-        }
-
-        if (_fileSystem.DirectoryExists(normalizedNew)
-            && _fileSystem.EnumerateFileSystemEntries(normalizedNew).Any())
-        {
-            return (false, false, "Target folder already exists and is not empty.");
-        }
-
-        var targetSemantics = await ResolveRenameSemanticsAsync(
-            normalizedNew,
-            rootFolders,
-            cancellationToken);
-        var plan = await BuildDirectoryMovePlanAsync(
-            audiobook,
-            normalizedCurrent,
-            normalizedNew,
-            sourceSemantics,
-            targetSemantics,
-            cancellationToken);
-        if (!plan.Success)
-        {
-            return (false, plan.Conflict, plan.Error);
-        }
-
-        var parent = Path.GetDirectoryName(normalizedNew);
-        if (!string.IsNullOrWhiteSpace(parent))
-        {
-            await EnsureOwnedRenameHierarchyAsync(
-                parent,
-                allowedRoots,
-                targetSemantics,
-                audiobook.Id,
-                Guid.NewGuid(),
-                cancellationToken);
-        }
-
-        var moved = await _fileMover.MoveDirectoryAsync(
-            normalizedCurrent,
-            normalizedNew);
-        if (!moved)
-        {
-            return (false, false, "Folder move operation failed.");
-        }
-
-        audiobook.BasePath = normalizedNew;
-        foreach (var update in plan.FileUpdates)
-        {
-            update.File.ApplyPathIdentity(update.StoredPath, update.Identity);
-        }
-
-        audiobook.FilePath = plan.LegacyFilePath;
-        return (true, false, null);
     }
 }

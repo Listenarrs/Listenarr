@@ -7,9 +7,77 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs;
 public sealed class MoveManifestIdentityTests : BaseTests
 {
     [Fact]
-    public void Version_IsFive()
+    public void Version_IsSix()
     {
-        Assert.Equal(5, MoveManifestIdentity.Version);
+        Assert.Equal(6, MoveManifestIdentity.Version);
+    }
+
+    [Fact]
+    public void SourceManifestsMatch_TargetBoundaryAuthorization_IsNotSourceContent()
+    {
+        var semantics = new FileSystemPathSemantics(
+            FileSystemPathSyntax.Unix,
+            FileSystemCaseSensitivity.Sensitive);
+        var current = new[] { SourceFile("book.m4b", 1, 2, 'A') };
+        var persisted = new List<MoveJobEntry>
+        {
+            PersistedFile("book.m4b", 1, 2, 'A'),
+            MoveManifestIdentity.CreateTargetBoundaryAuthorization(
+                2,
+                "target-generation")
+        };
+
+        Assert.True(MoveManifestIdentity.SourceManifestsMatch(
+            current,
+            persisted,
+            semantics));
+    }
+
+    [Fact]
+    public void CreateDeduplicationKey_TargetBoundaryGenerationChangesIdentity()
+    {
+        var semantics = new FileSystemPathSemantics(
+            FileSystemPathSyntax.Unix,
+            FileSystemCaseSensitivity.Sensitive);
+        var source = "/downloads/book";
+        var target = "/library/book";
+        var sourceIdentity = new PathIdentitySnapshot(
+            semantics.Syntax,
+            semantics.CaseSensitivity,
+            FileSystemCaseSensitivityMode.Sensitive,
+            "/downloads");
+        var targetIdentity = new PathIdentitySnapshot(
+            semantics.Syntax,
+            semantics.CaseSensitivity,
+            FileSystemCaseSensitivityMode.Sensitive,
+            "/library");
+        var firstEntries = new List<MoveJobEntry>
+        {
+            PersistedFile("book.m4b", 1, 2, 'A'),
+            MoveManifestIdentity.CreateTargetBoundaryAuthorization(2, "generation-a")
+        };
+        var secondEntries = new List<MoveJobEntry>
+        {
+            PersistedFile("book.m4b", 1, 2, 'A'),
+            MoveManifestIdentity.CreateTargetBoundaryAuthorization(2, "generation-b")
+        };
+
+        var first = MoveManifestIdentity.CreateDeduplicationKey(
+            1,
+            source,
+            sourceIdentity,
+            target,
+            targetIdentity,
+            firstEntries);
+        var second = MoveManifestIdentity.CreateDeduplicationKey(
+            1,
+            source,
+            sourceIdentity,
+            target,
+            targetIdentity,
+            secondEntries);
+
+        Assert.NotEqual(first, second);
     }
 
     [Fact]

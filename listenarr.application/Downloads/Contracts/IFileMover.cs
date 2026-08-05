@@ -19,11 +19,20 @@
 namespace Listenarr.Application.Downloads.Contracts
 {
     /// <summary>
-    /// This class responsability is to handle all file manipulation operations
+    /// Handles file manipulation within a destination hierarchy that has already
+    /// been established by the caller. Implementations must not create missing
+    /// managed destination parents; library hierarchy creation and enrollment
+    /// belong to <see cref="ILibraryDirectoryOwnershipStore"/>.
     /// </summary>
     public interface IFileMover
     {
         Task<bool> MoveDirectoryAsync(string source, string destination);
+
+        Task<bool> MoveFilePreservingPhysicalIdentityAsync(
+            string source,
+            string destination,
+            string expectedSourcePhysicalObjectIdentity,
+            Guid? operationId = null);
 
         Task<bool> CopyDirectoryAsync(string source, string destination);
 

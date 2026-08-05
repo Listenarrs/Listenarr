@@ -7,7 +7,9 @@ namespace Listenarr.Application.Audiobooks.Contracts;
 
 public static class MoveManifestIdentity
 {
-    public const int Version = 5;
+    public const int Version = 6;
+    private const string TargetBoundaryAuthorizationDomain =
+        "LISTENARR-MOVE-TARGET-BOUNDARY";
 
     public static string CreateDeduplicationKey(
         int audiobookId,
@@ -15,14 +17,27 @@ public static class MoveManifestIdentity
         PathIdentitySnapshot sourceIdentity,
         string target,
         PathIdentitySnapshot targetIdentity,
-        IEnumerable<MoveJobEntry> entries) =>
-        CreateDeduplicationKeyCore(
+        IEnumerable<MoveJobEntry> entries)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+        var persistedEntries = entries.ToList();
+        if (!TryGetTargetBoundaryAuthorization(
+                persistedEntries,
+                out _,
+                out _))
+        {
+            throw new InvalidOperationException(
+                "A durable move identity requires target-boundary physical-generation authorization.");
+        }
+
+        return CreateDeduplicationKeyCore(
             audiobookId,
             source,
             sourceIdentity,
             target,
             targetIdentity,
-            entries.Select(ToIdentityEntry));
+            persistedEntries.Select(ToIdentityEntry));
+    }
 
     public static string CreateDeduplicationKey(
         int audiobookId,
@@ -39,6 +54,24 @@ public static class MoveManifestIdentity
             targetIdentity,
             entries.Select(ToIdentityEntry));
 
+    public static string CreateReconciliationKey(
+        int audiobookId,
+        string source,
+        PathIdentitySnapshot sourceIdentity,
+        string target,
+        PathIdentitySnapshot targetIdentity,
+        IEnumerable<MoveJobEntry> entries)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+        return CreateDeduplicationKeyCore(
+            audiobookId,
+            source,
+            sourceIdentity,
+            target,
+            targetIdentity,
+            entries.Select(ToIdentityEntry));
+    }
+
     public static bool SourceManifestsMatch(
         IEnumerable<MoveSourceManifestEntry> currentEntries,
         IEnumerable<MoveJobEntry> persistedEntries,
@@ -51,9 +84,82 @@ public static class MoveManifestIdentity
                 currentEntries.Select(ToIdentityEntry),
                 semantics),
             ComputeManifestDigest(
-                persistedEntries.Select(ToIdentityEntry),
+                persistedEntries
+                    .Where(entry => !IsTargetBoundaryAuthorization(entry))
+                    .Select(ToIdentityEntry),
                 semantics),
             StringComparison.Ordinal);
+    }
+
+    public static MoveJobEntry CreateTargetBoundaryAuthorization(
+        int directoryIdentityVersion,
+        string directoryIdentity)
+    {
+        if (directoryIdentityVersion <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(directoryIdentityVersion));
+        }
+        ArgumentException.ThrowIfNullOrWhiteSpace(directoryIdentity);
+        return new MoveJobEntry
+        {
+            RelativePath = string.Empty,
+            EntryType = MoveJobEntryType.Directory,
+            Length = directoryIdentityVersion,
+            LastWriteTimeUtc = DateTime.UnixEpoch,
+            Sha256 = ComputeTargetBoundaryAuthorizationDigest(
+                directoryIdentityVersion,
+                directoryIdentity),
+            CopyState = MoveJobEntryCopyState.Pending,
+            CleanupState = MoveJobEntryCleanupState.Pending
+        };
+    }
+
+    public static bool IsTargetBoundaryAuthorization(MoveJobEntry entry) =>
+        entry.EntryType == MoveJobEntryType.Directory
+        && string.IsNullOrEmpty(entry.RelativePath)
+        && entry.Length > 0
+        && entry.Sha256 is { Length: 64 } digest
+        && digest.All(Uri.IsHexDigit);
+
+    public static bool TryGetTargetBoundaryAuthorization(
+        IEnumerable<MoveJobEntry> entries,
+        out int directoryIdentityVersion,
+        out string digest)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+        var matches = entries
+            .Where(IsTargetBoundaryAuthorization)
+            .Take(2)
+            .ToList();
+        if (matches.Count != 1
+            || matches[0].Length > int.MaxValue)
+        {
+            directoryIdentityVersion = 0;
+            digest = string.Empty;
+            return false;
+        }
+
+        directoryIdentityVersion = (int)matches[0].Length;
+        digest = matches[0].Sha256!.ToUpperInvariant();
+        return true;
+    }
+
+    public static string ComputeTargetBoundaryAuthorizationDigest(
+        int directoryIdentityVersion,
+        string directoryIdentity)
+    {
+        if (directoryIdentityVersion <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(directoryIdentityVersion));
+        }
+        ArgumentException.ThrowIfNullOrWhiteSpace(directoryIdentity);
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        AppendUtf8(hash, TargetBoundaryAuthorizationDomain);
+        AppendInt32(hash, directoryIdentityVersion);
+        AppendUtf8(hash, directoryIdentity);
+        return Convert.ToHexString(hash.GetHashAndReset());
     }
 
     private static string CreateDeduplicationKeyCore(
@@ -163,6 +269,19 @@ public static class MoveManifestIdentity
             semantics);
         if (entry.EntryType == MoveJobEntryType.Directory)
         {
+            if (string.IsNullOrEmpty(entry.RelativePath)
+                && entry.Length > 0
+                && entry.Sha256 is { Length: 64 } authorizationDigest
+                && authorizationDigest.All(Uri.IsHexDigit))
+            {
+                return new ManifestIdentityEntry(
+                    relativePath,
+                    entry.EntryType,
+                    entry.Length,
+                    DateTime.UnixEpoch,
+                    authorizationDigest.ToUpperInvariant());
+            }
+
             // Directory timestamps are not ownership evidence and may change when
             // unrelated content appears in a shared source tree.
             return new ManifestIdentityEntry(

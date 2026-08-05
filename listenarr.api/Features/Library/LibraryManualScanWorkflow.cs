@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using Listenarr.Application.Common.Exceptions;
 using Listenarr.Domain.Common;
 using Microsoft.AspNetCore.Mvc;
 
@@ -31,6 +32,7 @@ namespace Listenarr.Api.Features.Library
         private readonly IFileSystem _fileSystem;
         private readonly IFilesystemMutationCoordinator _filesystemMutationCoordinator;
         private readonly IAudiobookOperationCoordinator _audiobookOperationCoordinator;
+        private readonly IMoveQueueService _moveQueueService;
         private readonly ILogger<LibraryManualScanWorkflow> _logger;
 
         public LibraryManualScanWorkflow(
@@ -41,6 +43,7 @@ namespace Listenarr.Api.Features.Library
             IFileSystem fileSystem,
             IFilesystemMutationCoordinator filesystemMutationCoordinator,
             IAudiobookOperationCoordinator audiobookOperationCoordinator,
+            IMoveQueueService moveQueueService,
             ILogger<LibraryManualScanWorkflow> logger,
             INotificationService? notificationService = null)
         {
@@ -53,6 +56,7 @@ namespace Listenarr.Api.Features.Library
                 ?? throw new ArgumentNullException(nameof(filesystemMutationCoordinator));
             _audiobookOperationCoordinator = audiobookOperationCoordinator
                 ?? throw new ArgumentNullException(nameof(audiobookOperationCoordinator));
+            _moveQueueService = moveQueueService ?? throw new ArgumentNullException(nameof(moveQueueService));
             _logger = logger;
             _notificationService = notificationService;
         }
@@ -71,6 +75,21 @@ namespace Listenarr.Api.Features.Library
             LibraryController.ScanRequest? request,
             CancellationToken cancellationToken)
         {
+            try
+            {
+                await _moveQueueService.EnsureFilesystemMutationAllowedAsync(
+                    id,
+                    cancellationToken);
+            }
+            catch (ApplicationConflictException exception)
+            {
+                return new ConflictObjectResult(new
+                {
+                    message = exception.SafeDetail,
+                    code = exception.Code
+                });
+            }
+
             var audiobook = await _repo.GetByIdAsync(id);
             if (audiobook == null)
             {

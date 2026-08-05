@@ -13,6 +13,12 @@ namespace Listenarr.Application.Audiobooks.Contracts
         string MetadataPath { get; }
         string PhysicalObjectIdentity { get; }
         string? SourcePhysicalObjectIdentity { get; }
+        Stream OpenMetadataReadStream() =>
+            throw new NotSupportedException(
+                "This registration lease does not expose generation-bound metadata reads.");
+        Stream OpenMetadataWriteStream() =>
+            throw new NotSupportedException(
+                "This registration lease does not expose generation-bound metadata writes.");
         bool MatchesCurrentPublication();
         bool PrepareCleanupRecovery(int audiobookId);
         RegistrationPublicationCompletion CompletePublication();

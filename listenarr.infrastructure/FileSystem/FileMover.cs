@@ -53,8 +53,6 @@ namespace Listenarr.Infrastructure.FileSystem
         private static partial int LinkNative(string oldpath, string newpath);
 
         private readonly ILogger<FileMover> _logger;
-        private readonly IProcessRunner? _processRunner;
-        private readonly FileMoverOptions _options;
         private readonly IFileSystemSemanticsResolver _semanticsResolver;
 
         internal Func<Task>? AfterSourceStateCreatedForTestAsync { get; init; }
@@ -66,6 +64,10 @@ namespace Listenarr.Infrastructure.FileSystem
         internal Func<Task>? AfterSourceClaimDeletedForTestAsync { get; init; }
         internal Func<Task>? AfterFileMoveStateCleanedForTestAsync { get; init; }
         internal Func<Task>? AfterPreparedDestinationCapturedForTestAsync { get; init; }
+        internal Func<Task>? AfterPreparedClaimMovedBeforeEvidenceForTestAsync { get; init; }
+        internal Func<Task>? AfterPreparedClaimPublishedForTestAsync { get; init; }
+        internal Func<Task>? AfterPreparedPublicationCommittedForTestAsync { get; init; }
+        internal Func<Task>? AfterPreparedDestinationPublishedForTestAsync { get; init; }
         internal Func<Task>? AfterDirectoryCopyPreflightForTestAsync { get; init; }
         internal Action? BeforeDirectoryTreePreflightForTest { get; init; }
 
@@ -76,8 +78,8 @@ namespace Listenarr.Infrastructure.FileSystem
             IFileSystemSemanticsResolver? semanticsResolver = null)
         {
             _logger = logger;
-            _processRunner = processRunner;
-            _options = options?.Value ?? new FileMoverOptions();
+            _ = processRunner;
+            _ = options;
             _semanticsResolver = semanticsResolver ?? new FileSystemSemanticsResolver();
         }
 
@@ -253,84 +255,11 @@ namespace Listenarr.Infrastructure.FileSystem
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
-                _logger.LogError(ex, "Copy+delete fallback failed for directory {Source} -> {Dest}", sourceDir, destDir);
-
-                // On Windows attempt robocopy as a final-resort atomic-ish fallback
-                try
-                {
-                    var robocopyFallbackSafe = false;
-                    if (!Directory.Exists(destinationRoot)
-                        && await SourceSnapshotStillMatchesAsync(copySnapshot))
-                    {
-                        try
-                        {
-                            await EnsureDirectoryCopyTargetSafeAsync(
-                                copySnapshot.SourceRoot,
-                                destinationRoot,
-                                destinationRoot);
-                            robocopyFallbackSafe = true;
-                        }
-                        catch (Exception safetyException) when (safetyException is not (
-                            OperationCanceledException or OutOfMemoryException or StackOverflowException))
-                        {
-                            _logger.LogWarning(
-                                safetyException,
-                                "Robocopy fallback was blocked because directory safety could not be revalidated");
-                        }
-                    }
-
-                    if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-                        && _options.EnableRobocopy
-                        && _processRunner != null
-                        && robocopyFallbackSafe)
-                    {
-                        _logger.LogWarning("Attempting robocopy fallback for directory move: {Source} -> {Dest}", sourceDir, destDir);
-                        var startInfo = CreateRobocopyStartInfo(
-                            sourceDir,
-                            destinationRoot,
-                            "/E",
-                            "/NFL",
-                            "/NDL",
-                            "/NJH",
-                            "/NJS",
-                            "/NP");
-
-                        var pr = await _processRunner.RunAsync(startInfo, _options.RobocopyTimeoutMs);
-                        if (!pr.TimedOut && pr.ExitCode <= 7 && pr.ExitCode >= 0)
-                        {
-                            var cleanup = await CleanupCopiedSourceTreeAsync(
-                                copySnapshot,
-                                destinationRoot);
-                            if (!cleanup.DestinationVerified)
-                            {
-                                _logger.LogWarning(
-                                    "Robocopy completed, but source cleanup was blocked because the destination could not be verified: {Reason}",
-                                    cleanup.Reason);
-                                return false;
-                            }
-
-                            if (!cleanup.SourceRemoved)
-                            {
-                                _logger.LogWarning(
-                                    "Robocopy completed and preserved changed source content at {Source}: {Reason}",
-                                    LogRedaction.SanitizeFilePath(sourceDir),
-                                    cleanup.Reason);
-                                return false;
-                            }
-
-                            _logger.LogInformation("Robocopy fallback succeeded with exit code {Code}", pr.ExitCode);
-                            _logger.LogDebug("Robocopy stdout: {Out}", LogRedaction.RedactText(Truncate(pr.Stdout, 2000), LogRedaction.GetSensitiveValuesFromEnvironment()));
-                            return true;
-                        }
-
-                        _logger.LogWarning("Robocopy fallback failed or returned non-success code: {Code}. Stderr: {Err}", pr.ExitCode, LogRedaction.RedactText(Truncate(pr.Stderr, 2000), LogRedaction.GetSensitiveValuesFromEnvironment()));
-                    }
-                }
-                catch (Exception rex) when (rex is not OperationCanceledException && rex is not OutOfMemoryException && rex is not StackOverflowException)
-                {
-                    _logger.LogWarning(rex, "Robocopy fallback threw an exception");
-                }
-
+                _logger.LogError(
+                    ex,
+                    "Verified copy+cleanup failed for directory {Source} -> {Dest}; preserving the source because an external path-based fallback cannot retain pinned filesystem-generation authority",
+                    sourceDir,
+                    destDir);
                 return false;
             }
         }

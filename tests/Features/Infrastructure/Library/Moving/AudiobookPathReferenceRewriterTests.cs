@@ -17,16 +17,12 @@ public sealed class AudiobookPathReferenceRewriterTests : BaseTests
             Path.GetPathRoot(Environment.CurrentDirectory)!,
             "listenarr-rewriter-native",
             Guid.NewGuid().ToString("N"));
-        var driveRoot = Path.GetPathRoot(current)!;
-        var foreignSource = "/" + current[driveRoot.Length..].Replace('\\', '/');
+        var foreignSource = TempFileService
+            .GetWindowsRootRelativeForeignAlias(current);
         var target = Path.Join(
             Path.GetPathRoot(Environment.CurrentDirectory)!,
             "listenarr-rewriter-target",
             Guid.NewGuid().ToString("N"));
-        Assert.Equal(
-            Path.GetFullPath(current),
-            Path.GetFullPath(foreignSource),
-            StringComparer.OrdinalIgnoreCase);
         var audiobook = new Audiobook { BasePath = current };
         var semantics = FileSystemPathSemantics.CurrentHostDefault;
 

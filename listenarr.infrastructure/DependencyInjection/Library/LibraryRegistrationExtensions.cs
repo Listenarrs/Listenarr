@@ -7,6 +7,7 @@
  * by the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  */
+using Listenarr.Application.Audiobooks.Deletion;
 using Listenarr.Application.Audiobooks.RootFolders;
 using Listenarr.Infrastructure.Library.Realtime;
 using Listenarr.Infrastructure.Persistence;
@@ -30,6 +31,7 @@ internal static class LibraryRegistrationExtensions
         services.AddSingleton<IMoveCleanupBoundaryResolver, MoveCleanupBoundaryResolver>();
         services.AddSingleton<ILibraryDirectoryOwnershipStore, EfLibraryDirectoryOwnershipStore>();
         services.AddSingleton<IMoveQueueService, MoveQueueService>();
+        services.AddScoped<IAudiobookDeletionCommitService, AudiobookDeletionCommitService>();
         services.AddScoped<IAudiobookFilePathIdentityResolver, AudiobookFilePathIdentityResolver>();
         services.AddScoped<IAudiobookFileIdentityReconciler, AudiobookFileIdentityReconciler>();
         services.AddScoped<IRootFolderObjectIdentityReconciler, RootFolderObjectIdentityReconciler>();

@@ -37,6 +37,20 @@ export interface TrackedMoveJob {
   status: MoveJobStatus
   target?: string
   error?: string
+  recoveryDisposition?: string
+  canRetry?: boolean
+}
+
+export interface MoveRecoveryState {
+  hasUnresolvedMove: boolean
+  disposition: string
+  jobId?: string
+  status?: MoveJobStatus
+  phase?: string
+  requestedPath?: string
+  error?: string
+  canRetry: boolean
+  blockingJobIds: string[]
 }
 
 type MoveJobUpdate = {
@@ -45,6 +59,8 @@ type MoveJobUpdate = {
   status?: string
   target?: string
   error?: string
+  recoveryDisposition?: string
+  canRetry?: boolean
 }
 
 const terminalStatuses = new Set<MoveJobStatus>([
@@ -85,6 +101,48 @@ export const useMoveJobsStore = defineStore('moveJobs', () => {
   let unsubscribe: (() => void) | null = null
 
   const trackedJobs = computed(() => Object.values(trackedById.value))
+
+  function getActiveJobForAudiobook(audiobookId: number): TrackedMoveJob | undefined {
+    return trackedJobs.value.find(
+      (job) => job.audiobookId === audiobookId && !terminalStatuses.has(job.status),
+    )
+  }
+
+  async function getRecoveryStateForAudiobook(audiobookId: number): Promise<MoveRecoveryState> {
+    const response = await apiService.getMoveRecoveryState(audiobookId)
+    const status = response.status ? normalizeStatus(response.status) : null
+    return {
+      hasUnresolvedMove: Boolean(response.hasUnresolvedMove),
+      disposition: response.disposition,
+      jobId: response.jobId || undefined,
+      status: status ?? undefined,
+      phase: response.phase || undefined,
+      requestedPath: response.requestedPath || undefined,
+      error: response.error || undefined,
+      canRetry: Boolean(response.canRetry),
+      blockingJobIds: response.blockingJobIds || [],
+    }
+  }
+
+  async function requeueMoveJob(
+    jobId: string,
+    audiobookId?: number,
+    target?: string,
+  ): Promise<string> {
+    const response = await apiService.requeueMoveJob(jobId)
+    const requeuedJobId = response.jobId?.trim()
+    if (!requeuedJobId) {
+      throw new Error('The server did not return a durable move job ID.')
+    }
+
+    trackQueuedJob({
+      jobId: requeuedJobId,
+      audiobookId,
+      target,
+      status: 'Queued',
+    })
+    return requeuedJobId
+  }
 
   function start() {
     if (unsubscribe) {
@@ -171,6 +229,8 @@ export const useMoveJobsStore = defineStore('moveJobs', () => {
       status,
       target: update.target ?? existing.target,
       error: update.error,
+      recoveryDisposition: update.recoveryDisposition ?? existing.recoveryDisposition,
+      canRetry: update.canRetry ?? existing.canRetry,
     }
     trackedById.value[key] = next
 
@@ -200,6 +260,9 @@ export const useMoveJobsStore = defineStore('moveJobs', () => {
   return {
     trackedJobs,
     trackedById,
+    getActiveJobForAudiobook,
+    getRecoveryStateForAudiobook,
+    requeueMoveJob,
     start,
     stop,
     trackQueuedJob,

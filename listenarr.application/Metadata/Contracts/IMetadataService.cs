@@ -78,6 +78,18 @@ namespace Listenarr.Application.Metadata.Contracts
         Task WriteAsinTagAsync(string filePath, string asin);
 
         /// <summary>
+        /// Writes the ASIN through a generation-bound registration lease so a
+        /// replacement pathname cannot receive metadata intended for the
+        /// published audiobook file.
+        /// </summary>
+        Task WriteAsinTagAsync(
+            IAudiobookFileRegistrationLease registrationLease,
+            string asin) =>
+            Task.FromException(
+                new NotSupportedException(
+                    "Generation-bound ASIN tagging is unavailable."));
+
+        /// <summary>
         /// Downloads cover art image from URL
         /// </summary>
         /// <param name="coverArtUrl">URL of the cover art image</param>

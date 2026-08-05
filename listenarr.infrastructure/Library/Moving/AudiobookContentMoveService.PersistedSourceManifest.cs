@@ -36,6 +36,10 @@ internal sealed partial class AudiobookContentMoveService
         foreach (var entry in manifest)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (MoveManifestIdentity.IsTargetBoundaryAuthorization(entry))
+            {
+                continue;
+            }
             if (IsRootManifestEntry(entry)
                 || string.IsNullOrWhiteSpace(entry.RelativePath)
                 || string.Equals(entry.RelativePath, ".", StringComparison.Ordinal)
@@ -184,9 +188,10 @@ internal sealed partial class AudiobookContentMoveService
                 ownedScaffoldPaths,
                 structuralSpinePaths,
                 ownedDirectoryMarkerPaths);
-            var expectedEntryCount = manifest.Count(entry =>
-                !IsRootManifestEntry(entry));
-            if (validatedEntries.Count != expectedEntryCount)
+            var expectedSourceManifest = manifest
+                .Where(entry => !IsRootManifestEntry(entry))
+                .ToList();
+            if (validatedEntries.Count != expectedSourceManifest.Count)
             {
                 return false;
             }
@@ -196,7 +201,7 @@ internal sealed partial class AudiobookContentMoveService
                 validatedEntries,
                 cancellationToken);
             return ManifestMatches(
-                manifest.ToList(),
+                expectedSourceManifest,
                 currentManifest,
                 sourceSemantics);
         }

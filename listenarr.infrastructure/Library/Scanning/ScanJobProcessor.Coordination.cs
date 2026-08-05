@@ -18,6 +18,7 @@ public partial class ScanJobProcessor
     private readonly TimeProvider _timeProvider;
     private readonly IFilesystemMutationCoordinator _filesystemMutationCoordinator;
     private readonly IAudiobookOperationCoordinator _audiobookOperationCoordinator;
+    private readonly IMoveQueueService _moveQueueService;
     private readonly IAudiobookUpdatePublisher? _audiobookUpdatePublisher;
 
     public ScanJobProcessor(
@@ -29,6 +30,7 @@ public partial class ScanJobProcessor
         IFileSystemSemanticsResolver semanticsResolver,
         IFilesystemMutationCoordinator filesystemMutationCoordinator,
         IAudiobookOperationCoordinator audiobookOperationCoordinator,
+        IMoveQueueService moveQueueService,
         IMoveScanHandoffStore? moveScanHandoffStore = null,
         TimeProvider? timeProvider = null,
         IAudiobookUpdatePublisher? audiobookUpdatePublisher = null)
@@ -43,6 +45,7 @@ public partial class ScanJobProcessor
         _timeProvider = timeProvider ?? TimeProvider.System;
         _filesystemMutationCoordinator = filesystemMutationCoordinator ?? throw new ArgumentNullException(nameof(filesystemMutationCoordinator));
         _audiobookOperationCoordinator = audiobookOperationCoordinator ?? throw new ArgumentNullException(nameof(audiobookOperationCoordinator));
+        _moveQueueService = moveQueueService ?? throw new ArgumentNullException(nameof(moveQueueService));
         _audiobookUpdatePublisher = audiobookUpdatePublisher;
     }
 

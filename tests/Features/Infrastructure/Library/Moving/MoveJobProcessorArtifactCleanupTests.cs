@@ -56,6 +56,58 @@ public partial class MoveJobProcessorTests
     }
 
     [Fact]
+    public async Task ProcessJobAsync_EmptySourceStateNativeDeleteFailure_SchedulesAndCompletesRetry()
+    {
+        var source = FileService.GetTempDirectory("move-processor-source-state-delete-retry-src");
+        await FileService.GetFileAsync(source, "book.m4b", "audio");
+        var target = Path.Join(
+            FileService.GetTempPath(),
+            $"move-processor-source-state-delete-retry-dst-{Guid.NewGuid():N}");
+        var audiobook = await _audiobookRepository.AddAsync(new Audiobook
+        {
+            Title = "Source State Delete Retry",
+            BasePath = source
+        });
+        var (queue, job) = await CreateQueuedMoveJobAsync(audiobook, target, source);
+        var faultingContentMoveService = new AudiobookContentMoveService(
+            _provider.GetRequiredService<ILogger<AudiobookContentMoveService>>(),
+            _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>(),
+            TimeProvider.System,
+            new FailEmptySourceStateDeleteOnce());
+        var faultingProcessor = ActivatorUtilities.CreateInstance<MoveJobProcessor>(
+            _provider,
+            faultingContentMoveService);
+
+        await faultingProcessor.ProcessJobAsync(job, CancellationToken.None);
+
+        var retryJob = Assert.IsType<MoveJob>(await queue.GetJobAsync(job.Id));
+        Assert.Equal(MoveJobStatus.RetryScheduled, retryJob.Status);
+        Assert.NotNull(retryJob.NextAttemptAt);
+        Assert.False(Directory.Exists(source));
+        var statePath = Path.Join(
+            Path.GetDirectoryName(source)!,
+            $".listenarr-quarantine-{job.Id:N}",
+            ".listenarr-empty-source.state");
+        Assert.True(Directory.Exists(statePath));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(statePath));
+        Assert.True(File.Exists(Path.Join(target, "book.m4b")));
+        await MakeRetryDueAsync(job.Id);
+
+        var retryGeneration = Assert.IsType<int>(
+            await queue.TryClaimJobAsync(job.Id, LeaseOwner));
+        retryJob.LeaseOwner = LeaseOwner;
+        retryJob.LeaseGeneration = retryGeneration;
+        await _provider.GetRequiredService<IMoveJobProcessor>()
+            .ProcessJobAsync(retryJob, CancellationToken.None);
+
+        var completed = Assert.IsType<MoveJob>(await queue.GetJobAsync(job.Id));
+        Assert.Equal(MoveJobStatus.Completed, completed.Status);
+        Assert.False(Directory.Exists(source));
+        Assert.False(Directory.Exists(statePath));
+        Assert.True(File.Exists(Path.Join(target, "book.m4b")));
+    }
+
+    [Fact]
     public async Task ProcessJobAsync_ForeignSourceFileBeforeMarkerDelete_PreservesFileAndCompletes()
     {
         var source = FileService.GetTempDirectory("move-processor-recreated-source-src");
@@ -331,6 +383,27 @@ public partial class MoveJobProcessorTests
         var job = await db.MoveJobs.SingleAsync(candidate => candidate.Id == jobId);
         job.NextAttemptAt = DateTime.UtcNow.AddSeconds(-1);
         await db.SaveChangesAsync();
+    }
+
+    private sealed class FailEmptySourceStateDeleteOnce : IMoveFaultInjector
+    {
+        private bool _failed;
+
+        public void OnSourceCleanupMutation(
+            Guid jobId,
+            SourceCleanupFaultPoint faultPoint)
+        {
+            if (_failed
+                || faultPoint != SourceCleanupFaultPoint.BeforeEmptySourceStateDelete)
+            {
+                return;
+            }
+
+            _failed = true;
+            throw new System.ComponentModel.Win32Exception(
+                145,
+                "Injected empty-source state retirement failure.");
+        }
     }
 
     private sealed class RecreateSourceBeforeMarkerDelete(

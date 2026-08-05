@@ -103,7 +103,6 @@ public partial class FileMover
     private async Task<FileMoveGateLease?> TryAcquireFileMoveGateAsync(
         string sourceFile,
         string destinationFile,
-        bool createDestinationParent = false,
         bool allowExistingAliasForRecovery = false)
     {
         if (!allowExistingAliasForRecovery
@@ -199,7 +198,7 @@ public partial class FileMover
                 createMissing: false);
             destinationParent = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
                 destinationParentPath,
-                createDestinationParent);
+                createMissing: false);
             var pinnedSource = await ResolveFileMoveEndpointAsync(sourceFile);
             var pinnedDestination = await ResolveFileMoveEndpointAsync(
                 destinationFile);

@@ -3,6 +3,11 @@ export interface ApiValidationErrorPayload {
   field?: string
   message: string
   resolvedDestination?: string | null
+  jobId?: string
+  status?: string
+  requestedPath?: string
+  recoveryDisposition?: string
+  canRetry?: boolean
 }
 
 type ApiErrorWithBody = Error & {
@@ -34,6 +39,12 @@ export function getApiValidationError(
         typeof payload.resolvedDestination === 'string' || payload.resolvedDestination === null
           ? payload.resolvedDestination
           : undefined,
+      jobId: typeof payload.jobId === 'string' ? payload.jobId : undefined,
+      status: typeof payload.status === 'string' ? payload.status : undefined,
+      requestedPath: typeof payload.requestedPath === 'string' ? payload.requestedPath : undefined,
+      recoveryDisposition:
+        typeof payload.recoveryDisposition === 'string' ? payload.recoveryDisposition : undefined,
+      canRetry: typeof payload.canRetry === 'boolean' ? payload.canRetry : undefined,
     }
   } catch {
     return null

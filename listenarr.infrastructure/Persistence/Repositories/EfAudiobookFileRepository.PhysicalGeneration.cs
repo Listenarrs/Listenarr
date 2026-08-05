@@ -21,6 +21,8 @@ public partial class EfAudiobookFileRepository
             && candidate.PhysicalObjectIdentity == expectedPhysicalObjectIdentity);
         if (_db.Database.IsRelational())
         {
+            var completionToken =
+                RequestCancellationBoundary.EnterNonCancelablePhase(ct);
             var updated = await query.ExecuteUpdateAsync(
                 setters => setters
                     .SetProperty(candidate => candidate.Size, replacement.Size)
@@ -43,7 +45,7 @@ public partial class EfAudiobookFileRepository
                     .SetProperty(
                         candidate => candidate.PhysicalIdentityObservedAtUtc,
                         replacement.PhysicalIdentityObservedAtUtc),
-                ct);
+                completionToken);
             if (updated != 1)
             {
                 return false;
@@ -60,7 +62,9 @@ public partial class EfAudiobookFileRepository
         }
 
         ApplyPhysicalGeneration(existing, replacement);
-        await _db.SaveChangesAsync(ct);
+        var nonRelationalCompletionToken =
+            RequestCancellationBoundary.EnterNonCancelablePhase(ct);
+        await _db.SaveChangesAsync(nonRelationalCompletionToken);
         return true;
     }
 
@@ -79,7 +83,9 @@ public partial class EfAudiobookFileRepository
                 == expectedPhysicalObjectIdentity);
         if (_db.Database.IsRelational())
         {
-            var deleted = await query.ExecuteDeleteAsync(ct);
+            var completionToken =
+                RequestCancellationBoundary.EnterNonCancelablePhase(ct);
+            var deleted = await query.ExecuteDeleteAsync(completionToken);
             if (deleted != 1)
             {
                 return false;
@@ -102,7 +108,9 @@ public partial class EfAudiobookFileRepository
         }
 
         _db.AudiobookFiles.Remove(existing);
-        await _db.SaveChangesAsync(ct);
+        var nonRelationalCompletionToken =
+            RequestCancellationBoundary.EnterNonCancelablePhase(ct);
+        await _db.SaveChangesAsync(nonRelationalCompletionToken);
         return true;
     }
 

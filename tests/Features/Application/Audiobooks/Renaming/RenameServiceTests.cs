@@ -15,6 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using Listenarr.Application.Common.Exceptions;
 using Listenarr.Infrastructure.Persistence.Repositories;
 using Listenarr.Tests.Common;
 using Microsoft.EntityFrameworkCore;
@@ -24,7 +25,13 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
 {
     public class RenameServiceTests : IDisposable
     {
-        private readonly string _tempRoot = Path.Join(Path.GetTempPath(), "ListenarrRenameTests", Guid.NewGuid().ToString("N"));
+        private readonly string _tempRoot = OperatingSystem.IsWindows()
+            ? WindowsPathTestFixture.GetRootRelativeAliasCompatiblePath(
+                "ListenarrRenameTests")
+            : Path.Join(
+                Path.GetTempPath(),
+                "ListenarrRenameTests",
+                Guid.NewGuid().ToString("N"));
         private readonly List<ListenArrDbContext> _contexts = new();
         private readonly AudiobookOperationCoordinator _operationCoordinator = new();
 
@@ -189,13 +196,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
                 BasePath = customBase,
                 Files =
                 [
-                    new AudiobookFile
-                    {
-                        Id = 201,
-                        AudiobookId = 20,
-                        Path = sourcePath,
-                        Format = "m4b"
-                    }
+                    CreateTrackedFile(201, 20, sourcePath)
                 ]
             };
             db.Audiobooks.Add(audiobook);
@@ -234,12 +235,8 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
             Directory.CreateDirectory(nativeBase);
             await File.WriteAllTextAsync(nativeSource, "audio");
 
-            var root = Path.GetPathRoot(nativeBase)!;
-            var foreignBase = "/" + nativeBase[root.Length..].Replace('\\', '/');
-            Assert.Equal(
-                Path.GetFullPath(nativeBase),
-                Path.GetFullPath(foreignBase),
-                StringComparer.OrdinalIgnoreCase);
+            var foreignBase = WindowsPathTestFixture
+                .GetRootRelativeForeignAlias(nativeBase);
 
             var configuredOutput = Path.Join(_tempRoot, "configured-library");
             var (service, db, _) = BuildService(new ApplicationSettings
@@ -542,8 +539,11 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
             var rootB = Path.Join(_tempRoot, "organize-root-b");
             var sourceFolder = Path.Join(rootA, "Author", "Book");
             var targetFolder = Path.Join(rootB, "Author", "Book");
+            var sourceFile = Path.Join(sourceFolder, "Book.m4b");
+            var targetFile = Path.Join(targetFolder, "Book.m4b");
             Directory.CreateDirectory(sourceFolder);
             Directory.CreateDirectory(rootB);
+            await File.WriteAllTextAsync(sourceFile, "audio");
 
             var rootFolderService = new Mock<IRootFolderService>(MockBehavior.Strict);
             rootFolderService.Setup(service => service.GetAllAsync())
@@ -576,7 +576,8 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
                 Id = 13,
                 Title = "Book",
                 Authors = ["Author"],
-                BasePath = sourceFolder
+                BasePath = sourceFolder,
+                Files = [CreateTrackedFile(131, 13, sourceFile)]
             });
             await db.SaveChangesAsync();
 
@@ -588,7 +589,16 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
                     AudiobookId = 13,
                     CurrentFolderPath = preview.CurrentFolderPath,
                     CurrentFolderSemantics = preview.CurrentFolderSemantics,
-                    NewFolderPath = targetFolder
+                    NewFolderPath = targetFolder,
+                    FileRenames =
+                    [
+                        new FileRenameOperation
+                        {
+                            FileId = 131,
+                            CurrentPath = sourceFile,
+                            NewPath = targetFile
+                        }
+                    ]
                 }
             ]));
 
@@ -610,7 +620,9 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
             Directory.CreateDirectory(sourceFolder);
             Directory.CreateDirectory(outsideRoot);
             Directory.CreateSymbolicLink(linkedRoot, outsideRoot);
-            await File.WriteAllTextAsync(Path.Join(sourceFolder, "book.m4b"), "audio");
+            var sourceFile = Path.Join(sourceFolder, "book.m4b");
+            var targetFile = Path.Join(targetFolder, "book.m4b");
+            await File.WriteAllTextAsync(sourceFile, "audio");
             var settings = new ApplicationSettings
             {
                 OutputPath = libraryRoot,
@@ -623,7 +635,8 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
                 Id = 70,
                 Title = "Book",
                 Authors = new List<string> { "Author" },
-                BasePath = sourceFolder
+                BasePath = sourceFolder,
+                Files = [CreateTrackedFile(701, 70, sourceFile)]
             });
             await db.SaveChangesAsync();
 
@@ -634,7 +647,16 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
                     AudiobookId = 70,
                     CurrentFolderPath = sourceFolder,
                     CurrentFolderSemantics = ExpectedSemantics(sourceFolder),
-                    NewFolderPath = targetFolder
+                    NewFolderPath = targetFolder,
+                    FileRenames =
+                    [
+                        new FileRenameOperation
+                        {
+                            FileId = 701,
+                            CurrentPath = sourceFile,
+                            NewPath = targetFile
+                        }
+                    ]
                 }
             }));
 
@@ -668,10 +690,10 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
 
             var (service, db, dbName) = BuildService(settings, fileMover =>
             {
-                fileMover.Setup(mover => mover.PerformActionOn(
-                    FileAction.Move,
+                fileMover.Setup(mover => mover.MoveFilePreservingPhysicalIdentityAsync(
                     It.IsAny<string>(),
                     It.Is<string>(dest => dest.EndsWith("Part 2.m4b", StringComparison.OrdinalIgnoreCase)),
+                    It.IsAny<string>(),
                     It.IsAny<Guid?>()))
                     .ReturnsAsync(false);
             });
@@ -685,8 +707,8 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
                 FilePath = firstSourcePath,
                 Files = new List<AudiobookFile>
                 {
-                    new() { Id = 71, AudiobookId = 7, Path = firstSourcePath, Format = "m4b" },
-                    new() { Id = 72, AudiobookId = 7, Path = secondSourcePath, Format = "m4b" }
+                    CreateTrackedFile(71, 7, firstSourcePath),
+                    CreateTrackedFile(72, 7, secondSourcePath)
                 }
             });
             await db.SaveChangesAsync();
@@ -754,10 +776,10 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
             };
             var (service, db, _) = BuildService(settings, fileMover =>
             {
-                fileMover.Setup(mover => mover.PerformActionOn(
-                        FileAction.Move,
+                fileMover.Setup(mover => mover.MoveFilePreservingPhysicalIdentityAsync(
                         sourcePath,
                         targetPath,
+                        It.IsAny<string>(),
                         It.IsAny<Guid?>()))
                     .ThrowsAsync(new IOException(secret));
             });
@@ -768,13 +790,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
                 BasePath = sourceFolder,
                 Files =
                 [
-                    new AudiobookFile
-                    {
-                        Id = 731,
-                        AudiobookId = 73,
-                        Path = sourcePath,
-                        Format = "m4b"
-                    }
+                    CreateTrackedFile(731, 73, sourcePath)
                 ]
             });
             await db.SaveChangesAsync();
@@ -809,6 +825,68 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
         }
 
         [Fact]
+        public async Task ExecuteRename_UnresolvedMoveExecution_BlocksBeforeFileMutation()
+        {
+            var libraryRoot = Path.Join(_tempRoot, "unresolved-move-rename");
+            var sourceFolder = Path.Join(libraryRoot, "Old");
+            var targetFolder = Path.Join(libraryRoot, "Author", "Book");
+            Directory.CreateDirectory(sourceFolder);
+            var sourcePath = Path.Join(sourceFolder, "old-name.m4b");
+            var targetPath = Path.Join(targetFolder, "Book.m4b");
+            await File.WriteAllTextAsync(sourcePath, "test");
+            var moveQueue = new Mock<IMoveQueueService>(MockBehavior.Strict);
+            moveQueue.Setup(service => service.EnsureFilesystemMutationAllowedAsync(
+                    44,
+                    It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new ApplicationConflictException(
+                    "move_recovery_required",
+                    "An interrupted move still owns this audiobook's filesystem state."));
+            var (service, db, _) = BuildService(
+                new ApplicationSettings
+                {
+                    OutputPath = libraryRoot,
+                    FolderNamingPattern = "{Author}/{Title}",
+                    FileNamingPattern = "{Title}"
+                },
+                moveQueueServiceOverride: moveQueue.Object);
+            db.Audiobooks.Add(new Audiobook
+            {
+                Id = 44,
+                Title = "Book",
+                Authors = ["Author"],
+                BasePath = sourceFolder,
+                FilePath = sourcePath,
+                Files = [CreateTrackedFile(441, 44, sourcePath)]
+            });
+            await db.SaveChangesAsync();
+
+            var exception = await Assert.ThrowsAsync<ApplicationConflictException>(() =>
+                service.ExecuteRenameAsync(
+                [
+                    new RenameOperation
+                    {
+                        AudiobookId = 44,
+                        CurrentFolderPath = sourceFolder,
+                        CurrentFolderSemantics = ExpectedSemantics(sourceFolder),
+                        NewFolderPath = targetFolder,
+                        FileRenames =
+                        [
+                            new FileRenameOperation
+                            {
+                                FileId = 441,
+                                CurrentPath = sourcePath,
+                                NewPath = targetPath
+                            }
+                        ]
+                    }
+                ]));
+
+            Assert.Equal("move_recovery_required", exception.Code);
+            Assert.True(File.Exists(sourcePath));
+            Assert.False(File.Exists(targetPath));
+        }
+
+        [Fact]
         public async Task ExecuteRename_MovesFileAndUpdatesDatabasePaths()
         {
             var libraryRoot = Path.Join(_tempRoot, "library");
@@ -836,7 +914,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
                 FilePath = sourcePath,
                 Files = new List<AudiobookFile>
                 {
-                    new() { Id = 41, AudiobookId = 4, Path = sourcePath, Format = "m4b" }
+                    CreateTrackedFile(41, 4, sourcePath)
                 }
             });
             await db.SaveChangesAsync();
@@ -1002,8 +1080,8 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
                 BasePath = bookFolder,
                 Files =
                 [
-                    new AudiobookFile { Id = 181, AudiobookId = 18, Path = firstRelative },
-                    new AudiobookFile { Id = 182, AudiobookId = 18, Path = secondRelative }
+                    CreateTrackedFile(181, 18, firstRelative, firstSource),
+                    CreateTrackedFile(182, 18, secondRelative, secondSource)
                 ]
             };
             db.Audiobooks.Add(audiobook);
@@ -1061,13 +1139,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
                 FilePath = sourcePath,
                 Files =
                 [
-                    new AudiobookFile
-                    {
-                        Id = 111,
-                        AudiobookId = 11,
-                        Path = relativePath,
-                        Format = "m4b"
-                    }
+                    CreateTrackedFile(111, 11, relativePath, sourcePath)
                 ]
             };
             db.Audiobooks.Add(audiobook);
@@ -1136,12 +1208,12 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
                     FolderNamingPattern = "{Author}/{Title}",
                     FileNamingPattern = "{Title}"
                 },
-                fileMover => fileMover.Setup(mover => mover.PerformActionOn(
-                        FileAction.Move,
+                fileMover => fileMover.Setup(mover => mover.MoveFilePreservingPhysicalIdentityAsync(
+                        It.IsAny<string>(),
                         It.IsAny<string>(),
                         It.IsAny<string>(),
                         It.IsAny<Guid?>()))
-                    .Returns<FileAction, string, string, Guid?>((_, source, destination, _) =>
+                    .Returns<string, string, string, Guid?>((source, destination, _, _) =>
                     {
                         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
                         File.Move(source, destination, overwrite: true);
@@ -1160,18 +1232,8 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
                 BasePath = bookFolder,
                 Files =
                 [
-                    new AudiobookFile
-                    {
-                        Id = 151,
-                        AudiobookId = 15,
-                        Path = firstSource
-                    },
-                    new AudiobookFile
-                    {
-                        Id = 152,
-                        AudiobookId = 15,
-                        Path = secondSource
-                    }
+                    CreateTrackedFile(151, 15, firstSource),
+                    CreateTrackedFile(152, 15, secondSource)
                 ]
             });
             await db.SaveChangesAsync();
@@ -1399,14 +1461,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
                 FileSize = 5,
                 Files =
                 [
-                    new AudiobookFile
-                    {
-                        Id = 101,
-                        AudiobookId = 10,
-                        Path = sourcePath,
-                        Size = 5,
-                        Format = "m4b"
-                    }
+                    CreateTrackedFile(101, 10, sourcePath, size: 5)
                 ]
             };
             db.Audiobooks.Add(audiobook);
@@ -1453,65 +1508,53 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
         }
 
         [Fact]
-        public async Task ExecuteRename_FolderPersistenceFailure_RollsBackDirectoryAndPathState()
+        public async Task ExecuteRename_FolderOnlyRequest_DoesNotMoveUnownedDirectoryTree()
         {
-            var libraryRoot = Path.Join(_tempRoot, "library-persistence-rollback");
+            var libraryRoot = Path.Join(_tempRoot, "folder-only-rejected");
             var sourceFolder = Path.Join(libraryRoot, "Old");
             var targetFolder = Path.Join(libraryRoot, "Author", "Book");
             var sourcePath = Path.Join(sourceFolder, "Book.m4b");
+            var unrelatedPath = Path.Join(sourceFolder, "foreign.txt");
             Directory.CreateDirectory(sourceFolder);
             await File.WriteAllTextAsync(sourcePath, "audio");
+            await File.WriteAllTextAsync(unrelatedPath, "foreign");
 
-            var settings = new ApplicationSettings
+            var (service, db, _) = BuildService(new ApplicationSettings
             {
                 OutputPath = libraryRoot,
                 FolderNamingPattern = "{Author}/{Title}",
                 FileNamingPattern = "{Title}"
-            };
-            var (service, db, dbName) = BuildService(
-                settings,
-                contextFactory: options => new FailureInjectingListenArrDbContext(options));
-            var failureContext = Assert.IsType<FailureInjectingListenArrDbContext>(db);
-            db.Audiobooks.Add(new Audiobook
+            });
+            var audiobook = new Audiobook
             {
                 Id = 8,
                 Title = "Book",
-                Authors = new List<string> { "Author" },
+                Authors = ["Author"],
                 BasePath = sourceFolder,
                 FilePath = sourcePath,
-                Files = new List<AudiobookFile>
-                {
-                    new() { Id = 81, AudiobookId = 8, Path = sourcePath, Format = "m4b" }
-                }
-            });
+                Files = [CreateTrackedFile(81, 8, sourcePath)]
+            };
+            db.Audiobooks.Add(audiobook);
             await db.SaveChangesAsync();
-            failureContext.FailNextSave = true;
 
-            var result = Assert.Single(await service.ExecuteRenameAsync(new List<RenameOperation>
-            {
-                new()
+            var result = Assert.Single(await service.ExecuteRenameAsync(
+            [
+                new RenameOperation
                 {
                     AudiobookId = 8,
                     CurrentFolderPath = sourceFolder,
                     CurrentFolderSemantics = ExpectedSemantics(sourceFolder),
                     NewFolderPath = targetFolder
                 }
-            }));
+            ]));
 
             Assert.False(result.Success);
-            Assert.Contains("rolled back", result.Error, StringComparison.OrdinalIgnoreCase);
-            Assert.True(Directory.Exists(sourceFolder));
+            Assert.True(result.Conflict);
+            Assert.Contains("every tracked", result.Error, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(NormalizePath(sourceFolder), NormalizePath(audiobook.BasePath));
             Assert.True(File.Exists(sourcePath));
+            Assert.Equal("foreign", await File.ReadAllTextAsync(unrelatedPath));
             Assert.False(Directory.Exists(targetFolder));
-
-            await using var verification = CreateContext(dbName);
-            var saved = await verification.Audiobooks
-                .Include(audiobook => audiobook.Files)
-                .SingleAsync(audiobook => audiobook.Id == 8);
-            Assert.Equal(NormalizePath(sourceFolder), NormalizePath(saved.BasePath));
-            Assert.Equal(NormalizePath(sourcePath), NormalizePath(saved.FilePath));
-            Assert.Equal(NormalizePath(sourcePath), NormalizePath(saved.Files!.Single().Path));
-            Assert.Equal(PathIdentityState.Unavailable, saved.Files.Single().PathIdentityState);
         }
 
         [Fact]
@@ -1670,7 +1713,8 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
             IAudiobookOperationCoordinator? operationCoordinator = null,
             IFileSystemSemanticsResolver? semanticsResolverOverride = null,
             IRootFolderService? rootFolderServiceOverride = null,
-            IAudiobookFilePathIdentityResolver? identityResolverOverride = null)
+            IAudiobookFilePathIdentityResolver? identityResolverOverride = null,
+            IMoveQueueService? moveQueueServiceOverride = null)
         {
             var dbName = Guid.NewGuid().ToString();
             var options = new DbContextOptionsBuilder<ListenArrDbContext>()
@@ -1700,6 +1744,33 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
 
                     File.Move(source, dest, true);
                     return Task.FromResult(true);
+                });
+            fileMover.Setup(mover => mover.MoveFilePreservingPhysicalIdentityAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<Guid?>()))
+                .Returns<string, string, string, Guid?>((source, dest, expectedIdentity, _) =>
+                {
+                    if (!string.Equals(
+                            GetPhysicalObjectIdentity(source),
+                            expectedIdentity,
+                            StringComparison.Ordinal))
+                    {
+                        return Task.FromResult(false);
+                    }
+
+                    var dir = Path.GetDirectoryName(dest);
+                    if (!string.IsNullOrWhiteSpace(dir))
+                    {
+                        Directory.CreateDirectory(dir);
+                    }
+
+                    File.Move(source, dest, true);
+                    return Task.FromResult(string.Equals(
+                        GetPhysicalObjectIdentity(dest),
+                        expectedIdentity,
+                        StringComparison.Ordinal));
                 });
             fileMover.Setup(mover => mover.MoveDirectoryAsync(It.IsAny<string>(), It.IsAny<string>()))
                 .Returns<string, string>((source, dest) =>
@@ -1750,6 +1821,11 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
                     It.IsAny<int?>(),
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync([]);
+            var moveQueueService = new Mock<IMoveQueueService>();
+            moveQueueService.Setup(service => service.EnsureFilesystemMutationAllowedAsync(
+                    It.IsAny<int>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
             var service = new RenameService(
                 config.Object,
                 fileNaming,
@@ -1762,10 +1838,39 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
                 NullLogger<RenameService>.Instance,
                 semanticsResolver,
                 operationCoordinator ?? _operationCoordinator,
+                moveQueueServiceOverride ?? moveQueueService.Object,
                 directoryOwnershipStore.Object,
                 rootFolderServiceOverride);
 
             return (service, db, dbName);
+        }
+
+        private static AudiobookFile CreateTrackedFile(
+            int id,
+            int audiobookId,
+            string storedPath,
+            string? physicalPath = null,
+            string? format = "m4b",
+            long? size = null)
+        {
+            var file = new AudiobookFile
+            {
+                Id = id,
+                AudiobookId = audiobookId,
+                Path = storedPath,
+                Format = format,
+                Size = size
+            };
+            file.ApplyPhysicalObjectIdentity(
+                GetPhysicalObjectIdentity(physicalPath ?? storedPath),
+                DateTime.UtcNow);
+            return file;
+        }
+
+        private static string GetPhysicalObjectIdentity(string path)
+        {
+            using var lease = PinnedAudiobookFileRegistrationLease.Open(path);
+            return lease.PhysicalObjectIdentity;
         }
 
         private static IFileSystemSemanticsResolver BuildSemanticsResolver(FileSystemCaseSensitivity? caseSensitivity)

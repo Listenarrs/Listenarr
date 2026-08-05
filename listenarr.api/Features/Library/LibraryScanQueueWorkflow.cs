@@ -151,7 +151,14 @@ namespace Listenarr.Api.Features.Library
                 var job = new { jobId = jobId.ToString(), audiobookId, status = "Queued", enqueuedAt = DateTime.UtcNow };
                 await hub.BroadcastAsync(RealtimeHubTarget.Downloads, "ScanJobUpdate", job);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            catch (OperationCanceledException ex)
+            {
+                _logger.LogDebug(
+                    ex,
+                    "Scan job {JobId} was committed before its realtime broadcast was canceled",
+                    jobId);
+            }
+            catch (Exception ex) when (ex is not (OutOfMemoryException or StackOverflowException))
             {
                 _logger.LogWarning(ex, "Failed to broadcast ScanJobUpdate for job {JobId}", jobId);
             }

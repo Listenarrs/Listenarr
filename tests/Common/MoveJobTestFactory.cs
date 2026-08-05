@@ -1,7 +1,50 @@
+using Microsoft.EntityFrameworkCore;
+
 namespace Listenarr.Tests.Common;
 
 internal static class MoveJobTestFactory
 {
+    public static async Task<MoveJob> SeedUnresolvedExecutionAsync(
+        IServiceProvider services,
+        int audiobookId,
+        string sourcePath,
+        string targetPath,
+        MoveJobStatus status = MoveJobStatus.Failed,
+        MoveJobPhase phase = MoveJobPhase.Published,
+        MoveFailureKind failureKind = MoveFailureKind.Unknown)
+    {
+        var job = new MoveJob
+        {
+            Id = Guid.NewGuid(),
+            AudiobookId = audiobookId,
+            SourcePath = Path.GetFullPath(sourcePath),
+            RequestedPath = Path.GetFullPath(targetPath),
+            Status = status,
+            Phase = phase,
+            FailureKind = failureKind,
+            Error = "Injected unresolved filesystem execution for regression coverage.",
+            EnqueuedAt = DateTime.UtcNow,
+            Entries =
+            [
+                new MoveJobEntry
+                {
+                    RelativePath = "book.m4b",
+                    EntryType = MoveJobEntryType.File,
+                    Length = 1,
+                    LastWriteTimeUtc = DateTime.UnixEpoch,
+                    Sha256 = new string('A', 64),
+                    CopyState = MoveJobEntryCopyState.Verified,
+                    CleanupState = MoveJobEntryCleanupState.Deleted
+                }
+            ]
+        };
+        var factory = services.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        db.MoveJobs.Add(job);
+        await db.SaveChangesAsync();
+        return job;
+    }
+
     public static async Task<MoveEnqueueCommand> CreateCommandAsync(
         IServiceProvider services,
         int audiobookId,
@@ -27,11 +70,25 @@ internal static class MoveJobTestFactory
             FileSystemCaseSensitivityMode.Auto,
             sourceResolution.BoundaryPath,
             sourcePath);
+        var targetBoundary = FindTargetBoundary(
+            sourcePath,
+            targetPath,
+            sourceResolution.Semantics);
         var targetIdentity = PathIdentitySnapshot.FromResolution(
             targetResolution.Semantics,
             FileSystemCaseSensitivityMode.Auto,
-            targetResolution.BoundaryPath,
+            targetBoundary,
             targetPath);
+        var directoryIdentityResolver =
+            services.GetRequiredService<IDirectoryObjectIdentityResolver>();
+        var targetDirectoryIdentity = await directoryIdentityResolver.ResolveAsync(
+            targetBoundary);
+        if (!targetDirectoryIdentity.IsAvailable)
+        {
+            throw new InvalidOperationException(
+                targetDirectoryIdentity.UnavailableReason
+                    ?? "Move test target boundary identity is unavailable.");
+        }
         var manifest = await BuildManifestAsync(sourcePath);
         await EnsureTrackedRowsAsync(
             services,
@@ -46,8 +103,34 @@ internal static class MoveJobTestFactory
             manifest,
             targetPath,
             targetIdentity,
+            targetDirectoryIdentity.Version!.Value,
+            targetDirectoryIdentity.Value!,
             deleteEmptySource,
             sourceCleanupBoundary);
+    }
+
+    private static string FindTargetBoundary(
+        string sourcePath,
+        string targetPath,
+        FileSystemPathSemantics sourceSemantics)
+    {
+        var source = Path.GetFullPath(sourcePath);
+        var current = Path.GetDirectoryName(Path.GetFullPath(targetPath));
+        while (!string.IsNullOrWhiteSpace(current))
+        {
+            if (Directory.Exists(current)
+                && !FileSystemPathIdentity.IsSameOrInside(
+                    current,
+                    source,
+                    sourceSemantics))
+            {
+                return current;
+            }
+            current = Path.GetDirectoryName(current);
+        }
+
+        throw new InvalidOperationException(
+            "Move test target has no enclosing authorization boundary outside the source tree.");
     }
 
     private static async Task EnsureTrackedRowsAsync(

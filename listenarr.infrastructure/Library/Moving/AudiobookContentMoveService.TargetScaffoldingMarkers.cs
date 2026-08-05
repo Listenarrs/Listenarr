@@ -50,40 +50,61 @@ internal sealed partial class AudiobookContentMoveService
 
     private static ScaffoldOwnershipMarker? ReadScaffoldMarker(string directory)
     {
-        var markerPath = Path.Join(directory, ScaffoldOwnerFileName);
-        if (!File.Exists(markerPath))
+        if (!Directory.Exists(directory))
         {
             return null;
         }
 
-        if ((File.GetAttributes(markerPath) & FileAttributes.ReparsePoint) != 0)
-        {
-            throw new MoveNeedsAttentionException(
-                "The target scaffold ownership marker is linked.");
-        }
-
-        var length = new FileInfo(markerPath).Length;
-        if (length <= 0 || length > MaximumScaffoldMarkerBytes)
-        {
-            throw new MoveNeedsAttentionException(
-                "The target scaffold ownership marker has an invalid size.");
-        }
-
         try
         {
-            using var stream = new FileStream(
-                markerPath,
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.Read,
-                4096,
-                FileOptions.SequentialScan);
-            return JsonSerializer.Deserialize<ScaffoldOwnershipMarker>(stream);
+            using var directoryAnchor =
+                PinnedDirectoryCreation.OpenPinnedDirectoryNoFollow(directory);
+            if (!directoryAnchor.VisiblePathMatches())
+            {
+                throw new MoveNeedsAttentionException(
+                    "The target scaffold directory changed while its ownership marker was being inspected.");
+            }
+
+            PinnedDirectoryCreation.PinnedFileEntry markerEntry;
+            try
+            {
+                markerEntry = directoryAnchor.OpenExistingFileForStableRead(
+                    ScaffoldOwnerFileName);
+            }
+            catch (System.ComponentModel.Win32Exception exception) when (
+                exception.NativeErrorCode is 2 or 3)
+            {
+                return null;
+            }
+            catch (FileNotFoundException)
+            {
+                return null;
+            }
+            catch (DirectoryNotFoundException)
+            {
+                return null;
+            }
+
+            using (markerEntry)
+            {
+                if (!markerEntry.VisiblePathMatches())
+                {
+                    throw new MoveNeedsAttentionException(
+                        "The target scaffold ownership marker changed while it was being inspected.");
+                }
+
+                return ReadScaffoldMarker(markerEntry);
+            }
         }
-        catch (JsonException exception)
+        catch (MoveNeedsAttentionException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is
+            IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
         {
             throw new MoveNeedsAttentionException(
-                $"The target scaffold ownership marker is invalid: {exception.Message}");
+                $"The target scaffold ownership marker is unreadable: {exception.Message}");
         }
     }
 

@@ -10,12 +10,28 @@ public sealed partial class RootFolderRelocationService
         set;
     }
 
-    private void RetireOwnershipMigrationSources(
+    private async Task RetireOwnershipMigrationSourcesAsync(
         IReadOnlyList<OwnershipMigrationPlan> plans,
         string sourceBoundary,
-        string targetBoundary)
+        string targetBoundary,
+        int? targetIdentityVersion,
+        string? targetIdentityValue,
+        string? targetIdentityUnavailableReason,
+        CancellationToken cancellationToken)
     {
         BeforeOwnershipMigrationSourceRetirementForTest?.Invoke();
+        if (plans.Count > 0)
+        {
+            using var targetBoundaryAnchor = await OpenVerifiedMarkerParentWithinBoundaryAsync(
+                targetBoundary,
+                targetBoundary,
+                plans[0].Target.GetIdentity().Semantics,
+                targetIdentityVersion,
+                targetIdentityValue,
+                targetIdentityUnavailableReason,
+                cancellationToken);
+        }
+
         foreach (var plan in plans)
         {
             var sourceSiblingMarker =
@@ -43,10 +59,14 @@ public sealed partial class RootFolderRelocationService
                 sourceBoundary,
                 sourceParentPath,
                 plan.Source.GetIdentity().Semantics);
-            using var targetParent = OpenMarkerParentWithinBoundary(
+            using var targetParent = await OpenVerifiedMarkerParentWithinBoundaryAsync(
                 targetBoundary,
                 targetParentPath,
-                plan.Target.GetIdentity().Semantics);
+                plan.Target.GetIdentity().Semantics,
+                targetIdentityVersion,
+                targetIdentityValue,
+                targetIdentityUnavailableReason,
+                cancellationToken);
             using var targetMarker = targetParent.OpenExistingFileForStableRead(
                 Path.GetFileName(targetSiblingMarker));
             ValidateRetirementTarget(plan, targetParent, targetMarker);
@@ -183,6 +203,82 @@ public sealed partial class RootFolderRelocationService
             canonicalBoundary);
         try
         {
+            if (FileSystemPathIdentity.AreEquivalent(
+                    canonicalParent,
+                    canonicalBoundary,
+                    semantics))
+            {
+                return current;
+            }
+
+            var relative = Path.GetRelativePath(
+                canonicalBoundary,
+                canonicalParent);
+            foreach (var segment in relative.Split(
+                [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+                StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (segment is "." or "..")
+                {
+                    throw new InvalidOperationException(
+                        "An ownership marker parent contains navigation segments.");
+                }
+
+                var next = current.OpenExistingChild(segment);
+                current.Dispose();
+                current = next;
+            }
+
+            return current;
+        }
+        catch
+        {
+            current.Dispose();
+            throw;
+        }
+    }
+
+    private static async Task<PinnedDirectoryCreation.PinnedDirectoryAnchor>
+        OpenVerifiedMarkerParentWithinBoundaryAsync(
+            string boundaryPath,
+            string parentPath,
+            FileSystemPathSemantics semantics,
+            int? expectedBoundaryIdentityVersion = null,
+            string? expectedBoundaryIdentityValue = null,
+            string? boundaryIdentityUnavailableReason = null,
+            CancellationToken cancellationToken = default)
+    {
+        var canonicalBoundary = FileSystemPathIdentity.Canonicalize(
+            boundaryPath,
+            semantics.Syntax);
+        var canonicalParent = FileSystemPathIdentity.Canonicalize(
+            parentPath,
+            semantics.Syntax);
+        if (!FileSystemPathIdentity.IsSameOrInside(
+                canonicalParent,
+                canonicalBoundary,
+                semantics))
+        {
+            throw new InvalidOperationException(
+                "An ownership migration marker escaped its authorized root boundary.");
+        }
+
+        var current = PinnedDirectoryCreation.OpenPinnedBoundary(
+            canonicalBoundary);
+        try
+        {
+            if (expectedBoundaryIdentityVersion.HasValue
+                || !string.IsNullOrWhiteSpace(expectedBoundaryIdentityValue)
+                || !string.IsNullOrWhiteSpace(boundaryIdentityUnavailableReason))
+            {
+                await ManagedDirectoryEnrollment.RequireMatchingEnrollmentAsync(
+                    current,
+                    expectedBoundaryIdentityVersion,
+                    expectedBoundaryIdentityValue,
+                    boundaryIdentityUnavailableReason,
+                    cancellationToken);
+            }
+
             if (FileSystemPathIdentity.AreEquivalent(
                     canonicalParent,
                     canonicalBoundary,

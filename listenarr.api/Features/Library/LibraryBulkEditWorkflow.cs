@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using Listenarr.Application.Common.Exceptions;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Api.Features.Library
@@ -29,7 +30,9 @@ namespace Listenarr.Api.Features.Library
         private readonly string _contentRootPath;
         private readonly IFileSystem _fileSystem;
         private readonly IAudiobookDestinationRewriteService _destinationRewriteService;
+        private readonly IFilesystemMutationCoordinator _filesystemMutationCoordinator;
         private readonly IAudiobookOperationCoordinator _audiobookOperationCoordinator;
+        private readonly IMoveQueueService _moveQueueService;
         private readonly LibraryMoveWorkflow _moveWorkflow;
         private readonly ILogger<LibraryBulkEditWorkflow> _logger;
 
@@ -41,7 +44,9 @@ namespace Listenarr.Api.Features.Library
             IApplicationPathService applicationPathService,
             IFileSystem fileSystem,
             IAudiobookDestinationRewriteService destinationRewriteService,
+            IFilesystemMutationCoordinator filesystemMutationCoordinator,
             IAudiobookOperationCoordinator audiobookOperationCoordinator,
+            IMoveQueueService moveQueueService,
             LibraryMoveWorkflow moveWorkflow,
             ILogger<LibraryBulkEditWorkflow> logger)
         {
@@ -52,7 +57,9 @@ namespace Listenarr.Api.Features.Library
             _contentRootPath = applicationPathService.ContentRootPath;
             _fileSystem = fileSystem;
             _destinationRewriteService = destinationRewriteService ?? throw new ArgumentNullException(nameof(destinationRewriteService));
+            _filesystemMutationCoordinator = filesystemMutationCoordinator ?? throw new ArgumentNullException(nameof(filesystemMutationCoordinator));
             _audiobookOperationCoordinator = audiobookOperationCoordinator ?? throw new ArgumentNullException(nameof(audiobookOperationCoordinator));
+            _moveQueueService = moveQueueService ?? throw new ArgumentNullException(nameof(moveQueueService));
             _moveWorkflow = moveWorkflow ?? throw new ArgumentNullException(nameof(moveWorkflow));
             _logger = logger;
         }
@@ -109,13 +116,32 @@ namespace Listenarr.Api.Features.Library
                         metadataUpdates,
                         settings)
                 };
-                var outcome = await _audiobookOperationCoordinator.ExecuteExclusiveAsync(
-                    id,
-                    _ => UpdateOneAsync(
+                BulkUpdateOutcome outcome;
+                try
+                {
+                    outcome = await _audiobookOperationCoordinator.ExecuteExclusiveAsync(
                         id,
-                        metadataUpdates,
-                        rootRewrite.Rewritten,
-                        pathChangeMode == LibraryController.BulkPathChangeMode.Physical));
+                        async token =>
+                        {
+                            if (pathChangeMode == LibraryController.BulkPathChangeMode.Physical)
+                            {
+                                await _moveQueueService.EnsureFilesystemMutationAllowedAsync(id, token);
+                            }
+
+                            return await UpdateOneAsync(
+                                id,
+                                metadataUpdates,
+                                rootRewrite.Rewritten,
+                                pathChangeMode == LibraryController.BulkPathChangeMode.Physical);
+                        });
+                }
+                catch (ApplicationConflictException exception)
+                {
+                    outcome = new BulkUpdateOutcome(
+                        Success: false,
+                        MetadataUpdated: false,
+                        Errors: [exception.SafeDetail]);
+                }
                 var errors = outcome.Errors
                     .Concat(rootRewrite.Error == null ? [] : [rootRewrite.Error])
                     .Concat(physicalPlan.Error == null ? [] : [physicalPlan.Error])

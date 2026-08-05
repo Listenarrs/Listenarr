@@ -247,6 +247,15 @@ namespace Listenarr.Application.Metadata.Extraction
             return _audioTagWriter.WriteAsinTagAsync(filePath, asin);
         }
 
+        public Task WriteAsinTagAsync(
+            IAudiobookFileRegistrationLease registrationLease,
+            string asin)
+        {
+            return _audioTagWriter.WriteAsinTagAsync(
+                registrationLease,
+                asin);
+        }
+
         public async Task<byte[]?> DownloadCoverArtAsync(string coverArtUrl)
         {
             try

@@ -88,16 +88,17 @@ export const useRootFoldersStore = defineStore('rootFolders', () => {
 
     const requestedMode = payload.caseSensitivityMode ?? current.caseSensitivityMode ?? 'Auto'
     const hasPathChange = rootFolderPathChanged(current, payload.path)
+    const hasSemanticsChange = requestedMode !== (current.caseSensitivityMode ?? 'Auto')
     let pathChangeError: string | null = null
-    if (hasPathChange) {
-      if (opts?.pathChangeConfirmed !== true) {
+    if (hasPathChange || hasSemanticsChange) {
+      if (hasPathChange && opts?.pathChangeConfirmed !== true) {
         throw new Error('Root folder path change requires confirmation')
       }
 
       const result = await apiService.changeRootFolderPath(id, {
-        targetPath: payload.path,
-        mode: opts?.moveFiles === false ? 'metadataOnly' : 'relocate',
-        deleteEmptySource: opts?.deleteEmptySource !== false,
+        targetPath: hasPathChange ? payload.path : current.path,
+        mode: hasPathChange && opts?.moveFiles !== false ? 'relocate' : 'metadataOnly',
+        deleteEmptySource: hasPathChange && opts?.deleteEmptySource !== false,
         desiredName: payload.name,
         desiredIsDefault: payload.isDefault === true,
         targetCaseSensitivityMode: requestedMode,

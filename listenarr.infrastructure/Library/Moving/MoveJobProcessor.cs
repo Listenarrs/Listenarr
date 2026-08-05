@@ -36,6 +36,8 @@ internal partial class MoveJobProcessor(
     IAudiobookOperationCoordinator audiobookOperationCoordinator,
     IAudiobookUpdatePublisher? audiobookUpdatePublisher = null) : IMoveJobProcessor, IMoveJobProcessorPhases
 {
+    internal Func<MoveJob, Task>? AfterSourceCleanupBeforeMetadataRewriteForTest { get; set; }
+
     public async Task ProcessJobAsync(MoveJob job, CancellationToken stoppingToken)
     {
         var postCommit = await ProcessDurableJobAsync(job, stoppingToken);
@@ -75,11 +77,21 @@ internal partial class MoveJobProcessor(
 
         if (postCommit == null)
         {
-            await moveQueueService.NotifyPersistedJobStateAsync(
-                job.Id,
-                job.Status,
-                job.Error,
-                stoppingToken);
+            try
+            {
+                await moveQueueService.NotifyPersistedJobStateAsync(
+                    job.Id,
+                    job.Status,
+                    job.Error,
+                    stoppingToken);
+            }
+            catch (OperationCanceledException exception)
+            {
+                logger.LogDebug(
+                    exception,
+                    "Move job {JobId} state was already persisted before terminal notification cancellation",
+                    job.Id);
+            }
         }
 
         return postCommit;

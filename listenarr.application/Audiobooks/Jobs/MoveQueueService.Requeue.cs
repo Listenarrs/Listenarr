@@ -154,6 +154,27 @@ public partial class MoveQueueService
                 jobToNotify = job;
                 return null;
             }
+            if (!MoveManifestIdentity.TryGetTargetBoundaryAuthorization(
+                    job.Entries,
+                    out _,
+                    out _))
+            {
+                await MarkUnsafeStoredPathNeedsAttentionAsync(
+                    job,
+                    "The move job has no durable target-boundary physical-generation authorization and cannot be requeued safely.",
+                    cancellationToken);
+                jobToNotify = job;
+                return null;
+            }
+
+            if (job.Status != MoveJobStatus.Queued
+                && MoveRecoveryPolicy.GetDisposition(job) != MoveRecoveryDisposition.RetryAvailable)
+            {
+                _logger.LogInformation(
+                    "Move job {JobId} requires operator repair and cannot be manually requeued",
+                    jobId);
+                return null;
+            }
 
             var deduplicationKey = MoveManifestIdentity.CreateDeduplicationKey(
                 job.AudiobookId,
@@ -204,17 +225,19 @@ public partial class MoveQueueService
         if (jobToSchedule != null)
         {
             await ScheduleAsync(jobToSchedule);
-            await NotifyPersistedJobStateAsync(
+            await NotifyCommittedJobStateAsync(
                 jobToSchedule.Id,
                 jobToSchedule.Status,
-                jobToSchedule.Error);
+                jobToSchedule.Error,
+                CancellationToken.None);
         }
         else if (jobToNotify != null)
         {
-            await NotifyPersistedJobStateAsync(
+            await NotifyCommittedJobStateAsync(
                 jobToNotify.Id,
                 jobToNotify.Status,
-                jobToNotify.Error);
+                jobToNotify.Error,
+                CancellationToken.None);
         }
 
         return result;

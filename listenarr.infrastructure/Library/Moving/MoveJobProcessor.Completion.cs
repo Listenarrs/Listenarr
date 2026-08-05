@@ -59,6 +59,14 @@ internal partial class MoveJobProcessor
                 MoveJobStatus.Completed,
                 cancellationToken: cancellationToken);
         }
+        catch (OperationCanceledException exception) when (
+            !cancellationToken.IsCancellationRequested)
+        {
+            logger.LogWarning(
+                exception,
+                "Move job {JobId} completed durably but its current state publication was canceled internally",
+                context.JobId);
+        }
         catch (Exception exception) when (WorkerExceptionClassifier.IsNonFatal(exception))
         {
             logger.LogWarning(
@@ -86,6 +94,14 @@ internal partial class MoveJobProcessor
                 await historyRepository.MarkNotificationSentAsync(
                     context.MoveHistoryId,
                     cancellationToken);
+            }
+            catch (OperationCanceledException exception) when (
+                !cancellationToken.IsCancellationRequested)
+            {
+                logger.LogWarning(
+                    exception,
+                    "Move completion was committed but its notification flag update was canceled internally for job {JobId}",
+                    context.JobId);
             }
             catch (Exception exception) when (WorkerExceptionClassifier.IsNonFatal(exception))
             {
@@ -157,6 +173,14 @@ internal partial class MoveJobProcessor
 
             return true;
         }
+        catch (OperationCanceledException exception)
+        {
+            logger.LogWarning(
+                exception,
+                "Move notification was canceled internally for {JobId}",
+                context.JobId);
+            return false;
+        }
         catch (Exception exception) when (WorkerExceptionClassifier.IsNonFatal(exception))
         {
             logger.LogWarning(
@@ -180,6 +204,13 @@ internal partial class MoveJobProcessor
                 message,
                 timeoutMs: 5000);
             logger.LogDebug("Sent toast notification for move job {JobId}", context.JobId);
+        }
+        catch (OperationCanceledException exception)
+        {
+            logger.LogDebug(
+                exception,
+                "Toast notification was canceled internally for move job {JobId}",
+                context.JobId);
         }
         catch (Exception exception) when (WorkerExceptionClassifier.IsNonFatal(exception))
         {
@@ -207,6 +238,14 @@ internal partial class MoveJobProcessor
             logger.LogInformation(
                 "Broadcasted full AudiobookUpdate for AudiobookId {AudiobookId} after move job {JobId}",
                 context.AudiobookId,
+                context.JobId);
+        }
+        catch (OperationCanceledException exception) when (
+            !cancellationToken.IsCancellationRequested)
+        {
+            logger.LogWarning(
+                exception,
+                "AudiobookUpdate broadcast was canceled internally after move job {JobId}",
                 context.JobId);
         }
         catch (Exception exception) when (WorkerExceptionClassifier.IsNonFatal(exception))

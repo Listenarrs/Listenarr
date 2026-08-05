@@ -36,7 +36,7 @@ public sealed partial class RootFolderRelocationService
         var plan = DiscoverTargetReservationPlan(targetPath);
         if (plan.Segments.Count == 0)
         {
-            return await ResolveExistingDirectoryObjectIdentityAsync(
+            return await ResolveOrEnrollDirectoryObjectIdentityAsync(
                 targetPath,
                 cancellationToken);
         }

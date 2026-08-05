@@ -174,12 +174,8 @@ namespace Listenarr.Tests.Features.Infrastructure.Configuration.Paths
         public async Task TranslatePathAsync_ForeignPersistedLocalRoot_DoesNotMapWindowsAlias()
         {
             var nativeLocalRoot = FileUtils.GetAbsolutePath("foreign-local-root");
-            var driveRoot = Path.GetPathRoot(nativeLocalRoot)!;
-            var foreignLocalRoot = "/" + nativeLocalRoot[driveRoot.Length..].Replace('\\', '/');
-            Assert.Equal(
-                Path.GetFullPath(nativeLocalRoot),
-                Path.GetFullPath(foreignLocalRoot),
-                StringComparer.OrdinalIgnoreCase);
+            var foreignLocalRoot = TempFileService
+                .GetWindowsRootRelativeForeignAlias(nativeLocalRoot);
 
             await _remotePathMappingRepository.SaveAsync(new RemotePathMappingBuilder()
                 .WithDownloadClientConfiguration(client)

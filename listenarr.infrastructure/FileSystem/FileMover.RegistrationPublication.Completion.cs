@@ -14,7 +14,6 @@ public partial class FileMover
         using var gate = await TryAcquireFileMoveGateAsync(
             source,
             destination,
-            createDestinationParent: false,
             allowExistingAliasForRecovery: true);
         if (gate == null)
         {
@@ -74,6 +73,17 @@ public partial class FileMover
             using var claim = state.TryOpenExistingFile(
                 "publication.claim",
                 requireDeleteAccess: true);
+            using var intent = state.TryOpenExistingFile(
+                RegistrationCleanupIntentName,
+                requireDeleteAccess: true);
+            if (intent != null
+                && !RegistrationCleanupIntentMatchesPublication(
+                    intent,
+                    gate.DestinationName,
+                    expectedPhysicalObjectIdentity))
+            {
+                return null;
+            }
             if (claim != null)
             {
                 if (!claim.VisiblePathMatches()
@@ -89,15 +99,15 @@ public partial class FileMover
                     "registered publication claim retirement");
             }
 
-            if (!DeleteRegistrationCleanupIntentIfPresent(state))
+            if (intent != null
+                && !DeletePinnedRegistrationCleanupIntent(state, intent))
             {
                 return null;
             }
 
             state.Dispose();
-            statePublication.DeletePinnedEmptyDirectory(
-                stateName,
-                immediateWindows: true);
+            statePublication.RetirePinnedEmptyDirectoryFromNamespace(
+                stateName);
             FlushFileMoveDirectory(
                 gate.DestinationParent,
                 "registered publication state retirement");
@@ -158,7 +168,7 @@ public partial class FileMover
                 requireDeleteAccess: true);
             using var intent = state.TryOpenExistingFile(
                 RegistrationCleanupIntentName,
-                requireDeleteAccess: false);
+                requireDeleteAccess: true);
             using var published = parent.TryOpenExistingFile(
                 Path.GetFileName(destination),
                 requireDeleteAccess: false);
@@ -171,7 +181,12 @@ public partial class FileMover
                 || (claim == null && intent == null)
                 || (claim != null
                     && (!claim.VisiblePathMatches()
-                        || !claim.IdentifiesSameEntry(published))))
+                        || !claim.IdentifiesSameEntry(published)))
+                || (intent != null
+                    && !RegistrationCleanupIntentMatchesPublication(
+                        intent,
+                        Path.GetFileName(destination),
+                        expectedPhysicalObjectIdentity)))
             {
                 return false;
             }
@@ -185,16 +200,15 @@ public partial class FileMover
                     "completed registration-publication claim retirement");
             }
             AfterRegistrationPublicationClaimRetiredForTest?.Invoke();
-            intent?.Dispose();
-            if (!DeleteRegistrationCleanupIntentIfPresent(state))
+            if (intent != null
+                && !DeletePinnedRegistrationCleanupIntent(state, intent))
             {
                 return false;
             }
 
             state.Dispose();
-            statePublication.DeletePinnedEmptyDirectory(
-                stateName,
-                immediateWindows: true);
+            statePublication.RetirePinnedEmptyDirectoryFromNamespace(
+                stateName);
             FlushFileMoveDirectory(
                 parent,
                 "completed registration-publication state retirement");

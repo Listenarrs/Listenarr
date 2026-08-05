@@ -141,6 +141,13 @@ public sealed partial class RootFolderRelocationService
         AfterMetadataOnlyJournalCommitForTest?.Invoke();
         try
         {
+            if (targetObjectIdentity.IsAvailable)
+            {
+                await RequireTargetDirectoryGenerationAsync(
+                    targetPath,
+                    targetObjectIdentity,
+                    completionToken);
+            }
             await PublishOwnershipMigrationTargetsAsync(
                 ownershipPlans,
                 targetPath,
@@ -153,6 +160,13 @@ public sealed partial class RootFolderRelocationService
                 plan.Journal.UpdatedAt = DateTime.UtcNow;
             }
             await db.SaveChangesAsync(completionToken);
+            if (targetObjectIdentity.IsAvailable)
+            {
+                await RequireTargetDirectoryGenerationAsync(
+                    targetPath,
+                    targetObjectIdentity,
+                    completionToken);
+            }
         }
         catch (Exception exception) when (exception is not (
             OutOfMemoryException or StackOverflowException))
@@ -226,10 +240,14 @@ public sealed partial class RootFolderRelocationService
                 ownershipPlans,
                 targetPath,
                 CancellationToken.None);
-            RetireOwnershipMigrationSources(
+            await RetireOwnershipMigrationSourcesAsync(
                 ownershipPlans,
                 sourcePath,
-                targetPath);
+                targetPath,
+                targetObjectIdentity.Version,
+                targetObjectIdentity.Value,
+                targetObjectIdentity.UnavailableReason,
+                CancellationToken.None);
             db.LibraryDirectoryOwnershipPathMigrations.RemoveRange(
                 ownershipPlans.Select(plan => plan.Journal));
             var completedWithoutAttention = skipped.Count == 0;

@@ -24,6 +24,7 @@ import {
   trimTrailingDirectorySeparators,
   normalizeForCompare,
   isAbsolutePath,
+  isRootedPath,
   hasRelativePathSegment,
   hasParentTraversalSegment,
   hasEmptyMiddlePathSegment,
@@ -81,6 +82,15 @@ describe('path utils', () => {
     expect(isAbsolutePath('/library', 'windows')).toBe(false)
     expect(isAbsolutePath('/', 'windows')).toBe(true)
     expect(isAbsolutePath('relative/path')).toBe(false)
+  })
+
+  it('distinguishes rooted input from fully absolute paths', () => {
+    expect(isRootedPath('C:\\some\\path', 'windows')).toBe(true)
+    expect(isRootedPath('\\some\\path', 'windows')).toBe(true)
+    expect(isRootedPath('/some/path', 'unix')).toBe(true)
+    expect(isRootedPath('\\some\\path', 'unix')).toBe(false)
+    expect(isRootedPath('some/path', 'unix')).toBe(false)
+    expect(isRootedPath('some\\path', 'windows')).toBe(false)
   })
 
   it('classifies and rejects Windows drive-relative paths', () => {

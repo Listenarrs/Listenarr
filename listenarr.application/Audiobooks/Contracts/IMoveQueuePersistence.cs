@@ -50,6 +50,13 @@ public interface IMoveQueuePersistence
 
     Task<IReadOnlyList<MoveJob>> GetActiveAsync(CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<MoveJob>> GetRecoveryCandidatesByAudiobookAsync(
+        int audiobookId,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<MoveJob>> GetRecoveryCandidatesAsync(
+        CancellationToken cancellationToken = default);
+
     Task ReconcileIdentityKeysAsync(CancellationToken cancellationToken = default);
 
     Task<MoveQueueHealthSnapshot> GetHealthAsync(

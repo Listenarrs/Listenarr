@@ -217,11 +217,16 @@ namespace Listenarr.Api.Features.Library
         /// Delete multiple audiobooks in a single transaction.
         /// </summary>
         /// <param name="request">List of audiobook IDs to delete.</param>
+        /// <param name="cancellationToken">Request cancellation token.</param>
         /// <returns>Summary with deleted count, image cleanup count, and any per-item errors.</returns>
         [HttpPost("delete-bulk")]
-        public async Task<IActionResult> BulkDeleteAudiobooks([FromBody] BulkDeleteRequest request)
+        public async Task<IActionResult> BulkDeleteAudiobooks(
+            [FromBody] BulkDeleteRequest request,
+            CancellationToken cancellationToken = default)
         {
-            return await _bulkEditWorkflow.BulkDeleteAsync(request);
+            return await _bulkEditWorkflow.BulkDeleteAsync(
+                request,
+                cancellationToken);
         }
 
         /// <summary>
@@ -267,6 +272,19 @@ namespace Listenarr.Api.Features.Library
             CancellationToken cancellationToken = default)
         {
             return await _moveWorkflow.EnqueueAsync(id, request, cancellationToken);
+        }
+
+        /// <summary>
+        /// Get the durable unresolved move state for an audiobook.
+        /// </summary>
+        /// <param name="id">Audiobook ID.</param>
+        /// <param name="cancellationToken">Request cancellation token.</param>
+        [HttpGet("{id}/move/recovery")]
+        public async Task<IActionResult> GetMoveRecoveryState(
+            int id,
+            CancellationToken cancellationToken)
+        {
+            return await _moveWorkflow.GetRecoveryStateAsync(id, cancellationToken);
         }
 
         /// <summary>

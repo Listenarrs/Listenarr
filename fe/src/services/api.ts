@@ -1295,6 +1295,8 @@ class ApiService {
     status: string
     target?: string
     error?: string
+    recoveryDisposition?: string
+    canRetry?: boolean
   }> {
     const job = await this.request<{
       id: string
@@ -1307,6 +1309,7 @@ class ApiService {
       enqueuedAt?: string
       updatedAt?: string
       nextAttemptAt?: string
+      recoveryDisposition?: string
       canRetry?: boolean
     }>('/library/move/' + encodeURIComponent(jobId))
 
@@ -1316,7 +1319,29 @@ class ApiService {
       status: job.status,
       target: job.requestedPath,
       error: job.error,
+      recoveryDisposition: job.recoveryDisposition,
+      canRetry: job.canRetry,
     }
+  }
+
+  async getMoveRecoveryState(audiobookId: number): Promise<{
+    hasUnresolvedMove: boolean
+    disposition: string
+    jobId?: string | null
+    status?: string | null
+    phase?: string | null
+    requestedPath?: string | null
+    error?: string | null
+    canRetry: boolean
+    blockingJobIds: string[]
+  }> {
+    return this.request(`/library/${audiobookId}/move/recovery`)
+  }
+
+  async requeueMoveJob(jobId: string): Promise<{ message: string; jobId: string }> {
+    return this.request(`/library/move/requeue/${encodeURIComponent(jobId)}`, {
+      method: 'POST',
+    })
   }
 
   async removeFromLibrary(
@@ -1452,12 +1477,16 @@ class ApiService {
     return this.request<ManualImportPreviewResponse>(`/library/manual-import/preview${params}`)
   }
 
-  async startManualImport(
-    request: ManualImportRequest,
-  ): Promise<{ importedCount: number; totalCount?: number; results?: ManualImportResult[] }> {
+  async startManualImport(request: ManualImportRequest): Promise<{
+    importedCount: number
+    totalCount?: number
+    stoppedByCancellation?: boolean
+    results?: ManualImportResult[]
+  }> {
     return this.request<{
       importedCount: number
       totalCount?: number
+      stoppedByCancellation?: boolean
       results?: ManualImportResult[]
     }>(`/library/manual-import`, {
       method: 'POST',

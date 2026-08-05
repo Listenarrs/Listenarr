@@ -82,15 +82,11 @@ namespace Listenarr.Tests.Features.Api.Services
         [WindowsFact]
         public async Task GenerateFilePathAsync_ForeignConfiguredRootAlias_DoesNotOwnNativeCustomBase()
         {
-            var requestedRoot = Path.GetFullPath(Path.Join(
-                Path.GetTempPath(),
-                $"listenarr-naming-foreign-root-{Guid.NewGuid():N}"));
-            var driveRoot = Path.GetPathRoot(requestedRoot)!;
-            var foreignConfiguredRoot = "/" + requestedRoot[driveRoot.Length..].Replace('\\', '/');
-            Assert.Equal(
-                requestedRoot,
-                Path.GetFullPath(foreignConfiguredRoot),
-                StringComparer.OrdinalIgnoreCase);
+            var requestedRoot = WindowsPathTestFixture
+                .GetRootRelativeAliasCompatiblePath(
+                    "listenarr-naming-foreign-root");
+            var foreignConfiguredRoot = WindowsPathTestFixture
+                .GetRootRelativeForeignAlias(requestedRoot);
             var settings = new ApplicationSettings
             {
                 OutputPath = foreignConfiguredRoot,

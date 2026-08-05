@@ -46,7 +46,6 @@ public sealed partial class EfMoveQueuePersistence
                         "The move job has no persisted tracked-file source manifest and cannot be reconciled safely.");
                     continue;
                 }
-
                 if (string.IsNullOrWhiteSpace(job.SourcePath)
                     || string.IsNullOrWhiteSpace(job.RequestedPath))
                 {
@@ -119,7 +118,7 @@ public sealed partial class EfMoveQueuePersistence
                     job.IdentityKeyVersion = MoveManifestIdentity.Version;
                     resolvedJobs.Add((
                         job,
-                        MoveManifestIdentity.CreateDeduplicationKey(
+                        MoveManifestIdentity.CreateReconciliationKey(
                             job.AudiobookId,
                             sourcePath,
                             sourceIdentity,
@@ -140,6 +139,7 @@ public sealed partial class EfMoveQueuePersistence
             var activeJobIds = activeJobs.Select(job => job.Id).ToList();
             var jobIdsWithManifestExecutionState = await db.MoveJobEntries
                 .Where(entry => activeJobIds.Contains(entry.MoveJobId)
+                    && entry.RelativePath != string.Empty
                     && (entry.CopyState != MoveJobEntryCopyState.Pending
                         || entry.CleanupState != MoveJobEntryCleanupState.Pending))
                 .Select(entry => entry.MoveJobId)
@@ -215,15 +215,36 @@ public sealed partial class EfMoveQueuePersistence
                     continue;
                 }
 
+                if (evidenceBearing.Count == 0 && candidates.Count > 1)
+                {
+                    foreach (var candidate in candidates)
+                    {
+                        MarkIdentityConflict(
+                            candidate.Job,
+                            "Multiple active move jobs share one identity but no authoritative recovery owner can be proven.");
+                    }
+                    continue;
+                }
+
                 var canonical = evidenceBearing.Count == 1
                     ? evidenceBearing[0]
-                    : candidates
-                        .OrderByDescending(item => item.Job.Phase)
-                        .ThenByDescending(item => item.Job.Status == MoveJobStatus.Running)
-                        .ThenByDescending(item => item.Job.UpdatedAt ?? item.Job.EnqueuedAt)
-                        .First();
-                canonical.Job.ActiveDeduplicationKey = group.Key;
-                canonical.Job.IdentityKeyVersion = MoveManifestIdentity.Version;
+                    : candidates[0];
+                var canonicalHasTargetAuthorization =
+                    MoveManifestIdentity.TryGetTargetBoundaryAuthorization(
+                        canonical.Job.Entries,
+                        out _,
+                        out _);
+                if (canonicalHasTargetAuthorization)
+                {
+                    canonical.Job.ActiveDeduplicationKey = group.Key;
+                    canonical.Job.IdentityKeyVersion = MoveManifestIdentity.Version;
+                }
+                else
+                {
+                    MarkIdentityConflict(
+                        canonical.Job,
+                        "The move job has no durable target-boundary physical-generation authorization and cannot be reconciled safely.");
+                }
 
                 foreach (var duplicate in candidates.Where(item => item.Job.Id != canonical.Job.Id))
                 {

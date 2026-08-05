@@ -15,14 +15,17 @@ internal sealed partial class AudiobookContentMoveService
 
         if (!identities.TryGetValue(
                 manifestEntry.RelativePath,
-                out var expectedIdentity)
-            || string.IsNullOrWhiteSpace(expectedIdentity))
+                out var expectedIdentity))
         {
-            throw new MoveNeedsAttentionException(
-                $"The move request has no physical source identity for tracked file: {manifestEntry.RelativePath}");
+            // Non-audio companion files are authorized by the exclusive managed
+            // audiobook directory plus their immutable persisted content manifest.
+            // Tracked audiobook files are present in this identity map and retain
+            // the stronger physical-generation fence.
+            return;
         }
 
-        if (!string.Equals(
+        if (string.IsNullOrWhiteSpace(expectedIdentity)
+            || !string.Equals(
                 sourceEntry.GetObjectIdentity(),
                 expectedIdentity,
                 StringComparison.Ordinal))

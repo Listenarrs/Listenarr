@@ -13,6 +13,14 @@ public sealed partial class LibraryMoveWorkflow
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        var recovery = await _moveQueueService!.GetRecoveryStateForAudiobookAsync(
+            id,
+            cancellationToken);
+        if (recovery.BlocksFilesystemMutation)
+        {
+            return MoveRecoveryConflict(recovery);
+        }
+
         var audiobook = await _repo.GetByIdAsync(id);
         if (audiobook == null)
         {
@@ -26,6 +34,8 @@ public sealed partial class LibraryMoveWorkflow
             var rootFolderService = scope.ServiceProvider.GetRequiredService<IRootFolderService>();
             var settings = await configService.GetApplicationSettingsAsync();
             var rootFolders = await rootFolderService.GetAllAsync();
+            var directoryIdentityResolver = scope.ServiceProvider
+                .GetRequiredService<IDirectoryObjectIdentityResolver>();
             cancellationToken.ThrowIfCancellationRequested();
 
             var allowedMoveRoots = new List<MoveRootBoundary>();
@@ -34,6 +44,7 @@ public sealed partial class LibraryMoveWorkflow
                 allowedMoveRoots,
                 normalizedOutputPath,
                 FileSystemCaseSensitivityMode.Auto,
+                directoryIdentityResolver,
                 cancellationToken);
 
             string? defaultRootPath = null;
@@ -51,7 +62,12 @@ public sealed partial class LibraryMoveWorkflow
                     allowedMoveRoots,
                     normalizedRootPath,
                     rootFolder.CaseSensitivityMode,
-                    cancellationToken);
+                    directoryIdentityResolver,
+                    cancellationToken,
+                    rootFolder.DirectoryObjectIdentityVersion,
+                    rootFolder.DirectoryObjectIdentity,
+                    rootFolder.DirectoryObjectIdentityUnavailableReason,
+                    RootFolderPathSemantics.ResolvePersisted(rootFolder)?.Semantics);
                 if (rootFolder.IsDefault && defaultRootPath == null)
                 {
                     defaultRootPath = normalizedRootPath;
@@ -117,6 +133,13 @@ public sealed partial class LibraryMoveWorkflow
                     "Destination filesystem identity is unavailable.",
                     final);
             }
+            if (!targetBoundary.DirectoryIdentity.IsAvailable)
+            {
+                return DestinationValidationResult(
+                    "destination_physical_identity_unavailable",
+                    "Destination root physical identity is unavailable or changed.",
+                    final);
+            }
 
             var targetParent = Path.GetDirectoryName(final);
             if (string.IsNullOrEmpty(targetParent))
@@ -157,6 +180,14 @@ public sealed partial class LibraryMoveWorkflow
                 id,
                 async lockedToken =>
                 {
+                    var recovery = await _moveQueueService!.GetRecoveryStateForAudiobookAsync(
+                        id,
+                        lockedToken);
+                    if (recovery.BlocksFilesystemMutation)
+                    {
+                        throw new MoveRecoveryConflictException(recovery);
+                    }
+
                     using var authoritativeScope = _scopeFactory.CreateScope();
                     var authoritativeRepository = authoritativeScope.ServiceProvider
                         .GetRequiredService<IAudiobookRepository>();
@@ -242,6 +273,8 @@ public sealed partial class LibraryMoveWorkflow
                             manifest.Entries,
                             final,
                             targetIdentity,
+                            targetBoundary.DirectoryIdentity.Version!.Value,
+                            targetBoundary.DirectoryIdentity.Value!,
                             deleteEmptySource,
                             sourceCleanupBoundary),
                         lockedToken);
@@ -252,20 +285,17 @@ public sealed partial class LibraryMoveWorkflow
                 string.Empty,
                 new MoveEnqueuedResponse("Move enqueued", jobId, final));
         }
+        catch (MoveRecoveryConflictException exception)
+        {
+            return MoveRecoveryConflict(exception.Recovery);
+        }
         catch (PersistenceException ex)
         {
             _logger.LogError(
                 ex,
                 "Move queue persistence failed while enqueueing move job for audiobook {AudiobookId}",
                 id);
-            return new ObjectResult(new
-            {
-                message = "Move queue persistence is unavailable. Check database migrations.",
-                code = "move_queue_persistence_unavailable"
-            })
-            {
-                StatusCode = StatusCodes.Status500InternalServerError
-            };
+            return MoveQueuePersistenceUnavailableResult();
         }
         catch (MoveRelocationConflictException ex)
         {

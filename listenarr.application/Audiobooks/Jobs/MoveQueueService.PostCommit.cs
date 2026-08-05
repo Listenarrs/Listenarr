@@ -18,10 +18,10 @@ public partial class MoveQueueService
                 error,
                 cancellationToken);
         }
-        catch (OperationCanceledException) when (
-            cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException exception)
         {
             _logger.LogDebug(
+                exception,
                 "Move job {JobId} state was committed before notification cancellation",
                 id);
         }

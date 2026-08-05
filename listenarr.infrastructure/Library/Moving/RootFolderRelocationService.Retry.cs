@@ -202,6 +202,18 @@ public sealed partial class RootFolderRelocationService
                 unsafeRetryJobs++;
                 continue;
             }
+            if (!MoveManifestIdentity.TryGetTargetBoundaryAuthorization(
+                    job.Entries,
+                    out _,
+                    out _))
+            {
+                job.Status = MoveJobStatus.NeedsAttention;
+                job.Error = "The move job has no durable target-boundary physical-generation authorization and cannot be retried safely.";
+                job.FailureKind = MoveFailureKind.Verification;
+                job.ActiveDeduplicationKey = null;
+                unsafeRetryJobs++;
+                continue;
+            }
 
             var deduplicationKey = MoveManifestIdentity.CreateDeduplicationKey(
                 job.AudiobookId,

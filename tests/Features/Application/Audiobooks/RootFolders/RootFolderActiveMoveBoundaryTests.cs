@@ -28,7 +28,7 @@ public sealed class RootFolderActiveMoveBoundaryTests : BaseTests
         };
         await repository.AddAsync(root);
         var moveQueue = new Mock<IMoveQueueService>();
-        moveQueue.Setup(service => service.GetActiveJobsAsync(It.IsAny<CancellationToken>()))
+        moveQueue.Setup(service => service.GetFilesystemBlockingJobsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync([
                 new MoveJob
                 {
@@ -67,7 +67,7 @@ public sealed class RootFolderActiveMoveBoundaryTests : BaseTests
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             service.DeleteAsync(root.Id));
 
-        Assert.Contains("active move", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("unresolved move", exception.Message, StringComparison.OrdinalIgnoreCase);
         Assert.NotNull(await repository.GetByIdAsync(root.Id));
     }
 

@@ -324,6 +324,7 @@ export interface TranslatePathResponse {
 }
 
 export interface ApplicationSettings {
+  version: number
   outputPath: string
   folderNamingPattern: string
   fileNamingPattern: string
@@ -992,13 +993,12 @@ export interface ManualImportRequest {
 
 export interface ManualImportResult {
   success: boolean
+  sourcePath?: string
+  destinationPath?: string
+  audiobook?: Audiobook
+  error?: string
   skipped?: boolean
   skipReason?: string
-  filePath?: string
-  destinationPath?: string
-  audiobookId?: number
-  audiobookTitle?: string
-  error?: string
 }
 
 // Audible API Types

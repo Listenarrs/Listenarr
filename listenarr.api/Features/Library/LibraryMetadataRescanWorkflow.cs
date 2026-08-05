@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using Listenarr.Application.Common.Exceptions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Memory;
 
@@ -34,6 +35,7 @@ namespace Listenarr.Api.Features.Library
         private readonly IImageCacheService _imageCacheService;
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly IAudiobookOperationCoordinator _audiobookOperationCoordinator;
+        private readonly IMoveQueueService _moveQueueService;
         private readonly ILogger<LibraryMetadataRescanWorkflow> _logger;
         private readonly IMemoryCache? _memoryCache;
         private readonly IAsinLookupService? _asinLookupService;
@@ -44,6 +46,7 @@ namespace Listenarr.Api.Features.Library
             IImageCacheService imageCacheService,
             IServiceScopeFactory scopeFactory,
             IAudiobookOperationCoordinator audiobookOperationCoordinator,
+            IMoveQueueService moveQueueService,
             ILogger<LibraryMetadataRescanWorkflow> logger,
             IMemoryCache? memoryCache = null,
             IAsinLookupService? asinLookupService = null)
@@ -53,6 +56,7 @@ namespace Listenarr.Api.Features.Library
             _imageCacheService = imageCacheService;
             _scopeFactory = scopeFactory;
             _audiobookOperationCoordinator = audiobookOperationCoordinator ?? throw new ArgumentNullException(nameof(audiobookOperationCoordinator));
+            _moveQueueService = moveQueueService ?? throw new ArgumentNullException(nameof(moveQueueService));
             _logger = logger;
             _memoryCache = memoryCache;
             _asinLookupService = asinLookupService;
@@ -286,12 +290,28 @@ namespace Listenarr.Api.Features.Library
                 resolvedAsin,
                 string.IsNullOrWhiteSpace(providerSource) ? "Audible" : providerSource!);
 
-            var applyResult = await _audiobookOperationCoordinator.ExecuteExclusiveAsync(
-                id,
-                _ => ApplyMetadataRescanResultAsync(
+            MetadataRescanApplyResult applyResult;
+            try
+            {
+                applyResult = await _audiobookOperationCoordinator.ExecuteExclusiveAsync(
                     id,
-                    convertedMetadata,
-                    expectedMetadataState));
+                    async token =>
+                    {
+                        await _moveQueueService.EnsureFilesystemMutationAllowedAsync(id, token);
+                        return await ApplyMetadataRescanResultAsync(
+                            id,
+                            convertedMetadata,
+                            expectedMetadataState);
+                    });
+            }
+            catch (ApplicationConflictException exception)
+            {
+                return new ConflictObjectResult(new
+                {
+                    message = exception.SafeDetail,
+                    code = exception.Code
+                });
+            }
             if (applyResult.Status == MetadataRescanApplyStatus.NotFound)
             {
                 return new NotFoundObjectResult(new { message = "Audiobook not found" });

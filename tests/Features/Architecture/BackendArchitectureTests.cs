@@ -695,6 +695,77 @@ public sealed class BackendArchitectureTests : BaseTests
     }
 
     [Fact]
+    public void FileMover_DoesNotOwnManagedHierarchyCreation()
+    {
+        var fileMoverRoot = Path.Join(
+            RepositoryRoot,
+            "listenarr.infrastructure",
+            "FileSystem");
+        var createMissingPattern = new Regex(
+            @"createMissing\s*:\s*true",
+            RegexOptions.Compiled);
+        var matches = Directory
+            .EnumerateFiles(fileMoverRoot, "FileMover*.cs", SearchOption.TopDirectoryOnly)
+            .SelectMany(file => createMissingPattern
+                .Matches(File.ReadAllText(file))
+                .Select(_ => Normalize(Path.GetRelativePath(RepositoryRoot, file))))
+            .ToList();
+
+        Assert.Equal(
+            "listenarr.infrastructure/FileSystem/FileMover.FileMoveLocks.cs",
+            Assert.Single(matches));
+        var lockSource = File.ReadAllText(Path.Join(
+            fileMoverRoot,
+            "FileMover.FileMoveLocks.cs"));
+        Assert.Contains(
+            "OpenFileMoveLockDirectory()",
+            lockSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "directory,\n            createMissing: true",
+            lockSource.Replace("\r\n", "\n", StringComparison.Ordinal),
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "createDestinationParent",
+            string.Join(Environment.NewLine, Directory
+                .EnumerateFiles(fileMoverRoot, "FileMover*.cs", SearchOption.TopDirectoryOnly)
+                .Select(File.ReadAllText)),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AudiobookDatabaseDeletion_UsesSharedCommitBoundary()
+    {
+        const string commitOwner =
+            "listenarr.application/Audiobooks/Deletion/AudiobookDeletionCommitService.cs";
+        var directDeletePattern = new Regex(
+            @"\.\s*DeleteByIdAsync\s*\(",
+            RegexOptions.Compiled);
+        var productionRoots = new[]
+        {
+            "listenarr.application",
+            "listenarr.infrastructure",
+            "listenarr.api"
+        };
+
+        var violations = productionRoots
+            .SelectMany(root => Directory.EnumerateFiles(
+                Path.Join(RepositoryRoot, root),
+                "*.cs",
+                SearchOption.AllDirectories))
+            .Where(file => !IsBuildArtifact(file))
+            .Where(file => directDeletePattern.IsMatch(File.ReadAllText(file)))
+            .Select(file => Normalize(Path.GetRelativePath(RepositoryRoot, file)))
+            .Where(file => !string.Equals(
+                file,
+                commitOwner,
+                StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        Assert.Empty(violations);
+    }
+
+    [Fact]
     public void Controllers_DoNotResolveServicesOrImplementPersistence()
     {
         var controllerFiles = Directory

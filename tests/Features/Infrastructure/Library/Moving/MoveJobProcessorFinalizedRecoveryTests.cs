@@ -10,9 +10,8 @@ public partial class MoveJobProcessorTests
     {
         var source = FileService.GetTempDirectory("move-processor-foreign-base-finalized-src");
         var sourceFile = await FileService.GetFileAsync(source, "book.m4b", "verified audio");
-        var target = Path.Join(
-            FileService.GetTempPath(),
-            $"move-processor-foreign-base-finalized-dst-{Guid.NewGuid():N}");
+        var target = FileService.GetWindowsRootRelativeTempPath(
+            "move-processor-foreign-base-finalized-dst");
         var audiobook = await _audiobookRepository.AddAsync(new Audiobook
         {
             Title = "Foreign Base Finalized Recovery",
@@ -26,12 +25,8 @@ public partial class MoveJobProcessorTests
         Directory.CreateDirectory(target);
         File.Copy(sourceFile, Path.Join(target, "book.m4b"));
         Directory.Delete(source, recursive: true);
-        var driveRoot = Path.GetPathRoot(target)!;
-        var foreignTarget = "/" + target[driveRoot.Length..].Replace('\\', '/');
-        Assert.Equal(
-            Path.GetFullPath(target),
-            Path.GetFullPath(foreignTarget),
-            StringComparer.OrdinalIgnoreCase);
+        var foreignTarget = TempFileService
+            .GetWindowsRootRelativeForeignAlias(target);
         audiobook.BasePath = foreignTarget;
         await _audiobookRepository.UpdateAsync(audiobook);
         Assert.True(job.Phase < MoveJobPhase.Published);

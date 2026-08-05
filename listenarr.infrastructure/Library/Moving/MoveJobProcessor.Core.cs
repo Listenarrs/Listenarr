@@ -364,6 +364,13 @@ internal partial class MoveJobProcessor
             moveResult = await contentMoveService.ResumeSourceCleanupAsync(moveRequest, moveResult, stoppingToken);
             source = moveResult.Source;
             target = moveResult.Target;
+            if (AfterSourceCleanupBeforeMetadataRewriteForTest != null)
+            {
+                await AfterSourceCleanupBeforeMetadataRewriteForTest(job);
+            }
+            await contentMoveService.EnsureMutationAuthorizedAsync(
+                moveRequest,
+                stoppingToken);
 
             using (var rewriteScope = scopeFactory.CreateScope())
             {

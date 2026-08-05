@@ -37,7 +37,9 @@ internal enum SourceCleanupFaultPoint
     BeforePinnedQuarantineDelete,
     AfterPinnedQuarantineDelete,
     BeforeEmptySourceDirectoryQuarantine,
-    AfterEmptySourceDirectoryQuarantine
+    AfterEmptySourceDirectoryQuarantine,
+    BeforeEmptySourceClaimDelete,
+    BeforeEmptySourceStateDelete
 }
 
 internal enum CopyMutationFaultPoint

@@ -554,18 +554,13 @@ namespace Listenarr.Tests.Features.Domain.Utils
         [WindowsFact]
         public void TryValidateMutationTarget_ForeignUnixAlias_IsRejectedBeforeWindowsNormalization()
         {
-            var root = Path.Join(
-                Path.GetTempPath(),
-                "fu-mutation-foreign-" + Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(root);
+            var root = WindowsPathTestFixture
+                .CreateRootRelativeAliasCompatibleDirectory(
+                    "fu-mutation-foreign");
             var nativeTarget = Path.Join(root, "book.m4b");
             File.WriteAllText(nativeTarget, "audio");
-            var driveRoot = Path.GetPathRoot(nativeTarget)!;
-            var foreignTarget = "/" + nativeTarget[driveRoot.Length..].Replace('\\', '/');
-            Assert.Equal(
-                Path.GetFullPath(nativeTarget),
-                Path.GetFullPath(foreignTarget),
-                StringComparer.OrdinalIgnoreCase);
+            var foreignTarget = WindowsPathTestFixture
+                .GetRootRelativeForeignAlias(nativeTarget);
 
             try
             {

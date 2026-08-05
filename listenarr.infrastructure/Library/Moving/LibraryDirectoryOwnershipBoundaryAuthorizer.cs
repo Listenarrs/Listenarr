@@ -81,6 +81,109 @@ public sealed class LibraryDirectoryOwnershipBoundaryAuthorizer(
             cancellationToken);
     }
 
+    internal async Task<AuthorizedLibraryDirectoryOwnership?>
+        TryAuthorizeContainingRootAsync(
+            string path,
+            FileSystemPathSemantics semantics,
+            CancellationToken cancellationToken)
+    {
+        var canonicalPath = CanonicalizeHostAuthorizedPath(path, semantics);
+        var parentPath = Path.GetDirectoryName(canonicalPath)
+            ?? throw new InvalidOperationException(
+                "The retained directory has no parent.");
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var roots = await db.RootFolders.AsNoTracking().ToListAsync(cancellationToken);
+        var root = roots
+            .Where(candidate => HasCompatibleSyntax(candidate.Path, semantics.Syntax))
+            .Where(candidate => FileSystemPathIdentity.IsSameOrInside(
+                canonicalPath,
+                candidate.Path,
+                semantics))
+            .Where(candidate => FileSystemPathIdentity.IsSameOrInside(
+                parentPath,
+                candidate.Path,
+                semantics))
+            .OrderByDescending(candidate => candidate.Path.Length)
+            .FirstOrDefault();
+        if (root != null)
+        {
+            return await TryAuthorizePathWithinBoundaryAsync(
+                canonicalPath,
+                semantics,
+                root.Id,
+                root.Path,
+                root.DirectoryObjectIdentityVersion,
+                root.DirectoryObjectIdentity,
+                root.DirectoryObjectIdentityUnavailableReason,
+                cancellationToken);
+        }
+
+        var activeRelocations = await db.RootFolderRelocations
+            .AsNoTracking()
+            .Where(relocation => relocation.ActiveRootFolderId != null)
+            .ToListAsync(cancellationToken);
+        var relocation = activeRelocations
+            .Where(candidate => HasCompatibleSyntax(
+                candidate.TargetPath,
+                semantics.Syntax))
+            .Where(candidate => FileSystemPathIdentity.IsSameOrInside(
+                canonicalPath,
+                candidate.TargetPath,
+                semantics))
+            .Where(candidate => FileSystemPathIdentity.IsSameOrInside(
+                parentPath,
+                candidate.TargetPath,
+                semantics))
+            .OrderByDescending(candidate => candidate.TargetPath.Length)
+            .FirstOrDefault();
+        if (relocation == null)
+        {
+            return null;
+        }
+
+        return await TryAuthorizePathWithinBoundaryAsync(
+            canonicalPath,
+            semantics,
+            relocation.ActiveRootFolderId!.Value,
+            relocation.TargetPath,
+            relocation.TargetDirectoryObjectIdentityVersion,
+            relocation.TargetDirectoryObjectIdentity,
+            relocation.TargetDirectoryObjectIdentityUnavailableReason,
+            cancellationToken);
+    }
+
+    private async Task<AuthorizedLibraryDirectoryOwnership?>
+        TryAuthorizePathWithinBoundaryAsync(
+            string canonicalPath,
+            FileSystemPathSemantics semantics,
+            int rootFolderId,
+            string boundaryPath,
+            int? expectedDirectoryIdentityVersion,
+            string? expectedDirectoryIdentity,
+            string? identityUnavailableReason,
+            CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await AuthorizePathWithinBoundaryAsync(
+                canonicalPath,
+                semantics,
+                rootFolderId,
+                boundaryPath,
+                expectedDirectoryIdentityVersion,
+                expectedDirectoryIdentity,
+                identityUnavailableReason,
+                cancellationToken);
+        }
+        catch (Exception exception) when (exception is
+            InvalidOperationException or IOException or UnauthorizedAccessException
+                or ArgumentException or NotSupportedException or PathTooLongException
+                or System.ComponentModel.Win32Exception)
+        {
+            return null;
+        }
+    }
+
     internal async Task<ManagedLibraryBoundaryAuthorization> AuthorizeAsync(
         string boundaryPath,
         FileSystemPathSemantics semantics,

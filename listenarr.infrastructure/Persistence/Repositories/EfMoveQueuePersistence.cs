@@ -75,6 +75,60 @@ public sealed partial class EfMoveQueuePersistence(
         }
     }
 
+    public async Task<IReadOnlyList<MoveJob>> GetRecoveryCandidatesByAudiobookAsync(
+        int audiobookId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+            return await db.MoveJobs
+                .AsNoTracking()
+                .AsSplitQuery()
+                .Include(job => job.Entries)
+                .Include(job => job.CreatedDirectories)
+                .Where(job => job.AudiobookId == audiobookId
+                    && (job.Status == MoveJobStatus.Queued
+                        || job.Status == MoveJobStatus.Running
+                        || job.Status == MoveJobStatus.RetryScheduled
+                        || job.Status == MoveJobStatus.Failed
+                        || job.Status == MoveJobStatus.NeedsAttention))
+                .OrderBy(job => job.EnqueuedAt)
+                .ThenBy(job => job.Id)
+                .ToListAsync(cancellationToken);
+        }
+        catch (DbException ex)
+        {
+            throw new PersistenceException("Failed to query move recovery candidates.", ex);
+        }
+    }
+
+    public async Task<IReadOnlyList<MoveJob>> GetRecoveryCandidatesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+            return await db.MoveJobs
+                .AsNoTracking()
+                .AsSplitQuery()
+                .Include(job => job.Entries)
+                .Include(job => job.CreatedDirectories)
+                .Where(job => job.Status == MoveJobStatus.Queued
+                    || job.Status == MoveJobStatus.Running
+                    || job.Status == MoveJobStatus.RetryScheduled
+                    || job.Status == MoveJobStatus.Failed
+                    || job.Status == MoveJobStatus.NeedsAttention)
+                .OrderBy(job => job.EnqueuedAt)
+                .ThenBy(job => job.Id)
+                .ToListAsync(cancellationToken);
+        }
+        catch (DbException ex)
+        {
+            throw new PersistenceException("Failed to query move recovery candidates.", ex);
+        }
+    }
+
     public async Task<MoveQueueHealthSnapshot> GetHealthAsync(
         DateTimeOffset now,
         CancellationToken cancellationToken = default)

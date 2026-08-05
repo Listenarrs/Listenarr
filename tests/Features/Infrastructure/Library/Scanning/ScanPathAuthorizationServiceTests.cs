@@ -67,7 +67,7 @@ public sealed class ScanPathAuthorizationServiceTests : BaseTests
     }
 
     [Fact]
-    public async Task AuthorizeAsync_ReplacedRoot_ProducesDifferentPhysicalIdentity()
+    public async Task AuthorizeAsync_ReplacedEnrolledRoot_IsRejected()
     {
         var parent = FileService.GetTempDirectory("scan-authorization-root-replacement");
         var configuredRoot = Path.Join(parent, "library");
@@ -83,10 +83,11 @@ public sealed class ScanPathAuthorizationServiceTests : BaseTests
         Directory.CreateDirectory(scanRoot);
         var replacement = await service.AuthorizeAsync(scanRoot);
 
-        Assert.True(replacement.IsAuthorized, replacement.Error);
-        Assert.NotEqual(
-            original.PhysicalIdentity,
-            replacement.PhysicalIdentity);
+        Assert.False(replacement.IsAuthorized);
+        Assert.Equal(
+            ScanPathAuthorizationFailure.IdentityUnavailable,
+            replacement.Failure);
+        Assert.Null(replacement.PhysicalIdentity);
         Assert.True(Directory.Exists(Path.Join(displacedRoot, "Book")));
         Assert.True(Directory.Exists(scanRoot));
     }

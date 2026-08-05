@@ -13,6 +13,34 @@ internal sealed partial class PinnedDirectoryCreation
     private const int LinuxWouldBlock = 11;
     private const int MacWouldBlock = 35;
 
+    internal void RestrictToCurrentUser()
+    {
+        ThrowIfDisposed();
+        if (!Created || _directoryHandle == null || _directoryHandle.IsInvalid)
+        {
+            throw new InvalidOperationException(
+                "A created pinned directory is required to restrict permissions.");
+        }
+
+        if (OperatingSystem.IsWindows())
+        {
+            if (!VisiblePathMatches())
+            {
+                throw new IOException(
+                    "The pinned directory identity changed while permissions were restricted.");
+            }
+            return;
+        }
+
+        using var handle = DuplicateSafeHandle(_directoryHandle);
+        RestrictDirectoryHandleToCurrentUser(handle);
+        if (!VisiblePathMatches())
+        {
+            throw new IOException(
+                "The pinned directory identity changed while permissions were restricted.");
+        }
+    }
+
     internal sealed partial class PinnedDirectoryAnchor
     {
         internal void RestrictToCurrentUser()
@@ -25,13 +53,8 @@ internal sealed partial class PinnedDirectoryCreation
             }
 
             using var handle = DuplicateHandleForOperation();
-            var privateMode =
-                System.IO.UnixFileMode.UserRead
-                | System.IO.UnixFileMode.UserWrite
-                | System.IO.UnixFileMode.UserExecute;
-            File.SetUnixFileMode(handle, privateMode);
-            if (File.GetUnixFileMode(handle) != privateMode
-                || !VisiblePathMatches())
+            RestrictDirectoryHandleToCurrentUser(handle);
+            if (!VisiblePathMatches())
             {
                 throw new IOException(
                     "The pinned lock directory permissions or identity changed.");
@@ -169,6 +192,22 @@ internal sealed partial class PinnedDirectoryCreation
                 Marshal.FreeHGlobal(unicodeStringPointer);
             }
             Marshal.FreeHGlobal(nameBuffer);
+        }
+    }
+
+    [UnsupportedOSPlatform("windows")]
+    private static void RestrictDirectoryHandleToCurrentUser(
+        SafeFileHandle handle)
+    {
+        var privateMode =
+            System.IO.UnixFileMode.UserRead
+            | System.IO.UnixFileMode.UserWrite
+            | System.IO.UnixFileMode.UserExecute;
+        File.SetUnixFileMode(handle, privateMode);
+        if (File.GetUnixFileMode(handle) != privateMode)
+        {
+            throw new IOException(
+                "The pinned directory permissions could not be restricted to the current user.");
         }
     }
 

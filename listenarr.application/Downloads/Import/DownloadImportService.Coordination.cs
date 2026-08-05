@@ -14,6 +14,9 @@ public partial class DownloadImportService
                 audiobook.Id,
                 async token =>
                 {
+                    await moveQueueService.EnsureFilesystemMutationAllowedAsync(
+                        audiobook.Id,
+                        token);
                     var currentAudiobook = await audiobookRepository.GetByIdSnapshotAsync(
                         audiobook.Id,
                         token)

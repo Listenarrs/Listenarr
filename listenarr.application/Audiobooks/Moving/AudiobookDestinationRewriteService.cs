@@ -78,22 +78,17 @@ public sealed class AudiobookDestinationRewriteService : IAudiobookDestinationRe
         }
 
         var sourceBasePath = currentAudiobook.BasePath;
+        MoveRootBoundary? sourceBoundary = null;
         var sourceSemantics = destination.TargetBoundary.Semantics;
         if (!string.IsNullOrWhiteSpace(sourceBasePath))
         {
-            var sourceBoundary = FindAllowedMoveRoot(sourceBasePath, destination.AllowedMoveRoots);
-            if (sourceBoundary != null)
-            {
-                sourceSemantics = sourceBoundary.Semantics;
-            }
-            else
-            {
-                // Metadata-only updates must not require source filesystem access.
-                // If the source is not inside a configured boundary, reuse the validated
-                // target boundary semantics only for stale-source comparison and best-effort
-                // reference rewriting. Invalid source references are preserved by the rewriter.
-                sourceSemantics = destination.TargetBoundary.Semantics;
-            }
+            sourceBoundary = FindAllowedMoveRoot(
+                sourceBasePath,
+                destination.AllowedMoveRoots);
+            sourceSemantics = sourceBoundary?.Semantics
+                ?? ResolveConservativeStoredSourceSemantics(
+                    sourceBasePath,
+                    destination.TargetBoundary.Semantics);
         }
 
         if (!string.IsNullOrWhiteSpace(expectedSourcePath))
@@ -102,7 +97,7 @@ public sealed class AudiobookDestinationRewriteService : IAudiobookDestinationRe
                 || !StoredSourcePathMatchesExpected(
                     expectedSourcePath,
                     sourceBasePath,
-                    sourceSemantics))
+                    sourceBoundary?.Semantics))
             {
                 throw new ApplicationConflictException(
                     "source_path_changed",
@@ -345,26 +340,55 @@ public sealed class AudiobookDestinationRewriteService : IAudiobookDestinationRe
     private static bool StoredSourcePathMatchesExpected(
         string expectedSourcePath,
         string sourceBasePath,
-        FileSystemPathSemantics sourceSemantics)
+        FileSystemPathSemantics? authoritativeSourceSemantics)
     {
-        try
+        // ExpectedSourcePath is an optimistic-concurrency token. If the persisted
+        // source is no longer beneath a configured authority, no unrelated target
+        // filesystem may weaken that token's comparison rules.
+        if (!authoritativeSourceSemantics.HasValue)
         {
-            return FileSystemPathIdentity.AreEquivalent(
-                expectedSourcePath,
-                sourceBasePath,
-                sourceSemantics);
-        }
-        catch (Exception exception) when (exception is
-            ArgumentException or NotSupportedException or PathTooLongException or System.Security.SecurityException)
-        {
-            // If a legacy stored path cannot be canonicalized, preserve stale-source
-            // protection by accepting only the exact persisted value the caller observed.
-            // Never reinterpret stored syntax through the current host.
             return string.Equals(
                 expectedSourcePath,
                 sourceBasePath,
                 StringComparison.Ordinal);
         }
+
+        try
+        {
+            return FileSystemPathIdentity.AreEquivalent(
+                expectedSourcePath,
+                sourceBasePath,
+                authoritativeSourceSemantics.Value);
+        }
+        catch (Exception exception) when (exception is
+            ArgumentException or NotSupportedException or PathTooLongException or System.Security.SecurityException)
+        {
+            return string.Equals(
+                expectedSourcePath,
+                sourceBasePath,
+                StringComparison.Ordinal);
+        }
+    }
+
+    private static FileSystemPathSemantics ResolveConservativeStoredSourceSemantics(
+        string sourceBasePath,
+        FileSystemPathSemantics targetSemantics)
+    {
+        if (FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+                sourceBasePath,
+                out var sourceSyntax))
+        {
+            // Without an authoritative source boundary, case-sensitive comparison is
+            // the conservative choice: it can preserve an uncertain reference, but it
+            // cannot broaden a rewrite to a case-distinct path.
+            return new FileSystemPathSemantics(
+                sourceSyntax,
+                FileSystemCaseSensitivity.Sensitive);
+        }
+
+        return new FileSystemPathSemantics(
+            targetSemantics.Syntax,
+            FileSystemCaseSensitivity.Sensitive);
     }
 
     private static MoveRootBoundary? FindAllowedMoveRoot(

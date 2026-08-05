@@ -34,6 +34,9 @@ namespace Listenarr.Infrastructure.Library.Scanning
                     "Processing scan job {JobId} for audiobook {AudiobookId}",
                     job.Id,
                     job.AudiobookId);
+                await _moveQueueService.EnsureFilesystemMutationAllowedAsync(
+                    job.AudiobookId,
+                    stoppingToken);
                 await BroadcastProcessingAsync(job);
                 try
                 {

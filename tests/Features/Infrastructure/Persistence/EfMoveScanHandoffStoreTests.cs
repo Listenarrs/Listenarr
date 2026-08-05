@@ -583,6 +583,104 @@ public sealed class EfMoveScanHandoffStoreTests : BaseTests
         Assert.Single(claims, claim => claim != null);
     }
 
+    [Fact]
+    public async Task TryClaimAsync_RootProofWithoutTrackedFileManifest_FailsClosed()
+    {
+        var handoff = await InsertPendingHandoffAsync();
+        await using (var db = await GetFactory().CreateDbContextAsync())
+        {
+            var moveJobId = await db.MoveScanHandoffs
+                .Where(candidate => candidate.Id == handoff.Id)
+                .Select(candidate => candidate.MoveJobId)
+                .SingleAsync();
+            var entries = await db.MoveJobEntries
+                .Where(entry => entry.MoveJobId == moveJobId)
+                .ToListAsync();
+            db.MoveJobEntries.RemoveRange(entries);
+            db.MoveJobEntries.Add(new MoveJobEntry
+            {
+                MoveJobId = moveJobId,
+                RelativePath = string.Empty,
+                EntryType = MoveJobEntryType.Directory
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var store = _provider.GetRequiredService<IMoveScanHandoffStore>();
+        var claim = await store.TryClaimAsync(
+            handoff.Id,
+            "worker",
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow.AddMinutes(5));
+
+        Assert.Null(claim);
+        await using var verification = await GetFactory().CreateDbContextAsync();
+        var persisted = await verification.MoveScanHandoffs
+            .AsNoTracking()
+            .SingleAsync(candidate => candidate.Id == handoff.Id);
+        Assert.Equal(MoveScanHandoffStatus.Failed, persisted.Status);
+        Assert.Contains(
+            "tracked-file",
+            persisted.LastError,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task TryClaimAsync_TargetAuthorizationWithoutSourceManifest_FailsClosed()
+    {
+        var target = FileService.GetTempDirectory("move-scan-handoff-auth-only");
+        await using (var db = await GetFactory().CreateDbContextAsync())
+        {
+            var move = new MoveJob
+            {
+                AudiobookId = 42,
+                SourcePath = target,
+                RequestedPath = target,
+                Status = MoveJobStatus.Completed,
+                Phase = MoveJobPhase.RecordingCompletion
+            };
+            SetPathIdentities(move);
+            move.IdentityKeyVersion = MoveManifestIdentity.Version;
+            db.MoveJobs.Add(move);
+            var authorization = MoveManifestIdentity.CreateTargetBoundaryAuthorization(
+                2,
+                "test-target-generation");
+            authorization.MoveJobId = move.Id;
+            db.MoveJobEntries.Add(authorization);
+            db.MoveScanHandoffs.Add(new MoveScanHandoff
+            {
+                MoveJobId = move.Id,
+                AudiobookId = move.AudiobookId,
+                TargetPath = target,
+                Status = MoveScanHandoffStatus.Pending
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var store = _provider.GetRequiredService<IMoveScanHandoffStore>();
+        await using var lookup = await GetFactory().CreateDbContextAsync();
+        var handoffId = await lookup.MoveScanHandoffs
+            .Select(handoff => handoff.Id)
+            .SingleAsync();
+
+        var claim = await store.TryClaimAsync(
+            handoffId,
+            "worker",
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow.AddMinutes(5));
+
+        Assert.Null(claim);
+        await using var verification = await GetFactory().CreateDbContextAsync();
+        var handoff = await verification.MoveScanHandoffs
+            .AsNoTracking()
+            .SingleAsync(candidate => candidate.Id == handoffId);
+        Assert.Equal(MoveScanHandoffStatus.Failed, handoff.Status);
+        Assert.Contains(
+            "no durable target manifest",
+            handoff.LastError,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
     private IDbContextFactory<ListenArrDbContext> GetFactory() =>
         _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
 
@@ -606,8 +704,10 @@ public sealed class EfMoveScanHandoffStoreTests : BaseTests
         db.MoveJobEntries.Add(new MoveJobEntry
         {
             MoveJobId = job.Id,
-            RelativePath = string.Empty,
-            EntryType = MoveJobEntryType.Directory
+            RelativePath = "book.m4b",
+            EntryType = MoveJobEntryType.File,
+            Length = 1,
+            Sha256 = new string('A', 64)
         });
         await db.SaveChangesAsync();
         return job;
@@ -637,8 +737,10 @@ public sealed class EfMoveScanHandoffStoreTests : BaseTests
         db.MoveJobEntries.Add(new MoveJobEntry
         {
             MoveJobId = move.Id,
-            RelativePath = string.Empty,
-            EntryType = MoveJobEntryType.Directory
+            RelativePath = "book.m4b",
+            EntryType = MoveJobEntryType.File,
+            Length = 1,
+            Sha256 = new string('A', 64)
         });
         db.MoveScanHandoffs.Add(handoff);
         await db.SaveChangesAsync();

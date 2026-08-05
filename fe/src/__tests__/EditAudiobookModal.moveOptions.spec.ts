@@ -48,6 +48,26 @@ vi.mock('@/services/api', () => ({
     checkVolume: vi.fn().mockResolvedValue({ sameVolume: true }),
     updateAudiobook: vi.fn().mockResolvedValue({ message: 'ok', audiobook: {} }),
     updateAudiobookIdentifiers: vi.fn().mockResolvedValue({ identifiers: [] }),
+    getMoveRecoveryState: vi.fn().mockResolvedValue({
+      hasUnresolvedMove: false,
+      disposition: 'None',
+      jobId: null,
+      status: null,
+      phase: null,
+      requestedPath: null,
+      error: null,
+      canRetry: false,
+      blockingJobIds: [],
+    }),
+    requeueMoveJob: vi.fn().mockImplementation(async (jobId: string) => ({
+      message: 'requeued',
+      jobId,
+    })),
+    getMoveJobStatus: vi.fn().mockImplementation(async (jobId: string) => ({
+      jobId,
+      audiobookId: 1,
+      status: 'Queued',
+    })),
     moveAudiobook: vi.fn().mockImplementation(async (_id: number, destination: string) => ({
       message: 'queued',
       jobId: 'job-1',
@@ -79,13 +99,156 @@ const audiobook = {
 }
 
 describe('EditAudiobookModal move options', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks()
     signalRMocks.callback = null
     signalRMocks.onMoveJobUpdate.mockImplementation((callback: (job: MoveJobUpdate) => void) => {
       signalRMocks.callback = callback
       return signalRMocks.unsubscribe
     })
+    const { apiService } = await import('@/services/api')
+    vi.mocked(apiService.getMoveRecoveryState).mockResolvedValue({
+      hasUnresolvedMove: false,
+      disposition: 'None',
+      jobId: null,
+      status: null,
+      phase: null,
+      requestedPath: null,
+      error: null,
+      canRetry: false,
+      blockingJobIds: [],
+    })
+    vi.mocked(apiService.requeueMoveJob).mockImplementation(async (jobId: string) => ({
+      message: 'requeued',
+      jobId,
+    }))
+    vi.mocked(apiService.getMoveJobStatus).mockImplementation(async (jobId: string) => ({
+      jobId,
+      audiobookId: 1,
+      status: 'Queued',
+    }))
+    vi.mocked(apiService.moveAudiobook).mockImplementation(
+      async (_id: number, destination: string) => ({
+        message: 'queued',
+        jobId: 'job-1',
+        target: destination,
+      }),
+    )
+  })
+
+  it('rehydrates an interrupted move after a fresh open and resumes the original job', async () => {
+    const { apiService } = await import('@/services/api')
+    const recoverable = {
+      hasUnresolvedMove: true,
+      disposition: 'RetryAvailable',
+      jobId: 'recover-job-1',
+      status: 'Failed',
+      phase: 'Published',
+      requestedPath: 'C:\\root\\Recovered Author\\Recovered Book',
+      error: 'The previous filesystem cleanup was interrupted.',
+      canRetry: true,
+      blockingJobIds: ['recover-job-1'],
+    }
+    vi.mocked(apiService.getMoveRecoveryState)
+      .mockResolvedValueOnce(recoverable)
+      .mockResolvedValueOnce({
+        ...recoverable,
+        disposition: 'InProgress',
+        status: 'Queued',
+        canRetry: false,
+      })
+
+    const wrapper = mount(EditAudiobookModal, {
+      props: { isOpen: true, audiobook },
+      attachTo: document.body,
+      global: { plugins: [(await import('pinia')).createPinia()] },
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 200))
+
+    const notice = wrapper.get('[data-testid="move-recovery-notice"]')
+    expect(notice.text()).toContain('An interrupted move needs to be resumed.')
+    expect(notice.text()).toContain('C:\\root\\Recovered Author\\Recovered Book')
+    expect(wrapper.get('.btn-edit-destination').attributes('disabled')).toBeDefined()
+
+    await wrapper.get('[data-testid="resume-move-button"]').trigger('click')
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    expect(apiService.requeueMoveJob).toHaveBeenCalledWith('recover-job-1')
+    expect(toastMocks.info).toHaveBeenCalledWith(
+      'Move resumed',
+      'Move job recover-job-1 was queued to resume its interrupted work.',
+    )
+  })
+
+  it('turns a race-time recovery conflict into resumable server state instead of retrying a fresh move', async () => {
+    const { apiService } = await import('@/services/api')
+    const noRecovery = {
+      hasUnresolvedMove: false,
+      disposition: 'None',
+      jobId: null,
+      status: null,
+      phase: null,
+      requestedPath: null,
+      error: null,
+      canRetry: false,
+      blockingJobIds: [] as string[],
+    }
+    const recoverable = {
+      hasUnresolvedMove: true,
+      disposition: 'RetryAvailable',
+      jobId: 'recover-job-race',
+      status: 'Failed',
+      phase: 'Published',
+      requestedPath: 'C:\\root\\New Author\\New Book',
+      error: 'Interrupted move detected.',
+      canRetry: true,
+      blockingJobIds: ['recover-job-race'],
+    }
+    vi.mocked(apiService.getMoveRecoveryState).mockImplementation(async () =>
+      vi.mocked(apiService.moveAudiobook).mock.calls.length > 0 ? recoverable : noRecovery,
+    )
+    vi.mocked(apiService.moveAudiobook).mockRejectedValueOnce(
+      Object.assign(new Error('API error'), {
+        status: 409,
+        body: JSON.stringify({
+          code: 'move_recovery_required',
+          message: 'An interrupted move still owns this audiobook filesystem state.',
+          jobId: 'recover-job-race',
+          status: 'Failed',
+          requestedPath: recoverable.requestedPath,
+          recoveryDisposition: 'RetryAvailable',
+          canRetry: true,
+        }),
+      }),
+    )
+
+    const wrapper = mount(EditAudiobookModal, {
+      props: { isOpen: true, audiobook },
+      attachTo: document.body,
+      global: { plugins: [(await import('pinia')).createPinia()] },
+    })
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    ;(wrapper.vm as unknown).formData.relativePath = 'New Author\\New Book'
+    await wrapper.vm.$nextTick()
+
+    const savePromise = (wrapper.vm as unknown).handleSave()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const resolver = (wrapper.vm as unknown).moveConfirmResolver
+    if (resolver) resolver({ proceed: true, moveFiles: true, deleteEmptySource: true })
+    await savePromise
+    await wrapper.vm.$nextTick()
+
+    expect(apiService.moveAudiobook).toHaveBeenCalledTimes(1)
+    expect(apiService.requeueMoveJob).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-testid="move-recovery-notice"]').text()).toContain(
+      'An interrupted move needs to be resumed.',
+    )
+    expect(wrapper.get('[data-testid="resume-move-button"]').exists()).toBe(true)
+    expect(toastMocks.error).toHaveBeenCalledWith(
+      'Resume interrupted move',
+      'An interrupted move still owns this audiobook filesystem state.',
+    )
   })
 
   it('Change without moving should persist metadata and identifiers before the destination update', async () => {
@@ -98,9 +261,8 @@ describe('EditAudiobookModal move options', () => {
     // let init settle
     await new Promise((r) => setTimeout(r, 200))
 
-    // Ensure there is a detectable change: set an explicit custom root and change title
-    ;(wrapper.vm as unknown).selectedRootId = 0
-    ;(wrapper.vm as unknown).customRootPath = 'C:\\root\\New Author\\New Book'
+    // Ensure there is a detectable destination change under the configured output root.
+    ;(wrapper.vm as unknown).formData.relativePath = 'New Author\\New Book'
     ;(wrapper.vm as unknown).formData.title = 'Sample Updated'
     ;(wrapper.vm as unknown).formData.identifiers = [
       {
@@ -127,7 +289,7 @@ describe('EditAudiobookModal move options', () => {
 
     const { apiService } = await import('@/services/api')
     expect(apiService.moveAudiobook).toHaveBeenCalledTimes(1)
-    expect(apiService.moveAudiobook).toHaveBeenCalledWith(1, 'C:/root/New Author/New Book', {
+    expect(apiService.moveAudiobook).toHaveBeenCalledWith(1, 'C:\\root\\New Author\\New Book', {
       sourcePath: 'C:\\root\\Some Author\\Some Title',
       moveFiles: false,
       deleteEmptySource: false,
@@ -159,8 +321,7 @@ describe('EditAudiobookModal move options', () => {
     })
 
     await new Promise((r) => setTimeout(r, 200))
-    ;(wrapper.vm as unknown).selectedRootId = 0
-    ;(wrapper.vm as unknown).customRootPath = 'C:\\root\\New Author\\New Book'
+    ;(wrapper.vm as unknown).formData.relativePath = 'New Author\\New Book'
     ;(wrapper.vm as unknown).formData.title = 'Saved Before Move Failure'
     await wrapper.vm.$nextTick()
 
@@ -184,7 +345,7 @@ describe('EditAudiobookModal move options', () => {
 
   it('shows a structured destination rejection inline with the effective path', async () => {
     const { apiService } = await import('@/services/api')
-    const rejectedPath = 'C:/outside/New Author/New Book'
+    const rejectedPath = 'C:\\root\\New Author\\New Book'
     vi.mocked(apiService.moveAudiobook).mockRejectedValueOnce(
       Object.assign(new Error('API error'), {
         status: 400,
@@ -203,8 +364,7 @@ describe('EditAudiobookModal move options', () => {
     })
 
     await new Promise((resolve) => setTimeout(resolve, 200))
-    ;(wrapper.vm as unknown).selectedRootId = 0
-    ;(wrapper.vm as unknown).customRootPath = 'C:\\outside\\New Author\\New Book'
+    ;(wrapper.vm as unknown).formData.relativePath = 'New Author\\New Book'
     await wrapper.vm.$nextTick()
 
     const savePromise = (wrapper.vm as unknown).handleSave()
@@ -225,6 +385,40 @@ describe('EditAudiobookModal move options', () => {
     expect(wrapper.emitted('saved')).toBeUndefined()
   })
 
+  it('shows the server source-manifest failure instead of directing the user to a nonexistent queue job', async () => {
+    const { apiService } = await import('@/services/api')
+    const manifestMessage =
+      'The audiobook has no validated tracked files. Rescan or repair it before moving files.'
+    vi.mocked(apiService.moveAudiobook).mockRejectedValueOnce(
+      Object.assign(new Error('API error'), {
+        status: 400,
+        body: JSON.stringify({
+          code: 'move_source_unverified',
+          field: 'sourcePath',
+          message: manifestMessage,
+        }),
+      }),
+    )
+    const wrapper = mount(EditAudiobookModal, {
+      props: { isOpen: true, audiobook },
+      attachTo: document.body,
+      global: { plugins: [(await import('pinia')).createPinia()] },
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    ;(wrapper.vm as unknown).formData.relativePath = 'New Author\\New Book'
+    await wrapper.vm.$nextTick()
+
+    const savePromise = (wrapper.vm as unknown).handleSave()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const resolver = (wrapper.vm as unknown).moveConfirmResolver
+    if (resolver) resolver({ proceed: true, moveFiles: true, deleteEmptySource: true })
+    await savePromise
+
+    expect(toastMocks.error).toHaveBeenCalledWith('Move failed', manifestMessage)
+    expect(wrapper.emitted('saved')).toBeUndefined()
+  })
+
   it('Destination-only change without moving should call move API and skip metadata update', async () => {
     const wrapper = mount(EditAudiobookModal, {
       props: { isOpen: true, audiobook },
@@ -233,8 +427,7 @@ describe('EditAudiobookModal move options', () => {
     })
 
     await new Promise((r) => setTimeout(r, 200))
-    ;(wrapper.vm as unknown).selectedRootId = 0
-    ;(wrapper.vm as unknown).customRootPath = 'C:\\root\\New Author\\New Book'
+    ;(wrapper.vm as unknown).formData.relativePath = 'New Author\\New Book'
     await wrapper.vm.$nextTick()
 
     const savePromise = (wrapper.vm as unknown).handleSave()
@@ -247,7 +440,7 @@ describe('EditAudiobookModal move options', () => {
     const { apiService } = await import('@/services/api')
     expect(apiService.updateAudiobook).toHaveBeenCalledTimes(0)
     expect(apiService.moveAudiobook).toHaveBeenCalledTimes(1)
-    expect(apiService.moveAudiobook).toHaveBeenCalledWith(1, 'C:/root/New Author/New Book', {
+    expect(apiService.moveAudiobook).toHaveBeenCalledWith(1, 'C:\\root\\New Author\\New Book', {
       sourcePath: 'C:\\root\\Some Author\\Some Title',
       moveFiles: false,
       deleteEmptySource: false,
@@ -263,9 +456,8 @@ describe('EditAudiobookModal move options', () => {
 
     await new Promise((r) => setTimeout(r, 200))
 
-    // Ensure there is a detectable change: set an explicit custom root and flip monitored
-    ;(wrapper.vm as unknown).selectedRootId = 0
-    ;(wrapper.vm as unknown).customRootPath = 'C:\\root\\New Author\\New Book'
+    // Ensure there is a detectable destination change and flip monitored.
+    ;(wrapper.vm as unknown).formData.relativePath = 'New Author\\New Book'
     ;(wrapper.vm as unknown).formData.monitored = false
     await wrapper.vm.$nextTick()
 
@@ -287,11 +479,34 @@ describe('EditAudiobookModal move options', () => {
       expect.not.objectContaining({ basePath: expect.anything() }),
     )
     expect(apiService.moveAudiobook).toHaveBeenCalledTimes(1)
-    expect(apiService.moveAudiobook).toHaveBeenCalledWith(1, 'C:/root/New Author/New Book', {
+    expect(apiService.moveAudiobook).toHaveBeenCalledWith(1, 'C:\\root\\New Author\\New Book', {
       sourcePath: 'C:\\root\\Some Author\\Some Title',
       moveFiles: true,
       deleteEmptySource: true,
     })
+  })
+
+  it('rooted destination input cannot bypass the relative-only action boundary', async () => {
+    const { apiService } = await import('@/services/api')
+    const wrapper = mount(EditAudiobookModal, {
+      props: { isOpen: true, audiobook },
+      attachTo: document.body,
+      global: { plugins: [(await import('pinia')).createPinia()] },
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    ;(wrapper.vm as unknown).formData.relativePath = 'C:\\root\\New Author\\New Book'
+    ;(wrapper.vm as unknown).formData.title = 'Should Not Save'
+    await wrapper.vm.$nextTick()
+
+    await (wrapper.vm as unknown).handleSave()
+
+    expect(apiService.updateAudiobook).not.toHaveBeenCalled()
+    expect(apiService.moveAudiobook).not.toHaveBeenCalled()
+    expect(toastMocks.error).toHaveBeenCalledWith(
+      'Invalid destination',
+      'Enter a path relative to the selected configured root folder.',
+    )
   })
 
   it('Destination with parent traversal should be invalid and not call save APIs', async () => {
@@ -302,8 +517,7 @@ describe('EditAudiobookModal move options', () => {
     })
 
     await new Promise((r) => setTimeout(r, 200))
-    ;(wrapper.vm as unknown).selectedRootId = 0
-    ;(wrapper.vm as unknown).customRootPath = 'C:\\root\\Some Author\\Some Title\\..'
+    ;(wrapper.vm as unknown).formData.relativePath = 'Some Author\\Some Title\\..'
     await wrapper.vm.$nextTick()
 
     expect(wrapper.text()).toContain('Path traversal is not allowed in the destination folder')
@@ -327,8 +541,7 @@ describe('EditAudiobookModal move options', () => {
     })
 
     await new Promise((r) => setTimeout(r, 200))
-    ;(wrapper.vm as unknown).selectedRootId = 0
-    ;(wrapper.vm as unknown).customRootPath = 'C:\\root\\Some Author\\Some Title\\test '
+    ;(wrapper.vm as unknown).formData.relativePath = 'Some Author\\Some Title\\test '
     await wrapper.vm.$nextTick()
 
     expect(wrapper.text()).toContain(
@@ -354,8 +567,7 @@ describe('EditAudiobookModal move options', () => {
     })
 
     await new Promise((r) => setTimeout(r, 200))
-    ;(wrapper.vm as unknown).selectedRootId = 0
-    ;(wrapper.vm as unknown).customRootPath = 'C:\\root\\Some Author\\Some Title\\ test'
+    ;(wrapper.vm as unknown).formData.relativePath = 'Some Author\\Some Title\\ test'
     await wrapper.vm.$nextTick()
 
     expect(wrapper.text()).not.toContain('Source and destination folders cannot overlap')
@@ -374,7 +586,7 @@ describe('EditAudiobookModal move options', () => {
     expect(apiService.updateAudiobook).toHaveBeenCalledTimes(0)
     expect(apiService.moveAudiobook).toHaveBeenCalledWith(
       1,
-      'C:/root/Some Author/Some Title/ test',
+      'C:\\root\\Some Author\\Some Title\\ test',
       {
         sourcePath: 'C:\\root\\Some Author\\Some Title',
         moveFiles: true,
@@ -391,8 +603,7 @@ describe('EditAudiobookModal move options', () => {
     })
 
     await new Promise((r) => setTimeout(r, 200))
-    ;(wrapper.vm as unknown).selectedRootId = 0
-    ;(wrapper.vm as unknown).customRootPath = 'C:\\root\\Some Author\\Other Title\\ test'
+    ;(wrapper.vm as unknown).formData.relativePath = 'Some Author\\Other Title\\ test'
     await wrapper.vm.$nextTick()
 
     expect(wrapper.text()).not.toContain('Windows destination folder segments cannot end')
@@ -410,12 +621,41 @@ describe('EditAudiobookModal move options', () => {
     const { apiService } = await import('@/services/api')
     expect(apiService.moveAudiobook).toHaveBeenCalledWith(
       1,
-      'C:/root/Some Author/Other Title/ test',
+      'C:\\root\\Some Author\\Other Title\\ test',
       {
         sourcePath: 'C:\\root\\Some Author\\Some Title',
         moveFiles: true,
         deleteEmptySource: true,
       },
+    )
+  })
+
+  it('blocks a duplicate destination change while this client is already tracking an active move', async () => {
+    const pinia = (await import('pinia')).createPinia()
+    const wrapper = mount(EditAudiobookModal, {
+      props: { isOpen: true, audiobook },
+      attachTo: document.body,
+      global: { plugins: [pinia] },
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    const { useMoveJobsStore } = await import('@/stores/moveJobs')
+    const moveJobsStore = useMoveJobsStore(pinia)
+    moveJobsStore.trackQueuedJob({
+      jobId: 'job-active',
+      audiobookId: audiobook.id,
+      status: 'Running',
+      target: 'C:\\root\\First Destination',
+    })
+    ;(wrapper.vm as unknown).formData.relativePath = 'Second Destination'
+    await wrapper.vm.$nextTick()
+    await (wrapper.vm as unknown).handleSave()
+
+    const { apiService } = await import('@/services/api')
+    expect(apiService.moveAudiobook).not.toHaveBeenCalled()
+    expect(toastMocks.info).toHaveBeenCalledWith(
+      'Move already in progress',
+      'Move job job-active is still running. Wait for it to finish before changing the destination again.',
     )
   })
 
@@ -427,8 +667,7 @@ describe('EditAudiobookModal move options', () => {
     })
 
     await new Promise((r) => setTimeout(r, 200))
-    ;(wrapper.vm as unknown).selectedRootId = 0
-    ;(wrapper.vm as unknown).customRootPath = 'C:\\root\\New Author\\New Book'
+    ;(wrapper.vm as unknown).formData.relativePath = 'New Author\\New Book'
     await wrapper.vm.$nextTick()
 
     const savePromise = (wrapper.vm as unknown).handleSave()
@@ -442,7 +681,7 @@ describe('EditAudiobookModal move options', () => {
     const { useMoveJobsStore } = await import('@/stores/moveJobs')
     const moveJobsStore = useMoveJobsStore()
     expect(apiService.updateAudiobook).toHaveBeenCalledTimes(0)
-    expect(apiService.moveAudiobook).toHaveBeenCalledWith(1, 'C:/root/New Author/New Book', {
+    expect(apiService.moveAudiobook).toHaveBeenCalledWith(1, 'C:\\root\\New Author\\New Book', {
       sourcePath: 'C:\\root\\Some Author\\Some Title',
       moveFiles: true,
       deleteEmptySource: true,
@@ -451,7 +690,7 @@ describe('EditAudiobookModal move options', () => {
       jobId: 'job-1',
       audiobookId: 1,
       status: 'Queued',
-      target: 'C:/root/New Author/New Book',
+      target: 'C:\\root\\New Author\\New Book',
     })
     expect(signalRMocks.onMoveJobUpdate).toHaveBeenCalledTimes(1)
     expect(wrapper.emitted('saved')).toHaveLength(1)
@@ -472,8 +711,7 @@ describe('EditAudiobookModal move options', () => {
     })
 
     await new Promise((resolve) => setTimeout(resolve, 200))
-    ;(wrapper.vm as unknown).selectedRootId = 0
-    ;(wrapper.vm as unknown).customRootPath = 'C:\\root\\New Author\\New Book'
+    ;(wrapper.vm as unknown).formData.relativePath = 'New Author\\New Book'
     await wrapper.vm.$nextTick()
 
     const savePromise = (wrapper.vm as unknown).handleSave()
@@ -499,8 +737,7 @@ describe('EditAudiobookModal move options', () => {
     })
 
     await new Promise((resolve) => setTimeout(resolve, 200))
-    ;(wrapper.vm as unknown).selectedRootId = 0
-    ;(wrapper.vm as unknown).customRootPath = 'C:\\root\\New Author\\New Book'
+    ;(wrapper.vm as unknown).formData.relativePath = 'New Author\\New Book'
     await wrapper.vm.$nextTick()
 
     const savePromise = (wrapper.vm as unknown).handleSave()
@@ -515,8 +752,36 @@ describe('EditAudiobookModal move options', () => {
     expect(wrapper.emitted('saved')).toBeUndefined()
     expect(toastMocks.error).toHaveBeenCalledWith(
       'Move failed',
-      'The destination update could not be confirmed. Review the move queue before retrying.',
+      'The destination update could not be confirmed. No move job was created.',
     )
+  })
+
+  it('legacy out-of-root audiobooks allow metadata-only saves until relocation is explicitly chosen', async () => {
+    const { apiService } = await import('@/services/api')
+    const wrapper = mount(EditAudiobookModal, {
+      props: {
+        isOpen: true,
+        audiobook: {
+          ...audiobook,
+          basePath: 'D:\\legacy\\Some Author\\Some Title',
+        },
+      },
+      attachTo: document.body,
+      global: { plugins: [(await import('pinia')).createPinia()] },
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    ;(wrapper.vm as unknown).formData.title = 'Legacy Metadata Updated'
+    await wrapper.vm.$nextTick()
+
+    await (wrapper.vm as unknown).handleSave()
+
+    expect(apiService.updateAudiobook).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ title: 'Legacy Metadata Updated' }),
+    )
+    expect(apiService.moveAudiobook).not.toHaveBeenCalled()
+    expect(wrapper.emitted('saved')).toHaveLength(1)
   })
 
   it('Edition-only changes should persist through updateAudiobook', async () => {
@@ -541,7 +806,7 @@ describe('EditAudiobookModal move options', () => {
     )
   })
 
-  it('metadata edit with separator-only custom Windows path does not enqueue a move', async () => {
+  it('metadata edit with separator-only configured-root path does not enqueue a move', async () => {
     const wrapper = mount(EditAudiobookModal, {
       props: { isOpen: true, audiobook },
       attachTo: document.body,
@@ -551,13 +816,10 @@ describe('EditAudiobookModal move options', () => {
     await new Promise((r) => setTimeout(r, 200))
 
     const vm = wrapper.vm as unknown as {
-      selectedRootId: number
-      customRootPath: string
-      formData: { title: string }
+      formData: { title: string; relativePath: string }
       handleSave: () => Promise<void>
     }
-    vm.selectedRootId = 0
-    vm.customRootPath = 'C:/root/Some Author/Some Title'
+    vm.formData.relativePath = 'Some Author/Some Title'
     vm.formData.title = 'Updated Sample'
     await wrapper.vm.$nextTick()
 

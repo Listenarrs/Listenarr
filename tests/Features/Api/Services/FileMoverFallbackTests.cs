@@ -116,6 +116,116 @@ namespace Listenarr.Tests.Features.Api.Services
         }
 
         [Fact]
+        public async Task MoveFilePreservingPhysicalIdentity_AbsentDestination_PreservesExactGeneration()
+        {
+            var source = Path.Join(_root, "preserve-source.mp3");
+            var destination = Path.Join(_root, "preserve-destination.mp3");
+            await File.WriteAllTextAsync(source, "audio");
+            string expectedIdentity;
+            using (var sourceLease = PinnedAudiobookFileRegistrationLease.Open(source))
+            {
+                expectedIdentity = sourceLease.PhysicalObjectIdentity;
+            }
+            var mover = new FileMover(new NullLogger<FileMover>());
+
+            var moved = await mover.MoveFilePreservingPhysicalIdentityAsync(
+                source,
+                destination,
+                expectedIdentity);
+
+            Assert.True(moved);
+            Assert.False(File.Exists(source));
+            using var published = PinnedAudiobookFileRegistrationLease.Open(destination);
+            Assert.Equal(expectedIdentity, published.PhysicalObjectIdentity);
+            Assert.Equal("audio", await File.ReadAllTextAsync(destination));
+        }
+
+        [Fact]
+        public async Task MoveFilePreservingPhysicalIdentity_SourceGenerationReplaced_FailsClosed()
+        {
+            var source = Path.Join(_root, "generation-source.mp3");
+            var destination = Path.Join(_root, "generation-destination.mp3");
+            await File.WriteAllTextAsync(source, "original");
+            string expectedIdentity;
+            using (var lease = PinnedAudiobookFileRegistrationLease.Open(source))
+            {
+                expectedIdentity = lease.PhysicalObjectIdentity;
+            }
+
+            File.Delete(source);
+            await File.WriteAllTextAsync(source, "replacement");
+            var mover = new FileMover(new NullLogger<FileMover>());
+
+            var moved = await mover.MoveFilePreservingPhysicalIdentityAsync(
+                source,
+                destination,
+                expectedIdentity);
+
+            Assert.False(moved);
+            Assert.Equal("replacement", await File.ReadAllTextAsync(source));
+            Assert.False(File.Exists(destination));
+        }
+
+        [Fact]
+        public async Task MoveFilePreservingPhysicalIdentity_SameContentDifferentDestinationGeneration_FailsWithoutRetiringSource()
+        {
+            var source = Path.Join(_root, "same-content-source.mp3");
+            var destination = Path.Join(_root, "same-content-destination.mp3");
+            await File.WriteAllTextAsync(source, "audio");
+            await File.WriteAllTextAsync(destination, "audio");
+            string expectedIdentity;
+            string originalDestinationIdentity;
+            using (var sourceLease = PinnedAudiobookFileRegistrationLease.Open(source))
+            using (var destinationLease = PinnedAudiobookFileRegistrationLease.Open(destination))
+            {
+                expectedIdentity = sourceLease.PhysicalObjectIdentity;
+                originalDestinationIdentity = destinationLease.PhysicalObjectIdentity;
+            }
+            Assert.NotEqual(expectedIdentity, originalDestinationIdentity);
+            var mover = new FileMover(new NullLogger<FileMover>());
+
+            var moved = await mover.MoveFilePreservingPhysicalIdentityAsync(
+                source,
+                destination,
+                expectedIdentity);
+
+            Assert.False(moved);
+            Assert.True(File.Exists(source));
+            using var retainedSource = PinnedAudiobookFileRegistrationLease.Open(source);
+            Assert.Equal(expectedIdentity, retainedSource.PhysicalObjectIdentity);
+            using var retainedDestination = PinnedAudiobookFileRegistrationLease.Open(destination);
+            Assert.Equal(originalDestinationIdentity, retainedDestination.PhysicalObjectIdentity);
+            Assert.Equal("audio", await File.ReadAllTextAsync(source));
+            Assert.Equal("audio", await File.ReadAllTextAsync(destination));
+        }
+
+        [Fact]
+        public async Task MoveFilePreservingPhysicalIdentity_NativeRenameUnavailable_DoesNotCopyDelete()
+        {
+            var source = Path.Join(_root, "native-required-source.mp3");
+            var destination = Path.Join(_root, "native-required-destination.mp3");
+            await File.WriteAllTextAsync(source, "audio");
+            string expectedIdentity;
+            using (var lease = PinnedAudiobookFileRegistrationLease.Open(source))
+            {
+                expectedIdentity = lease.PhysicalObjectIdentity;
+            }
+            var mover = new FileMover(new NullLogger<FileMover>())
+            {
+                DisableNativeFileRenameForTest = true
+            };
+
+            var moved = await mover.MoveFilePreservingPhysicalIdentityAsync(
+                source,
+                destination,
+                expectedIdentity);
+
+            Assert.False(moved);
+            Assert.Equal("audio", await File.ReadAllTextAsync(source));
+            Assert.False(File.Exists(destination));
+        }
+
+        [Fact]
         public async Task PerformActionOn_MoveToSamePath_IsNoOpAndPreservesFile()
         {
             var file = Path.Join(_root, "perform-same.mp3");
@@ -447,6 +557,75 @@ namespace Listenarr.Tests.Features.Api.Services
                 RegistrationPublicationCompletion.Completed,
                 CompletePreparedPublication(recoveredLease));
             Assert.False(Directory.Exists(legacyStatePath));
+        }
+
+        [Fact]
+        public async Task PrepareActionForRegistration_CopyRecovery_RetainsOriginalSourceGenerationEvidence()
+        {
+            var source = Path.Join(
+                _root,
+                "copy-registration-recovery-source.m4b");
+            var displacedSource = Path.Join(
+                _root,
+                "copy-registration-recovery-source-original.m4b");
+            var destination = Path.Join(
+                _root,
+                "copy-registration-recovery-destination.m4b");
+            await File.WriteAllTextAsync(source, "audio");
+            await File.WriteAllTextAsync(destination, "previous");
+            string originalSourceIdentity;
+            using (var sourceLease =
+                PinnedAudiobookFileRegistrationLease.Open(source))
+            {
+                originalSourceIdentity = sourceLease.PhysicalObjectIdentity;
+            }
+
+            var interruptedMover = new FileMover(
+                new NullLogger<FileMover>(),
+                semanticsResolver: new FileSystemSemanticsResolver())
+            {
+                AfterPreparedPublicationCommittedForTestAsync = () =>
+                    throw new IOException(
+                        "simulated crash after prepared copy commit")
+            };
+            using var interruptedLease =
+                await interruptedMover.PrepareActionForRegistrationAsync(
+                    FileAction.Copy,
+                    source,
+                    destination,
+                    Guid.NewGuid());
+
+            Assert.Null(interruptedLease);
+            Assert.False(File.Exists(destination));
+            Assert.Single(Directory.EnumerateFiles(
+                _root,
+                "prepared.claim",
+                SearchOption.AllDirectories));
+            File.Move(source, displacedSource);
+            await File.WriteAllTextAsync(source, "audio");
+
+            var recoveryMover = new FileMover(
+                new NullLogger<FileMover>(),
+                semanticsResolver: new FileSystemSemanticsResolver());
+            using var recoveredLease =
+                await recoveryMover.PrepareActionForRegistrationAsync(
+                    FileAction.Copy,
+                    source,
+                    destination,
+                    Guid.NewGuid());
+
+            Assert.NotNull(recoveredLease);
+            Assert.True(recoveredLease.MatchesCurrentPublication());
+            Assert.Equal(
+                originalSourceIdentity,
+                recoveredLease.SourcePhysicalObjectIdentity);
+            Assert.Equal("audio", await File.ReadAllTextAsync(destination));
+            Assert.Equal("audio", await File.ReadAllTextAsync(source));
+            Assert.Equal("audio", await File.ReadAllTextAsync(displacedSource));
+            Assert.Empty(Directory.EnumerateDirectories(
+                _root,
+                ".listenarr-file-publication-*.state",
+                SearchOption.TopDirectoryOnly));
         }
 
         [Fact]
@@ -836,6 +1015,54 @@ namespace Listenarr.Tests.Features.Api.Services
         }
 
         [Fact]
+        public async Task PrepareActionForRegistration_CleanupIntentReplacedAfterClaimRetirement_PreservesReplacementAndBlocksCleanup()
+        {
+            var source = Path.Join(_root, "registered-intent-race-source.m4b");
+            var destination = Path.Join(_root, "registered-intent-race-destination.m4b");
+            await File.WriteAllTextAsync(source, "audio");
+            string? replacementIntent = null;
+            string? displacedIntent = null;
+            var mover = new FileMover(
+                new NullLogger<FileMover>(),
+                semanticsResolver: new FileSystemSemanticsResolver())
+            {
+                AfterRegistrationPublicationClaimRetiredForTest = () =>
+                {
+                    var stateDirectory = Assert.Single(
+                        Directory.EnumerateDirectories(
+                            _root,
+                            ".listenarr-registration-publication-*.state"));
+                    replacementIntent = Path.Join(
+                        stateDirectory,
+                        "registration.cleanup.json");
+                    displacedIntent = replacementIntent + ".displaced";
+                    File.Move(replacementIntent, displacedIntent);
+                    File.WriteAllText(replacementIntent, "{\"replacement\":true}");
+                }
+            };
+            using var lease = await mover.PrepareActionForRegistrationAsync(
+                FileAction.HardlinkCopy,
+                source,
+                destination,
+                Guid.NewGuid());
+            Assert.NotNull(lease);
+
+            var completion = CompletePreparedPublication(lease);
+
+            Assert.Equal(
+                RegistrationPublicationCompletion.CommittedCleanupPending,
+                completion);
+            Assert.NotNull(replacementIntent);
+            Assert.NotNull(displacedIntent);
+            Assert.True(File.Exists(replacementIntent));
+            Assert.Equal(
+                "{\"replacement\":true}",
+                await File.ReadAllTextAsync(replacementIntent!));
+            Assert.True(File.Exists(displacedIntent));
+            Assert.True(File.Exists(destination));
+        }
+
+        [Fact]
         public async Task PrepareActionForRegistration_UnregisteredHardlinkAlias_RemainsRejected()
         {
             var source = Path.Join(_root, "unregistered-hardlink-source.m4b");
@@ -1005,6 +1232,157 @@ namespace Listenarr.Tests.Features.Api.Services
             Assert.Equal(
                 "same-bytes",
                 await File.ReadAllTextAsync(destination));
+        }
+
+        [WindowsFact]
+        public async Task CompletePreparedMoveAsync_WindowsFailureAfterSourceRetirement_RestoresSource()
+        {
+            var source = Path.Join(_root, "prepared-windows-race-source.mp3");
+            var destination = Path.Join(_root, "prepared-windows-race-destination.mp3");
+            await File.WriteAllTextAsync(source, "original");
+            var mover = new FileMover(
+                new NullLogger<FileMover>(),
+                semanticsResolver: new FileSystemSemanticsResolver())
+            {
+                AfterPreparedMoveSourceDeletedForTestAsync = _ =>
+                    Task.FromException(
+                        new IOException("Injected post-retirement failure."))
+            };
+            using var lease = await mover.PrepareActionForRegistrationAsync(
+                FileAction.Move,
+                source,
+                destination);
+            Assert.NotNull(lease);
+
+            var completed = await mover.CompletePreparedMoveAsync(
+                source,
+                destination,
+                lease);
+
+            Assert.False(completed);
+            Assert.Equal("original", await File.ReadAllTextAsync(source));
+            Assert.Equal("original", await File.ReadAllTextAsync(destination));
+        }
+
+        [Fact]
+        public async Task CompletePreparedMoveAsync_RecoveredClaimSameContentReplacement_IsPreserved()
+        {
+            var source = Path.Join(_root, "prepared-replaced-claim-source.mp3");
+            var destination = Path.Join(_root, "prepared-replaced-claim-destination.mp3");
+            var displacedClaim = Path.Join(_root, "prepared-replaced-claim-original.mp3");
+            await File.WriteAllTextAsync(source, "same-bytes");
+            var operationId = Guid.NewGuid();
+            var semanticsResolver = new FileSystemSemanticsResolver();
+            using var lease = await new FileMover(
+                    new NullLogger<FileMover>(),
+                    semanticsResolver: semanticsResolver)
+                .PrepareActionForRegistrationAsync(
+                    FileAction.Move,
+                    source,
+                    destination,
+                    operationId);
+            Assert.NotNull(lease);
+
+            var resolution = await semanticsResolver.ResolveAsync(source);
+            Assert.Equal(PathIdentityState.Valid, resolution.State);
+            var sourceIdentity = Path.GetFullPath(source);
+            var destinationIdentity = Path.GetFullPath(destination);
+            if (resolution.Semantics.CaseSensitivity
+                == FileSystemCaseSensitivity.Insensitive)
+            {
+                sourceIdentity = sourceIdentity.ToUpperInvariant();
+                destinationIdentity = destinationIdentity.ToUpperInvariant();
+            }
+
+            var claimIdentity = FormattableString.Invariant(
+                $"{operationId:N}\0{sourceIdentity}\0{destinationIdentity}");
+            var claimDigest = Convert.ToHexString(
+                System.Security.Cryptography.SHA256.HashData(
+                    System.Text.Encoding.UTF8.GetBytes(claimIdentity)));
+            var claimPath = Path.Join(
+                _root,
+                $".listenarr-registration-move-{claimDigest[..32]}.claim");
+            File.Move(source, displacedClaim);
+            await File.WriteAllTextAsync(claimPath, "same-bytes");
+
+            var completed = await new FileMover(
+                    new NullLogger<FileMover>(),
+                    semanticsResolver: semanticsResolver)
+                .CompletePreparedMoveAsync(
+                    source,
+                    destination,
+                    lease,
+                    operationId);
+
+            Assert.False(completed);
+            Assert.False(File.Exists(claimPath));
+            Assert.True(File.Exists(source));
+            Assert.Equal("same-bytes", await File.ReadAllTextAsync(source));
+            Assert.True(File.Exists(displacedClaim));
+            Assert.Equal("same-bytes", await File.ReadAllTextAsync(displacedClaim));
+            Assert.Equal("same-bytes", await File.ReadAllTextAsync(destination));
+        }
+
+        [Fact]
+        public async Task CompletePreparedMoveAsync_RecoveredClaimFailureAfterRetirement_RestoresSource()
+        {
+            var source = Path.Join(_root, "prepared-recovery-failure-source.mp3");
+            var destination = Path.Join(
+                _root,
+                "prepared-recovery-failure-destination.mp3");
+            await File.WriteAllTextAsync(source, "original");
+            var operationId = Guid.NewGuid();
+            var semanticsResolver = new FileSystemSemanticsResolver();
+            using var lease = await new FileMover(
+                    new NullLogger<FileMover>(),
+                    semanticsResolver: semanticsResolver)
+                .PrepareActionForRegistrationAsync(
+                    FileAction.Move,
+                    source,
+                    destination,
+                    operationId);
+            Assert.NotNull(lease);
+
+            var resolution = await semanticsResolver.ResolveAsync(source);
+            Assert.Equal(PathIdentityState.Valid, resolution.State);
+            var sourceIdentity = Path.GetFullPath(source);
+            var destinationIdentity = Path.GetFullPath(destination);
+            if (resolution.Semantics.CaseSensitivity
+                == FileSystemCaseSensitivity.Insensitive)
+            {
+                sourceIdentity = sourceIdentity.ToUpperInvariant();
+                destinationIdentity = destinationIdentity.ToUpperInvariant();
+            }
+
+            var claimIdentity = FormattableString.Invariant(
+                $"{operationId:N}\0{sourceIdentity}\0{destinationIdentity}");
+            var claimDigest = Convert.ToHexString(
+                System.Security.Cryptography.SHA256.HashData(
+                    System.Text.Encoding.UTF8.GetBytes(claimIdentity)));
+            var claimPath = Path.Join(
+                _root,
+                $".listenarr-registration-move-{claimDigest[..32]}.claim");
+            File.Move(source, claimPath);
+
+            var recoveryMover = new FileMover(
+                new NullLogger<FileMover>(),
+                semanticsResolver: semanticsResolver)
+            {
+                AfterPreparedMoveSourceDeletedForTestAsync = _ =>
+                    Task.FromException(
+                        new IOException("Injected recovered-claim failure."))
+            };
+
+            var completed = await recoveryMover.CompletePreparedMoveAsync(
+                source,
+                destination,
+                lease,
+                operationId);
+
+            Assert.False(completed);
+            Assert.Equal("original", await File.ReadAllTextAsync(source));
+            Assert.Equal("original", await File.ReadAllTextAsync(destination));
+            Assert.False(File.Exists(claimPath));
         }
 
         [LinuxFact]
@@ -1200,6 +1578,57 @@ namespace Listenarr.Tests.Features.Api.Services
                 _root,
                 ".listenarr-directory-rename-*.journal",
                 SearchOption.TopDirectoryOnly));
+        }
+
+        [Fact]
+        public async Task MoveDirectoryAsync_RenameJournalReplacedBeforeRetirement_PreservesReplacement()
+        {
+            var source = Path.Join(_root, $"journal-replaced-source-{Guid.NewGuid():N}");
+            var destination = Path.Join(
+                _root,
+                $"journal-replaced-destination-{Guid.NewGuid():N}");
+            Directory.CreateDirectory(source);
+            await File.WriteAllTextAsync(Path.Join(source, "book.m4b"), "audio");
+            var crashingMover = new FileMover(
+                new NullLogger<FileMover>(),
+                semanticsResolver: new FileSystemSemanticsResolver())
+            {
+                AfterDirectoryRenameJournalPublishedForTest = _ =>
+                {
+                    Directory.Move(source, destination);
+                    throw new OperationCanceledException(
+                        "simulated process termination after rename");
+                }
+            };
+            await Assert.ThrowsAsync<OperationCanceledException>(() =>
+                crashingMover.MoveDirectoryAsync(source, destination));
+            var journalPath = Assert.Single(Directory.EnumerateFiles(
+                _root,
+                ".listenarr-directory-rename-*.journal",
+                SearchOption.TopDirectoryOnly));
+            var originalBytes = await File.ReadAllBytesAsync(journalPath);
+            var displacedJournalPath = journalPath + ".displaced";
+            var recoveringMover = new FileMover(
+                new NullLogger<FileMover>(),
+                semanticsResolver: new FileSystemSemanticsResolver())
+            {
+                BeforeDirectoryRenameJournalRetirementForTest = pinnedJournalPath =>
+                {
+                    Assert.Equal(journalPath, pinnedJournalPath);
+                    File.Move(journalPath, displacedJournalPath);
+                    File.WriteAllBytes(journalPath, originalBytes);
+                }
+            };
+
+            await Assert.ThrowsAsync<IOException>(() =>
+                recoveringMover.MoveDirectoryAsync(source, destination));
+
+            Assert.False(Directory.Exists(source));
+            Assert.True(Directory.Exists(destination));
+            Assert.True(File.Exists(journalPath));
+            Assert.Equal(originalBytes, await File.ReadAllBytesAsync(journalPath));
+            Assert.True(File.Exists(displacedJournalPath));
+            Assert.Equal(originalBytes, await File.ReadAllBytesAsync(displacedJournalPath));
         }
 
         [WindowsFact]
@@ -1964,6 +2393,120 @@ namespace Listenarr.Tests.Features.Api.Services
         }
 
         [Fact]
+        public async Task MoveFileAsync_UncommittedRecoverySourceClaimReplaced_PreservesReplacementAndBlocks()
+        {
+            var sourceFile = Path.Join(_root, "recovery-source-claim-source.mp3");
+            var destinationFile = Path.Join(_root, "recovery-source-claim-target.mp3");
+            await File.WriteAllTextAsync(sourceFile, "source-generation");
+            await File.WriteAllTextAsync(destinationFile, "destination-generation");
+            var interruptedMover = new FileMover(
+                new NullLogger<FileMover>(),
+                semanticsResolver: new FileSystemSemanticsResolver())
+            {
+                DisableNativeFileRenameForTest = true,
+                AfterDestinationQuarantinedForTestAsync = (_, _) =>
+                    throw new OperationCanceledException("simulated uncommitted interruption")
+            };
+
+            await Assert.ThrowsAsync<OperationCanceledException>(
+                () => interruptedMover.MoveFileAsync(sourceFile, destinationFile));
+            var claim = Assert.Single(Directory.EnumerateFiles(
+                _root,
+                "source.claim",
+                SearchOption.AllDirectories));
+            var displaced = Path.Join(_root, "original-source-claim.mp3");
+            File.Move(claim, displaced);
+            await File.WriteAllTextAsync(claim, "replacement-source-claim");
+
+            var retried = await new FileMover(
+                new NullLogger<FileMover>(),
+                semanticsResolver: new FileSystemSemanticsResolver())
+                .MoveFileAsync(sourceFile, destinationFile);
+
+            Assert.False(retried);
+            Assert.False(File.Exists(sourceFile));
+            Assert.False(File.Exists(destinationFile));
+            Assert.Equal("replacement-source-claim", await File.ReadAllTextAsync(claim));
+            Assert.Equal("source-generation", await File.ReadAllTextAsync(displaced));
+        }
+
+        [Fact]
+        public async Task MoveFileAsync_UncommittedRecoveryStageReplaced_PreservesReplacementAndBlocks()
+        {
+            var sourceFile = Path.Join(_root, "recovery-stage-source.mp3");
+            var destinationFile = Path.Join(_root, "recovery-stage-target.mp3");
+            await File.WriteAllTextAsync(sourceFile, "source-generation");
+            await File.WriteAllTextAsync(destinationFile, "destination-generation");
+            var interruptedMover = new FileMover(
+                new NullLogger<FileMover>(),
+                semanticsResolver: new FileSystemSemanticsResolver())
+            {
+                DisableNativeFileRenameForTest = true,
+                AfterDestinationQuarantinedForTestAsync = (_, _) =>
+                    throw new OperationCanceledException("simulated uncommitted interruption")
+            };
+
+            await Assert.ThrowsAsync<OperationCanceledException>(
+                () => interruptedMover.MoveFileAsync(sourceFile, destinationFile));
+            var stage = Assert.Single(Directory.EnumerateFiles(
+                _root,
+                "destination.stage",
+                SearchOption.AllDirectories));
+            var displaced = Path.Join(_root, "original-destination-stage.mp3");
+            File.Move(stage, displaced);
+            await File.WriteAllTextAsync(stage, "replacement-stage");
+
+            var retried = await new FileMover(
+                new NullLogger<FileMover>(),
+                semanticsResolver: new FileSystemSemanticsResolver())
+                .MoveFileAsync(sourceFile, destinationFile);
+
+            Assert.False(retried);
+            Assert.False(File.Exists(sourceFile));
+            Assert.False(File.Exists(destinationFile));
+            Assert.Equal("replacement-stage", await File.ReadAllTextAsync(stage));
+            Assert.Equal("source-generation", await File.ReadAllTextAsync(displaced));
+        }
+
+        [Fact]
+        public async Task MoveFileAsync_UncommittedRecoveryPreviousReplaced_PreservesReplacementAndBlocks()
+        {
+            var sourceFile = Path.Join(_root, "recovery-previous-source.mp3");
+            var destinationFile = Path.Join(_root, "recovery-previous-target.mp3");
+            await File.WriteAllTextAsync(sourceFile, "source-generation");
+            await File.WriteAllTextAsync(destinationFile, "destination-generation");
+            var interruptedMover = new FileMover(
+                new NullLogger<FileMover>(),
+                semanticsResolver: new FileSystemSemanticsResolver())
+            {
+                DisableNativeFileRenameForTest = true,
+                AfterDestinationQuarantinedForTestAsync = (_, _) =>
+                    throw new OperationCanceledException("simulated uncommitted interruption")
+            };
+
+            await Assert.ThrowsAsync<OperationCanceledException>(
+                () => interruptedMover.MoveFileAsync(sourceFile, destinationFile));
+            var previous = Assert.Single(Directory.EnumerateFiles(
+                _root,
+                "destination.previous",
+                SearchOption.AllDirectories));
+            var displaced = Path.Join(_root, "original-destination-previous.mp3");
+            File.Move(previous, displaced);
+            await File.WriteAllTextAsync(previous, "replacement-previous");
+
+            var retried = await new FileMover(
+                new NullLogger<FileMover>(),
+                semanticsResolver: new FileSystemSemanticsResolver())
+                .MoveFileAsync(sourceFile, destinationFile);
+
+            Assert.False(retried);
+            Assert.False(File.Exists(sourceFile));
+            Assert.False(File.Exists(destinationFile));
+            Assert.Equal("replacement-previous", await File.ReadAllTextAsync(previous));
+            Assert.Equal("destination-generation", await File.ReadAllTextAsync(displaced));
+        }
+
+        [Fact]
         public async Task MoveFileAsync_InterruptedAfterDestinationStage_RecoversOnRetry()
         {
             var sourceFile = Path.Join(_root, "stage-crash-source.mp3");
@@ -2071,6 +2614,33 @@ namespace Listenarr.Tests.Features.Api.Services
                 "destination.stage",
                 SearchOption.AllDirectories));
             Assert.Equal("original", await File.ReadAllTextAsync(interruptedStage));
+            var interruptedPrevious = Assert.Single(Directory.EnumerateFiles(
+                _root,
+                "destination.previous",
+                SearchOption.AllDirectories));
+            var operationState = Assert.Single(Directory.EnumerateFiles(
+                _root,
+                "operation.state",
+                SearchOption.AllDirectories));
+            var operationPayload = await File.ReadAllTextAsync(operationState);
+            using (var stageParent = PinnedDirectoryCreation.OpenPinnedDirectoryNoFollow(
+                Path.GetDirectoryName(interruptedStage)!))
+            using (var stage = stageParent.OpenExistingFile(
+                Path.GetFileName(interruptedStage),
+                requireDeleteAccess: false))
+            using (var previous = stageParent.OpenExistingFile(
+                Path.GetFileName(interruptedPrevious),
+                requireDeleteAccess: false))
+            {
+                Assert.Contains(
+                    $"destinationStageObjectIdentity={stage.GetObjectIdentity()}",
+                    operationPayload,
+                    StringComparison.Ordinal);
+                Assert.Contains(
+                    $"destinationPreviousObjectIdentity={previous.GetObjectIdentity()}",
+                    operationPayload,
+                    StringComparison.Ordinal);
+            }
             var retryMover = new FileMover(
                 new NullLogger<FileMover>(),
                 semanticsResolver: new FileSystemSemanticsResolver());
@@ -2244,6 +2814,49 @@ namespace Listenarr.Tests.Features.Api.Services
             Assert.False(retried);
             Assert.Equal("replacement", await File.ReadAllTextAsync(sourceFile));
             Assert.Equal("original", await File.ReadAllTextAsync(destinationFile));
+        }
+
+        [Fact]
+        public async Task MoveFileAsync_QuarantinedPredecessorReplacedBeforeRetirement_PreservesReplacement()
+        {
+            var sourceFile = Path.Join(_root, "predecessor-race-source.mp3");
+            var destinationFile = Path.Join(_root, "predecessor-race-target.mp3");
+            await File.WriteAllTextAsync(sourceFile, "new-generation");
+            await File.WriteAllTextAsync(destinationFile, "previous-generation");
+            string? displacedPredecessor = null;
+            var mover = new FileMover(
+                new NullLogger<FileMover>(),
+                semanticsResolver: new FileSystemSemanticsResolver())
+            {
+                AfterDestinationPublishedForTestAsync = _ =>
+                {
+                    var predecessor = Assert.Single(Directory.EnumerateFiles(
+                        _root,
+                        "destination.previous",
+                        SearchOption.AllDirectories));
+                    displacedPredecessor = predecessor + ".displaced";
+                    File.Move(predecessor, displacedPredecessor);
+                    File.WriteAllText(predecessor, "replacement-predecessor");
+                    return Task.CompletedTask;
+                }
+            };
+
+            var moved = await mover.MoveFileAsync(sourceFile, destinationFile);
+
+            Assert.False(moved);
+            Assert.Equal("new-generation", await File.ReadAllTextAsync(destinationFile));
+            var replacement = Assert.Single(Directory.EnumerateFiles(
+                _root,
+                "destination.previous",
+                SearchOption.AllDirectories));
+            Assert.Equal(
+                "replacement-predecessor",
+                await File.ReadAllTextAsync(replacement));
+            Assert.NotNull(displacedPredecessor);
+            Assert.True(File.Exists(displacedPredecessor));
+            Assert.Equal(
+                "previous-generation",
+                await File.ReadAllTextAsync(displacedPredecessor!));
         }
 
         [Fact]
@@ -2693,6 +3306,340 @@ namespace Listenarr.Tests.Features.Api.Services
         }
 
         [Fact]
+        public async Task HardlinkFileAsync_CrashAfterPreparedClaimMoveBeforeEvidence_RecoversOnRetry()
+        {
+            var sourceFile = Path.Join(
+                _root,
+                "publication-claim-evidence-gap-source.mp3");
+            var destinationFile = Path.Join(
+                _root,
+                "publication-claim-evidence-gap-target.mp3");
+            await File.WriteAllTextAsync(sourceFile, "source generation");
+            await File.WriteAllTextAsync(destinationFile, "destination generation");
+            var interruptedMover = new FileMover(
+                new NullLogger<FileMover>(),
+                semanticsResolver: new FileSystemSemanticsResolver())
+            {
+                AfterPreparedClaimMovedBeforeEvidenceForTestAsync = () =>
+                    throw new OperationCanceledException(
+                        "simulated crash after prepared claim move")
+            };
+
+            await Assert.ThrowsAsync<OperationCanceledException>(
+                () => interruptedMover.HardlinkFileAsync(
+                    sourceFile,
+                    destinationFile));
+            Assert.False(File.Exists(destinationFile));
+            Assert.Single(Directory.EnumerateFiles(
+                _root,
+                "prepared.claim",
+                SearchOption.AllDirectories));
+
+            var retried = await new FileMover(
+                new NullLogger<FileMover>(),
+                semanticsResolver: new FileSystemSemanticsResolver())
+                .HardlinkFileAsync(sourceFile, destinationFile);
+
+            Assert.True(retried);
+            Assert.Equal(
+                "source generation",
+                await File.ReadAllTextAsync(destinationFile));
+            Assert.Equal(
+                "source generation",
+                await File.ReadAllTextAsync(sourceFile));
+            Assert.Empty(Directory.EnumerateDirectories(
+                _root,
+                ".listenarr-file-publication-*.state",
+                SearchOption.TopDirectoryOnly));
+        }
+
+        [Fact]
+        public async Task HardlinkFileAsync_CrashAfterCommitBeforePublication_RecoversOnRetry()
+        {
+            var sourceFile = Path.Join(
+                _root,
+                "publication-postcommit-source.mp3");
+            var destinationFile = Path.Join(
+                _root,
+                "publication-postcommit-target.mp3");
+            await File.WriteAllTextAsync(sourceFile, "source generation");
+            await File.WriteAllTextAsync(destinationFile, "destination generation");
+            var interruptedMover = new FileMover(
+                new NullLogger<FileMover>(),
+                semanticsResolver: new FileSystemSemanticsResolver())
+            {
+                AfterPreparedPublicationCommittedForTestAsync = () =>
+                    throw new OperationCanceledException(
+                        "simulated crash after publication commit")
+            };
+
+            await Assert.ThrowsAsync<OperationCanceledException>(
+                () => interruptedMover.HardlinkFileAsync(
+                    sourceFile,
+                    destinationFile));
+            Assert.False(File.Exists(destinationFile));
+            Assert.Single(Directory.EnumerateFiles(
+                _root,
+                "prepared.claim",
+                SearchOption.AllDirectories));
+            Assert.Single(Directory.EnumerateFiles(
+                _root,
+                "destination.published.claim",
+                SearchOption.AllDirectories));
+
+            var retried = await new FileMover(
+                new NullLogger<FileMover>(),
+                semanticsResolver: new FileSystemSemanticsResolver())
+                .HardlinkFileAsync(sourceFile, destinationFile);
+
+            Assert.True(retried);
+            Assert.Equal(
+                "source generation",
+                await File.ReadAllTextAsync(destinationFile));
+            Assert.Equal(
+                "source generation",
+                await File.ReadAllTextAsync(sourceFile));
+            Assert.Empty(Directory.EnumerateDirectories(
+                _root,
+                ".listenarr-file-publication-*.state",
+                SearchOption.TopDirectoryOnly));
+        }
+
+        [Fact]
+        public async Task HardlinkFileAsync_CrashAfterPublicationBeforeGenerationEvidence_RecoversOnRetry()
+        {
+            var sourceFile = Path.Join(
+                _root,
+                "publication-postpublish-source.mp3");
+            var destinationFile = Path.Join(
+                _root,
+                "publication-postpublish-target.mp3");
+            await File.WriteAllTextAsync(sourceFile, "source generation");
+            await File.WriteAllTextAsync(destinationFile, "destination generation");
+            var interruptedMover = new FileMover(
+                new NullLogger<FileMover>(),
+                semanticsResolver: new FileSystemSemanticsResolver())
+            {
+                AfterPreparedDestinationPublishedForTestAsync = () =>
+                    throw new OperationCanceledException(
+                        "simulated crash after prepared publication")
+            };
+
+            await Assert.ThrowsAsync<OperationCanceledException>(
+                () => interruptedMover.HardlinkFileAsync(
+                    sourceFile,
+                    destinationFile));
+            Assert.Equal(
+                "source generation",
+                await File.ReadAllTextAsync(destinationFile));
+            Assert.Single(Directory.EnumerateFiles(
+                _root,
+                "destination.published.claim",
+                SearchOption.AllDirectories));
+
+            var retried = await new FileMover(
+                new NullLogger<FileMover>(),
+                semanticsResolver: new FileSystemSemanticsResolver())
+                .HardlinkFileAsync(sourceFile, destinationFile);
+
+            Assert.True(retried);
+            Assert.Equal(
+                "source generation",
+                await File.ReadAllTextAsync(destinationFile));
+            Assert.Equal(
+                "source generation",
+                await File.ReadAllTextAsync(sourceFile));
+            Assert.Empty(Directory.EnumerateDirectories(
+                _root,
+                ".listenarr-file-publication-*.state",
+                SearchOption.TopDirectoryOnly));
+        }
+
+        [Fact]
+        public async Task HardlinkFileAsync_PrecommitPreviousReplaced_PreservesReplacementAndBlocks()
+        {
+            var sourceFile = Path.Join(_root, "publication-precommit-previous-source.mp3");
+            var destinationFile = Path.Join(_root, "publication-precommit-previous-target.mp3");
+            await File.WriteAllTextAsync(sourceFile, "source generation");
+            await File.WriteAllTextAsync(destinationFile, "destination generation");
+            string? stateDirectory = null;
+            string? displacedPrevious = null;
+            var interruptedMover = new FileMover(
+                new NullLogger<FileMover>(),
+                semanticsResolver: new FileSystemSemanticsResolver())
+            {
+                AfterPreparedDestinationCapturedForTestAsync = () =>
+                {
+                    stateDirectory = Assert.Single(Directory.EnumerateDirectories(
+                        _root,
+                        ".listenarr-file-publication-*.state",
+                        SearchOption.TopDirectoryOnly));
+                    var previous = Path.Join(stateDirectory, "destination.previous");
+                    displacedPrevious = Path.Join(_root, "original-precommit-previous.mp3");
+                    File.Move(previous, displacedPrevious);
+                    File.WriteAllText(previous, "replacement previous");
+                    throw new OperationCanceledException("simulated precommit previous replacement");
+                }
+            };
+
+            await Assert.ThrowsAsync<OperationCanceledException>(
+                () => interruptedMover.HardlinkFileAsync(sourceFile, destinationFile));
+
+            var retried = await new FileMover(
+                new NullLogger<FileMover>(),
+                semanticsResolver: new FileSystemSemanticsResolver())
+                .HardlinkFileAsync(sourceFile, destinationFile);
+
+            Assert.False(retried);
+            Assert.False(File.Exists(destinationFile));
+            Assert.NotNull(stateDirectory);
+            Assert.Equal(
+                "replacement previous",
+                await File.ReadAllTextAsync(Path.Join(stateDirectory!, "destination.previous")));
+            Assert.NotNull(displacedPrevious);
+            Assert.Equal("destination generation", await File.ReadAllTextAsync(displacedPrevious!));
+            Assert.Equal("source generation", await File.ReadAllTextAsync(sourceFile));
+        }
+
+        [Fact]
+        public async Task HardlinkFileAsync_PrecommitPreparedClaimReplaced_PreservesReplacementAndBlocks()
+        {
+            var sourceFile = Path.Join(_root, "publication-precommit-prepared-source.mp3");
+            var destinationFile = Path.Join(_root, "publication-precommit-prepared-target.mp3");
+            await File.WriteAllTextAsync(sourceFile, "source generation");
+            await File.WriteAllTextAsync(destinationFile, "destination generation");
+            string? stateDirectory = null;
+            string? displacedPrepared = null;
+            var interruptedMover = new FileMover(
+                new NullLogger<FileMover>(),
+                semanticsResolver: new FileSystemSemanticsResolver())
+            {
+                AfterPreparedClaimPublishedForTestAsync = () =>
+                {
+                    stateDirectory = Assert.Single(Directory.EnumerateDirectories(
+                        _root,
+                        ".listenarr-file-publication-*.state",
+                        SearchOption.TopDirectoryOnly));
+                    var prepared = Path.Join(stateDirectory, "prepared.claim");
+                    displacedPrepared = Path.Join(_root, "original-precommit-prepared.mp3");
+                    File.Move(prepared, displacedPrepared);
+                    File.WriteAllText(prepared, "replacement prepared");
+                    throw new OperationCanceledException("simulated precommit prepared replacement");
+                }
+            };
+
+            await Assert.ThrowsAsync<OperationCanceledException>(
+                () => interruptedMover.HardlinkFileAsync(sourceFile, destinationFile));
+
+            var retried = await new FileMover(
+                new NullLogger<FileMover>(),
+                semanticsResolver: new FileSystemSemanticsResolver())
+                .HardlinkFileAsync(sourceFile, destinationFile);
+
+            Assert.False(retried);
+            Assert.False(File.Exists(destinationFile));
+            Assert.NotNull(stateDirectory);
+            Assert.Equal(
+                "replacement prepared",
+                await File.ReadAllTextAsync(Path.Join(stateDirectory!, "prepared.claim")));
+            Assert.NotNull(displacedPrepared);
+            Assert.Equal("source generation", await File.ReadAllTextAsync(displacedPrepared!));
+            Assert.Equal("source generation", await File.ReadAllTextAsync(sourceFile));
+        }
+
+        [Fact]
+        public async Task HardlinkFileAsync_CommittedPreparedClaimReplaced_PreservesReplacementAndBlocks()
+        {
+            var sourceFile = Path.Join(_root, "publication-committed-prepared-source.mp3");
+            var destinationFile = Path.Join(_root, "publication-committed-prepared-target.mp3");
+            await File.WriteAllTextAsync(sourceFile, "source generation");
+            await File.WriteAllTextAsync(destinationFile, "destination generation");
+            string? stateDirectory = null;
+            string? displacedPrepared = null;
+            var interruptedMover = new FileMover(
+                new NullLogger<FileMover>(),
+                semanticsResolver: new FileSystemSemanticsResolver())
+            {
+                AfterPreparedPublicationCommittedForTestAsync = () =>
+                {
+                    stateDirectory = Assert.Single(Directory.EnumerateDirectories(
+                        _root,
+                        ".listenarr-file-publication-*.state",
+                        SearchOption.TopDirectoryOnly));
+                    var prepared = Path.Join(stateDirectory, "prepared.claim");
+                    displacedPrepared = Path.Join(_root, "original-committed-prepared.mp3");
+                    File.Move(prepared, displacedPrepared);
+                    File.WriteAllText(prepared, "replacement committed prepared");
+                    throw new OperationCanceledException("simulated committed prepared replacement");
+                }
+            };
+
+            await Assert.ThrowsAsync<OperationCanceledException>(
+                () => interruptedMover.HardlinkFileAsync(sourceFile, destinationFile));
+
+            var retried = await new FileMover(
+                new NullLogger<FileMover>(),
+                semanticsResolver: new FileSystemSemanticsResolver())
+                .HardlinkFileAsync(sourceFile, destinationFile);
+
+            Assert.False(retried);
+            Assert.False(File.Exists(destinationFile));
+            Assert.NotNull(stateDirectory);
+            Assert.Equal(
+                "replacement committed prepared",
+                await File.ReadAllTextAsync(Path.Join(stateDirectory!, "prepared.claim")));
+            Assert.NotNull(displacedPrepared);
+            Assert.Equal("source generation", await File.ReadAllTextAsync(displacedPrepared!));
+            Assert.Equal("source generation", await File.ReadAllTextAsync(sourceFile));
+        }
+
+        [Fact]
+        public async Task HardlinkFileAsync_CommittedPreviousReplaced_PreservesReplacementAndBlocks()
+        {
+            var sourceFile = Path.Join(_root, "publication-committed-previous-source.mp3");
+            var destinationFile = Path.Join(_root, "publication-committed-previous-target.mp3");
+            await File.WriteAllTextAsync(sourceFile, "source generation");
+            await File.WriteAllTextAsync(destinationFile, "destination generation");
+            string? stateDirectory = null;
+            string? displacedPrevious = null;
+            var interruptedMover = new FileMover(
+                new NullLogger<FileMover>(),
+                semanticsResolver: new FileSystemSemanticsResolver())
+            {
+                AfterPreparedPublicationCommittedForTestAsync = () =>
+                {
+                    stateDirectory = Assert.Single(Directory.EnumerateDirectories(
+                        _root,
+                        ".listenarr-file-publication-*.state",
+                        SearchOption.TopDirectoryOnly));
+                    var previous = Path.Join(stateDirectory, "destination.previous");
+                    displacedPrevious = Path.Join(_root, "original-committed-previous.mp3");
+                    File.Move(previous, displacedPrevious);
+                    File.WriteAllText(previous, "replacement committed previous");
+                    throw new OperationCanceledException("simulated committed previous replacement");
+                }
+            };
+
+            await Assert.ThrowsAsync<OperationCanceledException>(
+                () => interruptedMover.HardlinkFileAsync(sourceFile, destinationFile));
+
+            var retried = await new FileMover(
+                new NullLogger<FileMover>(),
+                semanticsResolver: new FileSystemSemanticsResolver())
+                .HardlinkFileAsync(sourceFile, destinationFile);
+
+            Assert.False(retried);
+            Assert.False(File.Exists(destinationFile));
+            Assert.NotNull(stateDirectory);
+            Assert.Equal(
+                "replacement committed previous",
+                await File.ReadAllTextAsync(Path.Join(stateDirectory!, "destination.previous")));
+            Assert.NotNull(displacedPrevious);
+            Assert.Equal("destination generation", await File.ReadAllTextAsync(displacedPrevious!));
+            Assert.Equal("source generation", await File.ReadAllTextAsync(sourceFile));
+        }
+
+        [Fact]
         public async Task HardlinkFileAsync_InterruptedBeforeCommitFence_RollsBackAndRetries()
         {
             var sourceFile = Path.Join(
@@ -2727,10 +3674,6 @@ namespace Listenarr.Tests.Features.Api.Services
                 stateDirectory,
                 "destination.previous",
                 SearchOption.TopDirectoryOnly));
-            await File.WriteAllTextAsync(
-                Path.Join(stateDirectory, "prepared.claim"),
-                "source generation");
-
             var retried = await new FileMover(
                 new NullLogger<FileMover>(),
                 semanticsResolver: new FileSystemSemanticsResolver())
@@ -3008,6 +3951,54 @@ namespace Listenarr.Tests.Features.Api.Services
                 _root,
                 ".listenarr-copy-cleanup-*.journal",
                 SearchOption.TopDirectoryOnly));
+        }
+
+        [Fact]
+        public async Task CleanupCopiedSourceTreeAsync_JournalReplacedAfterQuarantineRetirement_PreservesReplacement()
+        {
+            var source = Path.Join(_root, "cleanup-journal-replacement-source");
+            var destination = Path.Join(_root, "cleanup-journal-replacement-target");
+            Directory.CreateDirectory(source);
+            Directory.CreateDirectory(destination);
+            await File.WriteAllTextAsync(Path.Join(source, "book.m4b"), "audio");
+            await File.WriteAllTextAsync(Path.Join(destination, "book.m4b"), "audio");
+            var interrupted = new FileMover(new NullLogger<FileMover>())
+            {
+                AfterCleanupDestinationPinnedForTestAsync = _ =>
+                    throw new IOException("simulated cleanup interruption")
+            };
+
+            var cleanup = await interrupted.CleanupCopiedSourceTreeAsync(
+                source,
+                destination);
+            Assert.True(cleanup.DestinationVerified);
+            Assert.False(cleanup.SourceRemoved);
+            var journalPath = Assert.Single(Directory.EnumerateFiles(
+                _root,
+                ".listenarr-copy-cleanup-*.journal",
+                SearchOption.TopDirectoryOnly));
+            var displacedJournalPath = journalPath + ".displaced";
+            var recovery = new FileMover(new NullLogger<FileMover>())
+            {
+                AfterCleanupQuarantineRetiredForTest = pinnedJournalPath =>
+                {
+                    Assert.Equal(journalPath, pinnedJournalPath);
+                    File.Move(journalPath, displacedJournalPath);
+                    File.WriteAllText(journalPath, "replacement journal");
+                }
+            };
+
+            var recovered = recovery.TryRecoverInterruptedCopiedSourceCleanup(
+                source,
+                out var recoveryReason);
+
+            Assert.False(recovered);
+            Assert.Contains("recovery failed", recoveryReason, StringComparison.OrdinalIgnoreCase);
+            Assert.True(File.Exists(journalPath));
+            Assert.Equal("replacement journal", await File.ReadAllTextAsync(journalPath));
+            Assert.True(File.Exists(displacedJournalPath));
+            Assert.False(Directory.Exists(source));
+            Assert.Equal("audio", await File.ReadAllTextAsync(Path.Join(destination, "book.m4b")));
         }
 
         [WindowsFact]
@@ -3403,7 +4394,7 @@ namespace Listenarr.Tests.Features.Api.Services
         }
 
         [WindowsFact]
-        public async Task MoveDirectoryAsync_RobocopyFallback_UsesArgumentList()
+        public async Task MoveDirectoryAsync_VerifiedFallbackFailure_DoesNotInvokeExternalProcess()
         {
             var source = Path.Join(_root, "robocopy-source");
             var dest = Path.Join(_root, "robocopy-destination");
@@ -3439,20 +4430,59 @@ namespace Listenarr.Tests.Features.Api.Services
 
             var ok = await mover.MoveDirectoryAsync(source, dest);
 
-            Assert.True(ok);
+            Assert.False(ok);
             Assert.True(publicationHookRan);
-            Assert.NotNull(runner.LastStartInfo);
-            Assert.Equal("robocopy", runner.LastStartInfo!.FileName);
-            Assert.True(string.IsNullOrEmpty(runner.LastStartInfo.Arguments));
-            Assert.Equal(source, runner.LastStartInfo.ArgumentList[0]);
-            Assert.Equal(dest, runner.LastStartInfo.ArgumentList[1]);
-            Assert.Contains("/E", runner.LastStartInfo.ArgumentList);
-            Assert.DoesNotContain("/MOVE", runner.LastStartInfo.ArgumentList);
-            Assert.All(runner.LastStartInfo.ArgumentList, argument =>
+            Assert.Null(runner.LastStartInfo);
+            Assert.True(File.Exists(Path.Join(source, "nested", "book.m4b")));
+            Assert.False(Directory.Exists(dest));
+        }
+
+        [WindowsFact]
+        public async Task MoveDirectoryAsync_RobocopyFallback_DestinationParentReplacedAfterSafetyPreflight_DoesNotWriteReplacement()
+        {
+            var source = Path.Join(_root, "robocopy-race-source");
+            var destinationParent = Path.Join(_root, "robocopy-race-parent");
+            var displacedParent = destinationParent + ".original";
+            var destination = Path.Join(destinationParent, "destination");
+            var sourceFile = Path.Join(source, "nested", "book.m4b");
+            Directory.CreateDirectory(Path.GetDirectoryName(sourceFile)!);
+            Directory.CreateDirectory(destinationParent);
+            await File.WriteAllTextAsync(sourceFile, "audio");
+            var runner = new RecordingProcessRunner(startInfo =>
             {
-                Assert.False(argument.StartsWith("\"", StringComparison.Ordinal));
-                Assert.False(argument.EndsWith("\"", StringComparison.Ordinal));
+                Directory.Move(destinationParent, displacedParent);
+                Directory.CreateDirectory(destinationParent);
+                var processDestination = startInfo.ArgumentList[1];
+                Directory.CreateDirectory(Path.Join(processDestination, "nested"));
+                File.Copy(
+                    sourceFile,
+                    Path.Join(processDestination, "nested", "book.m4b"));
             });
+            var mover = new FileMover(
+                new NullLogger<FileMover>(),
+                runner,
+                Options.Create(new FileMoverOptions
+                {
+                    EnableRobocopy = true,
+                    MaxRetries = 1,
+                    RobocopyTimeoutMs = 1000,
+                }),
+                new FileSystemSemanticsResolver())
+            {
+                BeforeDirectoryMoveAttemptForTest = () =>
+                    throw new IOException("Force the verified directory fallback."),
+                BeforeDirectoryCopyPublicationForTestAsync = _ =>
+                    throw new IOException("Force the external fallback boundary.")
+            };
+
+            var ok = await mover.MoveDirectoryAsync(source, destination);
+
+            Assert.False(ok);
+            Assert.Null(runner.LastStartInfo);
+            Assert.True(File.Exists(sourceFile));
+            Assert.False(Directory.Exists(displacedParent));
+            Assert.True(Directory.Exists(destinationParent));
+            Assert.False(Directory.Exists(destination));
         }
 
         [WindowsFact]

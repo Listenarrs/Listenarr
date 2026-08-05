@@ -186,18 +186,23 @@ namespace Listenarr.Api.Features.Library
                         existing.Path,
                         normalizedRequestedPath,
                         persistedSourceSemantics.Value);
-                if (!pathChanged)
+                var semanticsChanged =
+                    existing.CaseSensitivityMode != request.CaseSensitivityMode;
+                if (!pathChanged && !semanticsChanged)
                 {
                     request.Path = existing.Path;
                     var updatedMetadata = await _service.UpdateAsync(request);
                     return Ok(await MapAsync(updatedMetadata));
                 }
 
+                var relocationTargetPath = pathChanged
+                    ? normalizedRequestedPath
+                    : existing.Path;
                 var relocation = await _relocationService.StartAsync(
                     id,
                     new RootFolderPathChangeCommand(
-                        normalizedRequestedPath,
-                        moveFiles
+                        relocationTargetPath,
+                        pathChanged && moveFiles
                             ? RootFolderRelocationMode.Relocate
                             : RootFolderRelocationMode.MetadataOnly,
                         deleteEmptySource,
@@ -206,12 +211,16 @@ namespace Listenarr.Api.Features.Library
                         request.CaseSensitivityMode,
                         existing.Path),
                     cancellationToken);
-                if (relocation.Status is RootFolderRelocationStatus.Completed
-                    or RootFolderRelocationStatus.NeedsAttention)
+                if (relocation.Status == RootFolderRelocationStatus.Completed)
                 {
                     var updated = await _service.GetByIdAsync(id)
                         ?? throw new KeyNotFoundException("Root folder not found");
                     return Ok(await MapAsync(updated));
+                }
+
+                if (relocation.Status == RootFolderRelocationStatus.NeedsAttention)
+                {
+                    return Conflict(RootFolderRelocationPublicProjection.Sanitize(relocation));
                 }
 
                 return AcceptedAtRoute(
@@ -232,39 +241,6 @@ namespace Listenarr.Api.Features.Library
                 return BadRequest(new
                 {
                     message = "The root folder path cannot be changed in its current state."
-                });
-            }
-        }
-
-        [HttpPatch("{id}")]
-        public async Task<IActionResult> Patch(
-            int id,
-            [FromBody] RootFolderMetadataUpdateRequest request)
-        {
-            if (!Enum.IsDefined(request.CaseSensitivityMode))
-            {
-                return BadRequest(new { message = "The root folder metadata is invalid." });
-            }
-
-            var existing = await _service.GetByIdAsync(id);
-            if (existing == null) return NotFound(new { message = "Root folder not found" });
-            existing.Name = request.Name;
-            existing.IsDefault = request.IsDefault;
-            existing.CaseSensitivityMode = request.CaseSensitivityMode;
-            try
-            {
-                var updated = await _service.UpdateAsync(existing);
-                return Ok(await MapAsync(updated));
-            }
-            catch (ArgumentException)
-            {
-                return BadRequest(new { message = "The root folder metadata is invalid." });
-            }
-            catch (InvalidOperationException)
-            {
-                return Conflict(new
-                {
-                    message = "The root folder metadata conflicts with an existing root folder."
                 });
             }
         }
@@ -296,12 +272,17 @@ namespace Listenarr.Api.Features.Library
                         request.ExpectedCurrentPath),
                     cancellationToken);
                 var publicResult = RootFolderRelocationPublicProjection.Sanitize(result);
-                return mode == RootFolderRelocationMode.Relocate
-                    ? AcceptedAtRoute(
+                return result.Status switch
+                {
+                    RootFolderRelocationStatus.Completed => Ok(publicResult),
+                    RootFolderRelocationStatus.NeedsAttention or RootFolderRelocationStatus.Failed =>
+                        Conflict(publicResult),
+                    _ when mode == RootFolderRelocationMode.Relocate => AcceptedAtRoute(
                         "GetRootFolderRelocation",
                         new { id = result.RelocationId },
-                        publicResult)
-                    : Ok(publicResult);
+                        publicResult),
+                    _ => Ok(publicResult)
+                };
             }
             catch (KeyNotFoundException)
             {

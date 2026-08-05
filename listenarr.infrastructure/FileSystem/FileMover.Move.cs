@@ -17,6 +17,90 @@ namespace Listenarr.Infrastructure.FileSystem
         public Task<bool> MoveFileAsync(string sourceFile, string destFile) =>
             MoveFileAsync(sourceFile, destFile, operationId: null);
 
+        public async Task<bool> MoveFilePreservingPhysicalIdentityAsync(
+            string source,
+            string destination,
+            string expectedSourcePhysicalObjectIdentity,
+            Guid? operationId = null)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(
+                expectedSourcePhysicalObjectIdentity);
+            if (string.Equals(
+                    Path.GetFullPath(source),
+                    Path.GetFullPath(destination),
+                    StringComparison.Ordinal))
+            {
+                try
+                {
+                    using var lease = PinnedAudiobookFileRegistrationLease.Open(
+                        source,
+                        expectedSourcePhysicalObjectIdentity);
+                    return lease.MatchesCurrentPublication();
+                }
+                catch (Exception exception) when (exception is not (
+                    OperationCanceledException or OutOfMemoryException or StackOverflowException))
+                {
+                    _logger.LogWarning(
+                        exception,
+                        "Blocked generation-preserving file move because the source identity is unavailable: {Source}",
+                        LogRedaction.SanitizeFilePath(source));
+                    return false;
+                }
+            }
+
+            using var pathLock = await TryAcquireFileMoveGateAsync(
+                source,
+                destination);
+            if (pathLock == null)
+            {
+                return false;
+            }
+
+            var recoveryOutcome = await TryRecoverInterruptedFileMoveClaimsAsync(
+                pathLock,
+                operationId);
+            if (recoveryOutcome == FileMoveClaimRecoveryOutcome.Completed)
+            {
+                using var recoveredDestination =
+                    pathLock.DestinationParent.TryOpenExistingFile(
+                        pathLock.DestinationName,
+                        requireDeleteAccess: false);
+                return recoveredDestination != null
+                    && recoveredDestination.VisiblePathMatches()
+                    && string.Equals(
+                        recoveredDestination.GetObjectIdentity(),
+                        expectedSourcePhysicalObjectIdentity,
+                        StringComparison.Ordinal);
+            }
+
+            if (recoveryOutcome is FileMoveClaimRecoveryOutcome.Blocked
+                or FileMoveClaimRecoveryOutcome.SourceRecreated)
+            {
+                return false;
+            }
+
+            var moved = await MoveFileWithLocksAsync(
+                pathLock,
+                operationId,
+                expectedSourcePhysicalObjectIdentity,
+                requirePhysicalIdentityPreservation: true);
+            if (!moved)
+            {
+                return false;
+            }
+
+            using var destinationEntry =
+                pathLock.DestinationParent.TryOpenExistingFile(
+                    pathLock.DestinationName,
+                    requireDeleteAccess: false);
+            return destinationEntry != null
+                && destinationEntry.VisiblePathMatches()
+                && string.Equals(
+                    destinationEntry.GetObjectIdentity(),
+                    expectedSourcePhysicalObjectIdentity,
+                    StringComparison.Ordinal);
+        }
+
         internal async Task<bool> MoveFileAsync(
             string sourceFile,
             string destFile,
@@ -68,10 +152,38 @@ namespace Listenarr.Infrastructure.FileSystem
 
         private async Task<bool> MoveFileWithLocksAsync(
             FileMoveGateLease lease,
-            Guid? operationId)
+            Guid? operationId,
+            string? expectedSourcePhysicalObjectIdentity = null,
+            bool requirePhysicalIdentityPreservation = false)
         {
             var sourceFile = lease.SourcePath;
             var destFile = lease.DestinationPath;
+            if (!string.IsNullOrWhiteSpace(expectedSourcePhysicalObjectIdentity))
+            {
+                using var sourceEntry = lease.SourceParent.TryOpenExistingFile(
+                    lease.SourceName,
+                    requireDeleteAccess: false);
+                using var existingDestination = requirePhysicalIdentityPreservation
+                    ? lease.DestinationParent.TryOpenExistingFile(
+                        lease.DestinationName,
+                        requireDeleteAccess: false)
+                    : null;
+                if (sourceEntry == null
+                    || !sourceEntry.VisiblePathMatches()
+                    || !string.Equals(
+                        sourceEntry.GetObjectIdentity(),
+                        expectedSourcePhysicalObjectIdentity,
+                        StringComparison.Ordinal)
+                    || (requirePhysicalIdentityPreservation
+                        && (existingDestination != null
+                            || DisableNativeFileRenameForTest
+                            || !sourceEntry.IsOnSameVolume(
+                                lease.DestinationParent))))
+                {
+                    return false;
+                }
+            }
+
             var pathEquivalence = await TryDetermineFilesystemPathEquivalenceAsync(
                 sourceFile,
                 destFile);
@@ -86,9 +198,11 @@ namespace Listenarr.Infrastructure.FileSystem
                 return true;
             }
 
-            var idempotentOutcome = await TryCompleteIdempotentFileMoveAsync(
-                lease,
-                operationId);
+            var idempotentOutcome = requirePhysicalIdentityPreservation
+                ? IdempotentFileMoveOutcome.NotApplicable
+                : await TryCompleteIdempotentFileMoveAsync(
+                    lease,
+                    operationId);
             if (idempotentOutcome == IdempotentFileMoveOutcome.Completed)
             {
                 return true;
@@ -118,7 +232,9 @@ namespace Listenarr.Infrastructure.FileSystem
 
             var managedFallback = await TryManagedFileMoveFallbackAsync(
                 lease,
-                operationId);
+                operationId,
+                expectedSourcePhysicalObjectIdentity,
+                requirePhysicalIdentityPreservation);
             if (managedFallback == FileMoveFallbackOutcome.Success)
             {
                 LogMutation(

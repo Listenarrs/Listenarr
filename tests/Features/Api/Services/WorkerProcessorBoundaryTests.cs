@@ -105,9 +105,19 @@ namespace Listenarr.Tests.Features.Api.Services
             using var provider = services.BuildServiceProvider();
 
             using var operationCoordinator = new AudiobookOperationCoordinator();
+            var moveQueueService = new Mock<IMoveQueueService>();
+            moveQueueService.Setup(service => service.GetRecoveryStateForAudiobookAsync(
+                    It.IsAny<int>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(MoveRecoveryState.None);
+            moveQueueService.Setup(service => service.EnsureFilesystemMutationAllowedAsync(
+                    It.IsAny<int>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
             var processor = new MetadataRescanProcessor(
                 provider.GetRequiredService<IServiceScopeFactory>(),
                 operationCoordinator,
+                moveQueueService.Object,
                 Mock.Of<ILogger<MetadataRescanProcessor>>());
 
             await processor.RunCycleAsync(CancellationToken.None);
@@ -243,6 +253,7 @@ namespace Listenarr.Tests.Features.Api.Services
         {
             var root = FileService.GetTempDirectory("unmatched-processor-root");
             var file = await FileService.GetFileAsync(root, "Untracked Book.m4b", "audio");
+            await AddAuthorizedRootAsync(root);
             await CreateApplicationSettings();
             var queue = new UnmatchedScanQueueService(
                 _provider.GetRequiredService<ILogger<UnmatchedScanQueueService>>(),
@@ -271,15 +282,13 @@ namespace Listenarr.Tests.Features.Api.Services
         [WindowsFact]
         public async Task UnmatchedScanProcessor_ForeignRootSyntax_DoesNotScanWindowsAlias()
         {
-            var root = FileService.GetTempDirectory("unmatched-processor-foreign-root");
+            var root = FileService.GetWindowsRootRelativeTempDirectory(
+                "unmatched-processor-foreign-root");
             var file = await FileService.GetFileAsync(root, "Foreign Alias Book.m4b", "audio");
+            await AddAuthorizedRootAsync(root);
             await CreateApplicationSettings();
-            var driveRoot = Path.GetPathRoot(root)!;
-            var foreignRoot = "/" + root[driveRoot.Length..].Replace('\\', '/');
-            Assert.Equal(
-                Path.GetFullPath(root),
-                Path.GetFullPath(foreignRoot),
-                StringComparer.OrdinalIgnoreCase);
+            var foreignRoot = TempFileService
+                .GetWindowsRootRelativeForeignAlias(root);
             var queue = new UnmatchedScanQueueService(
                 _provider.GetRequiredService<ILogger<UnmatchedScanQueueService>>(),
                 _provider.GetRequiredService<IFileSystemSemanticsResolver>());
@@ -294,7 +303,7 @@ namespace Listenarr.Tests.Features.Api.Services
             await queue.EnqueueAsync(foreignRoot);
             Assert.True(queue.Reader.TryRead(out var job));
 
-            await Assert.ThrowsAsync<ArgumentException>(() =>
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 processor.ProcessJobAsync(job, CancellationToken.None));
 
             Assert.True(File.Exists(file));
@@ -303,8 +312,10 @@ namespace Listenarr.Tests.Features.Api.Services
         }
 
         [Fact]
-        public async Task UnmatchedScanProcessor_ProcessJob_MissingRootCompletesEmpty()
+        public async Task UnmatchedScanProcessor_AuthorizedRootMissingBeforeProcessing_FailsClosed()
         {
+            var missingRoot = FileService.GetTempDirectory("missing-root");
+            await AddAuthorizedRootAsync(missingRoot);
             await CreateApplicationSettings();
             var queue = new UnmatchedScanQueueService(
                 _provider.GetRequiredService<ILogger<UnmatchedScanQueueService>>(),
@@ -318,18 +329,57 @@ namespace Listenarr.Tests.Features.Api.Services
                 hubContext.Object,
                 _provider.GetRequiredService<IFfmpegService>(),
                 _provider.GetRequiredService<IFileSystemSemanticsResolver>());
-            var missingRoot = Path.Join(FileService.GetTempPath(), "missing-root");
             await queue.EnqueueAsync(missingRoot);
             Assert.True(queue.Reader.TryRead(out var job));
+            Directory.Delete(missingRoot, recursive: true);
 
-            await processor.ProcessJobAsync(job, CancellationToken.None);
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                processor.ProcessJobAsync(job, CancellationToken.None));
 
             Assert.True(queue.TryGetJob(job.Id, out var updatedJob));
-            Assert.Equal("Completed", updatedJob!.Status);
-            Assert.Empty(updatedJob.Results!);
+            Assert.Equal("Processing", updatedJob!.Status);
             clientProxy.Verify(
                 p => p.SendCoreAsync("UnmatchedScanComplete", It.IsAny<object?[]>(), It.IsAny<CancellationToken>()),
-                Times.Once);
+                Times.Never);
+        }
+
+        [Fact]
+        public async Task UnmatchedScanProcessor_AuthorizedRootReplacedBeforeProcessing_FailsClosed()
+        {
+            var parent = FileService.GetTempDirectory("unmatched-root-replacement-parent");
+            var root = Path.Join(parent, "library");
+            var displaced = Path.Join(parent, "library-original");
+            Directory.CreateDirectory(root);
+            await AddAuthorizedRootAsync(root);
+            await CreateApplicationSettings();
+            var queue = new UnmatchedScanQueueService(
+                _provider.GetRequiredService<ILogger<UnmatchedScanQueueService>>(),
+                _provider.GetRequiredService<IFileSystemSemanticsResolver>());
+            CreateHubProxy<SettingsHub>(out var hubContext);
+            var processor = new UnmatchedScanProcessor(
+                queue,
+                _provider.GetRequiredService<IServiceScopeFactory>(),
+                _provider.GetRequiredService<ILogger<UnmatchedScanProcessor>>(),
+                hubContext.Object,
+                _provider.GetRequiredService<IFfmpegService>(),
+                _provider.GetRequiredService<IFileSystemSemanticsResolver>());
+            await queue.EnqueueAsync(root);
+            Assert.True(queue.Reader.TryRead(out var job));
+
+            Directory.Move(root, displaced);
+            Directory.CreateDirectory(root);
+            var replacementFile = await FileService.GetFileAsync(
+                root,
+                "Replacement Book.m4b",
+                "replacement audio");
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                processor.ProcessJobAsync(job, CancellationToken.None));
+
+            Assert.True(File.Exists(replacementFile));
+            Assert.True(queue.TryGetJob(job.Id, out var updatedJob));
+            Assert.Equal("Processing", updatedJob!.Status);
+            Assert.Null(updatedJob.Results);
         }
 
         private static Mock<IClientProxy> CreateHubProxy<THub>(out Mock<IHubContext<THub>> hubContext)

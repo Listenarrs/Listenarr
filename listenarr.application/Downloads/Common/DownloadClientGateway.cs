@@ -342,16 +342,15 @@ namespace Listenarr.Application.Downloads.Common
 
         private static void EnsureNativePath(string? path, string clientName)
         {
-            if (string.IsNullOrWhiteSpace(path))
+            if (string.IsNullOrEmpty(path))
             {
                 return;
             }
 
-            var valid = OperatingSystem.IsWindows()
-                ? path.Length >= 3 && char.IsLetter(path[0]) && path[1] == ':' && path[2] is '/' or '\\'
-                    || path.StartsWith("\\\\", StringComparison.Ordinal)
-                : path[0] == '/';
-            if (!valid)
+            if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                    path,
+                    out _,
+                    out _))
             {
                 throw new InvalidOperationException(
                     $"Download client '{clientName}' reported a save path that is not valid on this host; check its remote path mappings.");

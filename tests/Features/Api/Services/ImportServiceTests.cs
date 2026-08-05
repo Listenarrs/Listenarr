@@ -70,6 +70,18 @@ namespace Listenarr.Tests.Features.Api.Services
             await _downloadRepository.AddAsync(_download);
         }
 
+        private async Task<ApplicationSettings> SaveCurrentSettingsAsync(
+            ApplicationSettings settings)
+        {
+            var current = await _applicationSettingsRepository.GetAsync();
+            if (current != null)
+            {
+                settings.Version = current.Version;
+            }
+
+            return await _applicationSettingsRepository.SaveAsync(settings);
+        }
+
         [Fact]
         public async Task ImportFilesFromDirectory_CreatesDestinationDirectory_WhenMissing()
         {
@@ -147,7 +159,7 @@ namespace Listenarr.Tests.Features.Api.Services
             await AddAuthorizedRootAsync(FileService.GetTempPath());
             await InitDataAsync();
 
-            var settings = await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
+            var settings = await SaveCurrentSettingsAsync(new ApplicationSettingsBuilder()
                 .WithOutputPath(outputRoot)
                 .WithCopyFileOnCompleted()
                 .WithMetadataProcessing()
@@ -365,7 +377,7 @@ namespace Listenarr.Tests.Features.Api.Services
                 "The short-path spelling must differ from the long path.");
             Assert.Contains('~', shortBasePath!);
 
-            var settings = await _applicationSettingsRepository.SaveAsync(new ApplicationSettings
+            var settings = await SaveCurrentSettingsAsync(new ApplicationSettings
             {
                 OutputPath = outputRoot,
                 CompletedFileAction = FileAction.Move,
@@ -416,7 +428,7 @@ namespace Listenarr.Tests.Features.Api.Services
             await AddAuthorizedRootAsync(FileService.GetTempPath());
             await InitDataAsync();
 
-            var settings = await _applicationSettingsRepository.SaveAsync(new ApplicationSettings
+            var settings = await SaveCurrentSettingsAsync(new ApplicationSettings
             {
                 OutputPath = outputRoot,
                 CompletedFileAction = FileAction.Copy,
@@ -471,7 +483,7 @@ namespace Listenarr.Tests.Features.Api.Services
             await AddAuthorizedRootAsync(FileService.GetTempPath());
             await InitDataAsync();
 
-            var settings = await _applicationSettingsRepository.SaveAsync(new ApplicationSettings
+            var settings = await SaveCurrentSettingsAsync(new ApplicationSettings
             {
                 OutputPath = outputRoot,
                 CompletedFileAction = FileAction.Copy,
@@ -519,7 +531,7 @@ namespace Listenarr.Tests.Features.Api.Services
             await AddAuthorizedRootAsync(FileService.GetTempPath());
             await InitDataAsync();
 
-            var settings = await _applicationSettingsRepository.SaveAsync(new ApplicationSettings
+            var settings = await SaveCurrentSettingsAsync(new ApplicationSettings
             {
                 OutputPath = outputRoot,
                 CompletedFileAction = FileAction.Copy,
@@ -564,7 +576,7 @@ namespace Listenarr.Tests.Features.Api.Services
             var firstSourceFile = await FileService.GetFileAsync(sourceDir, "first.mp3", "same audio");
             var secondSourceFile = await FileService.GetFileAsync(sourceDir, "second.mp3", "same audio");
 
-            await _applicationSettingsRepository.SaveAsync(new ApplicationSettings
+            await SaveCurrentSettingsAsync(new ApplicationSettings
             {
                 OutputPath = outputRoot,
                 CompletedFileAction = FileAction.Copy,
@@ -607,7 +619,7 @@ namespace Listenarr.Tests.Features.Api.Services
             var firstSourceFile = await FileService.GetFileAsync(sourceDir, "first.mp3", "old audio");
             var secondSourceFile = await FileService.GetFileAsync(sourceDir, "second.mp3", "new audio");
 
-            await _applicationSettingsRepository.SaveAsync(new ApplicationSettings
+            await SaveCurrentSettingsAsync(new ApplicationSettings
             {
                 OutputPath = outputRoot,
                 CompletedFileAction = FileAction.Copy,
@@ -655,7 +667,7 @@ namespace Listenarr.Tests.Features.Api.Services
             await AddAuthorizedRootAsync(FileService.GetTempPath());
             await InitDataAsync();
 
-            var settings = await _applicationSettingsRepository.SaveAsync(new ApplicationSettings
+            var settings = await SaveCurrentSettingsAsync(new ApplicationSettings
             {
                 OutputPath = outputRoot,
                 CompletedFileAction = FileAction.Copy,

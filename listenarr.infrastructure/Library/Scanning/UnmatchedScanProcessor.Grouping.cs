@@ -4,7 +4,6 @@
  */
 using System.Text.RegularExpressions;
 using Listenarr.Domain.Common;
-using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.Library.Scanning
 {
@@ -201,64 +200,6 @@ namespace Listenarr.Infrastructure.Library.Scanning
             if (!string.IsNullOrEmpty(tags.Year)) target.Year = tags.Year;
             if (!string.IsNullOrEmpty(tags.Description)) target.Description = tags.Description;
             if (!string.IsNullOrEmpty(tags.Asin)) target.Asin = tags.Asin;
-        }
-
-        private List<string> CollectAudioFiles(
-            string rootFolderPath,
-            FileSystemPathSemantics semantics)
-        {
-            var candidates = new List<string>();
-            var normalizedRoot = Path.GetFullPath(rootFolderPath);
-            var dirs = new Stack<string>();
-            dirs.Push(normalizedRoot);
-
-            while (dirs.Count > 0)
-            {
-                var dir = dirs.Pop();
-                try
-                {
-                    var normalizedDir = Path.GetFullPath(dir);
-                    foreach (var file in Directory.EnumerateFiles(normalizedDir))
-                    {
-                        try
-                        {
-                            if (AudioExtensions.Contains(Path.GetExtension(file), StringComparer.OrdinalIgnoreCase))
-                                candidates.Add(file);
-                        }
-                        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                        {
-                            _logger.LogDebug(ex, "Skipped file {File} during unmatched scan", file);
-                        }
-                    }
-                    foreach (var sub in Directory.EnumerateDirectories(normalizedDir))
-                    {
-                        // Skip reparse points (symlinks, junctions) because they can point outside the root.
-                        if (new DirectoryInfo(sub).Attributes.HasFlag(FileAttributes.ReparsePoint))
-                        {
-                            _logger.LogDebug("Skipping reparse point {Dir}", sub);
-                            continue;
-                        }
-                        var resolvedSub = Path.GetFullPath(sub);
-                        if (!FileSystemPathIdentity.IsSameOrInside(
-                            resolvedSub,
-                            normalizedRoot,
-                            semantics))
-                        {
-                            _logger.LogWarning("Skipping {Dir}: resolves outside configured root {Root}", sub, normalizedRoot);
-                            continue;
-                        }
-                        dirs.Push(resolvedSub);
-                    }
-                }
-                catch (IOException ioEx) { _logger.LogWarning(ioEx, "IO error scanning {Dir}", dir); }
-                catch (UnauthorizedAccessException uaEx) { _logger.LogWarning(uaEx, "Access denied scanning {Dir}", dir); }
-                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                {
-                    _logger.LogWarning(ex, "Unexpected error scanning {Dir}", dir);
-                }
-            }
-
-            return candidates;
         }
 
         /// <summary>
