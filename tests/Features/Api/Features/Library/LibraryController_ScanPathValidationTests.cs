@@ -322,11 +322,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
 
             Init(services => services.Without<IScanQueueService>());
             var controller = _provider.GetRequiredService<LibraryController>();
-            await _rootFolderRepository.AddAsync(new RootFolder
-            {
-                Name = "root",
-                Path = tempRoot
-            });
+            await AddAuthorizedRootAsync(tempRoot);
             await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
                 .WithOutputPath(tempRoot)
                 .Build());

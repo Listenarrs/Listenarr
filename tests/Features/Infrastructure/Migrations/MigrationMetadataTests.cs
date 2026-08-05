@@ -45,26 +45,20 @@ namespace Listenarr.Tests.Features.Infrastructure.Migrations
         }
 
         [Fact]
-        public void AddLibraryDirectoryOwnershipRootForeignKeyMigration_IsDiscoverableByEf()
+        public void AddLibraryDirectoryOwnershipRootForeignKey_IsDiscoverableAndIsolated()
         {
             var attribute = typeof(AddLibraryDirectoryOwnershipRootForeignKey)
                 .GetCustomAttribute<MigrationAttribute>();
-
             Assert.NotNull(attribute);
             Assert.Equal(
-                "20260726500000_AddLibraryDirectoryOwnershipRootForeignKey",
+                "20260805034058_AddLibraryDirectoryOwnershipRootForeignKey",
                 attribute!.Id);
-        }
 
-        [Fact]
-        public void AddLibraryDirectoryOwnershipRootForeignKey_ContainsOnlyForeignKeyOperation()
-        {
             var migration = new AddLibraryDirectoryOwnershipRootForeignKey();
             var upBuilder = new MigrationBuilder(
                 "Microsoft.EntityFrameworkCore.Sqlite");
             var downBuilder = new MigrationBuilder(
                 "Microsoft.EntityFrameworkCore.Sqlite");
-
             typeof(AddLibraryDirectoryOwnershipRootForeignKey)
                 .GetMethod(
                     "Up",
@@ -76,10 +70,14 @@ namespace Listenarr.Tests.Features.Infrastructure.Migrations
                     BindingFlags.Instance | BindingFlags.NonPublic)!
                 .Invoke(migration, [downBuilder]);
 
-            Assert.Single(upBuilder.Operations);
-            Assert.IsType<AddForeignKeyOperation>(upBuilder.Operations[0]);
-            Assert.Single(downBuilder.Operations);
-            Assert.IsType<DropForeignKeyOperation>(downBuilder.Operations[0]);
+            var addForeignKey = Assert.Single(upBuilder.Operations);
+            Assert.Equal(
+                "FK_LibraryDirectoryOwnerships_RootFolders_ManagedRootFolderId",
+                Assert.IsType<AddForeignKeyOperation>(addForeignKey).Name);
+            var dropForeignKey = Assert.Single(downBuilder.Operations);
+            Assert.Equal(
+                "FK_LibraryDirectoryOwnerships_RootFolders_ManagedRootFolderId",
+                Assert.IsType<DropForeignKeyOperation>(dropForeignKey).Name);
         }
 
         [Fact]

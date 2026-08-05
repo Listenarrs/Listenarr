@@ -2335,14 +2335,6 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.Navigation("Audiobook");
                 });
 
-            modelBuilder.Entity("Listenarr.Domain.Audiobooks.LibraryDirectoryOwnership", b =>
-                {
-                    b.HasOne("Listenarr.Domain.Audiobooks.RootFolder", null)
-                        .WithMany()
-                        .HasForeignKey("ManagedRootFolderId")
-                        .OnDelete(DeleteBehavior.SetNull);
-                });
-
             modelBuilder.Entity("Listenarr.Domain.Audiobooks.LibraryDirectoryOwnershipPathMigration", b =>
                 {
                     b.HasOne("Listenarr.Domain.Audiobooks.LibraryDirectoryOwnership", "Ownership")

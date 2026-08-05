@@ -292,6 +292,97 @@ public partial class AudiobookContentMoveServiceTests
         }
     }
 
+    [FileLinkFact]
+    public async Task GetRecoverableMoveAsync_DanglingRecoveryMarkerLink_PreservesLinkAndRequiresAttention()
+    {
+        var source = FileService.GetTempDirectory("content-move-dangling-marker-src");
+        await FileService.GetFileAsync(source, "book.m4b", "audio");
+        var target = FileService.GetTempDirectory("content-move-dangling-marker-dst");
+        var external = FileService.GetTempDirectory("content-move-dangling-marker-external");
+        var jobId = Guid.NewGuid();
+        var request = await CreateLeasedMoveRequestAsync(source, target, jobId);
+        var missingTarget = Path.Join(external, "missing-marker.json");
+        var markerPath = Path.Join(target, $".listenarr-move-{jobId:N}.pending");
+        try
+        {
+            File.CreateSymbolicLink(markerPath, missingTarget);
+        }
+        catch (Exception exception) when (exception is
+            IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            throw new Xunit.Sdk.XunitException(
+                $"This native filesystem regression requires symbolic-link support: {exception.Message}");
+        }
+
+        try
+        {
+            var service = _provider.GetRequiredService<AudiobookContentMoveService>();
+            var exception = await Assert.ThrowsAsync<MoveNeedsAttentionException>(() =>
+                service.GetRecoverableMoveAsync(request));
+
+            Assert.Contains("symbolic link or reparse point", exception.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.NotNull(new FileInfo(markerPath).LinkTarget);
+            Assert.False(File.Exists(missingTarget));
+            Assert.True(File.Exists(Path.Join(source, "book.m4b")));
+        }
+        finally
+        {
+            if (!string.IsNullOrWhiteSpace(new FileInfo(markerPath).LinkTarget))
+            {
+                File.Delete(markerPath);
+            }
+        }
+    }
+
+    [FileLinkFact]
+    public async Task CleanupCompletedMoveArtifactsAsync_DanglingRecoveryMarkerLink_PreservesLinkAndRequiresAttention()
+    {
+        var source = FileService.GetTempDirectory("content-move-dangling-cleanup-src");
+        await FileService.GetFileAsync(source, "book.m4b", "audio");
+        var target = Path.Join(
+            FileService.GetTempPath(),
+            $"content-move-dangling-cleanup-dst-{Guid.NewGuid():N}");
+        var external = FileService.GetTempDirectory("content-move-dangling-cleanup-external");
+        var missingTarget = Path.Join(external, "missing-marker.json");
+
+        var service = _provider.GetRequiredService<AudiobookContentMoveService>();
+        var request = await CreateLeasedMoveRequestAsync(source, target);
+        var result = await service.MoveContentsAsync(request, CancellationToken.None);
+        await service.FinalizeMoveAsync(request, result, CancellationToken.None);
+        File.Delete(result.RecoveryMarkerPath);
+        try
+        {
+            File.CreateSymbolicLink(result.RecoveryMarkerPath, missingTarget);
+        }
+        catch (Exception exception) when (exception is
+            IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            throw new Xunit.Sdk.XunitException(
+                $"This native filesystem regression requires symbolic-link support: {exception.Message}");
+        }
+
+        try
+        {
+            var exception = await Assert.ThrowsAsync<MoveNeedsAttentionException>(() =>
+                service.CleanupCompletedMoveArtifactsAsync(
+                    request,
+                    result,
+                    CancellationToken.None));
+
+            Assert.Contains("symbolic link or reparse point", exception.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.NotNull(new FileInfo(result.RecoveryMarkerPath).LinkTarget);
+            Assert.False(File.Exists(missingTarget));
+            Assert.True(File.Exists(Path.Join(target, "book.m4b")));
+        }
+        finally
+        {
+            if (!string.IsNullOrWhiteSpace(new FileInfo(result.RecoveryMarkerPath).LinkTarget))
+            {
+                File.Delete(result.RecoveryMarkerPath);
+            }
+        }
+    }
+
     [DirectoryLinkFact]
     public async Task GetRecoverableMoveAsync_AtomicMarkerWithLinkedTarget_RequiresAttention()
     {

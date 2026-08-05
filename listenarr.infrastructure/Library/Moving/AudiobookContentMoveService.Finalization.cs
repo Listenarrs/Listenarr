@@ -133,7 +133,7 @@ internal sealed partial class AudiobookContentMoveService
             result.Target,
             manifest);
 
-        if (!File.Exists(result.RecoveryMarkerPath))
+        if (!RecoveryMarkerEntryExists(result.RecoveryMarkerPath))
         {
             await UpdateJobPhaseAsync(
                 request.JobId,
@@ -171,7 +171,7 @@ internal sealed partial class AudiobookContentMoveService
             result.RecoveryMarkerPath,
             result.Target,
             request.TargetSemantics);
-        if ((File.GetAttributes(result.RecoveryMarkerPath) & FileAttributes.ReparsePoint) != 0)
+        if (RecoveryMarkerPathIsLinked(result.RecoveryMarkerPath))
         {
             throw new MoveNeedsAttentionException(
                 "The completed recovery marker became a symbolic link or reparse point.");

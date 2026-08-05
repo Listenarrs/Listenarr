@@ -2881,6 +2881,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
                 .ResolveAsync(linkedOwnedPath);
             Assert.True(rootIdentity.IsAvailable);
             Assert.True(ownedIdentity.IsAvailable);
+            var ownershipToken = Guid.NewGuid().ToString("N");
 
             int rootId;
             LibraryDirectoryOwnership ownership;
@@ -2930,13 +2931,15 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
                         "library-directory",
                         linkedOwnedPath,
                         sourceResolution.Semantics),
-                    OwnershipToken = Guid.NewGuid().ToString("N"),
+                    OwnershipToken = ownershipToken,
                     State = LibraryDirectoryOwnershipState.Owned,
                     CreationWorkflow = "Test",
                     AudiobookId = audiobook.Id,
                     ManagedRootFolderId = rootFolder.Id,
-                    DirectoryObjectIdentityVersion = ownedIdentity.Version,
-                    DirectoryObjectIdentity = ownedIdentity.Value
+                    DirectoryObjectIdentityVersion = ManagedDirectoryIdentity.CurrentVersion,
+                    DirectoryObjectIdentity = ManagedDirectoryIdentity.Create(
+                        ownershipToken,
+                        ownedIdentity.Value!)
                 };
                 db.LibraryDirectoryOwnerships.Add(ownership);
                 await db.SaveChangesAsync();
@@ -3018,6 +3021,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
                 .ResolveAsync(physicalOwnedPath);
             Assert.True(rootIdentity.IsAvailable);
             Assert.True(ownedIdentity.IsAvailable);
+            var ownershipToken = Guid.NewGuid().ToString("N");
 
             int rootId;
             LibraryDirectoryOwnership ownership;
@@ -3067,13 +3071,15 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
                         "library-directory",
                         physicalOwnedPath,
                         sourceResolution.Semantics),
-                    OwnershipToken = Guid.NewGuid().ToString("N"),
+                    OwnershipToken = ownershipToken,
                     State = LibraryDirectoryOwnershipState.Owned,
                     CreationWorkflow = "Test",
                     AudiobookId = audiobook.Id,
                     ManagedRootFolderId = rootFolder.Id,
-                    DirectoryObjectIdentityVersion = ownedIdentity.Version,
-                    DirectoryObjectIdentity = ownedIdentity.Value
+                    DirectoryObjectIdentityVersion = ManagedDirectoryIdentity.CurrentVersion,
+                    DirectoryObjectIdentity = ManagedDirectoryIdentity.Create(
+                        ownershipToken,
+                        ownedIdentity.Value!)
                 };
                 db.LibraryDirectoryOwnerships.Add(ownership);
                 await db.SaveChangesAsync();

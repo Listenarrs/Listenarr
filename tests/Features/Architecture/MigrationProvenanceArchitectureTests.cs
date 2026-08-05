@@ -7,6 +7,7 @@
  * by the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  */
+using System.Globalization;
 using Listenarr.Tests.Common;
 
 namespace Listenarr.Tests.Features.Architecture;
@@ -45,6 +46,16 @@ public sealed class MigrationProvenanceArchitectureTests : BaseTests
         {
             var source = File.ReadAllText(main);
             var relative = Normalize(Path.GetRelativePath(RepositoryRoot, main));
+            var migrationTimestamp = Path.GetFileName(main)[..14];
+            if (!DateTime.TryParseExact(
+                    migrationTimestamp,
+                    "yyyyMMddHHmmss",
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.None,
+                    out _))
+            {
+                violations.Add($"{relative}: migration ID prefix is not an EF-style UTC timestamp");
+            }
             if (source.Contains("migrationBuilder.Sql(", StringComparison.Ordinal)
                 || source.Contains("suppressTransaction", StringComparison.Ordinal)
                 || source.Contains("[Migration(", StringComparison.Ordinal)

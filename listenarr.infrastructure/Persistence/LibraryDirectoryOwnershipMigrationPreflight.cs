@@ -10,7 +10,7 @@ internal static class LibraryDirectoryOwnershipMigrationPreflight
     internal const string PredecessorMigrationId =
         "20260726042801_AddDirectoryObjectIdentityAuthorization";
     internal const string ForeignKeyMigrationId =
-        "20260726500000_AddLibraryDirectoryOwnershipRootForeignKey";
+        "20260805034058_AddLibraryDirectoryOwnershipRootForeignKey";
 
     public static int RepairLegacyForeignKeyReferences(ListenArrDbContext context)
     {

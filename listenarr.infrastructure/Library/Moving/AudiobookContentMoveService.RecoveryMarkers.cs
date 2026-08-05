@@ -192,6 +192,20 @@ internal sealed partial class AudiobookContentMoveService
         {
             throw;
         }
+        catch (Exception exception) when (
+            (exception is InvalidOperationException
+                or IOException
+                or UnauthorizedAccessException
+                or System.ComponentModel.Win32Exception)
+            && RecoveryMarkerPathIsLinked(markerPath))
+        {
+            logger.LogWarning(
+                exception,
+                "Move recovery marker {Marker} is linked and cannot be trusted",
+                LogRedaction.SanitizeFilePath(markerPath));
+            throw new MoveNeedsAttentionException(
+                "The move recovery marker is a symbolic link or reparse point and was preserved for review.");
+        }
         catch (Exception exception) when (exception is
             IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
         {
@@ -202,6 +216,42 @@ internal sealed partial class AudiobookContentMoveService
             throw new IOException(
                 "The move recovery marker is temporarily unreadable and was preserved.",
                 exception);
+        }
+    }
+
+    private static bool RecoveryMarkerEntryExists(string markerPath)
+    {
+        try
+        {
+            var marker = new FileInfo(markerPath);
+            return marker.Exists || !string.IsNullOrWhiteSpace(marker.LinkTarget);
+        }
+        catch (Exception exception) when (exception is
+            FileNotFoundException or DirectoryNotFoundException)
+        {
+            return false;
+        }
+        catch (Exception exception) when (exception is
+            IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            // Fail closed. The subsequent pinned read will classify the concrete
+            // unreadable state without treating an uncertain artifact as absent.
+            return true;
+        }
+    }
+
+    private static bool RecoveryMarkerPathIsLinked(string markerPath)
+    {
+        try
+        {
+            var marker = new FileInfo(markerPath);
+            return !string.IsNullOrWhiteSpace(marker.LinkTarget)
+                || (marker.Attributes & FileAttributes.ReparsePoint) != 0;
+        }
+        catch (Exception exception) when (exception is
+            IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            return false;
         }
     }
 

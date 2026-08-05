@@ -426,7 +426,11 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
             StringComparison.OrdinalIgnoreCase);
         Assert.True(Directory.Exists(displacedDirectory));
         Assert.Equal(insidePayload, await File.ReadAllTextAsync(insideMarker));
-        Assert.Equal(ownership.Id, resolution.Ownership?.Id);
+        Assert.Null(resolution.Ownership);
+        await using var verification = await _factory.CreateDbContextAsync();
+        var persisted = await verification.LibraryDirectoryOwnerships
+            .SingleAsync(candidate => candidate.Id == ownership.Id);
+        Assert.Equal(ownership.Id, persisted.Id);
     }
 
     [Fact]
