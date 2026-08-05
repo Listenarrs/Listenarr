@@ -50,6 +50,58 @@ internal sealed class DirectoryObjectIdentityResolver(
             cancellationToken);
     }
 
+    public async Task RetireEnrollmentAsync(
+        string path,
+        int expectedVersion,
+        string expectedValue,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(expectedValue);
+        if (expectedVersion != ManagedDirectoryIdentity.CurrentVersion)
+        {
+            throw new InvalidOperationException(
+                $"Directory identity version {expectedVersion} cannot be retired as a managed enrollment.");
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!FileSystemPathIdentity.TryCanonicalizeStoredAbsolutePathForHost(
+                path,
+                out var canonicalPath,
+                out var pathReason))
+        {
+            throw new InvalidOperationException(pathReason);
+        }
+
+        try
+        {
+            using var anchor = PinnedDirectoryCreation.OpenPinnedBoundary(canonicalPath);
+            var nativeIdentity = _nativeIdentityResolver(anchor);
+            var current = await ManagedDirectoryEnrollment.ResolveAsync(
+                anchor,
+                nativeIdentity,
+                enrollIfMissing: false,
+                cancellationToken);
+            if (!current.IsAvailable
+                || current.Version != expectedVersion
+                || !string.Equals(current.Value, expectedValue, StringComparison.Ordinal)
+                || !anchor.VisiblePathMatches())
+            {
+                throw new InvalidOperationException(
+                    "The managed directory enrollment changed before compensation and was preserved.");
+            }
+
+            ManagedDirectoryEnrollment.RetireValidMarker(anchor);
+        }
+        catch (Exception exception) when (exception is
+            IOException or UnauthorizedAccessException or Win32Exception
+                or PlatformNotSupportedException)
+        {
+            throw new InvalidOperationException(
+                "The managed directory enrollment could not be retired safely.",
+                exception);
+        }
+    }
+
     private async Task<DirectoryObjectIdentityResolution> ResolveCoreAsync(
         string path,
         bool enrollIfMissing,

@@ -1430,6 +1430,83 @@ namespace Listenarr.Tests.Features.Api.Features.Library
 
         [Fact]
         [Trait("Method", "EnqueueMove")]
+        [Trait("Scenario", "LegacyOutputPathDoesNotAuthorizeOutsideConfiguredRoot")]
+        public async Task MoveAudiobook_LegacyOutputPathDoesNotAuthorizeOutsideConfiguredRoot()
+        {
+            var legacyOutputPath = FileService.GetTempDirectory("listenarr-legacy-output");
+            var rootPath = FileService.GetTempDirectory("listenarr-managed-root");
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
+                .WithOutputPath(legacyOutputPath)
+                .Build());
+            await _rootFolderRepository.AddAsync(new RootFolderBuilder()
+                .WithName("Managed Root")
+                .WithPath(rootPath)
+                .WithIsDefault()
+                .Build());
+            var sourcePath = Path.Join(rootPath, "Author", "Source");
+            Directory.CreateDirectory(sourcePath);
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Legacy output authority")
+                .WithBasePath(sourcePath)
+                .Build());
+            var targetPath = Path.Join(legacyOutputPath, "Author", "Target");
+
+            var result = await _provider.GetRequiredService<LibraryController>().EnqueueMove(
+                audiobook.Id,
+                new LibraryController.MoveRequest
+                {
+                    DestinationPath = targetPath,
+                    MoveFiles = false
+                });
+
+            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+            Assert.Contains("destination_path_outside_roots", badRequest.Value?.ToString() ?? string.Empty);
+            var unchanged = await _audiobookRepository.GetByIdAsync(audiobook.Id);
+            Assert.Equal(sourcePath, unchanged!.BasePath);
+        }
+
+        [Fact]
+        [Trait("Method", "EnqueueMove")]
+        [Trait("Scenario", "LegacyOutputPathDoesNotAuthorizePhysicalMoveOutsideConfiguredRoot")]
+        public async Task MoveAudiobook_LegacyOutputPathDoesNotAuthorizePhysicalMoveOutsideConfiguredRoot()
+        {
+            var moveQueue = CreateMoveQueueMock();
+            Init(services => services.WithSingleton(moveQueue.Object));
+            var legacyOutputPath = FileService.GetTempDirectory("listenarr-legacy-physical-output");
+            var rootPath = FileService.GetTempDirectory("listenarr-managed-physical-root");
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
+                .WithOutputPath(legacyOutputPath)
+                .Build());
+            await _rootFolderRepository.AddAsync(new RootFolderBuilder()
+                .WithName("Managed Root")
+                .WithPath(rootPath)
+                .WithIsDefault()
+                .Build());
+            var sourcePath = Path.Join(rootPath, "Author", "Source");
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Legacy physical output authority")
+                .WithBasePath(sourcePath)
+                .Build());
+            await AddTrackedFileAsync(audiobook, sourcePath, identityBoundary: rootPath);
+            var targetPath = Path.Join(legacyOutputPath, "Author", "Target");
+
+            var result = await _provider.GetRequiredService<LibraryController>().EnqueueMove(
+                audiobook.Id,
+                new LibraryController.MoveRequest
+                {
+                    DestinationPath = targetPath,
+                    MoveFiles = true
+                });
+
+            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+            Assert.Contains("destination_path_outside_roots", badRequest.Value?.ToString() ?? string.Empty);
+            moveQueue.Verify(queue => queue.EnqueueMoveAsync(
+                It.IsAny<MoveEnqueueCommand>(),
+                It.IsAny<CancellationToken>()), Times.Never);
+        }
+
+        [Fact]
+        [Trait("Method", "EnqueueMove")]
         [Trait("Scenario", "RejectsAbsoluteDestinationOutsideConfiguredRoots")]
         public async Task MoveAudiobook_RejectsAbsoluteDestinationOutsideConfiguredRoots()
         {

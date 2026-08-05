@@ -21,7 +21,8 @@ internal sealed partial class AudiobookContentMoveService
         string? ownedRecoveryMarkerPath = null,
         IReadOnlyCollection<string>? ownedScaffoldPaths = null,
         IReadOnlyCollection<string>? structuralSpinePaths = null,
-        IReadOnlyCollection<string>? ownedDirectoryMarkerPaths = null)
+        IReadOnlyCollection<string>? ownedDirectoryMarkerPaths = null,
+        string? persistentManagedRootBoundary = null)
     {
         if (!Directory.Exists(source))
         {
@@ -84,6 +85,32 @@ internal sealed partial class AudiobookContentMoveService
                             ownedRecoveryMarkerPath,
                             sourceSemantics))
                     {
+                        continue;
+                    }
+
+                    if (string.Equals(
+                            entryName,
+                            ManagedDirectoryEnrollment.FileName,
+                            StringComparison.Ordinal)
+                        && IsSourceCleanupBoundary(
+                            source,
+                            persistentManagedRootBoundary,
+                            sourceSemantics)
+                        && FileSystemPathIdentity.AreEquivalent(
+                            Path.GetDirectoryName(entry)!,
+                            source,
+                            sourceSemantics))
+                    {
+                        var enrollmentAttributes = File.GetAttributes(entry);
+                        if ((enrollmentAttributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0)
+                        {
+                            throw new MoveNeedsAttentionException(
+                                "The managed-root enrollment artifact changed type or became linked.");
+                        }
+
+                        // The root enrollment belongs to the persistent cleanup boundary,
+                        // not to the audiobook. Leave it in place and exclude it from the
+                        // move manifest/companion sweep.
                         continue;
                     }
 

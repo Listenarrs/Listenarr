@@ -20,7 +20,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Audiobooks.RootFolders
 {
-    public class RootFolderService : IRootFolderService
+    public partial class RootFolderService : IRootFolderService
     {
         private readonly IRootFolderRepository _repo;
         private readonly ILogger<RootFolderService>? _logger;
@@ -81,19 +81,21 @@ namespace Listenarr.Application.Audiobooks.RootFolders
                 throw new InvalidOperationException(BuildRootFolderConflictMessage(conflict));
             }
 
-            await CaptureInitialDirectoryObjectIdentityAsync(root);
+            var identity = await CaptureInitialDirectoryObjectIdentityAsync(root);
 
             if (root.IsDefault)
             {
                 var currentDefaultId = (await _repo.GetDefaultAsync())?.Id;
-                await _repo.AddAndSetDefaultAsync(root, currentDefaultId);
-            }
-            else
-            {
-                await _repo.AddAsync(root);
+                return await PersistRootWithEnrollmentCompensationAsync(
+                    root,
+                    identity,
+                    () => _repo.AddAndSetDefaultAsync(root, currentDefaultId));
             }
 
-            return root;
+            return await PersistRootWithEnrollmentCompensationAsync(
+                root,
+                identity,
+                () => _repo.AddAsync(root));
         }
 
         public Task DeleteAsync(int id, int? reassignRootId = null) =>
@@ -322,52 +324,6 @@ namespace Listenarr.Application.Audiobooks.RootFolders
                 "root",
                 root.Path,
                 resolution.Semantics);
-        }
-
-        private async Task CaptureInitialDirectoryObjectIdentityAsync(RootFolder root)
-        {
-            var resolution = _directoryObjectIdentityResolver == null
-                ? DirectoryObjectIdentityResolution.Unavailable(
-                    "Directory object identity resolution is unavailable.")
-                : await _directoryObjectIdentityResolver.ResolveAsync(root.Path);
-            root.DirectoryObjectIdentityVersion = resolution.Version;
-            root.DirectoryObjectIdentity = resolution.Value;
-            root.DirectoryObjectIdentityUnavailableReason = resolution.UnavailableReason;
-        }
-
-        private async Task ValidateExistingDirectoryObjectIdentityAsync(RootFolder root)
-        {
-            if (root.DirectoryObjectIdentityVersion == null
-                || string.IsNullOrWhiteSpace(root.DirectoryObjectIdentity))
-            {
-                return;
-            }
-            if (_directoryObjectIdentityResolver == null)
-            {
-                throw new InvalidOperationException(
-                    "Root folder physical identity cannot be validated.");
-            }
-
-            if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
-                    root.Path,
-                    out var canonicalRootPath,
-                    out var pathReason))
-            {
-                throw new InvalidOperationException(pathReason);
-            }
-
-            var current = await _directoryObjectIdentityResolver.ResolveExistingAsync(
-                canonicalRootPath);
-            if (!current.IsAvailable
-                || current.Version != root.DirectoryObjectIdentityVersion
-                || !string.Equals(
-                    current.Value,
-                    root.DirectoryObjectIdentity,
-                    StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException(
-                    "The configured root folder now identifies a different physical directory; use an explicit path-change operation to reauthorize it.");
-            }
         }
 
         private async Task EnsureNoActiveRelocationAsync(int rootFolderId)

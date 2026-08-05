@@ -168,6 +168,7 @@ vi.mock('@/services/api', () => {
     getRootFolders: vi.fn(async () => []),
     updateRootFolder: vi.fn(async (_id: number, payload: unknown) => payload),
     changeRootFolderPath: vi.fn(async () => ({})),
+    reauthorizeRootFolderIdentity: vi.fn(async () => ({})),
     retryRootFolderRelocation: vi.fn(async () => ({})),
     reauthorizeLegacyRootFolderRelocationTarget: vi.fn(async () => ({})),
 

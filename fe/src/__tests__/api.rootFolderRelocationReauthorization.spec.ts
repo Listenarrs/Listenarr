@@ -9,10 +9,41 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-describe('ApiService legacy relocation target reauthorization', () => {
+describe('ApiService root-folder reauthorization', () => {
   afterEach(() => {
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
+  })
+
+  it('posts the exact confirmed root path to the physical identity endpoint', async () => {
+    vi.resetModules()
+    const rootPath = '/srv/Library '
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            id: 3,
+            name: 'Library',
+            path: rootPath,
+            isDefault: true,
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const actual = await vi.importActual<typeof import('@/services/api')>('@/services/api')
+    await actual.apiService.reauthorizeRootFolderIdentity(3, rootPath)
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [requestInfo, options] = fetchMock.mock.calls[0] as [RequestInfo, RequestInit]
+    expect(String(requestInfo)).toContain('/rootfolders/3/reauthorize-identity')
+    expect(options.method).toBe('POST')
+    expect(JSON.parse(String(options.body))).toEqual({ expectedCurrentPath: rootPath })
   })
 
   it('posts the exact confirmed target path to the dedicated endpoint', async () => {

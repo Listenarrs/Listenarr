@@ -931,6 +931,16 @@ class ApiService {
     )
   }
 
+  async reauthorizeRootFolderIdentity(
+    id: number,
+    expectedCurrentPath: string,
+  ): Promise<RootFolder> {
+    return this.request<RootFolder>(`/rootfolders/${id}/reauthorize-identity`, {
+      method: 'POST',
+      body: JSON.stringify({ expectedCurrentPath }),
+    })
+  }
+
   async retryRootFolderRelocation(
     relocationId: string,
   ): Promise<import('@/types').RootFolderPathChangeResult> {

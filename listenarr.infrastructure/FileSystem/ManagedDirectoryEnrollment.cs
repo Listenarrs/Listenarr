@@ -73,9 +73,11 @@ internal static class ManagedDirectoryEnrollment
                 $"The managed directory could not be enrolled safely: {exception.Message}");
         }
 
-        return TryRead(anchor, nativeIdentity, out _)
-            ?? DirectoryObjectIdentityResolution.Unavailable(
-                "The managed directory enrollment could not be verified after publication.");
+        var enrolled = TryRead(anchor, nativeIdentity, out _);
+        return enrolled == null
+            ? DirectoryObjectIdentityResolution.Unavailable(
+                "The managed directory enrollment could not be verified after publication.")
+            : enrolled with { EnrollmentCreated = true };
     }
 
     internal static async Task<string> RequireMatchingEnrollmentAsync(

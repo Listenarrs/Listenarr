@@ -49,6 +49,9 @@ namespace Listenarr.Api.Features.Library
         FileSystemCaseSensitivityMode TargetCaseSensitivityMode,
         string ExpectedCurrentPath);
 
+    public sealed record RootFolderIdentityReauthorizationRequest(
+        string ExpectedCurrentPath);
+
     [ApiController]
     [Route("api/v{version:apiVersion}/rootfolders")]
     [Tags("Root Folders")]
@@ -241,6 +244,49 @@ namespace Listenarr.Api.Features.Library
                 return BadRequest(new
                 {
                     message = "The root folder path cannot be changed in its current state."
+                });
+            }
+        }
+
+        [HttpPost("{id}/reauthorize-identity")]
+        public async Task<IActionResult> ReauthorizeIdentity(
+            int id,
+            [FromBody] RootFolderIdentityReauthorizationRequest request,
+            CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(request.ExpectedCurrentPath))
+            {
+                return BadRequest(new
+                {
+                    message = "The current root folder path must be confirmed."
+                });
+            }
+
+            try
+            {
+                var root = await _service.ReauthorizeDirectoryIdentityAsync(
+                    id,
+                    request.ExpectedCurrentPath,
+                    cancellationToken);
+                return Ok(await MapAsync(root));
+            }
+            catch (KeyNotFoundException)
+            {
+                return NotFound(new { message = "Root folder not found" });
+            }
+            catch (ArgumentException)
+            {
+                return BadRequest(new
+                {
+                    message = "The root folder physical identity reauthorization request is invalid."
+                });
+            }
+            catch (InvalidOperationException)
+            {
+                return Conflict(new
+                {
+                    message = "The root folder physical identity cannot be reauthorized in its current state.",
+                    code = "root_identity_reauthorization_blocked"
                 });
             }
         }

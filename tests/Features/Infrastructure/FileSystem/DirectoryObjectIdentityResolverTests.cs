@@ -86,8 +86,12 @@ public sealed class DirectoryObjectIdentityResolverTests : BaseTests
         var existing = await resolver.ResolveExistingAsync(directory);
 
         Assert.True(upgraded.IsAvailable, upgraded.UnavailableReason);
+        Assert.True(upgraded.EnrollmentCreated);
         Assert.Equal(ManagedDirectoryIdentity.CurrentVersion, upgraded.Version);
-        Assert.Equal(upgraded, existing);
+        Assert.True(existing.IsAvailable, existing.UnavailableReason);
+        Assert.False(existing.EnrollmentCreated);
+        Assert.Equal(upgraded.Version, existing.Version);
+        Assert.Equal(upgraded.Value, existing.Value);
     }
 
     [Fact]
@@ -106,6 +110,47 @@ public sealed class DirectoryObjectIdentityResolverTests : BaseTests
         Assert.False(File.Exists(Path.Join(
             directory,
             ManagedDirectoryEnrollment.FileName)));
+    }
+
+    [Fact]
+    public async Task RetireEnrollmentAsync_ExactCreatedGeneration_RemovesMarker()
+    {
+        var directory = FileService.GetTempDirectory("directory-object-identity-retire");
+        var resolver = new DirectoryObjectIdentityResolver();
+        var enrolled = await resolver.ResolveAsync(directory);
+        Assert.True(enrolled.IsAvailable, enrolled.UnavailableReason);
+        Assert.True(enrolled.EnrollmentCreated);
+
+        await resolver.RetireEnrollmentAsync(
+            directory,
+            enrolled.Version!.Value,
+            enrolled.Value!);
+
+        Assert.False(File.Exists(Path.Join(
+            directory,
+            ManagedDirectoryEnrollment.FileName)));
+        var existing = await resolver.ResolveExistingAsync(directory);
+        Assert.False(existing.IsAvailable);
+    }
+
+    [Fact]
+    public async Task RetireEnrollmentAsync_MismatchedExpectedGeneration_PreservesMarker()
+    {
+        var directory = FileService.GetTempDirectory("directory-object-identity-retire-mismatch");
+        var resolver = new DirectoryObjectIdentityResolver();
+        var enrolled = await resolver.ResolveAsync(directory);
+        Assert.True(enrolled.IsAvailable, enrolled.UnavailableReason);
+        var markerPath = Path.Join(directory, ManagedDirectoryEnrollment.FileName);
+        var original = await File.ReadAllTextAsync(markerPath);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            resolver.RetireEnrollmentAsync(
+                directory,
+                enrolled.Version!.Value,
+                "listenarr-directory-v2:00000000000000000000000000000000:"
+                    + new string('0', 64)));
+
+        Assert.Equal(original, await File.ReadAllTextAsync(markerPath));
     }
 
     [Fact]

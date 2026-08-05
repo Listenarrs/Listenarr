@@ -41,7 +41,7 @@ function relocation(
   }
 }
 
-function rootFolder(activeRelocation: RootFolderPathChangeResult): RootFolder {
+function rootFolder(activeRelocation: RootFolderPathChangeResult | null): RootFolder {
   return {
     id: 3,
     name: 'Audiobooks',
@@ -87,6 +87,28 @@ describe('RootFoldersSettings', () => {
     resolveFn([])
     await new Promise((r) => setTimeout(r, 0))
     await wrapper.vm.$nextTick()
+  })
+
+  it('reauthorizes the exact configured root path only after confirmation', async () => {
+    const folder = rootFolder(null)
+    vi.mocked(apiService.getRootFolders).mockResolvedValue([folder])
+    vi.mocked(apiService.reauthorizeRootFolderIdentity).mockResolvedValue(folder)
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(RootFoldersSettings, { global: { plugins: [pinia] } })
+    await flushPromises()
+
+    const action = wrapper.get('[data-cy="reauthorize-root-identity"]')
+    await action.trigger('click')
+
+    const displayedPath = wrapper.get('[data-testid="root-reauthorization-path"]')
+    expect(displayedPath.element.textContent).toBe(folder.path)
+    const confirm = wrapper.get('.modal-delete-button')
+    expect(confirm.text()).toContain('Reauthorize root')
+    await confirm.trigger('click')
+    await flushPromises()
+
+    expect(apiService.reauthorizeRootFolderIdentity).toHaveBeenCalledWith(folder.id, folder.path)
   })
 
   it('shows legacy reauthorization separately and confirms the exact target path', async () => {

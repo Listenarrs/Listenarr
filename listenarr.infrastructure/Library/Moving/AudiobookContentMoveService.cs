@@ -224,7 +224,8 @@ internal sealed partial class AudiobookContentMoveService(
             sourceRecoveryMarker == null ? null : sourceRecoveryMarkerPath,
             targetScaffolding.Select(directory => directory.Path).ToList(),
             targetStructuralSpine,
-            ownedSourceMarkerPaths);
+            ownedSourceMarkerPaths,
+            request.SourceCleanupBoundary);
 
         var tempName = Path.Join(targetParent, Path.GetFileName(target) + ".tmp-" + request.JobId.ToString("N"));
         if (!FileSystemSafety.TryValidateMutationTarget(tempName, [targetParent], out tempName, out var tempReason))

@@ -83,6 +83,15 @@
                   <PhPencil />
                 </button>
                 <button
+                  class="icon-button action-secondary"
+                  @click="confirmRootIdentityReauthorization(folder)"
+                  title="Reauthorize storage identity"
+                  data-cy="reauthorize-root-identity"
+                  :disabled="!!folder.activeRelocation"
+                >
+                  <PhShieldCheck />
+                </button>
+                <button
                   v-if="!folder.isDefault"
                   class="icon-button action-secondary"
                   @click="setDefaultFolder(folder)"
@@ -161,6 +170,33 @@
     </DeleteConfirmationModal>
 
     <DeleteConfirmationModal
+      :visible="rootToReauthorize !== null"
+      title="Reauthorize storage identity"
+      confirm-text="Reauthorize root"
+      @close="rootToReauthorize = null"
+      @confirm="executeRootIdentityReauthorization"
+    >
+      <template #confirm-icon><PhShieldCheck /></template>
+      <template #default>
+        <p>
+          Confirm that this is the exact directory currently configured for
+          <strong>{{ rootToReauthorize?.name }}</strong
+          >:
+        </p>
+        <p>
+          <code class="reauthorization-target-path" data-testid="root-reauthorization-path">{{
+            rootToReauthorize?.path
+          }}</code>
+        </p>
+        <p>
+          This establishes the directory currently visible at that path as the authorized physical
+          generation for this root. Only continue after verifying the path points to the intended
+          storage location.
+        </p>
+      </template>
+    </DeleteConfirmationModal>
+
+    <DeleteConfirmationModal
       :visible="relocationToReauthorize !== null"
       title="Reauthorize relocation target"
       confirm-text="Reauthorize target"
@@ -226,6 +262,11 @@ const relocationToReauthorize = ref<{
   relocationId: string
   targetPath: string
 } | null>(null)
+const rootToReauthorize = ref<{
+  id: number
+  name: string
+  path: string
+} | null>(null)
 
 onMounted(async () => {
   await store.load()
@@ -287,6 +328,34 @@ const setDefaultFolder = async (folder: RootFolder) => {
       operation: 'setDefaultFolder',
     })
     toast.error('Set default failed', (e as Error)?.message || 'Failed to set default root folder')
+  }
+}
+
+function confirmRootIdentityReauthorization(folder: RootFolder) {
+  if (!folder.id || folder.activeRelocation) return
+  rootToReauthorize.value = {
+    id: folder.id,
+    name: folder.name,
+    path: folder.path,
+  }
+}
+
+async function executeRootIdentityReauthorization() {
+  const confirmation = rootToReauthorize.value
+  if (!confirmation) return
+  rootToReauthorize.value = null
+  try {
+    await store.reauthorizeIdentity(confirmation.id, confirmation.path)
+    toast.success('Root folder', 'Storage identity reauthorized')
+  } catch (e: unknown) {
+    errorTracking.captureException(e as Error, {
+      component: 'RootFoldersSettings',
+      operation: 'reauthorizeRootIdentity',
+    })
+    toast.error(
+      'Reauthorization failed',
+      (e as Error)?.message || 'Failed to reauthorize root folder storage identity',
+    )
   }
 }
 

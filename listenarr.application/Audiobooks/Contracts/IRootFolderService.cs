@@ -26,6 +26,10 @@ namespace Listenarr.Application.Audiobooks.Contracts
         Task<RootFolder> CreateAsync(RootFolder root);
         // moveFiles: when true, enqueue move jobs for affected audiobooks; when false, perform DB-only reassign
         Task<RootFolder> UpdateAsync(RootFolder root, bool moveFiles = false, bool deleteEmptySource = true);
+        Task<RootFolder> ReauthorizeDirectoryIdentityAsync(
+            int id,
+            string expectedCurrentPath,
+            CancellationToken cancellationToken = default);
         Task DeleteAsync(int id, int? reassignRootId = null);
     }
 }

@@ -3,7 +3,8 @@ namespace Listenarr.Application.Audiobooks.Contracts;
 public sealed record DirectoryObjectIdentityResolution(
     int? Version,
     string? Value,
-    string? UnavailableReason)
+    string? UnavailableReason,
+    bool EnrollmentCreated = false)
 {
     public bool IsAvailable =>
         Version.HasValue
@@ -28,5 +29,11 @@ public interface IDirectoryObjectIdentityResolver
         string path,
         int legacyVersion,
         string legacyValue,
+        CancellationToken cancellationToken = default);
+
+    Task RetireEnrollmentAsync(
+        string path,
+        int expectedVersion,
+        string expectedValue,
         CancellationToken cancellationToken = default);
 }

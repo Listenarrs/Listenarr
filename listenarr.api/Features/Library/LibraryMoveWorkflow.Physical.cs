@@ -39,7 +39,13 @@ public sealed partial class LibraryMoveWorkflow
             cancellationToken.ThrowIfCancellationRequested();
 
             var allowedMoveRoots = new List<MoveRootBoundary>();
-            var normalizedOutputPath = TryNormalizeMoveRoot(settings.OutputPath, "configured output path");
+            // RootFolders are the authoritative managed-storage boundaries. OutputPath is
+            // retained only as a legacy fallback for databases that have not configured
+            // any root folders yet; otherwise stale cross-host OutputPath values must not
+            // grant independent filesystem mutation authority.
+            var normalizedOutputPath = rootFolders.Count == 0
+                ? TryNormalizeMoveRoot(settings.OutputPath, "legacy configured output path")
+                : null;
             await AddAllowedMoveRootAsync(
                 allowedMoveRoots,
                 normalizedOutputPath,

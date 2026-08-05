@@ -167,7 +167,11 @@ public sealed class AudiobookDestinationRewriteService : IAudiobookDestinationRe
         var rootFolders = await _rootFolderService.GetAllAsync();
 
         var allowedMoveRoots = new List<MoveRootBoundary>();
-        var normalizedOutputPath = TryNormalizeMoveRoot(settings.OutputPath, "configured output path");
+        // RootFolders are the authoritative managed-storage boundaries. OutputPath is
+        // only a compatibility fallback before any root folders have been configured.
+        var normalizedOutputPath = rootFolders.Count == 0
+            ? TryNormalizeMoveRoot(settings.OutputPath, "legacy configured output path")
+            : null;
         await AddAllowedMoveRootAsync(
             allowedMoveRoots,
             normalizedOutputPath,

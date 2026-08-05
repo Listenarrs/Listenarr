@@ -171,6 +171,24 @@ describe('root folder relocation store actions', () => {
     expect(apiService.getRootFolders).toHaveBeenCalledTimes(1)
   })
 
+  it('passes the exact confirmed root path and reloads after identity reauthorization', async () => {
+    const current = {
+      id: 3,
+      name: 'Library',
+      path: '/srv/Library ',
+      isDefault: false,
+      caseSensitivityMode: 'Auto' as const,
+    }
+    vi.mocked(apiService.reauthorizeRootFolderIdentity).mockResolvedValueOnce(current)
+    vi.mocked(apiService.getRootFolders).mockResolvedValueOnce([current])
+    const store = useRootFoldersStore()
+
+    await expect(store.reauthorizeIdentity(current.id, current.path)).resolves.toEqual(current)
+
+    expect(apiService.reauthorizeRootFolderIdentity).toHaveBeenCalledWith(current.id, current.path)
+    expect(apiService.getRootFolders).toHaveBeenCalledTimes(1)
+  })
+
   it('passes the exact confirmed target path and reloads root folders', async () => {
     const targetPath = '/srv/Audiobooks '
     const result: RootFolderPathChangeResult = {

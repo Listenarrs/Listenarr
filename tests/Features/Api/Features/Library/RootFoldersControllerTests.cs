@@ -90,6 +90,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             public List<RootFolder> Store { get; } = new List<RootFolder>();
             public bool ThrowPersistenceConflictOnDelete { get; set; }
             public Exception? CreateException { get; set; }
+            public Exception? ReauthorizeException { get; set; }
 
             public Task<RootFolder?> GetDefaultAsync() => Task.FromResult(Store.Count > 0 ? Store.First() : null);
 
@@ -125,6 +126,30 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 if (root.Path?.Contains("/invalid/") == true) throw new InvalidOperationException("Invalid path")
 ;
                 Store[idx] = root;
+                return Task.FromResult(root);
+            }
+
+            public Task<RootFolder> ReauthorizeDirectoryIdentityAsync(
+                int id,
+                string expectedCurrentPath,
+                CancellationToken cancellationToken = default)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (ReauthorizeException != null)
+                {
+                    throw ReauthorizeException;
+                }
+
+                var root = Store.Find(item => item.Id == id)
+                    ?? throw new KeyNotFoundException("Root folder not found");
+                if (!string.Equals(
+                        root.Path,
+                        expectedCurrentPath,
+                        StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException("Root folder path changed");
+                }
+
                 return Task.FromResult(root);
             }
 
@@ -1395,6 +1420,78 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             var token = json.RootElement.GetProperty("token").GetString();
             Assert.False(string.IsNullOrWhiteSpace(token));
             return token!;
+        }
+
+        [Fact]
+        public async Task ReauthorizeIdentity_ConfirmedCurrentPath_ReturnsRoot()
+        {
+            var path = FileUtils.GetAbsolutePath("reauthorize-root");
+            var svc = new FakeService();
+            svc.Store.Add(new RootFolder { Id = 1, Name = "R", Path = path });
+            var db = CreateDb();
+            var controller = new RootFoldersController(
+                svc,
+                _fakeQueue,
+                new EfAudiobookFileRepository(db),
+                new AudiobookRepository(db),
+                new LocalFileSystem());
+
+            var result = await controller.ReauthorizeIdentity(
+                1,
+                new RootFolderIdentityReauthorizationRequest(path),
+                CancellationToken.None);
+
+            var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(result);
+            var root = Assert.IsType<RootFolderDto>(ok.Value);
+            Assert.Equal(1, root.Id);
+            Assert.Equal(path, root.Path);
+        }
+
+        [Fact]
+        public async Task ReauthorizeIdentity_BlockedState_ReturnsConflictCode()
+        {
+            var path = FileUtils.GetAbsolutePath("reauthorize-blocked-root");
+            var svc = new FakeService
+            {
+                ReauthorizeException = new InvalidOperationException("blocked")
+            };
+            svc.Store.Add(new RootFolder { Id = 1, Name = "R", Path = path });
+            var db = CreateDb();
+            var controller = new RootFoldersController(
+                svc,
+                _fakeQueue,
+                new EfAudiobookFileRepository(db),
+                new AudiobookRepository(db),
+                new LocalFileSystem());
+
+            var result = await controller.ReauthorizeIdentity(
+                1,
+                new RootFolderIdentityReauthorizationRequest(path),
+                CancellationToken.None);
+
+            var conflict = Assert.IsType<Microsoft.AspNetCore.Mvc.ConflictObjectResult>(result);
+            var json = JsonSerializer.Serialize(conflict.Value);
+            Assert.Contains("root_identity_reauthorization_blocked", json, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public async Task ReauthorizeIdentity_MissingConfirmation_ReturnsBadRequest()
+        {
+            var svc = new FakeService();
+            var db = CreateDb();
+            var controller = new RootFoldersController(
+                svc,
+                _fakeQueue,
+                new EfAudiobookFileRepository(db),
+                new AudiobookRepository(db),
+                new LocalFileSystem());
+
+            var result = await controller.ReauthorizeIdentity(
+                1,
+                new RootFolderIdentityReauthorizationRequest(" "),
+                CancellationToken.None);
+
+            Assert.IsType<Microsoft.AspNetCore.Mvc.BadRequestObjectResult>(result);
         }
 
         [Fact]

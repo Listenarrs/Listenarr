@@ -123,6 +123,12 @@ export const useRootFoldersStore = defineStore('rootFolders', () => {
     return folders.value.find((folder) => folder.id === id) ?? current!
   }
 
+  async function reauthorizeIdentity(id: number, expectedCurrentPath: string) {
+    const result = await apiService.reauthorizeRootFolderIdentity(id, expectedCurrentPath)
+    await load()
+    return result
+  }
+
   async function retryRelocation(relocationId: string) {
     const result = await apiService.retryRootFolderRelocation(relocationId)
     await load()
@@ -151,6 +157,7 @@ export const useRootFoldersStore = defineStore('rootFolders', () => {
     load,
     create,
     update,
+    reauthorizeIdentity,
     retryRelocation,
     reauthorizeLegacyTarget,
     remove,
