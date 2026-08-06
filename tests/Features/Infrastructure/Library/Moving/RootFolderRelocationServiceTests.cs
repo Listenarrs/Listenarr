@@ -2844,7 +2844,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
     }
 
     [DirectoryLinkFact]
-    public async Task MetadataOnly_LinkedSourceAndPhysicalTarget_PreservesActiveOwnershipMarkers()
+    public async Task MetadataOnly_LinkedSourceAndPhysicalTarget_RetiresLegacyOwnershipMarkers()
     {
         var root = Path.Join(
             TempRoot,
@@ -2969,10 +2969,15 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
                 .LibraryDirectoryOwnerships.SingleAsync();
             Assert.Equal(physicalRoot, rootAfter.Path);
             Assert.Equal(physicalOwnedPath, ownershipAfter.CanonicalPath);
-            LibraryDirectoryOwnershipMarker.Validate(
-                ownershipAfter,
-                physicalOwnedPath);
-            Assert.True(File.Exists(Path.Join(
+            Assert.True(ManagedDirectoryIdentity.Matches(
+                ownershipAfter.DirectoryObjectIdentityVersion,
+                ownershipAfter.DirectoryObjectIdentity,
+                ownershipAfter.OwnershipToken,
+                ownedNativeIdentity));
+            Assert.False(File.Exists(Path.Join(
+                physicalOwnedPath,
+                LibraryDirectoryOwnershipMarker.FileName)));
+            Assert.False(File.Exists(Path.Join(
                 physicalRoot,
                 $".listenarr-directory-owner-{ownership.OwnershipToken}.json")));
             Assert.False(await verification
@@ -2990,7 +2995,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
     }
 
     [DirectoryLinkFact]
-    public async Task MetadataOnly_PhysicalSourceAndLinkedTarget_PreservesActiveOwnershipMarkers()
+    public async Task MetadataOnly_PhysicalSourceAndLinkedTarget_RetiresLegacyOwnershipMarkers()
     {
         var root = Path.Join(
             TempRoot,
@@ -3115,10 +3120,15 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
                 .LibraryDirectoryOwnerships.SingleAsync();
             Assert.Equal(linkedRoot, rootAfter.Path);
             Assert.Equal(linkedOwnedPath, ownershipAfter.CanonicalPath);
-            LibraryDirectoryOwnershipMarker.Validate(
-                ownershipAfter,
-                linkedOwnedPath);
-            Assert.True(File.Exists(Path.Join(
+            Assert.True(ManagedDirectoryIdentity.Matches(
+                ownershipAfter.DirectoryObjectIdentityVersion,
+                ownershipAfter.DirectoryObjectIdentity,
+                ownershipAfter.OwnershipToken,
+                ownedNativeIdentity));
+            Assert.False(File.Exists(Path.Join(
+                linkedOwnedPath,
+                LibraryDirectoryOwnershipMarker.FileName)));
+            Assert.False(File.Exists(Path.Join(
                 physicalRoot,
                 $".listenarr-directory-owner-{ownership.OwnershipToken}.json")));
             Assert.False(await verification

@@ -328,6 +328,15 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
                 directory,
                 FileSystemPathSemantics.CurrentHostDefault,
                 "test"));
+        using (var parent = PinnedDirectoryCreation.OpenPinnedBoundary(_root))
+        using (var publication = parent.OpenExistingChildForPublication(
+            Path.GetFileName(directory)))
+        {
+            await PinnedLibraryDirectoryOwnershipMarker.EnsureAsync(
+                ownership,
+                publication,
+                CancellationToken.None);
+        }
         var insideMarker = Path.Join(
             directory,
             LibraryDirectoryOwnershipMarker.FileName);

@@ -238,8 +238,12 @@ internal sealed partial class PinnedDirectoryCreation
                     "The filesystem does not expose complete directory generation identity.");
             }
 
-            return FormattableString.Invariant(
+            var baseIdentity = FormattableString.Invariant(
                 $"linux:{information.DeviceMajor:x8}:{information.DeviceMinor:x8}:{information.Inode:x16}:{information.BirthTime.Seconds:x16}:{information.BirthTime.Nanoseconds:x8}");
+            var generationIdentity = TryGetLinuxGenerationIdentity(handle);
+            return string.IsNullOrWhiteSpace(generationIdentity)
+                ? baseIdentity
+                : $"{baseIdentity}:{generationIdentity}";
         }
 
         if (OperatingSystem.IsMacOS())

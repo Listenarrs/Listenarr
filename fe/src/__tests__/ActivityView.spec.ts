@@ -80,18 +80,16 @@ const mockLibraryStore = (audiobooks: Array<{ id: number; title: string }> = [])
   }))
 }
 
+let currentMoveJobsStore: Record<string, unknown>
+
 const mockMoveJobsStore = (overrides: Record<string, unknown> = {}) => {
-  const store = {
+  currentMoveJobsStore = {
     trackedJobs: [],
     start: vi.fn(),
     ...overrides,
   }
 
-  vi.doMock('@/stores/moveJobs', () => ({
-    useMoveJobsStore: () => store,
-  }))
-
-  return store
+  return currentMoveJobsStore
 }
 
 const mockDownloadsStore = (overrides: Record<string, unknown> = {}) => {
@@ -131,6 +129,9 @@ describe('ActivityView', () => {
     vi.resetModules()
     vi.clearAllMocks()
     mockMoveJobsStore()
+    vi.doMock('@/stores/moveJobs', () => ({
+      useMoveJobsStore: () => currentMoveJobsStore,
+    }))
     vi.spyOn(globalThis, 'setInterval').mockReturnValue(
       1 as unknown as ReturnType<typeof setInterval>,
     )
