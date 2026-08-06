@@ -64,9 +64,13 @@ namespace Listenarr.Api.Features.Library
 
         public async Task<IActionResult> RescanAsync(int id, HttpContext httpContext)
         {
+            var cancellationToken = httpContext.RequestAborted;
+            cancellationToken.ThrowIfCancellationRequested();
+
             using var preflightScope = _scopeFactory.CreateScope();
             var preflightRepository = preflightScope.ServiceProvider.GetRequiredService<IAudiobookRepository>();
             var audiobook = await preflightRepository.GetByIdAsync(id);
+            cancellationToken.ThrowIfCancellationRequested();
 
             if (audiobook == null)
             {
@@ -163,6 +167,7 @@ namespace Listenarr.Api.Features.Library
                     try
                     {
                         rawResult = await _metadataService.GetMetadataAsync(normalizedAsin, regionValue, cache: false);
+                        cancellationToken.ThrowIfCancellationRequested();
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                     {
@@ -240,6 +245,7 @@ namespace Listenarr.Api.Features.Library
 
                         isbnConversionAttempts++;
                         var (success, asinFromIsbn, _) = await _asinLookupService.GetAsinFromIsbnAsync(isbnValue);
+                        cancellationToken.ThrowIfCancellationRequested();
                         if (!success || string.IsNullOrWhiteSpace(asinFromIsbn))
                         {
                             continue;
@@ -285,6 +291,7 @@ namespace Listenarr.Api.Features.Library
                 });
             }
 
+            cancellationToken.ThrowIfCancellationRequested();
             var convertedMetadata = _metadataConverters.ConvertAudibleToMetadata(
                 providerMetadata,
                 resolvedAsin,
@@ -298,11 +305,14 @@ namespace Listenarr.Api.Features.Library
                     async token =>
                     {
                         await _moveQueueService.EnsureFilesystemMutationAllowedAsync(id, token);
+                        token.ThrowIfCancellationRequested();
                         return await ApplyMetadataRescanResultAsync(
                             id,
                             convertedMetadata,
-                            expectedMetadataState);
-                    });
+                            expectedMetadataState,
+                            token);
+                    },
+                    cancellationToken);
             }
             catch (ApplicationConflictException exception)
             {

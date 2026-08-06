@@ -26,6 +26,13 @@ internal sealed partial class AudiobookContentMoveService
                 "The markerless move has no persisted tracked-file source manifest.");
         }
 
+        if (Directory.Exists(target))
+        {
+            await TryRetireReplacedMarkerlessTargetOwnershipAsync(
+                request,
+                target,
+                cancellationToken);
+        }
         var targetOwnership = Directory.Exists(target)
             ? await LoadValidatedTargetDirectoryOwnershipAsync(
                 target,
@@ -111,6 +118,10 @@ internal sealed partial class AudiobookContentMoveService
             manifest,
             cancellationToken);
         await CaptureOrValidateMarkerlessTargetRootAsync(
+            request,
+            target,
+            cancellationToken);
+        await TryRetireReplacedMarkerlessTargetOwnershipAsync(
             request,
             target,
             cancellationToken);

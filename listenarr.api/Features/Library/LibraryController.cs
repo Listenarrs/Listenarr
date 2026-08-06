@@ -186,10 +186,17 @@ namespace Listenarr.Api.Features.Library
         /// </summary>
         /// <param name="id">Audiobook ID.</param>
         /// <param name="request">Fields to update.</param>
+        /// <param name="cancellationToken">Request cancellation token.</param>
         [HttpPut("{id}")]
-        public async Task<IActionResult> UpdateAudiobook(int id, [FromBody] AudiobookUpdateRequest request)
+        public async Task<IActionResult> UpdateAudiobook(
+            int id,
+            [FromBody] AudiobookUpdateRequest request,
+            CancellationToken cancellationToken = default)
         {
-            return await _updateWorkflow.UpdateAsync(id, request);
+            return await _updateWorkflow.UpdateAsync(
+                id,
+                request,
+                cancellationToken);
         }
 
         /// <summary>
@@ -233,10 +240,15 @@ namespace Listenarr.Api.Features.Library
         /// Bulk-update fields (monitored status, quality profile, root folder) for multiple audiobooks at once.
         /// </summary>
         /// <param name="request">Audiobook IDs and the fields to update.</param>
+        /// <param name="cancellationToken">Request cancellation token.</param>
         [HttpPost("bulk-update")]
-        public async Task<IActionResult> BulkUpdateAudiobooks([FromBody] BulkUpdateRequest request)
+        public async Task<IActionResult> BulkUpdateAudiobooks(
+            [FromBody] BulkUpdateRequest request,
+            CancellationToken cancellationToken = default)
         {
-            return await _bulkEditWorkflow.BulkUpdateAsync(request);
+            return await _bulkEditWorkflow.BulkUpdateAsync(
+                request,
+                cancellationToken);
         }
 
         /// <summary>
@@ -244,9 +256,15 @@ namespace Listenarr.Api.Features.Library
         /// Optional body: { path: "C:\\some\\folder" } to scan a specific folder instead of the configured output path.
         /// </summary>
         [HttpPost("{id}/scan")]
-        public async Task<IActionResult> ScanAudiobookFiles(int id, [FromBody] ScanRequest? request)
+        public async Task<IActionResult> ScanAudiobookFiles(
+            int id,
+            [FromBody] ScanRequest? request,
+            CancellationToken cancellationToken = default)
         {
-            return await _manualScanWorkflow.ScanAsync(id, request);
+            return await _manualScanWorkflow.ScanAsync(
+                id,
+                request,
+                cancellationToken);
         }
 
         /// <summary>

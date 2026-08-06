@@ -90,9 +90,7 @@ internal sealed partial class AudiobookContentMoveService
                 await HandleExistingMarkerlessTargetAsync(
                     request,
                     entry,
-                    sourcePath,
                     sourceEntry,
-                    targetPath,
                     existingTarget,
                     completedWorkUnits,
                     totalWorkUnits,
@@ -193,9 +191,7 @@ internal sealed partial class AudiobookContentMoveService
                 await HandleExistingMarkerlessTargetAsync(
                     request,
                     entry,
-                    sourcePath,
                     sourceEntry,
-                    targetPath,
                     existingTarget,
                     completedWorkUnits,
                     totalWorkUnits,
@@ -259,9 +255,7 @@ internal sealed partial class AudiobookContentMoveService
             await WriteMarkerlessTargetAsync(
                 request,
                 entry,
-                sourcePath,
                 sourceEntry,
-                targetPath,
                 created,
                 completedWorkUnits,
                 totalWorkUnits,
@@ -282,9 +276,7 @@ internal sealed partial class AudiobookContentMoveService
     private async Task HandleExistingMarkerlessTargetAsync(
         AudiobookContentMoveRequest request,
         MoveJobEntry entry,
-        string sourcePath,
         PinnedDirectoryCreation.PinnedFileEntry sourceEntry,
-        string targetPath,
         PinnedDirectoryCreation.PinnedFileEntry targetEntry,
         long completedUnitsBeforeFile,
         long totalUnits,
@@ -339,9 +331,7 @@ internal sealed partial class AudiobookContentMoveService
         await WriteMarkerlessTargetAsync(
             request,
             entry,
-            sourcePath,
             sourceEntry,
-            targetPath,
             targetEntry,
             completedUnitsBeforeFile,
             totalUnits,
@@ -351,9 +341,7 @@ internal sealed partial class AudiobookContentMoveService
     private async Task WriteMarkerlessTargetAsync(
         AudiobookContentMoveRequest request,
         MoveJobEntry entry,
-        string sourcePath,
         PinnedDirectoryCreation.PinnedFileEntry sourceEntry,
-        string targetPath,
         PinnedDirectoryCreation.PinnedFileEntry targetEntry,
         long completedWorkUnitsBeforeFile,
         long totalWorkUnits,
@@ -423,11 +411,29 @@ internal sealed partial class AudiobookContentMoveService
         // The independently opened write stream is identity-verified against the
         // pinned entry and Flush(true) is the durability barrier. The observation
         // handle may be read-only during recovery and must not be flushed again.
-        PreserveMarkerlessFileMetadata(sourcePath, targetPath);
         faultInjector?.OnCopyMutation(
             request.JobId,
             CopyMutationFaultPoint
                 .AfterMarkerlessFileWriteBeforePublishedState);
+        try
+        {
+            faultInjector?.OnCopyMutation(
+                request.JobId,
+                CopyMutationFaultPoint.BeforeMarkerlessMetadataPreservation);
+            sourceEntry.PreserveMarkerlessMetadataTo(targetEntry);
+        }
+        catch (Exception exception) when (
+            WorkerExceptionClassifier.IsNonFatal(exception))
+        {
+            // Metadata preservation is best-effort, but only while the pinned file
+            // still owns the visible destination pathname. A replacement race must
+            // remain a hard failure instead of being treated as a metadata warning.
+            ValidateMarkerlessTargetEntry(entry, targetEntry);
+            logger.LogDebug(
+                exception,
+                "Non-fatal: failed to preserve markerless file metadata for {File}",
+                LogRedaction.SanitizeFilePath(targetEntry.FullPath));
+        }
         await UpdateTargetEntryStateAsync(
             request.JobId,
             request.LeaseToken,
@@ -455,27 +461,6 @@ internal sealed partial class AudiobookContentMoveService
             entry.TargetPhysicalObjectIdentity,
             cancellationToken);
         entry.CopyState = MoveJobEntryCopyState.Verified;
-    }
-
-    private void PreserveMarkerlessFileMetadata(
-        string sourceFile,
-        string destinationFile)
-    {
-        try
-        {
-            File.SetAttributes(destinationFile, File.GetAttributes(sourceFile));
-            File.SetLastWriteTimeUtc(
-                destinationFile,
-                File.GetLastWriteTimeUtc(sourceFile));
-        }
-        catch (Exception exception) when (
-            WorkerExceptionClassifier.IsNonFatal(exception))
-        {
-            logger.LogDebug(
-                exception,
-                "Non-fatal: failed to preserve markerless file metadata for {File}",
-                LogRedaction.SanitizeFilePath(sourceFile));
-        }
     }
 
     private static void TryRetireUncommittedMarkerlessFile(

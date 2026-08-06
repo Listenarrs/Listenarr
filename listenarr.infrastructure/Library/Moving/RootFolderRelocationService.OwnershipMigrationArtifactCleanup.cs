@@ -24,9 +24,8 @@ public sealed partial class RootFolderRelocationService
                 targetIdentityValue,
                 targetIdentityUnavailableReason,
                 cancellationToken);
-            using var publication = targetParent.OpenExistingChildForPublication(
+            using var targetDirectory = targetParent.OpenExistingChild(
                 Path.GetFileName(plan.Target.CanonicalPath));
-            using var targetDirectory = publication.OpenCreatedDirectoryAnchor();
             if (!ManagedDirectoryIdentity.Matches(
                     plan.Target.DirectoryObjectIdentityVersion,
                     plan.Target.DirectoryObjectIdentity,
@@ -39,7 +38,8 @@ public sealed partial class RootFolderRelocationService
                     "The ownership migration target changed before temporary artifact cleanup.");
             }
 
-            if (!LibraryDirectoryOwnershipMarker.TryRetireMatchingMarkers(
+            if (!LibraryDirectoryOwnershipMarker.TryRetireMigrationArtifacts(
+                    plan.Source,
                     plan.Target,
                     targetDirectory,
                     targetParent,

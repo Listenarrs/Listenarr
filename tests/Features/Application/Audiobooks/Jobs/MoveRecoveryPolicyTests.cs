@@ -43,6 +43,77 @@ public sealed class MoveRecoveryPolicyTests : BaseTests
     }
 
     [Fact]
+    public void ClassifyAudiobookJobs_MarkerlessNeedsAttentionUnknownWithCompletedRecoveryEvidence_IsRetryable()
+    {
+        var job = CreateJob(
+            MoveJobStatus.NeedsAttention,
+            MoveJobPhase.Published,
+            MoveFailureKind.Unknown,
+            MoveJobEntryCopyState.Verified,
+            MoveJobEntryCleanupState.Deleted);
+        job.ExecutionProtocolVersion = MoveExecutionProtocol.MarkerlessDatabaseState;
+        job.SourceDirectoryCleanupState = MoveJobEntryCleanupState.Deleted;
+        job.TargetDirectoryObjectIdentity = "target-generation";
+        var targetSemantics = FileSystemPathSemantics.CurrentHostDefault;
+        job.SetTargetIdentity(new PathIdentitySnapshot(
+            targetSemantics.Syntax,
+            targetSemantics.CaseSensitivity,
+            FileSystemCaseSensitivityMode.Auto,
+            Path.GetPathRoot(job.RequestedPath!)!));
+        job.CreatedDirectories =
+        [
+            new MoveJobCreatedDirectory
+            {
+                Path = job.RequestedPath!,
+                State = MoveCreatedDirectoryState.Created,
+                DirectoryObjectIdentity = job.TargetDirectoryObjectIdentity
+            }
+        ];
+
+        var state = MoveRecoveryPolicy.ClassifyAudiobookJobs([job]);
+
+        Assert.Equal(MoveRecoveryDisposition.RetryAvailable, state.Disposition);
+        Assert.True(state.BlocksFilesystemMutation);
+        Assert.True(state.CanRetry);
+        Assert.Equal(job.Id, state.JobId);
+    }
+
+    [Fact]
+    public void ClassifyAudiobookJobs_MarkerlessNeedsAttentionUnknownWithoutExactTargetGeneration_IsOperatorRepairOnly()
+    {
+        var job = CreateJob(
+            MoveJobStatus.NeedsAttention,
+            MoveJobPhase.Published,
+            MoveFailureKind.Unknown,
+            MoveJobEntryCopyState.Verified,
+            MoveJobEntryCleanupState.Deleted);
+        job.ExecutionProtocolVersion = MoveExecutionProtocol.MarkerlessDatabaseState;
+        job.SourceDirectoryCleanupState = MoveJobEntryCleanupState.Deleted;
+        job.TargetDirectoryObjectIdentity = "expected-generation";
+        var targetSemantics = FileSystemPathSemantics.CurrentHostDefault;
+        job.SetTargetIdentity(new PathIdentitySnapshot(
+            targetSemantics.Syntax,
+            targetSemantics.CaseSensitivity,
+            FileSystemCaseSensitivityMode.Auto,
+            Path.GetPathRoot(job.RequestedPath!)!));
+        job.CreatedDirectories =
+        [
+            new MoveJobCreatedDirectory
+            {
+                Path = job.RequestedPath!,
+                State = MoveCreatedDirectoryState.Created,
+                DirectoryObjectIdentity = "different-generation"
+            }
+        ];
+
+        var state = MoveRecoveryPolicy.ClassifyAudiobookJobs([job]);
+
+        Assert.Equal(MoveRecoveryDisposition.OperatorRepairRequired, state.Disposition);
+        Assert.True(state.BlocksFilesystemMutation);
+        Assert.False(state.CanRetry);
+    }
+
+    [Fact]
     public void ClassifyAudiobookJobs_NeedsAttentionVerification_IsOperatorRepairOnly()
     {
         var job = CreateJob(

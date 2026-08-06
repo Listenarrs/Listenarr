@@ -2360,6 +2360,226 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
     }
 
     [Fact]
+    public async Task MetadataOnly_ExternallyRenamedOwnedTree_DoesNotRequireOldSourcePathForFreshMarkerlessCleanup()
+    {
+        var source = Path.Join(
+            TempRoot,
+            $"metadata-markerless-renamed-source-{Guid.NewGuid():N}");
+        var target = Path.Join(
+            TempRoot,
+            $"metadata-markerless-renamed-target-{Guid.NewGuid():N}");
+        var sourceOwned = Path.Join(source, "Author", "Book B012345678");
+        var targetOwned = Path.Join(target, "Author", "Book B012345678");
+        Directory.CreateDirectory(sourceOwned);
+        await File.WriteAllTextAsync(Path.Join(sourceOwned, "01.m4b"), "audio");
+        var semantics = await new FileSystemSemanticsResolver()
+            .ResolveAsync(source);
+        Assert.Equal(PathIdentityState.Valid, semantics.State);
+        var rootObjectIdentity = await new DirectoryObjectIdentityResolver()
+            .ResolveAsync(source);
+        Assert.True(rootObjectIdentity.IsAvailable);
+        var ownershipToken = Guid.NewGuid().ToString("N");
+        string ownershipIdentity;
+        using (var ownedAnchor = PinnedDirectoryCreation.OpenPinnedBoundary(sourceOwned))
+        {
+            ownershipIdentity = ManagedDirectoryIdentity.Create(
+                ownershipToken,
+                ownedAnchor.GetDirectoryObjectIdentity());
+        }
+
+        int rootId;
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            var root = new RootFolder
+            {
+                Name = "Library",
+                Path = source,
+                CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto,
+                ResolvedCaseSensitivity = semantics.Semantics.CaseSensitivity,
+                PathIdentityState = PathIdentityState.Valid,
+                PathIdentityKey = FileSystemPathIdentity.CreateKey(
+                    "root",
+                    source,
+                    semantics.Semantics),
+                DirectoryObjectIdentityVersion = rootObjectIdentity.Version,
+                DirectoryObjectIdentity = rootObjectIdentity.Value
+            };
+            var audiobook = new Audiobook
+            {
+                Title = "Book",
+                BasePath = sourceOwned
+            };
+            db.RootFolders.Add(root);
+            db.Audiobooks.Add(audiobook);
+            await db.SaveChangesAsync();
+            rootId = root.Id;
+            db.LibraryDirectoryOwnerships.Add(new LibraryDirectoryOwnership
+            {
+                Path = sourceOwned,
+                CanonicalPath = sourceOwned,
+                PathSyntax = semantics.Semantics.Syntax,
+                PathCaseSensitivity = semantics.Semantics.CaseSensitivity,
+                PathCaseSensitivityMode = FileSystemCaseSensitivityMode.Auto,
+                PathIdentityBoundary = sourceOwned,
+                PathIdentityLookupKey = FileSystemPathIdentity.CreateLookupKey(
+                    "library-directory",
+                    sourceOwned,
+                    semantics.Semantics.Syntax),
+                PathOwnershipKey = FileSystemPathIdentity.CreateKey(
+                    "library-directory",
+                    sourceOwned,
+                    semantics.Semantics),
+                OwnershipToken = ownershipToken,
+                State = LibraryDirectoryOwnershipState.Owned,
+                CreationWorkflow = "Test",
+                AudiobookId = audiobook.Id,
+                ManagedRootFolderId = root.Id,
+                DirectoryObjectIdentityVersion = ManagedDirectoryIdentity.CurrentVersion,
+                DirectoryObjectIdentity = ownershipIdentity
+            });
+            await db.SaveChangesAsync();
+        }
+
+        Directory.Move(source, target);
+        Assert.False(Directory.Exists(source));
+        Assert.True(Directory.Exists(targetOwned));
+
+        var result = await CreateService().StartAsync(
+            rootId,
+            new RootFolderPathChangeCommand(
+                target,
+                RootFolderRelocationMode.MetadataOnly,
+                false,
+                "Renamed Library",
+                false,
+                FileSystemCaseSensitivityMode.Auto));
+
+        Assert.Equal(RootFolderRelocationStatus.Completed, result.Status);
+        await using var verification = await _factory.CreateDbContextAsync();
+        Assert.Equal(target, (await verification.RootFolders.SingleAsync()).Path);
+        Assert.Equal(targetOwned, (await verification.Audiobooks.SingleAsync()).BasePath);
+        Assert.Equal(
+            targetOwned,
+            (await verification.LibraryDirectoryOwnerships.SingleAsync()).CanonicalPath);
+        Assert.False(await verification
+            .LibraryDirectoryOwnershipPathMigrations.AnyAsync());
+        Assert.Empty(await verification.RootFolderRelocations.ToListAsync());
+        Assert.DoesNotContain(
+            Directory.EnumerateFileSystemEntries(
+                target,
+                "*",
+                SearchOption.AllDirectories),
+            path => Path.GetFileName(path).StartsWith(
+                ".listenarr",
+                StringComparison.OrdinalIgnoreCase));
+    }
+
+    [ReadOnlyBindMountFact]
+    public async Task MetadataOnly_RealReadOnlyBindMount_UsesDatabaseOnlyOwnershipMigration()
+    {
+        var rootPath = Path.GetFullPath(
+            Environment.GetEnvironmentVariable(
+                ReadOnlyBindMountFactAttribute.LibraryPathEnvironmentVariable)
+            ?? throw new InvalidOperationException(
+                "The read-only library bind mount was not provided."));
+        var ownedPath = Path.Join(rootPath, "Author", "Book B012345678");
+        Assert.True(Directory.Exists(ownedPath));
+        var semantics = await new FileSystemSemanticsResolver()
+            .ResolveAsync(rootPath);
+        Assert.Equal(PathIdentityState.Valid, semantics.State);
+        var rootObjectIdentity = await new DirectoryObjectIdentityResolver()
+            .ResolveAsync(rootPath);
+        var ownedObjectIdentity = await new DirectoryObjectIdentityResolver()
+            .ResolveAsync(ownedPath);
+        Assert.True(rootObjectIdentity.IsAvailable);
+        Assert.True(ownedObjectIdentity.IsAvailable);
+        var ownershipToken = Guid.NewGuid().ToString("N");
+        using var ownedAnchor = PinnedDirectoryCreation.OpenPinnedBoundary(ownedPath);
+        var ownershipIdentity = ManagedDirectoryIdentity.Create(
+            ownershipToken,
+            ownedAnchor.GetDirectoryObjectIdentity());
+
+        int rootId;
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            var root = new RootFolder
+            {
+                Name = "Read Only Library",
+                Path = rootPath,
+                CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto,
+                ResolvedCaseSensitivity = semantics.Semantics.CaseSensitivity,
+                PathIdentityState = PathIdentityState.Valid,
+                PathIdentityKey = FileSystemPathIdentity.CreateKey(
+                    "root",
+                    rootPath,
+                    semantics.Semantics),
+                DirectoryObjectIdentityVersion = rootObjectIdentity.Version,
+                DirectoryObjectIdentity = rootObjectIdentity.Value
+            };
+            var audiobook = new Audiobook
+            {
+                Title = "Book",
+                BasePath = ownedPath
+            };
+            db.RootFolders.Add(root);
+            db.Audiobooks.Add(audiobook);
+            await db.SaveChangesAsync();
+            rootId = root.Id;
+            db.LibraryDirectoryOwnerships.Add(new LibraryDirectoryOwnership
+            {
+                Path = ownedPath,
+                CanonicalPath = ownedPath,
+                PathSyntax = semantics.Semantics.Syntax,
+                PathCaseSensitivity = semantics.Semantics.CaseSensitivity,
+                PathCaseSensitivityMode = FileSystemCaseSensitivityMode.Auto,
+                PathIdentityBoundary = ownedPath,
+                PathIdentityLookupKey = FileSystemPathIdentity.CreateLookupKey(
+                    "library-directory",
+                    ownedPath,
+                    semantics.Semantics.Syntax),
+                PathOwnershipKey = FileSystemPathIdentity.CreateKey(
+                    "library-directory",
+                    ownedPath,
+                    semantics.Semantics),
+                OwnershipToken = ownershipToken,
+                State = LibraryDirectoryOwnershipState.Owned,
+                CreationWorkflow = "Test",
+                AudiobookId = audiobook.Id,
+                ManagedRootFolderId = root.Id,
+                DirectoryObjectIdentityVersion = ManagedDirectoryIdentity.CurrentVersion,
+                DirectoryObjectIdentity = ownershipIdentity
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var result = await CreateService().StartAsync(
+            rootId,
+            new RootFolderPathChangeCommand(
+                rootPath,
+                RootFolderRelocationMode.MetadataOnly,
+                false,
+                "Renamed Read Only Library",
+                false,
+                FileSystemCaseSensitivityMode.Auto));
+
+        Assert.Equal(RootFolderRelocationStatus.Completed, result.Status);
+        await using var verification = await _factory.CreateDbContextAsync();
+        Assert.Equal(
+            "Renamed Read Only Library",
+            (await verification.RootFolders.SingleAsync()).Name);
+        Assert.False(await verification
+            .LibraryDirectoryOwnershipPathMigrations.AnyAsync());
+        Assert.DoesNotContain(
+            Directory.EnumerateFileSystemEntries(
+                rootPath,
+                "*",
+                SearchOption.AllDirectories),
+            path => Path.GetFileName(path).StartsWith(
+                ".listenarr",
+                StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task MetadataOnly_PostCommitOwnershipCleanupFailure_ReturnsProtectedAttentionAndRecovers()
     {
         var rootPath = Path.Join(
@@ -2484,10 +2704,15 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
             Assert.Equal("Renamed Library", root.Name);
             Assert.Equal(targetOwnershipKey, ownership.PathOwnershipKey);
             Assert.Equal(
-                LibraryDirectoryOwnershipPathMigrationState.MetadataCommitted,
+                LibraryDirectoryOwnershipPathMigrationState
+                    .MarkerlessCommitted,
                 journal.State);
             Assert.Equal(rootId, relocation.ActiveRootFolderId);
         }
+        Assert.Empty(Directory.EnumerateFiles(
+            rootPath,
+            ".listenarr-*",
+            SearchOption.AllDirectories));
 
         var retried = await CreateService().RetryAsync(
             result.RelocationId!.Value);

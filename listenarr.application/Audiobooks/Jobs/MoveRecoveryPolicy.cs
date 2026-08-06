@@ -102,12 +102,83 @@ public static class MoveRecoveryPolicy
 
         if (job.Status == MoveJobStatus.NeedsAttention)
         {
-            return job.FailureKind is MoveFailureKind.Transient or MoveFailureKind.Persistence
-                ? MoveRecoveryDisposition.RetryAvailable
-                : MoveRecoveryDisposition.OperatorRepairRequired;
+            if (job.FailureKind is MoveFailureKind.Transient or MoveFailureKind.Persistence)
+            {
+                return MoveRecoveryDisposition.RetryAvailable;
+            }
+
+            if (job.FailureKind == MoveFailureKind.Unknown
+                && HasCompletedMarkerlessRecoveryEvidence(job))
+            {
+                return MoveRecoveryDisposition.RetryAvailable;
+            }
+
+            return MoveRecoveryDisposition.OperatorRepairRequired;
         }
 
         return MoveRecoveryDisposition.None;
+    }
+
+    private static bool HasCompletedMarkerlessRecoveryEvidence(MoveJob job)
+    {
+        if (job.ExecutionProtocolVersion < MoveExecutionProtocol.MarkerlessDatabaseState
+            || job.SourceDirectoryCleanupState != MoveJobEntryCleanupState.Deleted
+            || string.IsNullOrWhiteSpace(job.TargetDirectoryObjectIdentity)
+            || string.IsNullOrWhiteSpace(job.RequestedPath))
+        {
+            return false;
+        }
+
+        var fileEntries = job.Entries
+            .Where(entry => entry.EntryType == MoveJobEntryType.File)
+            .ToList();
+        if (fileEntries.Count == 0
+            || fileEntries.Any(entry =>
+                entry.CopyState != MoveJobEntryCopyState.Verified
+                || entry.CleanupState != MoveJobEntryCleanupState.Deleted))
+        {
+            return false;
+        }
+
+        if (!job.TryGetTargetIdentity(out var targetIdentity)
+            || !Listenarr.Domain.Common.FileSystemPathIdentity
+                .TryCanonicalizeStoredPathWithIdentityForHost(
+                    job.RequestedPath,
+                    targetIdentity,
+                    out var requestedPath,
+                    out _))
+        {
+            return false;
+        }
+
+        foreach (var directory in job.CreatedDirectories)
+        {
+            if (directory.State != MoveCreatedDirectoryState.Created
+                || string.IsNullOrWhiteSpace(directory.DirectoryObjectIdentity)
+                || !string.Equals(
+                    directory.DirectoryObjectIdentity,
+                    job.TargetDirectoryObjectIdentity,
+                    StringComparison.Ordinal)
+                || !Listenarr.Domain.Common.FileSystemPathIdentity
+                    .TryCanonicalizeStoredPathWithIdentityForHost(
+                        directory.Path,
+                        targetIdentity,
+                        out var directoryPath,
+                        out _))
+            {
+                continue;
+            }
+
+            if (Listenarr.Domain.Common.FileSystemPathIdentity.AreEquivalent(
+                    directoryPath,
+                    requestedPath,
+                    targetIdentity.Semantics))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public static MoveRecoveryState ClassifyAudiobookJobs(IEnumerable<MoveJob> jobs)

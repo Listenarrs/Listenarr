@@ -18,6 +18,7 @@
 using System.Net;
 using System.Text.Json;
 using Listenarr.Tests.Mocks;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -506,6 +507,86 @@ namespace Listenarr.Tests.Features.Api
             var verification = verificationScope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
             Assert.Equal(
                 "Manual Title",
+                (await verification.Audiobooks.SingleAsync(candidate => candidate.Id == audiobookId)).Title);
+        }
+
+        [Fact]
+        public async Task RescanMetadata_RequestCancelledDuringProviderLookup_DoesNotCommit()
+        {
+            const string asin = "B0CANCEL01";
+            var lookupStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseLookup = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var metadataMock = new Mock<IAudiobookMetadataService>();
+            metadataMock
+                .Setup(service => service.GetMetadataAsync(asin, "us", false))
+                .Returns(async () =>
+                {
+                    lookupStarted.SetResult();
+                    await releaseLookup.Task;
+                    return new
+                    {
+                        metadata = new AudibleBookResponse
+                        {
+                            Asin = asin,
+                            Title = "Provider Title"
+                        },
+                        source = "Audible"
+                    };
+                });
+            var factory = _factory.WithWebHostBuilder(builder =>
+            {
+                builder.ConfigureServices(services =>
+                {
+                    services.RemoveAll<IAudiobookMetadataService>();
+                    services.AddSingleton(metadataMock.Object);
+                });
+            });
+
+            int audiobookId;
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                var audiobook = new Audiobook
+                {
+                    Title = "Original Title",
+                    Asin = asin,
+                    ExternalIdentifiers =
+                    [
+                        new AudiobookExternalIdentifier
+                        {
+                            Type = AudiobookExternalIdentifierType.Asin,
+                            ValueRaw = asin,
+                            ValueNormalized = asin,
+                            Region = "us",
+                            IsPrimary = true,
+                            Source = AudiobookExternalIdentifierSource.Manual
+                        }
+                    ]
+                };
+                db.Audiobooks.Add(audiobook);
+                await db.SaveChangesAsync();
+                audiobookId = audiobook.Id;
+            }
+
+            using var workflowScope = factory.Services.CreateScope();
+            var workflow = workflowScope.ServiceProvider.GetRequiredService<LibraryMetadataRescanWorkflow>();
+            using var cancellation = new CancellationTokenSource();
+            var httpContext = new DefaultHttpContext
+            {
+                RequestAborted = cancellation.Token
+            };
+
+            var rescan = workflow.RescanAsync(audiobookId, httpContext);
+            await lookupStarted.Task;
+            cancellation.Cancel();
+            releaseLookup.SetResult();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => rescan);
+
+            using var verificationScope = factory.Services.CreateScope();
+            var verification = verificationScope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+            Assert.Equal(
+                "Original Title",
                 (await verification.Audiobooks.SingleAsync(candidate => candidate.Id == audiobookId)).Title);
         }
 

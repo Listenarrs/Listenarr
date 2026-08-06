@@ -44,9 +44,15 @@ namespace Listenarr.Api.Features.Library
             _logger = logger;
         }
 
-        public async Task<IActionResult> UpdateAsync(int id, AudiobookUpdateRequest request)
+        public async Task<IActionResult> UpdateAsync(
+            int id,
+            AudiobookUpdateRequest request,
+            CancellationToken cancellationToken = default)
         {
-            var existingAudiobook = await GetAudiobookPreflightSnapshotAsync(id);
+            cancellationToken.ThrowIfCancellationRequested();
+            var existingAudiobook = await GetAudiobookPreflightSnapshotAsync(
+                id,
+                cancellationToken);
             if (existingAudiobook == null)
             {
                 return new NotFoundObjectResult(new { message = "Audiobook not found" });
@@ -65,7 +71,8 @@ namespace Listenarr.Api.Features.Library
                 {
                     suppressStaleImageUrl = await IsPathInsideBasePathAsync(
                         request.ImageUrl,
-                        existingAudiobook.BasePath);
+                        existingAudiobook.BasePath,
+                        cancellationToken);
                     _logger.LogWarning(
                         "Deprecated PUT /library/{AudiobookId} BasePath update received. Route destination changes through the move endpoint with moveFiles=false.",
                         id);
@@ -75,7 +82,8 @@ namespace Listenarr.Api.Features.Library
                         await _destinationRewriteService.RewriteDestinationAsync(
                             id,
                             request.BasePath,
-                            existingAudiobook.BasePath);
+                            existingAudiobook.BasePath,
+                            cancellationToken);
                         basePathRewritten = true;
                     }
                     catch (ListenarrApplicationException ex)
@@ -98,26 +106,34 @@ namespace Listenarr.Api.Features.Library
                 }
             }
 
+            var completionToken = basePathRewritten
+                ? CancellationToken.None
+                : cancellationToken;
             return await _audiobookOperationCoordinator.ExecuteExclusiveAsync(
                 id,
-                _ => ApplyMetadataUpdatesAsync(
+                token => ApplyMetadataUpdatesAsync(
                     id,
                     request,
                     basePathRewritten,
                     suppressStaleImageUrl,
-                    metadataUpdateRequested));
+                    metadataUpdateRequested,
+                    token),
+                completionToken);
         }
 
-        private async Task<Audiobook?> GetAudiobookPreflightSnapshotAsync(int id)
+        private async Task<Audiobook?> GetAudiobookPreflightSnapshotAsync(
+            int id,
+            CancellationToken cancellationToken)
         {
             using var scope = _scopeFactory.CreateScope();
             var repository = scope.ServiceProvider.GetRequiredService<IAudiobookRepository>();
-            return await repository.GetByIdAsync(id);
+            return await repository.GetForUpdateSnapshotAsync(id, cancellationToken);
         }
 
         private async Task<bool> IsPathInsideBasePathAsync(
             string? candidatePath,
-            string? basePath)
+            string? basePath,
+            CancellationToken cancellationToken)
         {
             if (string.IsNullOrWhiteSpace(candidatePath)
                 || string.IsNullOrWhiteSpace(basePath))
@@ -129,7 +145,8 @@ namespace Listenarr.Api.Features.Library
             {
                 var resolution = await _fileSystemSemanticsResolver.ResolveAsync(
                     basePath,
-                    FileSystemCaseSensitivityMode.Auto);
+                    FileSystemCaseSensitivityMode.Auto,
+                    cancellationToken);
                 return resolution.State == PathIdentityState.Valid
                     && FileSystemPathIdentity.IsSameOrInside(
                         candidatePath,
@@ -226,7 +243,10 @@ namespace Listenarr.Api.Features.Library
             AudiobookSeriesMembershipHelper.ApplyPrimarySeriesFields(existingAudiobook);
         }
 
-        private async Task ApplyQualityProfileAsync(Audiobook existingAudiobook, AudiobookUpdateRequest request)
+        private async Task ApplyQualityProfileAsync(
+            Audiobook existingAudiobook,
+            AudiobookUpdateRequest request,
+            CancellationToken cancellationToken)
         {
             if (!request.QualityProfileId.HasValue)
             {
@@ -235,9 +255,11 @@ namespace Listenarr.Api.Features.Library
 
             if (request.QualityProfileId.Value == -1)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 using var scope = _scopeFactory.CreateScope();
                 var qualityProfileService = scope.ServiceProvider.GetRequiredService<IQualityProfileService>();
                 var defaultProfile = await qualityProfileService.GetDefaultAsync();
+                cancellationToken.ThrowIfCancellationRequested();
                 if (defaultProfile != null)
                 {
                     existingAudiobook.QualityProfileId = defaultProfile.Id;

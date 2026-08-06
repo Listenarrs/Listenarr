@@ -116,6 +116,94 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         }
 
         [Fact]
+        public async Task BulkUpdate_PreCanceledRequest_StopsBeforeAnyMutation()
+        {
+            var repository = new Mock<IAudiobookRepository>(MockBehavior.Strict);
+            var history = new Mock<IHistoryRepository>(MockBehavior.Strict);
+            Init(services => services
+                .WithSingleton<IAudiobookRepository>(repository.Object)
+                .WithSingleton<IHistoryRepository>(history.Object));
+            using var cancellation = new CancellationTokenSource();
+            cancellation.Cancel();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                _provider.GetRequiredService<LibraryController>()
+                    .BulkUpdateAudiobooks(
+                        new LibraryController.BulkUpdateRequest
+                        {
+                            Ids = [8129],
+                            Updates = new Dictionary<string, object>
+                            {
+                                ["monitored"] = true
+                            }
+                        },
+                        cancellation.Token));
+
+            repository.VerifyNoOtherCalls();
+            history.VerifyNoOtherCalls();
+        }
+
+        [Fact]
+        public async Task BulkUpdate_CanceledAfterFirstMetadataCommit_ReturnsPartialResultWithoutStartingNextItem()
+        {
+            const int firstId = 8130;
+            const int secondId = 8131;
+            var first = new Audiobook
+            {
+                Id = firstId,
+                Title = "Committed bulk update",
+                Monitored = false
+            };
+            using var cancellation = new CancellationTokenSource();
+            var repository = new Mock<IAudiobookRepository>(MockBehavior.Strict);
+            repository.Setup(service => service.GetByIdAsync(firstId))
+                .ReturnsAsync(first);
+            repository.Setup(service => service.UpdateAsync(first))
+                .Returns(() =>
+                {
+                    cancellation.Cancel();
+                    return Task.FromResult(true);
+                });
+            var history = new Mock<IHistoryRepository>(MockBehavior.Strict);
+            history.Setup(service => service.AddAsync(
+                    It.Is<History>(entry => entry.AudiobookId == firstId),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync((History entry, CancellationToken _) => entry);
+            Init(services => services
+                .WithSingleton<IAudiobookRepository>(repository.Object)
+                .WithSingleton<IHistoryRepository>(history.Object));
+
+            var result = await _provider.GetRequiredService<LibraryController>()
+                .BulkUpdateAudiobooks(
+                    new LibraryController.BulkUpdateRequest
+                    {
+                        Ids = [firstId, secondId],
+                        Updates = new Dictionary<string, object>
+                        {
+                            ["monitored"] = true
+                        }
+                    },
+                    cancellation.Token);
+
+            var ok = Assert.IsType<OkObjectResult>(result);
+            using var payload = JsonDocument.Parse(JsonSerializer.Serialize(ok.Value));
+            Assert.Contains(
+                "request cancellation",
+                payload.RootElement.GetProperty("message").GetString(),
+                StringComparison.OrdinalIgnoreCase);
+            var item = Assert.Single(payload.RootElement.GetProperty("results").EnumerateArray());
+            Assert.Equal(firstId, item.GetProperty("id").GetInt32());
+            Assert.True(item.GetProperty("success").GetBoolean());
+            Assert.True(item.GetProperty("metadataUpdated").GetBoolean());
+            Assert.True(first.Monitored);
+            repository.Verify(service => service.GetByIdAsync(secondId), Times.Never);
+            repository.Verify(service => service.UpdateAsync(first), Times.Once);
+            history.Verify(service => service.AddAsync(
+                It.Is<History>(entry => entry.AudiobookId == firstId),
+                It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [Fact]
         public async Task BulkUpdate_DatabaseFailure_DoesNotWriteHistoryOrExposeInternalError()
         {
             var audiobook = new Audiobook
@@ -451,6 +539,96 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             Assert.Equal(sourceBasePath, captured.SourcePath);
             Assert.Equal(FileUtils.NormalizeStoredPath(expectedTarget), captured.TargetPath);
             Assert.False(captured.DeleteEmptySource);
+            moveQueue.Verify(service => service.EnqueueMoveAsync(
+                It.IsAny<MoveEnqueueCommand>(),
+                It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [Fact]
+        public async Task BulkUpdate_PhysicalPathChange_HoldsAudiobookBoundaryThroughDurableEnqueue()
+        {
+            var recoveryEntered = new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseRecovery = new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var recoveryCalls = 0;
+            var moveQueue = CreateMoveQueueMock();
+            moveQueue.Setup(service => service.GetRecoveryStateForAudiobookAsync(
+                    It.IsAny<int>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns<int, CancellationToken>(async (_, cancellationToken) =>
+                {
+                    if (Interlocked.Increment(ref recoveryCalls) == 1)
+                    {
+                        recoveryEntered.TrySetResult();
+                        await releaseRecovery.Task.WaitAsync(cancellationToken);
+                    }
+
+                    return MoveRecoveryState.None;
+                });
+            moveQueue.Setup(service => service.EnqueueMoveAsync(
+                    It.IsAny<MoveEnqueueCommand>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Guid.NewGuid());
+            Init(services => services.WithSingleton(moveQueue.Object));
+
+            var destinationRoot = FileService.GetTempDirectory(
+                "bulk-boundary-destination");
+            await _applicationSettingsRepository.SaveAsync(
+                new ApplicationSettingsBuilder()
+                    .WithOutputPath(destinationRoot)
+                    .WithFileNamingPattern("{Author}/{Title}")
+                    .Build());
+            var sourceBasePath = FileService.GetTempDirectory(
+                "bulk-boundary-source");
+            var sourceFilePath = Path.Join(sourceBasePath, "book.m4b");
+            await File.WriteAllTextAsync(sourceFilePath, "audio");
+            var audiobook = await _audiobookRepository.AddAsync(new Audiobook
+            {
+                Title = "Boundary Book",
+                Authors = ["Boundary Author"],
+                BasePath = sourceBasePath,
+                FilePath = sourceFilePath
+            });
+            await AddTrackedFileAsync(audiobook, sourceFilePath);
+
+            var controller = _provider.GetRequiredService<LibraryController>();
+            var bulkUpdate = controller.BulkUpdateAudiobooks(
+                new LibraryController.BulkUpdateRequest
+                {
+                    Ids = [audiobook.Id],
+                    Updates = [],
+                    PathChange = new LibraryController.BulkPathChangeRequest
+                    {
+                        Mode = LibraryController.BulkPathChangeMode.Physical,
+                        DestinationRootOrPath = destinationRoot,
+                        DeleteEmptySource = false
+                    }
+                });
+            await recoveryEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            var contenderEntered = new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var coordinator = _provider
+                .GetRequiredService<IAudiobookOperationCoordinator>();
+            var contender = coordinator.ExecuteExclusiveAsync(
+                audiobook.Id,
+                _ =>
+                {
+                    contenderEntered.TrySetResult();
+                    return Task.CompletedTask;
+                });
+            var earlyEntry = await Task.WhenAny(
+                contenderEntered.Task,
+                Task.Delay(TimeSpan.FromMilliseconds(150)));
+            Assert.NotSame(contenderEntered.Task, earlyEntry);
+
+            releaseRecovery.TrySetResult();
+            var actionResult = await bulkUpdate;
+            await contender.WaitAsync(TimeSpan.FromSeconds(5));
+
+            Assert.IsType<OkObjectResult>(actionResult);
+            Assert.True(contenderEntered.Task.IsCompletedSuccessfully);
             moveQueue.Verify(service => service.EnqueueMoveAsync(
                 It.IsAny<MoveEnqueueCommand>(),
                 It.IsAny<CancellationToken>()), Times.Once);

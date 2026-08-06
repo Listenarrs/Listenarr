@@ -44,9 +44,11 @@ public sealed class LibraryUpdateWorkflowTests : BaseTests
         };
 
         var repository = new Mock<IAudiobookRepository>(MockBehavior.Strict);
-        repository
-            .SetupSequence(candidate => candidate.GetByIdAsync(id))
-            .ReturnsAsync(before)
+        repository.Setup(candidate => candidate.GetForUpdateSnapshotAsync(
+                id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(before);
+        repository.Setup(candidate => candidate.GetByIdAsync(id))
             .ReturnsAsync(after);
         var rewriteService = new Mock<IAudiobookDestinationRewriteService>(MockBehavior.Strict);
         rewriteService
@@ -109,9 +111,11 @@ public sealed class LibraryUpdateWorkflowTests : BaseTests
         };
 
         var repository = new Mock<IAudiobookRepository>(MockBehavior.Strict);
-        repository
-            .SetupSequence(candidate => candidate.GetByIdAsync(id))
-            .ReturnsAsync(before)
+        repository.Setup(candidate => candidate.GetForUpdateSnapshotAsync(
+                id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(before);
+        repository.Setup(candidate => candidate.GetByIdAsync(id))
             .ReturnsAsync(after);
         var rewriteService = new Mock<IAudiobookDestinationRewriteService>(MockBehavior.Strict);
         rewriteService
@@ -143,6 +147,72 @@ public sealed class LibraryUpdateWorkflowTests : BaseTests
     }
 
     [Fact]
+    public async Task UpdateAsync_CancelledAfterDestinationCommit_CompletesRequestedMetadataFinalization()
+    {
+        var id = 44;
+        var source = Path.Join(Path.GetTempPath(), $"listenarr-update-source-{Guid.NewGuid():N}");
+        var target = Path.Join(Path.GetTempPath(), $"listenarr-update-target-{Guid.NewGuid():N}");
+        var before = new Audiobook
+        {
+            Id = id,
+            Title = "Original",
+            BasePath = source
+        };
+        var after = new Audiobook
+        {
+            Id = id,
+            Title = "Original",
+            BasePath = target
+        };
+        using var cancellation = new CancellationTokenSource();
+        var repository = new Mock<IAudiobookRepository>(MockBehavior.Strict);
+        repository.Setup(candidate => candidate.GetForUpdateSnapshotAsync(
+                id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(before);
+        repository.Setup(candidate => candidate.GetByIdAsync(id))
+            .ReturnsAsync(after);
+        repository.Setup(candidate => candidate.UpdateAsync(after)).ReturnsAsync(true);
+        var rewriteService = new Mock<IAudiobookDestinationRewriteService>(MockBehavior.Strict);
+        rewriteService
+            .Setup(candidate => candidate.RewriteDestinationAsync(
+                id,
+                target,
+                source,
+                It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                cancellation.Cancel();
+                return Task.FromResult(
+                    new AudiobookDestinationRewriteResult(id, target, source));
+            });
+
+        var services = new ServiceCollection();
+        services.AddSingleton(repository.Object);
+        using var provider = services.BuildServiceProvider();
+        using var operationCoordinator = new AudiobookOperationCoordinator();
+        var workflow = new LibraryUpdateWorkflow(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            rewriteService.Object,
+            operationCoordinator,
+            new FileSystemSemanticsResolver(),
+            NullLogger<LibraryUpdateWorkflow>.Instance);
+
+        var result = await workflow.UpdateAsync(
+            id,
+            new AudiobookUpdateRequest
+            {
+                BasePath = target,
+                Title = "Edited"
+            },
+            cancellation.Token);
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.Equal("Edited", after.Title);
+        repository.Verify(candidate => candidate.UpdateAsync(after), Times.Once);
+    }
+
+    [Fact]
     public async Task UpdateAsync_DestinationAndMetadataUpdate_PreservesOmittedBooleans()
     {
         var id = 43;
@@ -168,9 +238,11 @@ public sealed class LibraryUpdateWorkflowTests : BaseTests
         };
 
         var repository = new Mock<IAudiobookRepository>(MockBehavior.Strict);
-        repository
-            .SetupSequence(candidate => candidate.GetByIdAsync(id))
-            .ReturnsAsync(before)
+        repository.Setup(candidate => candidate.GetForUpdateSnapshotAsync(
+                id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(before);
+        repository.Setup(candidate => candidate.GetByIdAsync(id))
             .ReturnsAsync(after);
         repository.Setup(candidate => candidate.UpdateAsync(after)).ReturnsAsync(true);
         var rewriteService = new Mock<IAudiobookDestinationRewriteService>(MockBehavior.Strict);

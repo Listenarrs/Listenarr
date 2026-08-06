@@ -241,6 +241,14 @@ vi.mock('@/services/signalr', () => ({
       void cb
       return () => {}
     },
+    onConnected: (cb?: (...args: unknown[]) => void) => {
+      void cb
+      return () => {}
+    },
+    onRootFolderRelocationUpdate: (cb?: (...args: unknown[]) => void) => {
+      void cb
+      return () => {}
+    },
     onDownloadUpdate: (cb?: (...args: unknown[]) => void) => {
       void cb
       return () => {}

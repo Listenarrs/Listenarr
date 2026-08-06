@@ -1935,6 +1935,19 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 CancellationToken cancellationToken = default) =>
                 inner.GetOwnedWithinAsync(basePath, semantics, cancellationToken);
 
+            public Task<bool> TryRetireReplacedByMarkerlessMoveAsync(
+                string path,
+                FileSystemPathSemantics semantics,
+                Guid moveJobId,
+                string replacementDirectoryObjectIdentity,
+                CancellationToken cancellationToken = default) =>
+                inner.TryRetireReplacedByMarkerlessMoveAsync(
+                    path,
+                    semantics,
+                    moveJobId,
+                    replacementDirectoryObjectIdentity,
+                    cancellationToken);
+
             public Task BeginRemovalAsync(
                 long ownershipId,
                 string expectedOwnershipKey,
@@ -2008,6 +2021,19 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 FileSystemPathSemantics semantics,
                 CancellationToken cancellationToken = default) =>
                 inner.GetOwnedWithinAsync(basePath, semantics, cancellationToken);
+
+            public Task<bool> TryRetireReplacedByMarkerlessMoveAsync(
+                string path,
+                FileSystemPathSemantics semantics,
+                Guid moveJobId,
+                string replacementDirectoryObjectIdentity,
+                CancellationToken cancellationToken = default) =>
+                inner.TryRetireReplacedByMarkerlessMoveAsync(
+                    path,
+                    semantics,
+                    moveJobId,
+                    replacementDirectoryObjectIdentity,
+                    cancellationToken);
 
             public Task BeginRemovalAsync(
                 long ownershipId,

@@ -74,6 +74,7 @@ public sealed partial class RootFolderRelocationService
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var relocation = await db.RootFolderRelocations
+            .AsSplitQuery()
             .Include(candidate => candidate.MoveJobs)
                 .ThenInclude(job => job.Entries)
             .Include(candidate => candidate.SkippedItems)

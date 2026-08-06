@@ -1,3 +1,4 @@
+using Listenarr.Tests.Common;
 using Microsoft.EntityFrameworkCore;
 
 namespace Listenarr.Tests.Features.Infrastructure.Library.Moving;
@@ -65,6 +66,41 @@ public partial class AudiobookContentMoveServiceTests
         Assert.True(File.Exists(Path.Join(target, "book.m4b")));
         Assert.False(Directory.Exists(source));
         Assert.True(result.SourceCleanupCompleted);
+    }
+
+    [WindowsFact]
+    public async Task MoveContentsAsync_RecoveredOwnershipWrite_DoesNotMutateAttributesBeforePinnedPublication()
+    {
+        var source = FileService.GetTempDirectory(
+            "content-move-recovered-marker-attributes-src");
+        await FileService.GetFileAsync(source, "book.m4b", "verified audio");
+        var target = Path.Join(
+            FileService.GetTempPath(),
+            $"content-move-recovered-marker-attributes-dst-{Guid.NewGuid():N}");
+        var request = await CreateLeasedMoveRequestAsync(source, target);
+        var faultingService = CreateOwnershipFaultingService(
+            OwnershipMarkerKind.TemporaryDirectory);
+        await Assert.ThrowsAnyAsync<IOException>(() =>
+            faultingService.MoveContentsAsync(request, CancellationToken.None));
+        var tempDirectory = Path.Join(
+            Path.GetDirectoryName(target)!,
+            Path.GetFileName(target) + ".tmp-" + request.JobId.ToString("N"));
+        var writePath = Assert.Single(Directory.EnumerateFiles(
+            tempDirectory,
+            ".listenarr-temp-owner.json.writing-*"));
+        File.SetAttributes(writePath, FileAttributes.Normal);
+        var recoveryService = CreateMoveService(
+            new SingleOwnershipPublicationFaultInjector(
+                OwnershipMarkerKind.TemporaryDirectory,
+                OwnershipMarkerWriteFaultPoint.BeforeRecoveredPublication));
+
+        await Assert.ThrowsAsync<IOException>(() =>
+            recoveryService.MoveContentsAsync(request, CancellationToken.None));
+
+        Assert.False(
+            File.GetAttributes(writePath).HasFlag(FileAttributes.Hidden));
+        Assert.True(File.Exists(Path.Join(source, "book.m4b")));
+        Assert.False(File.Exists(Path.Join(tempDirectory, ".listenarr-temp-owner.json")));
     }
 
     [Fact]

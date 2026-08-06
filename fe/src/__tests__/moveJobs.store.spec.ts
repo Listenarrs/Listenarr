@@ -120,6 +120,171 @@ describe('move jobs store', () => {
     )
   })
 
+  it('recovers a missed terminal update when a tracked job disappears from the active snapshot', async () => {
+    apiMocks.getActiveMoveJobs
+      .mockResolvedValueOnce([
+        {
+          jobId: 'job-1',
+          audiobookId: 42,
+          status: 'Running',
+          progress: 40,
+          target: '/library/book',
+        },
+      ])
+      .mockResolvedValueOnce([])
+    apiMocks.getMoveJobStatus.mockResolvedValue({
+      jobId: 'job-1',
+      audiobookId: 42,
+      status: 'Completed',
+      progress: 100,
+      target: '/library/book',
+    })
+    const store = useMoveJobsStore()
+
+    store.start()
+    await vi.waitFor(() => expect(store.trackedById['job-1']?.status).toBe('Running'))
+
+    await store.loadActiveJobs()
+
+    expect(apiMocks.getMoveJobStatus).toHaveBeenCalledWith('job-1')
+    expect(toastMocks.success).toHaveBeenCalledWith(
+      'Move completed',
+      'Files moved to /library/book',
+    )
+    expect(store.trackedById['job-1']).toBeUndefined()
+  })
+
+  it('preserves a job when a newer status read still reports it active', async () => {
+    apiMocks.getActiveMoveJobs
+      .mockResolvedValueOnce([
+        {
+          jobId: 'job-1',
+          audiobookId: 42,
+          status: 'Running',
+          progress: 40,
+          target: '/library/book',
+        },
+      ])
+      .mockResolvedValueOnce([])
+    apiMocks.getMoveJobStatus.mockResolvedValue({
+      jobId: 'job-1',
+      audiobookId: 42,
+      status: 'Running',
+      progress: 55,
+      target: '/library/book',
+    })
+    const store = useMoveJobsStore()
+
+    store.start()
+    await vi.waitFor(() => expect(store.trackedById['job-1']?.status).toBe('Running'))
+
+    await store.loadActiveJobs()
+
+    expect(store.trackedById['job-1']?.status).toBe('Running')
+    expect(toastMocks.success).not.toHaveBeenCalled()
+    expect(toastMocks.error).not.toHaveBeenCalled()
+  })
+
+  it('does not resurrect a terminal job from an older in-flight active snapshot', async () => {
+    let resolveActive:
+      | ((
+          jobs: Array<{
+            jobId: string
+            audiobookId: number
+            status: string
+            progress: number
+            target: string
+          }>,
+        ) => void)
+      | undefined
+    apiMocks.getActiveMoveJobs.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveActive = resolve
+        }),
+    )
+    const store = useMoveJobsStore()
+    store.trackQueuedJob({ jobId: 'job-1', audiobookId: 42, target: '/library/book' })
+
+    const refresh = store.loadActiveJobs()
+    signalRMocks.callback?.({
+      jobId: 'job-1',
+      audiobookId: 42,
+      status: 'Completed',
+      progress: 100,
+      target: '/library/book',
+    })
+    resolveActive?.([
+      {
+        jobId: 'job-1',
+        audiobookId: 42,
+        status: 'Running',
+        progress: 75,
+        target: '/library/book',
+      },
+    ])
+    await refresh
+
+    expect(store.trackedById['job-1']).toBeUndefined()
+    expect(toastMocks.success).toHaveBeenCalledTimes(1)
+  })
+
+  it('ignores an older active snapshot when a newer refresh finishes first', async () => {
+    let resolveOlder:
+      | ((
+          jobs: Array<{
+            jobId: string
+            audiobookId: number
+            status: string
+            progress: number
+            target: string
+          }>,
+        ) => void)
+      | undefined
+    apiMocks.getActiveMoveJobs
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveOlder = resolve
+          }),
+      )
+      .mockResolvedValueOnce([])
+    const store = useMoveJobsStore()
+
+    const olderRefresh = store.loadActiveJobs()
+    await store.loadActiveJobs()
+    resolveOlder?.([
+      {
+        jobId: 'job-old',
+        audiobookId: 42,
+        status: 'Running',
+        progress: 50,
+        target: '/library/book',
+      },
+    ])
+    await olderRefresh
+
+    expect(store.trackedById['job-old']).toBeUndefined()
+  })
+
+  it('does not prune a newly tracked job from an older in-flight active snapshot', async () => {
+    let resolveActive: ((jobs: never[]) => void) | undefined
+    apiMocks.getActiveMoveJobs.mockImplementationOnce(
+      () =>
+        new Promise<never[]>((resolve) => {
+          resolveActive = resolve
+        }),
+    )
+    const store = useMoveJobsStore()
+
+    const refresh = store.loadActiveJobs()
+    store.trackQueuedJob({ jobId: 'job-new', target: '/library/new' })
+    resolveActive?.([])
+    await refresh
+
+    expect(store.trackedById['job-new']?.status).toBe('Queued')
+  })
+
   it('tracks queued move jobs and subscribes on first track', () => {
     const store = useMoveJobsStore()
 

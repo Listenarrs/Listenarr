@@ -111,8 +111,30 @@ export const useMoveJobsStore = defineStore('moveJobs', () => {
   const trackedById = ref<Record<string, TrackedMoveJob>>({})
   const toast = useToast()
   let unsubscribe: (() => void) | null = null
+  let evidenceClock = 0
+  let activeRefreshGeneration = 0
+  const evidenceVersionById = new Map<string, number>()
 
   const trackedJobs = computed(() => Object.values(trackedById.value))
+
+  function getEvidenceVersion(key: string): number {
+    return evidenceVersionById.get(key) ?? 0
+  }
+
+  function markEvidence(key: string): void {
+    evidenceClock += 1
+    evidenceVersionById.set(key, evidenceClock)
+  }
+
+  function setTrackedJob(key: string, job: TrackedMoveJob): void {
+    trackedById.value[key] = job
+    markEvidence(key)
+  }
+
+  function removeTrackedJob(key: string): void {
+    delete trackedById.value[key]
+    markEvidence(key)
+  }
 
   function getActiveJobForAudiobook(audiobookId: number): TrackedMoveJob | undefined {
     return trackedJobs.value.find(
@@ -167,7 +189,18 @@ export const useMoveJobsStore = defineStore('moveJobs', () => {
 
   async function loadActiveJobs() {
     try {
+      // Reconcile only jobs that were already tracked when this authoritative
+      // active-job snapshot began. A newly queued job can be added locally while
+      // the request is in flight and must not be pruned from an older snapshot.
+      const refreshGeneration = ++activeRefreshGeneration
+      const refreshEvidenceVersion = evidenceClock
+      const trackedBeforeRefresh = new Set(Object.keys(trackedById.value))
       const jobs = await apiService.getActiveMoveJobs()
+      if (refreshGeneration !== activeRefreshGeneration) {
+        return
+      }
+
+      const activeKeys = new Set<string>()
       for (const job of jobs) {
         if (!job.jobId?.trim()) {
           continue
@@ -179,8 +212,13 @@ export const useMoveJobsStore = defineStore('moveJobs', () => {
         }
 
         const key = normalizeJobId(job.jobId)
+        activeKeys.add(key)
+        if (getEvidenceVersion(key) > refreshEvidenceVersion) {
+          continue
+        }
+
         const existing = trackedById.value[key]
-        trackedById.value[key] = {
+        setTrackedJob(key, {
           jobId: job.jobId,
           audiobookId: job.audiobookId ?? existing?.audiobookId,
           status,
@@ -190,6 +228,50 @@ export const useMoveJobsStore = defineStore('moveJobs', () => {
           error: job.error,
           recoveryDisposition: job.recoveryDisposition ?? existing?.recoveryDisposition,
           canRetry: job.canRetry ?? existing?.canRetry,
+        })
+      }
+
+      for (const key of trackedBeforeRefresh) {
+        if (activeKeys.has(key)) {
+          continue
+        }
+
+        const existing = trackedById.value[key]
+        if (!existing || getEvidenceVersion(key) > refreshEvidenceVersion) {
+          continue
+        }
+
+        const lookupEvidenceVersion = getEvidenceVersion(key)
+        try {
+          const current = await apiService.getMoveJobStatus(existing.jobId)
+          if (
+            refreshGeneration !== activeRefreshGeneration ||
+            getEvidenceVersion(key) !== lookupEvidenceVersion
+          ) {
+            continue
+          }
+
+          const currentStatus = normalizeStatus(current.status)
+          if (currentStatus != null && terminalStatuses.has(currentStatus)) {
+            handleMoveJobUpdate(current)
+            continue
+          }
+          if (currentStatus != null && !terminalStatuses.has(currentStatus)) {
+            // A status read taken after the active snapshot is newer evidence.
+            // Preserve the job and let the next refresh reconcile it.
+            continue
+          }
+        } catch {
+          // The active-list request succeeded and is authoritative for whether the
+          // job remains active. If its terminal detail lookup fails, drop the stale
+          // local entry rather than displaying a move forever after reconnect.
+        }
+
+        if (
+          refreshGeneration === activeRefreshGeneration &&
+          getEvidenceVersion(key) === lookupEvidenceVersion
+        ) {
+          removeTrackedJob(key)
         }
       }
     } catch (error) {
@@ -221,19 +303,24 @@ export const useMoveJobsStore = defineStore('moveJobs', () => {
 
     start()
     const key = normalizeJobId(job.jobId)
-    trackedById.value[key] = {
+    setTrackedJob(key, {
       jobId: job.jobId,
       audiobookId: job.audiobookId,
       status: job.status ?? 'Queued',
       progress: job.status === 'Completed' ? 100 : 0,
       target: job.target,
-    }
+    })
     void reconcileTrackedJob(key, job.jobId)
   }
 
   async function reconcileTrackedJob(key: string, jobId: string) {
+    const lookupEvidenceVersion = getEvidenceVersion(key)
     try {
       const current = await apiService.getMoveJobStatus(jobId)
+      if (getEvidenceVersion(key) !== lookupEvidenceVersion) {
+        return
+      }
+
       const existing = trackedById.value[key]
       if (!existing) {
         return
@@ -259,13 +346,16 @@ export const useMoveJobsStore = defineStore('moveJobs', () => {
     }
 
     const key = normalizeJobId(update.jobId)
-    const existing = trackedById.value[key]
-    if (!existing) {
+    const status = normalizeStatus(update.status)
+    if (status == null) {
       return
     }
 
-    const status = normalizeStatus(update.status)
-    if (status == null) {
+    const existing = trackedById.value[key]
+    if (!existing) {
+      if (terminalStatuses.has(status)) {
+        markEvidence(key)
+      }
       return
     }
 
@@ -283,7 +373,7 @@ export const useMoveJobsStore = defineStore('moveJobs', () => {
       recoveryDisposition: update.recoveryDisposition ?? existing.recoveryDisposition,
       canRetry: update.canRetry ?? existing.canRetry,
     }
-    trackedById.value[key] = next
+    setTrackedJob(key, next)
 
     if (status === 'Running' && existing.status !== 'Running') {
       toast.info('Move in progress', `Moving files to ${next.target || 'selected destination'}`)
@@ -305,7 +395,7 @@ export const useMoveJobsStore = defineStore('moveJobs', () => {
       )
     }
 
-    delete trackedById.value[key]
+    removeTrackedJob(key)
   }
 
   return {

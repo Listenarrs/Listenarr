@@ -23,6 +23,13 @@ internal interface IFileMutationJournalStore
         Guid operationId,
         CancellationToken cancellationToken);
 
+    Task<FileMutationJournal> SetSourceSha256Async(
+        Guid operationId,
+        string expectedSourcePhysicalObjectIdentity,
+        long expectedSourceLength,
+        string sourceSha256,
+        CancellationToken cancellationToken);
+
     FileMutationJournal? Get(Guid operationId);
 
     Task<FileMutationJournal> AdvanceAsync(
@@ -41,7 +48,7 @@ internal interface IFileMutationJournalStore
         string? error);
 }
 
-internal sealed class EfFileMutationJournalStore(
+internal sealed partial class EfFileMutationJournalStore(
     IDbContextFactory<ListenArrDbContext> dbContextFactory,
     TimeProvider timeProvider) : IFileMutationJournalStore
 {
@@ -409,12 +416,9 @@ internal sealed class EfFileMutationJournalStore(
         {
             throw new ArgumentOutOfRangeException(nameof(claim));
         }
-        if (claim.SourceSha256 is { Length: > 0 }
-            && claim.SourceSha256.Length != 64)
+        if (claim.SourceSha256 is { Length: > 0 })
         {
-            throw new ArgumentException(
-                "A file-mutation SHA-256 proof must contain 64 hexadecimal characters.",
-                nameof(claim));
+            ValidateSha256(claim.SourceSha256, nameof(claim));
         }
     }
 

@@ -7,11 +7,14 @@ public sealed partial class LibraryMetadataRescanWorkflow
     private async Task<MetadataRescanApplyResult> ApplyMetadataRescanResultAsync(
         int audiobookId,
         AudibleBookMetadata metadata,
-        string expectedMetadataState)
+        string expectedMetadataState,
+        CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         using var scope = _scopeFactory.CreateScope();
         var repository = scope.ServiceProvider.GetRequiredService<IAudiobookRepository>();
         var audiobook = await repository.GetByIdAsync(audiobookId);
+        cancellationToken.ThrowIfCancellationRequested();
         if (audiobook == null)
         {
             return new MetadataRescanApplyResult(MetadataRescanApplyStatus.NotFound);
@@ -38,6 +41,7 @@ public sealed partial class LibraryMetadataRescanWorkflow
             AudiobookIdentifierMapper.SyncImportedIdentifiersFromLegacyFields(audiobook);
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         if (!await repository.UpdateAsync(audiobook))
         {
             return new MetadataRescanApplyResult(

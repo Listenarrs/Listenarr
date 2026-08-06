@@ -150,6 +150,35 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         }
 
         [Fact]
+        public async Task UpdateAudiobook_PreCanceledRequest_DoesNotMutateAudiobook()
+        {
+            var audiobook = await _audiobookRepository.AddAsync(new Audiobook
+            {
+                Title = "Original",
+                Monitored = true
+            });
+            using var cancellation = new CancellationTokenSource();
+            cancellation.Cancel();
+
+            var update = _provider
+                .GetRequiredService<LibraryController>()
+                .UpdateAudiobook(
+                    audiobook.Id,
+                    new AudiobookUpdateRequest
+                    {
+                        Title = "Canceled update",
+                        Monitored = false
+                    },
+                    cancellation.Token);
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => update);
+            var stored = await GetFreshAudiobookAsync(audiobook.Id);
+            Assert.NotNull(stored);
+            Assert.Equal("Original", stored.Title);
+            Assert.True(stored.Monitored);
+        }
+
+        [Fact]
         public async Task UpdateAudiobook_RepositoryReportsMissing_ReturnsNotFound()
         {
             var audiobook = new Audiobook
@@ -159,6 +188,10 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             };
             var repository = new Mock<IAudiobookRepository>(
                 MockBehavior.Strict);
+            repository.Setup(service => service.GetForUpdateSnapshotAsync(
+                    audiobook.Id,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(audiobook);
             repository.Setup(service => service.GetByIdAsync(audiobook.Id))
                 .ReturnsAsync(audiobook);
             repository.Setup(service => service.UpdateAsync(
@@ -175,8 +208,11 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                     new AudiobookUpdateRequest { Title = "Updated" });
 
             Assert.IsType<NotFoundObjectResult>(result);
+            repository.Verify(service => service.GetForUpdateSnapshotAsync(
+                audiobook.Id,
+                It.IsAny<CancellationToken>()), Times.Once);
             repository.Verify(service => service.GetByIdAsync(audiobook.Id),
-                Times.Exactly(2));
+                Times.Once);
             repository.Verify(service => service.UpdateAsync(
                 It.Is<Audiobook>(candidate => candidate.Id == audiobook.Id)),
                 Times.Once);

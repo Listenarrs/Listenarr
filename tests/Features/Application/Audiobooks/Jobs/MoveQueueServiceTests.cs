@@ -1147,6 +1147,80 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
         }
 
         [Fact]
+        public async Task RequeueMoveAsync_MarkerlessNeedsAttentionUnknownWithCompletedRecoveryEvidence_Requeues()
+        {
+            var sourcePath = Path.GetFullPath(Path.Join(Path.GetTempPath(), "listenarr-recoverable-source", "Title"));
+            var targetPath = Path.GetFullPath(Path.Join(Path.GetTempPath(), "listenarr-recoverable-target", "Title"));
+            var semantics = FileSystemPathSemantics.CurrentHostDefault;
+            var identity = new PathIdentitySnapshot(
+                semantics.Syntax,
+                semantics.CaseSensitivity,
+                FileSystemCaseSensitivityMode.Auto,
+                Path.GetFullPath(Path.GetTempPath()));
+            var job = new MoveJob
+            {
+                Id = Guid.NewGuid(),
+                AudiobookId = 9,
+                SourcePath = sourcePath,
+                RequestedPath = targetPath,
+                Status = MoveJobStatus.NeedsAttention,
+                Phase = MoveJobPhase.Published,
+                ExecutionProtocolVersion = MoveExecutionProtocol.MarkerlessDatabaseState,
+                SourceDirectoryCleanupState = MoveJobEntryCleanupState.Deleted,
+                TargetDirectoryObjectIdentity = "target-generation",
+                FailureKind = MoveFailureKind.Unknown,
+                Error = "A prior build could not reconcile stale target ownership.",
+                Entries =
+                [
+                    new MoveJobEntry
+                    {
+                        RelativePath = "book.m4b",
+                        EntryType = MoveJobEntryType.File,
+                        Length = 1,
+                        LastWriteTimeUtc = DateTime.UnixEpoch,
+                        Sha256 = new string('A', 64),
+                        CopyState = MoveJobEntryCopyState.Verified,
+                        CleanupState = MoveJobEntryCleanupState.Deleted
+                    },
+                    MoveManifestIdentity.CreateTargetBoundaryAuthorization(
+                        2,
+                        "test-target-generation")
+                ],
+                CreatedDirectories =
+                [
+                    new MoveJobCreatedDirectory
+                    {
+                        Path = targetPath,
+                        State = MoveCreatedDirectoryState.Created,
+                        DirectoryObjectIdentity = "target-generation"
+                    }
+                ]
+            };
+            job.SetSourceIdentity(identity);
+            job.SetTargetIdentity(identity);
+            var persistence = CreateInMemoryPersistence([job]);
+            var service = new MoveQueueService(
+                NullLogger<MoveQueueService>.Instance,
+                persistence.Object,
+                new NoopHubBroadcaster(),
+                TimeProvider.System,
+                BuildSemanticsResolver());
+
+            var requeuedJobId = await service.RequeueMoveAsync(job.Id);
+
+            Assert.Equal(job.Id, requeuedJobId);
+            Assert.Equal(MoveJobStatus.Queued, job.Status);
+            Assert.Equal(MoveJobPhase.Published, job.Phase);
+            Assert.Equal(MoveFailureKind.None, job.FailureKind);
+            Assert.Null(job.Error);
+            persistence.Verify(store => store.RequeueAsync(
+                It.Is<RequeueMoveCommand>(command =>
+                    command.JobId == job.Id
+                    && command.ExpectedStatus == MoveJobStatus.NeedsAttention),
+                It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [Fact]
         public async Task RequeueMoveAsync_NeedsAttentionVerificationWithValidEvidence_RemainsOperatorRepairOnly()
         {
             var sourcePath = Path.GetFullPath(Path.Join(Path.GetTempPath(), "listenarr-repair-source", "Title"));

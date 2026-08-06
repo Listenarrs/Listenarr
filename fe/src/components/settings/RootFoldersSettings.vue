@@ -272,13 +272,21 @@ onMounted(async () => {
   await store.load()
 })
 
+const refreshRootFolders = () => {
+  store.load().catch(() => {})
+}
 const unsubscribeRelocation =
   typeof signalRService.onRootFolderRelocationUpdate === 'function'
-    ? signalRService.onRootFolderRelocationUpdate(() => {
-        store.load().catch(() => {})
-      })
+    ? signalRService.onRootFolderRelocationUpdate(refreshRootFolders)
     : () => {}
-onUnmounted(unsubscribeRelocation)
+const unsubscribeConnected =
+  typeof signalRService.onConnected === 'function'
+    ? signalRService.onConnected(refreshRootFolders)
+    : () => {}
+onUnmounted(() => {
+  unsubscribeRelocation()
+  unsubscribeConnected()
+})
 
 function openAdd() {
   editing.value = null

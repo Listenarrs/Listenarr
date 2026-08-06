@@ -208,6 +208,46 @@ public sealed partial class RootFolderRelocationService
         return plans;
     }
 
+    private static void ValidateMarkerlessOwnershipMigrationTargets(
+        IReadOnlyList<OwnershipMigrationPlan> plans,
+        string targetBoundary,
+        CancellationToken cancellationToken)
+    {
+        foreach (var plan in plans)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var targetParentPath = Path.GetDirectoryName(
+                plan.Target.CanonicalPath)
+                ?? throw new InvalidOperationException(
+                    "The migrated ownership target has no parent directory.");
+            using var targetParent = OpenMarkerParentWithinBoundary(
+                targetBoundary,
+                targetParentPath,
+                plan.Target.GetIdentity().Semantics);
+            using var directory = targetParent.OpenExistingChild(
+                Path.GetFileName(plan.Target.CanonicalPath));
+            var nativeIdentity = directory.GetDirectoryObjectIdentity();
+            if (!ManagedDirectoryIdentity.Matches(
+                    plan.Source.DirectoryObjectIdentityVersion,
+                    plan.Source.DirectoryObjectIdentity,
+                    plan.Source.OwnershipToken,
+                    nativeIdentity)
+                || !directory.VisiblePathMatches()
+                || !targetParent.VisiblePathMatches())
+            {
+                throw new InvalidOperationException(
+                    "Metadata-only relocation cannot transfer directory ownership to a different physical generation.");
+            }
+
+            plan.Target.DirectoryObjectIdentityVersion =
+                ManagedDirectoryIdentity.CurrentVersion;
+            plan.Target.DirectoryObjectIdentity = ManagedDirectoryIdentity.Create(
+                plan.Target.OwnershipToken,
+                nativeIdentity);
+            plan.Target.DirectoryObjectIdentityUnavailableReason = null;
+        }
+    }
+
     private static async Task PublishOwnershipMigrationTargetsAsync(
         IReadOnlyList<OwnershipMigrationPlan> plans,
         string targetBoundary,
@@ -273,15 +313,15 @@ public sealed partial class RootFolderRelocationService
 
     private static void AssignOwnershipMigrationKeys(
         IReadOnlyList<OwnershipMigrationPlan> plans,
-        DateTime now)
+        DateTime now,
+        LibraryDirectoryOwnershipPathMigrationState committedState =
+            LibraryDirectoryOwnershipPathMigrationState.MetadataCommitted)
     {
         foreach (var plan in plans)
         {
             plan.Tracked.PathOwnershipKey =
                 plan.Target.PathOwnershipKey;
-            plan.Journal.State =
-                LibraryDirectoryOwnershipPathMigrationState
-                    .MetadataCommitted;
+            plan.Journal.State = committedState;
             plan.Journal.UpdatedAt = now;
         }
     }

@@ -15,7 +15,9 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Listenarr.Infrastructure.Persistence.Repositories;
 using Listenarr.Tests.Builders;
 
@@ -59,6 +61,65 @@ namespace Listenarr.Tests.Features.Infrastructure.Repositories
 
             Assert.True(wantedDto.wanted);
             Assert.False(hasFileDto.wanted);
+        }
+
+        [Fact]
+        public async Task GetByIdQueries_DoNotTriggerMultipleCollectionIncludeWarning()
+        {
+            await using var connection = new SqliteConnection("DataSource=:memory:");
+            await connection.OpenAsync();
+            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+                .UseSqlite(connection)
+                .ConfigureWarnings(warnings => warnings.Throw(
+                    RelationalEventId.MultipleCollectionIncludeWarning))
+                .Options;
+            await using var db = new ListenArrDbContext(options);
+            await db.Database.EnsureCreatedAsync();
+
+            var qualityProfile = new QualityProfile { Name = "Split Query Profile" };
+            var audiobook = new Audiobook
+            {
+                Title = "Split Query Book",
+                QualityProfile = qualityProfile,
+                Files = [new AudiobookFile { Path = "/library/book.m4b" }],
+                ExternalIdentifiers =
+                [
+                    new AudiobookExternalIdentifier
+                    {
+                        Type = AudiobookExternalIdentifierType.Asin,
+                        ValueRaw = "B000SPLIT1",
+                        ValueNormalized = "B000SPLIT1",
+                        Source = AudiobookExternalIdentifierSource.Manual
+                    }
+                ],
+                SeriesMemberships =
+                [
+                    new AudiobookSeriesMembership
+                    {
+                        SeriesName = "Split Query Series"
+                    }
+                ]
+            };
+            db.Audiobooks.Add(audiobook);
+            await db.SaveChangesAsync();
+            db.ChangeTracker.Clear();
+            var repository = new AudiobookRepository(db);
+
+            var tracked = Assert.IsType<Audiobook>(
+                await repository.GetByIdAsync(audiobook.Id));
+            Assert.NotNull(tracked.QualityProfile);
+            Assert.Single(tracked.Files!);
+            Assert.Single(tracked.ExternalIdentifiers!);
+            Assert.Single(tracked.SeriesMemberships!);
+
+            db.ChangeTracker.Clear();
+            var snapshot = Assert.IsType<Audiobook>(
+                await repository.GetByIdSnapshotAsync(audiobook.Id));
+            Assert.NotNull(snapshot.QualityProfile);
+            Assert.Single(snapshot.Files!);
+            Assert.Single(snapshot.ExternalIdentifiers!);
+            Assert.Single(snapshot.SeriesMemberships!);
+            Assert.Equal(EntityState.Detached, db.Entry(snapshot).State);
         }
 
         [Fact]
@@ -144,6 +205,14 @@ namespace Listenarr.Tests.Features.Infrastructure.Repositories
             Assert.Null(snapshot.ExternalIdentifiers);
             Assert.Null(snapshot.SeriesMemberships);
             Assert.Null(snapshot.QualityProfile);
+
+            var updateSnapshot = Assert.IsType<Audiobook>(
+                await repository.GetForUpdateSnapshotAsync(audiobook.Id));
+            Assert.Equal(EntityState.Detached, db.Entry(updateSnapshot).State);
+            Assert.Null(updateSnapshot.Files);
+            Assert.Null(updateSnapshot.ExternalIdentifiers);
+            Assert.Null(updateSnapshot.SeriesMemberships);
+            Assert.Null(updateSnapshot.QualityProfile);
         }
 
         [Fact]

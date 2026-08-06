@@ -53,6 +53,7 @@ internal enum CopyMutationFaultPoint
     AfterMarkerlessFileCreationBeforeStateUpdate,
     AfterMarkerlessFileStateUpdate,
     AfterMarkerlessFileWriteBeforePublishedState,
+    BeforeMarkerlessMetadataPreservation,
     AfterMarkerlessNativeRenameBeforeStateUpdate
 }
 

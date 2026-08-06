@@ -93,7 +93,14 @@ internal sealed partial class AudiobookContentMoveService(
                 "Move source and target must be distinct non-root directories.");
         }
 
-        ValidateMoveSourceRoot(source);
+        var executionProtocolVersion = await GetExecutionProtocolVersionAsync(
+            request.JobId,
+            cancellationToken);
+        await ValidateMoveSourceRootForExecutionAsync(
+            request.JobId,
+            source,
+            executionProtocolVersion,
+            cancellationToken);
         ValidateMoveTargetRoot(target);
         await ValidatePersistedMoveIdentityAsync(
             request.JobId,
@@ -106,9 +113,6 @@ internal sealed partial class AudiobookContentMoveService(
 
         var targetInsideSource = IsSameOrInside(target, source, sourceSemantics);
         var sourceInsideTarget = IsSameOrInside(source, target, targetSemantics);
-        var executionProtocolVersion = await GetExecutionProtocolVersionAsync(
-            request.JobId,
-            cancellationToken);
         if (executionProtocolVersion >= MoveExecutionProtocol.MarkerlessDatabaseState)
         {
             return await MoveContentsMarkerlessAsync(

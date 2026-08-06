@@ -88,6 +88,60 @@ public sealed class EfMoveQueuePersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task GetByIdAsync_LoadsCompleteRecoveryAggregate()
+    {
+        var persistence = CreatePersistence();
+        var sourcePath = Path.GetFullPath(Path.Join(
+            Path.GetTempPath(),
+            $"listenarr-recovery-source-{Guid.NewGuid():N}"));
+        var targetPath = Path.GetFullPath(Path.Join(
+            Path.GetTempPath(),
+            $"listenarr-recovery-target-{Guid.NewGuid():N}"));
+        var semantics = FileSystemPathSemantics.CurrentHostDefault;
+        var identity = new PathIdentitySnapshot(
+            semantics.Syntax,
+            semantics.CaseSensitivity,
+            FileSystemCaseSensitivityMode.Auto,
+            Path.GetFullPath(Path.GetTempPath()));
+        var job = new MoveJob
+        {
+            AudiobookId = 42,
+            SourcePath = sourcePath,
+            RequestedPath = targetPath,
+            Status = MoveJobStatus.NeedsAttention,
+            Phase = MoveJobPhase.Published,
+            ExecutionProtocolVersion = MoveExecutionProtocol.MarkerlessDatabaseState,
+            SourceDirectoryCleanupState = MoveJobEntryCleanupState.Deleted,
+            TargetDirectoryObjectIdentity = "target-generation",
+            FailureKind = MoveFailureKind.Unknown,
+            Entries = CreateAuthorizedManifestEntries(
+                copyState: MoveJobEntryCopyState.Verified,
+                cleanupState: MoveJobEntryCleanupState.Deleted),
+            CreatedDirectories =
+            [
+                new MoveJobCreatedDirectory
+                {
+                    Path = targetPath,
+                    State = MoveCreatedDirectoryState.Created,
+                    DirectoryObjectIdentity = "target-generation"
+                }
+            ]
+        };
+        job.SetSourceIdentity(identity);
+        job.SetTargetIdentity(identity);
+
+        await persistence.AddAsync(job);
+        var persisted = await persistence.GetByIdAsync(job.Id);
+
+        var loaded = Assert.IsType<MoveJob>(persisted);
+        Assert.Single(loaded.CreatedDirectories);
+        Assert.Equal(2, loaded.Entries.Count);
+        Assert.Equal(
+            MoveRecoveryDisposition.RetryAvailable,
+            MoveRecoveryPolicy.GetDisposition(loaded));
+    }
+
+    [Fact]
     public async Task ReconcileIdentityKeys_SelectsMostAdvancedLegacyDuplicate()
     {
         var sourcePath = Path.GetFullPath(Path.Join(Path.GetTempPath(), "listenarr-reconcile-source", "book"));

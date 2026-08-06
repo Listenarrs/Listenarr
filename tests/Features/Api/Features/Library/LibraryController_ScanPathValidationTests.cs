@@ -85,6 +85,26 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         }
 
         [Fact]
+        public async Task ScanAudiobook_PreCanceledRequest_DoesNotPlanOrEnqueueScan()
+        {
+            var audiobook = await _audiobookRepository.AddAsync(
+                new AudiobookBuilder()
+                    .WithTitle("Canceled Scan")
+                    .WithBasePath(FileService.GetTempDirectory("canceled-scan"))
+                    .Build());
+            using var cancellation = new CancellationTokenSource();
+            cancellation.Cancel();
+
+            var scan = _provider.GetRequiredService<LibraryController>()
+                .ScanAudiobookFiles(
+                    audiobook.Id,
+                    request: null,
+                    cancellation.Token);
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => scan);
+        }
+
+        [Fact]
         public async Task ScanAudiobook_UnresolvedMoveExecution_BlocksBeforeScanPlanning()
         {
             var source = FileService.GetTempDirectory("scan-unresolved-move-source");

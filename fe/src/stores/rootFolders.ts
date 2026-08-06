@@ -25,23 +25,28 @@ import { rootFolderPathChanged } from '@/utils/rootFolderPath'
 export const useRootFoldersStore = defineStore('rootFolders', () => {
   const folders = ref<RootFolder[]>([])
   const loading = ref(false)
+  let loadGeneration = 0
 
   const defaultFolder = computed(() => folders.value.find((f) => f.isDefault) || null)
 
   async function load() {
+    const generation = ++loadGeneration
     loading.value = true
     try {
-      if (typeof apiService.getRootFolders === 'function') {
-        folders.value = await apiService.getRootFolders()
-      } else {
-        // In some tests the apiService is mocked partially; default to empty list
-        folders.value = []
+      const nextFolders =
+        typeof apiService.getRootFolders === 'function' ? await apiService.getRootFolders() : []
+      if (generation === loadGeneration) {
+        folders.value = nextFolders
       }
     } catch (err) {
       logger.debug('Failed to load root folders:', err)
-      folders.value = []
+      if (generation === loadGeneration) {
+        folders.value = []
+      }
     } finally {
-      loading.value = false
+      if (generation === loadGeneration) {
+        loading.value = false
+      }
     }
   }
 

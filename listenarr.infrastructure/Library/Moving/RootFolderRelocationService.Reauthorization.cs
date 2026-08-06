@@ -46,6 +46,7 @@ public sealed partial class RootFolderRelocationService
         await using var transaction =
             await db.Database.BeginTransactionAsync(cancellationToken);
         var relocation = await db.RootFolderRelocations
+            .AsSplitQuery()
             .Include(candidate => candidate.MoveJobs)
                 .ThenInclude(job => job.Entries)
             .SingleOrDefaultAsync(

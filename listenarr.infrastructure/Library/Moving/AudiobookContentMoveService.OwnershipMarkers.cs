@@ -152,15 +152,6 @@ internal sealed partial class AudiobookContentMoveService
         }
 
         var validWritePath = validWrites[0].Path;
-        if (OperatingSystem.IsWindows())
-        {
-            await authorizeMutation();
-            ValidateOwnershipMarkerWritePath(validWritePath, markerDirectory);
-            File.SetAttributes(
-                validWritePath,
-                File.GetAttributes(validWritePath) | FileAttributes.Hidden);
-        }
-
         return await PublishRecoveredOwnershipWriteAsync(
             markerPath,
             validWritePath,

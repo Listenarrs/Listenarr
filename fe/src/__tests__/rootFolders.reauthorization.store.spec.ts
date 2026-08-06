@@ -19,6 +19,35 @@ describe('root folder relocation store actions', () => {
     setActivePinia(createPinia())
   })
 
+  it('does not let an older load overwrite a newer root-folder snapshot', async () => {
+    const older = {
+      id: 3,
+      name: 'Library',
+      path: '/srv/Old',
+      isDefault: false,
+      caseSensitivityMode: 'Auto' as const,
+    }
+    const newer = { ...older, path: '/srv/New' }
+    let resolveOlder: ((folders: (typeof older)[]) => void) | undefined
+    vi.mocked(apiService.getRootFolders)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveOlder = resolve
+          }),
+      )
+      .mockResolvedValueOnce([newer])
+    const store = useRootFoldersStore()
+
+    const olderLoad = store.load()
+    await store.load()
+    resolveOlder?.([older])
+    await olderLoad
+
+    expect(store.folders).toEqual([newer])
+    expect(store.loading).toBe(false)
+  })
+
   it('sends the exact current path as the server relocation precondition', async () => {
     const current = {
       id: 3,

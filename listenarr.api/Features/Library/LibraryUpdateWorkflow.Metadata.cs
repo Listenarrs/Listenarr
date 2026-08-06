@@ -9,11 +9,14 @@ public sealed partial class LibraryUpdateWorkflow
         AudiobookUpdateRequest request,
         bool basePathRewritten,
         bool suppressStaleImageUrl,
-        bool metadataUpdateRequested)
+        bool metadataUpdateRequested,
+        CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         using var scope = _scopeFactory.CreateScope();
         var repository = scope.ServiceProvider.GetRequiredService<IAudiobookRepository>();
         var existingAudiobook = await repository.GetByIdAsync(id);
+        cancellationToken.ThrowIfCancellationRequested();
         if (existingAudiobook == null)
         {
             return new NotFoundObjectResult(new { message = "Audiobook not found" });
@@ -67,13 +70,17 @@ public sealed partial class LibraryUpdateWorkflow
         if (request.FileSize.HasValue) existingAudiobook.FileSize = request.FileSize;
         if (request.Quality != null) existingAudiobook.Quality = request.Quality;
 
-        await ApplyQualityProfileAsync(existingAudiobook, request);
+        await ApplyQualityProfileAsync(
+            existingAudiobook,
+            request,
+            cancellationToken);
 
         if (legacyIdentifierFieldsTouched)
         {
             AudiobookIdentifierMapper.SyncImportedIdentifiersFromLegacyFields(existingAudiobook);
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         if (metadataUpdateRequested
             && !await repository.UpdateAsync(existingAudiobook))
         {

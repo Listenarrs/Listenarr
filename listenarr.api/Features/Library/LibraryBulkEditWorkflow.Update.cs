@@ -20,7 +20,8 @@ namespace Listenarr.Api.Features.Library
             int id,
             Dictionary<string, object>? updates,
             ApplicationSettings? settings,
-            string? explicitRootPath = null)
+            string? explicitRootPath = null,
+            CancellationToken cancellationToken = default)
         {
             object? rootObject = explicitRootPath;
             if (rootObject == null
@@ -31,6 +32,7 @@ namespace Listenarr.Api.Features.Library
 
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var rootPath = ExtractRootPath(rootObject);
                 if (string.IsNullOrWhiteSpace(rootPath))
                 {
@@ -40,6 +42,7 @@ namespace Listenarr.Api.Features.Library
                 using var scope = _scopeFactory.CreateScope();
                 var repository = scope.ServiceProvider.GetRequiredService<IAudiobookRepository>();
                 var audiobook = await repository.GetByIdAsync(id);
+                cancellationToken.ThrowIfCancellationRequested();
                 if (audiobook == null)
                 {
                     return new RootFolderRewriteOutcome(
@@ -71,7 +74,8 @@ namespace Listenarr.Api.Features.Library
                 await _destinationRewriteService.RewriteDestinationAsync(
                     id,
                     newBasePath,
-                    audiobook.BasePath);
+                    audiobook.BasePath,
+                    cancellationToken);
                 await TryAddBulkUpdateHistoryAsync(
                     audiobook,
                     $"Destination path rewritten to {newBasePath} via bulk update");
@@ -99,7 +103,8 @@ namespace Listenarr.Api.Features.Library
         private async Task<PhysicalPathChangePlan> PlanPhysicalPathChangeAsync(
             int id,
             string? destinationRootOrPath,
-            ApplicationSettings? settings)
+            ApplicationSettings? settings,
+            CancellationToken cancellationToken)
         {
             if (string.IsNullOrWhiteSpace(destinationRootOrPath))
             {
@@ -110,9 +115,11 @@ namespace Listenarr.Api.Features.Library
 
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 using var scope = _scopeFactory.CreateScope();
                 var repository = scope.ServiceProvider.GetRequiredService<IAudiobookRepository>();
                 var audiobook = await repository.GetByIdAsync(id);
+                cancellationToken.ThrowIfCancellationRequested();
                 if (audiobook == null)
                 {
                     return new PhysicalPathChangePlan(
@@ -189,14 +196,17 @@ namespace Listenarr.Api.Features.Library
             int id,
             Dictionary<string, object>? updates,
             bool rootFolderRewritten,
-            bool physicalPathChangeRequested)
+            bool physicalPathChangeRequested,
+            CancellationToken cancellationToken)
         {
             var errors = new List<string>();
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 using var scope = _scopeFactory.CreateScope();
                 var repository = scope.ServiceProvider.GetRequiredService<IAudiobookRepository>();
                 var audiobook = await repository.GetByIdAsync(id);
+                cancellationToken.ThrowIfCancellationRequested();
                 if (audiobook == null)
                 {
                     errors.Add($"Audiobook with ID {id} not found");
@@ -263,6 +273,7 @@ namespace Listenarr.Api.Features.Library
 
                 if (changed)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     if (!await repository.UpdateAsync(audiobook))
                     {
                         errors.Add(
@@ -302,18 +313,80 @@ namespace Listenarr.Api.Features.Library
             public static PhysicalPathChangePlan NotRequested { get; } = new(null, null);
         }
 
+        private sealed record PhysicalBulkUpdateOutcome(
+            PhysicalPathChangePlan Plan,
+            BulkUpdateOutcome Update,
+            IActionResult? EnqueueResult);
+
         private sealed record BulkUpdateOutcome(
             bool Success,
             bool MetadataUpdated,
             List<string> Errors);
 
-        private async Task<ApplicationSettings?> TryLoadApplicationSettingsAsync()
+        private Task<PhysicalBulkUpdateOutcome> ExecutePhysicalPathChangeAsync(
+            int id,
+            Dictionary<string, object> metadataUpdates,
+            ApplicationSettings? settings,
+            LibraryController.BulkPathChangeRequest? pathChange,
+            CancellationToken cancellationToken) =>
+            _filesystemMutationCoordinator.ExecuteExclusiveAsync(
+                globalToken => _audiobookOperationCoordinator.ExecuteExclusiveAsync(
+                    id,
+                    async token =>
+                    {
+                        await _moveQueueService.EnsureFilesystemMutationAllowedAsync(
+                            id,
+                            token);
+                        var plan = await PlanPhysicalPathChangeAsync(
+                            id,
+                            pathChange?.DestinationRootOrPath,
+                            settings,
+                            token);
+                        var update = await UpdateOneAsync(
+                            id,
+                            metadataUpdates,
+                            rootFolderRewritten: false,
+                            physicalPathChangeRequested: true,
+                            token);
+                        IActionResult? enqueueResult = null;
+                        if (plan.Error == null
+                            && !string.IsNullOrWhiteSpace(plan.Destination)
+                            && update.Success)
+                        {
+                            var enqueueToken = update.MetadataUpdated
+                                ? CancellationToken.None
+                                : token;
+                            enqueueToken.ThrowIfCancellationRequested();
+                            enqueueResult = await _moveWorkflow.EnqueueAsync(
+                                id,
+                                new LibraryController.MoveRequest
+                                {
+                                    DestinationPath = plan.Destination,
+                                    MoveFiles = true,
+                                    DeleteEmptySource = pathChange?.DeleteEmptySource ?? true
+                                },
+                                enqueueToken);
+                        }
+
+                        return new PhysicalBulkUpdateOutcome(
+                            plan,
+                            update,
+                            enqueueResult);
+                    },
+                    globalToken),
+                cancellationToken);
+
+        private async Task<ApplicationSettings?> TryLoadApplicationSettingsAsync(
+            CancellationToken cancellationToken)
         {
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 using var scope = _scopeFactory.CreateScope();
                 var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
-                return await configService.GetApplicationSettingsAsync();
+                var settings = await configService.GetApplicationSettingsAsync();
+                cancellationToken.ThrowIfCancellationRequested();
+                return settings;
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {

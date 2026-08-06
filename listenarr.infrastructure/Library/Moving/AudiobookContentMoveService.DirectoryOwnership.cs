@@ -14,11 +14,60 @@ internal sealed partial class AudiobookContentMoveService
             return request;
         }
 
+        if (await GetExecutionProtocolVersionAsync(
+                request.JobId,
+                cancellationToken)
+            >= MoveExecutionProtocol.MarkerlessDatabaseState)
+        {
+            await TryRetireReplacedMarkerlessTargetOwnershipAsync(
+                request,
+                request.Target,
+                cancellationToken);
+        }
+
         var ownership = await LoadValidatedTargetDirectoryOwnershipAsync(
             request.Target,
             request.TargetSemantics,
             cancellationToken);
         return request with { TargetDirectoryOwnership = ownership };
+    }
+
+    private async Task TryRetireReplacedMarkerlessTargetOwnershipAsync(
+        AudiobookContentMoveRequest request,
+        string target,
+        CancellationToken cancellationToken)
+    {
+        if (!Directory.Exists(target))
+        {
+            return;
+        }
+
+        var endpoints = await GetEndpointObjectIdentitiesAsync(
+            request.JobId,
+            cancellationToken);
+        if (string.IsNullOrWhiteSpace(endpoints.TargetDirectoryObjectIdentity))
+        {
+            return;
+        }
+
+        try
+        {
+            _ = await directoryOwnershipStore
+                .TryRetireReplacedByMarkerlessMoveAsync(
+                    target,
+                    request.TargetSemantics,
+                    request.JobId,
+                    endpoints.TargetDirectoryObjectIdentity,
+                    cancellationToken);
+        }
+        catch (Exception exception) when (exception is
+            ArgumentException or IOException or UnauthorizedAccessException
+                or InvalidOperationException or NotSupportedException
+                or PathTooLongException or System.ComponentModel.Win32Exception)
+        {
+            throw new MoveNeedsAttentionException(
+                $"The markerless target ownership replacement could not be reconciled safely: {exception.Message}");
+        }
     }
 
     private async Task<LibraryDirectoryOwnership?> LoadValidatedTargetDirectoryOwnershipAsync(
@@ -211,6 +260,79 @@ internal sealed partial class AudiobookContentMoveService
             "The retired directory ownership marker for {DirectoryPath} could not be deleted: {Reason}",
             LogRedaction.SanitizeFilePath(ownership.CanonicalPath),
             LogRedaction.SanitizeText(reason));
+    }
+
+    private async Task<LibraryDirectoryOwnership?>
+        ResolveMarkerlessSourceDirectoryOwnershipAsync(
+            string path,
+            FileSystemPathSemantics semantics,
+            CancellationToken cancellationToken)
+    {
+        var resolution = await directoryOwnershipStore.ResolveOwnedAsync(
+            path,
+            semantics,
+            cancellationToken);
+        if (resolution.State == LibraryDirectoryOwnershipResolutionState.Unowned)
+        {
+            return null;
+        }
+        if (resolution.State != LibraryDirectoryOwnershipResolutionState.Owned
+            || resolution.Ownership == null)
+        {
+            throw new MoveNeedsAttentionException(
+                resolution.Reason
+                    ?? "Durable source-directory ownership is conflicting or unavailable.");
+        }
+
+        return resolution.Ownership;
+    }
+
+    private async Task<bool> RemoveMarkerlessOwnedDirectoryAsync(
+        AudiobookContentMoveRequest request,
+        string source,
+        string target,
+        LibraryDirectoryOwnership ownership,
+        CancellationToken cancellationToken)
+    {
+        var ownershipKey = ownership.PathOwnershipKey
+            ?? throw new MoveNeedsAttentionException(
+                "The markerless source-directory ownership key is unavailable.");
+        if (ownership.State != LibraryDirectoryOwnershipState.Removing)
+        {
+            await directoryOwnershipStore.BeginRemovalAsync(
+                ownership.Id,
+                ownershipKey,
+                cancellationToken);
+            ownership.State = LibraryDirectoryOwnershipState.Removing;
+        }
+
+        return await ResumeOwnedDirectoryRemovalAsync(
+            request,
+            source,
+            target,
+            ownership,
+            cancellationToken);
+    }
+
+    private async Task RetainMarkerlessOwnedDirectoryIfRemovingAsync(
+        LibraryDirectoryOwnership? ownership,
+        string reason,
+        CancellationToken cancellationToken)
+    {
+        if (ownership?.State != LibraryDirectoryOwnershipState.Removing)
+        {
+            return;
+        }
+
+        var ownershipKey = ownership.PathOwnershipKey
+            ?? throw new MoveNeedsAttentionException(
+                "The markerless source-directory ownership key is unavailable while retaining the directory.");
+        await directoryOwnershipStore.RetainAsync(
+            ownership.Id,
+            ownershipKey,
+            reason,
+            cancellationToken);
+        ownership.State = LibraryDirectoryOwnershipState.Retained;
     }
 
     private async Task<bool> ResumeOwnedDirectoryRemovalAsync(

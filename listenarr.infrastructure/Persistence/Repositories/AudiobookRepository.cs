@@ -118,6 +118,7 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
         {
             // Include QualityProfile and Files for callers that need full audiobook details
             return await _db.Audiobooks
+                .AsSplitQuery()
                 .Include(a => a.QualityProfile)
                 .Include(a => a.Files)
                 .Include(a => a.ExternalIdentifiers)
@@ -131,6 +132,7 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
         {
             return await _db.Audiobooks
                 .AsNoTracking()
+                .AsSplitQuery()
                 .Include(a => a.QualityProfile)
                 .Include(a => a.Files)
                 .Include(a => a.ExternalIdentifiers)

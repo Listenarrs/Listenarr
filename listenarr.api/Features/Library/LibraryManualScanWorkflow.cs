@@ -63,12 +63,14 @@ namespace Listenarr.Api.Features.Library
 
         public Task<IActionResult> ScanAsync(
             int id,
-            LibraryController.ScanRequest? request) =>
+            LibraryController.ScanRequest? request,
+            CancellationToken cancellationToken = default) =>
             _filesystemMutationCoordinator.ExecuteExclusiveAsync(
                 globalToken => _audiobookOperationCoordinator.ExecuteExclusiveAsync(
                     id,
                     token => ScanCoreAsync(id, request, token),
-                    globalToken));
+                    globalToken),
+                cancellationToken);
 
         private async Task<IActionResult> ScanCoreAsync(
             int id,
@@ -90,7 +92,9 @@ namespace Listenarr.Api.Features.Library
                 });
             }
 
-            var audiobook = await _repo.GetByIdAsync(id);
+            var audiobook = await _repo.GetForScanSnapshotAsync(
+                id,
+                cancellationToken);
             if (audiobook == null)
             {
                 return new NotFoundObjectResult(new
@@ -101,7 +105,8 @@ namespace Listenarr.Api.Features.Library
 
             var pathResolution = await _scanPathResolver.ResolveAsync(
                 audiobook,
-                request?.Path);
+                request?.Path,
+                cancellationToken);
             if (pathResolution.ErrorResult != null)
             {
                 return pathResolution.ErrorResult;
@@ -134,6 +139,7 @@ namespace Listenarr.Api.Features.Library
                 audiobook.BasePath,
                 scanRoot,
                 pathResolution.PathIdentity.Value.Semantics);
+            cancellationToken.ThrowIfCancellationRequested();
             var queuedResult = await _scanQueueWorkflow.TryEnqueueAsync(
                 audiobook,
                 scanRoot,

@@ -10,6 +10,50 @@ namespace Listenarr.Tests.Features.Infrastructure.FileSystem;
 public sealed class FileMoverMarkerlessMoveTests : BaseTests
 {
     [Fact]
+    public async Task MoveFileAsync_NativeRename_PersistsHashlessSourceProof()
+    {
+        var scenario = await CreateScenarioAsync();
+
+        Assert.True(await CreateMover().MoveFileAsync(
+            scenario.Source,
+            scenario.Destination,
+            scenario.OperationId));
+
+        var factory = _provider.GetRequiredService<
+            IDbContextFactory<ListenArrDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        var journal = await db.FileMutationJournals
+            .AsNoTracking()
+            .SingleAsync(candidate => candidate.OperationId == scenario.OperationId);
+        Assert.Equal(FileMutationJournalState.Completed, journal.State);
+        Assert.Null(journal.SourceSha256);
+        Assert.Equal(scenario.SourceIdentity, journal.SourcePhysicalObjectIdentity);
+        Assert.Equal(scenario.SourceIdentity, journal.TargetPhysicalObjectIdentity);
+        AssertNoLibraryArtifacts(scenario.Root);
+    }
+
+    [Fact]
+    public async Task MoveFileAsync_CopyFallback_PersistsContentHash()
+    {
+        var scenario = await CreateScenarioAsync();
+
+        Assert.True(await CreateMover(disableNativeRename: true).MoveFileAsync(
+            scenario.Source,
+            scenario.Destination,
+            scenario.OperationId));
+
+        var factory = _provider.GetRequiredService<
+            IDbContextFactory<ListenArrDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        var journal = await db.FileMutationJournals
+            .AsNoTracking()
+            .SingleAsync(candidate => candidate.OperationId == scenario.OperationId);
+        Assert.Equal(FileMutationJournalState.Completed, journal.State);
+        Assert.Matches("^[0-9A-F]{64}$", journal.SourceSha256 ?? string.Empty);
+        AssertNoLibraryArtifacts(scenario.Root);
+    }
+
+    [Fact]
     public async Task MoveFileAsync_NativeRenameBeforeTargetStateCommitResumes()
     {
         var scenario = await CreateScenarioAsync();

@@ -43,6 +43,7 @@ namespace Listenarr.Application.Audiobooks.Contracts.Repositories
         Task<Audiobook?> GetByIsbnAsync(string isbn);
         Task<Audiobook?> GetByIdAsync(int id);
         Task<Audiobook?> GetByIdSnapshotAsync(int id, CancellationToken ct = default);
+        Task<Audiobook?> GetForUpdateSnapshotAsync(int id, CancellationToken ct = default);
         Task<Audiobook?> GetForScanAsync(int id, CancellationToken ct = default);
         Task<Audiobook?> GetForScanSnapshotAsync(int id, CancellationToken ct = default);
         Task<bool> TryUpdateBasePathAsync(

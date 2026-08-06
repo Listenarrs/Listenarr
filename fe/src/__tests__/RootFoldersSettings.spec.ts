@@ -21,6 +21,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import RootFoldersSettings from '@/components/settings/RootFoldersSettings.vue'
 import { useRootFoldersStore } from '@/stores/rootFolders'
 import { apiService } from '@/services/api'
+import { signalRService } from '@/services/signalr'
 import type { RootFolder, RootFolderPathChangeResult } from '@/types'
 
 const targetPath = '/srv/Audiobooks '
@@ -57,6 +58,7 @@ describe('RootFoldersSettings', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
     vi.clearAllMocks()
+    vi.mocked(apiService.getRootFolders).mockReset().mockResolvedValue([])
   })
 
   it('shows header spinner and loading state when store.loading is true', async () => {
@@ -87,6 +89,32 @@ describe('RootFoldersSettings', () => {
     resolveFn([])
     await new Promise((r) => setTimeout(r, 0))
     await wrapper.vm.$nextTick()
+  })
+
+  it('reloads root relocation state after SignalR reconnect', async () => {
+    const active = relocation('Authorized')
+    vi.mocked(apiService.getRootFolders)
+      .mockResolvedValueOnce([rootFolder(active)])
+      .mockResolvedValueOnce([rootFolder(null)])
+    let connected: (() => void) | undefined
+    const unsubscribe = vi.fn()
+    vi.spyOn(signalRService, 'onConnected').mockImplementation((callback) => {
+      connected = callback
+      return unsubscribe
+    })
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(RootFoldersSettings, { global: { plugins: [pinia] } })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('NeedsAttention')
+    connected?.()
+    await flushPromises()
+
+    expect(apiService.getRootFolders).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).not.toContain('NeedsAttention')
+    wrapper.unmount()
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 
   it('reauthorizes the exact configured root path only after confirmation', async () => {

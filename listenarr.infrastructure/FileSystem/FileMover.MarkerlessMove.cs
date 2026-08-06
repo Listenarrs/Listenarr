@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using Listenarr.Domain.Audiobooks.Enumerations;
 using Microsoft.Extensions.Logging;
 
@@ -53,7 +52,8 @@ public partial class FileMover
 
             var proof = await CaptureMarkerlessSourceProofAsync(
                 initialSource,
-                cancellationToken);
+                cancellationToken,
+                includeSha256: false);
             journal = await _fileMutationJournalStore.GetOrCreateAsync(
                 new FileMutationJournalClaim(
                     operationId.Value,
@@ -113,9 +113,9 @@ public partial class FileMover
                             observedTarget.GetObjectIdentity(),
                             journal.SourcePhysicalObjectIdentity,
                             StringComparison.Ordinal)
-                        || !await observedTarget.MatchesAsync(
-                            journal.SourceLength,
-                            journal.SourceSha256,
+                        || !await MatchesMarkerlessTargetContentAsync(
+                            observedTarget,
+                            journal,
                             cancellationToken))
                     {
                         await MarkMarkerlessMoveNeedsAttentionAsync(
@@ -159,9 +159,18 @@ public partial class FileMover
                 return false;
             }
 
+            var canUseNativeRename = !DisableNativeFileRenameForTest
+                && sourceEntry.IsOnSameVolume(pathLock.DestinationParent);
+            if (!canUseNativeRename)
+            {
+                journal = await EnsureMarkerlessSourceHashAsync(
+                    sourceEntry,
+                    journal,
+                    cancellationToken);
+            }
+
             string targetIdentity;
-            if (!DisableNativeFileRenameForTest
-                && sourceEntry.IsOnSameVolume(pathLock.DestinationParent))
+            if (canUseNativeRename)
             {
                 sourceEntry.MoveTo(
                     pathLock.DestinationParent,
@@ -229,9 +238,9 @@ public partial class FileMover
                 return false;
             }
 
-            if (!await targetEntry.MatchesAsync(
-                    journal.SourceLength,
-                    journal.SourceSha256,
+            if (!await MatchesMarkerlessTargetContentAsync(
+                    targetEntry,
+                    journal,
                     cancellationToken))
             {
                 using var sourceEntry =
@@ -257,9 +266,9 @@ public partial class FileMover
                     cancellationToken);
                 sourceEntry.PreserveMarkerlessMetadataTo(targetEntry);
                 if (!TargetMatchesMarkerlessJournal(targetEntry, journal)
-                    || !await targetEntry.MatchesAsync(
-                        journal.SourceLength,
-                        journal.SourceSha256,
+                    || !await MatchesMarkerlessTargetContentAsync(
+                        targetEntry,
+                        journal,
                         cancellationToken))
                 {
                     throw new IOException(
@@ -287,9 +296,9 @@ public partial class FileMover
                     requireDeleteAccess: false);
             if (targetEntry == null
                 || !TargetMatchesMarkerlessJournal(targetEntry, journal)
-                || !await targetEntry.MatchesAsync(
-                    journal.SourceLength,
-                    journal.SourceSha256,
+                || !await MatchesMarkerlessTargetContentAsync(
+                    targetEntry,
+                    journal,
                     cancellationToken))
             {
                 await MarkMarkerlessMoveNeedsAttentionAsync(
@@ -379,69 +388,6 @@ public partial class FileMover
         return true;
     }
 
-    private static async Task<MarkerlessSourceProof>
-        CaptureMarkerlessSourceProofAsync(
-            PinnedDirectoryCreation.PinnedFileEntry source,
-            CancellationToken cancellationToken)
-    {
-        var physicalObjectIdentity = source.GetObjectIdentity();
-        await using var stream = source.OpenReadStream(
-            bufferSize: 128 * 1024,
-            asynchronous: false);
-        var length = stream.Length;
-        stream.Position = 0;
-        var hash = await SHA256.HashDataAsync(stream, cancellationToken);
-        return new MarkerlessSourceProof(
-            physicalObjectIdentity,
-            length,
-            Convert.ToHexString(hash));
-    }
-
-    private static async Task<bool> MatchesMarkerlessSourceProofAsync(
-        PinnedDirectoryCreation.PinnedFileEntry source,
-        FileMutationJournal journal,
-        CancellationToken cancellationToken) =>
-        source.VisiblePathMatches()
-        && string.Equals(
-            source.GetObjectIdentity(),
-            journal.SourcePhysicalObjectIdentity,
-            StringComparison.Ordinal)
-        && await source.MatchesAsync(
-            journal.SourceLength,
-            journal.SourceSha256,
-            cancellationToken);
-
-    private static bool TargetMatchesMarkerlessJournal(
-        PinnedDirectoryCreation.PinnedFileEntry target,
-        FileMutationJournal journal) =>
-        target.VisiblePathMatches()
-        && !string.IsNullOrWhiteSpace(
-            journal.TargetPhysicalObjectIdentity)
-        && string.Equals(
-            target.GetObjectIdentity(),
-            journal.TargetPhysicalObjectIdentity,
-            StringComparison.Ordinal);
-
-    private static async Task CopyMarkerlessFileAsync(
-        PinnedDirectoryCreation.PinnedFileEntry source,
-        PinnedDirectoryCreation.PinnedFileEntry target,
-        CancellationToken cancellationToken)
-    {
-        await using var sourceStream = source.OpenReadStream(
-            bufferSize: 128 * 1024,
-            asynchronous: false);
-        await using var targetStream = target.OpenWriteStream(
-            bufferSize: 128 * 1024,
-            asynchronous: false);
-        targetStream.SetLength(0);
-        await sourceStream.CopyToAsync(
-            targetStream,
-            128 * 1024,
-            cancellationToken);
-        await targetStream.FlushAsync(cancellationToken);
-        targetStream.Flush(flushToDisk: true);
-    }
-
     private static void ValidateMarkerlessMoveJournal(
         FileMutationJournal journal,
         FileMoveGateLease pathLock)
@@ -480,9 +426,4 @@ public partial class FileMover
             journal.OperationId,
             reason);
     }
-
-    private sealed record MarkerlessSourceProof(
-        string PhysicalObjectIdentity,
-        long Length,
-        string Sha256);
 }

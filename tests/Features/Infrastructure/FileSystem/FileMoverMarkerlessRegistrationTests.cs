@@ -63,6 +63,33 @@ public sealed class FileMoverMarkerlessRegistrationTests : BaseTests
         AssertNoLibraryArtifacts(scenario.Root);
     }
 
+    [Fact]
+    public async Task PrepareHardlinkCopy_SameVolumePersistsHashlessSourceProof()
+    {
+        var scenario = await CreateScenarioAsync("registration-hardlink-hashless");
+        var mover = CreateMover();
+
+        using var lease = await mover.PrepareActionForRegistrationAsync(
+            FileAction.HardlinkCopy,
+            scenario.Source,
+            scenario.Destination,
+            scenario.OperationId);
+
+        Assert.NotNull(lease);
+        var factory = _provider.GetRequiredService<
+            IDbContextFactory<ListenArrDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        var journal = await db.FileMutationJournals
+            .AsNoTracking()
+            .SingleAsync(candidate => candidate.OperationId == scenario.OperationId);
+        Assert.Equal(FileMutationJournalState.TargetVerified, journal.State);
+        Assert.Null(journal.SourceSha256);
+        Assert.Equal(
+            journal.SourcePhysicalObjectIdentity,
+            journal.TargetPhysicalObjectIdentity);
+        AssertNoLibraryArtifacts(scenario.Root);
+    }
+
     [Theory]
     [InlineData(FileAction.Copy)]
     [InlineData(FileAction.HardlinkCopy)]

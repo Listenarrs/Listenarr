@@ -25,7 +25,9 @@ public sealed partial class EfMoveQueuePersistence(
             await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
             return await db.MoveJobs
                 .AsNoTracking()
+                .AsSplitQuery()
                 .Include(job => job.Entries)
+                .Include(job => job.CreatedDirectories)
                 .SingleOrDefaultAsync(job => job.Id == id, cancellationToken);
         }
         catch (DbException ex)

@@ -54,6 +54,13 @@ public interface ILibraryDirectoryOwnershipStore
         FileSystemPathSemantics semantics,
         CancellationToken cancellationToken = default);
 
+    Task<bool> TryRetireReplacedByMarkerlessMoveAsync(
+        string path,
+        FileSystemPathSemantics semantics,
+        Guid moveJobId,
+        string replacementDirectoryObjectIdentity,
+        CancellationToken cancellationToken = default);
+
     Task BeginRemovalAsync(
         long ownershipId,
         string expectedOwnershipKey,

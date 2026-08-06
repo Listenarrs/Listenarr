@@ -41,6 +41,7 @@ public sealed partial class RootFolderRelocationService
             await using var db =
                 await dbContextFactory.CreateDbContextAsync(cancellationToken);
             var relocation = await db.RootFolderRelocations
+                .AsSplitQuery()
                 .Include(candidate => candidate.OwnershipPathMigrations)
                     .ThenInclude(migration => migration.Ownership)
                 .Include(candidate => candidate.SkippedItems)
@@ -62,7 +63,7 @@ public sealed partial class RootFolderRelocationService
                     .ToList();
                 if (preparedPlans.Count > 0)
                 {
-                    await PublishOwnershipMigrationTargetsAsync(
+                    ValidateMarkerlessOwnershipMigrationTargets(
                         preparedPlans,
                         relocation.TargetPath,
                         cancellationToken);
@@ -70,7 +71,7 @@ public sealed partial class RootFolderRelocationService
                     {
                         plan.Journal.State =
                             LibraryDirectoryOwnershipPathMigrationState
-                                .MarkersPublished;
+                                .TargetValidated;
                         plan.Journal.UpdatedAt =
                             timeProvider.GetUtcNow().UtcDateTime;
                     }
@@ -84,8 +85,9 @@ public sealed partial class RootFolderRelocationService
                     .ToList();
                 if (publishedPlans.Count > 0)
                 {
-                    // Re-prove the target directory generation and both durable
-                    // markers after every restart before committing metadata.
+                    // Existing MarkersPublished rows can only have been created by
+                    // the legacy sidecar protocol. Re-prove those artifacts without
+                    // publishing any new files before completing their old journal.
                     await PublishOwnershipMigrationTargetsAsync(
                         publishedPlans,
                         relocation.TargetPath,
@@ -96,6 +98,26 @@ public sealed partial class RootFolderRelocationService
                         relocation,
                         plans,
                         cancellationToken);
+                }
+
+                var markerlessValidatedPlans = plans
+                    .Where(plan => plan.Journal.State
+                        == LibraryDirectoryOwnershipPathMigrationState
+                            .TargetValidated)
+                    .ToList();
+                if (markerlessValidatedPlans.Count > 0)
+                {
+                    ValidateMarkerlessOwnershipMigrationTargets(
+                        markerlessValidatedPlans,
+                        relocation.TargetPath,
+                        cancellationToken);
+                    await CompleteOwnershipMigrationMetadataAsync(
+                        db,
+                        relocation,
+                        plans,
+                        cancellationToken,
+                        LibraryDirectoryOwnershipPathMigrationState
+                            .MarkerlessCommitted);
                 }
 
                 if (plans.All(plan =>
@@ -129,7 +151,38 @@ public sealed partial class RootFolderRelocationService
                 if (plans.All(plan =>
                     plan.Journal.State
                         == LibraryDirectoryOwnershipPathMigrationState
-                            .SourceMarkersRetired))
+                            .MarkerlessCommitted))
+                {
+                    await RequireTargetDirectoryGenerationAsync(
+                        relocation.TargetPath,
+                        relocation.TargetDirectoryObjectIdentityVersion,
+                        relocation.TargetDirectoryObjectIdentity,
+                        relocation.TargetDirectoryObjectIdentityUnavailableReason,
+                        CancellationToken.None);
+                    ValidateMarkerlessOwnershipMigrationTargets(
+                        plans,
+                        relocation.TargetPath,
+                        CancellationToken.None);
+                    TryRetireMarkerlessOwnershipMigrationSourceArtifacts(
+                        plans,
+                        relocation.SourcePath,
+                        CancellationToken.None);
+                    foreach (var plan in plans)
+                    {
+                        plan.Journal.State =
+                            LibraryDirectoryOwnershipPathMigrationState
+                                .MarkerlessRetired;
+                        plan.Journal.UpdatedAt =
+                            timeProvider.GetUtcNow().UtcDateTime;
+                    }
+                    await db.SaveChangesAsync(CancellationToken.None);
+                }
+
+                if (plans.All(plan =>
+                    plan.Journal.State is
+                        LibraryDirectoryOwnershipPathMigrationState.SourceMarkersRetired
+                            or LibraryDirectoryOwnershipPathMigrationState
+                                .MarkerlessRetired))
                 {
                     await RetireOwnershipMigrationTargetsAsync(
                         plans,
@@ -215,7 +268,9 @@ public sealed partial class RootFolderRelocationService
         ListenArrDbContext db,
         RootFolderRelocation relocation,
         IReadOnlyList<OwnershipMigrationPlan> plans,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        LibraryDirectoryOwnershipPathMigrationState committedState =
+            LibraryDirectoryOwnershipPathMigrationState.MetadataCommitted)
     {
         var rootId = relocation.RootFolderId
             ?? throw new InvalidOperationException(
@@ -324,7 +379,10 @@ public sealed partial class RootFolderRelocationService
         ApplyOwnershipMigrationMetadata(plans, now);
         BeforeOwnershipMigrationMetadataSaveForTest?.Invoke();
         await db.SaveChangesAsync(cancellationToken);
-        AssignOwnershipMigrationKeys(plans, now);
+        AssignOwnershipMigrationKeys(
+            plans,
+            now,
+            committedState);
         var command = new RootFolderPathChangeCommand(
             relocation.TargetPath,
             relocation.Mode,

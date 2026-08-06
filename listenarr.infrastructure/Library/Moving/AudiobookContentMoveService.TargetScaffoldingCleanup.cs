@@ -99,6 +99,17 @@ internal sealed partial class AudiobookContentMoveService
         AudiobookContentMoveRequest request,
         CancellationToken cancellationToken)
     {
+        if (await GetExecutionProtocolVersionAsync(
+                request.JobId,
+                cancellationToken)
+            >= MoveExecutionProtocol.MarkerlessDatabaseState)
+        {
+            await CleanupTerminalMarkerlessTargetDirectoriesAsync(
+                request,
+                cancellationToken);
+            return;
+        }
+
         var scaffolding = (await GetCreatedDirectoriesAsync(request.JobId, cancellationToken))
             .OrderBy(directory => GetPathDepth(directory.Path))
             .ToList();

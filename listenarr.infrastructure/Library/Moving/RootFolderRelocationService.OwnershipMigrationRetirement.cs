@@ -10,6 +10,56 @@ public sealed partial class RootFolderRelocationService
         set;
     }
 
+    private static void TryRetireMarkerlessOwnershipMigrationSourceArtifacts(
+        IReadOnlyList<OwnershipMigrationPlan> plans,
+        string sourceBoundary,
+        CancellationToken cancellationToken)
+    {
+        foreach (var plan in plans)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var sourceParentPath = Path.GetDirectoryName(
+                    plan.Source.CanonicalPath)
+                    ?? throw new InvalidOperationException(
+                        "The migrated ownership source has no parent directory.");
+                using var sourceParent = OpenMarkerParentWithinBoundary(
+                    sourceBoundary,
+                    sourceParentPath,
+                    plan.Source.GetIdentity().Semantics);
+                using var sourceDirectory = sourceParent.OpenExistingChild(
+                    Path.GetFileName(plan.Source.CanonicalPath));
+                if (!ManagedDirectoryIdentity.Matches(
+                        plan.Source.DirectoryObjectIdentityVersion,
+                        plan.Source.DirectoryObjectIdentity,
+                        plan.Source.OwnershipToken,
+                        sourceDirectory.GetDirectoryObjectIdentity())
+                    || !sourceDirectory.VisiblePathMatches()
+                    || !sourceParent.VisiblePathMatches())
+                {
+                    continue;
+                }
+
+                _ = LibraryDirectoryOwnershipMarker.TryRetireMigrationArtifacts(
+                    plan.Source,
+                    plan.Target,
+                    sourceDirectory,
+                    sourceParent,
+                    out _);
+            }
+            catch (Exception exception) when (exception is not (
+                OperationCanceledException or OutOfMemoryException
+                    or StackOverflowException))
+            {
+                // Fresh markerless migration never publishes source artifacts.
+                // Any source-side marker here is legacy cleanup only. The old path
+                // may legitimately be absent after an external rename, so failure
+                // to reach or prove it cannot invalidate the committed relocation.
+            }
+        }
+    }
+
     private async Task RetireOwnershipMigrationSourcesAsync(
         IReadOnlyList<OwnershipMigrationPlan> plans,
         string sourceBoundary,

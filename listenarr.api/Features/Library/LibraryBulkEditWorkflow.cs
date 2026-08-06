@@ -64,15 +64,19 @@ namespace Listenarr.Api.Features.Library
             _logger = logger;
         }
 
-        public async Task<IActionResult> BulkUpdateAsync(LibraryController.BulkUpdateRequest request)
+        public async Task<IActionResult> BulkUpdateAsync(
+            LibraryController.BulkUpdateRequest request,
+            CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (request?.Ids == null || !request.Ids.Any())
             {
                 return new BadRequestObjectResult(new { message = "No audiobook IDs provided for bulk update" });
             }
 
             var results = new List<object>();
-            var settings = await TryLoadApplicationSettingsAsync();
+            var stoppedAfterCancellation = false;
+            var settings = await TryLoadApplicationSettingsAsync(cancellationToken);
             var pathChangeMode = request.PathChange?.Mode
                 ?? LibraryController.BulkPathChangeMode.None;
             if (!Enum.IsDefined(pathChangeMode))
@@ -95,129 +99,151 @@ namespace Listenarr.Api.Features.Library
 
             foreach (var id in request.Ids.Distinct())
             {
-                var physicalPlan = pathChangeMode == LibraryController.BulkPathChangeMode.Physical
-                    ? await PlanPhysicalPathChangeAsync(
-                        id,
-                        request.PathChange?.DestinationRootOrPath,
-                        settings)
-                    : PhysicalPathChangePlan.NotRequested;
-                var rootRewrite = pathChangeMode switch
+                try
                 {
-                    LibraryController.BulkPathChangeMode.Physical =>
-                        new RootFolderRewriteOutcome(false, null, null),
-                    LibraryController.BulkPathChangeMode.MetadataOnly =>
-                        await RewriteRootFolderIfRequestedAsync(
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var rootRewrite = pathChangeMode switch
+                    {
+                        LibraryController.BulkPathChangeMode.Physical =>
+                            new RootFolderRewriteOutcome(false, null, null),
+                        LibraryController.BulkPathChangeMode.MetadataOnly =>
+                            await RewriteRootFolderIfRequestedAsync(
+                                id,
+                                metadataUpdates,
+                                settings,
+                                request.PathChange?.DestinationRootOrPath,
+                                cancellationToken),
+                        _ => await RewriteRootFolderIfRequestedAsync(
                             id,
                             metadataUpdates,
                             settings,
-                            request.PathChange?.DestinationRootOrPath),
-                    _ => await RewriteRootFolderIfRequestedAsync(
-                        id,
-                        metadataUpdates,
-                        settings)
-                };
-                BulkUpdateOutcome outcome;
-                try
-                {
-                    outcome = await _audiobookOperationCoordinator.ExecuteExclusiveAsync(
-                        id,
-                        async token =>
+                            cancellationToken: cancellationToken)
+                    };
+                    var physicalPlan = PhysicalPathChangePlan.NotRequested;
+                    IActionResult? enqueueResult = null;
+                    BulkUpdateOutcome outcome;
+                    try
+                    {
+                        if (pathChangeMode == LibraryController.BulkPathChangeMode.Physical)
                         {
-                            if (pathChangeMode == LibraryController.BulkPathChangeMode.Physical)
-                            {
-                                await _moveQueueService.EnsureFilesystemMutationAllowedAsync(id, token);
-                            }
-
-                            return await UpdateOneAsync(
+                            var physical = await ExecutePhysicalPathChangeAsync(
                                 id,
                                 metadataUpdates,
-                                rootRewrite.Rewritten,
-                                pathChangeMode == LibraryController.BulkPathChangeMode.Physical);
-                        });
-                }
-                catch (ApplicationConflictException exception)
-                {
-                    outcome = new BulkUpdateOutcome(
-                        Success: false,
-                        MetadataUpdated: false,
-                        Errors: [exception.SafeDetail]);
-                }
-                var errors = outcome.Errors
-                    .Concat(rootRewrite.Error == null ? [] : [rootRewrite.Error])
-                    .Concat(physicalPlan.Error == null ? [] : [physicalPlan.Error])
-                    .Distinct(StringComparer.Ordinal)
-                    .ToList();
-                var success = outcome.Success
-                    && (pathChangeMode != LibraryController.BulkPathChangeMode.MetadataOnly
-                        || rootRewrite.Error == null);
-                Guid? moveJobId = null;
-                var resolvedDestination = pathChangeMode == LibraryController.BulkPathChangeMode.MetadataOnly
-                    ? rootRewrite.Destination
-                    : physicalPlan.Destination;
-                var pathChangeOutcome = pathChangeMode switch
-                {
-                    LibraryController.BulkPathChangeMode.Physical => "not-enqueued",
-                    LibraryController.BulkPathChangeMode.MetadataOnly when rootRewrite.Rewritten => "metadata-updated",
-                    LibraryController.BulkPathChangeMode.MetadataOnly => "failed",
-                    _ => "none"
-                };
-
-                if (pathChangeMode == LibraryController.BulkPathChangeMode.Physical)
-                {
-                    if (physicalPlan.Error != null || string.IsNullOrWhiteSpace(physicalPlan.Destination))
-                    {
-                        success = false;
-                    }
-                    else if (outcome.Success)
-                    {
-                        var enqueueResult = await _moveWorkflow.EnqueueAsync(
-                            id,
-                            new LibraryController.MoveRequest
-                            {
-                                DestinationPath = physicalPlan.Destination,
-                                MoveFiles = true,
-                                DeleteEmptySource = request.PathChange?.DeleteEmptySource ?? true
-                            });
-                        if (enqueueResult is AcceptedResult
-                            {
-                                Value: MoveEnqueuedResponse enqueued
-                            })
-                        {
-                            if (enqueued.JobId == Guid.Empty)
-                            {
-                                success = false;
-                                pathChangeOutcome = "failed";
-                                errors.Add("The server did not return a durable move job ID.");
-                            }
-                            else
-                            {
-                                moveJobId = enqueued.JobId;
-                                resolvedDestination = enqueued.Target;
-                                pathChangeOutcome = "enqueued";
-                            }
+                                settings,
+                                request.PathChange,
+                                cancellationToken);
+                            physicalPlan = physical.Plan;
+                            outcome = physical.Update;
+                            enqueueResult = physical.EnqueueResult;
                         }
                         else
                         {
-                            success = false;
-                            pathChangeOutcome = "failed";
-                            errors.Add(GetActionResultError(enqueueResult));
+                            var itemContinuationToken = rootRewrite.Rewritten
+                                ? CancellationToken.None
+                                : cancellationToken;
+                            outcome = await _audiobookOperationCoordinator.ExecuteExclusiveAsync(
+                                id,
+                                token => UpdateOneAsync(
+                                    id,
+                                    metadataUpdates,
+                                    rootRewrite.Rewritten,
+                                    physicalPathChangeRequested: false,
+                                    token),
+                                itemContinuationToken);
                         }
                     }
-                }
+                    catch (ApplicationConflictException exception)
+                    {
+                        outcome = new BulkUpdateOutcome(
+                            Success: false,
+                            MetadataUpdated: false,
+                            Errors: [exception.SafeDetail]);
+                    }
 
-                results.Add(new
+                    var errors = outcome.Errors
+                        .Concat(rootRewrite.Error == null ? [] : [rootRewrite.Error])
+                        .Concat(physicalPlan.Error == null ? [] : [physicalPlan.Error])
+                        .Distinct(StringComparer.Ordinal)
+                        .ToList();
+                    var success = outcome.Success
+                        && (pathChangeMode != LibraryController.BulkPathChangeMode.MetadataOnly
+                            || rootRewrite.Error == null);
+                    Guid? moveJobId = null;
+                    var resolvedDestination = pathChangeMode == LibraryController.BulkPathChangeMode.MetadataOnly
+                        ? rootRewrite.Destination
+                        : physicalPlan.Destination;
+                    var pathChangeOutcome = pathChangeMode switch
+                    {
+                        LibraryController.BulkPathChangeMode.Physical => "not-enqueued",
+                        LibraryController.BulkPathChangeMode.MetadataOnly when rootRewrite.Rewritten => "metadata-updated",
+                        LibraryController.BulkPathChangeMode.MetadataOnly => "failed",
+                        _ => "none"
+                    };
+
+                    if (pathChangeMode == LibraryController.BulkPathChangeMode.Physical)
+                    {
+                        if (physicalPlan.Error != null
+                            || string.IsNullOrWhiteSpace(physicalPlan.Destination))
+                        {
+                            success = false;
+                        }
+                        else if (outcome.Success)
+                        {
+                            if (enqueueResult is AcceptedResult
+                                {
+                                    Value: MoveEnqueuedResponse enqueued
+                                })
+                            {
+                                if (enqueued.JobId == Guid.Empty)
+                                {
+                                    success = false;
+                                    pathChangeOutcome = "failed";
+                                    errors.Add(
+                                        "The server did not return a durable move job ID.");
+                                }
+                                else
+                                {
+                                    moveJobId = enqueued.JobId;
+                                    resolvedDestination = enqueued.Target;
+                                    pathChangeOutcome = "enqueued";
+                                }
+                            }
+                            else
+                            {
+                                success = false;
+                                pathChangeOutcome = "failed";
+                                errors.Add(enqueueResult == null
+                                    ? "Physical move was not enqueued."
+                                    : GetActionResultError(enqueueResult));
+                            }
+                        }
+                    }
+
+                    results.Add(new
+                    {
+                        id,
+                        success,
+                        metadataUpdated = outcome.MetadataUpdated,
+                        pathChangeOutcome,
+                        moveJobId,
+                        resolvedDestination,
+                        errors = errors.Distinct(StringComparer.Ordinal).ToList()
+                    });
+                }
+                catch (OperationCanceledException) when (results.Count > 0)
                 {
-                    id,
-                    success,
-                    metadataUpdated = outcome.MetadataUpdated,
-                    pathChangeOutcome,
-                    moveJobId,
-                    resolvedDestination,
-                    errors = errors.Distinct(StringComparer.Ordinal).ToList()
-                });
+                    stoppedAfterCancellation = true;
+                    break;
+                }
             }
 
-            return new OkObjectResult(new { message = "Bulk update completed", results });
+            return new OkObjectResult(new
+            {
+                message = stoppedAfterCancellation
+                    ? "Bulk update stopped after request cancellation"
+                    : "Bulk update completed",
+                results
+            });
         }
 
     }

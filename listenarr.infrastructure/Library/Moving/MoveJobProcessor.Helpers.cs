@@ -348,6 +348,33 @@ namespace Listenarr.Infrastructure.Library.Moving
             AudiobookContentMoveService? contentMoveService = null,
             AudiobookContentMoveRequest? moveRequest = null)
         {
+            var terminalCleanupCompleted = false;
+            if (contentMoveService != null && moveRequest != null)
+            {
+                var persistedBeforeRetry = await moveQueueService.GetJobAsync(
+                    job.Id,
+                    cancellationToken)
+                    ?? throw new MoveLeaseLostException(
+                        job.Id,
+                        job.LeaseGeneration);
+                if (persistedBeforeRetry.Status == MoveJobStatus.Running
+                    && string.Equals(
+                        persistedBeforeRetry.LeaseOwner,
+                        job.LeaseOwner,
+                        StringComparison.Ordinal)
+                    && persistedBeforeRetry.LeaseGeneration == job.LeaseGeneration
+                    && persistedBeforeRetry.AttemptCount + 1
+                        >= MoveTimingPolicy.MaxTransientAttempts)
+                {
+                    await TryCleanupTerminalTargetScaffoldingAsync(
+                        job,
+                        contentMoveService,
+                        moveRequest,
+                        cancellationToken);
+                    terminalCleanupCompleted = true;
+                }
+            }
+
             var result = await moveQueueService.ScheduleRetryWithoutNotificationAsync(
                 job.Id,
                 job.LeaseOwner!,
@@ -360,13 +387,13 @@ namespace Listenarr.Infrastructure.Library.Moving
                 : error;
             if (result.Status == MoveJobStatus.NeedsAttention)
             {
-                if (contentMoveService != null && moveRequest != null)
+                if (contentMoveService != null
+                    && moveRequest != null
+                    && !terminalCleanupCompleted)
                 {
-                    await TryCleanupTerminalTargetScaffoldingAsync(
-                        job,
-                        contentMoveService,
-                        moveRequest,
-                        cancellationToken);
+                    logger.LogWarning(
+                        "Move job {JobId} reached the retry limit without terminal scaffolding cleanup under its active lease",
+                        job.Id);
                 }
 
                 metrics.Increment("worker.move.job.needs_attention");

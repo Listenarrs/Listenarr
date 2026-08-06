@@ -148,7 +148,7 @@ public sealed partial class RootFolderRelocationService
                     targetObjectIdentity,
                     completionToken);
             }
-            await PublishOwnershipMigrationTargetsAsync(
+            ValidateMarkerlessOwnershipMigrationTargets(
                 ownershipPlans,
                 targetPath,
                 completionToken);
@@ -156,7 +156,7 @@ public sealed partial class RootFolderRelocationService
             {
                 plan.Journal.State =
                     LibraryDirectoryOwnershipPathMigrationState
-                        .MarkersPublished;
+                        .TargetValidated;
                 plan.Journal.UpdatedAt = DateTime.UtcNow;
             }
             await db.SaveChangesAsync(completionToken);
@@ -167,6 +167,10 @@ public sealed partial class RootFolderRelocationService
                     targetObjectIdentity,
                     completionToken);
             }
+            ValidateMarkerlessOwnershipMigrationTargets(
+                ownershipPlans,
+                targetPath,
+                completionToken);
         }
         catch (Exception exception) when (exception is not (
             OutOfMemoryException or StackOverflowException))
@@ -198,7 +202,11 @@ public sealed partial class RootFolderRelocationService
         RejectDuplicateAudiobookFileOwnership(db);
         ApplyOwnershipMigrationMetadata(ownershipPlans, nowUtc);
         await db.SaveChangesAsync(completionToken);
-        AssignOwnershipMigrationKeys(ownershipPlans, nowUtc);
+        AssignOwnershipMigrationKeys(
+            ownershipPlans,
+            nowUtc,
+            LibraryDirectoryOwnershipPathMigrationState
+                .MarkerlessCommitted);
         ApplyRootMetadata(
             root,
             command,
@@ -236,22 +244,26 @@ public sealed partial class RootFolderRelocationService
         try
         {
             AfterMetadataOnlyCommitForTest?.Invoke();
-            await PublishOwnershipMigrationTargetsAsync(
+            if (targetObjectIdentity.IsAvailable)
+            {
+                await RequireTargetDirectoryGenerationAsync(
+                    targetPath,
+                    targetObjectIdentity,
+                    CancellationToken.None);
+            }
+            ValidateMarkerlessOwnershipMigrationTargets(
                 ownershipPlans,
                 targetPath,
                 CancellationToken.None);
-            await RetireOwnershipMigrationSourcesAsync(
+            TryRetireMarkerlessOwnershipMigrationSourceArtifacts(
                 ownershipPlans,
                 sourcePath,
-                targetPath,
-                targetObjectIdentity.Version,
-                targetObjectIdentity.Value,
-                targetObjectIdentity.UnavailableReason,
                 CancellationToken.None);
             foreach (var plan in ownershipPlans)
             {
                 plan.Journal.State =
-                    LibraryDirectoryOwnershipPathMigrationState.SourceMarkersRetired;
+                    LibraryDirectoryOwnershipPathMigrationState
+                        .MarkerlessRetired;
                 plan.Journal.UpdatedAt = DateTime.UtcNow;
             }
             await db.SaveChangesAsync(CancellationToken.None);
