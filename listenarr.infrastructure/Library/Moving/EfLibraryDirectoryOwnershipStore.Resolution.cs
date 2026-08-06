@@ -138,6 +138,17 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
                         "The owned directory no longer matches its persisted physical identity.");
                 }
                 AfterOwnedDirectoryPhysicalIdentityPinnedForTest?.Invoke();
+                if (!ManagedDirectoryIdentity.Matches(
+                        resolved.DirectoryObjectIdentityVersion,
+                        resolved.DirectoryObjectIdentity,
+                        resolved.OwnershipToken,
+                        live.GetDirectoryObjectIdentity())
+                    || !live.VisiblePathMatches()
+                    || !authorization.ParentAnchor.VisiblePathMatches())
+                {
+                    throw new InvalidOperationException(
+                        "The owned directory changed after its physical identity was pinned.");
+                }
                 _ = LibraryDirectoryOwnershipMarker.TryRetireMatchingMarkers(
                     resolved,
                     live,

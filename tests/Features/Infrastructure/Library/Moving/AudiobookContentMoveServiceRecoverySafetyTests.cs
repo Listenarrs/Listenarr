@@ -369,7 +369,10 @@ public partial class AudiobookContentMoveServiceTests
                     result,
                     CancellationToken.None));
 
-            Assert.Contains("symbolic link or reparse point", exception.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains(
+                "Linked filesystem entry blocked safe traversal",
+                exception.Message,
+                StringComparison.OrdinalIgnoreCase);
             Assert.NotNull(new FileInfo(result.RecoveryMarkerPath).LinkTarget);
             Assert.False(File.Exists(missingTarget));
             Assert.True(File.Exists(Path.Join(target, "book.m4b")));

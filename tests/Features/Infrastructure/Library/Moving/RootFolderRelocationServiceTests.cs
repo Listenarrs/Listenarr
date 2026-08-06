@@ -2870,6 +2870,12 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
                 .ResolveAsync(linkedOwnedPath);
             Assert.True(rootIdentity.IsAvailable);
             Assert.True(ownedIdentity.IsAvailable);
+            string ownedNativeIdentity;
+            using (var ownedAnchor =
+                PinnedDirectoryCreation.OpenPinnedBoundary(linkedOwnedPath))
+            {
+                ownedNativeIdentity = ownedAnchor.GetDirectoryObjectIdentity();
+            }
             var ownershipToken = Guid.NewGuid().ToString("N");
 
             int rootId;
@@ -2928,7 +2934,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
                     DirectoryObjectIdentityVersion = ManagedDirectoryIdentity.CurrentVersion,
                     DirectoryObjectIdentity = ManagedDirectoryIdentity.Create(
                         ownershipToken,
-                        ownedIdentity.Value!)
+                        ownedNativeIdentity)
                 };
                 db.LibraryDirectoryOwnerships.Add(ownership);
                 await db.SaveChangesAsync();
@@ -3010,6 +3016,12 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
                 .ResolveAsync(physicalOwnedPath);
             Assert.True(rootIdentity.IsAvailable);
             Assert.True(ownedIdentity.IsAvailable);
+            string ownedNativeIdentity;
+            using (var ownedAnchor =
+                PinnedDirectoryCreation.OpenPinnedBoundary(physicalOwnedPath))
+            {
+                ownedNativeIdentity = ownedAnchor.GetDirectoryObjectIdentity();
+            }
             var ownershipToken = Guid.NewGuid().ToString("N");
 
             int rootId;
@@ -3068,7 +3080,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
                     DirectoryObjectIdentityVersion = ManagedDirectoryIdentity.CurrentVersion,
                     DirectoryObjectIdentity = ManagedDirectoryIdentity.Create(
                         ownershipToken,
-                        ownedIdentity.Value!)
+                        ownedNativeIdentity)
                 };
                 db.LibraryDirectoryOwnerships.Add(ownership);
                 await db.SaveChangesAsync();

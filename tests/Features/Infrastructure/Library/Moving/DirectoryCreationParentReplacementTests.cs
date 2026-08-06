@@ -39,7 +39,7 @@ public sealed class DirectoryCreationParentReplacementTests : BaseTests
 
             Assert.Equal(2, created.Count);
             Assert.True(Directory.Exists(Path.Join(physicalBoundary, "Author", "Book")));
-            Assert.True(File.Exists(Path.Join(
+            Assert.False(File.Exists(Path.Join(
                 physicalBoundary,
                 "Author",
                 "Book",
