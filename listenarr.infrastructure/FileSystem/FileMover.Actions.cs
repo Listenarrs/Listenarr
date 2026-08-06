@@ -58,6 +58,17 @@ public partial class FileMover
             return null;
         }
 
+        var markerless = await TryPrepareActionForRegistrationMarkerlessAsync(
+            action,
+            source,
+            destination,
+            operationId,
+            expectedRegisteredPhysicalObjectIdentity);
+        if (markerless.Handled)
+        {
+            return markerless.Lease;
+        }
+
         if (action == FileAction.HardlinkCopy)
         {
             if (!operationId.HasValue)

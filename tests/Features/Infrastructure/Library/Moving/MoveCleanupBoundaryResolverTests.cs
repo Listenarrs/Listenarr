@@ -113,6 +113,29 @@ public sealed class MoveCleanupBoundaryResolverTests : BaseTests
     }
 
     [Fact]
+    public async Task ResolveAsync_PersistedConfiguredRoot_IsRevalidatedAsConfiguredRoot()
+    {
+        var configuredRoot = FileService.GetTempDirectory("move-boundary-persisted-configured-root");
+        var source = Path.Join(configuredRoot, "Author", "Title", "test");
+        var target = Path.Join(
+            FileService.GetTempDirectory("move-boundary-persisted-configured-target"),
+            "Author",
+            "Title",
+            "test");
+        var resolver = CreateResolver();
+
+        var result = await resolver.ResolveAsync(
+            source,
+            target,
+            [new RootFolder { Name = "Library", Path = configuredRoot }],
+            configuredRoot);
+
+        Assert.True(result.IsAvailable, result.Reason);
+        Assert.Equal(MoveCleanupBoundaryKind.ConfiguredRoot, result.Kind);
+        Assert.Equal(configuredRoot, result.Boundary);
+    }
+
+    [Fact]
     public async Task ResolveAsync_NarrowPersistedBoundary_IsPreservedWithinConfiguredRoot()
     {
         var configuredRoot = FileService.GetTempDirectory("move-boundary-persisted-narrow");

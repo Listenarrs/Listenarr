@@ -133,7 +133,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
         }
 
         [Fact]
-        public async Task Create_PersistenceFailure_RetiresEnrollmentCreatedByAttempt()
+        public async Task Create_PersistenceFailure_DoesNotWriteFilesystemIdentityMarker()
         {
             var directory = CreateTempDirectory("root-create-enrollment-compensation");
             var repository = new Mock<IRootFolderRepository>();
@@ -167,7 +167,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
         }
 
         [Fact]
-        public async Task ReauthorizeDirectoryIdentity_MissingEnrollmentMarker_EnrollsNewGeneration()
+        public async Task ReauthorizeDirectoryIdentity_MissingLegacyMarker_UsesDatabaseOnlyGeneration()
         {
             var directory = CreateTempDirectory("root-identity-reauthorize-missing");
             var options = new DbContextOptionsBuilder<ListenArrDbContext>()
@@ -179,7 +179,9 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
             var identityResolver = new DirectoryObjectIdentityResolver();
             var originalIdentity = await identityResolver.ResolveAsync(directory);
             Assert.True(originalIdentity.IsAvailable, originalIdentity.UnavailableReason);
-            File.Delete(Path.Join(directory, ManagedDirectoryEnrollment.FileName));
+            Assert.False(File.Exists(Path.Join(
+                directory,
+                ManagedDirectoryEnrollment.FileName)));
             var semantics = FileSystemPathSemantics.CurrentHostDefault;
             var root = new RootFolder
             {
@@ -202,16 +204,16 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
                 root.Id,
                 directory);
 
-            Assert.True(File.Exists(Path.Join(directory, ManagedDirectoryEnrollment.FileName)));
+            Assert.False(File.Exists(Path.Join(directory, ManagedDirectoryEnrollment.FileName)));
             Assert.Equal(ManagedDirectoryIdentity.CurrentVersion, updated.DirectoryObjectIdentityVersion);
-            Assert.NotEqual(originalIdentity.Value, updated.DirectoryObjectIdentity);
+            Assert.Equal(originalIdentity.Value, updated.DirectoryObjectIdentity);
             Assert.Null(updated.DirectoryObjectIdentityUnavailableReason);
             var persisted = await repository.GetByIdAsync(root.Id);
             Assert.Equal(updated.DirectoryObjectIdentity, persisted!.DirectoryObjectIdentity);
         }
 
         [Fact]
-        public async Task ReauthorizeDirectoryIdentity_PersistenceFailure_RetiresNewEnrollment()
+        public async Task ReauthorizeDirectoryIdentity_PersistenceFailure_DoesNotWriteFilesystemIdentityMarker()
         {
             var directory = CreateTempDirectory("root-identity-reauthorize-compensation");
             var semantics = FileSystemPathSemantics.CurrentHostDefault;
@@ -265,7 +267,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
         }
 
         [Fact]
-        public async Task ReauthorizeDirectoryIdentity_CommittedThenThrow_PreservesCommittedEnrollment()
+        public async Task ReauthorizeDirectoryIdentity_CommittedThenThrow_LeavesDatabaseOutcomeToRepositoryContract()
         {
             var directory = CreateTempDirectory("root-identity-reauthorize-ambiguous-commit");
             var semantics = FileSystemPathSemantics.CurrentHostDefault;
@@ -335,15 +337,18 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
                 relocationService: relocationService.Object,
                 directoryObjectIdentityResolver: identityResolver);
 
-            var updated = await service.ReauthorizeDirectoryIdentityAsync(8, directory);
+            await Assert.ThrowsAsync<IOException>(() =>
+                service.ReauthorizeDirectoryIdentityAsync(8, directory));
 
             Assert.NotNull(durableRoot);
-            Assert.Equal(durableRoot!.DirectoryObjectIdentity, updated.DirectoryObjectIdentity);
-            Assert.True(File.Exists(Path.Join(
+            Assert.False(File.Exists(Path.Join(
                 directory,
                 ManagedDirectoryEnrollment.FileName)));
-            var existing = await identityResolver.ResolveExistingAsync(directory);
-            Assert.Equal(updated.DirectoryObjectIdentity, existing.Value);
+            var existing = await identityResolver.ResolveExistingAsync(
+                directory,
+                durableRoot!.DirectoryObjectIdentityVersion!.Value,
+                durableRoot.DirectoryObjectIdentity!);
+            Assert.Equal(durableRoot.DirectoryObjectIdentity, existing.Value);
         }
 
         [Fact]
@@ -380,7 +385,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
         }
 
         [Fact]
-        public async Task ReauthorizeDirectoryIdentity_InvalidExistingEnrollment_IsPreserved()
+        public async Task ReauthorizeDirectoryIdentity_InvalidLegacyMarker_IsIgnoredAndPreserved()
         {
             var directory = CreateTempDirectory("root-identity-reauthorize-invalid");
             var markerPath = Path.Join(directory, ManagedDirectoryEnrollment.FileName);
@@ -410,10 +415,14 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
                 null,
                 directoryObjectIdentityResolver: new DirectoryObjectIdentityResolver());
 
-            await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                service.ReauthorizeDirectoryIdentityAsync(root.Id, directory));
+            var updated = await service.ReauthorizeDirectoryIdentityAsync(
+                root.Id,
+                directory);
 
             Assert.Equal(originalMarker, await File.ReadAllTextAsync(markerPath));
+            Assert.Equal(ManagedDirectoryIdentity.CurrentVersion, updated.DirectoryObjectIdentityVersion);
+            Assert.NotEqual(root.DirectoryObjectIdentity, updated.DirectoryObjectIdentity);
+            Assert.Null(updated.DirectoryObjectIdentityUnavailableReason);
         }
 
         [Fact]

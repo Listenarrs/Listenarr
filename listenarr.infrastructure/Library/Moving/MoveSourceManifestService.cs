@@ -4,18 +4,20 @@ using Listenarr.Domain.Common;
 
 namespace Listenarr.Infrastructure.Library.Moving;
 
-internal sealed class MoveSourceManifestService(
+internal sealed partial class MoveSourceManifestService(
     IAudiobookFileRepository fileRepository,
     LibraryDirectoryOwnershipBoundaryAuthorizer? ownershipAuthorizer = null,
-    IAudiobookRepository? audiobookRepository = null) : IMoveSourceManifestService
+    IAudiobookRepository? audiobookRepository = null)
+    : IMoveSourceManifestService, IMoveSourcePlanService
 {
-    public async Task<MoveSourceManifest> BuildAsync(
-        Audiobook audiobook,
-        CancellationToken cancellationToken = default)
+    private async Task<MoveSourceManifest> BuildCoreAsync(
+        int audiobookId,
+        string? audiobookBasePath,
+        bool includeContentHashes,
+        CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(audiobook);
         var trackedFiles = await fileRepository.GetByAudiobookIdAsync(
-            audiobook.Id,
+            audiobookId,
             cancellationToken);
         if (trackedFiles.Count == 0)
         {
@@ -42,6 +44,7 @@ internal sealed class MoveSourceManifestService(
                 trackedFile.Id,
                 path,
                 trackedFile.PhysicalObjectIdentity,
+                includeContentHashes,
                 cancellationToken));
         }
 
@@ -72,13 +75,15 @@ internal sealed class MoveSourceManifestService(
             validated,
             identitySnapshot.Semantics);
         var companionEntries = await MoveSourceCompanionManifestBuilder.BuildAsync(
-            audiobook,
+            audiobookId,
+            audiobookBasePath,
             sourceRoot,
             identitySnapshot,
             validated.Select(file => file.Path).ToList(),
             ownershipAuthorizer,
             audiobookRepository,
             fileRepository,
+            includeContentHashes,
             cancellationToken);
         entries = MergeEntries(
             entries,
@@ -137,6 +142,7 @@ internal sealed class MoveSourceManifestService(
         int audiobookFileId,
         string path,
         string? expectedPhysicalObjectIdentity,
+        bool includeContentHash,
         CancellationToken cancellationToken)
     {
         if (!File.Exists(path))
@@ -175,8 +181,10 @@ internal sealed class MoveSourceManifestService(
                 asynchronous: false);
             var length = stream.Length;
             var lastWriteTimeUtc = File.GetLastWriteTimeUtc(path);
-            var hashBytes = await SHA256.HashDataAsync(stream, cancellationToken);
-            var hash = Convert.ToHexString(hashBytes);
+            var hash = includeContentHash
+                ? Convert.ToHexString(
+                    await SHA256.HashDataAsync(stream, cancellationToken))
+                : null;
             if (!file.VisiblePathMatches()
                 || !string.Equals(
                     file.GetObjectIdentity(),
@@ -474,5 +482,5 @@ internal sealed class MoveSourceManifestService(
         string Path,
         long Length,
         DateTime LastWriteTimeUtc,
-        string Sha256);
+        string? Sha256);
 }

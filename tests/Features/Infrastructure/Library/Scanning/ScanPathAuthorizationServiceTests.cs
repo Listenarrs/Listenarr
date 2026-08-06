@@ -66,6 +66,60 @@ public sealed class ScanPathAuthorizationServiceTests : BaseTests
         Assert.True(Directory.Exists(scanRoot));
     }
 
+    [WindowsFact]
+    public async Task AuthorizeAsync_ForeignFallbackOutputPath_DoesNotEmitWarning()
+    {
+        var configuredRoot = FileService.GetTempDirectory(
+            "scan-authorization-valid-windows-root");
+        var scanRoot = Path.Join(configuredRoot, "Book");
+        Directory.CreateDirectory(scanRoot);
+        var root = await AddAuthorizedRootAsync(configuredRoot);
+        var rootFolderService = new Mock<IRootFolderService>();
+        rootFolderService.Setup(service => service.GetAllAsync())
+            .ReturnsAsync([root]);
+        var configurationService = new Mock<IConfigurationService>();
+        configurationService.Setup(service => service.GetApplicationSettingsAsync())
+            .ReturnsAsync(new ApplicationSettings
+            {
+                OutputPath = "/server/mnt/drive/Audiobooks"
+            });
+        var logger = new CapturingScanAuthorizationLogger();
+        var service = new ScanPathAuthorizationService(
+            configurationService.Object,
+            rootFolderService.Object,
+            _provider.GetRequiredService<IFileSystemSemanticsResolver>(),
+            logger);
+
+        var result = await service.AuthorizeAsync(scanRoot);
+
+        Assert.True(result.IsAuthorized, result.Error);
+        Assert.DoesNotContain(logger.Entries, log =>
+            log.Level == LogLevel.Warning
+            && log.Message.Contains("Audiobooks", StringComparison.Ordinal));
+        Assert.Contains(logger.Entries, log =>
+            log.Level == LogLevel.Debug
+            && log.Message.Contains("Audiobooks", StringComparison.Ordinal));
+    }
+
+    private sealed class CapturingScanAuthorizationLogger
+        : ILogger<ScanPathAuthorizationService>
+    {
+        public List<(LogLevel Level, string Message)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, formatter(state, exception)));
+    }
+
     [Fact]
     public async Task AuthorizeAsync_ReplacedEnrolledRoot_IsRejected()
     {

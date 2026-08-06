@@ -18,6 +18,8 @@
 using System.Runtime.InteropServices;
 using System.Diagnostics.CodeAnalysis;
 using Listenarr.Domain.Audiobooks.Enumerations;
+using Listenarr.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
 
@@ -54,6 +56,7 @@ namespace Listenarr.Infrastructure.FileSystem
 
         private readonly ILogger<FileMover> _logger;
         private readonly IFileSystemSemanticsResolver _semanticsResolver;
+        private readonly IFileMutationJournalStore? _fileMutationJournalStore;
 
         internal Func<Task>? AfterSourceStateCreatedForTestAsync { get; init; }
         internal Func<string, string, Task>? AfterSourceQuarantinedForTestAsync { get; init; }
@@ -75,12 +78,19 @@ namespace Listenarr.Infrastructure.FileSystem
             ILogger<FileMover> logger,
             IProcessRunner? processRunner = null,
             IOptions<FileMoverOptions>? options = null,
-            IFileSystemSemanticsResolver? semanticsResolver = null)
+            IFileSystemSemanticsResolver? semanticsResolver = null,
+            IDbContextFactory<ListenArrDbContext>? dbContextFactory = null,
+            TimeProvider? timeProvider = null)
         {
             _logger = logger;
             _ = processRunner;
             _ = options;
             _semanticsResolver = semanticsResolver ?? new FileSystemSemanticsResolver();
+            _fileMutationJournalStore = dbContextFactory == null
+                ? null
+                : new EfFileMutationJournalStore(
+                    dbContextFactory,
+                    timeProvider ?? TimeProvider.System);
         }
 
         public async Task<bool> MoveDirectoryAsync(string sourceDir, string destDir)

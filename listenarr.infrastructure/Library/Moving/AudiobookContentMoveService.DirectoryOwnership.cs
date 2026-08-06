@@ -53,16 +53,7 @@ internal sealed partial class AudiobookContentMoveService
                 "Durable target-directory ownership does not match the exact move target.");
         }
 
-        try
-        {
-            LibraryDirectoryOwnershipMarker.Validate(ownership, target);
-        }
-        catch (InvalidOperationException exception)
-        {
-            throw new MoveNeedsAttentionException(
-                $"The target-directory ownership marker is invalid: {exception.Message}");
-        }
-
+        RevalidateTargetDirectoryOwnership(ownership);
         return ownership;
     }
 
@@ -76,14 +67,31 @@ internal sealed partial class AudiobookContentMoveService
 
         try
         {
-            LibraryDirectoryOwnershipMarker.Validate(
-                ownership,
-                ownership.CanonicalPath);
+            var parentPath = Path.GetDirectoryName(ownership.CanonicalPath)
+                ?? throw new InvalidOperationException(
+                    "The target ownership path has no parent directory.");
+            using var parent = PinnedDirectoryCreation.OpenPinnedBoundary(parentPath);
+            using var directory = parent.OpenExistingChild(
+                Path.GetFileName(ownership.CanonicalPath));
+            if (!ManagedDirectoryIdentity.Matches(
+                    ownership.DirectoryObjectIdentityVersion,
+                    ownership.DirectoryObjectIdentity,
+                    ownership.OwnershipToken,
+                    directory.GetDirectoryObjectIdentity())
+                || !directory.VisiblePathMatches()
+                || !parent.VisiblePathMatches())
+            {
+                throw new InvalidOperationException(
+                    "The target directory no longer matches its persisted physical ownership generation.");
+            }
         }
-        catch (InvalidOperationException exception)
+        catch (Exception exception) when (exception is
+            ArgumentException or IOException or UnauthorizedAccessException
+                or InvalidOperationException or NotSupportedException
+                or PathTooLongException or System.ComponentModel.Win32Exception)
         {
             throw new MoveNeedsAttentionException(
-                $"The target-directory ownership marker changed: {exception.Message}");
+                $"The target-directory ownership changed: {exception.Message}");
         }
     }
 
@@ -126,18 +134,6 @@ internal sealed partial class AudiobookContentMoveService
                 throw new MoveNeedsAttentionException(
                     "A durably owned source directory is missing.");
             }
-
-            try
-            {
-                LibraryDirectoryOwnershipMarker.Validate(
-                    ownership,
-                    ownership.CanonicalPath);
-            }
-            catch (InvalidOperationException exception)
-            {
-                throw new MoveNeedsAttentionException(
-                    $"A source-directory ownership marker is invalid: {exception.Message}");
-            }
         }
 
         return ownerships;
@@ -177,10 +173,6 @@ internal sealed partial class AudiobookContentMoveService
                     throw new InvalidOperationException(
                         "A durably owned source directory is missing without a removal intent.");
                 }
-
-                LibraryDirectoryOwnershipMarker.Validate(
-                    ownership,
-                    ownership.CanonicalPath);
             }
             catch (InvalidOperationException exception)
             {
@@ -323,23 +315,7 @@ internal sealed partial class AudiobookContentMoveService
                 continue;
             }
 
-            try
-            {
-                LibraryDirectoryOwnershipMarker.Validate(
-                    current,
-                    current.CanonicalPath);
-            }
-            catch (InvalidOperationException exception)
-            {
-                throw new MoveNeedsAttentionException(
-                    $"A source-directory ownership marker changed before cleanup: {exception.Message}");
-            }
-
-            var insideMarker = Path.Join(
-                current.CanonicalPath,
-                LibraryDirectoryOwnershipMarker.FileName);
             var remainingEntries = Directory.EnumerateFileSystemEntries(current.CanonicalPath)
-                .Where(entry => !string.Equals(entry, insideMarker, StringComparison.Ordinal))
                 .Take(1)
                 .ToList();
             if (remainingEntries.Count != 0)

@@ -22,6 +22,8 @@ type MoveJobUpdate = {
   jobId?: string
   audiobookId?: number
   status?: string
+  progress?: number
+  phase?: string
   target?: string
   error?: string
 }
@@ -33,6 +35,7 @@ const toastMocks = vi.hoisted(() => ({
 }))
 
 const apiMocks = vi.hoisted(() => ({
+  getActiveMoveJobs: vi.fn(),
   getMoveJobStatus: vi.fn(),
 }))
 
@@ -51,6 +54,7 @@ const signalRMocks = vi.hoisted(() => {
 
 vi.mock('@/services/api', () => ({
   apiService: {
+    getActiveMoveJobs: apiMocks.getActiveMoveJobs,
     getMoveJobStatus: apiMocks.getMoveJobStatus,
   },
 }))
@@ -72,6 +76,7 @@ describe('move jobs store', () => {
     vi.clearAllMocks()
     setActivePinia(createPinia())
     signalRMocks.callback = null
+    apiMocks.getActiveMoveJobs.mockResolvedValue([])
     apiMocks.getMoveJobStatus.mockImplementation(() => new Promise(() => {}))
     signalRMocks.onMoveJobUpdate.mockImplementation((callback: (job: MoveJobUpdate) => void) => {
       signalRMocks.callback = callback
@@ -91,6 +96,30 @@ describe('move jobs store', () => {
     expect(signalRMocks.unsubscribe).toHaveBeenCalledTimes(1)
   })
 
+  it('recovers active move jobs when the store starts', async () => {
+    apiMocks.getActiveMoveJobs.mockResolvedValue([
+      {
+        jobId: 'job-active',
+        audiobookId: 42,
+        status: 'Running',
+        progress: 61.5,
+        phase: 'Copying',
+        target: '/library/book',
+      },
+    ])
+    const store = useMoveJobsStore()
+
+    store.start()
+
+    await vi.waitFor(() =>
+      expect(store.trackedById['job-active']).toMatchObject({
+        status: 'Running',
+        progress: 61.5,
+        phase: 'Copying',
+      }),
+    )
+  })
+
   it('tracks queued move jobs and subscribes on first track', () => {
     const store = useMoveJobsStore()
 
@@ -105,6 +134,7 @@ describe('move jobs store', () => {
       jobId: 'JOB-1',
       audiobookId: 42,
       status: 'Queued',
+      progress: 0,
       target: '/library/book',
     })
   })
@@ -122,6 +152,33 @@ describe('move jobs store', () => {
       'Moving files to /library/book',
     )
     expect(store.trackedById['job-1']?.status).toBe('Running')
+  })
+
+  it('tracks realtime move progress and phase without repeating the running toast', () => {
+    const store = useMoveJobsStore()
+    store.trackQueuedJob({ jobId: 'job-1', target: '/library/book' })
+
+    signalRMocks.callback?.({
+      jobId: 'job-1',
+      status: 'Running',
+      progress: 18.5,
+      phase: 'Copying',
+      target: '/library/book',
+    })
+    signalRMocks.callback?.({
+      jobId: 'job-1',
+      status: 'Running',
+      progress: 63.25,
+      phase: 'Copying',
+      target: '/library/book',
+    })
+
+    expect(store.trackedById['job-1']).toMatchObject({
+      status: 'Running',
+      progress: 63.25,
+      phase: 'Copying',
+    })
+    expect(toastMocks.info).toHaveBeenCalledTimes(1)
   })
 
   it('shows success toast and clears tracked job on completion', () => {

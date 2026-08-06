@@ -81,6 +81,114 @@ namespace Listenarr.Tests.Features.Infrastructure.Migrations
         }
 
         [Fact]
+        public void AddMarkerlessMoveExecutionState_IsDiscoverableAndContainsOnlyExpectedColumns()
+        {
+            var attribute = typeof(AddMarkerlessMoveExecutionState)
+                .GetCustomAttribute<MigrationAttribute>();
+            Assert.NotNull(attribute);
+            Assert.Equal(
+                "20260805192525_AddMarkerlessMoveExecutionState",
+                attribute!.Id);
+
+            var migration = new AddMarkerlessMoveExecutionState();
+            var upBuilder = new MigrationBuilder(
+                "Microsoft.EntityFrameworkCore.Sqlite");
+            var downBuilder = new MigrationBuilder(
+                "Microsoft.EntityFrameworkCore.Sqlite");
+            typeof(AddMarkerlessMoveExecutionState)
+                .GetMethod(
+                    "Up",
+                    BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(migration, [upBuilder]);
+            typeof(AddMarkerlessMoveExecutionState)
+                .GetMethod(
+                    "Down",
+                    BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(migration, [downBuilder]);
+
+            var expectedColumns = new[]
+            {
+                "DirectoryObjectIdentity",
+                "ExecutionProtocolVersion",
+                "SourceDirectoryCleanupState",
+                "SourceDirectoryObjectIdentity",
+                "SourcePhysicalObjectIdentity",
+                "TargetDirectoryObjectIdentity",
+                "TargetPhysicalObjectIdentity"
+            };
+            Assert.Equal(
+                expectedColumns,
+                upBuilder.Operations
+                    .Select(operation => Assert.IsType<AddColumnOperation>(operation).Name)
+                    .OrderBy(name => name, StringComparer.Ordinal)
+                    .ToArray());
+            Assert.Equal(
+                expectedColumns,
+                downBuilder.Operations
+                    .Select(operation => Assert.IsType<DropColumnOperation>(operation).Name)
+                    .OrderBy(name => name, StringComparer.Ordinal)
+                    .ToArray());
+        }
+
+        [Fact]
+        public void AddMarkerlessFileMutationJournal_IsDiscoverableAndIsolated()
+        {
+            var attribute = typeof(AddMarkerlessFileMutationJournal)
+                .GetCustomAttribute<MigrationAttribute>();
+            Assert.NotNull(attribute);
+            Assert.Equal(
+                "20260805202154_AddMarkerlessFileMutationJournal",
+                attribute!.Id);
+
+            var migration = new AddMarkerlessFileMutationJournal();
+            var upBuilder = new MigrationBuilder(
+                "Microsoft.EntityFrameworkCore.Sqlite");
+            var downBuilder = new MigrationBuilder(
+                "Microsoft.EntityFrameworkCore.Sqlite");
+            typeof(AddMarkerlessFileMutationJournal)
+                .GetMethod(
+                    "Up",
+                    BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(migration, [upBuilder]);
+            typeof(AddMarkerlessFileMutationJournal)
+                .GetMethod(
+                    "Down",
+                    BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(migration, [downBuilder]);
+
+            var create = Assert.Single(
+                upBuilder.Operations.OfType<CreateTableOperation>());
+            Assert.Equal("FileMutationJournals", create.Name);
+            Assert.Equal(
+                [
+                    "Action",
+                    "AudiobookId",
+                    "CreatedAt",
+                    "DestinationPath",
+                    "Error",
+                    "OperationId",
+                    "ProtocolVersion",
+                    "SourceLength",
+                    "SourcePath",
+                    "SourcePhysicalObjectIdentity",
+                    "SourceSha256",
+                    "State",
+                    "TargetPhysicalObjectIdentity",
+                    "UpdatedAt"
+                ],
+                create.Columns
+                    .Select(column => column.Name)
+                    .OrderBy(name => name, StringComparer.Ordinal)
+                    .ToArray());
+            Assert.Equal(2, upBuilder.Operations.OfType<CreateIndexOperation>().Count());
+            Assert.Equal(3, upBuilder.Operations.Count);
+            Assert.Equal(
+                "FileMutationJournals",
+                Assert.Single(downBuilder.Operations.OfType<DropTableOperation>()).Name);
+            Assert.Single(downBuilder.Operations);
+        }
+
+        [Fact]
         public void OwnershipRecoveryProtocols_ContainsNoRawSqlOperations()
         {
             var migration = new AddOwnershipRecoveryProtocols();

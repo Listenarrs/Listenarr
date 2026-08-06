@@ -1299,10 +1299,52 @@ class ApiService {
     )
   }
 
+  async getActiveMoveJobs(): Promise<
+    Array<{
+      jobId: string
+      audiobookId?: number
+      status: string
+      progress?: number
+      phase?: string
+      target?: string
+      error?: string
+      recoveryDisposition?: string
+      canRetry?: boolean
+    }>
+  > {
+    const jobs = await this.request<
+      Array<{
+        id: string
+        audiobookId?: number
+        status: string
+        phase?: string
+        progress?: number
+        requestedPath?: string
+        error?: string
+        recoveryDisposition?: string
+        canRetry?: boolean
+      }>
+    >('/library/move')
+
+    return jobs.map((job) => ({
+      jobId: job.id,
+      audiobookId: job.audiobookId,
+      status: job.status,
+      progress: job.progress,
+      phase: job.phase,
+      target: job.requestedPath,
+      error: job.error,
+      recoveryDisposition: job.recoveryDisposition,
+      canRetry: job.canRetry,
+    }))
+  }
+
   async getMoveJobStatus(jobId: string): Promise<{
     jobId: string
     audiobookId?: number
     status: string
+    progress?: number
+    phase?: string
     target?: string
     error?: string
     recoveryDisposition?: string
@@ -1313,6 +1355,7 @@ class ApiService {
       audiobookId?: number
       status: string
       phase?: string
+      progress?: number
       requestedPath?: string
       error?: string
       attemptCount?: number
@@ -1327,6 +1370,8 @@ class ApiService {
       jobId: job.id,
       audiobookId: job.audiobookId,
       status: job.status,
+      progress: job.progress,
+      phase: job.phase,
       target: job.requestedPath,
       error: job.error,
       recoveryDisposition: job.recoveryDisposition,

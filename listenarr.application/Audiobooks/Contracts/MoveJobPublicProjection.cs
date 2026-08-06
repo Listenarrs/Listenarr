@@ -6,6 +6,8 @@ public sealed record MoveJobPublicUpdate(
     string Status,
     string? Error,
     string? Target,
+    double Progress,
+    string Phase,
     DateTime UpdatedAt);
 
 public static class MoveJobPublicProjection
@@ -48,7 +50,9 @@ public static class MoveJobPublicProjection
         MoveJobStatus fallbackStatus,
         string? fallbackError,
         DateTime fallbackUpdatedAt,
-        MoveJob? persistedJob)
+        MoveJob? persistedJob,
+        double? progressOverride = null,
+        string? phaseOverride = null)
     {
         var status = persistedJob?.Status ?? fallbackStatus;
         var error = persistedJob == null
@@ -60,6 +64,53 @@ public static class MoveJobPublicProjection
             status.ToString(),
             error,
             persistedJob?.RequestedPath,
+            Math.Clamp(
+                progressOverride ?? CalculateProgress(persistedJob, status),
+                0,
+                100),
+            phaseOverride ?? persistedJob?.Phase.ToString() ?? MoveJobPhase.None.ToString(),
             persistedJob?.UpdatedAt ?? fallbackUpdatedAt);
+    }
+
+    public static double CalculateProgress(MoveJob? job, MoveJobStatus fallbackStatus)
+    {
+        var status = job?.Status ?? fallbackStatus;
+        if (status == MoveJobStatus.Completed)
+        {
+            return 100;
+        }
+        if (status == MoveJobStatus.Queued)
+        {
+            return 0;
+        }
+
+        var phase = job?.Phase ?? MoveJobPhase.None;
+        var files = job?.Entries
+            .Where(entry => entry.EntryType == MoveJobEntryType.File
+                && !MoveManifestIdentity.IsTargetBoundaryAuthorization(entry))
+            .ToList() ?? [];
+        var totalBytes = files.Sum(entry => Math.Max(entry.Length, 1));
+        var copiedBytes = files
+            .Where(entry => entry.CopyState == MoveJobEntryCopyState.Verified)
+            .Sum(entry => Math.Max(entry.Length, 1));
+        var cleanedBytes = files
+            .Where(entry => entry.CleanupState is
+                MoveJobEntryCleanupState.Deleted or MoveJobEntryCleanupState.Retained)
+            .Sum(entry => Math.Max(entry.Length, 1));
+        var copyRatio = totalBytes == 0 ? 0 : (double)copiedBytes / totalBytes;
+        var cleanupRatio = totalBytes == 0 ? 0 : (double)cleanedBytes / totalBytes;
+
+        return phase switch
+        {
+            MoveJobPhase.None => 1,
+            MoveJobPhase.Planned => 5,
+            MoveJobPhase.Copying => 5 + (copyRatio * 65),
+            MoveJobPhase.Published => 72,
+            MoveJobPhase.CleaningSource => 75 + (cleanupRatio * 15),
+            MoveJobPhase.Finalizing => 92,
+            MoveJobPhase.CleaningArtifacts => 98,
+            MoveJobPhase.RecordingCompletion => 99,
+            _ => 1
+        };
     }
 }

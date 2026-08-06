@@ -192,12 +192,22 @@ public sealed partial class RootFolderRelocationService
             relocation.Error = "Target filesystem identity became unavailable during finalization.";
             return;
         }
+        if (!relocation.TargetDirectoryObjectIdentityVersion.HasValue
+            || string.IsNullOrWhiteSpace(relocation.TargetDirectoryObjectIdentity))
+        {
+            relocation.Status = RootFolderRelocationStatus.NeedsAttention;
+            relocation.Error =
+                "The target directory no longer has persisted physical identity authorization.";
+            return;
+        }
+
         var currentObjectIdentity =
             await ResolveExistingDirectoryObjectIdentityAsync(
                 canonicalTargetPath,
+                relocation.TargetDirectoryObjectIdentityVersion.Value,
+                relocation.TargetDirectoryObjectIdentity,
                 cancellationToken);
-        if (!relocation.TargetDirectoryObjectIdentityVersion.HasValue
-            || !currentObjectIdentity.IsAvailable
+        if (!currentObjectIdentity.IsAvailable
                 || currentObjectIdentity.Version
                     != relocation.TargetDirectoryObjectIdentityVersion
                 || !string.Equals(

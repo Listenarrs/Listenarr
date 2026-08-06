@@ -440,6 +440,8 @@ class SignalRService {
             jobId: string
             audiobookId?: number
             status: string
+            progress?: number
+            phase?: string
             target?: string
             error?: string
           }
@@ -749,6 +751,8 @@ class SignalRService {
       jobId: string
       audiobookId?: number
       status: string
+      progress?: number
+      phase?: string
       target?: string
       error?: string
     }) => void,

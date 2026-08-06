@@ -10,6 +10,40 @@ internal sealed partial class AudiobookContentMoveService
         CancellationToken cancellationToken) =>
         executionStore.EnsureLeaseOwnedAsync(jobId, leaseToken, cancellationToken);
 
+    private Task<int> GetExecutionProtocolVersionAsync(
+        Guid jobId,
+        CancellationToken cancellationToken) =>
+        executionStore.GetExecutionProtocolVersionAsync(jobId, cancellationToken);
+
+    private Task<MarkerlessMoveEndpointState> GetEndpointObjectIdentitiesAsync(
+        Guid jobId,
+        CancellationToken cancellationToken) =>
+        executionStore.GetEndpointObjectIdentitiesAsync(jobId, cancellationToken);
+
+    private Task UpdateEndpointObjectIdentitiesAsync(
+        Guid jobId,
+        MoveLeaseToken leaseToken,
+        string? sourceDirectoryObjectIdentity,
+        string? targetDirectoryObjectIdentity,
+        CancellationToken cancellationToken) =>
+        executionStore.UpdateEndpointObjectIdentitiesAsync(
+            jobId,
+            leaseToken,
+            sourceDirectoryObjectIdentity,
+            targetDirectoryObjectIdentity,
+            cancellationToken);
+
+    private Task UpdateSourceDirectoryCleanupStateAsync(
+        Guid jobId,
+        MoveLeaseToken leaseToken,
+        MoveJobEntryCleanupState cleanupState,
+        CancellationToken cancellationToken) =>
+        executionStore.UpdateSourceDirectoryCleanupStateAsync(
+            jobId,
+            leaseToken,
+            cleanupState,
+            cancellationToken);
+
     private Task ValidatePersistedMoveIdentityAsync(
         Guid jobId,
         string source,
@@ -65,6 +99,36 @@ internal sealed partial class AudiobookContentMoveService
         CancellationToken cancellationToken) =>
         executionStore.UpdateCopyStateAsync(jobId, leaseToken, cancellationToken);
 
+    private Task UpdateSourceEntryProofAsync(
+        Guid jobId,
+        MoveLeaseToken leaseToken,
+        string relativePath,
+        string sourcePhysicalObjectIdentity,
+        string? sha256,
+        CancellationToken cancellationToken) =>
+        executionStore.UpdateSourceEntryProofAsync(
+            jobId,
+            leaseToken,
+            relativePath,
+            sourcePhysicalObjectIdentity,
+            sha256,
+            cancellationToken);
+
+    private Task UpdateTargetEntryStateAsync(
+        Guid jobId,
+        MoveLeaseToken leaseToken,
+        string relativePath,
+        MoveJobEntryCopyState copyState,
+        string? targetPhysicalObjectIdentity,
+        CancellationToken cancellationToken) =>
+        executionStore.UpdateTargetEntryStateAsync(
+            jobId,
+            leaseToken,
+            relativePath,
+            copyState,
+            targetPhysicalObjectIdentity,
+            cancellationToken);
+
     private Task UpdateJobPhaseAsync(
         Guid jobId,
         MoveLeaseToken leaseToken,
@@ -103,5 +167,20 @@ internal sealed partial class AudiobookContentMoveService
             leaseToken,
             path,
             state,
+            cancellationToken);
+
+    private Task UpdateCreatedDirectoryPublicationAsync(
+        Guid jobId,
+        MoveLeaseToken leaseToken,
+        string path,
+        MoveCreatedDirectoryState state,
+        string directoryObjectIdentity,
+        CancellationToken cancellationToken) =>
+        executionStore.UpdateCreatedDirectoryPublicationAsync(
+            jobId,
+            leaseToken,
+            path,
+            state,
+            directoryObjectIdentity,
             cancellationToken);
 }

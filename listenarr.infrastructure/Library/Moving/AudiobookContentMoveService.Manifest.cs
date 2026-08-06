@@ -128,12 +128,40 @@ internal sealed partial class AudiobookContentMoveService
                 continue;
             }
 
-            if (!File.Exists(destinationPath)
-                || new FileInfo(destinationPath).Length != entry.Length
-                || !string.Equals(
-                    await ComputeSha256Async(destinationPath, cancellationToken),
-                    entry.Sha256,
-                    StringComparison.Ordinal))
+            if (!File.Exists(destinationPath))
+            {
+                throw new MoveNeedsAttentionException(
+                    $"Published file verification failed: {entry.RelativePath}");
+            }
+
+            var parentPath = Path.GetDirectoryName(destinationPath)
+                ?? throw new MoveNeedsAttentionException(
+                    "A published manifest file has no parent directory.");
+            using var parent = PinnedDirectoryCreation.OpenPinnedBoundary(parentPath);
+            using var file = parent.OpenExistingFile(
+                Path.GetFileName(destinationPath),
+                requireDeleteAccess: false);
+            if (!file.VisiblePathMatches()
+                || (!string.IsNullOrWhiteSpace(entry.TargetPhysicalObjectIdentity)
+                    && !string.Equals(
+                        entry.TargetPhysicalObjectIdentity,
+                        file.GetObjectIdentity(),
+                        StringComparison.Ordinal)))
+            {
+                throw new MoveNeedsAttentionException(
+                    $"Published file generation changed: {entry.RelativePath}");
+            }
+
+            var verified = !string.IsNullOrWhiteSpace(entry.Sha256)
+                ? await PinnedFileMatchesManifestAsync(
+                    file,
+                    entry,
+                    cancellationToken)
+                : IsVerifiedMarkerlessNativeRenameEntry(entry)
+                    && file.MatchesMetadata(
+                        entry.Length,
+                        entry.LastWriteTimeUtc);
+            if (!verified)
             {
                 throw new MoveNeedsAttentionException(
                     $"Published file verification failed: {entry.RelativePath}");

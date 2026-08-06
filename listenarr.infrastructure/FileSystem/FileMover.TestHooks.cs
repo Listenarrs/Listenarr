@@ -25,6 +25,54 @@ public partial class FileMover
         init;
     }
     internal Func<string, Task>? AfterPreparedMoveSourceDeletedForTestAsync { get; init; }
+    internal Func<Task>? AfterMarkerlessRenameJournalPlannedForTestAsync
+    {
+        get;
+        init;
+    }
+    internal Func<Task>?
+        AfterMarkerlessRenamePublishedBeforeTargetStateForTestAsync
+    {
+        get;
+        init;
+    }
+    internal Func<Task>? AfterMarkerlessRenameTargetStateForTestAsync
+    {
+        get;
+        init;
+    }
+    internal Func<Task>? AfterMarkerlessMoveJournalPlannedForTestAsync
+    {
+        get;
+        init;
+    }
+    internal Func<Task>?
+        AfterMarkerlessMovePublishedBeforeTargetStateForTestAsync
+    {
+        get;
+        init;
+    }
+    internal Func<Task>? AfterMarkerlessMoveTargetCreatedBeforeStateForTestAsync
+    {
+        get;
+        init;
+    }
+    internal Func<Task>? AfterMarkerlessMoveTargetStateForTestAsync
+    {
+        get;
+        init;
+    }
+    internal Func<Task>?
+        AfterMarkerlessMoveTargetWrittenBeforeVerifiedStateForTestAsync
+    {
+        get;
+        init;
+    }
+    internal Func<Task>? AfterMarkerlessMoveSourceDeletedBeforeStateForTestAsync
+    {
+        get;
+        init;
+    }
     internal bool DisableNativeFileRenameForTest { get; init; }
     internal Action<string>? BeforeFileMoveDurabilityBarrierForTest { get; init; }
     internal Action<string>? AfterDirectoryRenameJournalPublishedForTest { get; init; }

@@ -33,6 +33,7 @@ namespace Listenarr.Api.Features.Library
         int AudiobookId,
         MoveJobStatus Status,
         MoveJobPhase Phase,
+        double Progress,
         string? RequestedPath,
         string? Error,
         int AttemptCount,
@@ -164,6 +165,18 @@ namespace Listenarr.Api.Features.Library
                 cancellationToken);
         }
 
+        public async Task<IActionResult> GetActiveAsync(
+            CancellationToken cancellationToken = default)
+        {
+            if (_moveQueueService == null)
+            {
+                return new NotFoundObjectResult(new { message = "Move queue not available" });
+            }
+
+            var jobs = await _moveQueueService.GetActiveJobsAsync(cancellationToken);
+            return new OkObjectResult(jobs.Select(ToStatusResponse).ToList());
+        }
+
         public async Task<IActionResult> GetStatusAsync(
             string jobId,
             CancellationToken cancellationToken = default)
@@ -238,6 +251,7 @@ namespace Listenarr.Api.Features.Library
                 job.AudiobookId,
                 job.Status,
                 job.Phase,
+                MoveJobPublicProjection.CalculateProgress(job, job.Status),
                 job.RequestedPath,
                 MoveJobPublicProjection.ToError(job),
                 job.AttemptCount,

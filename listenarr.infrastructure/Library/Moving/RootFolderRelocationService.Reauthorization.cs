@@ -119,18 +119,16 @@ public sealed partial class RootFolderRelocationService
             relocation,
             sourceResolution.Semantics,
             targetResolution.Semantics);
+        cancellationToken.ThrowIfCancellationRequested();
         var targetNativeIdentity = target.GetDirectoryObjectIdentity();
-        var targetObjectIdentity = await ManagedDirectoryEnrollment.ResolveAsync(
-            target,
-            targetNativeIdentity,
-            enrollIfMissing: true,
-            cancellationToken);
-        if (!targetObjectIdentity.IsAvailable
-            || !target.VisiblePathMatches())
+        var targetObjectIdentity = new DirectoryObjectIdentityResolution(
+            ManagedDirectoryIdentity.CurrentVersion,
+            ManagedDirectoryIdentity.CreateMarkerless(targetNativeIdentity),
+            null);
+        if (!target.VisiblePathMatches())
         {
             throw new InvalidOperationException(
-                targetObjectIdentity.UnavailableReason
-                    ?? "The relocation target changed while its enrollment identity was captured.");
+                "The relocation target changed while its physical identity was captured.");
         }
 
         foreach (var job in relocation.MoveJobs)

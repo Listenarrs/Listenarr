@@ -55,7 +55,9 @@ namespace Listenarr.Infrastructure.Library.Scanning
                     .GetRequiredService<IAudiobookRepository>();
                 var historyRepository = scope.ServiceProvider
                     .GetRequiredService<IHistoryRepository>();
-                var audiobook = await audiobookRepository.GetByIdAsync(job.AudiobookId);
+                var audiobook = await audiobookRepository.GetForScanAsync(
+                    job.AudiobookId,
+                    stoppingToken);
                 if (audiobook == null)
                 {
                     _logger.LogWarning(

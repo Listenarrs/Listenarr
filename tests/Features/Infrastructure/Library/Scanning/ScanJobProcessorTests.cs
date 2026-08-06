@@ -517,7 +517,9 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Scanning
                 .Build();
             Assert.False(Directory.Exists(Path.GetFullPath(audiobook.BasePath!)));
             var audiobookRepository = new Mock<IAudiobookRepository>();
-            audiobookRepository.Setup(repository => repository.GetByIdAsync(audiobook.Id))
+            audiobookRepository.Setup(repository => repository.GetForScanAsync(
+                    audiobook.Id,
+                    It.IsAny<CancellationToken>()))
                 .ReturnsAsync(audiobook);
             var historyRepository = new Mock<IHistoryRepository>();
             historyRepository.Setup(repository => repository.AddAsync(
@@ -572,7 +574,9 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Scanning
                 .WithBasePath(basePath)
                 .Build();
             var audiobookRepository = new Mock<IAudiobookRepository>();
-            audiobookRepository.Setup(repository => repository.GetByIdAsync(audiobook.Id))
+            audiobookRepository.Setup(repository => repository.GetForScanAsync(
+                    audiobook.Id,
+                    It.IsAny<CancellationToken>()))
                 .ReturnsAsync(audiobook);
             var fileRepository = new Mock<IAudiobookFileRepository>();
             fileRepository.Setup(repository => repository.GetByAudiobookIdAsync(

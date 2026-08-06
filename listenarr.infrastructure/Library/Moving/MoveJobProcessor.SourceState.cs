@@ -268,13 +268,18 @@ internal partial class MoveJobProcessor
         try
         {
             var currentManifest = await services
-                .GetRequiredService<IMoveSourceManifestService>()
-                .BuildAsync(currentAudiobook, cancellationToken);
+                .GetRequiredService<IMoveSourcePlanService>()
+                .BuildPlanAsync(
+                    new AudiobookPathReferenceSnapshot(
+                        currentAudiobook.Id,
+                        currentAudiobook.BasePath,
+                        currentAudiobook.FilePath),
+                    cancellationToken);
             return FileSystemPathIdentity.AreEquivalent(
                     currentManifest.SourceRoot,
                     source,
                     sourceIdentity.Semantics)
-                && MoveManifestIdentity.SourceManifestsMatch(
+                && MoveManifestIdentity.SourceManifestShapesMatch(
                     currentManifest.Entries,
                     job.Entries,
                     sourceIdentity.Semantics);

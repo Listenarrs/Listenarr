@@ -95,12 +95,18 @@ internal sealed partial class EfMoveExecutionStore
         try
         {
             using var root = PinnedDirectoryCreation.OpenPinnedBoundary(targetRoot);
-            await ManagedDirectoryEnrollment.RequireMatchingEnrollmentAsync(
-                root,
-                relocation.TargetDirectoryObjectIdentityVersion,
-                relocation.TargetDirectoryObjectIdentity,
-                relocation.TargetDirectoryObjectIdentityUnavailableReason,
-                cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!string.IsNullOrWhiteSpace(
+                    relocation.TargetDirectoryObjectIdentityUnavailableReason)
+                || !ManagedDirectoryIdentity.MatchesNativeIdentity(
+                    relocation.TargetDirectoryObjectIdentityVersion,
+                    relocation.TargetDirectoryObjectIdentity,
+                    root.GetDirectoryObjectIdentity())
+                || !root.VisiblePathMatches())
+            {
+                throw new InvalidOperationException(
+                    "The relocation target no longer identifies its authorized physical generation.");
+            }
         }
         catch (Exception exception) when (exception is
             IOException or UnauthorizedAccessException
@@ -125,6 +131,7 @@ internal sealed partial class EfMoveExecutionStore
                 && entry.RelativePath == string.Empty
                 && entry.Length > 0
                 && entry.Sha256 != null)
+            .OrderBy(entry => entry.Id)
             .Select(entry => new
             {
                 entry.Length,
@@ -145,19 +152,46 @@ internal sealed partial class EfMoveExecutionStore
         {
             using var boundary = PinnedDirectoryCreation.OpenPinnedBoundary(
                 targetBoundary);
+            cancellationToken.ThrowIfCancellationRequested();
             var nativeIdentity = boundary.GetDirectoryObjectIdentity();
-            var current = await ManagedDirectoryEnrollment.ResolveAsync(
-                boundary,
-                nativeIdentity,
-                enrollIfMissing: false,
-                cancellationToken);
             var currentVersion = (int)authorizationEntries[0].Length;
-            if (!current.IsAvailable
-                || current.Version != currentVersion
-                || !string.Equals(
-                    MoveManifestIdentity.ComputeTargetBoundaryAuthorizationDigest(
+            var currentValue = ManagedDirectoryIdentity.CreateMarkerless(nativeIdentity);
+            var currentDigest = MoveManifestIdentity.ComputeTargetBoundaryAuthorizationDigest(
+                currentVersion,
+                currentValue);
+            if (!string.Equals(
+                    currentDigest,
+                    expectedDigest,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                currentDigest = await TryResolveConfiguredRootBoundaryDigestAsync(
+                        db,
+                        targetBoundary,
+                        nativeIdentity,
                         currentVersion,
-                        current.Value!),
+                        cancellationToken)
+                    ?? currentDigest;
+            }
+            if (!string.Equals(
+                    currentDigest,
+                    expectedDigest,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                // Last-resort compatibility for jobs created before a configured-root
+                // identity was available in the database. Read an existing legacy
+                // marker only; never create one.
+                var legacy = ManagedDirectoryEnrollment.ResolveExisting(
+                    boundary,
+                    nativeIdentity);
+                currentDigest = legacy.IsAvailable && legacy.Version == currentVersion
+                    ? MoveManifestIdentity.ComputeTargetBoundaryAuthorizationDigest(
+                        currentVersion,
+                        legacy.Value!)
+                    : currentDigest;
+            }
+
+            if (!string.Equals(
+                    currentDigest,
                     expectedDigest,
                     StringComparison.OrdinalIgnoreCase)
                 || !boundary.VisiblePathMatches())
@@ -178,6 +212,57 @@ internal sealed partial class EfMoveExecutionStore
             throw new MoveNeedsAttentionException(
                 $"The move target boundary physical generation is unavailable: {exception.Message}");
         }
+    }
+
+    private static async Task<string?> TryResolveConfiguredRootBoundaryDigestAsync(
+        ListenArrDbContext db,
+        string targetBoundary,
+        string nativeIdentity,
+        int expectedVersion,
+        CancellationToken cancellationToken)
+    {
+        var roots = await db.RootFolders
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+        foreach (var root in roots)
+        {
+            var persisted = RootFolderPathSemantics.ResolvePersisted(root);
+            if (persisted == null
+                || root.DirectoryObjectIdentityVersion != expectedVersion
+                || string.IsNullOrWhiteSpace(root.DirectoryObjectIdentity)
+                || !string.IsNullOrWhiteSpace(
+                    root.DirectoryObjectIdentityUnavailableReason)
+                || !ManagedDirectoryIdentity.MatchesNativeIdentity(
+                    root.DirectoryObjectIdentityVersion,
+                    root.DirectoryObjectIdentity,
+                    nativeIdentity))
+            {
+                continue;
+            }
+
+            try
+            {
+                if (!FileSystemPathIdentity.AreEquivalent(
+                        root.Path,
+                        targetBoundary,
+                        persisted.Value.Semantics))
+                {
+                    continue;
+                }
+            }
+            catch (Exception exception) when (exception is
+                ArgumentException or InvalidOperationException
+                    or NotSupportedException or PathTooLongException)
+            {
+                continue;
+            }
+
+            return MoveManifestIdentity.ComputeTargetBoundaryAuthorizationDigest(
+                expectedVersion,
+                root.DirectoryObjectIdentity);
+        }
+
+        return null;
     }
 
     private static async Task<bool> IsLeaseActiveAsync(

@@ -162,8 +162,8 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
             var movedChapter = Assert.Single(updatedFiles, file => file.Path == movedChapterPath);
             Assert.Equal(GetPhysicalObjectIdentity(movedBookPath), movedBook.PhysicalObjectIdentity);
             Assert.Equal(GetPhysicalObjectIdentity(movedChapterPath), movedChapter.PhysicalObjectIdentity);
-            Assert.NotEqual(originalPhysicalIdentities[bookPath], movedBook.PhysicalObjectIdentity);
-            Assert.NotEqual(originalPhysicalIdentities[chapterPath], movedChapter.PhysicalObjectIdentity);
+            Assert.Equal(originalPhysicalIdentities[bookPath], movedBook.PhysicalObjectIdentity);
+            Assert.Equal(originalPhysicalIdentities[chapterPath], movedChapter.PhysicalObjectIdentity);
             Assert.DoesNotContain(
                 updatedFiles,
                 file => file.Path?.StartsWith(source, StringComparison.Ordinal) == true);

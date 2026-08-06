@@ -20,9 +20,20 @@ using Listenarr.Domain.Common;
 
 namespace Listenarr.Application.Audiobooks.Contracts.Repositories
 {
+    public sealed record AudiobookPathReferenceSnapshot(
+        int AudiobookId,
+        string? BasePath,
+        string? FilePath);
+
     public interface IAudiobookRepository
     {
         Task<List<Audiobook>> GetAllAsync();
+        Task<AudiobookPathReferenceSnapshot?> GetPathReferenceSnapshotAsync(
+            int audiobookId,
+            CancellationToken ct = default);
+        Task<List<AudiobookPathReferenceSnapshot>> GetOtherPathReferenceSnapshotsAsync(
+            int audiobookId,
+            CancellationToken ct = default);
         Task<List<Audiobook>> GetLibraryAsync();
         Task<Dictionary<int, List<AudiobookSeriesMembership>>> GetAllSeriesMembershipsGroupedByAudiobookIdAsync(CancellationToken ct = default);
         Task<List<Audiobook>> GetByIdsWithFilesAsync(IEnumerable<int> ids, CancellationToken ct = default);
@@ -32,6 +43,8 @@ namespace Listenarr.Application.Audiobooks.Contracts.Repositories
         Task<Audiobook?> GetByIsbnAsync(string isbn);
         Task<Audiobook?> GetByIdAsync(int id);
         Task<Audiobook?> GetByIdSnapshotAsync(int id, CancellationToken ct = default);
+        Task<Audiobook?> GetForScanAsync(int id, CancellationToken ct = default);
+        Task<Audiobook?> GetForScanSnapshotAsync(int id, CancellationToken ct = default);
         Task<bool> TryUpdateBasePathAsync(
             int audiobookId,
             string expectedBasePath,

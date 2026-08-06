@@ -125,9 +125,6 @@ public sealed partial class AudiobookFilesystemDeleteService
                 "An owned directory is missing without a removal intent.");
         }
 
-        LibraryDirectoryOwnershipMarker.Validate(
-            ownership,
-            ownership.CanonicalPath);
     }
 
     private async Task<bool> RetireOwnedDirectoryAsync(

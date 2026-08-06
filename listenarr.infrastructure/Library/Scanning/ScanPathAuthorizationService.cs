@@ -159,9 +159,9 @@ internal sealed class ScanPathAuthorizationService(
             cancellationToken.ThrowIfCancellationRequested();
             if (!TryGetStoredFullPath(candidate.Path, out var fullPath))
             {
-                logger.LogWarning(
-                    "Ignoring invalid configured scan root {Path}",
-                    LogRedaction.SanitizeFilePath(candidate.Path));
+                LogUnavailableCandidate(
+                    candidate,
+                    "Ignoring invalid configured scan root {Path}");
                 continue;
             }
 
@@ -171,9 +171,9 @@ internal sealed class ScanPathAuthorizationService(
                 cancellationToken);
             if (resolution.State != PathIdentityState.Valid)
             {
-                logger.LogWarning(
+                LogUnavailableCandidate(
+                    candidate,
                     "Ignoring configured scan root {Path}: {Reason}",
-                    LogRedaction.SanitizeFilePath(candidate.Path),
                     resolution.Reason);
                 continue;
             }
@@ -183,9 +183,9 @@ internal sealed class ScanPathAuthorizationService(
                 resolution.Semantics.Syntax);
             if (IsFilesystemRoot(canonical, resolution.Semantics))
             {
-                logger.LogWarning(
-                    "Ignoring unsafe filesystem-root scan boundary {Path}",
-                    LogRedaction.SanitizeFilePath(candidate.Path));
+                LogUnavailableCandidate(
+                    candidate,
+                    "Ignoring unsafe filesystem-root scan boundary {Path}");
                 continue;
             }
 
@@ -224,6 +224,35 @@ internal sealed class ScanPathAuthorizationService(
         return roots;
     }
 
+    private void LogUnavailableCandidate(
+        RootCandidate candidate,
+        string message,
+        string? reason = null)
+    {
+        var sanitizedPath = LogRedaction.SanitizeFilePath(candidate.Path);
+        if (candidate.RequiresEnrollment)
+        {
+            if (reason == null)
+            {
+                logger.LogWarning(message, sanitizedPath);
+            }
+            else
+            {
+                logger.LogWarning(message, sanitizedPath, reason);
+            }
+            return;
+        }
+
+        if (reason == null)
+        {
+            logger.LogDebug(message, sanitizedPath);
+        }
+        else
+        {
+            logger.LogDebug(message, sanitizedPath, reason);
+        }
+    }
+
     private static async Task<PhysicalIdentityCapture> TryCapturePhysicalIdentityAsync(
         AuthorizedRoot authorizedRoot,
         string scanPath,
@@ -239,14 +268,19 @@ internal sealed class ScanPathAuthorizationService(
                 authorizedRoot.Semantics.Syntax);
             using var boundary = PinnedDirectoryCreation.OpenPinnedBoundary(
                 canonicalBoundary);
-            var boundaryIdentity = authorizedRoot.RequiresEnrollment
-                ? await ManagedDirectoryEnrollment.RequireMatchingEnrollmentAsync(
-                    boundary,
-                    authorizedRoot.DirectoryObjectIdentityVersion,
-                    authorizedRoot.DirectoryObjectIdentity,
-                    authorizedRoot.DirectoryObjectIdentityUnavailableReason,
-                    cancellationToken)
-                : boundary.GetDirectoryObjectIdentity();
+            cancellationToken.ThrowIfCancellationRequested();
+            var boundaryIdentity = boundary.GetDirectoryObjectIdentity();
+            if (authorizedRoot.RequiresEnrollment
+                && (!string.IsNullOrWhiteSpace(
+                        authorizedRoot.DirectoryObjectIdentityUnavailableReason)
+                    || !ManagedDirectoryIdentity.MatchesNativeIdentity(
+                        authorizedRoot.DirectoryObjectIdentityVersion,
+                        authorizedRoot.DirectoryObjectIdentity,
+                        boundaryIdentity)))
+            {
+                throw new InvalidOperationException(
+                    "The configured scan root no longer identifies its authorized physical generation.");
+            }
             using var scanRoot = OpenRelativeScanRoot(
                 boundary,
                 canonicalBoundary,

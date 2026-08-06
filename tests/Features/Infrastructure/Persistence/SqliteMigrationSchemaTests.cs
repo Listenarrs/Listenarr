@@ -47,6 +47,10 @@ namespace Listenarr.Tests.Features.Infrastructure.Persistence
             "20260730033245_AddPhysicalFileIdentityAndMoveCleanupProtection";
         private const string PhysicalIdentityMigrationPredecessorId =
             "20260727000644_AddOwnershipRecoveryProtocols";
+        private const string MarkerlessMoveMigrationId =
+            "20260805192525_AddMarkerlessMoveExecutionState";
+        private const string MarkerlessFileMutationMigrationId =
+            "20260805202154_AddMarkerlessFileMutationJournal";
 
         public static TheoryData<string> ChangedMigrationIds => new()
         {
@@ -65,7 +69,9 @@ namespace Listenarr.Tests.Features.Infrastructure.Persistence
             "20260717143713_AddLibraryDirectoryOwnership",
             "20260726042801_AddDirectoryObjectIdentityAuthorization",
             "20260727000644_AddOwnershipRecoveryProtocols",
-            PhysicalIdentityMigrationId
+            PhysicalIdentityMigrationId,
+            MarkerlessMoveMigrationId,
+            MarkerlessFileMutationMigrationId
         };
 
         private static (SqliteConnection Connection, ListenArrDbContext Context) CreateMigratedSqliteContext()
@@ -554,6 +560,189 @@ namespace Listenarr.Tests.Features.Infrastructure.Persistence
             ownershipCommand.CommandText =
                 "SELECT \"ManagedRootFolderId\" FROM \"LibraryDirectoryOwnerships\" WHERE \"Id\" = 10";
             Assert.Equal(DBNull.Value, await ownershipCommand.ExecuteScalarAsync());
+        }
+
+        [Fact]
+        [Trait("Scenario", "MarkerlessMoveExecutionStateUpgrade")]
+        public async Task MarkerlessMoveExecutionStateMigration_PreservesLegacyRowsAndDefaults()
+        {
+            await using var connection = new SqliteConnection("DataSource=:memory:");
+            await connection.OpenAsync();
+            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+                .UseSqlite(connection, sqlite =>
+                    sqlite.MigrationsAssembly(
+                        typeof(ListenArrDbContext).Assembly.GetName().Name))
+                .Options;
+            await using var context = new ListenArrDbContext(options);
+            var migrator = context.GetService<IMigrator>();
+            await migrator.MigrateAsync(
+                "20260805034058_AddLibraryDirectoryOwnershipRootForeignKey");
+
+            var moveJobId = Guid.NewGuid();
+            await context.Database.ExecuteSqlRawAsync(
+                """
+                INSERT INTO "MoveJobs" (
+                    "Id", "AudiobookId", "EnqueuedAt", "Status",
+                    "AttemptCount", "DeleteEmptySource", "FailureKind",
+                    "IdentityKeyVersion", "LeaseGeneration", "Phase")
+                VALUES ({0}, 501, CURRENT_TIMESTAMP, 'Queued', 0, 1,
+                    'None', 5, 0, 'None')
+                """,
+                moveJobId);
+            await context.Database.ExecuteSqlRawAsync(
+                """
+                INSERT INTO "MoveJobEntries" (
+                    "MoveJobId", "RelativePath", "EntryType", "Length",
+                    "LastWriteTimeUtc", "CopyState", "CleanupState",
+                    "CleanupProtectionVersion")
+                VALUES ({0}, 'book.m4b', 'File', 1234, CURRENT_TIMESTAMP,
+                    'Pending', 'Pending', 0)
+                """,
+                moveJobId);
+            await context.Database.ExecuteSqlRawAsync(
+                """
+                INSERT INTO "MoveJobCreatedDirectories" (
+                    "MoveJobId", "Path", "State")
+                VALUES ({0}, '/library/author/book', 'Planned')
+                """,
+                moveJobId);
+
+            await migrator.MigrateAsync(MarkerlessMoveMigrationId);
+
+            await using (var command = connection.CreateCommand())
+            {
+                command.CommandText =
+                    """
+                    SELECT "ExecutionProtocolVersion",
+                           "SourceDirectoryCleanupState",
+                           "SourceDirectoryObjectIdentity",
+                           "TargetDirectoryObjectIdentity"
+                    FROM "MoveJobs"
+                    WHERE "Id" = $jobId
+                    """;
+                command.Parameters.AddWithValue("$jobId", moveJobId);
+                await using var reader = await command.ExecuteReaderAsync();
+                Assert.True(await reader.ReadAsync());
+                Assert.Equal(MoveExecutionProtocol.LegacyFilesystemArtifacts, reader.GetInt32(0));
+                Assert.Equal("Pending", reader.GetString(1));
+                Assert.True(reader.IsDBNull(2));
+                Assert.True(reader.IsDBNull(3));
+            }
+
+            await using (var command = connection.CreateCommand())
+            {
+                command.CommandText =
+                    """
+                    SELECT "SourcePhysicalObjectIdentity",
+                           "TargetPhysicalObjectIdentity"
+                    FROM "MoveJobEntries"
+                    WHERE "MoveJobId" = $jobId
+                    """;
+                command.Parameters.AddWithValue("$jobId", moveJobId);
+                await using var reader = await command.ExecuteReaderAsync();
+                Assert.True(await reader.ReadAsync());
+                Assert.True(reader.IsDBNull(0));
+                Assert.True(reader.IsDBNull(1));
+            }
+
+            Assert.Equal(
+                DBNull.Value,
+                await ExecuteScalarAsync(
+                    connection,
+                    "SELECT \"DirectoryObjectIdentity\" FROM \"MoveJobCreatedDirectories\""));
+
+            await migrator.MigrateAsync(
+                "20260805034058_AddLibraryDirectoryOwnershipRootForeignKey");
+            Assert.False(await ColumnExistsAsync(
+                connection,
+                "MoveJobs",
+                "ExecutionProtocolVersion"));
+            Assert.False(await ColumnExistsAsync(
+                connection,
+                "MoveJobEntries",
+                "TargetPhysicalObjectIdentity"));
+            Assert.False(await ColumnExistsAsync(
+                connection,
+                "MoveJobCreatedDirectories",
+                "DirectoryObjectIdentity"));
+        }
+
+        [Fact]
+        [Trait("Scenario", "MarkerlessFileMutationJournalUpgrade")]
+        public async Task MarkerlessFileMutationJournalMigration_CreatesDurableDefaultsAndIndexes()
+        {
+            await using var connection = new SqliteConnection("DataSource=:memory:");
+            await connection.OpenAsync();
+            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+                .UseSqlite(connection, sqlite =>
+                    sqlite.MigrationsAssembly(
+                        typeof(ListenArrDbContext).Assembly.GetName().Name))
+                .Options;
+            await using var context = new ListenArrDbContext(options);
+            var migrator = context.GetService<IMigrator>();
+            await migrator.MigrateAsync(MarkerlessMoveMigrationId);
+            Assert.False(await TableExistsAsync(
+                connection,
+                "FileMutationJournals"));
+
+            await migrator.MigrateAsync(MarkerlessFileMutationMigrationId);
+            Assert.True(await TableExistsAsync(
+                connection,
+                "FileMutationJournals"));
+            var operationId = Guid.NewGuid();
+            await context.Database.ExecuteSqlRawAsync(
+                """
+                INSERT INTO "FileMutationJournals" (
+                    "OperationId", "Action", "SourcePath", "DestinationPath",
+                    "SourcePhysicalObjectIdentity", "SourceLength", "State",
+                    "CreatedAt", "UpdatedAt")
+                VALUES ({0}, 'Move', '/source/book.m4b',
+                    '/library/book.m4b', 'source-generation', 123,
+                    'Planned', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """,
+                operationId);
+
+            await using (var command = connection.CreateCommand())
+            {
+                command.CommandText =
+                    """
+                    SELECT "ProtocolVersion", "State",
+                           "TargetPhysicalObjectIdentity", "AudiobookId"
+                    FROM "FileMutationJournals"
+                    WHERE "OperationId" = $operationId
+                    """;
+                command.Parameters.AddWithValue("$operationId", operationId);
+                await using var reader = await command.ExecuteReaderAsync();
+                Assert.True(await reader.ReadAsync());
+                Assert.Equal(
+                    FileMutationProtocol.MarkerlessDatabaseState,
+                    reader.GetInt32(0));
+                Assert.Equal("Planned", reader.GetString(1));
+                Assert.True(reader.IsDBNull(2));
+                Assert.True(reader.IsDBNull(3));
+            }
+
+            await using (var command = connection.CreateCommand())
+            {
+                command.CommandText =
+                    """
+                    SELECT group_concat("name", ',')
+                    FROM (
+                        SELECT "name"
+                        FROM pragma_index_list('FileMutationJournals')
+                        WHERE "name" LIKE 'IX_FileMutationJournals_%'
+                        ORDER BY "name")
+                    """;
+                Assert.Equal(
+                    "IX_FileMutationJournals_State,"
+                    + "IX_FileMutationJournals_UpdatedAt",
+                    (await command.ExecuteScalarAsync())?.ToString());
+            }
+
+            await migrator.MigrateAsync(MarkerlessMoveMigrationId);
+            Assert.False(await TableExistsAsync(
+                connection,
+                "FileMutationJournals"));
         }
 
         [Fact]

@@ -10,10 +10,17 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
     {
         using var directory = creation.OpenCreatedDirectoryAnchor();
         using var parent = creation.OpenParentDirectoryAnchor();
-        LibraryDirectoryOwnershipMarker.Validate(
-            ownership,
-            directory,
-            parent);
+        if (!ManagedDirectoryIdentity.Matches(
+                ownership.DirectoryObjectIdentityVersion,
+                ownership.DirectoryObjectIdentity,
+                ownership.OwnershipToken,
+                directory.GetDirectoryObjectIdentity())
+            || !directory.VisiblePathMatches()
+            || !parent.VisiblePathMatches())
+        {
+            throw new InvalidOperationException(
+                "The owned directory no longer matches its persisted physical identity.");
+        }
     }
 
     private static void CleanupRetiredSiblingMarkers(

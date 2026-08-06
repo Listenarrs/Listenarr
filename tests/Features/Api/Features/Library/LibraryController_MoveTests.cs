@@ -132,6 +132,56 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         }
 
         [Fact]
+        public async Task GetActiveMoveJobs_ReturnsByteWeightedProgressWithoutWorkerInternals()
+        {
+            var job = new MoveJob
+            {
+                Id = Guid.NewGuid(),
+                AudiobookId = 42,
+                RequestedPath = "/library/Author/Title",
+                SourcePath = "/incoming/Author/Title",
+                Status = MoveJobStatus.Running,
+                Phase = MoveJobPhase.Copying,
+                LeaseOwner = "worker-secret",
+                Entries =
+                [
+                    new MoveJobEntry
+                    {
+                        RelativePath = "part-1.m4b",
+                        EntryType = MoveJobEntryType.File,
+                        Length = 100,
+                        CopyState = MoveJobEntryCopyState.Verified
+                    },
+                    new MoveJobEntry
+                    {
+                        RelativePath = "part-2.m4b",
+                        EntryType = MoveJobEntryType.File,
+                        Length = 300,
+                        CopyState = MoveJobEntryCopyState.Pending
+                    }
+                ]
+            };
+            var moveQueue = CreateStrictMoveQueueMock();
+            moveQueue.Setup(service => service.GetActiveJobsAsync(
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync([job]);
+            Init(services => services.WithSingleton(moveQueue.Object));
+
+            var result = await _provider.GetRequiredService<LibraryController>()
+                .GetActiveMoveJobs(CancellationToken.None);
+
+            var ok = Assert.IsType<OkObjectResult>(result);
+            var json = JsonSerializer.Serialize(ok.Value);
+            using var document = JsonDocument.Parse(json);
+            var projected = Assert.Single(document.RootElement.EnumerateArray());
+            Assert.Equal((int)MoveJobStatus.Running, projected.GetProperty("Status").GetInt32());
+            Assert.Equal((int)MoveJobPhase.Copying, projected.GetProperty("Phase").GetInt32());
+            Assert.Equal(21.25, projected.GetProperty("Progress").GetDouble());
+            Assert.DoesNotContain(nameof(MoveJob.Entries), json, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("worker-secret", json, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
         public async Task GetMoveJobStatus_NeedsAttentionVerification_ReportsOperatorRepairNotRetryable()
         {
             var jobId = Guid.NewGuid();

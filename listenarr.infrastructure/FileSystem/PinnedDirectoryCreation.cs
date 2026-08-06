@@ -20,12 +20,14 @@ internal sealed partial class PinnedDirectoryCreation : IDisposable
 
     private const uint FileListDirectory = 0x0001;
     private const uint FileReadAttributes = 0x0080;
+    private const uint FileWriteAttributes = 0x0100;
     private const uint Synchronize = 0x00100000;
     private const uint GenericRead = 0x80000000;
     private const uint GenericWrite = 0x40000000;
     private const uint DeleteAccess = 0x00010000;
     private const uint FileShareRead = 0x00000001;
     private const uint FileShareReadWrite = 0x00000003;
+    private const uint FileShareDelete = 0x00000004;
     private const uint FileShareAll = 0x00000007;
     private const uint OpenExisting = 3;
     private const uint FileFlagBackupSemantics = 0x02000000;
@@ -216,34 +218,16 @@ internal sealed partial class PinnedDirectoryCreation : IDisposable
         string childName)
     {
         var parentHandle = OpenDirectoryUnix(parentPath, noFollow: true);
-        var temporaryName = $".listenarr-create-{Guid.NewGuid():N}";
         SafeFileHandle? directoryHandle = null;
-        var temporaryExists = false;
         try
         {
             ExclusiveDirectoryCreator.InvokeBeforeCreateHook(Path.Join(parentPath, childName));
             var parentFd = parentHandle.DangerousGetHandle().ToInt32();
-            if (MkdirAt(parentFd, temporaryName, UnixDirectoryMode) != 0)
-            {
-                throw new Win32Exception(
-                    Marshal.GetLastWin32Error(),
-                    $"Could not create a pinned temporary directory beneath '{parentPath}'.");
-            }
-            temporaryExists = true;
-
-            directoryHandle = OpenDirectoryAtUnix(parentHandle, temporaryName);
-            var renameResult = OperatingSystem.IsMacOS()
-                ? RenameAtExclusiveMac(parentFd, temporaryName, parentFd, childName, RenameExclusiveMac)
-                : RenameAtNoReplaceLinux(parentFd, temporaryName, parentFd, childName, RenameNoReplace);
-            if (renameResult != 0)
+            if (MkdirAt(parentFd, childName, UnixDirectoryMode) != 0)
             {
                 var error = Marshal.GetLastWin32Error();
                 if (error == UnixAlreadyExists)
                 {
-                    directoryHandle.Dispose();
-                    directoryHandle = null;
-                    RemoveDirectoryAtUnix(parentHandle, temporaryName);
-                    temporaryExists = false;
                     return new PinnedDirectoryCreation(
                         parentHandle,
                         directoryHandle: null,
@@ -255,25 +239,30 @@ internal sealed partial class PinnedDirectoryCreation : IDisposable
 
                 throw new Win32Exception(
                     error,
-                    $"Could not publish a pinned directory beneath '{parentPath}'.");
+                    $"Could not create the requested directory beneath '{parentPath}'.");
             }
 
-            temporaryExists = false;
-            return new PinnedDirectoryCreation(
+            directoryHandle = OpenDirectoryAtUnix(parentHandle, childName);
+            var created = new PinnedDirectoryCreation(
                 parentHandle,
                 directoryHandle,
                 parentPath,
                 childName,
                 created: true,
                 parentFollowsVisibleFinalLink: false);
+            directoryHandle = null;
+            if (!created.VisiblePathMatches())
+            {
+                created.Dispose();
+                throw new InvalidOperationException(
+                    "The newly created directory changed before it could be pinned.");
+            }
+
+            return created;
         }
         catch
         {
             directoryHandle?.Dispose();
-            if (temporaryExists)
-            {
-                TryRemoveDirectoryAtUnix(parentHandle, temporaryName);
-            }
             parentHandle.Dispose();
             throw;
         }

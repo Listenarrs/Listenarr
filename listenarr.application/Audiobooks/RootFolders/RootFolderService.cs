@@ -81,21 +81,19 @@ namespace Listenarr.Application.Audiobooks.RootFolders
                 throw new InvalidOperationException(BuildRootFolderConflictMessage(conflict));
             }
 
-            var identity = await CaptureInitialDirectoryObjectIdentityAsync(root);
+            await CaptureInitialDirectoryObjectIdentityAsync(root);
 
             if (root.IsDefault)
             {
                 var currentDefaultId = (await _repo.GetDefaultAsync())?.Id;
-                return await PersistRootWithEnrollmentCompensationAsync(
-                    root,
-                    identity,
-                    () => _repo.AddAndSetDefaultAsync(root, currentDefaultId));
+                await _repo.AddAndSetDefaultAsync(root, currentDefaultId);
+            }
+            else
+            {
+                await _repo.AddAsync(root);
             }
 
-            return await PersistRootWithEnrollmentCompensationAsync(
-                root,
-                identity,
-                () => _repo.AddAsync(root));
+            return root;
         }
 
         public Task DeleteAsync(int id, int? reassignRootId = null) =>

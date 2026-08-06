@@ -11,6 +11,16 @@ internal sealed partial class MoveCleanupBoundaryResolver
     {
         try
         {
+            if (FileSystemPathIdentity.AreEquivalent(
+                    persistedBoundary,
+                    configuredBoundary,
+                    semantics))
+            {
+                return new MoveCleanupBoundaryResolution(
+                    configuredBoundary,
+                    MoveCleanupBoundaryKind.ConfiguredRoot);
+            }
+
             if (FileSystemPathIdentity.IsSameOrInside(
                     persistedBoundary,
                     configuredBoundary,

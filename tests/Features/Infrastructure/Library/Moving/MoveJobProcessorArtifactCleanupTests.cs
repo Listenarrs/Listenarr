@@ -17,7 +17,11 @@ public partial class MoveJobProcessorTests
             Title = "Artifact Cleanup Retry",
             BasePath = source
         });
-        var (queue, job) = await CreateQueuedMoveJobAsync(audiobook, target, source);
+        var (queue, job) = await CreateQueuedMoveJobAsync(
+            audiobook,
+            target,
+            source,
+            executionProtocolVersion: MoveExecutionProtocol.LegacyFilesystemArtifacts);
         var faultingContentMoveService = new AudiobookContentMoveService(
             _provider.GetRequiredService<ILogger<AudiobookContentMoveService>>(),
             _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>(),
@@ -68,7 +72,11 @@ public partial class MoveJobProcessorTests
             Title = "Source State Delete Retry",
             BasePath = source
         });
-        var (queue, job) = await CreateQueuedMoveJobAsync(audiobook, target, source);
+        var (queue, job) = await CreateQueuedMoveJobAsync(
+            audiobook,
+            target,
+            source,
+            executionProtocolVersion: MoveExecutionProtocol.LegacyFilesystemArtifacts);
         var faultingContentMoveService = new AudiobookContentMoveService(
             _provider.GetRequiredService<ILogger<AudiobookContentMoveService>>(),
             _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>(),
@@ -120,7 +128,11 @@ public partial class MoveJobProcessorTests
             Title = "Recreated Source",
             BasePath = source
         });
-        var (queue, job) = await CreateQueuedMoveJobAsync(audiobook, target, source);
+        var (queue, job) = await CreateQueuedMoveJobAsync(
+            audiobook,
+            target,
+            source,
+            executionProtocolVersion: MoveExecutionProtocol.LegacyFilesystemArtifacts);
         var faultingContentMoveService = new AudiobookContentMoveService(
             _provider.GetRequiredService<ILogger<AudiobookContentMoveService>>(),
             _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>(),
@@ -156,7 +168,11 @@ public partial class MoveJobProcessorTests
             Title = "Mutated Target",
             BasePath = source
         });
-        var (queue, job) = await CreateQueuedMoveJobAsync(audiobook, target, source);
+        var (queue, job) = await CreateQueuedMoveJobAsync(
+            audiobook,
+            target,
+            source,
+            executionProtocolVersion: MoveExecutionProtocol.LegacyFilesystemArtifacts);
         var faultingContentMoveService = new AudiobookContentMoveService(
             _provider.GetRequiredService<ILogger<AudiobookContentMoveService>>(),
             _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>(),
@@ -192,7 +208,11 @@ public partial class MoveJobProcessorTests
             Title = "Final Hash Ownership Race",
             BasePath = source
         });
-        var (queue, job) = await CreateQueuedMoveJobAsync(audiobook, target, source);
+        var (queue, job) = await CreateQueuedMoveJobAsync(
+            audiobook,
+            target,
+            source,
+            executionProtocolVersion: MoveExecutionProtocol.LegacyFilesystemArtifacts);
         var contentMoveService = new AudiobookContentMoveService(
             _provider.GetRequiredService<ILogger<AudiobookContentMoveService>>(),
             _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>(),
@@ -250,7 +270,7 @@ public partial class MoveJobProcessorTests
         Assert.Equal(MoveJobStatus.RetryScheduled, retryJob.Status);
         Assert.Equal(MoveJobPhase.Finalizing, retryJob.Phase);
         Assert.True(Directory.Exists(sourceParent));
-        Assert.True(File.Exists(Path.Join(target, $".listenarr-move-{job.Id:N}.pending")));
+        Assert.False(File.Exists(Path.Join(target, $".listenarr-move-{job.Id:N}.pending")));
         Assert.NotNull(retryJob.NextAttemptAt);
         Assert.Null(await queue.TryClaimJobAsync(job.Id, LeaseOwner));
         await MakeRetryDueAsync(job.Id);
@@ -272,11 +292,11 @@ public partial class MoveJobProcessorTests
     public async Task ProcessJobAsync_SourceAncestorReceivesContentDuringFinalization_PreservesItAndCompletes()
     {
         var sourceRoot = FileService.GetTempDirectory("move-processor-finalize-arrival-root");
+        await AddAuthorizedRootAsync(sourceRoot, "Finalization Arrival Source Root");
         var sourceParent = Path.Join(sourceRoot, "Author", "Old Title");
         var source = Path.Join(sourceParent, "test");
         Directory.CreateDirectory(source);
         await FileService.GetFileAsync(source, "book.m4b", "audio");
-        await RecordOwnedDirectoryHierarchyAsync(sourceRoot, sourceParent);
         var target = Path.Join(
             FileService.GetTempPath(),
             $"move-processor-finalize-arrival-dst-{Guid.NewGuid():N}");
@@ -371,7 +391,7 @@ public partial class MoveJobProcessorTests
             retryDelays);
         Assert.All(retryDelays, delay =>
             Assert.True(delay <= MoveTimingPolicy.MaxRetryDelay));
-        Assert.True(File.Exists(Path.Join(
+        Assert.False(File.Exists(Path.Join(
             target,
             $".listenarr-move-{initialJob.Id:N}.pending")));
     }

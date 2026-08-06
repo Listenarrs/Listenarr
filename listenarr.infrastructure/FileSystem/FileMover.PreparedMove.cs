@@ -19,6 +19,16 @@ public partial class FileMover
 
         try
         {
+            var markerlessResult = await TryCompletePreparedMoveMarkerlessAsync(
+                source,
+                destination,
+                registrationLease,
+                operationId);
+            if (markerlessResult.HasValue)
+            {
+                return markerlessResult.Value;
+            }
+
             if (!registrationLease.MatchesCurrentPublication())
             {
                 return false;

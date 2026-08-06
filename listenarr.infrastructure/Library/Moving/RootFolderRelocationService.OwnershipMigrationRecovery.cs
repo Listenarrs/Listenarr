@@ -116,6 +116,28 @@ public sealed partial class RootFolderRelocationService
                         relocation.TargetDirectoryObjectIdentity,
                         relocation.TargetDirectoryObjectIdentityUnavailableReason,
                         CancellationToken.None);
+                    foreach (var plan in plans)
+                    {
+                        plan.Journal.State =
+                            LibraryDirectoryOwnershipPathMigrationState.SourceMarkersRetired;
+                        plan.Journal.UpdatedAt =
+                            timeProvider.GetUtcNow().UtcDateTime;
+                    }
+                    await db.SaveChangesAsync(CancellationToken.None);
+                }
+
+                if (plans.All(plan =>
+                    plan.Journal.State
+                        == LibraryDirectoryOwnershipPathMigrationState
+                            .SourceMarkersRetired))
+                {
+                    await RetireOwnershipMigrationTargetsAsync(
+                        plans,
+                        relocation.TargetPath,
+                        relocation.TargetDirectoryObjectIdentityVersion,
+                        relocation.TargetDirectoryObjectIdentity,
+                        relocation.TargetDirectoryObjectIdentityUnavailableReason,
+                        CancellationToken.None);
                     db.LibraryDirectoryOwnershipPathMigrations
                         .RemoveRange(plans.Select(plan => plan.Journal));
                     FinalizeRecoveredMetadataOnlyRelocation(

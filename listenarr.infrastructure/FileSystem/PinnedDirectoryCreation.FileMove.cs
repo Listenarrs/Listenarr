@@ -343,28 +343,6 @@ internal sealed partial class PinnedDirectoryCreation
             }
         }
 
-        internal void PreserveMetadataTo(PinnedFileEntry destination)
-        {
-            ThrowIfDisposed();
-            ArgumentNullException.ThrowIfNull(destination);
-            destination.ThrowIfDisposed();
-            if (!OperatingSystem.IsWindows())
-            {
-                File.SetUnixFileMode(
-                    destination._fileHandle,
-                    File.GetUnixFileMode(_fileHandle));
-            }
-            File.SetAttributes(
-                destination._fileHandle,
-                File.GetAttributes(_fileHandle));
-            File.SetLastWriteTimeUtc(
-                destination._fileHandle,
-                File.GetLastWriteTimeUtc(_fileHandle));
-            File.SetCreationTimeUtc(
-                destination._fileHandle,
-                File.GetCreationTimeUtc(_fileHandle));
-        }
-
         internal async Task<bool> MatchesAsync(
             long expectedLength,
             string? expectedSha256,

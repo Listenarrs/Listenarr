@@ -1,5 +1,3 @@
-using System.Text.Json;
-using Listenarr.Domain.Common;
 using Listenarr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -11,14 +9,13 @@ public sealed partial class RootFolderRelocationService
         ".listenarr-relocation-directory.json";
     private const string RelocationReservationParentMarkerPrefix =
         ".listenarr-relocation-parent-";
-    private static readonly JsonSerializerOptions ReservationJsonOptions =
-        new(JsonSerializerDefaults.Web);
+
     internal Action<string>? TargetReservationDirectoryFlushedForTest
     {
         get;
         set;
     }
-    internal Action<string>? AfterReservationParentMarkerPublishedForTest
+    internal Action<string>? AfterReservationParentIntentPersistedForTest
     {
         get;
         set;
@@ -29,6 +26,11 @@ public sealed partial class RootFolderRelocationService
         set;
     }
     internal Action<string>? AfterReservationMarkerRetiredForTest
+    {
+        get;
+        set;
+    }
+    internal Action<string>? AfterTargetReservationStatePersistedForTest
     {
         get;
         set;
@@ -63,20 +65,18 @@ public sealed partial class RootFolderRelocationService
                 PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
                     parentPath,
                     createMissing: false);
+            ValidateReservationPathIsDirectChild(
+                reservation,
+                parent.FullPath);
             using var publication =
                 parent.TryOpenExistingChildForPublication(
                     Path.GetFileName(canonicalPath));
             if (publication == null)
             {
-                if (reservation.State ==
-                    RootFolderRelocationCreatedDirectoryState.Planned)
-                {
-                    RetireReservationParentMarker(
-                        relocationId,
-                        reservation,
-                        parent);
-                }
-
+                RetireReservationParentMarker(
+                    relocationId,
+                    reservation,
+                    parent);
                 reservation.State =
                     RootFolderRelocationCreatedDirectoryState.Removed;
                 reservation.UpdatedAt =
@@ -85,67 +85,44 @@ public sealed partial class RootFolderRelocationService
                 continue;
             }
 
-            using var directory =
-                publication.OpenCreatedDirectoryAnchor();
+            using var directory = publication.OpenCreatedDirectoryAnchor();
             if (reservation.State ==
                 RootFolderRelocationCreatedDirectoryState.Planned)
             {
-                if (!TryEnrollPublishedPlannedReservation(
+                ValidatePlannedReservationParent(
+                    reservation,
+                    parent);
+                if (!TryValidateLegacyReservationMarkers(
                         relocationId,
                         reservation,
                         parent,
                         directory))
                 {
-                    reservation.State =
-                        RootFolderRelocationCreatedDirectoryState.Retained;
-                    reservation.UpdatedAt =
-                        timeProvider.GetUtcNow().UtcDateTime;
+                    RetainObservedReservation(
+                        reservation,
+                        directory);
                     await db.SaveChangesAsync(cancellationToken);
                     continue;
                 }
 
-                var nativeIdentity = directory.GetDirectoryObjectIdentity();
-                reservation.State =
-                    RootFolderRelocationCreatedDirectoryState.Created;
-                reservation.DirectoryObjectIdentityVersion =
-                    ManagedDirectoryIdentity.CurrentVersion;
-                reservation.DirectoryObjectIdentity =
-                    ManagedDirectoryIdentity.Create(
-                        reservation.OwnershipToken,
-                        nativeIdentity);
-                reservation.UpdatedAt =
-                    timeProvider.GetUtcNow().UtcDateTime;
-                await db.SaveChangesAsync(cancellationToken);
-                RetireReservationParentMarker(
-                    relocationId,
+                CaptureCreatedReservation(
                     reservation,
-                    parent);
+                    directory);
+                await db.SaveChangesAsync(cancellationToken);
             }
             else
             {
-                RetireReservationParentMarker(
-                    relocationId,
+                ValidateReservationDirectoryIdentity(
                     reservation,
-                    parent);
+                    directory);
             }
 
-            ValidateReservationDirectory(
+            RetireLegacyReservationMarkers(
                 relocationId,
                 reservation,
+                parent,
                 directory);
-            ManagedDirectoryEnrollment.RetireValidMarker(directory);
-            var entries = Directory.EnumerateFileSystemEntries(
-                    canonicalPath)
-                .Take(2)
-                .ToList();
-            var markerPath = Path.Join(
-                canonicalPath,
-                RelocationReservationMarkerName);
-            if (entries.Count != 1
-                || !string.Equals(
-                    entries[0],
-                    markerPath,
-                    PathComparison)
+            if (Directory.EnumerateFileSystemEntries(canonicalPath).Any()
                 || !directory.VisiblePathMatches()
                 || !parent.VisiblePathMatches())
             {
@@ -157,37 +134,7 @@ public sealed partial class RootFolderRelocationService
                 continue;
             }
 
-            using (var marker = directory.OpenExistingFile(
-                RelocationReservationMarkerName,
-                requireDeleteAccess: true))
-            {
-                ValidateReservationMarker(
-                    relocationId,
-                    reservation,
-                    marker);
-                if (!marker.VisiblePathMatches()
-                    || !directory.VisiblePathMatches())
-                {
-                    throw new InvalidOperationException(
-                        "A relocation reservation marker changed before cleanup.");
-                }
-
-                ValidateReservationMarker(
-                    relocationId,
-                    reservation,
-                    marker);
-                marker.Delete();
-            }
-
-            if (Directory.EnumerateFileSystemEntries(
-                    canonicalPath).Any()
-                || !directory.VisiblePathMatches())
-            {
-                throw new InvalidOperationException(
-                    "A relocation-created directory changed after marker retirement.");
-            }
-
-            publication.DeletePinnedEmptyDirectory(
+            publication.RetirePinnedEmptyDirectoryFromNamespace(
                 Path.GetFileName(canonicalPath));
             reservation.State =
                 RootFolderRelocationCreatedDirectoryState.Removed;
@@ -209,14 +156,9 @@ public sealed partial class RootFolderRelocationService
         foreach (var reservation in reservations)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (reservation.State ==
-                RootFolderRelocationCreatedDirectoryState.Retained)
-            {
-                continue;
-            }
-
-            if (reservation.State !=
-                RootFolderRelocationCreatedDirectoryState.Created)
+            if (reservation.State is not (
+                    RootFolderRelocationCreatedDirectoryState.Created
+                        or RootFolderRelocationCreatedDirectoryState.Retained))
             {
                 throw new InvalidOperationException(
                     "A successful relocation has an incomplete target directory reservation.");
@@ -231,40 +173,28 @@ public sealed partial class RootFolderRelocationService
                 PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
                     parentPath,
                     createMissing: false);
+            ValidateReservationPathIsDirectChild(
+                reservation,
+                parent.FullPath);
             using var publication =
                 parent.TryOpenExistingChildForPublication(
                     Path.GetFileName(canonicalPath))
                 ?? throw new InvalidOperationException(
-                    "A relocation-created target directory disappeared before finalization.");
-            using var directory =
-                publication.OpenCreatedDirectoryAnchor();
+                    "A relocation target directory disappeared before finalization.");
+            using var directory = publication.OpenCreatedDirectoryAnchor();
             ValidateReservationDirectoryIdentity(
                 reservation,
                 directory);
-
-            using var marker = directory.TryOpenExistingFile(
-                RelocationReservationMarkerName,
-                requireDeleteAccess: false);
-            if (marker != null)
-            {
-                ValidateReservationMarker(
-                    relocationId,
-                    reservation,
-                    marker);
-                if (!marker.VisiblePathMatches()
-                    || !directory.VisiblePathMatches()
-                    || !parent.VisiblePathMatches())
-                {
-                    throw new InvalidOperationException(
-                        "A relocation reservation marker changed before finalization.");
-                }
-            }
-
+            RetireLegacyReservationMarkers(
+                relocationId,
+                reservation,
+                parent,
+                directory);
             if (!directory.VisiblePathMatches()
                 || !parent.VisiblePathMatches())
             {
                 throw new InvalidOperationException(
-                    "A relocation-created target directory changed during finalization.");
+                    "A relocation target directory changed during finalization.");
             }
 
             reservation.State =
@@ -296,60 +226,40 @@ public sealed partial class RootFolderRelocationService
             foreach (var reservation in reservations)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (reservation.State is
-                    RootFolderRelocationCreatedDirectoryState.Retained
-                        or RootFolderRelocationCreatedDirectoryState.Removed)
+                if (reservation.State ==
+                    RootFolderRelocationCreatedDirectoryState.Removed)
                 {
                     throw new InvalidOperationException(
-                        "A terminal relocation target reservation cannot be reused.");
+                        "A removed relocation target reservation cannot be reused.");
                 }
 
                 var canonicalPath = RequireHostReservationPath(
                     reservation.CanonicalPath);
+                ValidateReservationPathIsDirectChild(
+                    reservation,
+                    current.FullPath);
                 var childName = Path.GetFileName(canonicalPath);
-                var parentIdentity =
-                    current.GetDirectoryObjectIdentity();
+                bool childAlreadyExists;
+                using (var existing =
+                    current.TryOpenExistingChildForPublication(childName))
+                {
+                    childAlreadyExists = existing != null;
+                }
                 if (reservation.State ==
                     RootFolderRelocationCreatedDirectoryState.Planned)
                 {
-                    var expectedParentIdentity = ManagedDirectoryIdentity.Create(
-                        reservation.OwnershipToken,
-                        parentIdentity);
-                    if (reservation.DirectoryObjectIdentityVersion == null
+                    if (childAlreadyExists
+                        && reservation.DirectoryObjectIdentityVersion == null
                         && string.IsNullOrWhiteSpace(
                             reservation.DirectoryObjectIdentity))
                     {
-                        reservation.DirectoryObjectIdentityVersion =
-                            ManagedDirectoryIdentity.CurrentVersion;
-                        reservation.DirectoryObjectIdentity =
-                            expectedParentIdentity;
-                        reservation.UpdatedAt =
-                            timeProvider.GetUtcNow().UtcDateTime;
-                        await db.SaveChangesAsync(cancellationToken);
-                    }
-                    else if (reservation.DirectoryObjectIdentityVersion
-                                != ManagedDirectoryIdentity.CurrentVersion
-                        || !string.Equals(
-                            reservation.DirectoryObjectIdentity,
-                            expectedParentIdentity,
-                            StringComparison.Ordinal))
-                    {
                         throw new InvalidOperationException(
-                            "The parent of a planned relocation directory was replaced before creation.");
+                            "A relocation child appeared before its parent-generation intent was persisted.");
                     }
-
-                    bool childAlreadyExists;
-                    using (var existingChild =
-                        current.TryOpenExistingChildForPublication(childName))
-                    {
-                        childAlreadyExists = existingChild != null;
-                    }
-
-                    await EnsureReservationParentMarkerAsync(
-                        relocationId,
+                    await PersistOrValidatePlannedParentIdentityAsync(
+                        db,
                         reservation,
                         current,
-                        allowPublication: !childAlreadyExists,
                         cancellationToken);
                 }
 
@@ -361,51 +271,69 @@ public sealed partial class RootFolderRelocationService
                     if (creation.Created)
                     {
                         next = creation.OpenCreatedDirectoryAnchor();
-                        WriteReservationMarker(
-                            relocationId,
+                        next.FlushDirectoryEntry();
+                        current.FlushDirectoryEntry();
+                        TargetReservationDirectoryFlushedForTest?.Invoke(
+                            canonicalPath);
+                        CaptureCreatedReservation(
                             reservation,
                             next);
-                        FlushReservationDirectory(next);
-                        FlushReservationDirectory(current);
+                        await db.SaveChangesAsync(cancellationToken);
+                        AfterTargetReservationStatePersistedForTest?.Invoke(
+                            canonicalPath);
                     }
                     else
                     {
                         next = current.OpenExistingChild(childName);
-                        ValidateReservationMarker(
-                            relocationId,
-                            reservation,
-                            next);
+                        if (reservation.State ==
+                            RootFolderRelocationCreatedDirectoryState.Planned)
+                        {
+                            if (TryValidateLegacyReservationMarkers(
+                                    relocationId,
+                                    reservation,
+                                    current,
+                                    next))
+                            {
+                                CaptureCreatedReservation(
+                                    reservation,
+                                    next);
+                            }
+                            else
+                            {
+                                if (Directory.EnumerateFileSystemEntries(
+                                        canonicalPath).Any())
+                                {
+                                    throw new InvalidOperationException(
+                                        "An unproven relocation target directory contains content.");
+                                }
+                                RetainObservedReservation(
+                                    reservation,
+                                    next);
+                            }
+                            await db.SaveChangesAsync(cancellationToken);
+                            AfterTargetReservationStatePersistedForTest?.Invoke(
+                                canonicalPath);
+                        }
+                        else
+                        {
+                            ValidateReservationDirectoryIdentity(
+                                reservation,
+                                next);
+                        }
                     }
 
-                    var liveIdentity =
-                        next.GetDirectoryObjectIdentity();
-                    if (reservation.State ==
-                            RootFolderRelocationCreatedDirectoryState.Created
-                        && !ManagedDirectoryIdentity.Matches(
-                            reservation.DirectoryObjectIdentityVersion,
-                            reservation.DirectoryObjectIdentity,
-                            reservation.OwnershipToken,
-                            liveIdentity))
-                    {
-                        throw new InvalidOperationException(
-                            "A relocation-created directory was replaced after enrollment.");
-                    }
-
-                    reservation.State =
-                        RootFolderRelocationCreatedDirectoryState.Created;
-                    reservation.DirectoryObjectIdentityVersion =
-                        ManagedDirectoryIdentity.CurrentVersion;
-                    reservation.DirectoryObjectIdentity =
-                        ManagedDirectoryIdentity.Create(
-                            reservation.OwnershipToken,
-                            liveIdentity);
-                    reservation.UpdatedAt =
-                        timeProvider.GetUtcNow().UtcDateTime;
-                    await db.SaveChangesAsync(cancellationToken);
-                    RetireReservationParentMarker(
+                    RetireLegacyReservationMarkers(
                         relocationId,
                         reservation,
-                        current);
+                        current,
+                        next);
+                    if (!next.VisiblePathMatches()
+                        || !current.VisiblePathMatches())
+                    {
+                        throw new InvalidOperationException(
+                            "A relocation target reservation changed before use.");
+                    }
+
                     current.Dispose();
                     current = next;
                     next = null;
@@ -422,30 +350,17 @@ public sealed partial class RootFolderRelocationService
                     "The reserved relocation target changed before use.");
             }
 
-            var finalNativeIdentity = current.GetDirectoryObjectIdentity();
-            return await ManagedDirectoryEnrollment.ResolveAsync(
-                current,
-                finalNativeIdentity,
-                enrollIfMissing: true,
-                cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            return new DirectoryObjectIdentityResolution(
+                ManagedDirectoryIdentity.CurrentVersion,
+                ManagedDirectoryIdentity.CreateMarkerless(
+                    current.GetDirectoryObjectIdentity()),
+                null);
         }
         finally
         {
             current.Dispose();
         }
-    }
-
-    private static string RequireHostReservationPath(string path)
-    {
-        if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
-                path,
-                out var canonicalPath,
-                out var reason))
-        {
-            throw new InvalidOperationException(reason);
-        }
-
-        return canonicalPath;
     }
 
     private async Task MarkPrecommittedRelocationNeedsAttentionAsync(
@@ -459,18 +374,11 @@ public sealed partial class RootFolderRelocationService
             .SingleAsync(
                 candidate => candidate.Id == relocationId,
                 cancellationToken);
-        if (persisted.Status is
-            RootFolderRelocationStatus.Pending
-                or RootFolderRelocationStatus.Running)
-        {
-            persisted.Status =
-                RootFolderRelocationStatus.NeedsAttention;
-            persisted.Error =
-                $"Target directory reservation requires attention: {exception.Message}";
-            persisted.UpdatedAt =
-                timeProvider.GetUtcNow().UtcDateTime;
-            await recoveryDb.SaveChangesAsync(cancellationToken);
-        }
+        persisted.Status = RootFolderRelocationStatus.NeedsAttention;
+        persisted.Error =
+            $"Relocation target reservation requires attention: {exception.Message}";
+        persisted.UpdatedAt =
+            timeProvider.GetUtcNow().UtcDateTime;
+        await recoveryDb.SaveChangesAsync(cancellationToken);
     }
-
 }

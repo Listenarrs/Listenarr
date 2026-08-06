@@ -129,6 +129,7 @@ coverage/
 /cypress/screenshots/
 test-results/
 playwright-report/
+.playwright-cli/
 .codeql-db*/
 
 # Vite

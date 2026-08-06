@@ -52,6 +52,111 @@ public sealed class RootFolderObjectIdentityReconcilerTests : BaseTests
             StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task ReconcileAsync_LegacyVersionTwoIdentityWithoutMarker_RemainsAuthorized()
+    {
+        var rootPath = FileService.GetTempDirectory("root-object-identity-markerless-v2");
+        using var anchor = PinnedDirectoryCreation.OpenPinnedBoundary(rootPath);
+        var nativeIdentity = anchor.GetDirectoryObjectIdentity();
+        var persistedIdentity = ManagedDirectoryIdentity.Create(
+            Guid.NewGuid().ToString("N"),
+            nativeIdentity);
+        Assert.False(File.Exists(Path.Join(
+            rootPath,
+            ManagedDirectoryEnrollment.FileName)));
+
+        var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+        await using (var setup = new ListenArrDbContext(options))
+        {
+            setup.RootFolders.Add(new RootFolder
+            {
+                Id = 1,
+                Name = "Library",
+                Path = rootPath,
+                DirectoryObjectIdentityVersion = ManagedDirectoryIdentity.CurrentVersion,
+                DirectoryObjectIdentity = persistedIdentity
+            });
+            await setup.SaveChangesAsync();
+        }
+
+        var reconciler = new RootFolderObjectIdentityReconciler(
+            new TestDbContextFactory(options),
+            new DirectoryObjectIdentityResolver(),
+            new FilesystemMutationCoordinator(),
+            NullLogger<RootFolderObjectIdentityReconciler>.Instance);
+
+        await reconciler.ReconcileAsync();
+
+        await using var verification = new ListenArrDbContext(options);
+        var root = await verification.RootFolders.SingleAsync();
+        Assert.Equal(ManagedDirectoryIdentity.CurrentVersion, root.DirectoryObjectIdentityVersion);
+        Assert.Equal(persistedIdentity, root.DirectoryObjectIdentity);
+        Assert.Null(root.DirectoryObjectIdentityUnavailableReason);
+        Assert.False(File.Exists(Path.Join(
+            rootPath,
+            ManagedDirectoryEnrollment.FileName)));
+    }
+
+    [Fact]
+    public async Task ReconcileAsync_MatchingLegacyEnrollmentMarker_RetiresMarkerAndKeepsDatabaseIdentity()
+    {
+        var rootPath = FileService.GetTempDirectory("root-object-identity-retire-marker");
+        string nativeIdentity;
+        using (var anchor = PinnedDirectoryCreation.OpenPinnedBoundary(rootPath))
+        {
+            nativeIdentity = anchor.GetDirectoryObjectIdentity();
+        }
+        var token = Guid.NewGuid().ToString("N");
+        var legacyIdentity = new DirectoryObjectIdentityResolution(
+            ManagedDirectoryIdentity.CurrentVersion,
+            ManagedDirectoryIdentity.Create(token, nativeIdentity),
+            null);
+        var markerPath = Path.Join(rootPath, ManagedDirectoryEnrollment.FileName);
+        await File.WriteAllTextAsync(
+            markerPath,
+            System.Text.Json.JsonSerializer.Serialize(new
+            {
+                version = 1,
+                token,
+                nativeIdentity,
+                createdAtUtc = DateTimeOffset.UtcNow
+            }));
+        Assert.True(File.Exists(markerPath));
+
+        var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+        await using (var setup = new ListenArrDbContext(options))
+        {
+            setup.RootFolders.Add(new RootFolder
+            {
+                Id = 1,
+                Name = "Library",
+                Path = rootPath,
+                DirectoryObjectIdentityVersion = legacyIdentity.Version,
+                DirectoryObjectIdentity = legacyIdentity.Value
+            });
+            await setup.SaveChangesAsync();
+        }
+
+        var reconciler = new RootFolderObjectIdentityReconciler(
+            new TestDbContextFactory(options),
+            new DirectoryObjectIdentityResolver(),
+            new FilesystemMutationCoordinator(),
+            NullLogger<RootFolderObjectIdentityReconciler>.Instance);
+
+        await reconciler.ReconcileAsync();
+
+        await using var verification = new ListenArrDbContext(options);
+        var root = await verification.RootFolders.SingleAsync();
+        Assert.Equal(legacyIdentity.Version, root.DirectoryObjectIdentityVersion);
+        Assert.Equal(legacyIdentity.Value, root.DirectoryObjectIdentity);
+        Assert.Null(root.DirectoryObjectIdentityUnavailableReason);
+        Assert.False(File.Exists(markerPath));
+    }
+
     private sealed class TestDbContextFactory(
         DbContextOptions<ListenArrDbContext> options)
         : IDbContextFactory<ListenArrDbContext>

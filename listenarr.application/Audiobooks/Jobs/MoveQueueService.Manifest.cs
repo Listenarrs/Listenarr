@@ -63,8 +63,9 @@ public partial class MoveQueueService
             if (entry.EntryType == MoveJobEntryType.File)
             {
                 if (entry.Length < 0
-                    || entry.Sha256?.Length != 64
-                    || !entry.Sha256.All(Uri.IsHexDigit))
+                    || (entry.Sha256 != null
+                        && (entry.Sha256.Length != 64
+                            || !entry.Sha256.All(Uri.IsHexDigit))))
                 {
                     throw new InvalidOperationException(
                         "A move source file manifest entry has invalid length or hash evidence.");

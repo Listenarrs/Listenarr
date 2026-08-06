@@ -140,6 +140,7 @@ namespace Listenarr.Application.Audiobooks.Jobs
                     RequestedPath = target,
                     ActiveDeduplicationKey = deduplicationKey,
                     IdentityKeyVersion = MoveManifestIdentity.Version,
+                    ExecutionProtocolVersion = MoveExecutionProtocol.Current,
                     EnqueuedAt = _timeProvider.GetUtcNow().UtcDateTime,
                     Status = MoveJobStatus.Queued,
                     SourcePath = source,

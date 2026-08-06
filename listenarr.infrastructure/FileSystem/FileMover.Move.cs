@@ -48,6 +48,17 @@ namespace Listenarr.Infrastructure.FileSystem
                 }
             }
 
+            var markerlessResult =
+                await TryMoveFilePreservingPhysicalIdentityMarkerlessAsync(
+                    source,
+                    destination,
+                    expectedSourcePhysicalObjectIdentity,
+                    operationId);
+            if (markerlessResult.HasValue)
+            {
+                return markerlessResult.Value;
+            }
+
             using var pathLock = await TryAcquireFileMoveGateAsync(
                 source,
                 destination);
@@ -112,6 +123,15 @@ namespace Listenarr.Infrastructure.FileSystem
                     StringComparison.Ordinal))
             {
                 return true;
+            }
+
+            var markerlessResult = await TryMoveFileMarkerlessAsync(
+                sourceFile,
+                destFile,
+                operationId);
+            if (markerlessResult.HasValue)
+            {
+                return markerlessResult.Value;
             }
 
             using var pathLock = await TryAcquireFileMoveGateAsync(

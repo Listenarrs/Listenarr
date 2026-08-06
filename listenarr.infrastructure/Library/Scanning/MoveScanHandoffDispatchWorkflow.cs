@@ -9,6 +9,7 @@ internal enum MoveScanDispatchOutcome
     NotClaimed,
     Dispatched,
     Deferred,
+    Superseded,
     Failed
 }
 
@@ -47,16 +48,13 @@ internal static class MoveScanHandoffDispatchWorkflow
 
         try
         {
-            var audiobook = knownAudiobook;
-            if (audiobook == null)
-            {
-                using var scope = scopeFactory.CreateScope();
-                var audiobookRepository = scope.ServiceProvider
-                    .GetRequiredService<IAudiobookRepository>();
-                audiobook = await audiobookRepository.GetByIdAsync(claim.AudiobookId);
-            }
-
-            if (audiobook == null)
+            using var audiobookScope = scopeFactory.CreateScope();
+            var audiobookRepository = audiobookScope.ServiceProvider
+                .GetRequiredService<IAudiobookRepository>();
+            var currentAudiobook = await audiobookRepository.GetPathReferenceSnapshotAsync(
+                claim.AudiobookId,
+                cancellationToken);
+            if (currentAudiobook == null)
             {
                 await handoffStore.CompleteAttemptAsync(
                     claim.HandoffId,
@@ -71,6 +69,57 @@ internal static class MoveScanHandoffDispatchWorkflow
                     cancellationToken);
                 return new MoveScanDispatchResult(MoveScanDispatchOutcome.Failed);
             }
+
+            if (!TryCurrentAudiobookTargetsClaim(
+                    currentAudiobook.BasePath,
+                    claim,
+                    out var targetsClaim,
+                    out var currentPathError))
+            {
+                await handoffStore.CompleteAttemptAsync(
+                    claim.HandoffId,
+                    claim.AttemptGeneration,
+                    scanJobId: null,
+                    MoveScanTerminalOutcome.Failed,
+                    currentPathError,
+                    found: 0,
+                    created: 0,
+                    scanPath: claim.TargetPath,
+                    timeProvider.GetUtcNow(),
+                    cancellationToken);
+                return new MoveScanDispatchResult(MoveScanDispatchOutcome.Failed);
+            }
+
+            if (!targetsClaim)
+            {
+                const string supersededReason =
+                    "A newer audiobook destination superseded this move scan handoff.";
+                await handoffStore.CompleteAttemptAsync(
+                    claim.HandoffId,
+                    claim.AttemptGeneration,
+                    scanJobId: null,
+                    MoveScanTerminalOutcome.Superseded,
+                    supersededReason,
+                    found: 0,
+                    created: 0,
+                    scanPath: claim.TargetPath,
+                    timeProvider.GetUtcNow(),
+                    cancellationToken);
+                logger.LogInformation(
+                    "Superseded stale move scan handoff {HandoffId} for audiobook {AudiobookId} before filesystem authorization",
+                    claim.HandoffId,
+                    claim.AudiobookId);
+                return new MoveScanDispatchResult(MoveScanDispatchOutcome.Superseded);
+            }
+
+            var audiobook = new Audiobook
+            {
+                Id = claim.AudiobookId,
+                Title = knownAudiobook?.Id == claim.AudiobookId
+                    ? knownAudiobook.Title
+                    : string.Empty,
+                BasePath = currentAudiobook.BasePath
+            };
 
             using var authorizationScope = scopeFactory.CreateScope();
             var authorizationService = authorizationScope.ServiceProvider
@@ -200,6 +249,46 @@ internal static class MoveScanHandoffDispatchWorkflow
             }
 
             return new MoveScanDispatchResult(MoveScanDispatchOutcome.Failed);
+        }
+    }
+
+    private static bool TryCurrentAudiobookTargetsClaim(
+        string? currentPath,
+        MoveScanHandoffClaim claim,
+        out bool targetsClaim,
+        out string? error)
+    {
+        targetsClaim = false;
+        error = null;
+        if (string.IsNullOrWhiteSpace(currentPath))
+        {
+            return true;
+        }
+
+        if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                currentPath,
+                out var canonicalCurrentPath,
+                out var pathReason))
+        {
+            error = pathReason
+                ?? "The audiobook's current path is unavailable on this host.";
+            return false;
+        }
+
+        try
+        {
+            targetsClaim = FileSystemPathIdentity.AreEquivalent(
+                canonicalCurrentPath,
+                claim.TargetPath,
+                claim.TargetIdentity.Semantics);
+            return true;
+        }
+        catch (Exception exception) when (exception is
+            ArgumentException or InvalidOperationException
+                or NotSupportedException or PathTooLongException)
+        {
+            error = $"The audiobook's current path could not be compared to the move scan target: {exception.Message}";
+            return false;
         }
     }
 }

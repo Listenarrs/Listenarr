@@ -145,11 +145,7 @@
               </button>
             </div>
             <ul class="notification-list">
-              <li
-                v-for="item in recentNotifications.filter((n) => !n.dismissed)"
-                :key="item.id"
-                class="notification-item"
-              >
+              <li v-for="item in visibleNotifications" :key="item.id" class="notification-item">
                 <div class="notif-icon">
                   <component
                     v-if="notificationIconComponent(item.icon)"
@@ -160,10 +156,22 @@
                 <div class="notif-content">
                   <div class="notif-title">{{ item.title }}</div>
                   <div class="notif-message">{{ item.message }}</div>
-                  <div class="notif-time">{{ formatTime(item.timestamp) }}</div>
+                  <ProgressBar
+                    v-if="item.progress != null"
+                    :value="item.progress"
+                    variant="activity"
+                    height="small"
+                    :show-percentage="true"
+                    :show-size="false"
+                    :animating="item.active === true"
+                  />
+                  <div v-if="item.timestamp" class="notif-time">
+                    {{ formatTime(item.timestamp) }}
+                  </div>
                 </div>
                 <div class="notif-actions">
                   <button
+                    v-if="!item.active"
                     class="dismiss-btn"
                     @click.stop="dismissNotification(item.id)"
                     title="Dismiss"
@@ -172,10 +180,7 @@
                   </button>
                 </div>
               </li>
-              <li
-                v-if="recentNotifications.filter((n) => !n.dismissed).length === 0"
-                class="notification-empty"
-              >
+              <li v-if="visibleNotifications.length === 0" class="notification-empty">
                 No recent activity
               </li>
             </ul>
@@ -558,11 +563,12 @@ import { useConfirmService } from '@/composables/confirmService'
 import { useNotification } from '@/composables/useNotification'
 import { useDownloadsStore } from '@/stores/downloads'
 import { useLibraryStore } from '@/stores/library'
+import { useMoveJobsStore } from '@/stores/moveJobs'
 import { useAuthStore } from '@/stores/auth'
 import { apiService } from '@/services/api'
 import { getStartupConfigCached } from '@/services/startupConfigCache'
 import { handleImageError } from '@/utils/imageFallback'
-import { Pill } from '@/components/base'
+import { Pill, ProgressBar } from '@/components/base'
 import { getPlaceholderUrl } from '@/utils/placeholder'
 import { useProtectedImages } from '@/composables/useProtectedImages'
 import { logSessionState, clearAllAuthData } from '@/utils/sessionDebug'
@@ -586,6 +592,7 @@ const { notification, close: closeNotification } = useNotification()
 const { getProtectedImageSrc } = useProtectedImages()
 const downloadsStore = useDownloadsStore()
 const libraryStore = useLibraryStore()
+const moveJobsStore = useMoveJobsStore()
 const auth = useAuthStore()
 const authEnabled = ref(false)
 const startupConfigLoaded = ref(false)
@@ -793,7 +800,6 @@ const closeMobileMenu = () => {
 }
 
 // Reactive state for badges and counters
-const notificationCount = computed(() => recentNotifications.filter((n) => !n.dismissed).length)
 const queueItems = ref<QueueItem[]>([])
 const wantedCount = computed(
   () => libraryStore.audiobooks.filter((book) => book.wanted === true).length,
@@ -872,12 +878,40 @@ type HistoryNotification = {
   title: string
   message: string
   icon?: string
-  timestamp: string
+  timestamp?: string
   dismissed?: boolean
+  progress?: number
+  phase?: string
+  active?: boolean
 }
 
 const recentNotifications = reactive<HistoryNotification[]>([])
 const recentDownloadTitles = ref<Set<string>>(new Set()) // Track recent download titles to avoid spam
+
+const activeMoveNotifications = computed<HistoryNotification[]>(() =>
+  moveJobsStore.trackedJobs.map((job) => {
+    const audiobookTitle = job.audiobookId
+      ? libraryStore.audiobooks.find((book) => book.id === job.audiobookId)?.title
+      : undefined
+    const target = job.target ? ` to ${job.target}` : ''
+    return {
+      id: `move-${job.jobId}`,
+      title: audiobookTitle ? `Moving ${audiobookTitle}` : 'Moving audiobook',
+      message: `${job.phase || 'Preparing move'}${target}`,
+      icon: 'ph ph-folder-open',
+      progress: job.progress,
+      phase: job.phase,
+      active: true,
+    }
+  }),
+)
+
+const visibleNotifications = computed(() => [
+  ...activeMoveNotifications.value,
+  ...recentNotifications.filter((notification) => !notification.dismissed),
+])
+
+const notificationCount = computed(() => visibleNotifications.value.length)
 
 function pushNotification(n: HistoryNotification) {
   // Ensure new notifications are not dismissed
@@ -1156,12 +1190,17 @@ onMounted(async () => {
 
   // If authenticated, load protected resources and enable real-time updates
   if (auth.user.authenticated) {
+    // Keep durable move jobs globally visible so the notification dropdown can
+    // show progress even when the Activity page is not mounted.
+    moveJobsStore.start()
+
     // Hydrate the app once, then keep it current from SignalR updates.
     await Promise.all([downloadsStore.loadDownloads(), syncLibrarySnapshot()])
 
     unsubscribeSignalRConnected = signalRService.onConnected(() => {
       if (auth.user.authenticated) {
         void syncLibrarySnapshot()
+        void moveJobsStore.loadActiveJobs()
       }
     })
 
@@ -1343,6 +1382,7 @@ onUnmounted(() => {
   if (unsubscribeSignalRConnected) {
     unsubscribeSignalRConnected()
   }
+  moveJobsStore.stop()
   // Event listeners are automatically cleaned up by VueUse
 })
 

@@ -821,6 +821,63 @@ public sealed class BackendArchitectureTests : BaseTests
     }
 
     [Fact]
+    public void LegacyDirectoryMover_IsNotConnectedToProductionWorkflows()
+    {
+        var projectRoots = new[]
+        {
+            "listenarr.domain",
+            "listenarr.application",
+            "listenarr.infrastructure",
+            "listenarr.api"
+        };
+        var invocationPattern = new Regex(
+            @"\.(?:MoveDirectoryAsync|CopyDirectoryAsync)\s*\(",
+            RegexOptions.Compiled);
+        var violations = projectRoots
+            .SelectMany(root => Directory.EnumerateFiles(
+                Path.Join(RepositoryRoot, root),
+                "*.cs",
+                SearchOption.AllDirectories))
+            .Where(file => !IsBuildArtifact(file))
+            .Where(file => !file.Contains(
+                $"{Path.DirectorySeparatorChar}Persistence{Path.DirectorySeparatorChar}Migrations{Path.DirectorySeparatorChar}",
+                StringComparison.OrdinalIgnoreCase))
+            .Where(file => invocationPattern.IsMatch(File.ReadAllText(file)))
+            .Select(file => Normalize(Path.GetRelativePath(RepositoryRoot, file)))
+            .ToList();
+
+        Assert.Empty(violations);
+    }
+
+    [Fact]
+    public void RootDirectoryIdentity_DoesNotPublishPermanentFilesystemEnrollment()
+    {
+        var legacyEnrollmentSource = File.ReadAllText(Path.Join(
+            RepositoryRoot,
+            "listenarr.infrastructure",
+            "FileSystem",
+            "ManagedDirectoryEnrollment.cs"));
+        var resolverSource = File.ReadAllText(Path.Join(
+            RepositoryRoot,
+            "listenarr.infrastructure",
+            "FileSystem",
+            "DirectoryObjectIdentityResolver.cs"));
+
+        Assert.DoesNotContain(
+            "PublishNewFileAsync",
+            legacyEnrollmentSource,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "enrollIfMissing",
+            legacyEnrollmentSource,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "ManagedDirectoryEnrollment",
+            resolverSource,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void DurableMoveBoundary_RequiresExplicitFilesystemSemantics()
     {
         var files = new[]

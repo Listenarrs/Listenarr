@@ -21,12 +21,6 @@ public sealed partial class LibraryMoveWorkflow
             return MoveRecoveryConflict(recovery);
         }
 
-        var audiobook = await _repo.GetByIdAsync(id);
-        if (audiobook == null)
-        {
-            return new NotFoundObjectResult(new { message = "Audiobook not found" });
-        }
-
         try
         {
             using var scope = _scopeFactory.CreateScope();
@@ -198,14 +192,13 @@ public sealed partial class LibraryMoveWorkflow
                     var authoritativeRepository = authoritativeScope.ServiceProvider
                         .GetRequiredService<IAudiobookRepository>();
                     var manifestService = authoritativeScope.ServiceProvider
-                        .GetRequiredService<IMoveSourceManifestService>();
-                    var currentAudiobook = await authoritativeRepository.GetByIdSnapshotAsync(
-                        id,
-                        lockedToken)
+                        .GetRequiredService<IMoveSourcePlanService>();
+                    var currentAudiobook = await authoritativeRepository
+                        .GetPathReferenceSnapshotAsync(id, lockedToken)
                         ?? throw new ApplicationNotFoundException(
                             "audiobook_not_found",
                             "Audiobook not found");
-                    var manifest = await manifestService.BuildAsync(
+                    var manifest = await manifestService.BuildPlanAsync(
                         currentAudiobook,
                         lockedToken);
 

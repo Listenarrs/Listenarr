@@ -63,7 +63,9 @@ public partial class ScanJobProcessor
             using var historyScope = _scopeFactory.CreateScope();
             var historyRepository = historyScope.ServiceProvider.GetRequiredService<IHistoryRepository>();
             var audiobookRepository = historyScope.ServiceProvider.GetRequiredService<IAudiobookRepository>();
-            var audiobook = await audiobookRepository.GetByIdAsync(job.AudiobookId);
+            var audiobook = await audiobookRepository.GetForScanAsync(
+                job.AudiobookId,
+                cancellationToken);
             terminalDecision = await CommitTerminalDecisionAsync(
                 job,
                 commitToken => RecordScanFailureHistoryAsync(

@@ -8,6 +8,8 @@ internal sealed partial class EfMoveExecutionStore(
     IDbContextFactory<ListenArrDbContext> dbContextFactory,
     TimeProvider timeProvider) : IMoveExecutionStore
 {
+    internal Func<Task>? AfterMarkerlessStateLoadedForTestAsync { get; set; }
+
     public Task EnsureLeaseOwnedAsync(
         Guid jobId,
         MoveLeaseToken leaseToken,
@@ -28,6 +30,21 @@ internal sealed partial class EfMoveExecutionStore(
                 {
                     throw new MoveLeaseLostException(jobId, leaseToken.Generation);
                 }
+            },
+            cancellationToken);
+
+    public Task<int> GetExecutionProtocolVersionAsync(
+        Guid jobId,
+        CancellationToken cancellationToken) =>
+        ExecuteAsync(
+            "load the move execution protocol",
+            async () =>
+            {
+                await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+                return await db.MoveJobs
+                    .Where(job => job.Id == jobId)
+                    .Select(job => job.ExecutionProtocolVersion)
+                    .SingleAsync(cancellationToken);
             },
             cancellationToken);
 

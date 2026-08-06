@@ -690,7 +690,12 @@ describe('EditAudiobookModal move options', () => {
       jobId: 'job-1',
       audiobookId: 1,
       status: 'Queued',
+      progress: 0,
+      phase: undefined,
       target: 'C:\\root\\New Author\\New Book',
+      error: undefined,
+      recoveryDisposition: undefined,
+      canRetry: undefined,
     })
     expect(signalRMocks.onMoveJobUpdate).toHaveBeenCalledTimes(1)
     expect(wrapper.emitted('saved')).toHaveLength(1)

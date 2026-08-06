@@ -84,6 +84,69 @@ namespace Listenarr.Tests.Features.Infrastructure.Repositories
         }
 
         [Fact]
+        public async Task GetForScanAsync_DoesNotLoadUnneededNavigationGraphs()
+        {
+            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+            await using var db = new ListenArrDbContext(options);
+            var qualityProfile = new QualityProfile { Name = "Scan Profile" };
+            db.QualityProfiles.Add(qualityProfile);
+            await db.SaveChangesAsync();
+            var audiobook = new Audiobook
+            {
+                Title = "Narrow Scan Read",
+                BasePath = "/library/book",
+                QualityProfileId = qualityProfile.Id
+            };
+            db.Audiobooks.Add(audiobook);
+            await db.SaveChangesAsync();
+            db.AudiobookFiles.Add(new AudiobookFile
+            {
+                AudiobookId = audiobook.Id,
+                Path = "/library/book/book.m4b"
+            });
+            db.AudiobookExternalIdentifiers.Add(new AudiobookExternalIdentifier
+            {
+                AudiobookId = audiobook.Id,
+                Type = AudiobookExternalIdentifierType.Asin,
+                ValueRaw = "B000SCAN01",
+                ValueNormalized = "B000SCAN01",
+                Source = AudiobookExternalIdentifierSource.Manual
+            });
+            db.AudiobookSeriesMemberships.Add(new AudiobookSeriesMembership
+            {
+                AudiobookId = audiobook.Id,
+                SeriesName = "Scan Series"
+            });
+            await db.SaveChangesAsync();
+            db.ChangeTracker.Clear();
+            var repository = new AudiobookRepository(db);
+
+            var tracked = Assert.IsType<Audiobook>(
+                await repository.GetForScanAsync(audiobook.Id));
+
+            var entry = db.Entry(tracked);
+            Assert.False(entry.Collection(candidate => candidate.Files!).IsLoaded);
+            Assert.False(entry.Collection(candidate => candidate.ExternalIdentifiers!).IsLoaded);
+            Assert.False(entry.Collection(candidate => candidate.SeriesMemberships!).IsLoaded);
+            Assert.False(entry.Reference(candidate => candidate.QualityProfile).IsLoaded);
+            Assert.Null(tracked.Files);
+            Assert.Null(tracked.ExternalIdentifiers);
+            Assert.Null(tracked.SeriesMemberships);
+            Assert.Null(tracked.QualityProfile);
+
+            db.ChangeTracker.Clear();
+            var snapshot = Assert.IsType<Audiobook>(
+                await repository.GetForScanSnapshotAsync(audiobook.Id));
+            Assert.Equal(EntityState.Detached, db.Entry(snapshot).State);
+            Assert.Null(snapshot.Files);
+            Assert.Null(snapshot.ExternalIdentifiers);
+            Assert.Null(snapshot.SeriesMemberships);
+            Assert.Null(snapshot.QualityProfile);
+        }
+
+        [Fact]
         public async Task UpdateAsync_TrackedMetadataChange_DoesNotOverwriteNewerBasePathFromAnotherContext()
         {
             var databaseName = Guid.NewGuid().ToString();

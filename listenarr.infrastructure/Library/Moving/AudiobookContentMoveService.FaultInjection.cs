@@ -39,7 +39,9 @@ internal enum SourceCleanupFaultPoint
     BeforeEmptySourceDirectoryQuarantine,
     AfterEmptySourceDirectoryQuarantine,
     BeforeEmptySourceClaimDelete,
-    BeforeEmptySourceStateDelete
+    BeforeEmptySourceStateDelete,
+    AfterMarkerlessSourceFileDeleteBeforeStateUpdate,
+    AfterMarkerlessSourceFileStateUpdate
 }
 
 internal enum CopyMutationFaultPoint
@@ -47,7 +49,11 @@ internal enum CopyMutationFaultPoint
     BeforeCopyRootValidation,
     BeforePartialFileCreation,
     AfterChunkWritten,
-    BeforePartialPublication
+    BeforePartialPublication,
+    AfterMarkerlessFileCreationBeforeStateUpdate,
+    AfterMarkerlessFileStateUpdate,
+    AfterMarkerlessFileWriteBeforePublishedState,
+    AfterMarkerlessNativeRenameBeforeStateUpdate
 }
 
 internal enum AtomicRenameFaultPoint
@@ -80,7 +86,9 @@ internal enum CompletedArtifactCleanupFaultPoint
 internal enum TargetScaffoldPreparationFaultPoint
 {
     BeforePublication,
-    AfterPublication
+    AfterPublication,
+    AfterMarkerlessDirectoryCreationBeforeStateUpdate,
+    AfterMarkerlessDirectoryStateUpdate
 }
 
 internal enum TargetScaffoldCleanupFaultPoint
@@ -114,6 +122,7 @@ internal enum FinalizedVerificationFaultPoint
 internal interface IMoveFaultInjector
 {
     bool AllowAtomicRename => false;
+    bool AllowMarkerlessFileRename => false;
 
     Task AfterPublishedAsync(Guid jobId, CancellationToken cancellationToken) =>
         Task.CompletedTask;

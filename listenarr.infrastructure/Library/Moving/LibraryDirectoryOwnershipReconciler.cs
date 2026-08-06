@@ -98,33 +98,39 @@ public sealed class LibraryDirectoryOwnershipReconciler(
                                 ownership.CanonicalPath,
                                 ownership.GetIdentity().Semantics,
                                 cancellationToken);
-                    if (LibraryDirectoryOwnershipRemoval
-                        .TryValidateLegacyMissingBothRecovery(
+                    LibraryDirectoryOwnershipMarker.MarkerPayload? legacyPayload = null;
+                    try
+                    {
+                        LibraryDirectoryOwnershipRemoval.TryValidateLegacyMissingBothRecovery(
                             ownership,
                             missingAuthorization.ParentAnchor,
-                            out var legacyPayload))
+                            out legacyPayload);
+                    }
+                    catch (Exception exception) when (exception is not (
+                        OperationCanceledException or OutOfMemoryException
+                            or StackOverflowException))
                     {
-                        var now = DateTime.UtcNow;
+                        logger.LogWarning(
+                            exception,
+                            "An obsolete directory ownership artifact for ownership {OwnershipId} was preserved because it could not be validated; the completed removal is still converging from durable database state.",
+                            ownership.Id);
+                    }
+
+                    var now = DateTime.UtcNow;
+                    if (legacyPayload != null)
+                    {
                         db.LibraryDirectoryOwnershipRetiredMarkers.Add(
                             LibraryDirectoryOwnershipRetiredMarkerEvidence.Create(
                                 ownership,
-                                legacyPayload
-                                    ?? throw new InvalidOperationException(
-                                        "The validated legacy marker payload is unavailable."),
+                                legacyPayload,
                                 now));
-                        ownership.State =
-                            LibraryDirectoryOwnershipState.Removed;
-                        ownership.PathOwnershipKey = null;
-                        ownership.ManagedRootFolderId = null;
-                        ownership.StateReason = null;
-                        ownership.UpdatedAt = now;
-                        await db.SaveChangesAsync(cancellationToken);
-                        continue;
                     }
-
-                    LibraryDirectoryOwnershipMarker.ValidateSiblingMarker(
-                        ownership,
-                        missingAuthorization.ParentAnchor);
+                    ownership.State = LibraryDirectoryOwnershipState.Removed;
+                    ownership.PathOwnershipKey = null;
+                    ownership.ManagedRootFolderId = null;
+                    ownership.StateReason = null;
+                    ownership.UpdatedAt = now;
+                    await db.SaveChangesAsync(cancellationToken);
                     continue;
                 }
 
@@ -150,8 +156,6 @@ public sealed class LibraryDirectoryOwnershipReconciler(
                         "The owned directory and its recovery quarantine are missing.");
                 using var directory = publication.OpenCreatedDirectoryAnchor();
                 var liveIdentity = directory.GetDirectoryObjectIdentity();
-                var priorIdentity = CloneForIdentityMigration(ownership);
-                var requiresIdentityMigration = false;
                 if (ownership.DirectoryObjectIdentityVersion
                     == ManagedDirectoryIdentity.CurrentVersion)
                 {
@@ -175,8 +179,6 @@ public sealed class LibraryDirectoryOwnershipReconciler(
                         throw new InvalidOperationException(
                             "The live directory differs from its legacy physical identity.");
                     }
-
-                    requiresIdentityMigration = true;
                 }
                 else if (ownership.DirectoryObjectIdentityVersion.HasValue)
                 {
@@ -185,7 +187,8 @@ public sealed class LibraryDirectoryOwnershipReconciler(
                 }
                 else
                 {
-                    requiresIdentityMigration = true;
+                    // A pre-physical-identity claim can be upgraded only after the
+                    // exact live directory is pinned through its managed root.
                 }
 
                 ownership.ManagedRootFolderId = authorization.RootFolderId;
@@ -196,30 +199,28 @@ public sealed class LibraryDirectoryOwnershipReconciler(
                     liveIdentity);
                 ownership.DirectoryObjectIdentityUnavailableReason = null;
                 ownership.StateReason = null;
-                if (requiresIdentityMigration)
-                {
-                    await PinnedLibraryDirectoryOwnershipMarker
-                        .PublishIdentityMigrationAsync(
-                            priorIdentity,
-                            ownership,
-                            directory,
-                            authorization.ParentAnchor,
-                            cancellationToken);
-                }
-                else
-                {
-                    await PinnedLibraryDirectoryOwnershipMarker.ReconcileAsync(
-                        ownership,
-                        directory,
-                        authorization.ParentAnchor,
-                        cancellationToken);
-                }
                 if (ownership.State == LibraryDirectoryOwnershipState.Unavailable)
                 {
                     ownership.State = LibraryDirectoryOwnershipState.Owned;
                 }
                 ownership.UpdatedAt = DateTime.UtcNow;
                 await db.SaveChangesAsync(cancellationToken);
+
+                // Older builds left these marker files permanently. The durable row,
+                // managed-root authorization, and pinned native directory generation
+                // now provide the at-rest proof. Retire only artifacts that still match
+                // this exact ownership; unrelated files are preserved.
+                if (!LibraryDirectoryOwnershipMarker.TryRetireMatchingMarkers(
+                        ownership,
+                        directory,
+                        authorization.ParentAnchor,
+                        out var markerRetirementReason))
+                {
+                    logger.LogWarning(
+                        "Obsolete directory ownership artifacts for ownership {OwnershipId} could not be retired safely and were preserved: {Reason}",
+                        ownership.Id,
+                        markerRetirementReason);
+                }
             }
             catch (Exception exception) when (exception is not (
                 OperationCanceledException or OutOfMemoryException
@@ -331,34 +332,6 @@ public sealed class LibraryDirectoryOwnershipReconciler(
             }
         }
     }
-
-    private static LibraryDirectoryOwnership CloneForIdentityMigration(
-        LibraryDirectoryOwnership ownership) => new()
-        {
-            Id = ownership.Id,
-            Path = ownership.Path,
-            CanonicalPath = ownership.CanonicalPath,
-            PathSyntax = ownership.PathSyntax,
-            PathCaseSensitivity = ownership.PathCaseSensitivity,
-            PathCaseSensitivityMode = ownership.PathCaseSensitivityMode,
-            PathIdentityBoundary = ownership.PathIdentityBoundary,
-            PathIdentityLookupKey = ownership.PathIdentityLookupKey,
-            PathOwnershipKey = ownership.PathOwnershipKey,
-            OwnershipToken = ownership.OwnershipToken,
-            State = ownership.State,
-            CreationWorkflow = ownership.CreationWorkflow,
-            CreationOperationId = ownership.CreationOperationId,
-            AudiobookId = ownership.AudiobookId,
-            ManagedRootFolderId = ownership.ManagedRootFolderId,
-            DirectoryObjectIdentityVersion =
-                ownership.DirectoryObjectIdentityVersion,
-            DirectoryObjectIdentity = ownership.DirectoryObjectIdentity,
-            DirectoryObjectIdentityUnavailableReason =
-                ownership.DirectoryObjectIdentityUnavailableReason,
-            StateReason = ownership.StateReason,
-            CreatedAt = ownership.CreatedAt,
-            UpdatedAt = ownership.UpdatedAt
-        };
 
     private static void ReconcileRetiredMarker(
         LibraryDirectoryOwnershipRetiredMarker evidence)

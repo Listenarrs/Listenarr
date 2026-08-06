@@ -413,6 +413,7 @@ public sealed partial class RootFolderRelocationService(
                     EnqueuedAt = nowUtc,
                     RelocationId = relocation.Id,
                     IdentityKeyVersion = MoveManifestIdentity.Version,
+                    ExecutionProtocolVersion = MoveExecutionProtocol.Current,
                     ActiveDeduplicationKey = MoveManifestIdentity.CreateDeduplicationKey(
                         audiobook.Id,
                         plan.Manifest.SourceRoot,

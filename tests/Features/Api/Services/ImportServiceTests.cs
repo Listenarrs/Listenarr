@@ -17,6 +17,7 @@
  */
 using System.Runtime.InteropServices;
 using System.Text;
+using Microsoft.EntityFrameworkCore;
 using Listenarr.Tests.Common;
 using Listenarr.Tests.Builders;
 
@@ -569,6 +570,63 @@ namespace Listenarr.Tests.Features.Api.Services
         }
 
         [Fact]
+        public async Task ImportSingleFile_Move_UsesMarkerlessRegistrationJournalWithoutLibraryArtifacts()
+        {
+            var outputRoot = FileService.GetTempDirectory("markerless-import-out");
+            var sourceDir = FileService.GetTempDirectory("markerless-import-src");
+            var sourceFile = await FileService.GetFileAsync(
+                sourceDir,
+                "source.mp3",
+                "markerless audio");
+
+            await SaveCurrentSettingsAsync(new ApplicationSettings
+            {
+                OutputPath = outputRoot,
+                CompletedFileAction = FileAction.Move,
+                EnableMetadataProcessing = false,
+                FolderNamingPattern = "",
+                FileNamingPattern = "{Title}"
+            });
+
+            var audiobook = await _audiobookRepository.AddAsync(new Audiobook
+            {
+                Id = 990,
+                Title = "Markerless Book",
+                Authors = ["Markerless Author"],
+                BasePath = outputRoot
+            });
+
+            var downloadImportService =
+                _provider.GetRequiredService<IDownloadImportService>();
+            var result = Assert.Single(
+                await downloadImportService.ImportDownloadFilesAsync(
+                    audiobook,
+                    [sourceFile]));
+
+            Assert.True(result.Success);
+            Assert.NotNull(result.FinalPath);
+            Assert.False(File.Exists(sourceFile));
+            Assert.Equal(
+                "markerless audio",
+                await File.ReadAllTextAsync(result.FinalPath!));
+
+            var factory = _provider.GetRequiredService<
+                IDbContextFactory<ListenArrDbContext>>();
+            await using var db = await factory.CreateDbContextAsync();
+            var journal = await db.FileMutationJournals
+                .AsNoTracking()
+                .SingleAsync();
+            Assert.Equal(FileAction.Move, journal.Action);
+            Assert.Equal(FileMutationJournalState.Completed, journal.State);
+            Assert.Equal(audiobook.Id, journal.AudiobookId);
+            Assert.Equal(Path.GetFullPath(sourceFile), journal.SourcePath);
+            Assert.Equal(Path.GetFullPath(result.FinalPath!), journal.DestinationPath);
+
+            AssertNoListenarrArtifacts(sourceDir);
+            AssertNoListenarrArtifacts(outputRoot);
+        }
+
+        [Fact]
         public async Task ImportSingleFile_WhenDestinationHasSameContent_ReusesDestinationAndRegistersMissingFile()
         {
             var outputRoot = FileService.GetTempDirectory("import-out");
@@ -609,6 +667,18 @@ namespace Listenarr.Tests.Features.Api.Services
             Assert.True(File.Exists(secondSourceFile));
             var registeredFiles = await _audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id);
             Assert.Contains(registeredFiles, file => string.Equals(file.Path, first.FinalPath, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static void AssertNoListenarrArtifacts(string root)
+        {
+            Assert.DoesNotContain(
+                Directory.EnumerateFileSystemEntries(
+                    root,
+                    "*",
+                    SearchOption.AllDirectories),
+                path => Path.GetFileName(path).StartsWith(
+                    ".listenarr",
+                    StringComparison.OrdinalIgnoreCase));
         }
 
         [Fact]

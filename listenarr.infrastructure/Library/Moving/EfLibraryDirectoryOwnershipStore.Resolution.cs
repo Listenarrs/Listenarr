@@ -120,11 +120,11 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
         {
             try
             {
-                var parentPath = Path.GetDirectoryName(resolved.CanonicalPath)
-                    ?? throw new InvalidOperationException(
-                        "The owned directory has no parent for durable proof validation.");
-                using var parent = PinnedDirectoryCreation.OpenPinnedBoundary(parentPath);
-                using var live = parent.OpenExistingChild(
+                using var authorization =
+                    await _boundaryAuthorizer.AuthorizeOwnershipAsync(
+                        resolved,
+                        cancellationToken);
+                using var live = authorization.ParentAnchor.OpenExistingChild(
                     Path.GetFileName(resolved.CanonicalPath));
                 if (!ManagedDirectoryIdentity.Matches(
                         resolved.DirectoryObjectIdentityVersion,
@@ -132,16 +132,17 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
                         resolved.OwnershipToken,
                         live.GetDirectoryObjectIdentity())
                     || !live.VisiblePathMatches()
-                    || !parent.VisiblePathMatches())
+                    || !authorization.ParentAnchor.VisiblePathMatches())
                 {
                     throw new InvalidOperationException(
-                        "The owned directory no longer matches its enrolled physical identity.");
+                        "The owned directory no longer matches its persisted physical identity.");
                 }
                 AfterOwnedDirectoryPhysicalIdentityPinnedForTest?.Invoke();
-                LibraryDirectoryOwnershipMarker.Validate(
+                _ = LibraryDirectoryOwnershipMarker.TryRetireMatchingMarkers(
                     resolved,
                     live,
-                    parent);
+                    authorization.ParentAnchor,
+                    out _);
             }
             catch (Exception exception) when (exception is
                 ArgumentException or IOException or UnauthorizedAccessException
@@ -219,6 +220,33 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
             {
                 throw new InvalidOperationException(
                     "A durable ownership claim lacks managed-root physical identity.");
+            }
+
+            if (candidate.State is LibraryDirectoryOwnershipState.Owned
+                or LibraryDirectoryOwnershipState.Retained)
+            {
+                using var authorization =
+                    await _boundaryAuthorizer.AuthorizeOwnershipAsync(
+                        candidate,
+                        cancellationToken);
+                using var live = authorization.ParentAnchor.OpenExistingChild(
+                    Path.GetFileName(candidate.CanonicalPath));
+                if (!ManagedDirectoryIdentity.Matches(
+                        candidate.DirectoryObjectIdentityVersion,
+                        candidate.DirectoryObjectIdentity,
+                        candidate.OwnershipToken,
+                        live.GetDirectoryObjectIdentity())
+                    || !live.VisiblePathMatches()
+                    || !authorization.ParentAnchor.VisiblePathMatches())
+                {
+                    throw new InvalidOperationException(
+                        "A durable ownership claim no longer matches its persisted physical directory generation.");
+                }
+                _ = LibraryDirectoryOwnershipMarker.TryRetireMatchingMarkers(
+                    candidate,
+                    live,
+                    authorization.ParentAnchor,
+                    out _);
             }
 
             owned.Add(candidate);

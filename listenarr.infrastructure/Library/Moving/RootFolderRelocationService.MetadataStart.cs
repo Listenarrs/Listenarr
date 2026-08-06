@@ -248,6 +248,20 @@ public sealed partial class RootFolderRelocationService
                 targetObjectIdentity.Value,
                 targetObjectIdentity.UnavailableReason,
                 CancellationToken.None);
+            foreach (var plan in ownershipPlans)
+            {
+                plan.Journal.State =
+                    LibraryDirectoryOwnershipPathMigrationState.SourceMarkersRetired;
+                plan.Journal.UpdatedAt = DateTime.UtcNow;
+            }
+            await db.SaveChangesAsync(CancellationToken.None);
+            await RetireOwnershipMigrationTargetsAsync(
+                ownershipPlans,
+                targetPath,
+                targetObjectIdentity.Version,
+                targetObjectIdentity.Value,
+                targetObjectIdentity.UnavailableReason,
+                CancellationToken.None);
             db.LibraryDirectoryOwnershipPathMigrations.RemoveRange(
                 ownershipPlans.Select(plan => plan.Journal));
             var completedWithoutAttention = skipped.Count == 0;

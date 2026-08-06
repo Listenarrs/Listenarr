@@ -1,13 +1,26 @@
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 using Listenarr.Domain.Common;
 
 namespace Listenarr.Infrastructure.FileSystem;
 
 public sealed class FileSystemSemanticsResolver : IFileSystemSemanticsResolver
 {
-    private const string ProbePrefix = ".listenarr-case-probe-";
+    private const uint FileReadAttributes = 0x0080;
+    private const uint FileShareRead = 0x00000001;
+    private const uint FileShareWrite = 0x00000002;
+    private const uint FileShareDelete = 0x00000004;
+    private const uint OpenExisting = 3;
+    private const uint FileFlagBackupSemantics = 0x02000000;
+    private const int FileCaseSensitiveInfo = 23;
+    private const uint FileCsFlagCaseSensitiveDir = 0x00000001;
 
-    internal Action<string>? BeforeProbeForTest { get; init; }
-    internal Action<string, string>? AfterPrimaryProbeCreatedForTest { get; init; }
+    private const int OpenReadOnly = 0;
+    private const int OpenDirectory = 0x10000;
+    private const int OpenCloseOnExec = 0x80000;
+    private const ulong FsIocGetFlags = 0x80086601;
+    private const int FsCasefoldFlag = 0x40000000;
 
     public ValueTask<FileSystemSemanticsResolution> ResolveAsync(
         string path,
@@ -18,7 +31,9 @@ public sealed class FileSystemSemanticsResolver : IFileSystemSemanticsResolver
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         if (!Path.IsPathFullyQualified(path))
         {
-            throw new ArgumentException("Filesystem semantics require an absolute path.", nameof(path));
+            throw new ArgumentException(
+                "Filesystem semantics require an absolute path.",
+                nameof(path));
         }
 
         var syntax = OperatingSystem.IsWindows()
@@ -41,108 +56,122 @@ public sealed class FileSystemSemanticsResolver : IFileSystemSemanticsResolver
         var boundary = FindExistingBoundary(fullPath);
         if (boundary == null)
         {
-            return ValueTask.FromResult(Unavailable(syntax, fullPath, "No existing filesystem boundary could be found."));
+            return ValueTask.FromResult(Unavailable(
+                syntax,
+                fullPath,
+                "No existing filesystem boundary could be found."));
         }
 
-        BeforeProbeForTest?.Invoke(boundary);
-        var resolved = Probe(boundary, syntax);
-        return ValueTask.FromResult(resolved with { CanonicalPath = fullPath });
+        var resolution = ResolveReadOnly(boundary, syntax);
+        return ValueTask.FromResult(resolution with { CanonicalPath = fullPath });
     }
 
-    private FileSystemSemanticsResolution Probe(
+    private static FileSystemSemanticsResolution ResolveReadOnly(
         string boundary,
         FileSystemPathSyntax syntax)
     {
-        var probeName = ProbePrefix + Guid.NewGuid().ToString("N") + "-a";
-        var alternateName = probeName.ToUpperInvariant();
-        PinnedDirectoryCreation.PinnedFileEntry? primary = null;
-        PinnedDirectoryCreation.PinnedFileEntry? alternate = null;
-        var alternateCreated = false;
-        try
+        if (OperatingSystem.IsWindows())
         {
-            using var pinnedBoundary =
-                PinnedDirectoryCreation.OpenPinnedBoundary(boundary);
-            primary = pinnedBoundary.CreateNewFile(probeName);
-            AfterPrimaryProbeCreatedForTest?.Invoke(
-                primary.FullPath,
-                Path.Join(boundary, alternateName));
-
-            try
-            {
-                alternate = pinnedBoundary.CreateNewFile(alternateName);
-                alternateCreated = true;
-                if (!pinnedBoundary.VisiblePathMatches()
-                    || !primary.VisiblePathMatches()
-                    || !alternate.VisiblePathMatches())
-                {
-                    return Unavailable(
-                        syntax,
-                        boundary,
-                        "Filesystem case-sensitivity probe entries changed during classification.");
-                }
-
-                return new FileSystemSemanticsResolution(
-                    new FileSystemPathSemantics(
-                        syntax,
-                        FileSystemCaseSensitivity.Sensitive),
-                    PathIdentityState.Valid,
-                    boundary);
-            }
-            catch (Exception exception) when (
-                exception is InvalidOperationException
-                || exception is System.ComponentModel.Win32Exception
-                {
-                    NativeErrorCode: 17
-                })
-            {
-                alternate = pinnedBoundary.TryOpenExistingFile(
-                    alternateName,
-                    requireDeleteAccess: false);
-                if (alternate == null
-                    || !pinnedBoundary.VisiblePathMatches()
-                    || !primary.VisiblePathMatches()
-                    || !alternate.VisiblePathMatches()
-                    || !primary.IdentifiesSameEntry(alternate)
-                    || primary.GetLinkCount() != 1
-                    || !pinnedBoundary.VisiblePathMatches()
-                    || !primary.VisiblePathMatches()
-                    || !alternate.VisiblePathMatches())
-                {
-                    return Unavailable(
-                        syntax,
-                        boundary,
-                        "Filesystem case-sensitivity probe collision could not be attributed to the created entry.");
-                }
-
-                return new FileSystemSemanticsResolution(
-                    new FileSystemPathSemantics(
-                        syntax,
-                        FileSystemCaseSensitivity.Insensitive),
-                    PathIdentityState.Valid,
-                    boundary);
-            }
+            return ResolveWindows(boundary, syntax);
         }
-        catch (Exception exception) when (exception is
-            IOException or UnauthorizedAccessException or InvalidOperationException
-                or System.ComponentModel.Win32Exception)
+
+        if (OperatingSystem.IsLinux())
+        {
+            return ResolveLinux(boundary, syntax);
+        }
+
+        return Unavailable(
+            syntax,
+            boundary,
+            "Automatic case-sensitivity detection is unavailable on this host without writing a probe. Select Sensitive or Insensitive explicitly.");
+    }
+
+    private static FileSystemSemanticsResolution ResolveWindows(
+        string boundary,
+        FileSystemPathSyntax syntax)
+    {
+        using var handle = CreateFileWindows(
+            boundary,
+            FileReadAttributes,
+            FileShareRead | FileShareWrite | FileShareDelete,
+            IntPtr.Zero,
+            OpenExisting,
+            FileFlagBackupSemantics,
+            IntPtr.Zero);
+        if (handle.IsInvalid)
         {
             return Unavailable(
                 syntax,
                 boundary,
-                $"Filesystem case sensitivity could not be probed: {exception.GetType().Name}.");
+                $"Filesystem case sensitivity could not be read: {new Win32Exception(Marshal.GetLastWin32Error()).Message}");
+        }
+
+        if (!GetFileInformationByHandleEx(
+                handle,
+                FileCaseSensitiveInfo,
+                out var info,
+                (uint)Marshal.SizeOf<FileCaseSensitiveInformation>()))
+        {
+            var error = Marshal.GetLastWin32Error();
+            // Older Windows/filesystems do not expose per-directory case-sensitive
+            // mode. Their Win32 namespace is case-insensitive.
+            if (error is 1 or 50 or 87)
+            {
+                return Valid(
+                    syntax,
+                    boundary,
+                    FileSystemCaseSensitivity.Insensitive);
+            }
+
+            return Unavailable(
+                syntax,
+                boundary,
+                $"Filesystem case sensitivity could not be read: {new Win32Exception(error).Message}");
+        }
+
+        return Valid(
+            syntax,
+            boundary,
+            (info.Flags & FileCsFlagCaseSensitiveDir) != 0
+                ? FileSystemCaseSensitivity.Sensitive
+                : FileSystemCaseSensitivity.Insensitive);
+    }
+
+    private static FileSystemSemanticsResolution ResolveLinux(
+        string boundary,
+        FileSystemPathSyntax syntax)
+    {
+        var descriptor = OpenUnix(
+            boundary,
+            OpenReadOnly | OpenDirectory | OpenCloseOnExec);
+        if (descriptor < 0)
+        {
+            return Unavailable(
+                syntax,
+                boundary,
+                $"Filesystem case sensitivity could not be read: {new Win32Exception(Marshal.GetLastWin32Error()).Message}");
+        }
+
+        try
+        {
+            if (IoctlUnix(descriptor, FsIocGetFlags, out var flags) == 0)
+            {
+                return Valid(
+                    syntax,
+                    boundary,
+                    (flags & FsCasefoldFlag) != 0
+                        ? FileSystemCaseSensitivity.Insensitive
+                        : FileSystemCaseSensitivity.Sensitive);
+            }
+
+            return Unavailable(
+                syntax,
+                boundary,
+                "The filesystem does not expose read-only case-sensitivity metadata. Select Sensitive or Insensitive explicitly.");
         }
         finally
         {
-            if (alternateCreated && alternate != null)
-            {
-                TryDeleteProbe(alternate);
-            }
-            alternate?.Dispose();
-            if (primary != null)
-            {
-                TryDeleteProbe(primary);
-            }
-            primary?.Dispose();
+            _ = CloseUnix(descriptor);
         }
     }
 
@@ -162,37 +191,63 @@ public sealed class FileSystemSemanticsResolver : IFileSystemSemanticsResolver
         return null;
     }
 
+    private static FileSystemSemanticsResolution Valid(
+        FileSystemPathSyntax syntax,
+        string boundary,
+        FileSystemCaseSensitivity sensitivity) =>
+        new(
+            new FileSystemPathSemantics(syntax, sensitivity),
+            PathIdentityState.Valid,
+            boundary);
+
     private static FileSystemSemanticsResolution Unavailable(
         FileSystemPathSyntax syntax,
         string boundary,
-        string reason)
-    {
-        return new FileSystemSemanticsResolution(
-            new FileSystemPathSemantics(syntax, FileSystemCaseSensitivity.Unknown),
+        string reason) =>
+        new(
+            new FileSystemPathSemantics(
+                syntax,
+                FileSystemCaseSensitivity.Unknown),
             PathIdentityState.Unavailable,
             boundary,
             reason,
             boundary);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FileCaseSensitiveInformation
+    {
+        public uint Flags;
     }
 
-    private static void TryDeleteProbe(
-        PinnedDirectoryCreation.PinnedFileEntry probe)
-    {
-        try
-        {
-            if (probe.VisiblePathMatches())
-            {
-                probe.Delete(immediateWindows: true);
-            }
-        }
-        catch (Exception exception) when (exception is
-            IOException or UnauthorizedAccessException or InvalidOperationException
-                or System.ComponentModel.Win32Exception)
-        {
-            System.Diagnostics.Trace.TraceWarning(
-                "Failed to remove filesystem case-sensitivity probe {0}: {1}",
-                probe.FullPath,
-                exception.Message);
-        }
-    }
+    [DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern SafeFileHandle CreateFileWindows(
+        string fileName,
+        uint desiredAccess,
+        uint shareMode,
+        IntPtr securityAttributes,
+        uint creationDisposition,
+        uint flagsAndAttributes,
+        IntPtr templateFile);
+
+    [DllImport("kernel32.dll", EntryPoint = "GetFileInformationByHandleEx", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetFileInformationByHandleEx(
+        SafeFileHandle fileHandle,
+        int fileInformationClass,
+        out FileCaseSensitiveInformation fileInformation,
+        uint bufferSize);
+
+    [DllImport("libc", EntryPoint = "open", SetLastError = true)]
+    private static extern int OpenUnix(
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string path,
+        int flags);
+
+    [DllImport("libc", EntryPoint = "ioctl", SetLastError = true)]
+    private static extern int IoctlUnix(
+        int descriptor,
+        ulong request,
+        out int flags);
+
+    [DllImport("libc", EntryPoint = "close", SetLastError = true)]
+    private static extern int CloseUnix(int descriptor);
 }

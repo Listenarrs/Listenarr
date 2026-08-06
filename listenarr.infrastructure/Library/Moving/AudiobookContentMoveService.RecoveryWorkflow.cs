@@ -29,6 +29,17 @@ internal sealed partial class AudiobookContentMoveService
             targetSemantics,
             request.LeaseToken,
             cancellationToken);
+        if (await GetExecutionProtocolVersionAsync(
+                request.JobId,
+                cancellationToken)
+            >= MoveExecutionProtocol.MarkerlessDatabaseState)
+        {
+            return await GetMarkerlessRecoverableMoveAsync(
+                request,
+                source,
+                target,
+                cancellationToken);
+        }
         await RecoverRecoveryMarkerWriteFilesAsync(
             source,
             request,
@@ -224,6 +235,34 @@ internal sealed partial class AudiobookContentMoveService
         }
 
         await EnsureLeaseOwnedAsync(request.JobId, request.LeaseToken, cancellationToken);
+        if (await GetExecutionProtocolVersionAsync(
+                request.JobId,
+                cancellationToken)
+            >= MoveExecutionProtocol.MarkerlessDatabaseState)
+        {
+            await DeleteMarkerlessSourceAsync(
+                request,
+                result.Source,
+                result.Target,
+                result.TargetInsideSource,
+                manifest,
+                cancellationToken);
+            VerifySourceCleanupState(
+                request,
+                result.Source,
+                result.Target,
+                manifest);
+            var markerlessIdentities = CreatePersistedTargetPhysicalIdentityMap(
+                result.Target,
+                manifest,
+                request.TargetSemantics);
+            return result with
+            {
+                SourceCleanupCompleted = true,
+                RecoveryMarkerPath = string.Empty,
+                TargetPhysicalObjectIdentities = markerlessIdentities
+            };
+        }
 
         await DeleteOriginalSourceAsync(
             result.Source,

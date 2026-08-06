@@ -20,6 +20,14 @@ public sealed class MoveJobConfiguration : IEntityTypeConfiguration<MoveJob>
     {
         builder.Property(job => job.Status).HasConversion<string>().HasMaxLength(32);
         builder.Property(job => job.Phase).HasConversion<string>().HasMaxLength(32);
+        builder.Property(job => job.ExecutionProtocolVersion)
+            .HasDefaultValue(MoveExecutionProtocol.LegacyFilesystemArtifacts);
+        builder.Property(job => job.SourceDirectoryObjectIdentity).HasMaxLength(512);
+        builder.Property(job => job.TargetDirectoryObjectIdentity).HasMaxLength(512);
+        builder.Property(job => job.SourceDirectoryCleanupState)
+            .HasConversion<string>()
+            .HasMaxLength(24)
+            .HasDefaultValue(MoveJobEntryCleanupState.Pending);
         builder.Property(job => job.FailureKind).HasConversion<string>().HasMaxLength(32);
         builder.Property(job => job.ActiveDeduplicationKey).HasMaxLength(1024);
         builder.Property(job => job.SourcePathSyntax).HasConversion<string>().HasMaxLength(16);
@@ -160,6 +168,8 @@ public sealed class MoveJobEntryConfiguration : IEntityTypeConfiguration<MoveJob
         builder.Property(entry => entry.CopyState).HasConversion<string>().HasMaxLength(16);
         builder.Property(entry => entry.CleanupState).HasConversion<string>().HasMaxLength(16);
         builder.Property(entry => entry.CleanupProtectionVersion).HasDefaultValue(0);
+        builder.Property(entry => entry.SourcePhysicalObjectIdentity).HasMaxLength(512);
+        builder.Property(entry => entry.TargetPhysicalObjectIdentity).HasMaxLength(512);
         builder.HasIndex(entry => new { entry.MoveJobId, entry.RelativePath }).IsUnique();
     }
 }

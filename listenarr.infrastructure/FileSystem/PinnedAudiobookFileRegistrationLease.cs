@@ -8,8 +8,11 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
     private readonly PinnedDirectoryCreation.PinnedFileEntry _file;
     private readonly Microsoft.Win32.SafeHandles.SafeFileHandle? _stableHandle;
     private readonly Func<int, bool>? _prepareCleanupRecovery;
+    private readonly Func<int, bool>? _commitRegistration;
     private readonly Func<bool>? _completePublication;
+    private int? _cleanupRecoveryAudiobookId;
     private bool _cleanupRecoveryPrepared;
+    private bool _registrationCommitted;
     private bool _publicationCompleted;
     private bool _disposed;
 
@@ -21,11 +24,13 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
         string physicalObjectIdentity,
         string? sourcePhysicalObjectIdentity,
         Func<int, bool>? prepareCleanupRecovery,
-        Func<bool>? completePublication)
+        Func<bool>? completePublication,
+        Func<int, bool>? commitRegistration)
     {
         _file = file;
         _stableHandle = stableHandle;
         _prepareCleanupRecovery = prepareCleanupRecovery;
+        _commitRegistration = commitRegistration;
         _completePublication = completePublication;
         PublicPath = publicPath;
         MetadataPath = metadataPath;
@@ -59,7 +64,8 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
         string? expectedPhysicalObjectIdentity = null,
         string? sourcePhysicalObjectIdentity = null,
         Func<int, bool>? prepareCleanupRecovery = null,
-        Func<bool>? completePublication = null)
+        Func<bool>? completePublication = null,
+        Func<int, bool>? commitRegistration = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(publicPath);
         var canonicalPath = Path.GetFullPath(publicPath);
@@ -77,7 +83,8 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
             expectedPhysicalObjectIdentity,
             sourcePhysicalObjectIdentity,
             prepareCleanupRecovery,
-            completePublication);
+            completePublication,
+            commitRegistration);
     }
 
     internal static PinnedAudiobookFileRegistrationLease Create(
@@ -86,7 +93,8 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
         string? expectedPhysicalObjectIdentity = null,
         string? sourcePhysicalObjectIdentity = null,
         Func<int, bool>? prepareCleanupRecovery = null,
-        Func<bool>? completePublication = null)
+        Func<bool>? completePublication = null,
+        Func<int, bool>? commitRegistration = null)
     {
         ArgumentNullException.ThrowIfNull(file);
         ArgumentException.ThrowIfNullOrWhiteSpace(publicPath);
@@ -116,7 +124,8 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
                     physicalObjectIdentity,
                     sourcePhysicalObjectIdentity,
                     prepareCleanupRecovery,
-                    completePublication);
+                    completePublication,
+                    commitRegistration);
             }
 
             if (OperatingSystem.IsLinux())
@@ -138,7 +147,8 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
                     physicalObjectIdentity,
                     sourcePhysicalObjectIdentity,
                     prepareCleanupRecovery,
-                    completePublication);
+                    completePublication,
+                    commitRegistration);
                 stableHandle = null;
                 return result;
             }
@@ -238,6 +248,14 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
         {
             throw new ArgumentOutOfRangeException(nameof(audiobookId));
         }
+        if (_cleanupRecoveryAudiobookId.HasValue
+            && _cleanupRecoveryAudiobookId.Value != audiobookId)
+        {
+            throw new InvalidOperationException(
+                "The registration lease is already bound to another audiobook.");
+        }
+
+        _cleanupRecoveryAudiobookId = audiobookId;
         if (_cleanupRecoveryPrepared || _prepareCleanupRecovery == null)
         {
             _cleanupRecoveryPrepared = true;
@@ -255,10 +273,24 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
         {
             return RegistrationPublicationCompletion.Completed;
         }
-        if (_prepareCleanupRecovery != null && !_cleanupRecoveryPrepared)
+        if ((_prepareCleanupRecovery != null || _commitRegistration != null)
+            && !_cleanupRecoveryPrepared)
         {
             throw new InvalidOperationException(
                 "Durable cleanup recovery must be prepared before publication is completed.");
+        }
+
+        if (!_registrationCommitted && _commitRegistration != null)
+        {
+            var audiobookId = _cleanupRecoveryAudiobookId
+                ?? throw new InvalidOperationException(
+                    "The registration lease has no durable audiobook owner.");
+            if (!_commitRegistration(audiobookId))
+            {
+                return RegistrationPublicationCompletion.CommittedCleanupPending;
+            }
+
+            _registrationCommitted = true;
         }
 
         if (_completePublication != null && !_completePublication())

@@ -103,7 +103,8 @@ internal sealed partial class AudiobookContentMoveService
         ValidatedTempOwnership? tempOwnership = null,
         ValidatedQuarantineOwnership? quarantineOwnership = null,
         bool allowPartialFiles = true,
-        LibraryDirectoryOwnership? targetDirectoryOwnership = null)
+        LibraryDirectoryOwnership? targetDirectoryOwnership = null,
+        bool allowRecoveryMarker = true)
     {
         if (!Directory.Exists(destinationRoot))
         {
@@ -189,7 +190,11 @@ internal sealed partial class AudiobookContentMoveService
                     file,
                     targetDirectoryOwnership,
                     targetSemantics)
-                || FileSystemPathIdentity.AreEquivalent(file, markerPath, targetSemantics)
+                || (allowRecoveryMarker
+                    && FileSystemPathIdentity.AreEquivalent(
+                        file,
+                        markerPath,
+                        targetSemantics))
                 || (tempOwnership != null
                     && FileSystemPathIdentity.AreEquivalent(
                         file,

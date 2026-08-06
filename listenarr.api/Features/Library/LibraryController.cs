@@ -288,6 +288,16 @@ namespace Listenarr.Api.Features.Library
         }
 
         /// <summary>
+        /// Get active file-move background jobs for activity recovery.
+        /// </summary>
+        /// <param name="cancellationToken">Request cancellation token.</param>
+        [HttpGet("move")]
+        public async Task<IActionResult> GetActiveMoveJobs(CancellationToken cancellationToken)
+        {
+            return await _moveWorkflow.GetActiveAsync(cancellationToken);
+        }
+
+        /// <summary>
         /// Get the current status of a file-move background job.
         /// </summary>
         /// <param name="jobId">The GUID returned when the move was enqueued.</param>

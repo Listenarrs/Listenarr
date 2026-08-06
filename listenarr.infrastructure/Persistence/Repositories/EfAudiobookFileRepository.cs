@@ -248,6 +248,18 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
                 .ToListAsync(ct);
         }
 
+        public Task<List<AudiobookFilePathReferenceSnapshot>> GetOtherPathReferenceSnapshotsAsync(
+            int audiobookId,
+            CancellationToken ct = default) =>
+            _db.AudiobookFiles
+                .AsNoTracking()
+                .Where(file => file.AudiobookId != audiobookId)
+                .Where(file => file.Path != null)
+                .Select(file => new AudiobookFilePathReferenceSnapshot(
+                    file.AudiobookId,
+                    file.Path))
+                .ToListAsync(ct);
+
         public async Task<List<AudiobookFormatSummary>> GetFormatSummariesAsync(CancellationToken ct = default)
         {
             var rows = await _db.AudiobookFiles

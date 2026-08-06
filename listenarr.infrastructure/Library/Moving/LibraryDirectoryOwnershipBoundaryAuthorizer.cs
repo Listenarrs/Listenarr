@@ -208,13 +208,19 @@ public sealed class LibraryDirectoryOwnershipBoundaryAuthorizer(
         var anchor = PinnedDirectoryCreation.OpenPinnedBoundary(canonicalBoundary);
         try
         {
-            var liveIdentity = await ManagedDirectoryEnrollment
-                .RequireMatchingEnrollmentAsync(
-                    anchor,
+            cancellationToken.ThrowIfCancellationRequested();
+            var liveIdentity = anchor.GetDirectoryObjectIdentity();
+            if (!string.IsNullOrWhiteSpace(
+                    root.DirectoryObjectIdentityUnavailableReason)
+                || !ManagedDirectoryIdentity.MatchesNativeIdentity(
                     root.DirectoryObjectIdentityVersion,
                     root.DirectoryObjectIdentity,
-                    root.DirectoryObjectIdentityUnavailableReason,
-                    cancellationToken);
+                    liveIdentity)
+                || !anchor.VisiblePathMatches())
+            {
+                throw new InvalidOperationException(
+                    "The managed root no longer identifies its authorized physical generation.");
+            }
 
             return new ManagedLibraryBoundaryAuthorization(
                 root.Id,
@@ -322,12 +328,17 @@ public sealed class LibraryDirectoryOwnershipBoundaryAuthorizer(
         var boundary = PinnedDirectoryCreation.OpenPinnedBoundary(boundaryPath);
         try
         {
-            await ManagedDirectoryEnrollment.RequireMatchingEnrollmentAsync(
-                boundary,
-                expectedIdentityVersion,
-                expectedIdentity,
-                identityUnavailableReason,
-                cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!string.IsNullOrWhiteSpace(identityUnavailableReason)
+                || !ManagedDirectoryIdentity.MatchesNativeIdentity(
+                    expectedIdentityVersion,
+                    expectedIdentity,
+                    boundary.GetDirectoryObjectIdentity())
+                || !boundary.VisiblePathMatches())
+            {
+                throw new InvalidOperationException(
+                    "The managed root boundary no longer identifies its authorized physical generation.");
+            }
 
             var current = boundary.Duplicate();
             try

@@ -535,14 +535,8 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         }
 
         [WindowsFact]
-        public async Task DeleteAudiobook_AmbiguousPersistedBasePath_DoesNotProbeWindowsDeviceAlias()
+        public async Task DeleteAudiobook_AmbiguousPersistedBasePath_DoesNotWriteProbeArtifacts()
         {
-            var probedBoundaries = new List<string>();
-            var semanticsResolver = new FileSystemSemanticsResolver
-            {
-                BeforeProbeForTest = path => probedBoundaries.Add(Path.GetFullPath(path))
-            };
-            Init(builder => builder.WithSingleton<IFileSystemSemanticsResolver>(semanticsResolver));
             var tempRoot = FileService.GetTempDirectory("listenarr-delete-ambiguous-base");
             var bookFolder = Path.Join(tempRoot, "Ambiguous Base Book");
             var audioPath = Path.Join(bookFolder, "track.m4b");
@@ -559,7 +553,6 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 .WithId(509)
                 .WithPath(tempRoot)
                 .Build());
-            probedBoundaries.Clear();
             var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
                 .WithId(509)
                 .WithTitle("Ambiguous Base Book")
@@ -581,11 +574,14 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             Assert.True(File.Exists(audioPath));
             Assert.True(File.Exists(sidecarPath));
             Assert.True(Directory.Exists(bookFolder));
-            var ambiguousNativeAlias = Path.GetFullPath(ambiguousBasePath);
-            Assert.DoesNotContain(probedBoundaries, path => string.Equals(
-                path,
-                ambiguousNativeAlias,
-                StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(
+                Directory.EnumerateFileSystemEntries(
+                    tempRoot,
+                    "*",
+                    SearchOption.AllDirectories),
+                path => Path.GetFileName(path).StartsWith(
+                    ".listenarr-",
+                    StringComparison.Ordinal));
         }
 
         [WindowsFact]
@@ -1597,7 +1593,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
 
             Assert.False(Directory.Exists(bookFolder));
             Assert.False(Directory.Exists(authorFolder));
-            Assert.True(File.Exists(authorSiblingMarker));
+            Assert.False(File.Exists(authorSiblingMarker));
             var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
             await using (var interruptedDb = await factory.CreateDbContextAsync())
             {

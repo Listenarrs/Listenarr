@@ -87,7 +87,8 @@ public partial class AudiobookFileService
                             ApplyCommittedBasePath(audiobook, registration.Mutation);
                             if (registrationLease.MatchesCurrentPublication())
                             {
-                                return true;
+                                return CompleteRegisteredPublication(
+                                    registrationLease);
                             }
 
                             await RollbackPublishedGenerationIfStaleAsync(
@@ -133,7 +134,8 @@ public partial class AudiobookFileService
                             ApplyCommittedBasePath(audiobook, basePathCommit.Mutation);
                             if (registrationLease.MatchesCurrentPublication())
                             {
-                                return true;
+                                return CompleteRegisteredPublication(
+                                    registrationLease);
                             }
 
                             await RollbackPublishedGenerationIfStaleAsync(
@@ -169,7 +171,8 @@ public partial class AudiobookFileService
                         ApplyCommittedBasePath(audiobook, refresh.Mutation);
                         if (registrationLease.MatchesCurrentPublication())
                         {
-                            return true;
+                            return CompleteRegisteredPublication(
+                                registrationLease);
                         }
 
                         await RollbackPublishedGenerationIfStaleAsync(
@@ -186,6 +189,12 @@ public partial class AudiobookFileService
 
         return false;
     }
+
+    private static bool CompleteRegisteredPublication(
+        IAudiobookFileRegistrationLease registrationLease) =>
+        registrationLease.CompletePublication() is
+            RegistrationPublicationCompletion.Completed or
+            RegistrationPublicationCompletion.CommittedCleanupPending;
 
     public Task RollbackPublishedGenerationIfStaleAsync(
         Audiobook audiobook,

@@ -238,7 +238,9 @@ public sealed class NativeTestWorkflowContractTests : BaseTests
             "dotnet test listenarr.slnx",
             script,
             StringComparison.Ordinal);
-        Assert.Equal(2, Regex.Matches(script, @"(?m)^& dotnet test ").Count);
+        Assert.Equal(
+            2,
+            Regex.Matches(script, @"(?m)^\s*& dotnet test ").Count);
 
         var fullSuiteIndex = script.IndexOf(
             "& dotnet test listenarr.slnx",
@@ -246,7 +248,11 @@ public sealed class NativeTestWorkflowContractTests : BaseTests
         Assert.True(fullSuiteIndex >= 0);
         var fullSuiteCommand = script[fullSuiteIndex..];
         Assert.DoesNotContain("--filter", fullSuiteCommand, StringComparison.Ordinal);
-        Assert.Contains("exit $LASTEXITCODE", fullSuiteCommand, StringComparison.Ordinal);
+        Assert.Contains(
+            "$exitCode = $LASTEXITCODE",
+            fullSuiteCommand,
+            StringComparison.Ordinal);
+        Assert.Contains("exit $exitCode", fullSuiteCommand, StringComparison.Ordinal);
     }
 
     [Fact]

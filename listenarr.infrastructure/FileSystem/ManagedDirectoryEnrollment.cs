@@ -1,8 +1,10 @@
-using System.ComponentModel;
 using System.Text.Json;
 
 namespace Listenarr.Infrastructure.FileSystem;
 
+// Compatibility reader/retirer for the short-lived marker-backed root identity
+// format. New code must never publish this file; root physical identity is persisted
+// in SQLite and verified against the pinned OS-native directory generation.
 internal static class ManagedDirectoryEnrollment
 {
     internal const string FileName = ".listenarr-root-enrollment.json";
@@ -11,111 +13,19 @@ internal static class ManagedDirectoryEnrollment
     private static readonly JsonSerializerOptions JsonOptions =
         new(JsonSerializerDefaults.Web);
 
-    internal static async Task<DirectoryObjectIdentityResolution> ResolveAsync(
+    internal static DirectoryObjectIdentityResolution ResolveExisting(
         PinnedDirectoryCreation.PinnedDirectoryAnchor anchor,
-        string nativeIdentity,
-        bool enrollIfMissing,
-        CancellationToken cancellationToken)
+        string nativeIdentity)
     {
         ArgumentNullException.ThrowIfNull(anchor);
         ArgumentException.ThrowIfNullOrWhiteSpace(nativeIdentity);
-        cancellationToken.ThrowIfCancellationRequested();
 
         var existing = TryRead(anchor, nativeIdentity, out var markerMissing);
-        if (existing != null || !markerMissing || !enrollIfMissing)
-        {
-            return existing
-                ?? DirectoryObjectIdentityResolution.Unavailable(
-                    markerMissing
-                        ? "The managed directory enrollment marker is missing."
-                        : "The managed directory enrollment marker is invalid or identifies a different physical directory.");
-        }
-
-        var token = Guid.NewGuid().ToString("N");
-        var payload = new EnrollmentPayload(
-            MarkerVersion,
-            token,
-            nativeIdentity,
-            DateTimeOffset.UtcNow);
-        var temporaryName =
-            $"{FileName}.{Guid.NewGuid():N}.tmp";
-        try
-        {
-            await anchor.PublishNewFileAsync(
-                temporaryName,
-                FileName,
-                beforeCreateAsync: () => Task.CompletedTask,
-                writeAndFlushAsync: async stream =>
-                {
-                    await JsonSerializer.SerializeAsync(
-                        stream,
-                        payload,
-                        JsonOptions,
-                        cancellationToken);
-                    await stream.FlushAsync(cancellationToken);
-                    stream.Flush(flushToDisk: true);
-                },
-                beforePublicationAsync: () => Task.CompletedTask,
-                preserveTemporaryFileOnFailure: _ => false);
-            anchor.FlushDirectoryEntry();
-        }
-        catch (Exception exception) when (exception is
-            IOException or UnauthorizedAccessException or Win32Exception
-                or InvalidOperationException)
-        {
-            var raced = TryRead(anchor, nativeIdentity, out _);
-            if (raced != null)
-            {
-                return raced;
-            }
-
-            return DirectoryObjectIdentityResolution.Unavailable(
-                $"The managed directory could not be enrolled safely: {exception.Message}");
-        }
-
-        var enrolled = TryRead(anchor, nativeIdentity, out _);
-        return enrolled == null
-            ? DirectoryObjectIdentityResolution.Unavailable(
-                "The managed directory enrollment could not be verified after publication.")
-            : enrolled with { EnrollmentCreated = true };
-    }
-
-    internal static async Task<string> RequireMatchingEnrollmentAsync(
-        PinnedDirectoryCreation.PinnedDirectoryAnchor anchor,
-        int? expectedVersion,
-        string? expectedValue,
-        string? unavailableReason,
-        CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(anchor);
-        if (expectedVersion != ManagedDirectoryIdentity.CurrentVersion
-            || string.IsNullOrWhiteSpace(expectedValue)
-            || !string.IsNullOrWhiteSpace(unavailableReason))
-        {
-            throw new InvalidOperationException(
-                "The managed directory has no usable Listenarr enrollment identity.");
-        }
-
-        cancellationToken.ThrowIfCancellationRequested();
-        var nativeIdentity = anchor.GetDirectoryObjectIdentity();
-        var current = await ResolveAsync(
-            anchor,
-            nativeIdentity,
-            enrollIfMissing: false,
-            cancellationToken);
-        if (!current.IsAvailable
-            || current.Version != expectedVersion
-            || !string.Equals(
-                current.Value,
-                expectedValue,
-                StringComparison.Ordinal)
-            || !anchor.VisiblePathMatches())
-        {
-            throw new InvalidOperationException(
-                "The managed directory no longer identifies its enrolled physical generation.");
-        }
-
-        return nativeIdentity;
+        return existing
+            ?? DirectoryObjectIdentityResolution.Unavailable(
+                markerMissing
+                    ? "The legacy managed-directory enrollment marker is missing."
+                    : "The legacy managed-directory enrollment marker is invalid or identifies a different physical directory.");
     }
 
     internal static void RetireValidMarker(
@@ -131,18 +41,57 @@ internal static class ManagedDirectoryEnrollment
         if (current == null)
         {
             throw new InvalidOperationException(
-                "The managed directory enrollment marker is invalid and was preserved.");
+                "The legacy managed-directory enrollment marker is invalid and was preserved.");
         }
 
+        RetireVerifiedMarker(anchor, nativeIdentity, current.Value!);
+    }
+
+    internal static bool TryRetireMatchingLegacyMarker(
+        PinnedDirectoryCreation.PinnedDirectoryAnchor anchor,
+        int? expectedVersion,
+        string? expectedValue)
+    {
+        ArgumentNullException.ThrowIfNull(anchor);
+        if (expectedVersion != ManagedDirectoryIdentity.CurrentVersion
+            || string.IsNullOrWhiteSpace(expectedValue))
+        {
+            return false;
+        }
+
+        var nativeIdentity = anchor.GetDirectoryObjectIdentity();
+        var current = TryRead(anchor, nativeIdentity, out var markerMissing);
+        if (markerMissing)
+        {
+            return false;
+        }
+        if (current == null
+            || current.Version != expectedVersion
+            || !string.Equals(current.Value, expectedValue, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        RetireVerifiedMarker(anchor, nativeIdentity, expectedValue);
+        return true;
+    }
+
+    private static void RetireVerifiedMarker(
+        PinnedDirectoryCreation.PinnedDirectoryAnchor anchor,
+        string nativeIdentity,
+        string expectedValue)
+    {
         using var marker = anchor.OpenExistingFile(
             FileName,
             requireDeleteAccess: true);
-        if (TryRead(anchor, nativeIdentity, out _) == null
+        var current = TryRead(anchor, nativeIdentity, out _);
+        if (current == null
+            || !string.Equals(current.Value, expectedValue, StringComparison.Ordinal)
             || !marker.VisiblePathMatches()
             || !anchor.VisiblePathMatches())
         {
             throw new InvalidOperationException(
-                "The managed directory enrollment marker changed before retirement.");
+                "The legacy managed-directory enrollment marker changed before retirement.");
         }
 
         marker.Delete();

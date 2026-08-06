@@ -102,7 +102,7 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
     }
 
     [Fact]
-    public async Task RecordCreatedAsync_PersistsIdentityAndMatchingPhysicalMarkers()
+    public async Task RecordCreatedAsync_PersistsIdentityWithoutPermanentFilesystemMarkers()
     {
         var directory = Path.Join(_root, "Author");
         Directory.CreateDirectory(directory);
@@ -118,28 +118,7 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
         Assert.NotEqual(0, ownership.Id);
         Assert.False(string.IsNullOrWhiteSpace(ownership.PathOwnershipKey));
         Assert.False(string.IsNullOrWhiteSpace(ownership.OwnershipToken));
-        Assert.True(File.Exists(Path.Join(directory, LibraryDirectoryOwnershipMarker.FileName)));
-        Assert.Single(Directory.EnumerateFiles(
-            _root,
-            ".listenarr-directory-owner-*.json",
-            SearchOption.TopDirectoryOnly));
-        using (var marker = JsonDocument.Parse(
-            await File.ReadAllTextAsync(
-                Path.Join(directory, LibraryDirectoryOwnershipMarker.FileName))))
-        {
-            var payload = marker.RootElement;
-            Assert.Equal(2, payload.GetProperty("version").GetInt32());
-            Assert.Equal(
-                ownership.ManagedRootFolderId,
-                payload.GetProperty("managedRootFolderId").GetInt32());
-            Assert.Equal(
-                ownership.DirectoryObjectIdentityVersion,
-                payload.GetProperty("directoryObjectIdentityVersion").GetInt32());
-            Assert.Equal(
-                ownership.DirectoryObjectIdentity,
-                payload.GetProperty("directoryObjectIdentity").GetString());
-        }
-        LibraryDirectoryOwnershipMarker.Validate(ownership, directory);
+        AssertNoPersistentOwnershipArtifacts(ownership);
 
         var resolution = await _store.ResolveOwnedAsync(
             directory,
@@ -149,44 +128,38 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
     }
 
     [Fact]
-    public async Task RecordCreatedAsync_RequestCancelledAfterMarkerPublication_CommitsMatchingOwnership()
+    public async Task RecordCreatedAsync_RequestCancelledBeforeCommit_LeavesNoOwnershipOrArtifacts()
     {
-        var directory = Path.Join(_root, "CancelledAfterMarker");
+        var directory = Path.Join(_root, "CancelledBeforeCommit");
         Directory.CreateDirectory(directory);
         using var cancellation = new CancellationTokenSource();
-        _store.AfterOwnershipMarkerPublicationForTest = cancellation.Cancel;
+        _store.BeforeNewOwnershipCommitForTest = cancellation.Cancel;
 
-        var ownership = await _store.RecordCreatedAsync(
-            new LibraryDirectoryOwnershipClaim(
-                directory,
-                FileSystemPathSemantics.CurrentHostDefault,
-                "test",
-                Guid.NewGuid(),
-                AudiobookId: 11),
-            cancellation.Token);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            _store.RecordCreatedAsync(
+                new LibraryDirectoryOwnershipClaim(
+                    directory,
+                    FileSystemPathSemantics.CurrentHostDefault,
+                    "test",
+                    Guid.NewGuid(),
+                    AudiobookId: 11),
+                cancellation.Token));
 
         Assert.True(cancellation.IsCancellationRequested);
-        Assert.NotEqual(0, ownership.Id);
-        LibraryDirectoryOwnershipMarker.Validate(ownership, directory);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(directory));
         await using var db = await _factory.CreateDbContextAsync();
-        var persisted = await db.LibraryDirectoryOwnerships
-            .SingleAsync(candidate => candidate.Id == ownership.Id);
-        Assert.Equal(ownership.OwnershipToken, persisted.OwnershipToken);
-        Assert.Equal(
-            LibraryDirectoryOwnershipState.Owned,
-            persisted.State);
+        Assert.Empty(await db.LibraryDirectoryOwnerships.ToListAsync());
     }
 
     [Fact]
-    public async Task RecordCreatedAsync_InterruptedAfterInsideMarker_RecoversSameOwnershipToken()
+    public async Task RecordCreatedAsync_InterruptedBeforeCommit_LeavesNoClaimOrArtifacts()
     {
-        var directory = Path.Join(_root, "InterruptedBetweenMarkers");
+        var directory = Path.Join(_root, "InterruptedBeforeCommit");
         Directory.CreateDirectory(directory);
-        _store.AfterInsideOwnershipMarkerPublicationForTest = () =>
-            throw new IOException(
-                "Injected interruption after inside marker publication.");
+        _store.BeforeNewOwnershipCommitForTest = () =>
+            throw new IOException("Injected interruption before ownership commit.");
 
-        await Assert.ThrowsAsync<IOException>(() =>
+        var exception = await Assert.ThrowsAsync<IOException>(() =>
             _store.RecordCreatedAsync(
                 new LibraryDirectoryOwnershipClaim(
                     directory,
@@ -195,49 +168,16 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
                     Guid.NewGuid(),
                     AudiobookId: 12)));
 
-        await using (var interruptedDb =
-            await _factory.CreateDbContextAsync())
-        {
-            var interrupted = await interruptedDb
-                .LibraryDirectoryOwnerships.SingleAsync();
-            Assert.Equal(
-                LibraryDirectoryOwnershipState.Unavailable,
-                interrupted.State);
-            Assert.NotNull(interrupted.PathOwnershipKey);
-            Assert.Contains(
-                "Injected interruption",
-                interrupted.DirectoryObjectIdentityUnavailableReason,
-                StringComparison.Ordinal);
-            var markerPaths =
-                LibraryDirectoryOwnershipMarker.GetMarkerPaths(interrupted);
-            Assert.True(File.Exists(markerPaths[0]));
-            Assert.False(File.Exists(markerPaths[1]));
-            using var interruptedDirectory =
-                PinnedDirectoryCreation.OpenPinnedBoundary(directory);
-            using var interruptedMarker = interruptedDirectory.OpenExistingFile(
-                LibraryDirectoryOwnershipMarker.FileName,
-                requireDeleteAccess: false);
-            LibraryDirectoryOwnershipMarker.ValidateMarkerFile(
-                interrupted,
-                interruptedMarker);
-        }
-
-        await CreateOwnershipReconciler().ReconcileAsync();
-
-        await using var recoveredDb = await _factory.CreateDbContextAsync();
-        var recovered = await recoveredDb
-            .LibraryDirectoryOwnerships.SingleAsync();
-        Assert.Equal(
-            LibraryDirectoryOwnershipState.Owned,
-            recovered.State);
-        Assert.Null(recovered.DirectoryObjectIdentityUnavailableReason);
-        LibraryDirectoryOwnershipMarker.Validate(recovered, directory);
+        Assert.Contains("before ownership commit", exception.Message, StringComparison.Ordinal);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(directory));
+        await using var db = await _factory.CreateDbContextAsync();
+        Assert.Empty(await db.LibraryDirectoryOwnerships.ToListAsync());
     }
 
     [Fact]
-    public async Task RecordCreatedAsync_RetryAfterPartialPublication_RepairsSameClaim()
+    public async Task RecordCreatedAsync_RetryAfterPreCommitInterruption_CreatesSingleClaim()
     {
-        var directory = Path.Join(_root, "RetryInterruptedPublication");
+        var directory = Path.Join(_root, "RetryInterruptedCommit");
         Directory.CreateDirectory(directory);
         var claim = new LibraryDirectoryOwnershipClaim(
             directory,
@@ -245,36 +185,20 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
             "test",
             Guid.NewGuid(),
             AudiobookId: 13);
-        _store.AfterInsideOwnershipMarkerPublicationForTest = () =>
-            throw new IOException("Injected partial publication.");
+        _store.BeforeNewOwnershipCommitForTest = () =>
+            throw new IOException("Injected ownership persistence interruption.");
 
         await Assert.ThrowsAsync<IOException>(() =>
             _store.RecordCreatedAsync(claim));
-        long ownershipId;
-        string ownershipToken;
-        await using (var interruptedDb =
-            await _factory.CreateDbContextAsync())
-        {
-            var interrupted = await interruptedDb
-                .LibraryDirectoryOwnerships.SingleAsync();
-            ownershipId = interrupted.Id;
-            ownershipToken = interrupted.OwnershipToken;
-            Assert.Equal(
-                LibraryDirectoryOwnershipState.Unavailable,
-                interrupted.State);
-        }
+        _store.BeforeNewOwnershipCommitForTest = null;
 
-        _store.AfterInsideOwnershipMarkerPublicationForTest = null;
         var repaired = await _store.RecordCreatedAsync(claim);
 
-        Assert.Equal(ownershipId, repaired.Id);
-        Assert.Equal(ownershipToken, repaired.OwnershipToken);
         Assert.Equal(LibraryDirectoryOwnershipState.Owned, repaired.State);
         Assert.Null(repaired.DirectoryObjectIdentityUnavailableReason);
-        LibraryDirectoryOwnershipMarker.Validate(repaired, directory);
+        AssertNoPersistentOwnershipArtifacts(repaired);
         await using var verification = await _factory.CreateDbContextAsync();
-        Assert.Single(await verification
-            .LibraryDirectoryOwnerships.ToListAsync());
+        Assert.Single(await verification.LibraryDirectoryOwnerships.ToListAsync());
     }
 
     [Fact]
@@ -331,23 +255,32 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
     }
 
     [Fact]
-    public async Task PhysicalPathReplacementWithoutInsideMarkerFailsValidation()
+    public async Task PhysicalPathReplacementWithoutMarkerFailsNativeGenerationValidation()
     {
         var directory = Path.Join(_root, "Author");
         Directory.CreateDirectory(directory);
-        var ownership = await _store.RecordCreatedAsync(
+        await _store.RecordCreatedAsync(
             new LibraryDirectoryOwnershipClaim(
                 directory,
                 FileSystemPathSemantics.CurrentHostDefault,
                 "test"));
+        Assert.False(File.Exists(Path.Join(
+            directory,
+            LibraryDirectoryOwnershipMarker.FileName)));
 
-        File.Delete(Path.Join(directory, LibraryDirectoryOwnershipMarker.FileName));
         Directory.Delete(directory, recursive: false);
         Directory.CreateDirectory(directory);
 
-        var exception = Assert.Throws<InvalidOperationException>(() =>
-            LibraryDirectoryOwnershipMarker.Validate(ownership, directory));
-        Assert.Contains("marker", exception.Message, StringComparison.OrdinalIgnoreCase);
+        var resolution = await _store.ResolveOwnedAsync(
+            directory,
+            FileSystemPathSemantics.CurrentHostDefault);
+        Assert.Equal(
+            LibraryDirectoryOwnershipResolutionState.Unavailable,
+            resolution.State);
+        Assert.Contains(
+            "physical",
+            resolution.Reason,
+            StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -360,6 +293,7 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
                 directory,
                 FileSystemPathSemantics.CurrentHostDefault,
                 "test"));
+        await PublishLegacyOwnershipMarkersAsync(ownership);
         var insideMarker = Path.Join(
             directory,
             LibraryDirectoryOwnershipMarker.FileName);
@@ -454,9 +388,7 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
         Assert.Equal(LibraryDirectoryOwnershipResolutionState.Unowned, rootResolution.State);
         foreach (var ownership in ownerships)
         {
-            LibraryDirectoryOwnershipMarker.Validate(
-                ownership,
-                ownership.CanonicalPath);
+            AssertNoPersistentOwnershipArtifacts(ownership);
         }
     }
 
@@ -487,7 +419,7 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
                 marker,
                 destinationDirectory,
                 FileSystemPathSemantics.CurrentHostDefault));
-        Assert.True(File.Exists(siblingMarker));
+        Assert.False(File.Exists(siblingMarker));
         Directory.Delete(destinationDirectory, recursive: true);
         var mover = new FileMover(
             new NullLogger<FileMover>(),
@@ -499,7 +431,7 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
         Assert.True(File.Exists(source));
         Assert.False(Directory.Exists(destinationDirectory));
         Assert.False(File.Exists(destination));
-        Assert.True(File.Exists(siblingMarker));
+        Assert.False(File.Exists(siblingMarker));
         var resolution = await _store.ResolveOwnedAsync(
             destinationDirectory,
             FileSystemPathSemantics.CurrentHostDefault);
@@ -584,7 +516,7 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
 
         Assert.True(cancellation.IsCancellationRequested);
         var ownership = Assert.Single(ownerships);
-        LibraryDirectoryOwnershipMarker.Validate(ownership, destination);
+        AssertNoPersistentOwnershipArtifacts(ownership);
         var resolution = await _store.ResolveOwnedAsync(
             destination,
             FileSystemPathSemantics.CurrentHostDefault);
@@ -592,12 +524,8 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
         Assert.Equal(ownership.Id, resolution.Ownership?.Id);
     }
 
-    [Theory]
-    [InlineData(0)]
-    [InlineData(1)]
-    [InlineData(2)]
-    public async Task EnsureCreatedHierarchyAsync_RepairsMarkersOnlyForExistingDurableClaim(
-        int missingMarker)
+    [Fact]
+    public async Task EnsureCreatedHierarchyAsync_ExistingDurableClaimDoesNotRequireMarkers()
     {
         var destination = Path.Join(_root, "Author", "Book");
         var ownerships = await _store.EnsureCreatedHierarchyAsync(
@@ -610,20 +538,7 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
                 item.CanonicalPath,
                 destination,
                 FileSystemPathSemantics.CurrentHostDefault));
-        var markerPaths = LibraryDirectoryOwnershipMarker
-            .GetMarkerPaths(ownership)
-            .ToList();
-        IReadOnlyList<string> pathsToDelete = missingMarker == 2
-            ? markerPaths
-            : [markerPaths[missingMarker]];
-        foreach (var markerPath in pathsToDelete)
-        {
-            if (OperatingSystem.IsWindows())
-            {
-                File.SetAttributes(markerPath, FileAttributes.Normal);
-            }
-            File.Delete(markerPath);
-        }
+        AssertNoPersistentOwnershipArtifacts(ownership);
 
         var repaired = await _store.EnsureCreatedHierarchyAsync(
             destination,
@@ -632,7 +547,13 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
             "test-retry");
 
         Assert.Empty(repaired);
-        LibraryDirectoryOwnershipMarker.Validate(ownership, destination);
+        AssertNoPersistentOwnershipArtifacts(ownership);
+        var resolution = await _store.ResolveOwnedAsync(
+            destination,
+            FileSystemPathSemantics.CurrentHostDefault);
+        Assert.Equal(
+            LibraryDirectoryOwnershipResolutionState.Owned,
+            resolution.State);
     }
 
     [Fact]
@@ -684,7 +605,7 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
         var ownershipKey = Assert.IsType<string>(ownership.PathOwnershipKey);
 
         await _store.BeginRemovalAsync(ownership.Id, ownershipKey);
-        LibraryDirectoryOwnershipMarker.DeleteInsideMarker(ownership, directory);
+        AssertNoPersistentOwnershipArtifacts(ownership);
         Directory.Delete(directory, recursive: false);
 
         var restartedStore = new EfLibraryDirectoryOwnershipStore(_factory, TimeProvider.System);
@@ -735,6 +656,7 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
                 FileSystemPathSemantics.CurrentHostDefault,
                 "test"));
         var ownershipKey = Assert.IsType<string>(prior.PathOwnershipKey);
+        await PublishLegacyOwnershipMarkersAsync(prior);
         var retiredSiblingMarker = LibraryDirectoryOwnershipMarker.GetMarkerPaths(prior)
             .Single(path => !FileSystemPathIdentity.IsSameOrInside(
                 path,
@@ -759,7 +681,7 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
         Assert.NotEqual(prior.Id, recreated.Id);
         Assert.NotEqual(prior.OwnershipToken, recreated.OwnershipToken);
         Assert.False(File.Exists(retiredSiblingMarker));
-        LibraryDirectoryOwnershipMarker.Validate(recreated, directory);
+        AssertNoPersistentOwnershipArtifacts(recreated);
     }
 
     [Fact]
@@ -775,7 +697,7 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
         var insideMarker = Path.Join(
             directory,
             LibraryDirectoryOwnershipMarker.FileName);
-        LibraryDirectoryOwnershipMarker.DeleteInsideMarker(ownership, directory);
+        Assert.False(File.Exists(insideMarker));
         ownership.OwnershipToken = $"..{Path.DirectorySeparatorChar}outside";
 
         var quarantineException = Assert.Throws<InvalidOperationException>(() =>
@@ -808,7 +730,6 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
         var ownershipKey = Assert.IsType<string>(ownership.PathOwnershipKey);
         await _store.BeginRemovalAsync(ownership.Id, ownershipKey);
         ownership.State = LibraryDirectoryOwnershipState.Removing;
-        LibraryDirectoryOwnershipMarker.DeleteInsideMarker(ownership, directory);
         Directory.Delete(directory, recursive: false);
         await File.WriteAllTextAsync(directory, "user file");
 
@@ -833,7 +754,6 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
         var ownershipKey = Assert.IsType<string>(ownership.PathOwnershipKey);
         await _store.BeginRemovalAsync(ownership.Id, ownershipKey);
         ownership.State = LibraryDirectoryOwnershipState.Removing;
-        LibraryDirectoryOwnershipMarker.DeleteInsideMarker(ownership, directory);
         Directory.Delete(directory, recursive: false);
         var quarantinePath = LibraryDirectoryOwnershipRemoval.GetQuarantinePath(ownership);
         await File.WriteAllTextAsync(quarantinePath, "foreign file");
@@ -862,9 +782,6 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
         var quarantinePath =
             LibraryDirectoryOwnershipRemoval.GetQuarantinePath(ownership);
         Directory.Move(directory, quarantinePath);
-        LibraryDirectoryOwnershipMarker.DeleteInsideMarker(
-            ownership,
-            quarantinePath);
 
         LibraryDirectoryOwnershipRemoval.ValidateRecoverableState(ownership);
         using var parent =
@@ -875,9 +792,7 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
 
         Assert.Equal(LibraryDirectoryRemovalOutcome.Removed, outcome);
         Assert.False(Directory.Exists(quarantinePath));
-        Assert.True(
-            File.Exists(
-                LibraryDirectoryOwnershipMarker.GetMarkerPaths(ownership)[1]));
+        AssertNoPersistentOwnershipArtifacts(ownership);
     }
 
     [Fact]
@@ -893,7 +808,6 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
         var ownershipKey = Assert.IsType<string>(prior.PathOwnershipKey);
 
         await _store.BeginRemovalAsync(prior.Id, ownershipKey);
-        LibraryDirectoryOwnershipMarker.DeleteInsideMarker(prior, directory);
         Directory.Delete(directory, recursive: false);
         await _store.MarkRemovedAsync(prior.Id, ownershipKey);
         await using (var db = await _factory.CreateDbContextAsync())
@@ -912,7 +826,7 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
                 "test-recreated"));
 
         Assert.NotEqual(prior.Id, recreated.Id);
-        LibraryDirectoryOwnershipMarker.Validate(recreated, directory);
+        AssertNoPersistentOwnershipArtifacts(recreated);
     }
 
     [Fact]
@@ -959,7 +873,7 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
     }
 
     [Fact]
-    public async Task Reconciler_SiblingOnlyRemoval_PreservesRecoverableIntent()
+    public async Task Reconciler_MissingRemovingDirectoryConvergesWithoutMarkerProof()
     {
         var directory = Path.Join(_root, "SiblingOnlyRemoval");
         Directory.CreateDirectory(directory);
@@ -970,7 +884,6 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
                 "test"));
         var ownershipKey = Assert.IsType<string>(ownership.PathOwnershipKey);
         await _store.BeginRemovalAsync(ownership.Id, ownershipKey);
-        LibraryDirectoryOwnershipMarker.DeleteInsideMarker(ownership, directory);
         Directory.Delete(directory);
         var reconciler = new LibraryDirectoryOwnershipReconciler(
             _factory,
@@ -983,10 +896,10 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
         await using var verification = await _factory.CreateDbContextAsync();
         var persisted = await verification.LibraryDirectoryOwnerships.SingleAsync();
         Assert.Equal(
-            LibraryDirectoryOwnershipState.Removing,
+            LibraryDirectoryOwnershipState.Removed,
             persisted.State);
-        Assert.Equal(ownershipKey, persisted.PathOwnershipKey);
-        LibraryDirectoryOwnershipRemoval.ValidateRecoverableState(persisted);
+        Assert.Null(persisted.PathOwnershipKey);
+        AssertNoPersistentOwnershipArtifacts(persisted);
     }
 
     [Fact]
@@ -1006,6 +919,7 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
         const string originalStateReason =
             "Legacy cleanup completed.\nPreserve this diagnostic.";
 
+        await PublishLegacyOwnershipMarkersAsync(ownership);
         await _store.BeginRemovalAsync(ownership.Id, ownershipKey);
         LibraryDirectoryOwnershipMarker.DeleteInsideMarker(ownership, directory);
         Directory.Delete(directory);
@@ -1102,7 +1016,7 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
     }
 
     [Fact]
-    public async Task Reconciler_LegacyMissingBothCorruptMarkerFailsClosed()
+    public async Task Reconciler_LegacyMissingBothCorruptMarker_PreservesArtifactAndConvergesRemoval()
     {
         var fixture = await PrepareLegacyMissingBothAsync(
             "LegacyMissingBothCorrupt");
@@ -1113,11 +1027,11 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
 
         await CreateOwnershipReconciler().ReconcileAsync();
 
-        await AssertLegacyRecoveryRejectedAsync(fixture);
+        await AssertRemovalConvergedWithPreservedLegacyArtifactAsync(fixture);
     }
 
     [Fact]
-    public async Task Reconciler_LegacyMissingBothWrongTokenFailsClosed()
+    public async Task Reconciler_LegacyMissingBothWrongToken_PreservesArtifactAndConvergesRemoval()
     {
         var fixture = await PrepareLegacyMissingBothAsync(
             "LegacyMissingBothWrongToken");
@@ -1134,7 +1048,7 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
 
         await CreateOwnershipReconciler().ReconcileAsync();
 
-        await AssertLegacyRecoveryRejectedAsync(fixture);
+        await AssertRemovalConvergedWithPreservedLegacyArtifactAsync(fixture);
     }
 
     [Fact]
@@ -1175,6 +1089,7 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
                 directory,
                 FileSystemPathSemantics.CurrentHostDefault,
                 "test"));
+        await PublishLegacyOwnershipMarkersAsync(ownership);
         var markerPath = Path.Join(
             directory,
             LibraryDirectoryOwnershipMarker.FileName);
@@ -1199,7 +1114,7 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
 
         Assert.False(File.Exists(backupPath));
         Assert.False(File.Exists(temporaryPath));
-        LibraryDirectoryOwnershipMarker.Validate(ownership, directory);
+        AssertNoPersistentOwnershipArtifacts(ownership);
     }
 
     [Fact]
@@ -1212,6 +1127,7 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
                 directory,
                 FileSystemPathSemantics.CurrentHostDefault,
                 "test"));
+        await PublishLegacyOwnershipMarkersAsync(ownership);
         var backupPath = Path.Join(
             directory,
             PinnedDirectoryCreation.GetConditionalReplacementBackupName(
@@ -1227,7 +1143,7 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
         await CreateOwnershipReconciler().ReconcileAsync();
 
         Assert.False(File.Exists(backupPath));
-        LibraryDirectoryOwnershipMarker.Validate(ownership, directory);
+        AssertNoPersistentOwnershipArtifacts(ownership);
     }
 
     [Fact]
@@ -1240,6 +1156,7 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
                 directory,
                 FileSystemPathSemantics.CurrentHostDefault,
                 "test"));
+        await PublishLegacyOwnershipMarkersAsync(ownership);
         var temporaryPath = Path.Join(
             directory,
             LibraryDirectoryOwnershipMarker.FileName + ".v2.tmp");
@@ -1254,7 +1171,7 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
         await CreateOwnershipReconciler().ReconcileAsync();
 
         Assert.False(File.Exists(temporaryPath));
-        LibraryDirectoryOwnershipMarker.Validate(ownership, directory);
+        AssertNoPersistentOwnershipArtifacts(ownership);
         await using var verification = await _factory.CreateDbContextAsync();
         var persisted = await verification.LibraryDirectoryOwnerships
             .SingleAsync(candidate => candidate.Id == ownership.Id);
@@ -1262,7 +1179,7 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
     }
 
     [Fact]
-    public async Task Reconciler_LegacyMissingBothMixedUpgradeMarkersFailClosed()
+    public async Task Reconciler_LegacyMissingBothMixedUpgradeMarkers_PreservesArtifactsAndConvergesRemoval()
     {
         var fixture = await PrepareLegacyMissingBothAsync(
             "LegacyMissingBothMixed");
@@ -1273,7 +1190,8 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
 
         await CreateOwnershipReconciler().ReconcileAsync();
 
-        await AssertLegacyRecoveryRejectedAsync(fixture);
+        await AssertRemovalConvergedWithPreservedLegacyArtifactAsync(fixture);
+        Assert.True(File.Exists(fixture.SiblingMarkerPath + ".v2.tmp"));
     }
 
     [Fact]
@@ -1306,6 +1224,7 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
                 FileSystemPathSemantics.CurrentHostDefault,
                 "test"));
         var ownershipKey = Assert.IsType<string>(ownership.PathOwnershipKey);
+        await PublishLegacyOwnershipMarkersAsync(ownership);
         await _store.BeginRemovalAsync(ownership.Id, ownershipKey);
         LibraryDirectoryOwnershipMarker.DeleteInsideMarker(ownership, directory);
         Directory.Delete(directory);
@@ -1347,6 +1266,7 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
                 FileSystemPathSemantics.CurrentHostDefault,
                 "test"));
         var ownershipKey = Assert.IsType<string>(ownership.PathOwnershipKey);
+        await PublishLegacyOwnershipMarkersAsync(ownership);
         await _store.BeginRemovalAsync(ownership.Id, ownershipKey);
         LibraryDirectoryOwnershipMarker.DeleteInsideMarker(ownership, directory);
         Directory.Delete(directory);
@@ -1390,6 +1310,7 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
                 "test"));
         var ownershipKey = Assert.IsType<string>(
             ownership.PathOwnershipKey);
+        await PublishLegacyOwnershipMarkersAsync(ownership);
         await _store.BeginRemovalAsync(ownership.Id, ownershipKey);
         LibraryDirectoryOwnershipMarker.DeleteInsideMarker(
             ownership,
@@ -1423,6 +1344,41 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
             evidence.State);
     }
 
+    private static void AssertNoPersistentOwnershipArtifacts(
+        LibraryDirectoryOwnership ownership)
+    {
+        var markerPaths = LibraryDirectoryOwnershipMarker.GetMarkerPaths(ownership);
+        Assert.False(File.Exists(markerPaths[0]));
+        Assert.False(File.Exists(markerPaths[0] + ".v2.tmp"));
+        Assert.False(File.Exists(markerPaths[0] + ".migration.tmp"));
+        Assert.False(File.Exists(Path.Join(
+            Path.GetDirectoryName(markerPaths[0])!,
+            PinnedDirectoryCreation.GetConditionalReplacementBackupName(
+                Path.GetFileName(markerPaths[0])))));
+        Assert.False(File.Exists(markerPaths[1]));
+        Assert.False(File.Exists(markerPaths[1] + ".v2.tmp"));
+        Assert.False(File.Exists(markerPaths[1] + ".migration.tmp"));
+        Assert.False(File.Exists(Path.Join(
+            Path.GetDirectoryName(markerPaths[1])!,
+            PinnedDirectoryCreation.GetConditionalReplacementBackupName(
+                Path.GetFileName(markerPaths[1])))));
+    }
+
+    private static async Task PublishLegacyOwnershipMarkersAsync(
+        LibraryDirectoryOwnership ownership)
+    {
+        var parentPath = Path.GetDirectoryName(ownership.CanonicalPath)
+            ?? throw new InvalidOperationException(
+                "The test ownership path has no parent directory.");
+        using var parent = PinnedDirectoryCreation.OpenPinnedBoundary(parentPath);
+        using var publication = parent.OpenExistingChildForPublication(
+            Path.GetFileName(ownership.CanonicalPath));
+        await PinnedLibraryDirectoryOwnershipMarker.EnsureAsync(
+            ownership,
+            publication,
+            CancellationToken.None);
+    }
+
     private LibraryDirectoryOwnershipReconciler CreateOwnershipReconciler() =>
         new(
             _factory,
@@ -1441,6 +1397,7 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
                 FileSystemPathSemantics.CurrentHostDefault,
                 "test"));
         var ownershipKey = Assert.IsType<string>(ownership.PathOwnershipKey);
+        await PublishLegacyOwnershipMarkersAsync(ownership);
         await _store.BeginRemovalAsync(ownership.Id, ownershipKey);
         LibraryDirectoryOwnershipMarker.DeleteInsideMarker(
             ownership,
@@ -1462,6 +1419,19 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
             directory,
             LibraryDirectoryOwnershipRemoval.GetQuarantinePath(ownership),
             siblingMarkerPath);
+    }
+
+    private async Task AssertRemovalConvergedWithPreservedLegacyArtifactAsync(
+        LegacyRemovalFixture fixture)
+    {
+        await using var verification = await _factory.CreateDbContextAsync();
+        var persisted = await verification.LibraryDirectoryOwnerships
+            .SingleAsync(candidate => candidate.Id == fixture.Ownership.Id);
+        Assert.Equal(LibraryDirectoryOwnershipState.Removed, persisted.State);
+        Assert.Null(persisted.PathOwnershipKey);
+        Assert.True(File.Exists(fixture.SiblingMarkerPath));
+        Assert.False(Directory.Exists(fixture.DirectoryPath));
+        Assert.False(Directory.Exists(fixture.QuarantinePath));
     }
 
     private async Task AssertLegacyRecoveryRejectedAsync(

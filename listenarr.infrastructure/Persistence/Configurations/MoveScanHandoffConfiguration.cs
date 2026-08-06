@@ -33,6 +33,7 @@ public sealed class MoveJobCreatedDirectoryConfiguration : IEntityTypeConfigurat
         builder.ToTable("MoveJobCreatedDirectories");
         builder.Property(directory => directory.Path).HasMaxLength(2000);
         builder.Property(directory => directory.State).HasConversion<string>().HasMaxLength(16);
+        builder.Property(directory => directory.DirectoryObjectIdentity).HasMaxLength(512);
         builder.HasIndex(directory => new { directory.MoveJobId, directory.Path }).IsUnique();
         builder.HasOne(directory => directory.MoveJob)
             .WithMany(job => job.CreatedDirectories)

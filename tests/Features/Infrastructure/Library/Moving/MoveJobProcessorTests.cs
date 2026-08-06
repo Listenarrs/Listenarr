@@ -126,12 +126,10 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
         public async Task ProcessJobAsync_RemovesEmptySourceAncestorsWithinConfiguredRoot()
         {
             var sourceRoot = FileService.GetTempDirectory("move-processor-cleanup-root");
+            await AddAuthorizedRootAsync(sourceRoot, "Move Cleanup Source Root");
             var source = Path.Join(sourceRoot, "Author", "Series", "Title", "test");
             Directory.CreateDirectory(source);
             await FileService.GetFileAsync(source, "book.m4b", "audio");
-            await RecordOwnedDirectoryHierarchyAsync(
-                sourceRoot,
-                Path.GetDirectoryName(source)!);
             var target = Path.Join(FileService.GetTempPath(), $"move-processor-cleanup-dst-{Guid.NewGuid():N}");
             var audiobook = await _audiobookRepository.AddAsync(new Audiobook { Title = "Cleanup Test", BasePath = source });
             var (queue, job) = await CreateQueuedMoveJobAsync(audiobook, target, source);
@@ -1357,7 +1355,8 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
             Audiobook audiobook,
             string requestedPath,
             string sourcePath,
-            bool deleteEmptySource = true)
+            bool deleteEmptySource = true,
+            int executionProtocolVersion = MoveExecutionProtocol.Current)
         {
             var queue = _provider.GetRequiredService<IMoveQueueService>();
             var semanticsResolver = _provider
@@ -1404,6 +1403,17 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                     deleteEmptySource));
             var job = Assert.IsType<MoveJob>(
                 await queue.GetJobAsync(jobId));
+            if (job.ExecutionProtocolVersion != executionProtocolVersion)
+            {
+                var factory = _provider.GetRequiredService<
+                    IDbContextFactory<ListenArrDbContext>>();
+                await using var db = await factory.CreateDbContextAsync();
+                var persisted = await db.MoveJobs.SingleAsync(
+                    candidate => candidate.Id == job.Id);
+                persisted.ExecutionProtocolVersion = executionProtocolVersion;
+                await db.SaveChangesAsync();
+                job.ExecutionProtocolVersion = executionProtocolVersion;
+            }
             await PrepareJobForProcessingAsync(queue, job);
             return (queue, job);
         }

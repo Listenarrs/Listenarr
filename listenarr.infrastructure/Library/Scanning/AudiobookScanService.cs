@@ -30,7 +30,9 @@ internal sealed partial class AudiobookScanService(
 
         var semantics = await ValidateCommandAsync(command, cancellationToken);
         using var pinnedAuthority = OpenPinnedScanAuthority(command);
-        var audiobook = await audiobookRepository.GetByIdAsync(command.AudiobookId)
+        var audiobook = await audiobookRepository.GetForScanAsync(
+            command.AudiobookId,
+            cancellationToken)
             ?? throw new InvalidOperationException(
                 $"Audiobook {command.AudiobookId} no longer exists.");
         var existingFiles = await fileRepository.GetByAudiobookIdAsync(
@@ -154,7 +156,7 @@ internal sealed partial class AudiobookScanService(
             diagnostics,
             cancellationToken);
 
-        var refreshed = await audiobookRepository.GetByIdSnapshotAsync(
+        var refreshed = await audiobookRepository.GetForScanSnapshotAsync(
             audiobook.Id,
             cancellationToken)
             ?? throw new InvalidOperationException(

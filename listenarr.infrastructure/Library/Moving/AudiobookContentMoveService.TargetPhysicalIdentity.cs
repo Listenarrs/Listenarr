@@ -25,6 +25,42 @@ internal sealed partial class AudiobookContentMoveService
             cancellationToken);
     }
 
+    private static IReadOnlyDictionary<string, string>
+        CreatePersistedTargetPhysicalIdentityMap(
+            string target,
+            IEnumerable<MoveJobEntry> manifest,
+            FileSystemPathSemantics targetSemantics)
+    {
+        var identities = new Dictionary<string, string>(targetSemantics.Comparer);
+        foreach (var entry in manifest
+            .Where(candidate => candidate.EntryType == MoveJobEntryType.File)
+            .Where(IsPhysicalManifestEntry))
+        {
+            if (string.IsNullOrWhiteSpace(entry.TargetPhysicalObjectIdentity))
+            {
+                throw new MoveNeedsAttentionException(
+                    $"A markerless target file lacks persisted physical identity: {entry.RelativePath}");
+            }
+            if (!FileSystemPathIdentity.TryResolveRelativePathWithinBase(
+                    target,
+                    entry.RelativePath,
+                    targetSemantics,
+                    out var targetFilePath))
+            {
+                throw new MoveNeedsAttentionException(
+                    $"The persisted markerless target identity escaped its root: {entry.RelativePath}");
+            }
+
+            identities.Add(
+                FileSystemPathIdentity.Canonicalize(
+                    targetFilePath,
+                    targetSemantics.Syntax),
+                entry.TargetPhysicalObjectIdentity);
+        }
+
+        return identities;
+    }
+
     private static async Task<IReadOnlyDictionary<string, string>>
         CapturePublishedTargetPhysicalIdentitiesAsync(
             string target,

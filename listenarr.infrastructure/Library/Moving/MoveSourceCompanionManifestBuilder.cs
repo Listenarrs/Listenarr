@@ -7,21 +7,22 @@ namespace Listenarr.Infrastructure.Library.Moving;
 internal static class MoveSourceCompanionManifestBuilder
 {
     public static async Task<IReadOnlyList<MoveSourceManifestEntry>> BuildAsync(
-        Audiobook audiobook,
+        int audiobookId,
+        string? audiobookBasePath,
         string sourceRoot,
         PathIdentitySnapshot sourceIdentity,
         IReadOnlyCollection<string> trackedFilePaths,
         LibraryDirectoryOwnershipBoundaryAuthorizer? ownershipAuthorizer,
         IAudiobookRepository? audiobookRepository,
         IAudiobookFileRepository fileRepository,
+        bool includeContentHashes,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(audiobook);
         if (ownershipAuthorizer == null
             || audiobookRepository == null
-            || string.IsNullOrWhiteSpace(audiobook.BasePath)
+            || string.IsNullOrWhiteSpace(audiobookBasePath)
             || !FileSystemPathIdentity.TryCanonicalizeStoredPathWithIdentityForHost(
-                audiobook.BasePath,
+                audiobookBasePath,
                 sourceIdentity,
                 out var canonicalBasePath,
                 out _)
@@ -34,7 +35,7 @@ internal static class MoveSourceCompanionManifestBuilder
         }
 
         if (!await HasExclusiveAudiobookReferenceAsync(
-                audiobook,
+                audiobookId,
                 sourceRoot,
                 sourceIdentity.Semantics,
                 audiobookRepository,
@@ -88,6 +89,7 @@ internal static class MoveSourceCompanionManifestBuilder
                 tracked,
                 sourceIdentity.Semantics,
                 entries,
+                includeContentHashes,
                 cancellationToken);
             if (!source.VisiblePathMatches(sourceRoot))
             {
@@ -113,16 +115,16 @@ internal static class MoveSourceCompanionManifestBuilder
     }
 
     private static async Task<bool> HasExclusiveAudiobookReferenceAsync(
-        Audiobook audiobook,
+        int audiobookId,
         string sourceRoot,
         FileSystemPathSemantics semantics,
         IAudiobookRepository audiobookRepository,
         IAudiobookFileRepository fileRepository,
         CancellationToken cancellationToken)
     {
-        var otherAudiobooks = (await audiobookRepository.GetAllAsync())
-            .Where(candidate => candidate.Id != audiobook.Id)
-            .ToDictionary(candidate => candidate.Id);
+        var otherAudiobooks = (await audiobookRepository
+                .GetOtherPathReferenceSnapshotsAsync(audiobookId, cancellationToken))
+            .ToDictionary(candidate => candidate.AudiobookId);
         foreach (var other in otherAudiobooks.Values)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -152,7 +154,7 @@ internal static class MoveSourceCompanionManifestBuilder
             if (!string.IsNullOrWhiteSpace(other.FilePath))
             {
                 if (!TryResolveOtherStoredFilePath(
-                        other,
+                        other.BasePath,
                         other.FilePath,
                         semantics,
                         out var legacyPath))
@@ -170,14 +172,13 @@ internal static class MoveSourceCompanionManifestBuilder
             }
         }
 
-        foreach (var file in (await fileRepository.GetAllAsync()).Where(file =>
-            file.AudiobookId != audiobook.Id
-            && !string.IsNullOrWhiteSpace(file.Path)))
+        foreach (var file in await fileRepository
+            .GetOtherPathReferenceSnapshotsAsync(audiobookId, cancellationToken))
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (!otherAudiobooks.TryGetValue(file.AudiobookId, out var owner)
                 || !TryResolveOtherStoredFilePath(
-                    owner,
+                    owner.BasePath,
                     file.Path!,
                     semantics,
                     out var otherFilePath))
@@ -198,7 +199,7 @@ internal static class MoveSourceCompanionManifestBuilder
     }
 
     private static bool TryResolveOtherStoredFilePath(
-        Audiobook audiobook,
+        string? audiobookBasePath,
         string storedPath,
         FileSystemPathSemantics semantics,
         out string resolvedPath)
@@ -217,9 +218,9 @@ internal static class MoveSourceCompanionManifestBuilder
             return true;
         }
 
-        return !string.IsNullOrWhiteSpace(audiobook.BasePath)
+        return !string.IsNullOrWhiteSpace(audiobookBasePath)
             && FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
-                audiobook.BasePath,
+                audiobookBasePath,
                 out var basePath,
                 out _)
             && FileSystemPathIdentity.TryResolveRelativePathWithinBase(
@@ -235,6 +236,7 @@ internal static class MoveSourceCompanionManifestBuilder
         IReadOnlySet<string> trackedFilePaths,
         FileSystemPathSemantics semantics,
         ICollection<MoveSourceManifestEntry> entries,
+        bool includeContentHashes,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -267,6 +269,7 @@ internal static class MoveSourceCompanionManifestBuilder
                     trackedFilePaths,
                     semantics,
                     entries,
+                    includeContentHashes,
                     cancellationToken);
                 if (childContainsCompanion)
                 {
@@ -296,6 +299,7 @@ internal static class MoveSourceCompanionManifestBuilder
                 current,
                 entryName,
                 semantics,
+                includeContentHashes,
                 cancellationToken));
             containsCompanion = true;
         }
@@ -316,6 +320,7 @@ internal static class MoveSourceCompanionManifestBuilder
         PinnedDirectoryCreation.PinnedDirectoryAnchor parent,
         string fileName,
         FileSystemPathSemantics semantics,
+        bool includeContentHash,
         CancellationToken cancellationToken)
     {
         using var file = parent.OpenExistingFileForStableRead(fileName);
@@ -325,8 +330,10 @@ internal static class MoveSourceCompanionManifestBuilder
             asynchronous: false);
         var length = stream.Length;
         var lastWriteTimeUtc = File.GetLastWriteTimeUtc(file.FullPath);
-        var hashBytes = await SHA256.HashDataAsync(stream, cancellationToken);
-        var hash = Convert.ToHexString(hashBytes);
+        var hash = includeContentHash
+            ? Convert.ToHexString(
+                await SHA256.HashDataAsync(stream, cancellationToken))
+            : null;
         if (!root.VisiblePathMatches()
             || !parent.VisiblePathMatches()
             || !file.VisiblePathMatches()

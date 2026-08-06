@@ -1022,6 +1022,11 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.Property<string>("Error")
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("ExecutionProtocolVersion")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1);
+
                     b.Property<string>("FailureKind")
                         .IsRequired()
                         .HasMaxLength(32)
@@ -1068,6 +1073,17 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("SourceDirectoryCleanupState")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(24)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("Pending");
+
+                    b.Property<string>("SourceDirectoryObjectIdentity")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("SourceIdentityBoundary")
                         .HasMaxLength(2000)
                         .HasColumnType("TEXT");
@@ -1090,6 +1106,10 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
 
                     b.Property<string>("TargetCaseSensitivityMode")
                         .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TargetDirectoryObjectIdentity")
+                        .HasMaxLength(512)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("TargetIdentityBoundary")
@@ -1123,6 +1143,10 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.Property<long>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("DirectoryObjectIdentity")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
 
                     b.Property<Guid>("MoveJobId")
                         .HasColumnType("TEXT");
@@ -1187,6 +1211,14 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
 
                     b.Property<string>("Sha256")
                         .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourcePhysicalObjectIdentity")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TargetPhysicalObjectIdentity")
+                        .HasMaxLength(512)
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
@@ -2103,6 +2135,75 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.HasIndex("DownloadId", "Status");
 
                     b.ToTable("DownloadProcessingJobs");
+                });
+
+            modelBuilder.Entity("Listenarr.Domain.Downloads.FileMutationJournal", b =>
+                {
+                    b.Property<Guid>("OperationId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("AudiobookId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DestinationPath")
+                        .IsRequired()
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(2048)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ProtocolVersion")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(2);
+
+                    b.Property<long>("SourceLength")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SourcePath")
+                        .IsRequired()
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourcePhysicalObjectIdentity")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TargetPhysicalObjectIdentity")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("OperationId");
+
+                    b.HasIndex("State");
+
+                    b.HasIndex("UpdatedAt");
+
+                    b.ToTable("FileMutationJournals", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Downloads.RemotePathMapping", b =>

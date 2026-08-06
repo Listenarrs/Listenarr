@@ -44,6 +44,27 @@ public sealed class LinuxTheoryAttribute : TheoryAttribute
     }
 }
 
+public sealed class ReadOnlyBindMountFactAttribute : FactAttribute
+{
+    public const string LibraryPathEnvironmentVariable =
+        "LISTENARR_READONLY_LIBRARY_PATH";
+
+    public ReadOnlyBindMountFactAttribute()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Skip = "This test requires a native Linux read-only bind mount.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(
+                LibraryPathEnvironmentVariable)))
+        {
+            Skip = "The native test runner did not provide a read-only library bind mount.";
+        }
+    }
+}
+
 public sealed class DirectoryLinkFactAttribute : FactAttribute
 {
     public DirectoryLinkFactAttribute()

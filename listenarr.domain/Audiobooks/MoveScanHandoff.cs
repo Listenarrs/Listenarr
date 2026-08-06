@@ -50,4 +50,6 @@ public sealed class MoveJobCreatedDirectory
     [Required, MaxLength(2000)]
     public string Path { get; set; } = string.Empty;
     public MoveCreatedDirectoryState State { get; set; } = MoveCreatedDirectoryState.Planned;
+    [MaxLength(512)]
+    public string? DirectoryObjectIdentity { get; set; }
 }

@@ -118,7 +118,10 @@ internal partial class MoveJobProcessor
                     resolvedSourceIdentity.Semantics,
                     targetSemantics,
                     CreateLeaseToken(job),
-                    cleanupBoundaryResolution.Boundary);
+                    cleanupBoundaryResolution.Boundary,
+                    AllowUnownedSourceAncestorCleanup:
+                        cleanupBoundaryResolution.Kind
+                            == MoveCleanupBoundaryKind.ConfiguredRoot);
                 try
                 {
                     var resumedMove = await contentMoveService.GetRecoverableMoveAsync(recoveryRequest, stoppingToken);
@@ -348,6 +351,7 @@ internal partial class MoveJobProcessor
         CancellationToken stoppingToken)
     {
         AudiobookContentMoveRequest? moveRequest = null;
+        AudiobookContentMoveResult? moveResult = recoveredMove;
         try
         {
             moveRequest = new AudiobookContentMoveRequest(
@@ -359,8 +363,17 @@ internal partial class MoveJobProcessor
                 targetSemantics,
                 CreateLeaseToken(job),
                 cleanupBoundaryResolution.Boundary,
-                SourcePhysicalObjectIdentities: sourcePhysicalObjectIdentities);
-            var moveResult = recoveredMove ?? await contentMoveService.MoveContentsAsync(moveRequest, stoppingToken);
+                SourcePhysicalObjectIdentities: sourcePhysicalObjectIdentities,
+                ProgressReporter: (progress, phase, token) =>
+                    moveQueueService.PublishProgressAsync(
+                        job.Id,
+                        progress,
+                        phase,
+                        token),
+                AllowUnownedSourceAncestorCleanup:
+                    cleanupBoundaryResolution.Kind
+                        == MoveCleanupBoundaryKind.ConfiguredRoot);
+            moveResult ??= await contentMoveService.MoveContentsAsync(moveRequest, stoppingToken);
             moveResult = await contentMoveService.ResumeSourceCleanupAsync(moveRequest, moveResult, stoppingToken);
             source = moveResult.Source;
             target = moveResult.Target;
@@ -460,6 +473,10 @@ internal partial class MoveJobProcessor
                 scope,
                 ex,
                 stoppingToken);
+        }
+        finally
+        {
+            moveResult?.TargetVerificationLease?.Dispose();
         }
     }
 

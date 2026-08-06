@@ -20,6 +20,24 @@ import { mount, type VueWrapper } from '@vue/test-utils'
 import { computed, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 
+const moveJobsMock = vi.hoisted(() => ({
+  trackedJobs: [] as Array<{
+    jobId: string
+    audiobookId?: number
+    status: string
+    progress: number
+    phase?: string
+    target?: string
+  }>,
+  start: vi.fn(),
+  stop: vi.fn(),
+  loadActiveJobs: vi.fn(async () => undefined),
+}))
+
+vi.mock('@/stores/moveJobs', () => ({
+  useMoveJobsStore: () => moveJobsMock,
+}))
+
 // Mock the downloads store so App.vue picks up the activeDownloads correctly
 vi.mock('@/stores/downloads', () => ({
   useDownloadsStore: () => ({
@@ -75,6 +93,7 @@ describe('App.vue activity badge', () => {
   beforeEach(() => {
     // reset mocks between tests
     vi.resetModules()
+    moveJobsMock.trackedJobs.length = 0
     setActivePinia(createPinia())
   })
 
@@ -102,6 +121,39 @@ describe('App.vue activity badge', () => {
       configurable: true,
     })
   }
+
+  it('shows active move progress in the notification dropdown', async () => {
+    moveJobsMock.trackedJobs.push({
+      jobId: 'move-1',
+      audiobookId: 98,
+      status: 'Running',
+      progress: 42.4,
+      phase: 'Verifying source',
+      target: 'D:\\Listenarr Test\\Book',
+    })
+
+    const { default: AppComponent } = await import('@/App.vue')
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: '/', name: 'home', component: { template: '<div />' } }],
+    })
+    await router.push('/')
+    await router.isReady().catch(() => {})
+
+    wrapper = mount(AppComponent, {
+      global: { stubs: ['RouterLink', 'RouterView'], plugins: [createPinia(), router] },
+    })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    await wrapper.find('.notification-wrapper .nav-btn').trigger('click')
+
+    const dropdown = wrapper.find('.notification-dropdown')
+    expect(dropdown.exists()).toBe(true)
+    expect(dropdown.text()).toContain('Moving audiobook')
+    expect(dropdown.text()).toContain('Verifying source')
+    expect(dropdown.text()).toContain('42%')
+    expect(dropdown.find('.progress-fill').attributes('style')).toContain('width: 42.4%')
+  })
 
   it('counts active downloads correctly even when statuses are lowercase', async () => {
     // replace the downloads mock with one that returns a lowercased status

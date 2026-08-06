@@ -15,7 +15,6 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using System.Runtime.ExceptionServices;
 using Listenarr.Domain.Common;
 
 namespace Listenarr.Application.Audiobooks.RootFolders
@@ -85,16 +84,13 @@ namespace Listenarr.Application.Audiobooks.RootFolders
                     root.DirectoryObjectIdentity = identity.Value;
                     root.DirectoryObjectIdentityUnavailableReason = null;
                     root.UpdatedAt = DateTime.UtcNow;
-                    return await PersistRootWithEnrollmentCompensationAsync(
-                        root,
-                        identity,
-                        () => _repo.UpdateAsync(root));
+                    await _repo.UpdateAsync(root);
+                    return root;
                 },
                 cancellationToken);
         }
 
-        private async Task<DirectoryObjectIdentityResolution>
-            CaptureInitialDirectoryObjectIdentityAsync(RootFolder root)
+        private async Task CaptureInitialDirectoryObjectIdentityAsync(RootFolder root)
         {
             var resolution = _directoryObjectIdentityResolver == null
                 ? DirectoryObjectIdentityResolution.Unavailable(
@@ -103,73 +99,6 @@ namespace Listenarr.Application.Audiobooks.RootFolders
             root.DirectoryObjectIdentityVersion = resolution.Version;
             root.DirectoryObjectIdentity = resolution.Value;
             root.DirectoryObjectIdentityUnavailableReason = resolution.UnavailableReason;
-            return resolution;
-        }
-
-        private async Task<RootFolder> PersistRootWithEnrollmentCompensationAsync(
-            RootFolder root,
-            DirectoryObjectIdentityResolution identity,
-            Func<Task> persistAsync)
-        {
-            try
-            {
-                await persistAsync();
-                return root;
-            }
-            catch (Exception persistenceException)
-            {
-                RootFolder? durableRoot;
-                try
-                {
-                    durableRoot = root.Id > 0
-                        ? await _repo.GetByIdAsync(root.Id)
-                        : await _repo.GetByPathAsync(root.Path);
-                }
-                catch (Exception verificationException)
-                {
-                    throw new InvalidOperationException(
-                        "Root folder persistence failed and its durable outcome could not be verified; the physical enrollment marker was preserved.",
-                        new AggregateException(
-                            persistenceException,
-                            verificationException));
-                }
-
-                if (durableRoot != null
-                    && durableRoot.DirectoryObjectIdentityVersion == identity.Version
-                    && string.Equals(
-                        durableRoot.DirectoryObjectIdentity,
-                        identity.Value,
-                        StringComparison.Ordinal))
-                {
-                    return durableRoot;
-                }
-
-                if (identity.EnrollmentCreated
-                    && identity.Version.HasValue
-                    && !string.IsNullOrWhiteSpace(identity.Value)
-                    && _directoryObjectIdentityResolver != null)
-                {
-                    try
-                    {
-                        await _directoryObjectIdentityResolver.RetireEnrollmentAsync(
-                            root.Path,
-                            identity.Version.Value,
-                            identity.Value,
-                            CancellationToken.None);
-                    }
-                    catch (Exception compensationException)
-                    {
-                        throw new InvalidOperationException(
-                            "Root folder persistence failed and its newly created physical enrollment could not be retired safely.",
-                            new AggregateException(
-                                persistenceException,
-                                compensationException));
-                    }
-                }
-
-                ExceptionDispatchInfo.Capture(persistenceException).Throw();
-                throw new InvalidOperationException("Unreachable persistence compensation state.");
-            }
         }
 
         private async Task ValidateExistingDirectoryObjectIdentityAsync(RootFolder root)
@@ -194,7 +123,9 @@ namespace Listenarr.Application.Audiobooks.RootFolders
             }
 
             var current = await _directoryObjectIdentityResolver.ResolveExistingAsync(
-                canonicalRootPath);
+                canonicalRootPath,
+                root.DirectoryObjectIdentityVersion.Value,
+                root.DirectoryObjectIdentity);
             if (!current.IsAvailable
                 || current.Version != root.DirectoryObjectIdentityVersion
                 || !string.Equals(

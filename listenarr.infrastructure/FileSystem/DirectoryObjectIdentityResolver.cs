@@ -14,20 +14,35 @@ internal sealed class DirectoryObjectIdentityResolver(
     public Task<DirectoryObjectIdentityResolution> ResolveAsync(
         string path,
         CancellationToken cancellationToken = default) =>
-        ResolveCoreAsync(
+        ResolvePinnedAsync(
             path,
-            enrollIfMissing: true,
-            expectedLegacyIdentity: null,
-            cancellationToken);
+            cancellationToken,
+            nativeIdentity => new DirectoryObjectIdentityResolution(
+                ManagedDirectoryIdentity.CurrentVersion,
+                ManagedDirectoryIdentity.CreateMarkerless(nativeIdentity),
+                null));
 
     public Task<DirectoryObjectIdentityResolution> ResolveExistingAsync(
         string path,
-        CancellationToken cancellationToken = default) =>
-        ResolveCoreAsync(
+        int expectedVersion,
+        string expectedValue,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(expectedValue);
+        return ResolvePinnedAsync(
             path,
-            enrollIfMissing: false,
-            expectedLegacyIdentity: null,
-            cancellationToken);
+            cancellationToken,
+            nativeIdentity => ManagedDirectoryIdentity.MatchesNativeIdentity(
+                    expectedVersion,
+                    expectedValue,
+                    nativeIdentity)
+                ? new DirectoryObjectIdentityResolution(
+                    expectedVersion,
+                    expectedValue,
+                    null)
+                : DirectoryObjectIdentityResolution.Unavailable(
+                    "The live directory no longer matches its persisted physical identity."));
+    }
 
     public Task<DirectoryObjectIdentityResolution> UpgradeLegacyAsync(
         string path,
@@ -43,70 +58,25 @@ internal sealed class DirectoryObjectIdentityResolver(
                     $"Directory identity version {legacyVersion} cannot be upgraded automatically."));
         }
 
-        return ResolveCoreAsync(
+        return ResolvePinnedAsync(
             path,
-            enrollIfMissing: true,
-            expectedLegacyIdentity: legacyValue,
-            cancellationToken);
+            cancellationToken,
+            nativeIdentity => string.Equals(
+                    nativeIdentity,
+                    legacyValue,
+                    StringComparison.Ordinal)
+                ? new DirectoryObjectIdentityResolution(
+                    ManagedDirectoryIdentity.CurrentVersion,
+                    ManagedDirectoryIdentity.CreateMarkerless(nativeIdentity),
+                    null)
+                : DirectoryObjectIdentityResolution.Unavailable(
+                    "The live directory no longer matches its legacy physical identity and cannot be upgraded automatically."));
     }
 
-    public async Task RetireEnrollmentAsync(
+    private Task<DirectoryObjectIdentityResolution> ResolvePinnedAsync(
         string path,
-        int expectedVersion,
-        string expectedValue,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(expectedValue);
-        if (expectedVersion != ManagedDirectoryIdentity.CurrentVersion)
-        {
-            throw new InvalidOperationException(
-                $"Directory identity version {expectedVersion} cannot be retired as a managed enrollment.");
-        }
-
-        cancellationToken.ThrowIfCancellationRequested();
-        if (!FileSystemPathIdentity.TryCanonicalizeStoredAbsolutePathForHost(
-                path,
-                out var canonicalPath,
-                out var pathReason))
-        {
-            throw new InvalidOperationException(pathReason);
-        }
-
-        try
-        {
-            using var anchor = PinnedDirectoryCreation.OpenPinnedBoundary(canonicalPath);
-            var nativeIdentity = _nativeIdentityResolver(anchor);
-            var current = await ManagedDirectoryEnrollment.ResolveAsync(
-                anchor,
-                nativeIdentity,
-                enrollIfMissing: false,
-                cancellationToken);
-            if (!current.IsAvailable
-                || current.Version != expectedVersion
-                || !string.Equals(current.Value, expectedValue, StringComparison.Ordinal)
-                || !anchor.VisiblePathMatches())
-            {
-                throw new InvalidOperationException(
-                    "The managed directory enrollment changed before compensation and was preserved.");
-            }
-
-            ManagedDirectoryEnrollment.RetireValidMarker(anchor);
-        }
-        catch (Exception exception) when (exception is
-            IOException or UnauthorizedAccessException or Win32Exception
-                or PlatformNotSupportedException)
-        {
-            throw new InvalidOperationException(
-                "The managed directory enrollment could not be retired safely.",
-                exception);
-        }
-    }
-
-    private async Task<DirectoryObjectIdentityResolution> ResolveCoreAsync(
-        string path,
-        bool enrollIfMissing,
-        string? expectedLegacyIdentity,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<string, DirectoryObjectIdentityResolution> resolve)
     {
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
@@ -115,7 +85,8 @@ internal sealed class DirectoryObjectIdentityResolver(
                 out var canonicalPath,
                 out var pathReason))
         {
-            return DirectoryObjectIdentityResolution.Unavailable(pathReason);
+            return Task.FromResult(
+                DirectoryObjectIdentityResolution.Unavailable(pathReason));
         }
 
         try
@@ -124,31 +95,19 @@ internal sealed class DirectoryObjectIdentityResolver(
             var nativeIdentity = _nativeIdentityResolver(anchor);
             if (!anchor.VisiblePathMatches())
             {
-                return DirectoryObjectIdentityResolution.Unavailable(
-                    "The directory changed while its physical identity was captured.");
+                return Task.FromResult(
+                    DirectoryObjectIdentityResolution.Unavailable(
+                        "The directory changed while its physical identity was captured."));
             }
 
-            if (expectedLegacyIdentity != null
-                && !string.Equals(
-                    nativeIdentity,
-                    expectedLegacyIdentity,
-                    StringComparison.Ordinal))
-            {
-                return DirectoryObjectIdentityResolution.Unavailable(
-                    "The live directory no longer matches its legacy physical identity and cannot be enrolled automatically.");
-            }
-
-            return await ManagedDirectoryEnrollment.ResolveAsync(
-                anchor,
-                nativeIdentity,
-                enrollIfMissing,
-                cancellationToken);
+            return Task.FromResult(resolve(nativeIdentity));
         }
         catch (Exception exception) when (exception is
             IOException or UnauthorizedAccessException or Win32Exception
                 or PlatformNotSupportedException or InvalidOperationException)
         {
-            return DirectoryObjectIdentityResolution.Unavailable(exception.Message);
+            return Task.FromResult(
+                DirectoryObjectIdentityResolution.Unavailable(exception.Message));
         }
     }
 }

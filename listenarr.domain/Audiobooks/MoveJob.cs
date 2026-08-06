@@ -72,8 +72,16 @@ namespace Listenarr.Domain.Audiobooks
     {
         Pending,
         Quarantined,
+        DeletionAuthorized,
         Deleted,
         Retained
+    }
+
+    public static class MoveExecutionProtocol
+    {
+        public const int LegacyFilesystemArtifacts = 1;
+        public const int MarkerlessDatabaseState = 2;
+        public const int Current = MarkerlessDatabaseState;
     }
 
     public static class MoveJobStatusExtensions
@@ -93,6 +101,14 @@ namespace Listenarr.Domain.Audiobooks
         public DateTime EnqueuedAt { get; set; } = DateTime.UtcNow;
         public MoveJobStatus Status { get; set; } = MoveJobStatus.Queued;
         public MoveJobPhase Phase { get; set; } = MoveJobPhase.None;
+        public int ExecutionProtocolVersion { get; set; } =
+            MoveExecutionProtocol.LegacyFilesystemArtifacts;
+        [MaxLength(512)]
+        public string? SourceDirectoryObjectIdentity { get; set; }
+        [MaxLength(512)]
+        public string? TargetDirectoryObjectIdentity { get; set; }
+        public MoveJobEntryCleanupState SourceDirectoryCleanupState { get; set; } =
+            MoveJobEntryCleanupState.Pending;
         public string? Error { get; set; }
         public MoveFailureKind FailureKind { get; set; } = MoveFailureKind.None;
         public int AttemptCount { get; set; } = 0;
@@ -212,5 +228,9 @@ namespace Listenarr.Domain.Audiobooks
         public MoveJobEntryCopyState CopyState { get; set; }
         public MoveJobEntryCleanupState CleanupState { get; set; }
         public int CleanupProtectionVersion { get; set; }
+        [MaxLength(512)]
+        public string? SourcePhysicalObjectIdentity { get; set; }
+        [MaxLength(512)]
+        public string? TargetPhysicalObjectIdentity { get; set; }
     }
 }

@@ -46,6 +46,44 @@ public sealed class MoveSourceManifestServiceTests : BaseTests
     }
 
     [Fact]
+    public async Task BuildPlanAsync_ProducesStructuralManifestWithoutReadingContentHash()
+    {
+        var root = FileService.GetTempDirectory("move-plan-metadata-only");
+        var filePath = await FileService.GetFileAsync(
+            root,
+            "Book.m4b",
+            "source bytes");
+        var audiobook = await _audiobookRepository.AddAsync(
+            new AudiobookBuilder()
+                .WithTitle("Book")
+                .WithBasePath(root)
+                .Build());
+        await AddTrackedFileAsync(audiobook, filePath, root);
+
+        var plan = await _provider
+            .GetRequiredService<IMoveSourcePlanService>()
+            .BuildPlanAsync(new AudiobookPathReferenceSnapshot(
+                audiobook.Id,
+                audiobook.BasePath,
+                audiobook.FilePath));
+        var fullManifest = await _provider
+            .GetRequiredService<IMoveSourceManifestService>()
+            .BuildAsync(audiobook);
+
+        var plannedFile = Assert.Single(
+            plan.Entries,
+            entry => entry.EntryType == MoveJobEntryType.File);
+        var hashedFile = Assert.Single(
+            fullManifest.Entries,
+            entry => entry.EntryType == MoveJobEntryType.File);
+        Assert.Null(plannedFile.Sha256);
+        Assert.NotNull(hashedFile.Sha256);
+        Assert.Equal(hashedFile.RelativePath, plannedFile.RelativePath);
+        Assert.Equal(hashedFile.Length, plannedFile.Length);
+        Assert.Equal(hashedFile.LastWriteTimeUtc, plannedFile.LastWriteTimeUtc);
+    }
+
+    [Fact]
     public async Task BuildAsync_SharedFlatFolder_IncludesOnlyTrackedFile()
     {
         var root = FileService.GetTempDirectory("move-manifest-flat");

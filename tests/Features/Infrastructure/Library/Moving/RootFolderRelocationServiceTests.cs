@@ -198,7 +198,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
     }
 
     [Fact]
-    public async Task StartRelocation_EmptyNestedTarget_RetainsDirectoriesAndRetiresMarkers()
+    public async Task StartRelocation_EmptyNestedTarget_RetainsDirectoriesWithoutArtifacts()
     {
         var source = Path.Join(
             TempRoot,
@@ -227,7 +227,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
         var service = CreateService();
         service.TargetReservationDirectoryFlushedForTest = path =>
         {
-            var reservationIndex = flushOrder.Count / 2;
+            var reservationIndex = flushOrder.Count;
             using var observation = _factory.CreateDbContext();
             statesObservedAtFlush.Add(observation
                 .RootFolderRelocationCreatedDirectories
@@ -250,11 +250,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
             .ToListAsync();
         Assert.True(reservations.Count >= 3);
         Assert.Equal(
-            reservations.SelectMany(reservation => new[]
-            {
-                reservation.CanonicalPath,
-                Path.GetDirectoryName(reservation.CanonicalPath)!
-            }),
+            reservations.Select(reservation => reservation.CanonicalPath),
             flushOrder);
         Assert.All(statesObservedAtFlush, state =>
             Assert.Equal(
@@ -266,9 +262,14 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
                 RootFolderRelocationCreatedDirectoryState.Retained,
                 reservation.State);
             Assert.True(Directory.Exists(reservation.CanonicalPath));
-            Assert.False(File.Exists(Path.Join(
-                reservation.CanonicalPath,
-                ".listenarr-relocation-directory.json")));
+            Assert.DoesNotContain(
+                Directory.EnumerateFileSystemEntries(
+                    reservation.CanonicalPath,
+                    "*",
+                    SearchOption.AllDirectories),
+                path => Path.GetFileName(path).Contains(
+                    ".listenarr-",
+                    StringComparison.Ordinal));
         });
     }
 
@@ -322,14 +323,14 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
     }
 
     [Fact]
-    public async Task ReconcileActive_RetainedReservationMarkerCleanupResumesAfterCrash()
+    public async Task ReconcileActive_RetainedReservationsRemainArtifactFreeAndIdempotent()
     {
         var source = Path.Join(
             TempRoot,
-            $"reservation-marker-recovery-source-{Guid.NewGuid():N}");
+            $"reservation-markerless-recovery-source-{Guid.NewGuid():N}");
         var target = Path.Join(
             TempRoot,
-            $"reservation-marker-recovery-target-{Guid.NewGuid():N}",
+            $"reservation-markerless-recovery-target-{Guid.NewGuid():N}",
             "nested");
         Directory.CreateDirectory(source);
         int rootId;
@@ -345,32 +346,12 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
             rootId = root.Id;
         }
 
-        var interrupted = CreateService();
-        interrupted.BeforeReservationMarkerRetirementForTest = _ =>
-            throw new IOException(
-                "Injected crash before post-commit marker retirement.");
-        var result = await interrupted.StartAsync(
+        var result = await CreateService().StartAsync(
             rootId,
             BuildRelocationCommand(target));
-
         Assert.Equal(RootFolderRelocationStatus.Completed, result.Status);
-        await using (var verification =
-            await _factory.CreateDbContextAsync())
-        {
-            var reservations = await verification
-                .RootFolderRelocationCreatedDirectories
-                .ToListAsync();
-            Assert.All(reservations, reservation =>
-            {
-                Assert.Equal(
-                    RootFolderRelocationCreatedDirectoryState.Retained,
-                    reservation.State);
-                Assert.True(File.Exists(Path.Join(
-                    reservation.CanonicalPath,
-                    ".listenarr-relocation-directory.json")));
-            });
-        }
 
+        await CreateService().ReconcileActiveAsync();
         await CreateService().ReconcileActiveAsync();
 
         await using var completed =
@@ -378,14 +359,22 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
         var completedReservations = await completed
             .RootFolderRelocationCreatedDirectories
             .ToListAsync();
+        Assert.NotEmpty(completedReservations);
         Assert.All(completedReservations, reservation =>
         {
             Assert.Equal(
                 RootFolderRelocationCreatedDirectoryState.Retained,
                 reservation.State);
+            Assert.True(Directory.Exists(reservation.CanonicalPath));
+        });
+        Assert.All(completedReservations, reservation =>
+        {
             Assert.False(File.Exists(Path.Join(
                 reservation.CanonicalPath,
                 ".listenarr-relocation-directory.json")));
+            Assert.False(File.Exists(Path.Join(
+                Path.GetDirectoryName(reservation.CanonicalPath)!,
+                $".listenarr-relocation-parent-{reservation.OwnershipToken}.json")));
         });
     }
 
@@ -413,26 +402,25 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
             rootId = root.Id;
         }
 
-        var interrupted = CreateService();
-        interrupted.BeforeReservationMarkerRetirementForTest = _ =>
-            throw new IOException(
-                "Injected crash before post-commit marker retirement.");
-        var result = await interrupted.StartAsync(
+        var result = await CreateService().StartAsync(
             rootId,
             BuildRelocationCommand(target));
         Assert.Equal(RootFolderRelocationStatus.Completed, result.Status);
 
-        List<string> nativeMarkerPaths;
+        List<string> nativeSentinelPaths;
         await using (var db = await _factory.CreateDbContextAsync())
         {
             var reservations = await db.RootFolderRelocationCreatedDirectories
                 .ToListAsync();
-            nativeMarkerPaths = reservations
+            nativeSentinelPaths = reservations
                 .Select(reservation => Path.Join(
                     reservation.CanonicalPath,
-                    ".listenarr-relocation-directory.json"))
+                    "user-content.txt"))
                 .ToList();
-            Assert.All(nativeMarkerPaths, path => Assert.True(File.Exists(path)));
+            foreach (var sentinel in nativeSentinelPaths)
+            {
+                await File.WriteAllTextAsync(sentinel, "preserve");
+            }
 
             foreach (var reservation in reservations)
             {
@@ -446,13 +434,13 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
 
         await CreateService().ReconcileActiveAsync();
 
-        Assert.All(nativeMarkerPaths, path => Assert.True(
+        Assert.All(nativeSentinelPaths, path => Assert.True(
             File.Exists(path),
             $"Foreign persisted reservation path touched Windows alias: {path}"));
     }
 
     [LinuxFact]
-    public async Task ReconcileActive_AmbiguousPersistedReservationPath_PreservesMarker()
+    public async Task ReconcileActive_AmbiguousPersistedReservationPath_PreservesUserContent()
     {
         var source = Path.Join(
             TempRoot,
@@ -475,26 +463,25 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
             rootId = root.Id;
         }
 
-        var interrupted = CreateService();
-        interrupted.BeforeReservationMarkerRetirementForTest = _ =>
-            throw new IOException(
-                "Injected crash before post-commit marker retirement.");
-        var result = await interrupted.StartAsync(
+        var result = await CreateService().StartAsync(
             rootId,
             BuildRelocationCommand(target));
         Assert.Equal(RootFolderRelocationStatus.Completed, result.Status);
 
-        List<string> nativeMarkerPaths;
+        List<string> nativeSentinelPaths;
         await using (var db = await _factory.CreateDbContextAsync())
         {
             var reservations = await db.RootFolderRelocationCreatedDirectories
                 .ToListAsync();
-            nativeMarkerPaths = reservations
+            nativeSentinelPaths = reservations
                 .Select(reservation => Path.Join(
                     reservation.CanonicalPath,
-                    ".listenarr-relocation-directory.json"))
+                    "user-content.txt"))
                 .ToList();
-            Assert.All(nativeMarkerPaths, path => Assert.True(File.Exists(path)));
+            foreach (var sentinel in nativeSentinelPaths)
+            {
+                await File.WriteAllTextAsync(sentinel, "preserve");
+            }
 
             foreach (var reservation in reservations)
             {
@@ -509,9 +496,9 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
 
         await CreateService().ReconcileActiveAsync();
 
-        Assert.All(nativeMarkerPaths, path => Assert.True(
+        Assert.All(nativeSentinelPaths, path => Assert.True(
             File.Exists(path),
-            $"Ambiguous persisted reservation path retired marker: {path}"));
+            $"Ambiguous persisted reservation path touched user content: {path}"));
     }
 
     [Fact]
@@ -550,20 +537,18 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
             rootId = root.Id;
         }
 
-        var finalParent = Path.GetDirectoryName(target)!;
         var service = CreateService();
-        service.TargetReservationDirectoryFlushedForTest = path =>
+        service.AfterTargetReservationStatePersistedForTest = path =>
         {
-            if (Directory.Exists(target)
-                && string.Equals(
+            if (string.Equals(
                     path,
-                    finalParent,
+                    target,
                     OperatingSystem.IsWindows()
                         ? StringComparison.OrdinalIgnoreCase
                         : StringComparison.Ordinal))
             {
                 throw new IOException(
-                    "Injected crash after the final reserved child and parent were flushed.");
+                    "Injected crash after the final reserved directory state was persisted.");
             }
         };
         await Assert.ThrowsAsync<IOException>(() =>
@@ -662,7 +647,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
             TargetIdentityEnrollmentState.Unavailable,
             relocation.TargetIdentityEnrollmentState);
         Assert.Contains(
-            "Target reservations",
+            "target reservation",
             relocation.Error,
             StringComparison.OrdinalIgnoreCase);
     }
@@ -739,12 +724,22 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
             Assert.Equal(
                 TargetIdentityEnrollmentState.Authorized,
                 relocation.TargetIdentityEnrollmentState);
+            var recoveredReservations = await recovered
+                .RootFolderRelocationCreatedDirectories
+                .ToListAsync();
+            Assert.Single(
+                recoveredReservations,
+                reservation => reservation.State ==
+                    RootFolderRelocationCreatedDirectoryState.Retained);
             Assert.All(
-                await recovered.RootFolderRelocationCreatedDirectories
-                    .ToListAsync(),
-                reservation => Assert.Equal(
-                    RootFolderRelocationCreatedDirectoryState.Created,
-                    reservation.State));
+                recoveredReservations,
+                reservation => Assert.Contains(
+                    reservation.State,
+                    new[]
+                    {
+                        RootFolderRelocationCreatedDirectoryState.Created,
+                        RootFolderRelocationCreatedDirectoryState.Retained
+                    }));
         }
 
         var result = await restarted.RetryAsync(relocationId);
@@ -788,7 +783,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
 
         var injected = false;
         var interrupted = CreateService();
-        interrupted.AfterReservationParentMarkerPublishedForTest = _ =>
+        interrupted.AfterReservationParentIntentPersistedForTest = _ =>
         {
             if (!injected)
             {
@@ -813,23 +808,24 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
             Assert.Equal(
                 RootFolderRelocationStatus.NeedsAttention,
                 relocation.Status);
-            var firstReservation = await verification
+            var plannedReservation = await verification
                 .RootFolderRelocationCreatedDirectories
-                .OrderBy(candidate => candidate.CanonicalPath.Length)
-                .FirstAsync();
+                .SingleAsync(candidate => candidate.State ==
+                    RootFolderRelocationCreatedDirectoryState.Planned);
+            Assert.False(Directory.Exists(plannedReservation.CanonicalPath));
             Assert.Equal(
-                RootFolderRelocationCreatedDirectoryState.Planned,
-                firstReservation.State);
-            Assert.False(Directory.Exists(firstReservation.CanonicalPath));
-            Assert.True(File.Exists(Path.Join(
-                Path.GetDirectoryName(firstReservation.CanonicalPath)!,
-                $".listenarr-relocation-parent-{firstReservation.OwnershipToken}.json")));
+                ManagedDirectoryIdentity.CurrentVersion,
+                plannedReservation.DirectoryObjectIdentityVersion);
+            Assert.False(string.IsNullOrWhiteSpace(
+                plannedReservation.DirectoryObjectIdentity));
+            Assert.False(File.Exists(Path.Join(
+                Path.GetDirectoryName(plannedReservation.CanonicalPath)!,
+                $".listenarr-relocation-parent-{plannedReservation.OwnershipToken}.json")));
         }
 
         var restarted = CreateService();
         await restarted.ReconcileActiveAsync();
 
-        List<string> expectedParentMarkers;
         await using (var recovered =
             await _factory.CreateDbContextAsync())
         {
@@ -847,19 +843,15 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
                 reservation => Assert.Equal(
                     RootFolderRelocationCreatedDirectoryState.Created,
                     reservation.State));
-            expectedParentMarkers = recoveredReservations
-                .Select(reservation => Path.Join(
-                    Path.GetDirectoryName(reservation.CanonicalPath)!,
-                    $".listenarr-relocation-parent-{reservation.OwnershipToken}.json"))
-                .ToList();
         }
-        var remainingParentMarkers = expectedParentMarkers
-            .Where(File.Exists)
-            .Order(StringComparer.Ordinal)
-            .ToList();
-        Assert.True(
-            remainingParentMarkers.Count == 0,
-            $"Unretired parent markers: {string.Join(", ", remainingParentMarkers)}");
+        Assert.DoesNotContain(
+            Directory.EnumerateFileSystemEntries(
+                Path.GetDirectoryName(target)!,
+                "*",
+                SearchOption.AllDirectories),
+            path => Path.GetFileName(path).Contains(
+                ".listenarr-",
+                StringComparison.Ordinal));
 
         var result = await restarted.RetryAsync(relocationId);
         Assert.Equal(RootFolderRelocationStatus.Completed, result.Status);
@@ -888,14 +880,12 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
             rootId = root.Id;
         }
 
-        var parent = Path.GetDirectoryName(target)!;
         var interrupted = CreateService();
         interrupted.TargetReservationDirectoryFlushedForTest = path =>
         {
-            if (Directory.Exists(target)
-                && string.Equals(
+            if (string.Equals(
                     path,
-                    parent,
+                    target,
                     OperatingSystem.IsWindows()
                         ? StringComparison.OrdinalIgnoreCase
                         : StringComparison.Ordinal))
@@ -923,12 +913,10 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
             Assert.Equal(
                 RootFolderRelocationCreatedDirectoryState.Planned,
                 reservation.State);
+            reservation.DirectoryObjectIdentityVersion = null;
+            reservation.DirectoryObjectIdentity = null;
+            await verification.SaveChangesAsync();
         }
-        var parentMarker = Path.Join(
-            parent,
-            $".listenarr-relocation-parent-{reservation.OwnershipToken}.json");
-        Assert.True(File.Exists(parentMarker));
-        File.Delete(parentMarker);
 
         await CreateService().ReconcileActiveAsync();
 
@@ -948,12 +936,13 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
             RootFolderRelocationCreatedDirectoryState.Planned,
             blockedReservation.State);
         Assert.True(Directory.Exists(target));
-        Assert.True(File.Exists(Path.Join(
+        Assert.Empty(Directory.EnumerateFileSystemEntries(target));
+        Assert.False(File.Exists(Path.Join(
             target,
             ".listenarr-relocation-directory.json")));
         Assert.False(File.Exists(Path.Join(
-            target,
-            ManagedDirectoryEnrollment.FileName)));
+            Path.GetDirectoryName(target)!,
+            $".listenarr-relocation-parent-{reservation.OwnershipToken}.json")));
     }
 
     [Fact]
@@ -2613,7 +2602,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
             .SingleAsync(candidate => candidate.RelocationId == scenario.RelocationId);
         Assert.Equal(RootFolderRelocationStatus.NeedsAttention, relocation.Status);
         Assert.Contains(
-            "enrolled physical generation",
+            "physical generation",
             relocation.Error ?? string.Empty,
             StringComparison.OrdinalIgnoreCase);
         Assert.Equal(
@@ -2710,7 +2699,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
     }
 
     [Fact]
-    public async Task ReconcileOwnershipMigration_DistinctHardlinkedSourceMarker_RetiresSourceName()
+    public async Task ReconcileOwnershipMigration_DistinctHardlinkedMarkersAreFullyRetired()
     {
         var scenario = await SeedPublishedOwnershipMigrationAsync();
         var sourceRoot = Path.Join(
@@ -2785,7 +2774,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
             scenario.RootPath,
             $".listenarr-directory-owner-{scenario.OwnershipToken}.json");
         Assert.False(File.Exists(sourceSibling));
-        Assert.True(File.Exists(targetSiblingAfter));
+        Assert.False(File.Exists(targetSiblingAfter));
         await using var verification = await _factory.CreateDbContextAsync();
         Assert.False(await verification
             .LibraryDirectoryOwnershipPathMigrations.AnyAsync());
@@ -2830,7 +2819,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
     }
 
     [Fact]
-    public async Task ReconcileOwnershipMigration_EquivalentSiblingMarker_RemainsAfterCompletion()
+    public async Task ReconcileOwnershipMigration_EquivalentLegacyMarkersAreRetiredAfterCompletion()
     {
         var scenario = await SeedPublishedOwnershipMigrationAsync();
 
@@ -2842,8 +2831,8 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
         var insideMarker = Path.Join(
             scenario.OwnedPath,
             LibraryDirectoryOwnershipMarker.FileName);
-        Assert.True(File.Exists(siblingMarker));
-        Assert.True(File.Exists(insideMarker));
+        Assert.False(File.Exists(siblingMarker));
+        Assert.False(File.Exists(insideMarker));
         await using var verification = await _factory.CreateDbContextAsync();
         var ownershipAfter = await verification
             .LibraryDirectoryOwnerships.SingleAsync();

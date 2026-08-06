@@ -26,7 +26,9 @@ internal sealed record AudiobookContentMoveRequest(
     MoveLeaseToken LeaseToken,
     string? SourceCleanupBoundary = null,
     LibraryDirectoryOwnership? TargetDirectoryOwnership = null,
-    IReadOnlyDictionary<string, string>? SourcePhysicalObjectIdentities = null)
+    IReadOnlyDictionary<string, string>? SourcePhysicalObjectIdentities = null,
+    Func<double, string, CancellationToken, Task>? ProgressReporter = null,
+    bool AllowUnownedSourceAncestorCleanup = false)
 {
     public string LeaseOwner => LeaseToken.Owner;
     public int LeaseGeneration => LeaseToken.Generation;
@@ -39,7 +41,8 @@ internal sealed record AudiobookContentMoveResult(
     bool SourceInsideTarget,
     string RecoveryMarkerPath,
     bool SourceCleanupCompleted,
-    IReadOnlyDictionary<string, string> TargetPhysicalObjectIdentities);
+    IReadOnlyDictionary<string, string> TargetPhysicalObjectIdentities,
+    MarkerlessTargetVerificationLease? TargetVerificationLease = null);
 
 internal sealed class MoveNeedsAttentionException(string message) : IOException(message);
 
@@ -103,6 +106,19 @@ internal sealed partial class AudiobookContentMoveService(
 
         var targetInsideSource = IsSameOrInside(target, source, sourceSemantics);
         var sourceInsideTarget = IsSameOrInside(source, target, targetSemantics);
+        var executionProtocolVersion = await GetExecutionProtocolVersionAsync(
+            request.JobId,
+            cancellationToken);
+        if (executionProtocolVersion >= MoveExecutionProtocol.MarkerlessDatabaseState)
+        {
+            return await MoveContentsMarkerlessAsync(
+                request,
+                source,
+                target,
+                targetInsideSource,
+                sourceInsideTarget,
+                cancellationToken);
+        }
 
         var targetParent = Path.GetDirectoryName(target);
         if (string.IsNullOrEmpty(targetParent))

@@ -36,6 +36,30 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
                 .ToListAsync();
         }
 
+        public Task<AudiobookPathReferenceSnapshot?> GetPathReferenceSnapshotAsync(
+            int audiobookId,
+            CancellationToken ct = default) =>
+            _db.Audiobooks
+                .AsNoTracking()
+                .Where(audiobook => audiobook.Id == audiobookId)
+                .Select(audiobook => new AudiobookPathReferenceSnapshot(
+                    audiobook.Id,
+                    audiobook.BasePath,
+                    audiobook.FilePath))
+                .SingleOrDefaultAsync(ct);
+
+        public Task<List<AudiobookPathReferenceSnapshot>> GetOtherPathReferenceSnapshotsAsync(
+            int audiobookId,
+            CancellationToken ct = default) =>
+            _db.Audiobooks
+                .AsNoTracking()
+                .Where(audiobook => audiobook.Id != audiobookId)
+                .Select(audiobook => new AudiobookPathReferenceSnapshot(
+                    audiobook.Id,
+                    audiobook.BasePath,
+                    audiobook.FilePath))
+                .ToListAsync(ct);
+
         public async Task<List<Audiobook>> GetLibraryAsync()
         {
             return await _db.Audiobooks
@@ -113,6 +137,18 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
                 .Include(a => a.SeriesMemberships)
                 .FirstOrDefaultAsync(a => a.Id == id, ct);
         }
+
+        public Task<Audiobook?> GetForScanAsync(
+            int id,
+            CancellationToken ct = default) =>
+            _db.Audiobooks.FirstOrDefaultAsync(a => a.Id == id, ct);
+
+        public Task<Audiobook?> GetForScanSnapshotAsync(
+            int id,
+            CancellationToken ct = default) =>
+            _db.Audiobooks
+                .AsNoTracking()
+                .FirstOrDefaultAsync(a => a.Id == id, ct);
 
         public async Task<List<Audiobook>> GetByIdsWithFilesAsync(IEnumerable<int> ids, System.Threading.CancellationToken ct = default)
         {

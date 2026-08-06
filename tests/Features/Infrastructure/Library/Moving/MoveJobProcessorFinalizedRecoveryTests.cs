@@ -224,7 +224,7 @@ public partial class MoveJobProcessorTests
         var service = _provider.GetRequiredService<AudiobookContentMoveService>();
         var request = CreateMoveRequest(source, target, job, deleteEmptySource: false);
         var result = await service.MoveContentsAsync(request, CancellationToken.None);
-        File.Delete(result.RecoveryMarkerPath);
+        Assert.Empty(result.RecoveryMarkerPath);
         var persistedJob = Assert.IsType<MoveJob>(
             await queue.GetJobAsync(job.Id));
         Assert.Equal(MoveJobPhase.Finalizing, persistedJob.Phase);
@@ -270,7 +270,7 @@ public partial class MoveJobProcessorTests
         audiobook.BasePath = target;
         await _audiobookRepository.UpdateAsync(audiobook);
         await service.FinalizeMoveAsync(request, result, CancellationToken.None);
-        File.Delete(result.RecoveryMarkerPath);
+        Assert.Empty(result.RecoveryMarkerPath);
         var processor = _provider.GetRequiredService<IMoveJobProcessor>();
 
         await processor.ProcessJobAsync(job, CancellationToken.None);
@@ -305,7 +305,7 @@ public partial class MoveJobProcessorTests
         audiobook.BasePath = target;
         await _audiobookRepository.UpdateAsync(audiobook);
         await service.FinalizeMoveAsync(request, result, CancellationToken.None);
-        File.Delete(result.RecoveryMarkerPath);
+        Assert.Empty(result.RecoveryMarkerPath);
         Directory.Delete(target, recursive: true);
         if (!string.Equals(mutation, "deleted", StringComparison.Ordinal))
         {
@@ -350,7 +350,8 @@ public partial class MoveJobProcessorTests
         audiobook.BasePath = target;
         await _audiobookRepository.UpdateAsync(audiobook);
         await service.FinalizeMoveAsync(request, result, CancellationToken.None);
-        File.Delete(result.RecoveryMarkerPath);
+        result.TargetVerificationLease?.Dispose();
+        Assert.Empty(result.RecoveryMarkerPath);
         return new MarkerlessFinalizedCopyState(queue, job, source, target);
     }
 

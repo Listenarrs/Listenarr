@@ -21,3 +21,10 @@ public interface IMoveSourceManifestService
         Audiobook audiobook,
         CancellationToken cancellationToken = default);
 }
+
+public interface IMoveSourcePlanService
+{
+    Task<MoveSourceManifest> BuildPlanAsync(
+        AudiobookPathReferenceSnapshot audiobook,
+        CancellationToken cancellationToken = default);
+}

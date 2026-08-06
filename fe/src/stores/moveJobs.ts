@@ -35,6 +35,8 @@ export interface TrackedMoveJob {
   jobId: string
   audiobookId?: number
   status: MoveJobStatus
+  progress: number
+  phase?: string
   target?: string
   error?: string
   recoveryDisposition?: string
@@ -57,6 +59,8 @@ type MoveJobUpdate = {
   jobId?: string
   audiobookId?: number
   status?: string
+  progress?: number
+  phase?: string
   target?: string
   error?: string
   recoveryDisposition?: string
@@ -93,6 +97,14 @@ function normalizeStatus(status: string | undefined): MoveJobStatus | null {
 
 function normalizeJobId(jobId: string): string {
   return jobId.trim().toLowerCase()
+}
+
+function normalizeProgress(progress: number | undefined, fallback: number): number {
+  if (progress == null || !Number.isFinite(progress)) {
+    return fallback
+  }
+
+  return Math.min(100, Math.max(0, progress))
 }
 
 export const useMoveJobsStore = defineStore('moveJobs', () => {
@@ -150,6 +162,39 @@ export const useMoveJobsStore = defineStore('moveJobs', () => {
     }
 
     unsubscribe = signalRService.onMoveJobUpdate(handleMoveJobUpdate)
+    void loadActiveJobs()
+  }
+
+  async function loadActiveJobs() {
+    try {
+      const jobs = await apiService.getActiveMoveJobs()
+      for (const job of jobs) {
+        if (!job.jobId?.trim()) {
+          continue
+        }
+
+        const status = normalizeStatus(job.status)
+        if (status == null || terminalStatuses.has(status)) {
+          continue
+        }
+
+        const key = normalizeJobId(job.jobId)
+        const existing = trackedById.value[key]
+        trackedById.value[key] = {
+          jobId: job.jobId,
+          audiobookId: job.audiobookId ?? existing?.audiobookId,
+          status,
+          progress: normalizeProgress(job.progress, existing?.progress ?? 0),
+          phase: job.phase ?? existing?.phase,
+          target: job.target ?? existing?.target,
+          error: job.error,
+          recoveryDisposition: job.recoveryDisposition ?? existing?.recoveryDisposition,
+          canRetry: job.canRetry ?? existing?.canRetry,
+        }
+      }
+    } catch (error) {
+      logger.debug('Failed to load active move jobs', error)
+    }
   }
 
   function stop() {
@@ -180,6 +225,7 @@ export const useMoveJobsStore = defineStore('moveJobs', () => {
       jobId: job.jobId,
       audiobookId: job.audiobookId,
       status: job.status ?? 'Queued',
+      progress: job.status === 'Completed' ? 100 : 0,
       target: job.target,
     }
     void reconcileTrackedJob(key, job.jobId)
@@ -227,6 +273,11 @@ export const useMoveJobsStore = defineStore('moveJobs', () => {
       ...existing,
       audiobookId: update.audiobookId ?? existing.audiobookId,
       status,
+      progress: normalizeProgress(
+        update.progress,
+        status === 'Completed' ? 100 : existing.progress,
+      ),
+      phase: update.phase ?? existing.phase,
       target: update.target ?? existing.target,
       error: update.error,
       recoveryDisposition: update.recoveryDisposition ?? existing.recoveryDisposition,
@@ -265,6 +316,7 @@ export const useMoveJobsStore = defineStore('moveJobs', () => {
     requeueMoveJob,
     start,
     stop,
+    loadActiveJobs,
     trackQueuedJob,
     handleMoveJobUpdate,
   }

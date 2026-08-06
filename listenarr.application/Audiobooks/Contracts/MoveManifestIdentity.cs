@@ -91,6 +91,28 @@ public static class MoveManifestIdentity
             StringComparison.Ordinal);
     }
 
+    public static bool SourceManifestShapesMatch(
+        IEnumerable<MoveSourceManifestEntry> currentEntries,
+        IEnumerable<MoveJobEntry> persistedEntries,
+        FileSystemPathSemantics semantics)
+    {
+        ArgumentNullException.ThrowIfNull(currentEntries);
+        ArgumentNullException.ThrowIfNull(persistedEntries);
+        return string.Equals(
+            ComputeManifestDigest(
+                currentEntries
+                    .Select(ToIdentityEntry)
+                    .Select(entry => entry with { Sha256 = null }),
+                semantics),
+            ComputeManifestDigest(
+                persistedEntries
+                    .Where(entry => !IsTargetBoundaryAuthorization(entry))
+                    .Select(ToIdentityEntry)
+                    .Select(entry => entry with { Sha256 = null }),
+                semantics),
+            StringComparison.Ordinal);
+    }
+
     public static MoveJobEntry CreateTargetBoundaryAuthorization(
         int directoryIdentityVersion,
         string directoryIdentity)

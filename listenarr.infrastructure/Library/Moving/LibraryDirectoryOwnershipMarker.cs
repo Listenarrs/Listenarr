@@ -200,6 +200,133 @@ internal static partial class LibraryDirectoryOwnershipMarker
         }
     }
 
+    public static bool TryRetireMatchingSiblingArtifacts(
+        LibraryDirectoryOwnership ownership,
+        PinnedDirectoryCreation.PinnedDirectoryAnchor parent,
+        out string? reason)
+    {
+        ArgumentNullException.ThrowIfNull(ownership);
+        ArgumentNullException.ThrowIfNull(parent);
+        try
+        {
+            var siblingName = Path.GetFileName(GetSiblingPath(ownership));
+            RetireMatchingMarkerIfPresent(
+                ownership,
+                parent,
+                siblingName);
+            RetireMatchingMarkerIfPresent(
+                ownership,
+                parent,
+                siblingName + ".v2.tmp");
+            RetireMatchingMarkerIfPresent(
+                ownership,
+                parent,
+                siblingName + ".migration.tmp");
+            RetireMatchingMarkerIfPresent(
+                ownership,
+                parent,
+                PinnedDirectoryCreation.GetConditionalReplacementBackupName(
+                    siblingName));
+            parent.FlushDirectoryEntry();
+            reason = null;
+            return true;
+        }
+        catch (Exception exception) when (exception is
+            ArgumentException or IOException or UnauthorizedAccessException
+                or InvalidOperationException or NotSupportedException
+                or System.ComponentModel.Win32Exception)
+        {
+            reason = exception.Message;
+            return false;
+        }
+    }
+
+    public static bool TryRetireMatchingMarkers(
+        LibraryDirectoryOwnership ownership,
+        PinnedDirectoryCreation.PinnedDirectoryAnchor directory,
+        PinnedDirectoryCreation.PinnedDirectoryAnchor parent,
+        out string? reason)
+    {
+        ArgumentNullException.ThrowIfNull(ownership);
+        ArgumentNullException.ThrowIfNull(directory);
+        ArgumentNullException.ThrowIfNull(parent);
+        try
+        {
+            RetireMatchingMarkerIfPresent(
+                ownership,
+                directory,
+                FileName);
+            RetireMatchingMarkerIfPresent(
+                ownership,
+                directory,
+                FileName + ".v2.tmp");
+            RetireMatchingMarkerIfPresent(
+                ownership,
+                directory,
+                FileName + ".migration.tmp");
+            RetireMatchingMarkerIfPresent(
+                ownership,
+                directory,
+                PinnedDirectoryCreation.GetConditionalReplacementBackupName(
+                    FileName));
+            if (!TryRetireMatchingSiblingArtifacts(
+                    ownership,
+                    parent,
+                    out reason))
+            {
+                return false;
+            }
+            directory.FlushDirectoryEntry();
+            reason = null;
+            return true;
+        }
+        catch (Exception exception) when (exception is
+            ArgumentException or IOException or UnauthorizedAccessException
+                or InvalidOperationException or NotSupportedException
+                or System.ComponentModel.Win32Exception)
+        {
+            reason = exception.Message;
+            return false;
+        }
+    }
+
+    private static void RetireMatchingMarkerIfPresent(
+        LibraryDirectoryOwnership ownership,
+        PinnedDirectoryCreation.PinnedDirectoryAnchor parent,
+        string fileName)
+    {
+        using var marker = parent.TryOpenExistingFile(
+            fileName,
+            requireDeleteAccess: true);
+        if (marker == null)
+        {
+            return;
+        }
+
+        var payload = ReadPayload(marker);
+        if (!MatchesCurrentPayload(ownership, payload)
+            && !MatchesLegacyPayload(ownership, payload))
+        {
+            throw new InvalidOperationException(
+                "A legacy directory ownership artifact does not match the persisted ownership claim.");
+        }
+        if (!parent.VisiblePathMatches() || !marker.VisiblePathMatches())
+        {
+            throw new InvalidOperationException(
+                "A legacy directory ownership artifact changed before retirement.");
+        }
+
+        var verifiedPayload = ReadPayload(marker);
+        if (!MatchesCurrentPayload(ownership, verifiedPayload)
+            && !MatchesLegacyPayload(ownership, verifiedPayload))
+        {
+            throw new InvalidOperationException(
+                "A legacy directory ownership artifact changed before retirement.");
+        }
+
+        marker.Delete();
+    }
+
     public static IReadOnlyList<string> GetMarkerPaths(
         LibraryDirectoryOwnership ownership) =>
         [GetInsidePath(ownership.CanonicalPath), GetSiblingPath(ownership)];

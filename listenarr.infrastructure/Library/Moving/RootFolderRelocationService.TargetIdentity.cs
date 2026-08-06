@@ -29,7 +29,7 @@ public sealed partial class RootFolderRelocationService
         }
     }
 
-    private static async Task RequireTargetDirectoryGenerationAsync(
+    private static Task RequireTargetDirectoryGenerationAsync(
         string targetPath,
         int? expectedVersion,
         string? expectedValue,
@@ -48,12 +48,19 @@ public sealed partial class RootFolderRelocationService
         {
             using var target = PinnedDirectoryCreation.OpenPinnedBoundary(
                 canonicalTargetPath);
-            await ManagedDirectoryEnrollment.RequireMatchingEnrollmentAsync(
-                target,
-                expectedVersion,
-                expectedValue,
-                unavailableReason,
-                cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!string.IsNullOrWhiteSpace(unavailableReason)
+                || !ManagedDirectoryIdentity.MatchesNativeIdentity(
+                    expectedVersion,
+                    expectedValue,
+                    target.GetDirectoryObjectIdentity())
+                || !target.VisiblePathMatches())
+            {
+                throw new InvalidOperationException(
+                    "The managed directory no longer identifies its authorized physical generation.");
+            }
+
+            return Task.CompletedTask;
         }
         catch (Exception exception) when (exception is
             IOException or UnauthorizedAccessException
@@ -86,7 +93,7 @@ public sealed partial class RootFolderRelocationService
         root.DirectoryObjectIdentityUnavailableReason = identity.UnavailableReason;
     }
 
-    private async Task<DirectoryObjectIdentityResolution>
+    private Task<DirectoryObjectIdentityResolution>
         ResolveOrCreateRelocationTargetIdentityAsync(
             string targetPath,
             CancellationToken cancellationToken)
@@ -109,24 +116,14 @@ public sealed partial class RootFolderRelocationService
                     "The relocation target changed while its physical identity was reserved.");
             }
 
-            var nativeIdentity = anchor.GetDirectoryObjectIdentity();
-            return await ManagedDirectoryEnrollment.ResolveAsync(
-                anchor,
-                nativeIdentity,
-                enrollIfMissing: true,
-                cancellationToken);
+            return Task.FromResult(CreateMarkerlessIdentity(anchor));
         }
 
         try
         {
             using var existing = PinnedDirectoryCreation.OpenPinnedBoundary(
                 targetPath);
-            var nativeIdentity = existing.GetDirectoryObjectIdentity();
-            return await ManagedDirectoryEnrollment.ResolveAsync(
-                existing,
-                nativeIdentity,
-                enrollIfMissing: true,
-                cancellationToken);
+            return Task.FromResult(CreateMarkerlessIdentity(existing));
         }
         catch (Exception exception) when (exception is
             IOException or UnauthorizedAccessException
@@ -142,55 +139,92 @@ public sealed partial class RootFolderRelocationService
     private Task<DirectoryObjectIdentityResolution>
         ResolveOrEnrollDirectoryObjectIdentityAsync(
             string path,
-            CancellationToken cancellationToken) =>
-        ResolveDirectoryObjectIdentityAsync(
-            path,
-            enrollIfMissing: true,
-            cancellationToken);
-
-    private Task<DirectoryObjectIdentityResolution>
-        ResolveExistingDirectoryObjectIdentityAsync(
-            string path,
-            CancellationToken cancellationToken) =>
-        ResolveDirectoryObjectIdentityAsync(
-            path,
-            enrollIfMissing: false,
-            cancellationToken);
-
-    private async Task<DirectoryObjectIdentityResolution>
-        ResolveDirectoryObjectIdentityAsync(
-            string path,
-            bool enrollIfMissing,
             CancellationToken cancellationToken)
     {
         if (_directoryObjectIdentityResolver != null)
         {
-            return enrollIfMissing
-                ? await _directoryObjectIdentityResolver.ResolveAsync(
-                    path,
-                    cancellationToken)
-                : await _directoryObjectIdentityResolver.ResolveExistingAsync(
-                    path,
-                    cancellationToken);
+            return _directoryObjectIdentityResolver.ResolveAsync(
+                path,
+                cancellationToken);
         }
 
+        return ResolveMarkerlessDirectoryObjectIdentityAsync(
+            path,
+            expectedVersion: null,
+            expectedValue: null,
+            cancellationToken);
+    }
+
+    private Task<DirectoryObjectIdentityResolution>
+        ResolveExistingDirectoryObjectIdentityAsync(
+            string path,
+            int expectedVersion,
+            string expectedValue,
+            CancellationToken cancellationToken)
+    {
+        if (_directoryObjectIdentityResolver != null)
+        {
+            return _directoryObjectIdentityResolver.ResolveExistingAsync(
+                path,
+                expectedVersion,
+                expectedValue,
+                cancellationToken);
+        }
+
+        return ResolveMarkerlessDirectoryObjectIdentityAsync(
+            path,
+            expectedVersion,
+            expectedValue,
+            cancellationToken);
+    }
+
+    private static Task<DirectoryObjectIdentityResolution>
+        ResolveMarkerlessDirectoryObjectIdentityAsync(
+            string path,
+            int? expectedVersion,
+            string? expectedValue,
+            CancellationToken cancellationToken)
+    {
         try
         {
             using var anchor = PinnedDirectoryCreation.OpenPinnedBoundary(path);
+            cancellationToken.ThrowIfCancellationRequested();
             var nativeIdentity = anchor.GetDirectoryObjectIdentity();
-            return await ManagedDirectoryEnrollment.ResolveAsync(
-                anchor,
-                nativeIdentity,
-                enrollIfMissing,
-                cancellationToken);
+            if (expectedVersion.HasValue && expectedValue != null)
+            {
+                return Task.FromResult(
+                    ManagedDirectoryIdentity.MatchesNativeIdentity(
+                        expectedVersion,
+                        expectedValue,
+                        nativeIdentity)
+                        ? new DirectoryObjectIdentityResolution(
+                            expectedVersion,
+                            expectedValue,
+                            null)
+                        : DirectoryObjectIdentityResolution.Unavailable(
+                            "The live directory no longer matches its persisted physical identity."));
+            }
+
+            return Task.FromResult(CreateMarkerlessIdentity(anchor));
         }
         catch (Exception exception) when (exception is
             IOException or UnauthorizedAccessException
                 or InvalidOperationException or NotSupportedException
                 or System.ComponentModel.Win32Exception)
         {
-            return DirectoryObjectIdentityResolution.Unavailable(
-                exception.Message);
+            return Task.FromResult(
+                DirectoryObjectIdentityResolution.Unavailable(
+                    exception.Message));
         }
+    }
+
+    private static DirectoryObjectIdentityResolution CreateMarkerlessIdentity(
+        PinnedDirectoryCreation.PinnedDirectoryAnchor anchor)
+    {
+        var nativeIdentity = anchor.GetDirectoryObjectIdentity();
+        return new DirectoryObjectIdentityResolution(
+            ManagedDirectoryIdentity.CurrentVersion,
+            ManagedDirectoryIdentity.CreateMarkerless(nativeIdentity),
+            null);
     }
 }

@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using Listenarr.Tests.Common;
 
 namespace Listenarr.Tests.Features.Infrastructure.FileSystem;
@@ -11,7 +11,7 @@ public sealed class FileSystemSemanticsResolverTests : BaseTests
     [InlineData("")]
     [InlineData("relative/path")]
     [InlineData("relative\0path")]
-    public async Task ResolveAsync_RejectsInvalidOrRelativePathBeforeProbing(string path)
+    public async Task ResolveAsync_RejectsInvalidOrRelativePath(string path)
     {
         var resolver = new FileSystemSemanticsResolver();
 
@@ -20,77 +20,90 @@ public sealed class FileSystemSemanticsResolverTests : BaseTests
     }
 
     [Fact]
-    public async Task ExplicitOverride_ResolvesWithoutExistingPath()
+    public async Task ExplicitOverride_ResolvesMissingPathWithoutFilesystemWrites()
     {
-        var probes = 0;
-        var resolver = new FileSystemSemanticsResolver
-        {
-            BeforeProbeForTest = _ => probes++
-        };
-        var missingPath = Path.Join(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "books");
-
-        var resolution = await resolver.ResolveAsync(
-            missingPath,
-            FileSystemCaseSensitivityMode.Sensitive);
-
-        Assert.Equal(FileSystemCaseSensitivity.Sensitive, resolution.Semantics.CaseSensitivity);
-        Assert.Equal(PathIdentityState.Valid, resolution.State);
-        Assert.Equal(0, probes);
-    }
-
-    [Fact]
-    public async Task AutoProbe_RepeatedBoundary_IsProbedIndependently()
-    {
-        var root = Path.Join(Path.GetTempPath(), "filesystem-semantics-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        var probes = 0;
-        var resolver = new FileSystemSemanticsResolver
-        {
-            BeforeProbeForTest = boundary =>
-            {
-                Assert.Equal(Path.GetFullPath(root), Path.GetFullPath(boundary));
-                probes++;
-            }
-        };
+        var parent = Path.Join(
+            Path.GetTempPath(),
+            "filesystem-semantics-explicit-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(parent);
         try
         {
-            var first = await resolver.ResolveAsync(root, FileSystemCaseSensitivityMode.Auto);
-            var second = await resolver.ResolveAsync(root, FileSystemCaseSensitivityMode.Auto);
+            var missingPath = Path.Join(parent, "future", "books");
+            var before = Snapshot(parent);
 
-            Assert.Equal(PathIdentityState.Valid, first.State);
-            Assert.Equal(PathIdentityState.Valid, second.State);
-            Assert.Equal(2, probes);
-            Assert.Empty(Directory.EnumerateFileSystemEntries(root, ".listenarr-case-probe-*"));
-        }
-        finally
-        {
-            Directory.Delete(root, true);
-        }
-    }
+            var resolution = await new FileSystemSemanticsResolver().ResolveAsync(
+                missingPath,
+                FileSystemCaseSensitivityMode.Sensitive);
 
-    [Fact]
-    public async Task AutoProbe_ExistingBoundary_ProbesWithinBoundaryAndRemovesProbeFile()
-    {
-        var root = Path.Join(Path.GetTempPath(), "filesystem-semantics-" + Guid.NewGuid().ToString("N"));
-        var boundary = Path.Join(root, "Books");
-        Directory.CreateDirectory(boundary);
-        var resolver = new FileSystemSemanticsResolver();
-        try
-        {
-            var resolution = await resolver.ResolveAsync(boundary, FileSystemCaseSensitivityMode.Auto);
-
-            Assert.NotEqual(FileSystemCaseSensitivity.Unknown, resolution.Semantics.CaseSensitivity);
             Assert.Equal(PathIdentityState.Valid, resolution.State);
-            Assert.Empty(Directory.EnumerateFileSystemEntries(boundary, ".listenarr-case-probe-*"));
+            Assert.Equal(
+                FileSystemCaseSensitivity.Sensitive,
+                resolution.Semantics.CaseSensitivity);
+            Assert.Equal(before, Snapshot(parent));
+            Assert.False(Directory.Exists(Path.Join(parent, "future")));
         }
         finally
         {
-            Directory.Delete(root, true);
+            Directory.Delete(parent, true);
+        }
+    }
+
+    [Fact]
+    public async Task Auto_ExistingBoundary_DoesNotCreateOrModifyEntries()
+    {
+        var boundary = Path.Join(
+            Path.GetTempPath(),
+            "filesystem-semantics-auto-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(boundary);
+        await File.WriteAllTextAsync(Path.Join(boundary, "existing.txt"), "unchanged");
+        try
+        {
+            var before = Snapshot(boundary);
+
+            var resolution = await new FileSystemSemanticsResolver().ResolveAsync(
+                boundary,
+                FileSystemCaseSensitivityMode.Auto);
+
+            AssertReadOnlyResolutionForCurrentHost(resolution);
+            Assert.Equal(before, Snapshot(boundary));
+            Assert.Equal("unchanged", await File.ReadAllTextAsync(
+                Path.Join(boundary, "existing.txt")));
+        }
+        finally
+        {
+            Directory.Delete(boundary, true);
+        }
+    }
+
+    [Fact]
+    public async Task Auto_MissingDescendant_UsesExistingBoundaryWithoutCreatingIt()
+    {
+        var boundary = Path.Join(
+            Path.GetTempPath(),
+            "filesystem-semantics-future-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(boundary);
+        try
+        {
+            var requested = Path.Join(boundary, "future", "books");
+            var before = Snapshot(boundary);
+
+            var resolution = await new FileSystemSemanticsResolver().ResolveAsync(
+                requested,
+                FileSystemCaseSensitivityMode.Auto);
+
+            AssertReadOnlyResolutionForCurrentHost(resolution);
+            Assert.Equal(Path.GetFullPath(requested), resolution.CanonicalPath);
+            Assert.Equal(before, Snapshot(boundary));
+            Assert.False(Directory.Exists(Path.Join(boundary, "future")));
+        }
+        finally
+        {
+            Directory.Delete(boundary, true);
         }
     }
 
     [DirectoryLinkFact]
-    public async Task AutoProbe_LinkedBoundary_ProbesPinnedPhysicalDirectoryAndRemovesProbeFiles()
+    public async Task Auto_LinkedBoundary_DoesNotWriteThroughLink()
     {
         var root = Path.Join(
             Path.GetTempPath(),
@@ -98,22 +111,19 @@ public sealed class FileSystemSemanticsResolverTests : BaseTests
         var physical = Path.Join(root, "physical");
         var linked = Path.Join(root, "linked");
         Directory.CreateDirectory(physical);
+        await File.WriteAllTextAsync(Path.Join(physical, "existing.txt"), "unchanged");
         Directory.CreateSymbolicLink(linked, physical);
-        var resolver = new FileSystemSemanticsResolver();
         try
         {
-            var resolution = await resolver.ResolveAsync(
+            var before = Snapshot(physical);
+
+            var resolution = await new FileSystemSemanticsResolver().ResolveAsync(
                 linked,
                 FileSystemCaseSensitivityMode.Auto);
 
-            Assert.Equal(PathIdentityState.Valid, resolution.State);
-            Assert.NotEqual(
-                FileSystemCaseSensitivity.Unknown,
-                resolution.Semantics.CaseSensitivity);
+            AssertReadOnlyResolutionForCurrentHost(resolution);
             Assert.Equal(Path.GetFullPath(linked), resolution.CanonicalPath);
-            Assert.Empty(Directory.EnumerateFileSystemEntries(
-                physical,
-                ".listenarr-case-probe-*"));
+            Assert.Equal(before, Snapshot(physical));
         }
         finally
         {
@@ -122,189 +132,97 @@ public sealed class FileSystemSemanticsResolverTests : BaseTests
         }
     }
 
-    [Fact]
-    public async Task AutoProbe_ResolvesAndRemovesProbeFile()
+    [LinuxFact]
+    [SupportedOSPlatform("linux")]
+    public async Task Auto_ReadOnlyBoundary_ResolvesWithoutRequiringWritePermission()
     {
-        var root = Path.Join(Path.GetTempPath(), "filesystem-semantics-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        var resolver = new FileSystemSemanticsResolver();
+        var boundary = Path.Join(
+            Path.GetTempPath(),
+            "filesystem-semantics-readonly-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(boundary);
+        await File.WriteAllTextAsync(Path.Join(boundary, "existing.txt"), "unchanged");
+        var originalMode = File.GetUnixFileMode(boundary);
         try
         {
-            var resolution = await resolver.ResolveAsync(
-                Path.Join(root, "future", "books"),
+            File.SetUnixFileMode(
+                boundary,
+                UnixFileMode.UserRead | UnixFileMode.UserExecute
+                    | UnixFileMode.GroupRead | UnixFileMode.GroupExecute
+                    | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+            var before = Snapshot(boundary);
+
+            var resolution = await new FileSystemSemanticsResolver().ResolveAsync(
+                boundary,
                 FileSystemCaseSensitivityMode.Auto);
 
-            Assert.NotEqual(FileSystemCaseSensitivity.Unknown, resolution.Semantics.CaseSensitivity);
             Assert.Equal(PathIdentityState.Valid, resolution.State);
-            Assert.Empty(Directory.EnumerateFiles(root, ".listenarr-case-probe-*"));
+            Assert.NotEqual(
+                FileSystemCaseSensitivity.Unknown,
+                resolution.Semantics.CaseSensitivity);
+            Assert.Equal(before, Snapshot(boundary));
         }
         finally
         {
-            Directory.Delete(root, true);
+            File.SetUnixFileMode(boundary, originalMode);
+            Directory.Delete(boundary, true);
         }
     }
 
     [Fact]
-    public async Task AutoProbe_PrimaryGenerationIsReplaced_PreservesReplacementAndReturnsUnavailable()
+    public async Task Auto_RepeatedResolution_NeverPublishesProbeArtifacts()
     {
-        var root = Path.Join(
+        var boundary = Path.Join(
             Path.GetTempPath(),
-            "filesystem-semantics-race-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        string? replacementPath = null;
-        var resolver = new FileSystemSemanticsResolver
-        {
-            AfterPrimaryProbeCreatedForTest = (primaryPath, _) =>
-            {
-                File.Delete(primaryPath);
-                File.WriteAllText(primaryPath, "replacement");
-                replacementPath = primaryPath;
-            }
-        };
+            "filesystem-semantics-repeat-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(boundary);
         try
         {
-            var resolution = await resolver.ResolveAsync(
-                root,
-                FileSystemCaseSensitivityMode.Auto);
+            var before = Snapshot(boundary);
+            var resolver = new FileSystemSemanticsResolver();
 
-            Assert.Equal(PathIdentityState.Unavailable, resolution.State);
-            Assert.Equal(
-                FileSystemCaseSensitivity.Unknown,
-                resolution.Semantics.CaseSensitivity);
-            Assert.NotNull(replacementPath);
-            Assert.Equal("replacement", await File.ReadAllTextAsync(replacementPath));
+            var first = await resolver.ResolveAsync(boundary);
+            var second = await resolver.ResolveAsync(boundary);
+
+            Assert.Equal(first.State, second.State);
+            Assert.Equal(first.Semantics, second.Semantics);
+            Assert.Equal(before, Snapshot(boundary));
+            Assert.DoesNotContain(
+                Directory.EnumerateFileSystemEntries(boundary),
+                entry => Path.GetFileName(entry).StartsWith(
+                    ".listenarr-",
+                    StringComparison.Ordinal));
         }
         finally
         {
-            Directory.Delete(root, true);
+            Directory.Delete(boundary, true);
         }
     }
 
-    [LinuxFact]
-    public async Task AutoProbe_AlternateSpellingIsOccupied_PreservesUnownedEntryAndReturnsUnavailable()
+    private static void AssertReadOnlyResolutionForCurrentHost(
+        FileSystemSemanticsResolution resolution)
     {
-        var root = Path.Join(
-            Path.GetTempPath(),
-            "filesystem-semantics-alternate-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        var capabilityLower = Path.Join(root, "case-capability-a");
-        var capabilityUpper = Path.Join(root, "CASE-CAPABILITY-A");
-        await File.WriteAllTextAsync(capabilityLower, "lower");
-        try
+        if (OperatingSystem.IsWindows() || OperatingSystem.IsLinux())
         {
-            await using var alternateCapability = new FileStream(
-                capabilityUpper,
-                FileMode.CreateNew,
-                FileAccess.Write,
-                FileShare.Read);
-        }
-        catch (IOException exception)
-        {
-            Directory.Delete(root, true);
-            throw new Xunit.Sdk.XunitException(
-                $"This regression requires a case-sensitive native filesystem: {exception.Message}");
-        }
-
-        File.Delete(capabilityLower);
-        File.Delete(capabilityUpper);
-        string? occupiedAlternate = null;
-        var resolver = new FileSystemSemanticsResolver
-        {
-            AfterPrimaryProbeCreatedForTest = (_, alternatePath) =>
-            {
-                File.WriteAllText(alternatePath, "external");
-                occupiedAlternate = alternatePath;
-            }
-        };
-        try
-        {
-            var resolution = await resolver.ResolveAsync(
-                root,
-                FileSystemCaseSensitivityMode.Auto);
-
-            Assert.Equal(PathIdentityState.Unavailable, resolution.State);
-            Assert.Equal(
+            Assert.Equal(PathIdentityState.Valid, resolution.State);
+            Assert.NotEqual(
                 FileSystemCaseSensitivity.Unknown,
                 resolution.Semantics.CaseSensitivity);
-            Assert.NotNull(occupiedAlternate);
-            Assert.Equal("external", await File.ReadAllTextAsync(occupiedAlternate));
+            return;
         }
-        finally
-        {
-            Directory.Delete(root, true);
-        }
+
+        Assert.Equal(PathIdentityState.Unavailable, resolution.State);
+        Assert.Equal(
+            FileSystemCaseSensitivity.Unknown,
+            resolution.Semantics.CaseSensitivity);
+        Assert.Contains(
+            "Select Sensitive or Insensitive explicitly",
+            resolution.Reason ?? string.Empty,
+            StringComparison.Ordinal);
     }
 
-    [LinuxFact]
-    public async Task AutoProbe_AlternateSpellingHardlinkSpoof_ReturnsUnavailableAndPreservesUnownedLink()
-    {
-        var root = Path.Join(
-            Path.GetTempPath(),
-            "filesystem-semantics-hardlink-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        var capabilityLower = Path.Join(root, "case-capability-a");
-        var capabilityUpper = Path.Join(root, "CASE-CAPABILITY-A");
-        await File.WriteAllTextAsync(capabilityLower, "lower");
-        if (!TryCreateHardLink(capabilityUpper, capabilityLower))
-        {
-            Directory.Delete(root, true);
-            Assert.Fail("The required hard link could not be created.");
-        }
-
-        File.Delete(capabilityLower);
-        File.Delete(capabilityUpper);
-        string? spoofedAlternate = null;
-        var resolver = new FileSystemSemanticsResolver
-        {
-            AfterPrimaryProbeCreatedForTest = (primaryPath, alternatePath) =>
-            {
-                Assert.True(TryCreateHardLink(alternatePath, primaryPath));
-                spoofedAlternate = alternatePath;
-            }
-        };
-        try
-        {
-            var resolution = await resolver.ResolveAsync(
-                root,
-                FileSystemCaseSensitivityMode.Auto);
-
-            Assert.Equal(PathIdentityState.Unavailable, resolution.State);
-            Assert.Equal(
-                FileSystemCaseSensitivity.Unknown,
-                resolution.Semantics.CaseSensitivity);
-            Assert.NotNull(spoofedAlternate);
-            Assert.True(File.Exists(spoofedAlternate));
-        }
-        finally
-        {
-            Directory.Delete(root, true);
-        }
-    }
-
-    private static bool TryCreateHardLink(string linkPath, string existingPath)
-    {
-        try
-        {
-            return OperatingSystem.IsWindows()
-                ? CreateHardLinkWindows(linkPath, existingPath, IntPtr.Zero)
-                : LinkUnix(existingPath, linkPath) == 0;
-        }
-        catch (Exception exception) when (exception is
-            IOException or UnauthorizedAccessException or PlatformNotSupportedException)
-        {
-            return false;
-        }
-    }
-
-    [DllImport("kernel32.dll", EntryPoint = "CreateHardLinkW", CharSet = CharSet.Unicode, SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool CreateHardLinkWindows(
-        string fileName,
-        string existingFileName,
-        IntPtr securityAttributes);
-
-    [DllImport("libc", EntryPoint = "link", SetLastError = true)]
-    private static extern int LinkUnix(
-        [MarshalAs(UnmanagedType.LPUTF8Str)] string existingPath,
-        [MarshalAs(UnmanagedType.LPUTF8Str)] string newPath);
+    private static IReadOnlyList<string> Snapshot(string directory) =>
+        Directory.EnumerateFileSystemEntries(directory, "*", SearchOption.AllDirectories)
+            .Select(path => Path.GetRelativePath(directory, path))
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .ToArray();
 }

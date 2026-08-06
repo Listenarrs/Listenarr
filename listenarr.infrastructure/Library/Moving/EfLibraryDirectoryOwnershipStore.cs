@@ -15,13 +15,7 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore(
         boundaryAuthorizer
         ?? new LibraryDirectoryOwnershipBoundaryAuthorizer(dbContextFactory);
 
-    internal Action? AfterInsideOwnershipMarkerPublicationForTest
-    {
-        get;
-        set;
-    }
-
-    internal Action? AfterOwnershipMarkerPublicationForTest
+    internal Action? BeforeNewOwnershipCommitForTest
     {
         get;
         set;
@@ -190,10 +184,6 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore(
                 managedRootFolderId,
                 directoryObjectIdentity);
             cancellationToken.ThrowIfCancellationRequested();
-            await PinnedLibraryDirectoryOwnershipMarker.EnsureAsync(
-                existing,
-                markerCreation,
-                CancellationToken.None);
             ValidatePinnedOwnership(existing, markerCreation);
             existing.State = LibraryDirectoryOwnershipState.Owned;
             existing.StateReason = null;
@@ -246,13 +236,13 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore(
             canonicalPath,
             lookupKey,
             ownershipKey,
-            LibraryDirectoryOwnershipState.Unavailable,
-            "Durable ownership marker publication is pending.",
+            LibraryDirectoryOwnershipState.Owned,
+            reason: null,
             managedRootFolderId,
             directoryObjectIdentity,
             now);
-        ownership.DirectoryObjectIdentityUnavailableReason =
-            "Durable ownership marker publication is pending.";
+        ValidatePinnedOwnership(ownership, markerCreation);
+        BeforeNewOwnershipCommitForTest?.Invoke();
         db.LibraryDirectoryOwnerships.Add(ownership);
         try
         {
@@ -288,10 +278,6 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore(
                     managedRootFolderId,
                     directoryObjectIdentity);
                 cancellationToken.ThrowIfCancellationRequested();
-                await PinnedLibraryDirectoryOwnershipMarker.EnsureAsync(
-                    concurrent,
-                    markerCreation,
-                    CancellationToken.None);
                 ValidatePinnedOwnership(concurrent, markerCreation);
                 concurrent.State = LibraryDirectoryOwnershipState.Owned;
                 concurrent.StateReason = null;
@@ -307,42 +293,6 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore(
             throw;
         }
 
-        try
-        {
-            await PinnedLibraryDirectoryOwnershipMarker.EnsureAsync(
-                ownership,
-                markerCreation,
-                CancellationToken.None,
-                AfterInsideOwnershipMarkerPublicationForTest);
-            AfterOwnershipMarkerPublicationForTest?.Invoke();
-            ValidatePinnedOwnership(ownership, markerCreation);
-        }
-        catch (Exception exception) when (exception is not (
-            OutOfMemoryException or StackOverflowException))
-        {
-            ownership.State = LibraryDirectoryOwnershipState.Unavailable;
-            ownership.StateReason =
-                "Durable ownership marker publication requires recovery.";
-            ownership.DirectoryObjectIdentityUnavailableReason =
-                exception.Message;
-            ownership.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
-            try
-            {
-                await db.SaveChangesAsync(CancellationToken.None);
-            }
-            catch
-            {
-                // The committed pending row already preserves the ownership token.
-                // Do not replace the original publication failure.
-            }
-            throw;
-        }
-
-        ownership.State = LibraryDirectoryOwnershipState.Owned;
-        ownership.StateReason = null;
-        ownership.DirectoryObjectIdentityUnavailableReason = null;
-        ownership.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
-        await db.SaveChangesAsync(CancellationToken.None);
         CleanupRetiredSiblingMarkers(
             retiredCandidates,
             canonicalPath,

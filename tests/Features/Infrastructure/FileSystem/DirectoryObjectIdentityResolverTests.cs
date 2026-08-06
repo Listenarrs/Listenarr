@@ -7,73 +7,94 @@ namespace Listenarr.Tests.Features.Infrastructure.FileSystem;
 public sealed class DirectoryObjectIdentityResolverTests : BaseTests
 {
     [Fact]
-    public async Task ResolveAsync_IsStableForSameEnrolledDirectory()
+    public async Task ResolveAsync_IsStableWithoutFilesystemMarker()
     {
         var directory = FileService.GetTempDirectory("directory-object-identity-stable");
         var resolver = new DirectoryObjectIdentityResolver();
 
         var first = await resolver.ResolveAsync(directory);
-        var second = await resolver.ResolveExistingAsync(directory);
+        var second = await resolver.ResolveAsync(directory);
 
         Assert.True(first.IsAvailable, first.UnavailableReason);
         Assert.Equal(ManagedDirectoryIdentity.CurrentVersion, first.Version);
-        Assert.Equal(first.Version, second.Version);
-        Assert.Equal(first.Value, second.Value);
+        Assert.Equal(first, second);
+        Assert.False(File.Exists(Path.Join(
+            directory,
+            ManagedDirectoryEnrollment.FileName)));
+    }
+
+    [Fact]
+    public async Task ResolveExistingAsync_LegacyVersionTwoValue_ValidatesFromNativeGenerationWithoutMarker()
+    {
+        var directory = FileService.GetTempDirectory("directory-object-identity-existing-v2");
+        const string nativeIdentity = "stable-native-generation";
+        var resolver = new DirectoryObjectIdentityResolver(
+            nativeIdentityResolver: static _ => nativeIdentity);
+        var legacyPersisted = ManagedDirectoryIdentity.Create(
+            Guid.NewGuid().ToString("N"),
+            nativeIdentity);
+
+        var existing = await resolver.ResolveExistingAsync(
+            directory,
+            ManagedDirectoryIdentity.CurrentVersion,
+            legacyPersisted);
+
+        Assert.True(existing.IsAvailable, existing.UnavailableReason);
+        Assert.Equal(legacyPersisted, existing.Value);
+        Assert.False(File.Exists(Path.Join(
+            directory,
+            ManagedDirectoryEnrollment.FileName)));
+    }
+
+    [Fact]
+    public async Task ResolveExistingAsync_DifferentNativeGeneration_IsUnavailable()
+    {
+        var directory = FileService.GetTempDirectory("directory-object-identity-recreated");
+        var nativeIdentity = "generation-a";
+        var resolver = new DirectoryObjectIdentityResolver(
+            nativeIdentityResolver: _ => nativeIdentity);
+        var first = await resolver.ResolveAsync(directory);
+        Assert.True(first.IsAvailable, first.UnavailableReason);
+
+        nativeIdentity = "generation-b";
+        var existing = await resolver.ResolveExistingAsync(
+            directory,
+            first.Version!.Value,
+            first.Value!);
+
+        Assert.False(existing.IsAvailable);
+        Assert.Contains(
+            "physical identity",
+            existing.UnavailableReason,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ResolveExistingAsync_ForeignMarkerCannotAuthorizeDifferentNativeGeneration()
+    {
+        var directory = FileService.GetTempDirectory("directory-object-identity-foreign-marker");
+        var resolver = new DirectoryObjectIdentityResolver(
+            nativeIdentityResolver: static _ => "native-current");
+        var expected = ManagedDirectoryIdentity.Create(
+            Guid.NewGuid().ToString("N"),
+            "native-original");
+        await File.WriteAllTextAsync(
+            Path.Join(directory, ManagedDirectoryEnrollment.FileName),
+            "{\"version\":1,\"token\":\"00000000000000000000000000000000\"}");
+
+        var existing = await resolver.ResolveExistingAsync(
+            directory,
+            ManagedDirectoryIdentity.CurrentVersion,
+            expected);
+
+        Assert.False(existing.IsAvailable);
         Assert.True(File.Exists(Path.Join(
             directory,
             ManagedDirectoryEnrollment.FileName)));
     }
 
     [Fact]
-    public async Task ResolveExistingAsync_RecreatedPathWithReusedNativeIdentity_IsUnavailable()
-    {
-        var directory = FileService.GetTempDirectory("directory-object-identity-recreated");
-        var resolver = new DirectoryObjectIdentityResolver(
-            nativeIdentityResolver: static _ => "simulated-reused-native-identity");
-        var first = await resolver.ResolveAsync(directory);
-        Assert.True(first.IsAvailable, first.UnavailableReason);
-
-        Directory.Delete(directory, recursive: true);
-        Directory.CreateDirectory(directory);
-        var existing = await resolver.ResolveExistingAsync(directory);
-        var reenrolled = await resolver.ResolveAsync(directory);
-
-        Assert.False(existing.IsAvailable);
-        Assert.Contains(
-            "enrollment",
-            existing.UnavailableReason,
-            StringComparison.OrdinalIgnoreCase);
-        Assert.True(reenrolled.IsAvailable, reenrolled.UnavailableReason);
-        Assert.NotEqual(first.Value, reenrolled.Value);
-    }
-
-    [Fact]
-    public async Task ResolveExistingAsync_CopiedEnrollmentMarkerWithDifferentNativeIdentity_IsUnavailable()
-    {
-        var source = FileService.GetTempDirectory("directory-object-identity-source");
-        var replacement = FileService.GetTempDirectory("directory-object-identity-replacement");
-        var sourceResolver = new DirectoryObjectIdentityResolver(
-            nativeIdentityResolver: anchor =>
-                anchor.FullPath.EndsWith("source", StringComparison.Ordinal)
-                    ? "native-source"
-                    : "native-replacement");
-        var sourceIdentity = await sourceResolver.ResolveAsync(source);
-        Assert.True(sourceIdentity.IsAvailable, sourceIdentity.UnavailableReason);
-        File.Copy(
-            Path.Join(source, ManagedDirectoryEnrollment.FileName),
-            Path.Join(replacement, ManagedDirectoryEnrollment.FileName));
-
-        var replacementIdentity = await sourceResolver.ResolveExistingAsync(replacement);
-
-        Assert.False(replacementIdentity.IsAvailable);
-        Assert.Contains(
-            "physical directory",
-            replacementIdentity.UnavailableReason,
-            StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public async Task UpgradeLegacyAsync_MatchingNativeIdentity_EnrollsVersionTwo()
+    public async Task UpgradeLegacyAsync_MatchingNativeIdentity_ProducesMarkerlessVersionTwo()
     {
         var directory = FileService.GetTempDirectory("directory-object-identity-upgrade");
         var resolver = new DirectoryObjectIdentityResolver(
@@ -83,19 +104,21 @@ public sealed class DirectoryObjectIdentityResolverTests : BaseTests
             directory,
             legacyVersion: 1,
             legacyValue: "legacy-native");
-        var existing = await resolver.ResolveExistingAsync(directory);
+        var existing = await resolver.ResolveExistingAsync(
+            directory,
+            upgraded.Version!.Value,
+            upgraded.Value!);
 
         Assert.True(upgraded.IsAvailable, upgraded.UnavailableReason);
-        Assert.True(upgraded.EnrollmentCreated);
         Assert.Equal(ManagedDirectoryIdentity.CurrentVersion, upgraded.Version);
-        Assert.True(existing.IsAvailable, existing.UnavailableReason);
-        Assert.False(existing.EnrollmentCreated);
-        Assert.Equal(upgraded.Version, existing.Version);
-        Assert.Equal(upgraded.Value, existing.Value);
+        Assert.Equal(upgraded, existing);
+        Assert.False(File.Exists(Path.Join(
+            directory,
+            ManagedDirectoryEnrollment.FileName)));
     }
 
     [Fact]
-    public async Task UpgradeLegacyAsync_MismatchedNativeIdentity_FailsClosedWithoutEnrollment()
+    public async Task UpgradeLegacyAsync_MismatchedNativeIdentity_FailsClosedWithoutMarker()
     {
         var directory = FileService.GetTempDirectory("directory-object-identity-upgrade-mismatch");
         var resolver = new DirectoryObjectIdentityResolver(
@@ -113,48 +136,7 @@ public sealed class DirectoryObjectIdentityResolverTests : BaseTests
     }
 
     [Fact]
-    public async Task RetireEnrollmentAsync_ExactCreatedGeneration_RemovesMarker()
-    {
-        var directory = FileService.GetTempDirectory("directory-object-identity-retire");
-        var resolver = new DirectoryObjectIdentityResolver();
-        var enrolled = await resolver.ResolveAsync(directory);
-        Assert.True(enrolled.IsAvailable, enrolled.UnavailableReason);
-        Assert.True(enrolled.EnrollmentCreated);
-
-        await resolver.RetireEnrollmentAsync(
-            directory,
-            enrolled.Version!.Value,
-            enrolled.Value!);
-
-        Assert.False(File.Exists(Path.Join(
-            directory,
-            ManagedDirectoryEnrollment.FileName)));
-        var existing = await resolver.ResolveExistingAsync(directory);
-        Assert.False(existing.IsAvailable);
-    }
-
-    [Fact]
-    public async Task RetireEnrollmentAsync_MismatchedExpectedGeneration_PreservesMarker()
-    {
-        var directory = FileService.GetTempDirectory("directory-object-identity-retire-mismatch");
-        var resolver = new DirectoryObjectIdentityResolver();
-        var enrolled = await resolver.ResolveAsync(directory);
-        Assert.True(enrolled.IsAvailable, enrolled.UnavailableReason);
-        var markerPath = Path.Join(directory, ManagedDirectoryEnrollment.FileName);
-        var original = await File.ReadAllTextAsync(markerPath);
-
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            resolver.RetireEnrollmentAsync(
-                directory,
-                enrolled.Version!.Value,
-                "listenarr-directory-v2:00000000000000000000000000000000:"
-                    + new string('0', 64)));
-
-        Assert.Equal(original, await File.ReadAllTextAsync(markerPath));
-    }
-
-    [Fact]
-    public async Task ResolveAsync_ForeignPersistedSyntax_FailsClosedBeforeNativeProbeOrEnrollment()
+    public async Task ResolveAsync_ForeignPersistedSyntax_FailsClosedBeforeNativeProbeOrMarkerWrite()
     {
         var directory = FileService.GetTempDirectory("directory-object-identity-foreign-syntax");
         var nativeProbeCount = 0;
@@ -171,9 +153,13 @@ public sealed class DirectoryObjectIdentityResolverTests : BaseTests
         var expectedForeignSyntax = OperatingSystem.IsWindows()
             ? FileSystemPathSyntax.Unix
             : FileSystemPathSyntax.Windows;
+        var expected = ManagedDirectoryIdentity.CreateMarkerless("expected-native");
 
         var resolution = await resolver.ResolveAsync(foreignPath);
-        var existing = await resolver.ResolveExistingAsync(foreignPath);
+        var existing = await resolver.ResolveExistingAsync(
+            foreignPath,
+            ManagedDirectoryIdentity.CurrentVersion,
+            expected);
         var legacy = await resolver.UpgradeLegacyAsync(
             foreignPath,
             legacyVersion: 1,
@@ -207,7 +193,7 @@ public sealed class DirectoryObjectIdentityResolverTests : BaseTests
     }
 
     [LinuxFact]
-    public async Task ResolveExistingAsync_ImmediateNativeDeleteRecreate_DoesNotRetainEnrollment()
+    public async Task ResolveExistingAsync_ImmediateNativeDeleteRecreate_DetectsGenerationChange()
     {
         var directory = FileService.GetTempDirectory("directory-object-identity-native-recreate");
         var resolver = new DirectoryObjectIdentityResolver();
@@ -216,7 +202,10 @@ public sealed class DirectoryObjectIdentityResolverTests : BaseTests
 
         Directory.Delete(directory, recursive: true);
         Directory.CreateDirectory(directory);
-        var existing = await resolver.ResolveExistingAsync(directory);
+        var existing = await resolver.ResolveExistingAsync(
+            directory,
+            first.Version!.Value,
+            first.Value!);
 
         Assert.False(existing.IsAvailable);
     }

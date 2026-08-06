@@ -24,6 +24,10 @@ namespace Listenarr.Application.Audiobooks.Contracts.Repositories
         string? ExpectedCurrentBasePath,
         string? ResultingBasePath);
 
+    public sealed record AudiobookFilePathReferenceSnapshot(
+        int AudiobookId,
+        string? Path);
+
     public interface IAudiobookFileRepository
     {
         Task<AudiobookFile?> GetByIdAsync(int id, CancellationToken ct = default);
@@ -77,6 +81,9 @@ namespace Listenarr.Application.Audiobooks.Contracts.Repositories
             FileSystemPathSemantics comparisonSemantics,
             CancellationToken ct = default);
         Task<List<AudiobookFile>> GetAllAsync(CancellationToken ct = default);
+        Task<List<AudiobookFilePathReferenceSnapshot>> GetOtherPathReferenceSnapshotsAsync(
+            int audiobookId,
+            CancellationToken ct = default);
         Task<List<AudiobookFormatSummary>> GetFormatSummariesAsync(CancellationToken ct = default);
         Task<Dictionary<int, int>> GetCountsByAudiobookIdAsync(CancellationToken ct = default);
     }

@@ -67,9 +67,16 @@ public sealed partial class LibraryMoveWorkflow
         DirectoryObjectIdentityResolution directoryIdentity;
         if (hasPersistedDirectoryIdentity)
         {
-            var current = await directoryIdentityResolver.ResolveExistingAsync(
-                normalizedRoot,
-                cancellationToken);
+            var current = expectedDirectoryIdentityVersion.HasValue
+                && !string.IsNullOrWhiteSpace(expectedDirectoryIdentity)
+                    ? await directoryIdentityResolver.ResolveExistingAsync(
+                        normalizedRoot,
+                        expectedDirectoryIdentityVersion.Value,
+                        expectedDirectoryIdentity,
+                        cancellationToken)
+                    : DirectoryObjectIdentityResolution.Unavailable(
+                        directoryIdentityUnavailableReason
+                            ?? "The configured root has incomplete persisted physical identity.");
             directoryIdentity = current.IsAvailable
                 && current.Version == expectedDirectoryIdentityVersion
                 && string.Equals(

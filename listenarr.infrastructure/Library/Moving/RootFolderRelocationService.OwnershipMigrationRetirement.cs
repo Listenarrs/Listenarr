@@ -271,12 +271,17 @@ public sealed partial class RootFolderRelocationService
                 || !string.IsNullOrWhiteSpace(expectedBoundaryIdentityValue)
                 || !string.IsNullOrWhiteSpace(boundaryIdentityUnavailableReason))
             {
-                await ManagedDirectoryEnrollment.RequireMatchingEnrollmentAsync(
-                    current,
-                    expectedBoundaryIdentityVersion,
-                    expectedBoundaryIdentityValue,
-                    boundaryIdentityUnavailableReason,
-                    cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!string.IsNullOrWhiteSpace(boundaryIdentityUnavailableReason)
+                    || !ManagedDirectoryIdentity.MatchesNativeIdentity(
+                        expectedBoundaryIdentityVersion,
+                        expectedBoundaryIdentityValue,
+                        current.GetDirectoryObjectIdentity())
+                    || !current.VisiblePathMatches())
+                {
+                    throw new InvalidOperationException(
+                        "The ownership migration boundary no longer identifies its authorized physical generation.");
+                }
             }
 
             if (FileSystemPathIdentity.AreEquivalent(

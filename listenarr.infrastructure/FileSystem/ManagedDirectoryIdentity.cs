@@ -24,9 +24,40 @@ internal static class ManagedDirectoryIdentity
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(token);
         ArgumentException.ThrowIfNullOrWhiteSpace(nativeIdentity);
-        var nativeHash = Convert.ToHexString(
-            SHA256.HashData(Encoding.UTF8.GetBytes(nativeIdentity)))
-            .ToLowerInvariant();
-        return FormattableString.Invariant($"{Prefix}:{token}:{nativeHash}");
+        return FormattableString.Invariant(
+            $"{Prefix}:{token}:{HashNativeIdentity(nativeIdentity)}");
     }
+
+    internal static string CreateMarkerless(string nativeIdentity)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(nativeIdentity);
+        var nativeHash = HashNativeIdentity(nativeIdentity);
+        return FormattableString.Invariant(
+            $"{Prefix}:{nativeHash[..32]}:{nativeHash}");
+    }
+
+    internal static bool MatchesNativeIdentity(
+        int? version,
+        string? value,
+        string nativeIdentity)
+    {
+        if (version != CurrentVersion || string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var parts = value.Split(':');
+        return parts.Length == 3
+            && string.Equals(parts[0], Prefix, StringComparison.Ordinal)
+            && Guid.TryParseExact(parts[1], "N", out _)
+            && string.Equals(
+                parts[2],
+                HashNativeIdentity(nativeIdentity),
+                StringComparison.Ordinal);
+    }
+
+    private static string HashNativeIdentity(string nativeIdentity) =>
+        Convert.ToHexString(
+            SHA256.HashData(Encoding.UTF8.GetBytes(nativeIdentity)))
+        .ToLowerInvariant();
 }

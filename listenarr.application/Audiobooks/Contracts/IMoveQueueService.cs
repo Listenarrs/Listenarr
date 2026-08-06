@@ -85,6 +85,11 @@ namespace Listenarr.Application.Audiobooks.Contracts
         Task UpdateJobStatusAsync(Guid id, string leaseOwner, int leaseGeneration, MoveJobStatus status, string? error = null, CancellationToken cancellationToken = default);
         Task UpdateJobStatusWithoutNotificationAsync(Guid id, string leaseOwner, int leaseGeneration, MoveJobStatus status, string? error = null, CancellationToken cancellationToken = default);
         Task NotifyPersistedJobStateAsync(Guid id, MoveJobStatus status, string? error = null, CancellationToken cancellationToken = default);
+        Task PublishProgressAsync(
+            Guid id,
+            double progress,
+            string phase,
+            CancellationToken cancellationToken = default);
         System.Threading.Channels.ChannelReader<MoveJob> Reader { get; }
     }
 }

@@ -30,7 +30,8 @@ public enum LibraryDirectoryOwnershipPathMigrationState
 {
     Prepared,
     MarkersPublished,
-    MetadataCommitted
+    MetadataCommitted,
+    SourceMarkersRetired
 }
 
 public enum RootFolderRelocationCreatedDirectoryState

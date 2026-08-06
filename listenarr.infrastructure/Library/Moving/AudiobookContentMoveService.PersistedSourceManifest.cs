@@ -11,7 +11,9 @@ internal sealed partial class AudiobookContentMoveService
         IReadOnlyCollection<MoveJobEntry> manifest,
         FileSystemPathSemantics sourceSemantics,
         CancellationToken cancellationToken,
-        bool requireTrackedFile = true)
+        bool requireTrackedFile = true,
+        bool verifyFileContents = true,
+        bool allowVerifiedNativeRenameMissingSources = false)
     {
         ValidateMoveSourceRoot(source);
         if (manifest.Count == 0)
@@ -88,13 +90,22 @@ internal sealed partial class AudiobookContentMoveService
                 continue;
             }
 
+            if (!File.Exists(fullPath)
+                && allowVerifiedNativeRenameMissingSources
+                && IsVerifiedMarkerlessNativeRenameEntry(entry))
+            {
+                continue;
+            }
+
             if (entry.EntryType != MoveJobEntryType.File
                 || !File.Exists(fullPath)
                 || (File.GetAttributes(fullPath) & FileAttributes.ReparsePoint) != 0
-                || !await FileMatchesManifestAsync(
-                    fullPath,
-                    entry,
-                    cancellationToken))
+                || !FileMetadataMatchesManifest(fullPath, entry)
+                || (verifyFileContents
+                    && !await FileMatchesManifestAsync(
+                        fullPath,
+                        entry,
+                        cancellationToken)))
             {
                 throw new MoveNeedsAttentionException(
                     $"Manifest file changed, disappeared, or became linked: {entry.RelativePath}");
@@ -102,6 +113,30 @@ internal sealed partial class AudiobookContentMoveService
         }
 
         ValidateMoveSourceRoot(source);
+    }
+
+    private static bool IsVerifiedMarkerlessNativeRenameEntry(
+        MoveJobEntry entry) =>
+        entry.EntryType == MoveJobEntryType.File
+        && entry.CopyState == MoveJobEntryCopyState.Verified
+        && !string.IsNullOrWhiteSpace(entry.SourcePhysicalObjectIdentity)
+        && string.Equals(
+            entry.SourcePhysicalObjectIdentity,
+            entry.TargetPhysicalObjectIdentity,
+            StringComparison.Ordinal);
+
+    private static bool FileMetadataMatchesManifest(
+        string path,
+        MoveJobEntry manifestEntry)
+    {
+        if (manifestEntry.EntryType != MoveJobEntryType.File)
+        {
+            return false;
+        }
+
+        var fileInfo = new FileInfo(path);
+        return fileInfo.Length == manifestEntry.Length
+            && fileInfo.LastWriteTimeUtc == manifestEntry.LastWriteTimeUtc;
     }
 
     private static void ValidateManifestAncestorChain(
