@@ -85,3 +85,15 @@ new = '''        if (!stale.ManagedRootFolderId.HasValue
 if old not in text:
     raise SystemExit('missing markerless replacement legacy retired-evidence fallback')
 replacement.write_text(text.replace(old, new, 1))
+
+reconciler = Path('listenarr.infrastructure/Library/Moving/LibraryDirectoryOwnershipReconciler.cs')
+text = reconciler.read_text()
+old = '''                    ownership.State = LibraryDirectoryOwnershipState.Removed;
+                    ownership.UpdatedAt = now;
+'''
+new = '''                    ownership.State = LibraryDirectoryOwnershipState.Removed;
+                    ownership.UpdatedAt = DateTime.UtcNow;
+'''
+if old not in text:
+    raise SystemExit('missing converged removal timestamp assignment')
+reconciler.write_text(text.replace(old, new, 1))
