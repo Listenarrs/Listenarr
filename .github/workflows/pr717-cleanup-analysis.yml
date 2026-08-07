@@ -9,20 +9,61 @@ permissions:
   contents: write
 
 jobs:
-  inventory-root-enrollment:
+  remove-root-enrollment-compatibility:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Inventory obsolete root enrollment compatibility
+
+      - name: Remove obsolete root enrollment compatibility
+        run: python3 .github/scripts/pr717_cleanup_step4.py
+
+      - name: Static adversarial review
         shell: bash
         run: |
           set -euo pipefail
-          echo '=== ManagedDirectoryEnrollment references ==='
-          git grep -n -F 'ManagedDirectoryEnrollment' -- ':!.github/workflows/pr717-cleanup-analysis.yml' ':!.github/scripts/**' || true
-          echo '=== marker literal references ==='
-          git grep -n -F '.listenarr-root-enrollment.json' -- ':!.github/workflows/pr717-cleanup-analysis.yml' ':!.github/scripts/**' || true
-          echo '=== source file ==='
-          sed -n '1,240p' listenarr.infrastructure/FileSystem/ManagedDirectoryEnrollment.cs
+          git diff --check
+          if git grep -n -E 'ManagedDirectoryEnrollment|\.listenarr-root-enrollment\.json|UpgradeLegacyAsync' -- \
+            'listenarr.application' 'listenarr.domain' 'listenarr.infrastructure' 'listenarr.api' 'tests' \
+            ':!.github/**'; then
+            echo 'Obsolete root enrollment compatibility remains' >&2
+            exit 1
+          fi
+          test ! -e listenarr.infrastructure/FileSystem/ManagedDirectoryEnrollment.cs
+          git diff --stat
+
+      - name: Restore and build
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet restore listenarr.slnx
+          dotnet build listenarr.slnx --configuration Release --no-restore
+
+      - name: Focused identity and move tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet test tests/Listenarr.Tests.csproj --configuration Release --no-build --filter 'FullyQualifiedName~RootFolderServiceTests|FullyQualifiedName~DirectoryObjectIdentityResolverTests|FullyQualifiedName~RootFolderObjectIdentityReconcilerTests|FullyQualifiedName~AudiobookContentMoveServiceTests|FullyQualifiedName~RootFolderRelocationServiceTests|FullyQualifiedName~BackendArchitectureTests'
+
+      - name: Adversarial current-contract review
+        shell: bash
+        run: |
+          set -euo pipefail
+          git grep -n -F 'CreateMarkerless' -- listenarr.infrastructure tests | head -100
+          git grep -n -F 'LibraryDirectoryOwnershipMarker' -- listenarr.infrastructure tests | head -100
+          if git grep -n -E 'legacy managed-directory enrollment|legacy root enrollment|root enrollment marker' -- listenarr.application listenarr.domain listenarr.infrastructure listenarr.api tests; then
+            echo 'Legacy root-enrollment language remains in production/test contracts' >&2
+            exit 1
+          fi
+
+      - name: Commit cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A ':!.github/workflows/pr717-cleanup-analysis.yml' ':!.github/scripts/**' ':!.github/pr717-cleanup-trigger'
+          git commit -m 'refactor(identity): remove intermediate root enrollment compatibility'
+          git push origin HEAD:bugfix/unix-folder-name-space
