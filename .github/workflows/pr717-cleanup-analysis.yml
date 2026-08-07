@@ -6,10 +6,10 @@ on:
       - bugfix/unix-folder-name-space
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  analyze:
+  codify-policy:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
@@ -17,40 +17,96 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Inventory cleanup candidates
+      - name: Codify compatibility and migration policy
         shell: bash
         run: |
           set -euo pipefail
-          echo '=== HEAD ==='
-          git rev-parse HEAD
-          echo '=== post-canary migrations ==='
-          find listenarr.infrastructure/Persistence/Migrations -maxdepth 1 -type f -name '*.cs' -printf '%f\n' \
-            | sort \
-            | awk '$0 > "20260621002226"'
-          echo '=== intermediate compatibility tokens ==='
-          for token in \
-            'LegacyUnenrolled' \
-            'reauthorize-legacy-target' \
-            'ReauthorizeLegacyTarget' \
-            'ManagedDirectoryEnrollment' \
-            '.listenarr-root-enrollment' \
-            'ObsoleteStage' \
-            'pre-release recovery marker' \
-            'LegacyFilesystemArtifacts' \
-            'LibraryDirectoryOwnershipMarker' \
-            'PinnedLibraryDirectoryOwnershipMarker' \
-            'TargetIdentityEnrollment' \
-            'ExclusiveDirectoryCreator.TryCreate' \
-            'isWindowsShapedPath' \
-            'hasOuterWhitespace' \
-            'hasPathSegmentOuterWhitespace' \
-            'pathsOverlap'; do
-            echo "--- $token"
-            git grep -n -F "$token" -- ':!listenarr.infrastructure/Persistence/Migrations/*.Designer.cs' ':!listenarr.infrastructure/Persistence/Migrations/ListenArrDbContextModelSnapshot.cs' || true
-          done
-          echo '=== marker artifact literals ==='
-          git grep -n -E '\.listenarr-(directory-owner|root-enrollment|move|recovery)|marker-backed|marker marker|ownership marker|recovery marker' -- \
-            'listenarr.*' 'tests' 'fe/src' 2>/dev/null || true
+          python3 - <<'PY'
+          from pathlib import Path
 
-      - name: Build backend
-        run: dotnet build listenarr.slnx --configuration Release --no-restore
+          agent_policy = '''## Compatibility Boundary for Development Branches
+
+- The authoritative compatibility boundary is the target branch or released version that a change will merge into. Persisted states produced only by an unmerged feature branch, pull-request build, or intermediate development image are not supported upgrade inputs.
+- Do not add production compatibility code, recovery states, filesystem marker readers, API endpoints, schema versions, or tests solely to preserve intermediate iterations of an unmerged change. Remove or regenerate those development artifacts before merge.
+- EF migrations are immutable historical artifacts only after they reach the target branch. While a feature branch is unmerged, delete superseded branch-only migrations, restore the target branch model snapshot, and regenerate the minimum final EF migration set from the cleaned final model. Never hand-shape generated migrations to preserve intermediate branch states.
+- Compatibility with the actual target-branch schema and persisted data remains mandatory. Before deleting legacy-looking behavior, prove whether the state can exist on the target branch; released or merged states must continue to fail safely or upgrade deterministically.
+- Reviews must distinguish current crash-safety evidence from development-history compatibility. A filesystem marker or recovery protocol that is still part of the final safety contract is not removable merely because earlier versions of that protocol existed during development.
+
+'''
+          contributor_policy = '''### Compatibility and migration development policy
+
+The compatibility boundary for a pull request is the branch it targets. Databases, filesystem artifacts, API states, and recovery formats that were produced only by an unmerged feature branch or intermediate PR image are development artifacts, not supported upgrade inputs.
+
+- Do not keep production compatibility paths solely for intermediate versions of an unmerged PR.
+- Preserve and regression-test compatibility with schemas and persisted data that actually exist on the target branch.
+- Once an EF migration is merged into a supported branch it is immutable history. Before merge, superseded branch-only migrations should be removed and the final migration set regenerated with EF from the target branch model snapshot.
+- Do not hand-edit EF scaffolding to emulate intermediate branch schemas. Put unavoidable data repair for real target-branch upgrades in explicit, tested startup/reconciliation primitives.
+
+'''
+          backend_policy = '''## Compatibility and Migration Boundary
+
+Backend compatibility begins at the branch or release that code has actually reached. An unmerged feature branch is free to replace its own schema, recovery protocol, or persisted development artifacts; those intermediate states must not become permanent production compatibility surfaces merely because a developer ran an earlier PR build.
+
+EF migrations become immutable historical artifacts when they merge into the target branch. Before merge, a feature branch should remove superseded branch-only migrations, restore the target branch model snapshot, and regenerate the smallest final EF-scaffolded migration set from the cleaned model. Compatibility and startup reconciliation must be designed against data that can exist on the actual target branch, not against transient schemas that existed only during feature development.
+
+This rule does not authorize deleting current crash-safety evidence. Marker files, journals, leases, identities, or other durable protocols that the final implementation itself writes and requires for restart safety remain part of the current contract. Reviewers must distinguish those from readers, endpoints, states, and migrations whose only purpose is upgrading an obsolete intermediate branch protocol.
+
+'''
+
+          for filename in ['.github/AGENTS.md', '.github/CLAUDE.md']:
+              path = Path(filename)
+              text = path.read_text()
+              if '## Compatibility Boundary for Development Branches' not in text:
+                  marker = '## Cross-shell null redirection\n'
+                  if marker not in text:
+                      raise SystemExit(f'missing insertion marker in {filename}')
+                  text = text.replace(marker, agent_policy + marker, 1)
+                  path.write_text(text)
+
+          path = Path('CONTRIBUTING.md')
+          text = path.read_text()
+          if '### Compatibility and migration development policy' not in text:
+              marker = '### Branching Model\n'
+              if marker not in text:
+                  raise SystemExit('missing CONTRIBUTING insertion marker')
+              text = text.replace(marker, contributor_policy + marker, 1)
+              path.write_text(text)
+
+          path = Path('BACKEND_ARCHITECTURE.md')
+          text = path.read_text()
+          if '## Compatibility and Migration Boundary' not in text:
+              marker = '## Boundary Cleanup\n'
+              if marker not in text:
+                  raise SystemExit('missing architecture insertion marker')
+              text = text.replace(marker, backend_policy + marker, 1)
+              path.write_text(text)
+          PY
+
+      - name: Adversarial review policy-only diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          mapfile -t changed < <(git diff --name-only)
+          printf 'Changed files:\n%s\n' "${changed[*]}"
+          expected=(.github/AGENTS.md .github/CLAUDE.md CONTRIBUTING.md BACKEND_ARCHITECTURE.md)
+          for path in "${changed[@]}"; do
+            case "$path" in
+              .github/AGENTS.md|.github/CLAUDE.md|CONTRIBUTING.md|BACKEND_ARCHITECTURE.md) ;;
+              *) echo "Unexpected file changed: $path" >&2; exit 1 ;;
+            esac
+          done
+          for path in "${expected[@]}"; do
+            grep -q 'target branch' "$path" || { echo "Missing target-branch policy in $path" >&2; exit 1; }
+          done
+          git diff -- .github/AGENTS.md .github/CLAUDE.md CONTRIBUTING.md BACKEND_ARCHITECTURE.md
+
+      - name: Commit policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/AGENTS.md .github/CLAUDE.md CONTRIBUTING.md BACKEND_ARCHITECTURE.md
+          git commit -m 'docs: define target-branch compatibility boundary'
+          git push origin HEAD:bugfix/unix-folder-name-space
