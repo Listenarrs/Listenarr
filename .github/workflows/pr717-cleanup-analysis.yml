@@ -1,0 +1,56 @@
+name: PR 717 cleanup analysis
+
+on:
+  push:
+    branches:
+      - bugfix/unix-folder-name-space
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Inventory cleanup candidates
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '=== HEAD ==='
+          git rev-parse HEAD
+          echo '=== post-canary migrations ==='
+          find listenarr.infrastructure/Persistence/Migrations -maxdepth 1 -type f -name '*.cs' -printf '%f\n' \
+            | sort \
+            | awk '$0 > "20260621002226"'
+          echo '=== intermediate compatibility tokens ==='
+          for token in \
+            'LegacyUnenrolled' \
+            'reauthorize-legacy-target' \
+            'ReauthorizeLegacyTarget' \
+            'ManagedDirectoryEnrollment' \
+            '.listenarr-root-enrollment' \
+            'ObsoleteStage' \
+            'pre-release recovery marker' \
+            'LegacyFilesystemArtifacts' \
+            'LibraryDirectoryOwnershipMarker' \
+            'PinnedLibraryDirectoryOwnershipMarker' \
+            'TargetIdentityEnrollment' \
+            'ExclusiveDirectoryCreator.TryCreate' \
+            'isWindowsShapedPath' \
+            'hasOuterWhitespace' \
+            'hasPathSegmentOuterWhitespace' \
+            'pathsOverlap'; do
+            echo "--- $token"
+            git grep -n -F "$token" -- ':!listenarr.infrastructure/Persistence/Migrations/*.Designer.cs' ':!listenarr.infrastructure/Persistence/Migrations/ListenArrDbContextModelSnapshot.cs' || true
+          done
+          echo '=== marker artifact literals ==='
+          git grep -n -E '\.listenarr-(directory-owner|root-enrollment|move|recovery)|marker-backed|marker marker|ownership marker|recovery marker' -- \
+            'listenarr.*' 'tests' 'fe/src' 2>/dev/null || true
+
+      - name: Build backend
+        run: dotnet build listenarr.slnx --configuration Release --no-restore
