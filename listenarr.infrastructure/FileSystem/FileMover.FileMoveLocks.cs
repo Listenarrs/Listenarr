@@ -388,18 +388,13 @@ public partial class FileMover
         var directory = FileMoveLockDirectoryForTest;
         if (string.IsNullOrWhiteSpace(directory))
         {
-            var localData = Environment.GetFolderPath(
-                Environment.SpecialFolder.LocalApplicationData);
-            if (string.IsNullOrWhiteSpace(localData))
-            {
-                throw new IOException(
-                    "A per-user application-data directory is required for file-move locks.");
-            }
+            directory = _applicationPathService.FileMoveLockRootPath;
+        }
 
-            directory = Path.Join(
-                localData,
-                "Listenarr",
-                "file-move-locks");
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            throw new IOException(
+                "An application-owned directory is required for file-move locks.");
         }
 
         var pinned = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
