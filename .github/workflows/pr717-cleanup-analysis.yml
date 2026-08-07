@@ -18,7 +18,49 @@ jobs:
           fetch-depth: 0
 
       - name: Remove intermediate ownership compatibility
-        run: python3 .github/scripts/pr717_cleanup_step5.py
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          # The first cleanup target is expression-bodied, while the shared temporary
+          # cleanup helper is intentionally brace-oriented. Remove it exactly and
+          # suppress the helper call for this one member.
+          payload = Path('listenarr.infrastructure/Library/Moving/LibraryDirectoryOwnershipMarker.Payload.cs')
+          text = payload.read_text()
+          block = '''    internal static bool MatchesLegacyPayload(
+              LibraryDirectoryOwnership ownership,
+              MarkerPayload payload) =>
+              payload.Version == 1
+              && string.Equals(
+                  payload.OwnershipToken,
+                  ownership.OwnershipToken,
+                  StringComparison.Ordinal)
+              && MarkerPathMatches(
+                  payload.CanonicalPath,
+                  ownership.CanonicalPath,
+                  ownership.GetIdentity().Semantics);
+          '''
+          # Normalize indentation from this temporary heredoc before matching source.
+          block = '\n'.join(line[10:] if line.startswith('          ') else line for line in block.splitlines()) + '\n'
+          if block not in text:
+              raise SystemExit('missing expression-bodied legacy marker matcher')
+          payload.write_text(text.replace(block, '', 1))
+
+          script = Path('.github/scripts/pr717_cleanup_step5.py')
+          source = script.read_text()
+          call = '''remove_decl(
+              "listenarr.infrastructure/Library/Moving/LibraryDirectoryOwnershipMarker.Payload.cs",
+              "internal static bool MatchesLegacyPayload(",
+          )
+          '''
+          call = '\n'.join(line[10:] if line.startswith('          ') else line for line in call.splitlines()) + '\n'
+          if call not in source:
+              raise SystemExit('missing legacy matcher cleanup call')
+          script.write_text(source.replace(call, '', 1))
+          PY
+          python3 .github/scripts/pr717_cleanup_step5.py
 
       - name: Static adversarial review
         shell: bash
@@ -43,6 +85,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          git restore .github/scripts/pr717_cleanup_step5.py
           dotnet restore listenarr.slnx
           dotnet build listenarr.slnx --configuration Release --no-restore
 
