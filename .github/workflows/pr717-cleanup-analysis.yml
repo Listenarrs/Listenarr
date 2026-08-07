@@ -9,62 +9,20 @@ permissions:
   contents: write
 
 jobs:
-  remove-legacy-relocation:
+  inventory-root-enrollment:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Remove intermediate root relocation compatibility
+      - name: Inventory obsolete root enrollment compatibility
         shell: bash
         run: |
           set -euo pipefail
-          python3 .github/scripts/pr717_cleanup.py
-          python3 .github/scripts/pr717_cleanup_step3_extra.py
-
-      - name: Restore and build
-        shell: bash
-        run: |
-          set -euo pipefail
-          dotnet restore listenarr.slnx
-          dotnet build listenarr.slnx --configuration Release --no-restore
-
-      - name: Focused backend tests
-        shell: bash
-        run: |
-          set -euo pipefail
-          dotnet test tests/Listenarr.Tests.csproj --configuration Release --no-build --filter 'FullyQualifiedName~RootFolderRelocation|FullyQualifiedName~RootFolderObjectIdentityReconciler'
-
-      - name: Focused frontend validation
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd fe
-          npm ci
-          npx vitest run src/__tests__/RootFoldersSettings.spec.ts src/__tests__/rootFolders.reauthorization.store.spec.ts
-          npm run type-check
-
-      - name: Adversarial review removed surface
-        shell: bash
-        run: |
-          set -euo pipefail
-          git diff --check
-          if git grep -n -E 'LegacyUnenrolled|reauthorize-legacy-target|ReauthorizeLegacyTarget|reauthorizeLegacyRootFolderRelocationTarget|reauthorizeLegacyTarget' -- ':!listenarr.infrastructure/Persistence/Migrations/**' ':!.github/workflows/pr717-cleanup-analysis.yml' ':!.github/scripts/pr717_cleanup.py' ':!.github/scripts/pr717_cleanup_step3_extra.py'; then
-            echo 'Intermediate relocation compatibility remains' >&2
-            exit 1
-          fi
-          test ! -e listenarr.infrastructure/Library/Moving/RootFolderRelocationService.Reauthorization.cs
-          test ! -e fe/src/__tests__/api.rootFolderRelocationReauthorization.spec.ts
-          git diff --stat
-
-      - name: Commit cleanup
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A ':!.github/workflows/pr717-cleanup-analysis.yml' ':!.github/scripts/pr717_cleanup.py' ':!.github/scripts/pr717_cleanup_step3_extra.py' ':!.github/pr717-cleanup-trigger'
-          git commit -m 'refactor(relocation): remove intermediate target reauthorization'
-          git push origin HEAD:bugfix/unix-folder-name-space
+          echo '=== ManagedDirectoryEnrollment references ==='
+          git grep -n -F 'ManagedDirectoryEnrollment' -- ':!.github/workflows/pr717-cleanup-analysis.yml' ':!.github/scripts/**' || true
+          echo '=== marker literal references ==='
+          git grep -n -F '.listenarr-root-enrollment.json' -- ':!.github/workflows/pr717-cleanup-analysis.yml' ':!.github/scripts/**' || true
+          echo '=== source file ==='
+          sed -n '1,240p' listenarr.infrastructure/FileSystem/ManagedDirectoryEnrollment.cs
