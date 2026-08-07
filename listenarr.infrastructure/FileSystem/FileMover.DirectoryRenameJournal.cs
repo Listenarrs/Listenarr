@@ -33,8 +33,8 @@ public partial class FileMover
         var payload = new DirectoryRenameJournalPayload(
             Version: 1,
             Guid.NewGuid(),
-            Path.GetFullPath(source),
-            Path.GetFullPath(destination),
+            CanonicalizeDirectoryRenameJournalPath(source),
+            CanonicalizeDirectoryRenameJournalPath(destination),
             sourceObjectIdentity,
             sourceParent.GetDirectoryObjectIdentity(),
             destinationParent.GetDirectoryObjectIdentity());
@@ -126,8 +126,8 @@ public partial class FileMover
         string sourceDirectory,
         string destinationDirectory)
     {
-        var source = Path.GetFullPath(sourceDirectory);
-        var destination = Path.GetFullPath(destinationDirectory);
+        var source = CanonicalizeDirectoryRenameJournalPath(sourceDirectory);
+        var destination = CanonicalizeDirectoryRenameJournalPath(destinationDirectory);
         var sourceParentPath = Path.GetDirectoryName(source);
         if (string.IsNullOrWhiteSpace(sourceParentPath)
             || !Directory.Exists(sourceParentPath))
@@ -135,9 +135,6 @@ public partial class FileMover
             return null;
         }
 
-        var comparison = OperatingSystem.IsWindows()
-            ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal;
         using var sourceParent =
             PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
                 sourceParentPath,
@@ -170,11 +167,11 @@ public partial class FileMover
                 || !string.Equals(
                     payloadSource,
                     source,
-                    comparison)
+                    StringComparison.Ordinal)
                 || !string.Equals(
                     payloadDestination,
                     destination,
-                    comparison))
+                    StringComparison.Ordinal))
             {
                 return PinnedDirectoryMoveOutcome.Indeterminate;
             }
@@ -268,22 +265,36 @@ public partial class FileMover
         return outcome;
     }
 
-    private static string GetDirectoryRenameJournalStem(
+    internal static string GetDirectoryRenameJournalStem(
         string source,
-        string destination)
+        string destination,
+        FileSystemPathSyntax? syntax = null)
     {
-        var normalizedSource = Path.GetFullPath(source);
-        var normalizedDestination = Path.GetFullPath(destination);
-        if (OperatingSystem.IsWindows())
-        {
-            normalizedSource = normalizedSource.ToUpperInvariant();
-            normalizedDestination = normalizedDestination.ToUpperInvariant();
-        }
+        var effectiveSyntax = syntax
+            ?? (OperatingSystem.IsWindows()
+                ? FileSystemPathSyntax.Windows
+                : FileSystemPathSyntax.Unix);
+        var normalizedSource = syntax.HasValue
+            ? FileSystemPathIdentity.Canonicalize(source, effectiveSyntax)
+            : CanonicalizeDirectoryRenameJournalPath(source);
+        var normalizedDestination = syntax.HasValue
+            ? FileSystemPathIdentity.Canonicalize(destination, effectiveSyntax)
+            : CanonicalizeDirectoryRenameJournalPath(destination);
 
         var keyBytes = Encoding.UTF8.GetBytes(
             normalizedSource + "\0" + normalizedDestination);
         var key = Convert.ToHexString(SHA256.HashData(keyBytes))[..24];
         return DirectoryRenameJournalPrefix + key;
+    }
+
+    private static string CanonicalizeDirectoryRenameJournalPath(string path)
+    {
+        var syntax = OperatingSystem.IsWindows()
+            ? FileSystemPathSyntax.Windows
+            : FileSystemPathSyntax.Unix;
+        return FileSystemPathIdentity.Canonicalize(
+            Path.GetFullPath(path),
+            syntax);
     }
 
     private static DirectoryRenameJournalPayload? ReadDirectoryRenameJournal(

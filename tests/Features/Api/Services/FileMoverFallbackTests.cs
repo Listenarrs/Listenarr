@@ -1535,6 +1535,21 @@ namespace Listenarr.Tests.Features.Api.Services
         }
 
         [Fact]
+        public void DirectoryRenameJournalStem_WindowsCaseDistinctPaths_DoNotCollide()
+        {
+            var first = FileMover.GetDirectoryRenameJournalStem(
+                @"C:\Library\Book",
+                @"C:\Destination\Book",
+                FileSystemPathSyntax.Windows);
+            var second = FileMover.GetDirectoryRenameJournalStem(
+                @"C:\Library\book",
+                @"C:\Destination\book",
+                FileSystemPathSyntax.Windows);
+
+            Assert.NotEqual(first, second);
+        }
+
+        [Fact]
         public async Task MoveDirectoryAsync_CrashAfterRenameJournalPublication_RecoversMovedGeneration()
         {
             var source = Path.Join(_root, $"journal-source-{Guid.NewGuid():N}");
