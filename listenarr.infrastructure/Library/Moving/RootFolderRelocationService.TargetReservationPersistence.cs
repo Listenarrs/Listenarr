@@ -251,7 +251,6 @@ public sealed partial class RootFolderRelocationService
             relocationId,
             reservation,
             parent);
-        ManagedDirectoryEnrollment.RetireValidMarker(directory);
     }
 
     private static void ValidateReservationDirectoryIdentity(

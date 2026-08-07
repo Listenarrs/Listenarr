@@ -73,9 +73,6 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
         Assert.Empty(verification.RootFolderRelocations);
         Assert.Empty(verification.MoveJobs);
         Assert.Equal(source, (await verification.RootFolders.SingleAsync()).Path);
-        Assert.False(File.Exists(Path.Join(
-            target,
-            ManagedDirectoryEnrollment.FileName)));
     }
 
     [Fact]
@@ -3821,7 +3818,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
     }
 
     [Fact]
-    public async Task FinalizeCompletedRelocation_ReplacedTargetWithoutEnrollment_DoesNotEnrollReplacement()
+    public async Task FinalizeCompletedRelocation_ReplacedTargetWithoutAuthorization_DoesNotCommitReplacement()
     {
         var (rootId, _, source, target) = await SeedRelocationScenarioAsync();
         var service = CreateService();
@@ -3841,11 +3838,6 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
         var displacedTarget = target + "-displaced";
         Directory.Move(target, displacedTarget);
         Directory.CreateDirectory(target);
-        var replacementEnrollment = Path.Join(
-            target,
-            ".listenarr-root-enrollment.json");
-        Assert.False(File.Exists(replacementEnrollment));
-
         await service.OnMoveJobStateChangedAsync(jobId);
 
         await using var verification = await _factory.CreateDbContextAsync();
@@ -3854,7 +3846,6 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
             .SingleAsync(relocation => relocation.Id == started.RelocationId);
         Assert.Equal(source, rootAfter.Path);
         Assert.Equal(RootFolderRelocationStatus.NeedsAttention, relocationAfter.Status);
-        Assert.False(File.Exists(replacementEnrollment));
         Assert.True(Directory.Exists(displacedTarget));
     }
 

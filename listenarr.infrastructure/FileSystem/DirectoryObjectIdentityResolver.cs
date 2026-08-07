@@ -44,36 +44,7 @@ internal sealed class DirectoryObjectIdentityResolver(
                     "The live directory no longer matches its persisted physical identity."));
     }
 
-    public Task<DirectoryObjectIdentityResolution> UpgradeLegacyAsync(
-        string path,
-        int legacyVersion,
-        string legacyValue,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(legacyValue);
-        if (legacyVersion != 1)
-        {
-            return Task.FromResult(
-                DirectoryObjectIdentityResolution.Unavailable(
-                    $"Directory identity version {legacyVersion} cannot be upgraded automatically."));
-        }
-
-        return ResolvePinnedAsync(
-            path,
-            cancellationToken,
-            nativeIdentity => string.Equals(
-                    nativeIdentity,
-                    legacyValue,
-                    StringComparison.Ordinal)
-                ? new DirectoryObjectIdentityResolution(
-                    ManagedDirectoryIdentity.CurrentVersion,
-                    ManagedDirectoryIdentity.CreateMarkerless(nativeIdentity),
-                    null)
-                : DirectoryObjectIdentityResolution.Unavailable(
-                    "The live directory no longer matches its legacy physical identity and cannot be upgraded automatically."));
-    }
-
-    private Task<DirectoryObjectIdentityResolution> ResolvePinnedAsync(
+private Task<DirectoryObjectIdentityResolution> ResolvePinnedAsync(
         string path,
         CancellationToken cancellationToken,
         Func<string, DirectoryObjectIdentityResolution> resolve)

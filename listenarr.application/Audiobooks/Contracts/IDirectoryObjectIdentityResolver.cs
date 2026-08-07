@@ -26,9 +26,4 @@ public interface IDirectoryObjectIdentityResolver
         string expectedValue,
         CancellationToken cancellationToken = default);
 
-    Task<DirectoryObjectIdentityResolution> UpgradeLegacyAsync(
-        string path,
-        int legacyVersion,
-        string legacyValue,
-        CancellationToken cancellationToken = default);
 }

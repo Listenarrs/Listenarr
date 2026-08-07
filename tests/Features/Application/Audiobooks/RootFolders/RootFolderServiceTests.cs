@@ -160,10 +160,6 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
                     Name = "Library",
                     Path = directory
                 }));
-
-            Assert.False(File.Exists(Path.Join(
-                directory,
-                ManagedDirectoryEnrollment.FileName)));
         }
 
         [Fact]
@@ -179,9 +175,6 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
             var identityResolver = new DirectoryObjectIdentityResolver();
             var originalIdentity = await identityResolver.ResolveAsync(directory);
             Assert.True(originalIdentity.IsAvailable, originalIdentity.UnavailableReason);
-            Assert.False(File.Exists(Path.Join(
-                directory,
-                ManagedDirectoryEnrollment.FileName)));
             var semantics = FileSystemPathSemantics.CurrentHostDefault;
             var root = new RootFolder
             {
@@ -203,8 +196,6 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
             var updated = await service.ReauthorizeDirectoryIdentityAsync(
                 root.Id,
                 directory);
-
-            Assert.False(File.Exists(Path.Join(directory, ManagedDirectoryEnrollment.FileName)));
             Assert.Equal(ManagedDirectoryIdentity.CurrentVersion, updated.DirectoryObjectIdentityVersion);
             Assert.Equal(originalIdentity.Value, updated.DirectoryObjectIdentity);
             Assert.Null(updated.DirectoryObjectIdentityUnavailableReason);
@@ -260,10 +251,6 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
 
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 service.ReauthorizeDirectoryIdentityAsync(7, directory));
-
-            Assert.False(File.Exists(Path.Join(
-                directory,
-                ManagedDirectoryEnrollment.FileName)));
         }
 
         [Fact]
@@ -341,9 +328,6 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
                 service.ReauthorizeDirectoryIdentityAsync(8, directory));
 
             Assert.NotNull(durableRoot);
-            Assert.False(File.Exists(Path.Join(
-                directory,
-                ManagedDirectoryEnrollment.FileName)));
             var existing = await identityResolver.ResolveExistingAsync(
                 directory,
                 durableRoot!.DirectoryObjectIdentityVersion!.Value,
@@ -380,52 +364,9 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
                 service.ReauthorizeDirectoryIdentityAsync(
                     root.Id,
                     FileUtils.GetAbsolutePath("different-root")));
-
-            Assert.False(File.Exists(Path.Join(directory, ManagedDirectoryEnrollment.FileName)));
         }
 
-        [Fact]
-        public async Task ReauthorizeDirectoryIdentity_InvalidLegacyMarker_IsIgnoredAndPreserved()
-        {
-            var directory = CreateTempDirectory("root-identity-reauthorize-invalid");
-            var markerPath = Path.Join(directory, ManagedDirectoryEnrollment.FileName);
-            await File.WriteAllTextAsync(markerPath, "{ invalid");
-            var originalMarker = await File.ReadAllTextAsync(markerPath);
-            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
-                .UseInMemoryDatabase(Guid.NewGuid().ToString())
-                .Options;
-            var repository = new EfRootFolderRepository(
-                new TestDbFactory(options),
-                Mock.Of<ILogger<EfRootFolderRepository>>());
-            var semantics = FileSystemPathSemantics.CurrentHostDefault;
-            var root = new RootFolder
-            {
-                Name = "Library",
-                Path = directory,
-                ResolvedCaseSensitivity = semantics.CaseSensitivity,
-                PathIdentityState = PathIdentityState.Valid,
-                PathIdentityKey = FileSystemPathIdentity.CreateKey("root", directory, semantics),
-                DirectoryObjectIdentityVersion = ManagedDirectoryIdentity.CurrentVersion,
-                DirectoryObjectIdentity = "listenarr-directory-v2:00000000000000000000000000000000:"
-                    + new string('0', 64)
-            };
-            await repository.AddAsync(root);
-            var service = new RootFolderService(
-                repository,
-                null,
-                directoryObjectIdentityResolver: new DirectoryObjectIdentityResolver());
-
-            var updated = await service.ReauthorizeDirectoryIdentityAsync(
-                root.Id,
-                directory);
-
-            Assert.Equal(originalMarker, await File.ReadAllTextAsync(markerPath));
-            Assert.Equal(ManagedDirectoryIdentity.CurrentVersion, updated.DirectoryObjectIdentityVersion);
-            Assert.NotEqual(root.DirectoryObjectIdentity, updated.DirectoryObjectIdentity);
-            Assert.Null(updated.DirectoryObjectIdentityUnavailableReason);
-        }
-
-        [Fact]
+[Fact]
         public async Task ReauthorizeDirectoryIdentity_ActiveMoveTouchingRoot_IsBlockedBeforeEnrollment()
         {
             var directory = CreateTempDirectory("root-identity-reauthorize-active-move");
@@ -465,8 +406,6 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
 
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 service.ReauthorizeDirectoryIdentityAsync(root.Id, directory));
-
-            Assert.False(File.Exists(Path.Join(directory, ManagedDirectoryEnrollment.FileName)));
         }
 
         [Fact]
@@ -770,80 +709,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
             Assert.Contains("nested", exception.Message, StringComparison.OrdinalIgnoreCase);
         }
 
-        [Fact]
-        public async Task Create_NestedRejectedRoot_DoesNotEnrollCandidateDirectory()
-        {
-            var tempRoot = Path.Join(
-                Path.GetTempPath(),
-                "listenarr-root-create-rejected-" + Guid.NewGuid().ToString("N"));
-            var nestedPath = Path.Join(tempRoot, "Nested");
-            Directory.CreateDirectory(nestedPath);
-            try
-            {
-                var options = new DbContextOptionsBuilder<ListenArrDbContext>()
-                    .UseInMemoryDatabase(Guid.NewGuid().ToString())
-                    .Options;
-                await using (var db = new ListenArrDbContext(options))
-                {
-                    db.RootFolders.Add(new RootFolder
-                    {
-                        Name = "Existing",
-                        Path = tempRoot,
-                        ResolvedCaseSensitivity =
-                            FileSystemPathSemantics.CurrentHostDefault.CaseSensitivity,
-                        PathIdentityState = PathIdentityState.Valid
-                    });
-                    await db.SaveChangesAsync();
-                }
-
-                var repository = new EfRootFolderRepository(
-                    new TestDbFactory(options),
-                    Mock.Of<ILogger<EfRootFolderRepository>>());
-                var relocation = new Mock<IRootFolderRelocationService>();
-                relocation.Setup(service => service.IsBoundaryProtectedAsync(
-                        It.IsAny<string>(),
-                        It.IsAny<FileSystemPathSemantics>(),
-                        It.IsAny<CancellationToken>()))
-                    .ReturnsAsync(false);
-                var service = new AppRootFolderService(
-                    repository,
-                    null,
-                    new FileSystemSemanticsResolver(),
-                    Mock.Of<IMoveQueueService>(),
-                    relocation.Object,
-                    new FilesystemMutationCoordinator(),
-                    new AudiobookOperationCoordinator(),
-                    new DirectoryObjectIdentityResolver());
-                var enrollmentPath = Path.Join(
-                    nestedPath,
-                    ManagedDirectoryEnrollment.FileName);
-                Assert.False(File.Exists(enrollmentPath));
-
-                await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                    service.CreateAsync(new RootFolder
-                    {
-                        Name = "Nested",
-                        Path = nestedPath
-                    }));
-
-                Assert.False(File.Exists(enrollmentPath));
-            }
-            finally
-            {
-                try
-                {
-                    Directory.Delete(tempRoot, recursive: true);
-                }
-                catch (IOException)
-                {
-                }
-                catch (UnauthorizedAccessException)
-                {
-                }
-            }
-        }
-
-        [LinuxFact]
+[LinuxFact]
         public async Task Create_InsensitiveRequestedRootRejectsCaseVariantNestedExistingRoot()
         {
 

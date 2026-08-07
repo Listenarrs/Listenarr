@@ -43,14 +43,6 @@ public sealed class RootFolderObjectIdentityReconciler(
                     canonicalRootPath,
                     cancellationToken);
             }
-            else if (root.DirectoryObjectIdentityVersion == 1)
-            {
-                current = await identityResolver.UpgradeLegacyAsync(
-                    canonicalRootPath,
-                    root.DirectoryObjectIdentityVersion.Value,
-                    root.DirectoryObjectIdentity,
-                    cancellationToken);
-            }
             else if (root.DirectoryObjectIdentityVersion
                 == ManagedDirectoryIdentity.CurrentVersion)
             {
@@ -95,42 +87,9 @@ public sealed class RootFolderObjectIdentityReconciler(
             root.DirectoryObjectIdentityVersion = current.Version;
             root.DirectoryObjectIdentity = current.Value;
             root.DirectoryObjectIdentityUnavailableReason = null;
-            TryRetireLegacyRootEnrollmentMarker(
-                canonicalRootPath,
-                root,
-                logger);
         }
 
         await db.SaveChangesAsync(cancellationToken);
     }
 
-    private static void TryRetireLegacyRootEnrollmentMarker(
-        string rootPath,
-        RootFolder root,
-        ILogger logger)
-    {
-        try
-        {
-            using var anchor = PinnedDirectoryCreation.OpenPinnedBoundary(rootPath);
-            if (ManagedDirectoryEnrollment.TryRetireMatchingLegacyMarker(
-                    anchor,
-                    root.DirectoryObjectIdentityVersion,
-                    root.DirectoryObjectIdentity))
-            {
-                logger.LogInformation(
-                    "Retired obsolete filesystem enrollment marker for root folder {RootFolderId}; physical identity is now database-only.",
-                    root.Id);
-            }
-        }
-        catch (Exception exception) when (exception is
-            IOException or UnauthorizedAccessException
-                or InvalidOperationException or NotSupportedException
-                or System.ComponentModel.Win32Exception)
-        {
-            logger.LogWarning(
-                exception,
-                "Could not retire obsolete filesystem enrollment marker for root folder {RootFolderId}; the marker is not used for authorization and was preserved.",
-                root.Id);
-        }
-    }
 }

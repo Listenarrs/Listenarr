@@ -850,31 +850,34 @@ public sealed class BackendArchitectureTests : BaseTests
     }
 
     [Fact]
-    public void RootDirectoryIdentity_DoesNotPublishPermanentFilesystemEnrollment()
+    public void RootDirectoryIdentity_HasNoIntermediateFilesystemEnrollmentCompatibility()
     {
-        var legacyEnrollmentSource = File.ReadAllText(Path.Join(
+        Assert.False(File.Exists(Path.Join(
             RepositoryRoot,
             "listenarr.infrastructure",
             "FileSystem",
-            "ManagedDirectoryEnrollment.cs"));
-        var resolverSource = File.ReadAllText(Path.Join(
-            RepositoryRoot,
-            "listenarr.infrastructure",
-            "FileSystem",
-            "DirectoryObjectIdentityResolver.cs"));
+            "ManagedDirectoryEnrollment.cs")));
 
-        Assert.DoesNotContain(
-            "PublishNewFileAsync",
-            legacyEnrollmentSource,
-            StringComparison.Ordinal);
-        Assert.DoesNotContain(
-            "enrollIfMissing",
-            legacyEnrollmentSource,
-            StringComparison.Ordinal);
-        Assert.DoesNotContain(
-            "ManagedDirectoryEnrollment",
-            resolverSource,
-            StringComparison.Ordinal);
+        var productionRoots = new[]
+        {
+            Path.Join(RepositoryRoot, "listenarr.application"),
+            Path.Join(RepositoryRoot, "listenarr.domain"),
+            Path.Join(RepositoryRoot, "listenarr.infrastructure"),
+            Path.Join(RepositoryRoot, "listenarr.api")
+        };
+        var violations = productionRoots
+            .SelectMany(root => Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories))
+            .Where(file =>
+            {
+                var source = File.ReadAllText(file);
+                return source.Contains("ManagedDirectoryEnrollment", StringComparison.Ordinal)
+                    || source.Contains(".listenarr-root-enrollment.json", StringComparison.Ordinal)
+                    || source.Contains("UpgradeLegacyAsync", StringComparison.Ordinal);
+            })
+            .Select(file => Normalize(Path.GetRelativePath(RepositoryRoot, file)))
+            .ToList();
+
+        Assert.Empty(violations);
     }
 
     [Fact]

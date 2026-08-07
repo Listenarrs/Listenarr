@@ -646,41 +646,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
             Assert.True(File.Exists(Path.Join(target, "book.m4b")));
         }
 
-        [Fact]
-        public async Task MoveContents_SourceAtManagedRoot_DoesNotCreateRootEnrollmentMarker()
-        {
-            var source = FileService.GetTempDirectory("content-move-managed-root-source");
-            await FileService.GetFileAsync(source, "book.m4b", "audio");
-            var identity = await new DirectoryObjectIdentityResolver().ResolveAsync(source);
-            Assert.True(identity.IsAvailable, identity.UnavailableReason);
-            var enrollmentMarker = Path.Join(source, ManagedDirectoryEnrollment.FileName);
-            Assert.False(File.Exists(enrollmentMarker));
-            var target = Path.Join(
-                FileService.GetTempPath(),
-                $"content-move-managed-root-target-{Guid.NewGuid():N}");
-
-            var service = _provider.GetRequiredService<AudiobookContentMoveService>();
-            var request = await CreateLeasedMoveRequestAsync(
-                source,
-                target,
-                sourceCleanupBoundary: source);
-            var result = await service.MoveContentsAsync(request, CancellationToken.None);
-
-            Assert.False(File.Exists(enrollmentMarker));
-            Assert.False(File.Exists(Path.Join(target, ManagedDirectoryEnrollment.FileName)));
-            Assert.True(File.Exists(Path.Join(target, "book.m4b")));
-
-            await service.FinalizeMoveAsync(request, result, CancellationToken.None);
-            await service.CleanupCompletedMoveArtifactsAsync(
-                request,
-                result,
-                CancellationToken.None);
-
-            Assert.False(File.Exists(enrollmentMarker));
-            Assert.False(File.Exists(Path.Join(target, ManagedDirectoryEnrollment.FileName)));
-        }
-
-        [Fact]
+[Fact]
         public async Task FinalizeMove_ExistingEmptyTarget_PrunesSourceParentAfterNestedQuarantineCleanup()
         {
             var sourceRoot = FileService.GetTempDirectory("content-move-existing-target-root");
@@ -3540,7 +3506,6 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
             || string.Equals(name, ".listenarr-temp-owner.json", StringComparison.Ordinal)
             || string.Equals(name, ".listenarr-quarantine-owner.json", StringComparison.Ordinal)
             || string.Equals(name, LibraryDirectoryOwnershipMarker.FileName, StringComparison.Ordinal)
-            || string.Equals(name, ManagedDirectoryEnrollment.FileName, StringComparison.Ordinal)
             || name.StartsWith(".listenarr-directory-owner-", StringComparison.Ordinal)
                 && name.EndsWith(".json", StringComparison.Ordinal)
             || name.Contains(".listenarr-", StringComparison.Ordinal)

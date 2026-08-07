@@ -175,24 +175,6 @@ internal sealed partial class EfMoveExecutionStore
             if (!string.Equals(
                     currentDigest,
                     expectedDigest,
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                // Last-resort compatibility for jobs created before a configured-root
-                // identity was available in the database. Read an existing legacy
-                // marker only; never create one.
-                var legacy = ManagedDirectoryEnrollment.ResolveExisting(
-                    boundary,
-                    nativeIdentity);
-                currentDigest = legacy.IsAvailable && legacy.Version == currentVersion
-                    ? MoveManifestIdentity.ComputeTargetBoundaryAuthorizationDigest(
-                        currentVersion,
-                        legacy.Value!)
-                    : currentDigest;
-            }
-
-            if (!string.Equals(
-                    currentDigest,
-                    expectedDigest,
                     StringComparison.OrdinalIgnoreCase)
                 || !boundary.VisiblePathMatches())
             {
