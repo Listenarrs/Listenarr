@@ -18,7 +18,11 @@ jobs:
           fetch-depth: 0
 
       - name: Remove intermediate root relocation compatibility
-        run: python3 .github/scripts/pr717_cleanup.py
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/pr717_cleanup.py
+          python3 .github/scripts/pr717_cleanup_step3_extra.py
 
       - name: Restore and build
         shell: bash
@@ -39,7 +43,7 @@ jobs:
           set -euo pipefail
           cd fe
           npm ci
-          npx vitest run src/__tests__/RootFoldersSettings.spec.ts
+          npx vitest run src/__tests__/RootFoldersSettings.spec.ts src/__tests__/rootFolders.reauthorization.store.spec.ts
           npm run type-check
 
       - name: Adversarial review removed surface
@@ -47,7 +51,7 @@ jobs:
         run: |
           set -euo pipefail
           git diff --check
-          if git grep -n -E 'LegacyUnenrolled|reauthorize-legacy-target|ReauthorizeLegacyTarget|reauthorizeLegacyRootFolderRelocationTarget|reauthorizeLegacyTarget' -- ':!listenarr.infrastructure/Persistence/Migrations/**' ':!.github/workflows/pr717-cleanup-analysis.yml' ':!.github/scripts/pr717_cleanup.py'; then
+          if git grep -n -E 'LegacyUnenrolled|reauthorize-legacy-target|ReauthorizeLegacyTarget|reauthorizeLegacyRootFolderRelocationTarget|reauthorizeLegacyTarget' -- ':!listenarr.infrastructure/Persistence/Migrations/**' ':!.github/workflows/pr717-cleanup-analysis.yml' ':!.github/scripts/pr717_cleanup.py' ':!.github/scripts/pr717_cleanup_step3_extra.py'; then
             echo 'Intermediate relocation compatibility remains' >&2
             exit 1
           fi
@@ -61,6 +65,6 @@ jobs:
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A ':!.github/workflows/pr717-cleanup-analysis.yml' ':!.github/scripts/pr717_cleanup.py'
+          git add -A ':!.github/workflows/pr717-cleanup-analysis.yml' ':!.github/scripts/pr717_cleanup.py' ':!.github/scripts/pr717_cleanup_step3_extra.py' ':!.github/pr717-cleanup-trigger'
           git commit -m 'refactor(relocation): remove intermediate target reauthorization'
           git push origin HEAD:bugfix/unix-folder-name-space
