@@ -64,8 +64,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git grep -n -F 'CreateMarkerless' -- listenarr.infrastructure tests | head -100
-          git grep -n -F 'LibraryDirectoryOwnershipMarker' -- listenarr.infrastructure tests | head -100
+          git grep -n -F 'CreateMarkerless' -- listenarr.infrastructure tests || true
+          git grep -n -F 'LibraryDirectoryOwnershipMarker' -- listenarr.infrastructure tests || true
           if git grep -n -E 'legacy managed-directory enrollment|legacy root enrollment|root enrollment marker' -- listenarr.application listenarr.domain listenarr.infrastructure listenarr.api; then
             echo 'Legacy root-enrollment language remains in production contracts' >&2
             exit 1
