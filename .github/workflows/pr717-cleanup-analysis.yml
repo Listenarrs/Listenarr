@@ -21,66 +21,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-
-          agent_policy = '''## Compatibility Boundary for Development Branches
-
-- The authoritative compatibility boundary is the target branch or released version that a change will merge into. Persisted states produced only by an unmerged feature branch, pull-request build, or intermediate development image are not supported upgrade inputs.
-- Do not add production compatibility code, recovery states, filesystem marker readers, API endpoints, schema versions, or tests solely to preserve intermediate iterations of an unmerged change. Remove or regenerate those development artifacts before merge.
-- EF migrations are immutable historical artifacts only after they reach the target branch. While a feature branch is unmerged, delete superseded branch-only migrations, restore the target branch model snapshot, and regenerate the minimum final EF migration set from the cleaned final model. Never hand-shape generated migrations to preserve intermediate branch states.
-- Compatibility with the actual target-branch schema and persisted data remains mandatory. Before deleting legacy-looking behavior, prove whether the state can exist on the target branch; released or merged states must continue to fail safely or upgrade deterministically.
-- Reviews must distinguish current crash-safety evidence from development-history compatibility. A filesystem marker or recovery protocol that is still part of the final safety contract is not removable merely because earlier versions of that protocol existed during development.
-
-'''
-          contributor_policy = '''### Compatibility and migration development policy
-
-The compatibility boundary for a pull request is the branch it targets. Databases, filesystem artifacts, API states, and recovery formats that were produced only by an unmerged feature branch or intermediate PR image are development artifacts, not supported upgrade inputs.
-
-- Do not keep production compatibility paths solely for intermediate versions of an unmerged PR.
-- Preserve and regression-test compatibility with schemas and persisted data that actually exist on the target branch.
-- Once an EF migration is merged into a supported branch it is immutable history. Before merge, superseded branch-only migrations should be removed and the final migration set regenerated with EF from the target branch model snapshot.
-- Do not hand-edit EF scaffolding to emulate intermediate branch schemas. Put unavoidable data repair for real target-branch upgrades in explicit, tested startup/reconciliation primitives.
-
-'''
-          backend_policy = '''## Compatibility and Migration Boundary
-
-Backend compatibility begins at the branch or release that code has actually reached. An unmerged feature branch is free to replace its own schema, recovery protocol, or persisted development artifacts; those intermediate states must not become permanent production compatibility surfaces merely because a developer ran an earlier PR build.
-
-EF migrations become immutable historical artifacts when they merge into the target branch. Before merge, a feature branch should remove superseded branch-only migrations, restore the target branch model snapshot, and regenerate the smallest final EF-scaffolded migration set from the cleaned model. Compatibility and startup reconciliation must be designed against data that can exist on the actual target branch, not against transient schemas that existed only during feature development.
-
-This rule does not authorize deleting current crash-safety evidence. Marker files, journals, leases, identities, or other durable protocols that the final implementation itself writes and requires for restart safety remain part of the current contract. Reviewers must distinguish those from readers, endpoints, states, and migrations whose only purpose is upgrading an obsolete intermediate branch protocol.
-
-'''
-
-          for filename in ['.github/AGENTS.md', '.github/CLAUDE.md']:
-              path = Path(filename)
-              text = path.read_text()
-              if '## Compatibility Boundary for Development Branches' not in text:
-                  marker = '## Cross-shell null redirection\n'
-                  if marker not in text:
-                      raise SystemExit(f'missing insertion marker in {filename}')
-                  text = text.replace(marker, agent_policy + marker, 1)
-                  path.write_text(text)
-
-          path = Path('CONTRIBUTING.md')
-          text = path.read_text()
-          if '### Compatibility and migration development policy' not in text:
-              marker = '### Branching Model\n'
-              if marker not in text:
-                  raise SystemExit('missing CONTRIBUTING insertion marker')
-              text = text.replace(marker, contributor_policy + marker, 1)
-              path.write_text(text)
-
-          path = Path('BACKEND_ARCHITECTURE.md')
-          text = path.read_text()
-          if '## Compatibility and Migration Boundary' not in text:
-              marker = '## Boundary Cleanup\n'
-              if marker not in text:
-                  raise SystemExit('missing architecture insertion marker')
-              text = text.replace(marker, backend_policy + marker, 1)
-              path.write_text(text)
-          PY
+          echo 'ZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCgphZ2VudF9wb2xpY3kgPSAiIiIjIyBDb21wYXRpYmlsaXR5IEJvdW5kYXJ5IGZvciBEZXZlbG9wbWVudCBCcmFuY2hlcwoKLSBUaGUgYXV0aG9yaXRhdGl2ZSBjb21wYXRpYmlsaXR5IGJvdW5kYXJ5IGlzIHRoZSB0YXJnZXQgYnJhbmNoIG9yIHJlbGVhc2VkIHZlcnNpb24gdGhhdCBhIGNoYW5nZSB3aWxsIG1lcmdlIGludG8uIFBlcnNpc3RlZCBzdGF0ZXMgcHJvZHVjZWQgb25seSBieSBhbiB1bm1lcmdlZCBmZWF0dXJlIGJyYW5jaCwgcHVsbC1yZXF1ZXN0IGJ1aWxkLCBvciBpbnRlcm1lZGlhdGUgZGV2ZWxvcG1lbnQgaW1hZ2UgYXJlIG5vdCBzdXBwb3J0ZWQgdXBncmFkZSBpbnB1dHMuCi0gRG8gbm90IGFkZCBwcm9kdWN0aW9uIGNvbXBhdGliaWxpdHkgY29kZSwgcmVjb3Zlcnkgc3RhdGVzLCBmaWxlc3lzdGVtIG1hcmtlciByZWFkZXJzLCBBUEkgZW5kcG9pbnRzLCBzY2hlbWEgdmVyc2lvbnMsIG9yIHRlc3RzIHNvbGVseSB0byBwcmVzZXJ2ZSBpbnRlcm1lZGlhdGUgaXRlcmF0aW9ucyBvZiBhbiB1bm1lcmdlZCBjaGFuZ2UuIFJlbW92ZSBvciByZWdlbmVyYXRlIHRob3NlIGRldmVsb3BtZW50IGFydGlmYWN0cyBiZWZvcmUgbWVyZ2UuCi0gRUYgbWlncmF0aW9ucyBhcmUgaW1tdXRhYmxlIGhpc3RvcmljYWwgYXJ0aWZhY3RzIG9ubHkgYWZ0ZXIgdGhleSByZWFjaCB0aGUgdGFyZ2V0IGJyYW5jaC4gV2hpbGUgYSBmZWF0dXJlIGJyYW5jaCBpcyB1bm1lcmdlZCwgZGVsZXRlIHN1cGVyc2VkZWQgYnJhbmNoLW9ubHkgbWlncmF0aW9ucywgcmVzdG9yZSB0aGUgdGFyZ2V0IGJyYW5jaCBtb2RlbCBzbmFwc2hvdCwgYW5kIHJlZ2VuZXJhdGUgdGhlIG1pbmltdW0gZmluYWwgRUYgbWlncmF0aW9uIHNldCBmcm9tIHRoZSBjbGVhbmVkIGZpbmFsIG1vZGVsLiBOZXZlciBoYW5kLXNoYXBlIGdlbmVyYXRlZCBtaWdyYXRpb25zIHRvIHByZXNlcnZlIGludGVybWVkaWF0ZSBicmFuY2ggc3RhdGVzLgotIENvbXBhdGliaWxpdHkgd2l0aCB0aGUgYWN0dWFsIHRhcmdldC1icmFuY2ggc2NoZW1hIGFuZCBwZXJzaXN0ZWQgZGF0YSByZW1haW5zIG1hbmRhdG9yeS4gQmVmb3JlIGRlbGV0aW5nIGxlZ2FjeS1sb29raW5nIGJlaGF2aW9yLCBwcm92ZSB3aGV0aGVyIHRoZSBzdGF0ZSBjYW4gZXhpc3Qgb24gdGhlIHRhcmdldCBicmFuY2g7IHJlbGVhc2VkIG9yIG1lcmdlZCBzdGF0ZXMgbXVzdCBjb250aW51ZSB0byBmYWlsIHNhZmVseSBvciB1cGdyYWRlIGRldGVybWluaXN0aWNhbGx5LgotIFJldmlld3MgbXVzdCBkaXN0aW5ndWlzaCBjdXJyZW50IGNyYXNoLXNhZmV0eSBldmlkZW5jZSBmcm9tIGRldmVsb3BtZW50LWhpc3RvcnkgY29tcGF0aWJpbGl0eS4gQSBmaWxlc3lzdGVtIG1hcmtlciBvciByZWNvdmVyeSBwcm90b2NvbCB0aGF0IGlzIHN0aWxsIHBhcnQgb2YgdGhlIGZpbmFsIHNhZmV0eSBjb250cmFjdCBpcyBub3QgcmVtb3ZhYmxlIG1lcmVseSBiZWNhdXNlIGVhcmxpZXIgdmVyc2lvbnMgb2YgdGhhdCBwcm90b2NvbCBleGlzdGVkIGR1cmluZyBkZXZlbG9wbWVudC4KCiIiIgpjb250cmlidXRvcl9wb2xpY3kgPSAiIiIjIyMgQ29tcGF0aWJpbGl0eSBhbmQgbWlncmF0aW9uIGRldmVsb3BtZW50IHBvbGljeQoKVGhlIGNvbXBhdGliaWxpdHkgYm91bmRhcnkgZm9yIGEgcHVsbCByZXF1ZXN0IGlzIHRoZSBicmFuY2ggaXQgdGFyZ2V0cy4gRGF0YWJhc2VzLCBmaWxlc3lzdGVtIGFydGlmYWN0cywgQVBJIHN0YXRlcywgYW5kIHJlY292ZXJ5IGZvcm1hdHMgdGhhdCB3ZXJlIHByb2R1Y2VkIG9ubHkgYnkgYW4gdW5tZXJnZWQgZmVhdHVyZSBicmFuY2ggb3IgaW50ZXJtZWRpYXRlIFBSIGltYWdlIGFyZSBkZXZlbG9wbWVudCBhcnRpZmFjdHMsIG5vdCBzdXBwb3J0ZWQgdXBncmFkZSBpbnB1dHMuCgotIERvIG5vdCBrZWVwIHByb2R1Y3Rpb24gY29tcGF0aWJpbGl0eSBwYXRocyBzb2xlbHkgZm9yIGludGVybWVkaWF0ZSB2ZXJzaW9ucyBvZiBhbiB1bm1lcmdlZCBQUi4KLSBQcmVzZXJ2ZSBhbmQgcmVncmVzc2lvbi10ZXN0IGNvbXBhdGliaWxpdHkgd2l0aCBzY2hlbWFzIGFuZCBwZXJzaXN0ZWQgZGF0YSB0aGF0IGFjdHVhbGx5IGV4aXN0IG9uIHRoZSB0YXJnZXQgYnJhbmNoLgotIE9uY2UgYW4gRUYgbWlncmF0aW9uIGlzIG1lcmdlZCBpbnRvIGEgc3VwcG9ydGVkIGJyYW5jaCBpdCBpcyBpbW11dGFibGUgaGlzdG9yeS4gQmVmb3JlIG1lcmdlLCBzdXBlcnNlZGVkIGJyYW5jaC1vbmx5IG1pZ3JhdGlvbnMgc2hvdWxkIGJlIHJlbW92ZWQgYW5kIHRoZSBmaW5hbCBtaWdyYXRpb24gc2V0IHJlZ2VuZXJhdGVkIHdpdGggRUYgZnJvbSB0aGUgdGFyZ2V0IGJyYW5jaCBtb2RlbCBzbmFwc2hvdC4KLSBEbyBub3QgaGFuZC1lZGl0IEVGIHNjYWZmb2xkaW5nIHRvIGVtdWxhdGUgaW50ZXJtZWRpYXRlIGJyYW5jaCBzY2hlbWFzLiBQdXQgdW5hdm9pZGFibGUgZGF0YSByZXBhaXIgZm9yIHJlYWwgdGFyZ2V0LWJyYW5jaCB1cGdyYWRlcyBpbiBleHBsaWNpdCwgdGVzdGVkIHN0YXJ0dXAvcmVjb25jaWxpYXRpb24gcHJpbWl0aXZlcy4KCiIiIgpiYWNrZW5kX3BvbGljeSA9ICIiIiMjIENvbXBhdGliaWxpdHkgYW5kIE1pZ3JhdGlvbiBCb3VuZGFyeQoKQmFja2VuZCBjb21wYXRpYmlsaXR5IGJlZ2lucyBhdCB0aGUgYnJhbmNoIG9yIHJlbGVhc2UgdGhhdCBjb2RlIGhhcyBhY3R1YWxseSByZWFjaGVkLiBBbiB1bm1lcmdlZCBmZWF0dXJlIGJyYW5jaCBpcyBmcmVlIHRvIHJlcGxhY2UgaXRzIG93biBzY2hlbWEsIHJlY292ZXJ5IHByb3RvY29sLCBvciBwZXJzaXN0ZWQgZGV2ZWxvcG1lbnQgYXJ0aWZhY3RzOyB0aG9zZSBpbnRlcm1lZGlhdGUgc3RhdGVzIG11c3Qgbm90IGJlY29tZSBwZXJtYW5lbnQgcHJvZHVjdGlvbiBjb21wYXRpYmlsaXR5IHN1cmZhY2VzIG1lcmVseSBiZWNhdXNlIGEgZGV2ZWxvcGVyIHJhbiBhbiBlYXJsaWVyIFBSIGJ1aWxkLgoKRUYgbWlncmF0aW9ucyBiZWNvbWUgaW1tdXRhYmxlIGhpc3RvcmljYWwgYXJ0aWZhY3RzIHdoZW4gdGhleSBtZXJnZSBpbnRvIHRoZSB0YXJnZXQgYnJhbmNoLiBCZWZvcmUgbWVyZ2UsIGEgZmVhdHVyZSBicmFuY2ggc2hvdWxkIHJlbW92ZSBzdXBlcnNlZGVkIGJyYW5jaC1vbmx5IG1pZ3JhdGlvbnMsIHJlc3RvcmUgdGhlIHRhcmdldCBicmFuY2ggbW9kZWwgc25hcHNob3QsIGFuZCByZWdlbmVyYXRlIHRoZSBzbWFsbGVzdCBmaW5hbCBFRi1zY2FmZm9sZGVkIG1pZ3JhdGlvbiBzZXQgZnJvbSB0aGUgY2xlYW5lZCBtb2RlbC4gQ29tcGF0aWJpbGl0eSBhbmQgc3RhcnR1cCByZWNvbmNpbGlhdGlvbiBtdXN0IGJlIGRlc2lnbmVkIGFnYWluc3QgZGF0YSB0aGF0IGNhbiBleGlzdCBvbiB0aGUgYWN0dWFsIHRhcmdldCBicmFuY2gsIG5vdCBhZ2FpbnN0IHRyYW5zaWVudCBzY2hlbWFzIHRoYXQgZXhpc3RlZCBvbmx5IGR1cmluZyBmZWF0dXJlIGRldmVsb3BtZW50LgoKVGhpcyBydWxlIGRvZXMgbm90IGF1dGhvcml6ZSBkZWxldGluZyBjdXJyZW50IGNyYXNoLXNhZmV0eSBldmlkZW5jZS4gTWFya2VyIGZpbGVzLCBqb3VybmFscywgbGVhc2VzLCBpZGVudGl0aWVzLCBvciBvdGhlciBkdXJhYmxlIHByb3RvY29scyB0aGF0IHRoZSBmaW5hbCBpbXBsZW1lbnRhdGlvbiBpdHNlbGYgd3JpdGVzIGFuZCByZXF1aXJlcyBmb3IgcmVzdGFydCBzYWZldHkgcmVtYWluIHBhcnQgb2YgdGhlIGN1cnJlbnQgY29udHJhY3QuIFJldmlld2VycyBtdXN0IGRpc3Rpbmd1aXNoIHRob3NlIGZyb20gcmVhZGVycywgZW5kcG9pbnRzLCBzdGF0ZXMsIGFuZCBtaWdyYXRpb25zIHdob3NlIG9ubHkgcHVycG9zZSBpcyB1cGdyYWRpbmcgYW4gb2Jzb2xldGUgaW50ZXJtZWRpYXRlIGJyYW5jaCBwcm90b2NvbC4KCiIiIgoKZm9yIGZpbGVuYW1lIGluIFsnLmdpdGh1Yi9BR0VOVFMubWQnLCAnLmdpdGh1Yi9DTEFVREUubWQnXToKICAgIHBhdGggPSBQYXRoKGZpbGVuYW1lKQogICAgdGV4dCA9IHBhdGgucmVhZF90ZXh0KCkKICAgIGlmICcjIyBDb21wYXRpYmlsaXR5IEJvdW5kYXJ5IGZvciBEZXZlbG9wbWVudCBCcmFuY2hlcycgbm90IGluIHRleHQ6CiAgICAgICAgbWFya2VyID0gJyMjIENyb3NzLXNoZWxsIG51bGwgcmVkaXJlY3Rpb25cbicKICAgICAgICBpZiBtYXJrZXIgbm90IGluIHRleHQ6CiAgICAgICAgICAgIHJhaXNlIFN5c3RlbUV4aXQoZidtaXNzaW5nIGluc2VydGlvbiBtYXJrZXIgaW4ge2ZpbGVuYW1lfScpCiAgICAgICAgdGV4dCA9IHRleHQucmVwbGFjZShtYXJrZXIsIGFnZW50X3BvbGljeSArIG1hcmtlciwgMSkKICAgICAgICBwYXRoLndyaXRlX3RleHQodGV4dCkKCnBhdGggPSBQYXRoKCdDT05UUklCVVRJTkcubWQnKQp0ZXh0ID0gcGF0aC5yZWFkX3RleHQoKQppZiAnIyMjIENvbXBhdGliaWxpdHkgYW5kIG1pZ3JhdGlvbiBkZXZlbG9wbWVudCBwb2xpY3knIG5vdCBpbiB0ZXh0OgogICAgbWFya2VyID0gJyMjIyBCcmFuY2hpbmcgTW9kZWxcbicKICAgIGlmIG1hcmtlciBub3QgaW4gdGV4dDoKICAgICAgICByYWlzZSBTeXN0ZW1FeGl0KCdtaXNzaW5nIENPTlRSSUJVVElORyBpbnNlcnRpb24gbWFya2VyJykKICAgIHRleHQgPSB0ZXh0LnJlcGxhY2UobWFya2VyLCBjb250cmlidXRvcl9wb2xpY3kgKyBtYXJrZXIsIDEpCiAgICBwYXRoLndyaXRlX3RleHQodGV4dCkKCnBhdGggPSBQYXRoKCdCQUNLRU5EX0FSQ0hJVEVDVFVSRS5tZCcpCnRleHQgPSBwYXRoLnJlYWRfdGV4dCgpCmlmICcjIyBDb21wYXRpYmlsaXR5IGFuZCBNaWdyYXRpb24gQm91bmRhcnknIG5vdCBpbiB0ZXh0OgogICAgbWFya2VyID0gJyMjIEJvdW5kYXJ5IENsZWFudXBcbicKICAgIGlmIG1hcmtlciBub3QgaW4gdGV4dDoKICAgICAgICByYWlzZSBTeXN0ZW1FeGl0KCdtaXNzaW5nIGFyY2hpdGVjdHVyZSBpbnNlcnRpb24gbWFya2VyJykKICAgIHRleHQgPSB0ZXh0LnJlcGxhY2UobWFya2VyLCBiYWNrZW5kX3BvbGljeSArIG1hcmtlciwgMSkKICAgIHBhdGgud3JpdGVfdGV4dCh0ZXh0KQo=' | base64 -d > /tmp/policy.py
+          python3 /tmp/policy.py
 
       - name: Adversarial review policy-only diff
         shell: bash
@@ -88,17 +30,17 @@ This rule does not authorize deleting current crash-safety evidence. Marker file
           set -euo pipefail
           git diff --check
           mapfile -t changed < <(git diff --name-only)
-          printf 'Changed files:\n%s\n' "${changed[*]}"
-          expected=(.github/AGENTS.md .github/CLAUDE.md CONTRIBUTING.md BACKEND_ARCHITECTURE.md)
+          test "${#changed[@]}" -eq 4
           for path in "${changed[@]}"; do
             case "$path" in
               .github/AGENTS.md|.github/CLAUDE.md|CONTRIBUTING.md|BACKEND_ARCHITECTURE.md) ;;
               *) echo "Unexpected file changed: $path" >&2; exit 1 ;;
             esac
           done
-          for path in "${expected[@]}"; do
-            grep -q 'target branch' "$path" || { echo "Missing target-branch policy in $path" >&2; exit 1; }
+          for path in .github/AGENTS.md .github/CLAUDE.md CONTRIBUTING.md BACKEND_ARCHITECTURE.md; do
+            grep -q 'target branch' "$path"
           done
+          git diff --stat
           git diff -- .github/AGENTS.md .github/CLAUDE.md CONTRIBUTING.md BACKEND_ARCHITECTURE.md
 
       - name: Commit policy
