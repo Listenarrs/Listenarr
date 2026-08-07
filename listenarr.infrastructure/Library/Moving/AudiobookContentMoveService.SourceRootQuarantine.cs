@@ -85,11 +85,9 @@ internal sealed partial class AudiobookContentMoveService
         }
         if (entries.Count != 1
             || !string.Equals(
-                Path.GetFullPath(entries[0]),
-                Path.GetFullPath(claimPath),
-                OperatingSystem.IsWindows()
-                    ? StringComparison.OrdinalIgnoreCase
-                    : StringComparison.Ordinal)
+                Path.GetFileName(entries[0]),
+                EmptySourceClaimDirectoryName,
+                StringComparison.Ordinal)
             || File.Exists(claimPath)
             || !Directory.Exists(claimPath))
         {

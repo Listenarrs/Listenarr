@@ -422,7 +422,7 @@ public partial class FileMover
                 [destinationRoot],
                 out var normalizedTarget,
                 out var validationReason)
-            || !PathsMatchForCurrentHost(normalizedTarget, targetPath))
+            || !DurablePathEvidenceEquals(normalizedTarget, targetPath))
         {
             throw new IOException(
                 $"Directory copy destination failed mutation-boundary validation: {validationReason}");
@@ -439,7 +439,7 @@ public partial class FileMover
     {
         var relativePath = Path.GetRelativePath(root, path);
         var resolvedPath = ResolveSnapshotPath(root, relativePath, "snapshot entry");
-        if (!PathsMatchForCurrentHost(resolvedPath, path))
+        if (!DurablePathEvidenceEquals(resolvedPath, path))
         {
             throw new IOException("Directory copy snapshot entry escaped its source root.");
         }
@@ -469,11 +469,4 @@ public partial class FileMover
             character == Path.DirectorySeparatorChar
             || character == Path.AltDirectorySeparatorChar);
 
-    private static bool PathsMatchForCurrentHost(string first, string second) =>
-        string.Equals(
-            Path.GetFullPath(first),
-            Path.GetFullPath(second),
-            OperatingSystem.IsWindows()
-                ? StringComparison.OrdinalIgnoreCase
-                : StringComparison.Ordinal);
 }

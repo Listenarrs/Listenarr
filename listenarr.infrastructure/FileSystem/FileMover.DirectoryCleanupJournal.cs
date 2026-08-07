@@ -35,7 +35,7 @@ public partial class FileMover
         out string reason)
     {
         reason = string.Empty;
-        var normalizedSource = Path.GetFullPath(sourceRoot);
+        var normalizedSource = CanonicalizeDurablePathEvidence(sourceRoot);
         var parentPath = Path.GetDirectoryName(normalizedSource);
         if (string.IsNullOrWhiteSpace(parentPath)
             || !Directory.Exists(parentPath))
@@ -87,9 +87,7 @@ public partial class FileMover
                 if (string.Equals(
                         payloadSourceRoot,
                         normalizedSource,
-                        OperatingSystem.IsWindows()
-                            ? StringComparison.OrdinalIgnoreCase
-                            : StringComparison.Ordinal))
+                        StringComparison.Ordinal))
                 {
                     if (matching != null)
                     {
@@ -154,11 +152,9 @@ public partial class FileMover
             || Path.GetDirectoryName(Path.GetFullPath(payload.SourceRoot))
                 is not { } sourceParent
             || !string.Equals(
-                Path.GetFullPath(sourceParent),
-                Path.GetFullPath(parent.FullPath),
-                OperatingSystem.IsWindows()
-                    ? StringComparison.OrdinalIgnoreCase
-                    : StringComparison.Ordinal))
+                CanonicalizeDurablePathEvidence(sourceParent),
+                CanonicalizeDurablePathEvidence(parent.FullPath),
+                StringComparison.Ordinal))
         {
             return false;
         }
@@ -297,7 +293,7 @@ public partial class FileMover
         DirectoryCopySnapshot snapshot,
         string destinationRoot)
     {
-        var normalizedDestination = Path.GetFullPath(destinationRoot);
+        var normalizedDestination = CanonicalizeDurablePathEvidence(destinationRoot);
         if (!TryGetDirectoryIdentity(normalizedDestination, out var destinationIdentity))
         {
             return new DirectoryCopyCleanupResult(
@@ -359,7 +355,7 @@ public partial class FileMover
         var payload = new CleanupJournalPayload(
             Version: journalVersion,
             operationId,
-            Path.GetFullPath(snapshot.SourceRoot),
+            CanonicalizeDurablePathEvidence(snapshot.SourceRoot),
             normalizedDestination,
             snapshot.SourceRootIdentity,
             destinationIdentity,

@@ -1084,6 +1084,19 @@ namespace Listenarr.Tests.Features.Domain.Utils
         }
 
         [WindowsFact]
+        public void GetValidMutationRootsForCurrentOs_PreservesCaseDistinctWindowsRoots()
+        {
+            var roots = FileUtils.GetValidMutationRootsForCurrentOs([
+                @"C:\Library",
+                @"C:\library"
+            ]);
+
+            Assert.Equal(2, roots.Count);
+            Assert.Contains(@"C:\Library", roots, StringComparer.Ordinal);
+            Assert.Contains(@"C:\library", roots, StringComparer.Ordinal);
+        }
+
+        [WindowsFact]
         public void GetValidMutationRootsForCurrentOs_DoesNotLaunderPersistedUnixRoot()
         {
             var nativeRoot = Path.Join(
@@ -1176,6 +1189,28 @@ namespace Listenarr.Tests.Features.Domain.Utils
                     "/Books/AuthorB"
                 ]));
             }
+        }
+
+        [Fact]
+        public void GetCommonPathForDirectories_ExplicitWindowsSemantics_AreHostIndependent()
+        {
+            var semantics = new FileSystemPathSemantics(
+                FileSystemPathSyntax.Windows,
+                FileSystemCaseSensitivity.Sensitive);
+
+            Assert.Equal(@"C:\Library", FileUtils.GetCommonPathForDirectories([
+                @"c:\Library\Author\BookA",
+                @"C:\Library\author\BookB"
+            ], semantics));
+        }
+
+        [WindowsFact]
+        public void GetCommonPathForDirectories_PreservesCaseDistinctWindowsSegments()
+        {
+            Assert.Equal(@"C:\Library", FileUtils.GetCommonPathForDirectories([
+                @"C:\Library\Author\BookA",
+                @"C:\Library\author\BookB"
+            ]));
         }
 
         [Fact]

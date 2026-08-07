@@ -17,10 +17,7 @@ public static partial class FileUtils
     {
         ArgumentNullException.ThrowIfNull(paths);
 
-        var comparer = OperatingSystem.IsWindows()
-            ? StringComparer.OrdinalIgnoreCase
-            : StringComparer.Ordinal;
-        var normalizedRoots = new HashSet<string>(comparer);
+        var normalizedRoots = new HashSet<string>(StringComparer.Ordinal);
         foreach (var path in paths)
         {
             if (string.IsNullOrWhiteSpace(path)

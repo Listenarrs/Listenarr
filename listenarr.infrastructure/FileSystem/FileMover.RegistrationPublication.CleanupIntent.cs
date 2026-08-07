@@ -106,11 +106,9 @@ public partial class FileMover
                         expectedPhysicalObjectIdentity,
                         StringComparison.Ordinal)
                     && string.Equals(
-                        Path.GetFullPath(intent.SourcePath ?? string.Empty),
-                        sourcePath,
-                        OperatingSystem.IsWindows()
-                            ? StringComparison.OrdinalIgnoreCase
-                            : StringComparison.Ordinal)
+                        CanonicalizeDurablePathEvidence(intent.SourcePath ?? string.Empty),
+                        CanonicalizeDurablePathEvidence(sourcePath),
+                        StringComparison.Ordinal)
                     && string.Equals(
                         intent.SourcePhysicalObjectIdentity,
                         sourcePhysicalObjectIdentity,
@@ -134,7 +132,7 @@ public partial class FileMover
                     audiobookId,
                     Path.GetFileName(destinationPath),
                     expectedPhysicalObjectIdentity,
-                    sourcePath,
+                    CanonicalizeDurablePathEvidence(sourcePath),
                     sourcePhysicalObjectIdentity));
             using var intentEntry = state.CreateNewFile(RegistrationCleanupIntentName);
             using (var stream = intentEntry.OpenWriteStream(
@@ -175,14 +173,10 @@ public partial class FileMover
             if (string.IsNullOrWhiteSpace(stateName)
                 || !stateName.StartsWith(
                     ".listenarr-registration-publication-",
-                    OperatingSystem.IsWindows()
-                        ? StringComparison.OrdinalIgnoreCase
-                        : StringComparison.Ordinal)
+                    StringComparison.Ordinal)
                 || !stateName.EndsWith(
                     ".state",
-                    OperatingSystem.IsWindows()
-                        ? StringComparison.OrdinalIgnoreCase
-                        : StringComparison.Ordinal))
+                    StringComparison.Ordinal))
             {
                 return null;
             }
@@ -321,15 +315,11 @@ public partial class FileMover
             || !string.Equals(
                 current.StateName,
                 candidate.StateName,
-                OperatingSystem.IsWindows()
-                    ? StringComparison.OrdinalIgnoreCase
-                    : StringComparison.Ordinal)
+                StringComparison.Ordinal)
             || !string.Equals(
-                Path.GetFullPath(current.DestinationPath),
-                Path.GetFullPath(candidate.DestinationPath),
-                OperatingSystem.IsWindows()
-                    ? StringComparison.OrdinalIgnoreCase
-                    : StringComparison.Ordinal)
+                CanonicalizeDurablePathEvidence(current.DestinationPath),
+                CanonicalizeDurablePathEvidence(candidate.DestinationPath),
+                StringComparison.Ordinal)
             || !string.Equals(
                 current.PhysicalObjectIdentity,
                 candidate.PhysicalObjectIdentity,

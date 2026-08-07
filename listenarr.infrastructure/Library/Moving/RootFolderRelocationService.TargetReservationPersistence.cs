@@ -331,10 +331,7 @@ public sealed partial class RootFolderRelocationService
         }
     }
 
-    private static StringComparison PathComparison =>
-        OperatingSystem.IsWindows()
-            ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal;
+    private static StringComparison PathComparison => StringComparison.Ordinal;
 
     private sealed record TargetReservationPlan(
         string ExistingAncestor,

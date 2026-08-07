@@ -18,21 +18,15 @@ public partial class FileMover
             || !string.Equals(
                 current.StateName,
                 candidate.StateName,
-                OperatingSystem.IsWindows()
-                    ? StringComparison.OrdinalIgnoreCase
-                    : StringComparison.Ordinal)
+                StringComparison.Ordinal)
             || !string.Equals(
-                Path.GetFullPath(current.DestinationPath),
-                Path.GetFullPath(candidate.DestinationPath),
-                OperatingSystem.IsWindows()
-                    ? StringComparison.OrdinalIgnoreCase
-                    : StringComparison.Ordinal)
+                CanonicalizeDurablePathEvidence(current.DestinationPath),
+                CanonicalizeDurablePathEvidence(candidate.DestinationPath),
+                StringComparison.Ordinal)
             || !string.Equals(
-                Path.GetFullPath(current.SourcePath),
-                Path.GetFullPath(candidate.SourcePath ?? string.Empty),
-                OperatingSystem.IsWindows()
-                    ? StringComparison.OrdinalIgnoreCase
-                    : StringComparison.Ordinal)
+                CanonicalizeDurablePathEvidence(current.SourcePath),
+                CanonicalizeDurablePathEvidence(candidate.SourcePath ?? string.Empty),
+                StringComparison.Ordinal)
             || !string.Equals(
                 current.PhysicalObjectIdentity,
                 candidate.PhysicalObjectIdentity,

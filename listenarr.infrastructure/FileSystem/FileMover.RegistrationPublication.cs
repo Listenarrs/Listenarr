@@ -429,9 +429,7 @@ public partial class FileMover
         var identity = GetRegistrationPublicationStateIdentity(
             logicalIdentity,
             sourcePhysicalObjectIdentity: string.Empty);
-        var comparer = OperatingSystem.IsWindows()
-            ? StringComparer.OrdinalIgnoreCase
-            : StringComparer.Ordinal;
+        var comparer = DurableRecoveryArtifactNameComparer;
         var candidates = Directory.EnumerateFileSystemEntries(
                 destinationParent.FullPath,
                 ".listenarr-registration-publication-*.state",
@@ -439,15 +437,12 @@ public partial class FileMover
             .Select(Path.GetFileName)
             .Where(name => name != null
                 && (comparer.Equals(name, identity.LegacyStateName)
-                    || (name.StartsWith(identity.CandidatePrefix,
-                            OperatingSystem.IsWindows()
-                                ? StringComparison.OrdinalIgnoreCase
-                                : StringComparison.Ordinal)
+                    || (name.StartsWith(
+                            identity.CandidatePrefix,
+                            StringComparison.Ordinal)
                         && name.EndsWith(
                             ".state",
-                            OperatingSystem.IsWindows()
-                                ? StringComparison.OrdinalIgnoreCase
-                                : StringComparison.Ordinal))))
+                            StringComparison.Ordinal))))
             .Select(name => name!)
             .Distinct(comparer)
             .ToArray();
@@ -461,10 +456,5 @@ public partial class FileMover
     }
 
     private static bool StateNameEquals(string first, string second) =>
-        string.Equals(
-            first,
-            second,
-            OperatingSystem.IsWindows()
-                ? StringComparison.OrdinalIgnoreCase
-                : StringComparison.Ordinal);
+        DurableRecoveryArtifactNameComparer.Equals(first, second);
 }

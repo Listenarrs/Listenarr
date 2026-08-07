@@ -33,8 +33,8 @@ public partial class FileMover
         var payload = new DirectoryRenameJournalPayload(
             Version: 1,
             Guid.NewGuid(),
-            CanonicalizeDirectoryRenameJournalPath(source),
-            CanonicalizeDirectoryRenameJournalPath(destination),
+            CanonicalizeDurablePathEvidence(source),
+            CanonicalizeDurablePathEvidence(destination),
             sourceObjectIdentity,
             sourceParent.GetDirectoryObjectIdentity(),
             destinationParent.GetDirectoryObjectIdentity());
@@ -126,8 +126,8 @@ public partial class FileMover
         string sourceDirectory,
         string destinationDirectory)
     {
-        var source = CanonicalizeDirectoryRenameJournalPath(sourceDirectory);
-        var destination = CanonicalizeDirectoryRenameJournalPath(destinationDirectory);
+        var source = CanonicalizeDurablePathEvidence(sourceDirectory);
+        var destination = CanonicalizeDurablePathEvidence(destinationDirectory);
         var sourceParentPath = Path.GetDirectoryName(source);
         if (string.IsNullOrWhiteSpace(sourceParentPath)
             || !Directory.Exists(sourceParentPath))
@@ -276,25 +276,15 @@ public partial class FileMover
                 : FileSystemPathSyntax.Unix);
         var normalizedSource = syntax.HasValue
             ? FileSystemPathIdentity.Canonicalize(source, effectiveSyntax)
-            : CanonicalizeDirectoryRenameJournalPath(source);
+            : CanonicalizeDurablePathEvidence(source);
         var normalizedDestination = syntax.HasValue
             ? FileSystemPathIdentity.Canonicalize(destination, effectiveSyntax)
-            : CanonicalizeDirectoryRenameJournalPath(destination);
+            : CanonicalizeDurablePathEvidence(destination);
 
         var keyBytes = Encoding.UTF8.GetBytes(
             normalizedSource + "\0" + normalizedDestination);
         var key = Convert.ToHexString(SHA256.HashData(keyBytes))[..24];
         return DirectoryRenameJournalPrefix + key;
-    }
-
-    private static string CanonicalizeDirectoryRenameJournalPath(string path)
-    {
-        var syntax = OperatingSystem.IsWindows()
-            ? FileSystemPathSyntax.Windows
-            : FileSystemPathSyntax.Unix;
-        return FileSystemPathIdentity.Canonicalize(
-            Path.GetFullPath(path),
-            syntax);
     }
 
     private static DirectoryRenameJournalPayload? ReadDirectoryRenameJournal(

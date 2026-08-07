@@ -92,10 +92,7 @@ public partial class FileMover
         {
             return false;
         }
-        var comparer = OperatingSystem.IsWindows()
-            ? StringComparer.OrdinalIgnoreCase
-            : StringComparer.Ordinal;
-        var allowed = allowedNames.ToHashSet(comparer);
+        var allowed = allowedNames.ToHashSet(DurableRecoveryArtifactNameComparer);
         var actual = Directory.EnumerateFileSystemEntries(state.FullPath)
             .Select(Path.GetFileName)
             .ToList();
