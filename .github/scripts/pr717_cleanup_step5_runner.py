@@ -88,11 +88,11 @@ replacement.write_text(text.replace(old, new, 1))
 
 reconciler = Path('listenarr.infrastructure/Library/Moving/LibraryDirectoryOwnershipReconciler.cs')
 text = reconciler.read_text()
-old = '''                    ownership.State = LibraryDirectoryOwnershipState.Removed;
-                    ownership.UpdatedAt = now;
+old = '''                    ownership.UpdatedAt = now;
+                    await db.SaveChangesAsync(cancellationToken);
 '''
-new = '''                    ownership.State = LibraryDirectoryOwnershipState.Removed;
-                    ownership.UpdatedAt = DateTime.UtcNow;
+new = '''                    ownership.UpdatedAt = DateTime.UtcNow;
+                    await db.SaveChangesAsync(cancellationToken);
 '''
 if old not in text:
     raise SystemExit('missing converged removal timestamp assignment')
