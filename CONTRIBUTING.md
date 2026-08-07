@@ -151,6 +151,15 @@ This project follows a layered pattern: domain models in `listenarr.domain`, EF 
 - Run frontend type checks: `cd fe && npm run type-check`
 - Ensure all tests pass before submitting PR
 
+### Compatibility and migration development policy
+
+The compatibility boundary for a pull request is the branch it targets. Databases, filesystem artifacts, API states, and recovery formats that were produced only by an unmerged feature branch or intermediate PR image are development artifacts, not supported upgrade inputs.
+
+- Do not keep production compatibility paths solely for intermediate versions of an unmerged PR.
+- Preserve and regression-test compatibility with schemas and persisted data that actually exist on the target branch.
+- Once an EF migration is merged into a supported branch it is immutable history. Before merge, superseded branch-only migrations should be removed and the final migration set regenerated with EF from the target branch model snapshot.
+- Do not hand-edit EF scaffolding to emulate intermediate branch schemas. Put unavoidable data repair for real target-branch upgrades in explicit, tested startup/reconciliation primitives.
+
 ### Branching Model
 
 Listenarr follows a **canary → beta → main** release flow:

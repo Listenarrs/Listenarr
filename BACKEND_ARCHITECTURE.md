@@ -38,6 +38,14 @@ New implementation-specific dependencies should go in `listenarr.infrastructure`
 
 The application project should not reference SQLite providers, EF Core implementation packages, Swagger/OpenAPI packages, HTML parsers, image libraries, audio tagging libraries, ASP.NET Core hosting types, SignalR hubs, HTTP context, or data-protection implementations directly. SQLite and EF Core belong to infrastructure, Swagger/OpenAPI belongs to API, hosted adapters and SignalR delivery belong to infrastructure/API, and parsing/tagging/image inspection belong behind application ports implemented by infrastructure.
 
+## Compatibility and Migration Boundary
+
+Backend compatibility begins at the branch or release that code has actually reached. An unmerged feature branch is free to replace its own schema, recovery protocol, or persisted development artifacts; those intermediate states must not become permanent production compatibility surfaces merely because a developer ran an earlier PR build.
+
+EF migrations become immutable historical artifacts when they merge into the target branch. Before merge, a feature branch should remove superseded branch-only migrations, restore the target branch model snapshot, and regenerate the smallest final EF-scaffolded migration set from the cleaned model. Compatibility and startup reconciliation must be designed against data that can exist on the actual target branch, not against transient schemas that existed only during feature development.
+
+This rule does not authorize deleting current crash-safety evidence. Marker files, journals, leases, identities, or other durable protocols that the final implementation itself writes and requires for restart safety remain part of the current contract. Reviewers must distinguish those from readers, endpoints, states, and migrations whose only purpose is upgrading an obsolete intermediate branch protocol.
+
 ## Boundary Cleanup
 
 The application layer now delegates these infrastructure-shaped concerns through interfaces:

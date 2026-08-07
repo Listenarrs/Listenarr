@@ -36,6 +36,14 @@ Required review behavior:
 - Do not call a diff clean or merge-ready until two consecutive, complete, unchanged review passes find no confirmed defects or repository-rule violations.
 - Clearly distinguish confirmed findings, unverified risks, missing platform validation, process blockers, and non-blocking suggestions.
 
+## Compatibility Boundary for Development Branches
+
+- The authoritative compatibility boundary is the target branch or released version that a change will merge into. Persisted states produced only by an unmerged feature branch, pull-request build, or intermediate development image are not supported upgrade inputs.
+- Do not add production compatibility code, recovery states, filesystem marker readers, API endpoints, schema versions, or tests solely to preserve intermediate iterations of an unmerged change. Remove or regenerate those development artifacts before merge.
+- EF migrations are immutable historical artifacts only after they reach the target branch. While a feature branch is unmerged, delete superseded branch-only migrations, restore the target branch model snapshot, and regenerate the minimum final EF migration set from the cleaned final model. Never hand-shape generated migrations to preserve intermediate branch states.
+- Compatibility with the actual target-branch schema and persisted data remains mandatory. Before deleting legacy-looking behavior, prove whether the state can exist on the target branch; released or merged states must continue to fail safely or upgrade deterministically.
+- Reviews must distinguish current crash-safety evidence from development-history compatibility. A filesystem marker or recovery protocol that is still part of the final safety contract is not removable merely because earlier versions of that protocol existed during development.
+
 ## Cross-shell null redirection
 
 - Never redirect output to `NUL` from Git Bash, MSYS, WSL, or another POSIX shell; those environments can create a real Windows-reserved file named `NUL` in the checkout.
