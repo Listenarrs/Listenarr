@@ -1,23 +1,38 @@
 from pathlib import Path
 
+store_test = Path("fe/src/__tests__/rootFolders.reauthorization.store.spec.ts")
+text = store_test.read_text()
+block = """  it('passes the exact confirmed target path and reloads root folders', async () => {
+    const targetPath = '/srv/Audiobooks '
+    const result: RootFolderPathChangeResult = {
+      relocationId: 'relocation-1',
+      rootFolderId: 3,
+      currentPath: '/srv/Old',
+      targetPath,
+      status: 'Running',
+      totalJobs: 1,
+      completedJobs: 0,
+      targetIdentityEnrollmentState: 'Authorized',
+    }
+    vi.mocked(apiService.reauthorizeLegacyRootFolderRelocationTarget).mockResolvedValueOnce(result)
+    vi.mocked(apiService.getRootFolders).mockResolvedValueOnce([])
+    const store = useRootFoldersStore()
 
-def remove_block(path: str, start_marker: str, end_marker: str) -> None:
-    file = Path(path)
-    text = file.read_text()
-    start = text.find(start_marker)
-    if start < 0:
-        raise SystemExit(f"missing start marker in {path}: {start_marker!r}")
-    end = text.find(end_marker, start)
-    if end < 0:
-        raise SystemExit(f"missing end marker in {path}: {end_marker!r}")
-    file.write_text(text[:start] + text[end:])
+    await expect(store.reauthorizeLegacyTarget('relocation-1', targetPath)).resolves.toEqual(result)
 
-
-remove_block(
-    "fe/src/__tests__/rootFolders.reauthorization.store.spec.ts",
-    "  it('passes the exact confirmed target path and reloads root folders', async () => {\n",
-    "})\n",
-)
+    expect(apiService.reauthorizeLegacyRootFolderRelocationTarget).toHaveBeenCalledWith(
+      'relocation-1',
+      targetPath,
+    )
+    expect(apiService.getRootFolders).toHaveBeenCalledTimes(1)
+  })
+"""
+if block not in text:
+    raise SystemExit("missing exact legacy relocation store test")
+text = text.replace(block, "", 1)
+if text.count("RootFolderPathChangeResult") == 1:
+    text = text.replace("import type { RootFolderPathChangeResult } from '@/types'\n", "", 1)
+store_test.write_text(text)
 
 setup = Path("fe/src/__tests__/test-setup.ts")
 text = setup.read_text()
