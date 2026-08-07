@@ -85,12 +85,6 @@ public sealed partial class RootFolderRelocationService
             throw new InvalidOperationException("Only relocations needing attention can be retried.");
         }
         if (relocation.TargetIdentityEnrollmentState
-            == TargetIdentityEnrollmentState.LegacyUnenrolled)
-        {
-            throw new InvalidOperationException(
-                "The legacy relocation target must be explicitly reauthorized before retry.");
-        }
-        if (relocation.TargetIdentityEnrollmentState
             == TargetIdentityEnrollmentState.Unavailable)
         {
             throw new InvalidOperationException(

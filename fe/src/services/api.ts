@@ -950,20 +950,7 @@ class ApiService {
     )
   }
 
-  async reauthorizeLegacyRootFolderRelocationTarget(
-    relocationId: string,
-    confirmedTargetPath: string,
-  ): Promise<import('@/types').RootFolderPathChangeResult> {
-    return this.request<import('@/types').RootFolderPathChangeResult>(
-      `/rootfolder-relocations/${relocationId}/reauthorize-legacy-target`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ confirmedTargetPath }),
-      },
-    )
-  }
-
-  async deleteRootFolder(id: number, reassignTo?: number): Promise<{ message?: string }> {
+async deleteRootFolder(id: number, reassignTo?: number): Promise<{ message?: string }> {
     const qs = reassignTo ? `?reassignTo=${reassignTo}` : ''
     return this.request<{ message?: string }>(`/rootfolders/${id}${qs}`, { method: 'DELETE' })
   }

@@ -170,7 +170,6 @@ vi.mock('@/services/api', () => {
     changeRootFolderPath: vi.fn(async () => ({})),
     reauthorizeRootFolderIdentity: vi.fn(async () => ({})),
     retryRootFolderRelocation: vi.fn(async () => ({})),
-    reauthorizeLegacyRootFolderRelocationTarget: vi.fn(async () => ({})),
 
     // add checkVolume to apiService so components that call `apiService.checkVolume` in
     // unit tests have a sensible default value that matches the real API signature.

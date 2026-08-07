@@ -21,7 +21,6 @@ public enum RootFolderRelocationStatus
 public enum TargetIdentityEnrollmentState
 {
     Authorized,
-    LegacyUnenrolled,
     Unavailable,
     NotRequired
 }
@@ -43,41 +42,6 @@ public enum RootFolderRelocationCreatedDirectoryState
     Created,
     Retained,
     Removed
-}
-
-public static class TargetIdentityEnrollment
-{
-    public static TargetIdentityEnrollmentState Classify(
-        RootFolderRelocation relocation)
-    {
-        ArgumentNullException.ThrowIfNull(relocation);
-        if (relocation.Status is
-            RootFolderRelocationStatus.Completed
-                or RootFolderRelocationStatus.Failed)
-        {
-            return TargetIdentityEnrollmentState.NotRequired;
-        }
-
-        if (relocation.TargetDirectoryObjectIdentityVersion.HasValue
-            && !string.IsNullOrWhiteSpace(
-                relocation.TargetDirectoryObjectIdentity)
-            && string.IsNullOrWhiteSpace(
-                relocation.TargetDirectoryObjectIdentityUnavailableReason))
-        {
-            return TargetIdentityEnrollmentState.Authorized;
-        }
-
-        if (relocation.TargetDirectoryObjectIdentityVersion == null
-            && string.IsNullOrWhiteSpace(
-                relocation.TargetDirectoryObjectIdentity)
-            && string.IsNullOrWhiteSpace(
-                relocation.TargetDirectoryObjectIdentityUnavailableReason))
-        {
-            return TargetIdentityEnrollmentState.LegacyUnenrolled;
-        }
-
-        return TargetIdentityEnrollmentState.Unavailable;
-    }
 }
 
 public sealed class RootFolderRelocation

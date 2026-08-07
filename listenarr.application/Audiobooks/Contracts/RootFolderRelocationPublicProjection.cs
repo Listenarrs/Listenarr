@@ -30,8 +30,6 @@ public static class RootFolderRelocationPublicProjection
 
         return enrollmentState switch
         {
-            TargetIdentityEnrollmentState.LegacyUnenrolled =>
-                "The relocation target must be reauthorized before the relocation can continue.",
             TargetIdentityEnrollmentState.Unavailable =>
                 "The relocation target identity is unavailable. Review the target and retry.",
             _ => status switch

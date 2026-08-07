@@ -47,11 +47,6 @@ public interface IRootFolderRelocationService
         Guid relocationId,
         CancellationToken cancellationToken = default);
 
-    Task<RootFolderPathChangeResult> ReauthorizeLegacyTargetAsync(
-        Guid relocationId,
-        string confirmedTargetPath,
-        CancellationToken cancellationToken = default);
-
     Task OnMoveJobStateChangedAsync(
         Guid moveJobId,
         CancellationToken cancellationToken = default);

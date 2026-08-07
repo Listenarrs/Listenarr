@@ -139,41 +139,7 @@ describe('RootFoldersSettings', () => {
     expect(apiService.reauthorizeRootFolderIdentity).toHaveBeenCalledWith(folder.id, folder.path)
   })
 
-  it('shows legacy reauthorization separately and confirms the exact target path', async () => {
-    const legacy = relocation('LegacyUnenrolled')
-    vi.mocked(apiService.getRootFolders).mockResolvedValue([rootFolder(legacy)])
-    vi.mocked(apiService.reauthorizeLegacyRootFolderRelocationTarget).mockResolvedValue({
-      ...legacy,
-      status: 'Running',
-      targetIdentityEnrollmentState: 'Authorized',
-    })
-    const pinia = createPinia()
-    setActivePinia(pinia)
-    const wrapper = mount(RootFoldersSettings, { global: { plugins: [pinia] } })
-    await flushPromises()
-
-    const action = wrapper.get('[data-cy="reauthorize-relocation-target"]')
-    expect(action.text()).toContain('Reauthorize target')
-    expect(wrapper.findAll('button').some((button) => button.text().trim() === 'Retry')).toBe(false)
-
-    await action.trigger('click')
-
-    const displayedTarget = wrapper.get('[data-testid="reauthorization-target-path"]')
-    expect(displayedTarget.element.textContent).toBe(targetPath)
-    expect(displayedTarget.classes()).toContain('reauthorization-target-path')
-    const confirm = wrapper.get('.modal-delete-button')
-    expect(confirm.text()).toContain('Reauthorize target')
-    await confirm.trigger('click')
-    await flushPromises()
-
-    expect(apiService.reauthorizeLegacyRootFolderRelocationTarget).toHaveBeenCalledWith(
-      'relocation-1',
-      targetPath,
-    )
-    expect(wrapper.emitted('close')).toBeUndefined()
-  })
-
-  it('keeps ordinary retry separate for an authorized relocation', async () => {
+it('keeps ordinary retry separate for an authorized relocation', async () => {
     vi.mocked(apiService.getRootFolders).mockResolvedValue([rootFolder(relocation('Authorized'))])
     const pinia = createPinia()
     setActivePinia(pinia)

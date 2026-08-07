@@ -11,7 +11,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { apiService } from '@/services/api'
 import { useRootFoldersStore } from '@/stores/rootFolders'
-import type { RootFolderPathChangeResult } from '@/types'
 
 describe('root folder relocation store actions', () => {
   beforeEach(() => {
@@ -218,28 +217,4 @@ describe('root folder relocation store actions', () => {
     expect(apiService.getRootFolders).toHaveBeenCalledTimes(1)
   })
 
-  it('passes the exact confirmed target path and reloads root folders', async () => {
-    const targetPath = '/srv/Audiobooks '
-    const result: RootFolderPathChangeResult = {
-      relocationId: 'relocation-1',
-      rootFolderId: 3,
-      currentPath: '/srv/Old',
-      targetPath,
-      status: 'Running',
-      totalJobs: 1,
-      completedJobs: 0,
-      targetIdentityEnrollmentState: 'Authorized',
-    }
-    vi.mocked(apiService.reauthorizeLegacyRootFolderRelocationTarget).mockResolvedValueOnce(result)
-    vi.mocked(apiService.getRootFolders).mockResolvedValueOnce([])
-    const store = useRootFoldersStore()
-
-    await expect(store.reauthorizeLegacyTarget('relocation-1', targetPath)).resolves.toEqual(result)
-
-    expect(apiService.reauthorizeLegacyRootFolderRelocationTarget).toHaveBeenCalledWith(
-      'relocation-1',
-      targetPath,
-    )
-    expect(apiService.getRootFolders).toHaveBeenCalledTimes(1)
-  })
 })
