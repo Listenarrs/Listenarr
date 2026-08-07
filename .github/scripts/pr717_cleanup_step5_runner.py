@@ -27,3 +27,61 @@ if count != 1:
 
 namespace = {'__name__': '__main__', '__file__': str(script)}
 exec(compile(source, str(script), 'exec'), namespace)
+
+replacement = Path('listenarr.infrastructure/Library/Moving/EfLibraryDirectoryOwnershipStore.MarkerlessReplacement.cs')
+text = replacement.read_text()
+old = '''        if (!await db.LibraryDirectoryOwnershipRetiredMarkers.AnyAsync(
+                marker => marker.OwnershipId == stale.Id,
+                cancellationToken))
+        {
+            if (stale.ManagedRootFolderId.HasValue
+                && stale.DirectoryObjectIdentityVersion.HasValue
+                && !string.IsNullOrWhiteSpace(stale.DirectoryObjectIdentity))
+            {
+                db.LibraryDirectoryOwnershipRetiredMarkers.Add(
+                    LibraryDirectoryOwnershipRetiredMarkerEvidence.Create(
+                        stale,
+                        new LibraryDirectoryOwnershipMarker.MarkerPayload(
+                            LibraryDirectoryOwnershipMarker.Version,
+                            stale.OwnershipToken,
+                            stale.CanonicalPath,
+                            stale.ManagedRootFolderId,
+                            stale.DirectoryObjectIdentityVersion,
+                            stale.DirectoryObjectIdentity),
+                        now));
+            }
+            else
+            {
+                db.LibraryDirectoryOwnershipRetiredMarkers.Add(
+                    LibraryDirectoryOwnershipRetiredMarkerEvidence
+                        .CreateLegacyPending(stale));
+            }
+        }
+'''
+new = '''        if (!stale.ManagedRootFolderId.HasValue
+            || stale.DirectoryObjectIdentityVersion != ManagedDirectoryIdentity.CurrentVersion
+            || string.IsNullOrWhiteSpace(stale.DirectoryObjectIdentity))
+        {
+            throw new InvalidOperationException(
+                "The stale ownership row does not contain the final durable identity required for retirement.");
+        }
+        if (!await db.LibraryDirectoryOwnershipRetiredMarkers.AnyAsync(
+                marker => marker.OwnershipId == stale.Id,
+                cancellationToken))
+        {
+            db.LibraryDirectoryOwnershipRetiredMarkers.Add(
+                LibraryDirectoryOwnershipRetiredMarkerEvidence.Create(
+                    stale,
+                    new LibraryDirectoryOwnershipMarker.MarkerPayload(
+                        LibraryDirectoryOwnershipMarker.Version,
+                        stale.OwnershipToken,
+                        stale.CanonicalPath,
+                        stale.ManagedRootFolderId,
+                        stale.DirectoryObjectIdentityVersion,
+                        stale.DirectoryObjectIdentity),
+                    now));
+        }
+'''
+if old not in text:
+    raise SystemExit('missing markerless replacement legacy retired-evidence fallback')
+replacement.write_text(text.replace(old, new, 1))
