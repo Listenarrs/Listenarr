@@ -9,36 +9,67 @@ permissions:
   contents: write
 
 jobs:
-  inventory-ownership-compatibility:
+  remove-ownership-version-compatibility:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Inventory ownership protocol compatibility
+
+      - name: Remove intermediate ownership compatibility
+        run: python3 .github/scripts/pr717_cleanup_step5.py
+
+      - name: Static adversarial review
         shell: bash
         run: |
           set -euo pipefail
-          for token in \
-            'LegacyMarkerPayload' \
-            'MatchesLegacyPayload' \
-            'UpgradeLegacyMarkerAsync' \
-            'UpgradeLegacyAsync' \
-            'UpgradeLegacyRecordAsync' \
-            'DirectoryObjectIdentityVersion == 1' \
-            'DirectoryObjectIdentityVersion is null' \
-            'MarkerPayload' \
-            'TryRetireMatchingMarkerIfPresent' \
-            'PublishMigrationTargetAsync' \
-            'RecoverMigrationTargetPromotion' \
-            'migration.tmp'; do
-            echo "=== $token ==="
-            git grep -n -F "$token" -- listenarr.application listenarr.domain listenarr.infrastructure listenarr.api tests || true
-          done
-          echo '=== ownership store files ==='
-          find listenarr.infrastructure/Library/Moving -maxdepth 1 -type f -name '*Ownership*' -printf '%f\n' | sort
-          echo '=== claim marker calls ==='
-          git grep -n -E 'PinnedLibraryDirectoryOwnershipMarker\.(EnsureAsync|ReconcileAsync|PublishMigrationTargetAsync|UpgradeLegacyAsync|TryRetireMatchingMarkerIfPresent)' -- listenarr.infrastructure tests || true
-          echo '=== marker API calls ==='
-          git grep -n -E 'LibraryDirectoryOwnershipMarker\.(EnsureAsync|Validate|Delete|Contains|HasValid|SerializePayload|Matches)' -- listenarr.infrastructure tests || true
+          git diff --check
+          if git grep -n -E 'MatchesLegacyPayload|UpgradeLegacyMarkerAsync|TryValidateLegacyMissingBothRecovery|CreateLegacyPending|legacy physical identity|pre-physical-identity|Older builds left these marker' -- \
+            listenarr.application listenarr.domain listenarr.infrastructure listenarr.api; then
+            echo 'Intermediate ownership compatibility remains in production' >&2
+            exit 1
+          fi
+          if git grep -n -E 'DirectoryObjectIdentityVersion[[:space:]]*==[[:space:]]*1|PayloadVersion[[:space:]]*==[[:space:]]*1' -- \
+            listenarr.infrastructure; then
+            echo 'Version-one ownership compatibility remains' >&2
+            exit 1
+          fi
+          echo 'Current relocation marker migration callers:'
+          git grep -n -E 'PublishMigrationTargetAsync|TryRetireMigrationArtifacts' -- listenarr.infrastructure tests || true
+          git diff --stat
+
+      - name: Restore and build
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet restore listenarr.slnx
+          dotnet build listenarr.slnx --configuration Release --no-restore
+
+      - name: Focused ownership and relocation tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet test tests/Listenarr.Tests.csproj --configuration Release --no-build --filter 'FullyQualifiedName~LibraryDirectoryOwnership|FullyQualifiedName~RootFolderRelocation|FullyQualifiedName~AudiobookContentMoveService|FullyQualifiedName~AudiobookFilesystemDeleteService'
+
+      - name: Adversarial live-marker contract review
+        shell: bash
+        run: |
+          set -euo pipefail
+          git grep -n -E 'PublishMigrationTargetAsync|\.migration\.tmp|TryRetireMigrationArtifacts|RecoverConditionalReplacement' -- listenarr.infrastructure tests || true
+          test -f listenarr.infrastructure/Library/Moving/PinnedLibraryDirectoryOwnershipMarker.Migration.cs
+          test -f listenarr.infrastructure/Library/Moving/PinnedLibraryDirectoryOwnershipMarker.Recovery.cs
+          if ! git grep -q -F 'PublishMigrationTargetAsync' -- listenarr.infrastructure/Library/Moving/RootFolderRelocationService.OwnershipMigration.cs; then
+            echo 'Current root-relocation marker migration contract was accidentally removed' >&2
+            exit 1
+          fi
+
+      - name: Commit cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A ':!.github/workflows/pr717-cleanup-analysis.yml' ':!.github/scripts/**' ':!.github/pr717-cleanup-trigger'
+          git commit -m 'refactor(ownership): remove intermediate protocol compatibility'
+          git push origin HEAD:bugfix/unix-folder-name-space
