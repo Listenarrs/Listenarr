@@ -256,7 +256,11 @@ namespace Listenarr.Domain.Common
                     return false;
                 }
 
-                if (ContainsRootedPathSegment(relativePath))
+                if (ContainsRootedPathSegment(relativePath)
+                    || relativePath.Split(
+                            [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+                            StringSplitOptions.RemoveEmptyEntries)
+                        .Any(segment => segment is "." or ".."))
                 {
                     return false;
                 }

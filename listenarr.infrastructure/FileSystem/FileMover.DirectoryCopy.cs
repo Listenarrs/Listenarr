@@ -24,6 +24,12 @@ public partial class FileMover
         IReadOnlyDictionary<string, RegularFileIdentity> DirectoryIdentities,
         IReadOnlyList<DirectoryCopyFileSnapshot> Files);
 
+    // Snapshot paths are captured lexical evidence. Never fold them by host OS:
+    // Windows can expose case-sensitive directory namespaces, where names that differ
+    // only by case identify distinct entries.
+    internal static StringComparer DirectoryCopySnapshotPathComparer { get; } =
+        StringComparer.Ordinal;
+
     private static bool TryCaptureDirectoryCopySnapshot(
         string sourceDirectory,
         out DirectoryCopySnapshot? snapshot,
@@ -232,10 +238,8 @@ public partial class FileMover
         DirectoryCopySnapshot snapshot,
         PinnedDirectoryCreation.PinnedDirectoryAnchor stagingAnchor)
     {
-        var comparer = OperatingSystem.IsWindows()
-            ? StringComparer.OrdinalIgnoreCase
-            : StringComparer.Ordinal;
-        var anchors = new Dictionary<string, PinnedDirectoryCreation.PinnedDirectoryAnchor>(comparer)
+        var anchors = new Dictionary<string, PinnedDirectoryCreation.PinnedDirectoryAnchor>(
+            DirectoryCopySnapshotPathComparer)
         {
             [string.Empty] = stagingAnchor
         };

@@ -501,6 +501,23 @@ namespace Listenarr.Tests.Features.Domain.Utils
             }
         }
 
+        [WindowsFact]
+        public void TryResolveRelativePathWithinBase_BlocksCaseDistinctSiblingTraversalOnWindows()
+        {
+            var parent = Path.Join(
+                Path.GetTempPath(),
+                "fu-case-boundary-" + Guid.NewGuid().ToString("N"));
+            var root = Path.Join(parent, "Library");
+
+            var ok = FileUtils.TryResolveRelativePathWithinBase(
+                root,
+                Path.Join("..", "library", "escape.m4b"),
+                out var resolved);
+
+            Assert.False(ok);
+            Assert.Equal(string.Empty, resolved);
+        }
+
         [Theory]
         [InlineData("../escape.m4b")]
         [InlineData("author/../../escape.m4b")]
@@ -521,6 +538,49 @@ namespace Listenarr.Tests.Features.Domain.Utils
             finally
             {
                 try { Directory.Delete(root, true); } catch (IOException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); } catch (UnauthorizedAccessException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); }
+            }
+        }
+
+        [Fact]
+        public void MutationBoundary_WindowsCaseDistinctSibling_IsNotContained()
+        {
+            Assert.True(FileSystemSafety.IsSameOrInsideMutationBoundary(
+                @"c:\Library\Author\Book.m4b",
+                @"C:\Library\",
+                FileSystemPathSyntax.Windows));
+            Assert.False(FileSystemSafety.IsSameOrInsideMutationBoundary(
+                @"C:\library\Author\Book.m4b",
+                @"C:\Library",
+                FileSystemPathSyntax.Windows));
+        }
+
+        [WindowsFact]
+        public void TryValidateMutationTarget_AllowsCaseAliasOnlyWhenItIsSamePhysicalRoot()
+        {
+            var parent = Path.Join(
+                Path.GetTempPath(),
+                "fu-mutation-case-alias-" + Guid.NewGuid().ToString("N"));
+            var root = Path.Join(parent, "LibraryRoot");
+            Directory.CreateDirectory(root);
+            var aliasRoot = Path.Join(parent, "libraryroot");
+
+            try
+            {
+                Assert.True(
+                    Directory.Exists(aliasRoot),
+                    "The Windows temp boundary must expose its normal case-insensitive alias for this regression.");
+
+                var target = Path.Join(aliasRoot, "book.m4b");
+                Assert.True(new LocalFileSystem().TryValidateMutationTarget(
+                    target,
+                    [root],
+                    out _,
+                    out var reason),
+                    reason);
+            }
+            finally
+            {
+                try { Directory.Delete(parent, true); } catch (IOException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); } catch (UnauthorizedAccessException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); }
             }
         }
 

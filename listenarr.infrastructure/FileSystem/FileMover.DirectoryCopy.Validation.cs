@@ -25,9 +25,7 @@ public partial class FileMover
             return false;
         }
 
-        var comparer = OperatingSystem.IsWindows()
-            ? StringComparer.OrdinalIgnoreCase
-            : StringComparer.Ordinal;
+        var comparer = DirectoryCopySnapshotPathComparer;
         if (!snapshot.RelativeDirectories.SequenceEqual(
                 currentSnapshot.RelativeDirectories,
                 comparer)
@@ -94,9 +92,7 @@ public partial class FileMover
             return false;
         }
 
-        var comparer = OperatingSystem.IsWindows()
-            ? StringComparer.OrdinalIgnoreCase
-            : StringComparer.Ordinal;
+        var comparer = DirectoryCopySnapshotPathComparer;
         var relativeDirectories = candidateDirectories
             .Select(path => GetVerifiedRelativePath(candidateRoot, path))
             .OrderBy(PathDepth)
@@ -161,9 +157,7 @@ public partial class FileMover
                 return;
             }
 
-            var comparer = OperatingSystem.IsWindows()
-                ? StringComparer.OrdinalIgnoreCase
-                : StringComparer.Ordinal;
+            var comparer = DirectoryCopySnapshotPathComparer;
             var expectedFiles = snapshot.Files
                 .Select(file => file.RelativePath)
                 .ToHashSet(comparer);

@@ -89,7 +89,10 @@ internal static partial class FileSystemSafety
             }
 
             var normalizedTarget = normalizedPath;
-            var normalizedRoots = new HashSet<string>(PathComparer);
+            // Mutation authorization must not assume all Windows directories are
+            // case-insensitive. Without pinned proof that two differently-cased
+            // spellings identify the same boundary, fail closed on lexical aliases.
+            var normalizedRoots = new HashSet<string>(StringComparer.Ordinal);
             foreach (var root in allowedRoots.Where(root => !string.IsNullOrWhiteSpace(root)))
             {
                 if (FileSystemPathIdentity.TryCanonicalizeStoredAbsolutePathForHost(
@@ -108,7 +111,7 @@ internal static partial class FileSystemSafety
             }
 
             var candidateRoots = normalizedRoots
-                .Where(root => FileUtils.IsPathSameOrInside(normalizedTarget, root))
+                .Where(root => IsSameOrInsideMutationBoundary(normalizedTarget, root))
                 .OrderByDescending(root => root.Length)
                 .ToList();
             if (candidateRoots.Count == 0)
@@ -234,9 +237,9 @@ internal static partial class FileSystemSafety
             return false;
         }
 
-        if (!FileUtils.IsPathSameOrInside(existingTargetPath, existingRootPath))
+        if (!IsSameOrInsideMutationBoundary(existingTargetPath, existingRootPath))
         {
-            if (FileUtils.IsPathSameOrInside(existingRootPath, existingTargetPath))
+            if (IsSameOrInsideMutationBoundary(existingRootPath, existingTargetPath))
             {
                 existingTargetPath = existingRootPath;
             }
@@ -269,7 +272,7 @@ internal static partial class FileSystemSafety
                 : null;
             currentResolvedPath = Path.GetFullPath(
                 resolvedTarget?.FullName ?? Path.Join(currentResolvedPath, segment));
-            if (!FileUtils.IsPathSameOrInside(currentResolvedPath, resolvedRootPath))
+            if (!IsSameOrInsideMutationBoundary(currentResolvedPath, resolvedRootPath))
             {
                 reason = "Target path resolves outside an allowed mutation root through a linked path component.";
                 return false;
@@ -336,8 +339,77 @@ internal static partial class FileSystemSafety
         }
     }
 
-    private static StringComparer PathComparer =>
-        OperatingSystem.IsWindows()
-            ? StringComparer.OrdinalIgnoreCase
-            : StringComparer.Ordinal;
+    internal static bool IsSameOrInsideMutationBoundary(
+        string candidatePath,
+        string rootPath,
+        FileSystemPathSyntax? syntax = null)
+    {
+        var effectiveSyntax = syntax
+            ?? (OperatingSystem.IsWindows()
+                ? FileSystemPathSyntax.Windows
+                : FileSystemPathSyntax.Unix);
+        var sensitiveSemantics = new FileSystemPathSemantics(
+            effectiveSyntax,
+            FileSystemCaseSensitivity.Sensitive);
+        if (FileSystemPathIdentity.IsSameOrInside(
+                candidatePath,
+                rootPath,
+                sensitiveSemantics))
+        {
+            return true;
+        }
+
+        // A Windows namespace can be case-insensitive or case-sensitive per
+        // directory. Accept a differently-cased spelling only when the candidate
+        // prefix that corresponds to the allowed root can be pinned and proven to
+        // identify the same physical directory. This preserves normal Windows case
+        // aliases without authorizing a case-distinct sibling on a sensitive parent.
+        if (effectiveSyntax != FileSystemPathSyntax.Windows
+            || !OperatingSystem.IsWindows())
+        {
+            return false;
+        }
+
+        var insensitiveSemantics = new FileSystemPathSemantics(
+            FileSystemPathSyntax.Windows,
+            FileSystemCaseSensitivity.Insensitive);
+        if (!FileSystemPathIdentity.IsSameOrInside(
+                candidatePath,
+                rootPath,
+                insensitiveSemantics))
+        {
+            return false;
+        }
+
+        try
+        {
+            var canonicalRoot = FileSystemPathIdentity.Canonicalize(
+                rootPath,
+                FileSystemPathSyntax.Windows);
+            var canonicalCandidate = FileSystemPathIdentity.Canonicalize(
+                candidatePath,
+                FileSystemPathSyntax.Windows);
+            if (canonicalCandidate.Length < canonicalRoot.Length)
+            {
+                return false;
+            }
+
+            var candidateRootAlias = canonicalCandidate[..canonicalRoot.Length];
+            using var expectedRoot = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
+                canonicalRoot,
+                createMissing: false);
+            using var candidateRoot = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
+                candidateRootAlias,
+                createMissing: false);
+            return string.Equals(
+                expectedRoot.GetDirectoryObjectIdentity(),
+                candidateRoot.GetDirectoryObjectIdentity(),
+                StringComparison.Ordinal);
+        }
+        catch (Exception exception) when (exception is not (
+            OperationCanceledException or OutOfMemoryException or StackOverflowException))
+        {
+            return false;
+        }
+    }
 }

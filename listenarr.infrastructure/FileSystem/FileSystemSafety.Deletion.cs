@@ -61,7 +61,7 @@ internal static partial class FileSystemSafety
                     roots,
                     out var revalidatedDirectory,
                     out reason)
-                || !PathComparer.Equals(normalizedDirectory, revalidatedDirectory)
+                || !StringComparer.Ordinal.Equals(normalizedDirectory, revalidatedDirectory)
                 || !pinnedDirectory.VisiblePathMatches())
             {
                 reason = string.IsNullOrWhiteSpace(reason)
@@ -153,7 +153,7 @@ internal static partial class FileSystemSafety
                     roots,
                     out var revalidatedFile,
                     out reason)
-                || !PathComparer.Equals(normalizedFile, revalidatedFile)
+                || !StringComparer.Ordinal.Equals(normalizedFile, revalidatedFile)
                 || !parent.VisiblePathMatches()
                 || !entry.VisiblePathMatches())
             {
