@@ -7,72 +7,42 @@ internal sealed partial class AudiobookContentMoveService
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        cancellationToken.ThrowIfCancellationRequested();
+        await EnsureLeaseOwnedAsync(
+            request.JobId,
+            request.LeaseToken,
+            cancellationToken);
+        await EnsureCurrentExecutionProtocolAsync(
+            request.JobId,
+            cancellationToken);
+        await ValidatePersistedMoveIdentityAsync(
+            request.JobId,
+            request.Source,
+            request.Target,
+            request.SourceSemantics,
+            request.TargetSemantics,
+            request.LeaseToken,
+            cancellationToken);
         request = await WithValidatedTargetDirectoryOwnershipAsync(
             request,
             cancellationToken);
-
-        var source = NormalizeMoveDirectoryEndpoint(request.Source);
-        var target = NormalizeMoveDirectoryEndpoint(request.Target);
-        await EnsureLeaseOwnedAsync(request.JobId, request.LeaseToken, cancellationToken);
-        await ValidatePersistedMoveIdentityAsync(
+        var manifest = await LoadManifestAsync(
             request.JobId,
-            source,
-            target,
-            request.SourceSemantics,
-            request.TargetSemantics,
-            request.LeaseToken,
             cancellationToken);
-
-        ValidateMoveRootPath(source, mustExist: false, "source recovery");
-        ValidateMoveTargetRoot(target);
-        if (!Directory.Exists(target))
-        {
-            throw new MoveNeedsAttentionException(
-                "The finalized move target no longer exists.");
-        }
-
-        var manifest = await LoadManifestAsync(request.JobId, cancellationToken);
         if (manifest.Count == 0)
         {
             throw new MoveNeedsAttentionException(
-                "A markerless finalized move cannot be verified without a persisted manifest.");
+                "Finalized move verification requires a persisted manifest.");
         }
 
-        faultInjector?.OnFinalizedVerification(
-            request.JobId,
-            FinalizedVerificationFaultPoint.BeforeManifestVerification);
-        ValidateTargetManifest(target, manifest, request.TargetSemantics);
-        var tempOwnership = await TryValidatePublishedTempOwnershipAsync(
-            target,
+        await VerifyMarkerlessTargetAsync(
             request,
-            source,
-            target,
-            cancellationToken);
-        var quarantineOwnership = await TryValidateExistingQuarantineDirectoryAsync(
-            source,
-            target,
-            request.JobId,
-            request.SourceSemantics,
-            request.TargetSemantics,
-            request.LeaseToken,
-            cancellationToken);
-        ValidateExistingDestinationContents(
-            source,
-            target,
+            request.Target,
             manifest,
-            request.JobId,
-            request.TargetSemantics,
-            tempOwnership,
-            quarantineOwnership,
-            allowPartialFiles: false,
-            targetDirectoryOwnership: request.TargetDirectoryOwnership);
-        await VerifyPublishedManifestAsync(
-            target,
-            manifest,
-            request.TargetSemantics,
             cancellationToken);
-
-        VerifySourceCleanupState(request, source, target, manifest);
+        VerifySourceCleanupState(
+            request,
+            request.Source,
+            request.Target,
+            manifest);
     }
 }

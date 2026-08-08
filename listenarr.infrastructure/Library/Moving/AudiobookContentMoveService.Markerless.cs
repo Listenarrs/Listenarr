@@ -12,12 +12,6 @@ internal sealed partial class AudiobookContentMoveService
         bool sourceInsideTarget,
         CancellationToken cancellationToken)
     {
-        if (HasLegacyFilesystemRecoveryArtifacts(source, target, request.JobId))
-        {
-            throw new MoveNeedsAttentionException(
-                "A markerless move encountered legacy filesystem recovery artifacts. They were preserved for explicit recovery.");
-        }
-
         await ReportProgressAsync(request, 2, "Preparing", cancellationToken);
         var manifest = await LoadManifestAsync(request.JobId, cancellationToken);
         if (manifest.Count == 0)
@@ -94,11 +88,7 @@ internal sealed partial class AudiobookContentMoveService
             targetInsideSource,
             request.SourceSemantics,
             cancellationToken,
-            ownedRecoveryMarkerPath: null,
-            ownedScaffoldPaths: [],
-            structuralSpinePaths: targetStructuralSpine,
-            ownedDirectoryMarkerPaths: [],
-            request.SourceCleanupBoundary);
+            structuralSpinePaths: targetStructuralSpine);
 
         await ReportProgressAsync(request, 3, "Capturing source", cancellationToken);
         await CaptureMarkerlessSourceIdentitiesAsync(
@@ -130,12 +120,8 @@ internal sealed partial class AudiobookContentMoveService
             source,
             target,
             manifest,
-            request.JobId,
             request.TargetSemantics,
-            tempOwnership: null,
-            quarantineOwnership: null,
-            allowPartialFiles: false,
-            targetDirectoryOwnership: request.TargetDirectoryOwnership);
+            request.TargetDirectoryOwnership);
         await UpdateJobPhaseAsync(
             request.JobId,
             request.LeaseToken,
@@ -287,7 +273,6 @@ internal sealed partial class AudiobookContentMoveService
             target,
             targetInsideSource,
             sourceInsideTarget,
-            RecoveryMarkerPath: string.Empty,
             SourceCleanupCompleted: true,
             targetIdentities,
             targetVerificationLease);
@@ -354,7 +339,6 @@ internal sealed partial class AudiobookContentMoveService
             target,
             IsSameOrInside(target, source, request.SourceSemantics),
             IsSameOrInside(source, target, request.TargetSemantics),
-            RecoveryMarkerPath: string.Empty,
             SourceCleanupCompleted: true,
             identities);
     }

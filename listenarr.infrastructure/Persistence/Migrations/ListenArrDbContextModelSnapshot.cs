@@ -420,13 +420,17 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
 
                     b.Property<string>("PathCaseSensitivity")
                         .IsRequired()
+                        .ValueGeneratedOnAdd()
                         .HasMaxLength(16)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("Unknown");
 
                     b.Property<string>("PathCaseSensitivityMode")
                         .IsRequired()
+                        .ValueGeneratedOnAdd()
                         .HasMaxLength(16)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("Auto");
 
                     b.Property<string>("PathIdentityBoundary")
                         .HasMaxLength(4096)
@@ -442,11 +446,15 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
 
                     b.Property<string>("PathIdentityState")
                         .IsRequired()
+                        .ValueGeneratedOnAdd()
                         .HasMaxLength(16)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("Unavailable");
 
                     b.Property<int>("PathIdentityVersion")
-                        .HasColumnType("INTEGER");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1);
 
                     b.Property<string>("PathOwnershipKey")
                         .HasMaxLength(160)
@@ -743,11 +751,6 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                         .HasMaxLength(16)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("State")
-                        .IsRequired()
-                        .HasMaxLength(24)
-                        .HasColumnType("TEXT");
-
                     b.Property<string>("TargetCanonicalPath")
                         .IsRequired()
                         .HasMaxLength(4096)
@@ -797,92 +800,6 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("LibraryDirectoryOwnershipPathMigrations", (string)null);
-                });
-
-            modelBuilder.Entity("Listenarr.Domain.Audiobooks.LibraryDirectoryOwnershipRetiredMarker", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("CanonicalMarkerPath")
-                        .HasMaxLength(4096)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("CanonicalOwnershipPath")
-                        .IsRequired()
-                        .HasMaxLength(4096)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("CanonicalPayload")
-                        .HasMaxLength(16384)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("DirectoryObjectIdentity")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<int?>("DirectoryObjectIdentityVersion")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int?>("OriginalManagedRootFolderId")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<long>("OwnershipId")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("OwnershipToken")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("PathCaseSensitivity")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("PathCaseSensitivityMode")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("PathIdentityBoundary")
-                        .IsRequired()
-                        .HasMaxLength(4096)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("PathSyntax")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("PayloadSha256")
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("PayloadVersion")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("State")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CanonicalMarkerPath")
-                        .IsUnique();
-
-                    b.HasIndex("OwnershipId")
-                        .IsUnique();
-
-                    b.ToTable("LibraryDirectoryOwnershipRetiredMarkers", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Audiobooks.MonitoredAuthor", b =>
@@ -1025,12 +942,14 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.Property<int>("ExecutionProtocolVersion")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")
-                        .HasDefaultValue(1);
+                        .HasDefaultValue(0);
 
                     b.Property<string>("FailureKind")
                         .IsRequired()
+                        .ValueGeneratedOnAdd()
                         .HasMaxLength(32)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("None");
 
                     b.Property<int>("IdentityKeyVersion")
                         .HasColumnType("INTEGER");
@@ -1052,8 +971,10 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
 
                     b.Property<string>("Phase")
                         .IsRequired()
+                        .ValueGeneratedOnAdd()
                         .HasMaxLength(32)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("None");
 
                     b.Property<Guid?>("RelocationId")
                         .HasColumnType("TEXT");
@@ -1380,8 +1301,10 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
 
                     b.Property<string>("CaseSensitivityMode")
                         .IsRequired()
+                        .ValueGeneratedOnAdd()
                         .HasMaxLength(16)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("Auto");
 
                     b.Property<DateTime>("CreatedAt")
                         .ValueGeneratedOnAdd()
@@ -1420,13 +1343,17 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
 
                     b.Property<string>("PathIdentityState")
                         .IsRequired()
+                        .ValueGeneratedOnAdd()
                         .HasMaxLength(16)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("Unavailable");
 
                     b.Property<string>("ResolvedCaseSensitivity")
                         .IsRequired()
+                        .ValueGeneratedOnAdd()
                         .HasMaxLength(16)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("Unknown");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("TEXT");
@@ -2460,17 +2387,6 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.Navigation("Relocation");
                 });
 
-            modelBuilder.Entity("Listenarr.Domain.Audiobooks.LibraryDirectoryOwnershipRetiredMarker", b =>
-                {
-                    b.HasOne("Listenarr.Domain.Audiobooks.LibraryDirectoryOwnership", "Ownership")
-                        .WithOne("RetiredMarker")
-                        .HasForeignKey("Listenarr.Domain.Audiobooks.LibraryDirectoryOwnershipRetiredMarker", "OwnershipId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Ownership");
-                });
-
             modelBuilder.Entity("Listenarr.Domain.Audiobooks.MoveJob", b =>
                 {
                     b.HasOne("Listenarr.Domain.Audiobooks.RootFolderRelocation", "Relocation")
@@ -2558,8 +2474,6 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("Listenarr.Domain.Audiobooks.LibraryDirectoryOwnership", b =>
                 {
                     b.Navigation("PathMigrations");
-
-                    b.Navigation("RetiredMarker");
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Audiobooks.MoveJob", b =>

@@ -28,7 +28,7 @@ internal sealed partial class AudiobookContentMoveService
         if (!Directory.Exists(sourcePath))
         {
             if (entry.CleanupState is
-                MoveJobEntryCleanupState.DeletionAuthorized
+                MoveJobEntryCleanupState.DeleteAuthorized
                     or MoveJobEntryCleanupState.Deleted)
             {
                 if (ownership != null)
@@ -105,9 +105,9 @@ internal sealed partial class AudiobookContentMoveService
                     request.JobId,
                     request.LeaseToken,
                     entry.RelativePath,
-                    MoveJobEntryCleanupState.DeletionAuthorized,
+                    MoveJobEntryCleanupState.DeleteAuthorized,
                     cancellationToken);
-                entry.CleanupState = MoveJobEntryCleanupState.DeletionAuthorized;
+                entry.CleanupState = MoveJobEntryCleanupState.DeleteAuthorized;
             }
 
             if (ownership == null)
@@ -199,7 +199,7 @@ internal sealed partial class AudiobookContentMoveService
         if (!Directory.Exists(source))
         {
             if (endpoints.SourceDirectoryCleanupState is
-                MoveJobEntryCleanupState.DeletionAuthorized
+                MoveJobEntryCleanupState.DeleteAuthorized
                     or MoveJobEntryCleanupState.Deleted)
             {
                 if (ownership != null)
@@ -277,7 +277,7 @@ internal sealed partial class AudiobookContentMoveService
                 await UpdateSourceDirectoryCleanupStateAsync(
                     request.JobId,
                     request.LeaseToken,
-                    MoveJobEntryCleanupState.DeletionAuthorized,
+                    MoveJobEntryCleanupState.DeleteAuthorized,
                     cancellationToken);
             }
 

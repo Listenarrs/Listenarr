@@ -186,7 +186,6 @@
         </p>
       </template>
     </DeleteConfirmationModal>
-
   </div>
 </template>
 

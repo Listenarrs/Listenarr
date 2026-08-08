@@ -63,14 +63,22 @@ public static class MoveRecoveryPolicy
     public static bool BlocksFilesystemMutation(MoveJob job)
     {
         ArgumentNullException.ThrowIfNull(job);
-        if (job.Status.IsActive())
-        {
-            return true;
-        }
-
         if (job.Status is MoveJobStatus.Completed or MoveJobStatus.Superseded)
         {
             return false;
+        }
+
+        if (!MoveExecutionProtocol.IsCurrent(job.ExecutionProtocolVersion))
+        {
+            // Released pre-durable jobs and unsupported development protocols cannot
+            // carry trustworthy manifest/generation evidence. Their absence of current
+            // evidence is therefore not proof that no filesystem mutation occurred.
+            return true;
+        }
+
+        if (job.Status.IsActive())
+        {
+            return true;
         }
 
         return job.Status is MoveJobStatus.Failed or MoveJobStatus.NeedsAttention
@@ -80,14 +88,19 @@ public static class MoveRecoveryPolicy
     public static MoveRecoveryDisposition GetDisposition(MoveJob job)
     {
         ArgumentNullException.ThrowIfNull(job);
-        if (job.Status.IsActive())
-        {
-            return MoveRecoveryDisposition.InProgress;
-        }
-
         if (job.Status is MoveJobStatus.Completed or MoveJobStatus.Superseded)
         {
             return MoveRecoveryDisposition.None;
+        }
+
+        if (!MoveExecutionProtocol.IsCurrent(job.ExecutionProtocolVersion))
+        {
+            return MoveRecoveryDisposition.OperatorRepairRequired;
+        }
+
+        if (job.Status.IsActive())
+        {
+            return MoveRecoveryDisposition.InProgress;
         }
 
         if (job.Status == MoveJobStatus.Failed)
@@ -121,7 +134,7 @@ public static class MoveRecoveryPolicy
 
     private static bool HasCompletedMarkerlessRecoveryEvidence(MoveJob job)
     {
-        if (job.ExecutionProtocolVersion < MoveExecutionProtocol.MarkerlessDatabaseState
+        if (!MoveExecutionProtocol.IsCurrent(job.ExecutionProtocolVersion)
             || job.SourceDirectoryCleanupState != MoveJobEntryCleanupState.Deleted
             || string.IsNullOrWhiteSpace(job.TargetDirectoryObjectIdentity)
             || string.IsNullOrWhiteSpace(job.RequestedPath))

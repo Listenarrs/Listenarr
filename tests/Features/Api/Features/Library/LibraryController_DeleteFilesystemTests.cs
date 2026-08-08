@@ -1096,10 +1096,6 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 Assert.Equal(LibraryDirectoryOwnershipState.Removed, ownership.State);
                 Assert.Null(ownership.PathOwnershipKey);
             });
-            Assert.All(ownerships, ownership =>
-                Assert.All(
-                    LibraryDirectoryOwnershipMarker.GetMarkerPaths(ownership),
-                    markerPath => Assert.False(File.Exists(markerPath))));
         }
 
         [Fact]
@@ -1581,19 +1577,11 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 new FailingNthMarkRemovedOwnershipStore(ownershipStore, failOnCall: 2),
                 _provider.GetRequiredService<ILogger<AudiobookFilesystemDeleteService>>(),
                 _provider.GetRequiredService<LibraryDirectoryOwnershipBoundaryAuthorizer>());
-            var authorSiblingMarker = LibraryDirectoryOwnershipMarker
-                .GetMarkerPaths(authorOwnership)
-                .Single(path => !FileSystemPathIdentity.IsSameOrInside(
-                    path,
-                    authorFolder,
-                    FileSystemPathSemantics.CurrentHostDefault));
-
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 failingService.DeleteAsync(audiobook, deleteFolder: true));
 
             Assert.False(Directory.Exists(bookFolder));
             Assert.False(Directory.Exists(authorFolder));
-            Assert.False(File.Exists(authorSiblingMarker));
             var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
             await using (var interruptedDb = await factory.CreateDbContextAsync())
             {
@@ -1609,7 +1597,6 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             var normalService = _provider.GetRequiredService<IAudiobookFilesystemDeleteService>();
             await normalService.DeleteAsync(audiobook, deleteFolder: true);
 
-            Assert.False(File.Exists(authorSiblingMarker));
             await using var recoveredDb = await factory.CreateDbContextAsync();
             var recoveredAuthor = await recoveredDb.LibraryDirectoryOwnerships.AsNoTracking()
                 .SingleAsync(candidate => candidate.Id == authorOwnership.Id);

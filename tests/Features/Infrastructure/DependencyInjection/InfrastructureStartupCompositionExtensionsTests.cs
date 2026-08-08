@@ -86,11 +86,15 @@ public sealed class InfrastructureStartupCompositionExtensionsTests : BaseTests
             .GetRequiredService<IDbContextFactory<ListenArrDbContext>>()
             .CreateDbContext();
         var moveJob = verification.MoveJobs.AsNoTracking().Single(job => job.Id == moveJobId);
-        Assert.Equal(MoveJobStatus.Running, moveJob.Status);
-        Assert.Equal(1, moveJob.IdentityKeyVersion);
-        Assert.Equal(
-            $"legacy:{moveJobId.ToString().ToUpperInvariant()}",
-            moveJob.ActiveDeduplicationKey);
+        Assert.Equal(MoveJobStatus.NeedsAttention, moveJob.Status);
+        Assert.Equal(MoveFailureKind.Verification, moveJob.FailureKind);
+        Assert.Equal(MoveExecutionProtocol.PreDurableReleased, moveJob.ExecutionProtocolVersion);
+        Assert.Equal(0, moveJob.IdentityKeyVersion);
+        Assert.Null(moveJob.ActiveDeduplicationKey);
+        Assert.Contains(
+            "pre-durable released version",
+            moveJob.Error,
+            StringComparison.Ordinal);
         Assert.Equal([10], verification.RootFolders
             .AsNoTracking()
             .Where(root => root.IsDefault)
@@ -147,64 +151,9 @@ public sealed class InfrastructureStartupCompositionExtensionsTests : BaseTests
             .CreateDbContext();
         var moveJob = verification.MoveJobs.AsNoTracking().Single(job => job.Id == moveJobId);
         Assert.Equal(MoveJobStatus.Running, moveJob.Status);
+        Assert.Equal(MoveExecutionProtocol.Current, moveJob.ExecutionProtocolVersion);
         Assert.Equal(MoveManifestIdentity.Version, moveJob.IdentityKeyVersion);
         Assert.Equal(currentKey, moveJob.ActiveDeduplicationKey);
-    }
-
-    [Fact]
-    [Trait("Scenario", "LegacyOwnershipForeignKeyMigration")]
-    public void ApplyListenarrDatabaseMigrations_RepairsLegacyOwnershipBeforeForeignKey()
-    {
-        using var connection = new SqliteConnection("DataSource=:memory:");
-        connection.Open();
-        var baselineOptions = new DbContextOptionsBuilder<ListenArrDbContext>()
-            .UseSqlite(connection, sqlite =>
-                sqlite.MigrationsAssembly(
-                    typeof(ListenArrDbContext).Assembly.GetName().Name))
-            .Options;
-        using (var baseline = new ListenArrDbContext(baselineOptions))
-        {
-            baseline.GetService<IMigrator>().Migrate(
-                LibraryDirectoryOwnershipMigrationPreflight.PredecessorMigrationId);
-            baseline.Database.ExecuteSqlRaw(
-                """
-                INSERT INTO "LibraryDirectoryOwnerships" (
-                    "Id", "Path", "CanonicalPath", "PathSyntax",
-                    "PathCaseSensitivity", "PathCaseSensitivityMode",
-                    "PathIdentityBoundary", "PathIdentityLookupKey",
-                    "PathOwnershipKey", "OwnershipToken", "State",
-                    "CreationWorkflow", "CreatedAt", "UpdatedAt",
-                    "ManagedRootFolderId")
-                VALUES (
-                    404, '/orphan', '/orphan', 'Unix', 'Sensitive',
-                    'Sensitive', '/orphan', 'lookup-404', 'ownership-404',
-                    '40440440440440440440440440440440', 'Owned', 'test',
-                    '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', 999);
-                """);
-        }
-
-        var services = new ServiceCollection();
-        services.AddDbContextFactory<ListenArrDbContext>(options =>
-            options
-                .UseSqlite(connection, sqlite =>
-                    sqlite.MigrationsAssembly(
-                        typeof(ListenArrDbContext).Assembly.GetName().Name))
-                .ConfigureWarnings(warnings => warnings.Throw(
-                    RelationalEventId.NonTransactionalMigrationOperationWarning)));
-        using var provider = services.BuildServiceProvider();
-
-        provider.ApplyListenarrDatabaseMigrations();
-
-        var factory = provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
-        using var verification = factory.CreateDbContext();
-        var ownership = verification.LibraryDirectoryOwnerships.Single(
-            candidate => candidate.Id == 404);
-        Assert.Equal(LibraryDirectoryOwnershipState.Unavailable, ownership.State);
-        Assert.Null(ownership.ManagedRootFolderId);
-        Assert.Null(ownership.PathOwnershipKey);
-        Assert.Contains(
-            LibraryDirectoryOwnershipMigrationPreflight.ForeignKeyMigrationId,
-            verification.Database.GetAppliedMigrations());
     }
 
     [Fact]

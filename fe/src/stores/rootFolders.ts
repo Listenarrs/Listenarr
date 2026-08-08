@@ -140,7 +140,7 @@ export const useRootFoldersStore = defineStore('rootFolders', () => {
     return result
   }
 
-async function remove(id: number, reassignTo?: number) {
+  async function remove(id: number, reassignTo?: number) {
     const r = await apiService.deleteRootFolder(id, reassignTo)
     await load()
     return r

@@ -25,17 +25,6 @@ public enum TargetIdentityEnrollmentState
     NotRequired
 }
 
-public enum LibraryDirectoryOwnershipPathMigrationState
-{
-    Prepared,
-    MarkersPublished,
-    MetadataCommitted,
-    SourceMarkersRetired,
-    TargetValidated,
-    MarkerlessCommitted,
-    MarkerlessRetired
-}
-
 public enum RootFolderRelocationCreatedDirectoryState
 {
     Planned,
@@ -127,8 +116,6 @@ public sealed class LibraryDirectoryOwnershipPathMigration
     public string TargetIdentityLookupKey { get; set; } = string.Empty;
     [Required, MaxLength(160)]
     public string TargetOwnershipKey { get; set; } = string.Empty;
-    public LibraryDirectoryOwnershipPathMigrationState State { get; set; } =
-        LibraryDirectoryOwnershipPathMigrationState.Prepared;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }

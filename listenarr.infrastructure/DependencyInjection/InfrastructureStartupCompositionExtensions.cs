@@ -71,16 +71,6 @@ public static class InfrastructureStartupCompositionExtensions
                     repairedLegacyData.DefaultRootsNormalized);
             }
 
-            var repairedOwnershipReferences =
-                LibraryDirectoryOwnershipMigrationPreflight
-                    .RepairLegacyForeignKeyReferences(ctx);
-            if (repairedOwnershipReferences > 0)
-            {
-                Log.Logger.Warning(
-                    "[Startup] Repaired {Count} legacy directory ownership root reference(s) before applying the ownership foreign key migration",
-                    repairedOwnershipReferences);
-            }
-
             ctx.Database.Migrate();
             var repairedPostMigrationData =
                 ListenarrDatabaseMigrationPreflight.RepairPostMigrationData(ctx);
@@ -89,12 +79,6 @@ public static class InfrastructureStartupCompositionExtensions
                 Log.Logger.Warning(
                     "[Startup] Normalized {Count} legacy move job row(s) after applying durable move migrations",
                     repairedPostMigrationData.MoveJobsRepaired);
-            }
-            if (repairedPostMigrationData.AudiobookFilesRepaired > 0)
-            {
-                Log.Logger.Warning(
-                    "[Startup] Normalized {Count} legacy audiobook file identity row(s) after applying ownership schema migrations",
-                    repairedPostMigrationData.AudiobookFilesRepaired);
             }
             Log.Logger.Information("[Startup] EF Core migrations applied successfully");
         }

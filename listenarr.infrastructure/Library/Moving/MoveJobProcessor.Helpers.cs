@@ -178,7 +178,6 @@ namespace Listenarr.Infrastructure.Library.Moving
                     target,
                     targetInsideSource,
                     sourceInsideTarget,
-                    Path.Join(target, $".listenarr-move-{job.Id:N}.pending"),
                     SourceCleanupCompleted: true,
                     targetPhysicalObjectIdentities));
         }

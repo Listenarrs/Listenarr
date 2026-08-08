@@ -224,7 +224,6 @@ public partial class MoveJobProcessorTests
         var service = _provider.GetRequiredService<AudiobookContentMoveService>();
         var request = CreateMoveRequest(source, target, job, deleteEmptySource: false);
         var result = await service.MoveContentsAsync(request, CancellationToken.None);
-        Assert.Empty(result.RecoveryMarkerPath);
         var persistedJob = Assert.IsType<MoveJob>(
             await queue.GetJobAsync(job.Id));
         Assert.Equal(MoveJobPhase.Finalizing, persistedJob.Phase);
@@ -243,8 +242,6 @@ public partial class MoveJobProcessorTests
         Assert.Equal(
             Path.GetFullPath(target),
             Path.GetFullPath(Assert.IsType<string>(updated.BasePath)));
-        Assert.False(File.Exists(Path.Join(target, ".listenarr-temp-owner.json")));
-        Assert.False(File.Exists(result.RecoveryMarkerPath));
         Assert.Single(
             await _historyRepository.GetByCorrelationIdAsync($"move:{job.Id:N}"),
             entry => entry.EventType == "Moved");
@@ -270,7 +267,6 @@ public partial class MoveJobProcessorTests
         audiobook.BasePath = target;
         await _audiobookRepository.UpdateAsync(audiobook);
         await service.FinalizeMoveAsync(request, result, CancellationToken.None);
-        Assert.Empty(result.RecoveryMarkerPath);
         var processor = _provider.GetRequiredService<IMoveJobProcessor>();
 
         await processor.ProcessJobAsync(job, CancellationToken.None);
@@ -305,7 +301,6 @@ public partial class MoveJobProcessorTests
         audiobook.BasePath = target;
         await _audiobookRepository.UpdateAsync(audiobook);
         await service.FinalizeMoveAsync(request, result, CancellationToken.None);
-        Assert.Empty(result.RecoveryMarkerPath);
         Directory.Delete(target, recursive: true);
         if (!string.Equals(mutation, "deleted", StringComparison.Ordinal))
         {
@@ -351,7 +346,6 @@ public partial class MoveJobProcessorTests
         await _audiobookRepository.UpdateAsync(audiobook);
         await service.FinalizeMoveAsync(request, result, CancellationToken.None);
         result.TargetVerificationLease?.Dispose();
-        Assert.Empty(result.RecoveryMarkerPath);
         return new MarkerlessFinalizedCopyState(queue, job, source, target);
     }
 

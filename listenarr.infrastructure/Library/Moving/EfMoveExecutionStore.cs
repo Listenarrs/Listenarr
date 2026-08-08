@@ -48,14 +48,13 @@ internal sealed partial class EfMoveExecutionStore(
             },
             cancellationToken);
 
-    public Task ValidateOrAdoptIdentityAsync(
+    public Task ValidateIdentityAsync(
         Guid jobId,
         string source,
         string target,
         FileSystemPathSemantics sourceSemantics,
         FileSystemPathSemantics targetSemantics,
         MoveLeaseToken leaseToken,
-        bool hasFilesystemRecoveryArtifacts,
         CancellationToken cancellationToken) =>
         ExecuteAsync(
             "validate the persisted move identity",
@@ -84,54 +83,8 @@ internal sealed partial class EfMoveExecutionStore(
                 var persistedSource = identity.SourcePath;
                 if (string.IsNullOrWhiteSpace(persistedSource))
                 {
-                    var hasManifest = await db.MoveJobEntries.AnyAsync(
-                        entry => entry.MoveJobId == jobId,
-                        cancellationToken);
-                    if (hasManifest || hasFilesystemRecoveryArtifacts)
-                    {
-                        throw new MoveNeedsAttentionException(
-                            "A legacy move without a persisted source cannot own existing recovery artifacts.");
-                    }
-
-                    var nowUtc = timeProvider.GetUtcNow().UtcDateTime;
-                    if (!db.Database.IsRelational())
-                    {
-                        var job = await db.MoveJobs.SingleOrDefaultAsync(
-                            candidate => candidate.Id == jobId
-                                && candidate.Status == MoveJobStatus.Running
-                                && candidate.LeaseOwner == leaseToken.Owner
-                                && candidate.LeaseGeneration == leaseToken.Generation
-                                && candidate.LeaseExpiresAt != null
-                                && candidate.LeaseExpiresAt > nowUtc,
-                            cancellationToken);
-                        if (job == null || !string.IsNullOrWhiteSpace(job.SourcePath))
-                        {
-                            throw new MoveLeaseLostException(jobId, leaseToken.Generation);
-                        }
-
-                        job.SourcePath = source;
-                        await db.SaveChangesAsync(cancellationToken);
-                    }
-                    else
-                    {
-                        var affected = await db.MoveJobs
-                            .Where(candidate => candidate.Id == jobId
-                                && candidate.SourcePath == identity.SourcePath
-                                && candidate.Status == MoveJobStatus.Running
-                                && candidate.LeaseOwner == leaseToken.Owner
-                                && candidate.LeaseGeneration == leaseToken.Generation
-                                && candidate.LeaseExpiresAt != null
-                                && candidate.LeaseExpiresAt > nowUtc)
-                            .ExecuteUpdateAsync(
-                                updates => updates.SetProperty(job => job.SourcePath, source),
-                                cancellationToken);
-                        if (affected != 1)
-                        {
-                            throw new MoveLeaseLostException(jobId, leaseToken.Generation);
-                        }
-                    }
-
-                    persistedSource = source;
+                    throw new MoveNeedsAttentionException(
+                        "Persisted move source identity is required before filesystem mutation.");
                 }
 
                 EnsureEquivalentIdentity(
@@ -253,37 +206,49 @@ internal sealed partial class EfMoveExecutionStore(
                 EnsureLeaseTokenProvided(jobId, leaseToken);
                 var nowUtc = timeProvider.GetUtcNow().UtcDateTime;
                 await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+                var entry = await db.MoveJobEntries
+                    .Include(candidate => candidate.MoveJob)
+                    .SingleOrDefaultAsync(
+                        candidate => candidate.MoveJobId == jobId
+                            && candidate.RelativePath == relativePath,
+                        cancellationToken);
+                if (entry == null
+                    || entry.MoveJob.Status != MoveJobStatus.Running
+                    || !string.Equals(
+                        entry.MoveJob.LeaseOwner,
+                        leaseToken.Owner,
+                        StringComparison.Ordinal)
+                    || entry.MoveJob.LeaseGeneration != leaseToken.Generation
+                    || entry.MoveJob.LeaseExpiresAt == null
+                    || entry.MoveJob.LeaseExpiresAt <= nowUtc)
+                {
+                    throw new MoveLeaseLostException(jobId, leaseToken.Generation);
+                }
+
+                var observedState = entry.CleanupState;
+                var desiredState = AdvanceCleanupState(observedState, cleanupState);
                 if (!db.Database.IsRelational())
                 {
-                    var entry = await db.MoveJobEntries.SingleOrDefaultAsync(
-                        candidate => candidate.MoveJobId == jobId
-                            && candidate.RelativePath == relativePath
-                            && candidate.MoveJob.Status == MoveJobStatus.Running
-                            && candidate.MoveJob.LeaseOwner == leaseToken.Owner
-                            && candidate.MoveJob.LeaseGeneration == leaseToken.Generation
-                            && candidate.MoveJob.LeaseExpiresAt != null
-                            && candidate.MoveJob.LeaseExpiresAt > nowUtc,
-                        cancellationToken);
-                    if (entry == null)
-                    {
-                        throw new MoveLeaseLostException(jobId, leaseToken.Generation);
-                    }
-
-                    entry.CleanupState = cleanupState;
+                    entry.CleanupState = desiredState;
                     await db.SaveChangesAsync(cancellationToken);
                     return;
                 }
 
+                db.Entry(entry).State = EntityState.Detached;
+                db.Entry(entry.MoveJob).State = EntityState.Detached;
                 var affected = await db.MoveJobEntries
-                    .Where(entry => entry.MoveJobId == jobId
-                        && entry.RelativePath == relativePath
-                        && entry.MoveJob.Status == MoveJobStatus.Running
-                        && entry.MoveJob.LeaseOwner == leaseToken.Owner
-                        && entry.MoveJob.LeaseGeneration == leaseToken.Generation
-                        && entry.MoveJob.LeaseExpiresAt != null
-                        && entry.MoveJob.LeaseExpiresAt > nowUtc)
+                    .Where(candidate => candidate.MoveJobId == jobId
+                        && candidate.RelativePath == relativePath
+                        && candidate.CleanupState == observedState
+                        && candidate.MoveJob.Status == MoveJobStatus.Running
+                        && candidate.MoveJob.LeaseOwner == leaseToken.Owner
+                        && candidate.MoveJob.LeaseGeneration == leaseToken.Generation
+                        && candidate.MoveJob.LeaseExpiresAt != null
+                        && candidate.MoveJob.LeaseExpiresAt > nowUtc)
                     .ExecuteUpdateAsync(
-                        updates => updates.SetProperty(entry => entry.CleanupState, cleanupState),
+                        updates => updates.SetProperty(
+                            candidate => candidate.CleanupState,
+                            desiredState),
                         cancellationToken);
                 if (affected != 1)
                 {

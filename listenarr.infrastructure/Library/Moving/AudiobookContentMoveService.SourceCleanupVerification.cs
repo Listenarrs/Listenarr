@@ -15,9 +15,6 @@ internal sealed partial class AudiobookContentMoveService
             return true;
         }
 
-        // Ordinary foreign content may remain in a shared source directory.
-        // The manifest-aware finalized verifier decides whether owned paths were
-        // cleaned; this preflight only rejects an unsafe linked source tree.
         return FileSystemSafety.TryEnumerateTreeWithoutLinks(
             source,
             out _,
@@ -67,7 +64,6 @@ internal sealed partial class AudiobookContentMoveService
                     throw new MoveNeedsAttentionException(
                         $"The completed move source contains a recreated or uncleared owned file path: {entry.RelativePath}");
                 }
-
                 continue;
             }
 
@@ -100,8 +96,7 @@ internal sealed partial class AudiobookContentMoveService
             .Concat(remainingDirectories)
             .Where(entry => !targetInsideSource
                 || (!IsSameOrInside(entry, target, request.SourceSemantics)
-                    && !IsSameOrInside(target, entry, request.SourceSemantics)
-                    && !IsOwnedScaffoldMarker(entry, request, target)))
+                    && !IsSameOrInside(target, entry, request.SourceSemantics)))
             .ToList();
 
         if (ordinaryRemainingEntries.Count == 0
@@ -115,56 +110,5 @@ internal sealed partial class AudiobookContentMoveService
             throw new MoveNeedsAttentionException(
                 "The completed move source directory was recreated after cleanup.");
         }
-    }
-
-    private static bool IsOwnedScaffoldMarker(
-        string entry,
-        AudiobookContentMoveRequest request,
-        string target)
-    {
-        if (!IsScaffoldMarkerOnTargetSpine(entry, target, request.SourceSemantics))
-        {
-            return false;
-        }
-
-        var publishedRoot = Path.GetDirectoryName(entry);
-        if (string.IsNullOrWhiteSpace(publishedRoot))
-        {
-            return false;
-        }
-
-        try
-        {
-            ValidateScaffoldMarker(
-                ReadScaffoldMarker(publishedRoot),
-                request.JobId,
-                target,
-                publishedRoot,
-                request.SourceSemantics);
-            return true;
-        }
-        catch (MoveNeedsAttentionException)
-        {
-            return false;
-        }
-    }
-
-    private static bool IsScaffoldMarkerOnTargetSpine(
-        string entry,
-        string target,
-        FileSystemPathSemantics semantics)
-    {
-        if (!string.Equals(
-                Path.GetFileName(entry),
-                ScaffoldOwnerFileName,
-                StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        var directory = Path.GetDirectoryName(entry);
-        return !string.IsNullOrWhiteSpace(directory)
-            && !FileSystemPathIdentity.AreEquivalent(directory, target, semantics)
-            && FileSystemPathIdentity.IsSameOrInside(target, directory, semantics);
     }
 }

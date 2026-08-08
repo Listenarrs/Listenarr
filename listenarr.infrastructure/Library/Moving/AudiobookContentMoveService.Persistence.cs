@@ -52,15 +52,26 @@ internal sealed partial class AudiobookContentMoveService
         FileSystemPathSemantics targetSemantics,
         MoveLeaseToken leaseToken,
         CancellationToken cancellationToken) =>
-        executionStore.ValidateOrAdoptIdentityAsync(
+        executionStore.ValidateIdentityAsync(
             jobId,
             source,
             target,
             sourceSemantics,
             targetSemantics,
             leaseToken,
-            HasLegacyFilesystemRecoveryArtifacts(source, target, jobId),
             cancellationToken);
+
+    private async Task EnsureCurrentExecutionProtocolAsync(
+        Guid jobId,
+        CancellationToken cancellationToken)
+    {
+        var version = await GetExecutionProtocolVersionAsync(jobId, cancellationToken);
+        if (!MoveExecutionProtocol.IsCurrent(version))
+        {
+            throw new MoveNeedsAttentionException(
+                "This move job does not use the current durable database execution protocol.");
+        }
+    }
 
     private Task<List<MoveJobEntry>> LoadManifestAsync(
         Guid jobId,

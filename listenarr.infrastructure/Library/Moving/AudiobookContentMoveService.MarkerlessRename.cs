@@ -275,9 +275,9 @@ internal sealed partial class AudiobookContentMoveService
             request.JobId,
             request.LeaseToken,
             entry.RelativePath,
-            MoveJobEntryCleanupState.DeletionAuthorized,
+            MoveJobEntryCleanupState.DeleteAuthorized,
             cancellationToken);
-        entry.CleanupState = MoveJobEntryCleanupState.DeletionAuthorized;
+        entry.CleanupState = MoveJobEntryCleanupState.DeleteAuthorized;
         await UpdateCleanupStateAsync(
             request.JobId,
             request.LeaseToken,

@@ -70,7 +70,7 @@ public partial class AudiobookContentMoveServiceTests
         var exception = await Assert.ThrowsAsync<MoveNeedsAttentionException>(() =>
             service.VerifyFinalizedMoveAsync(request, CancellationToken.None));
 
-        Assert.Contains("without a persisted manifest", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("requires a persisted manifest", exception.Message, StringComparison.OrdinalIgnoreCase);
         Assert.True(File.Exists(Path.Join(target, "book.m4b")));
     }
 
@@ -84,8 +84,7 @@ public partial class AudiobookContentMoveServiceTests
             $"content-move-atomic-dst-{Guid.NewGuid():N}");
         var request = await CreateLeasedMoveRequestAsync(source, target);
         var service = _provider.GetRequiredService<AudiobookContentMoveService>();
-        var result = await service.MoveContentsAsync(request, CancellationToken.None);
-        File.Delete(result.RecoveryMarkerPath);
+        await service.MoveContentsAsync(request, CancellationToken.None);
 
         await service.VerifyFinalizedMoveAsync(request, CancellationToken.None);
 
@@ -103,8 +102,7 @@ public partial class AudiobookContentMoveServiceTests
             $"content-move-atomic-tampered-dst-{Guid.NewGuid():N}");
         var request = await CreateLeasedMoveRequestAsync(source, target);
         var service = _provider.GetRequiredService<AudiobookContentMoveService>();
-        var result = await service.MoveContentsAsync(request, CancellationToken.None);
-        File.Delete(result.RecoveryMarkerPath);
+        await service.MoveContentsAsync(request, CancellationToken.None);
         var unrelated = await FileService.GetFileAsync(
             target,
             "operator-note.txt",

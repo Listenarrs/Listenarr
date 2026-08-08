@@ -19,16 +19,22 @@ public sealed class MoveJobConfiguration : IEntityTypeConfiguration<MoveJob>
     public void Configure(EntityTypeBuilder<MoveJob> builder)
     {
         builder.Property(job => job.Status).HasConversion<string>().HasMaxLength(32);
-        builder.Property(job => job.Phase).HasConversion<string>().HasMaxLength(32);
+        builder.Property(job => job.Phase)
+            .HasConversion<string>()
+            .HasMaxLength(32)
+            .HasDefaultValue(MoveJobPhase.None);
         builder.Property(job => job.ExecutionProtocolVersion)
-            .HasDefaultValue(MoveExecutionProtocol.LegacyFilesystemArtifacts);
+            .HasDefaultValue(MoveExecutionProtocol.PreDurableReleased);
         builder.Property(job => job.SourceDirectoryObjectIdentity).HasMaxLength(512);
         builder.Property(job => job.TargetDirectoryObjectIdentity).HasMaxLength(512);
         builder.Property(job => job.SourceDirectoryCleanupState)
             .HasConversion<string>()
             .HasMaxLength(24)
             .HasDefaultValue(MoveJobEntryCleanupState.Pending);
-        builder.Property(job => job.FailureKind).HasConversion<string>().HasMaxLength(32);
+        builder.Property(job => job.FailureKind)
+            .HasConversion<string>()
+            .HasMaxLength(32)
+            .HasDefaultValue(MoveFailureKind.None);
         builder.Property(job => job.ActiveDeduplicationKey).HasMaxLength(1024);
         builder.Property(job => job.SourcePathSyntax).HasConversion<string>().HasMaxLength(16);
         builder.Property(job => job.SourceCaseSensitivity).HasConversion<string>().HasMaxLength(16);
@@ -113,7 +119,6 @@ public sealed class LibraryDirectoryOwnershipPathMigrationConfiguration
         builder.Property(item => item.TargetIdentityBoundary).HasMaxLength(4096);
         builder.Property(item => item.TargetIdentityLookupKey).HasMaxLength(160);
         builder.Property(item => item.TargetOwnershipKey).HasMaxLength(160);
-        builder.Property(item => item.State).HasConversion<string>().HasMaxLength(24);
         builder.HasIndex(item => new { item.OwnershipId, item.RelocationId })
             .IsUnique();
         builder.HasIndex(item => item.TargetOwnershipKey).IsUnique();

@@ -384,6 +384,10 @@ internal partial class MoveJobProcessor
             await contentMoveService.EnsureMutationAuthorizedAsync(
                 moveRequest,
                 stoppingToken);
+            await contentMoveService.VerifyTargetBeforeMetadataRewriteAsync(
+                moveRequest,
+                moveResult,
+                stoppingToken);
 
             using (var rewriteScope = scopeFactory.CreateScope())
             {

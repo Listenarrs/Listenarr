@@ -1,4 +1,5 @@
 using Listenarr.Domain.Common;
+using Microsoft.EntityFrameworkCore;
 
 namespace Listenarr.Infrastructure.Library.Moving;
 
@@ -23,28 +24,41 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
         }
     }
 
-    private static void CleanupRetiredSiblingMarkers(
-        IEnumerable<LibraryDirectoryOwnership> retiredCandidates,
-        string canonicalPath,
-        FileSystemPathSemantics semantics)
+    private async Task RevalidateCommittedOwnershipAsync(
+        LibraryDirectoryOwnership ownership,
+        PinnedDirectoryCreation creation,
+        CancellationToken cancellationToken)
     {
-        foreach (var retired in retiredCandidates)
+        try
         {
-            try
+            AfterOwnershipCommitForTest?.Invoke();
+            ValidatePinnedOwnership(ownership, creation);
+        }
+        catch (Exception exception) when (exception is not (
+            OutOfMemoryException or StackOverflowException))
+        {
+            await using var repairDb =
+                await dbContextFactory.CreateDbContextAsync(CancellationToken.None);
+            var persisted = await repairDb.LibraryDirectoryOwnerships
+                .SingleOrDefaultAsync(
+                    candidate => candidate.Id == ownership.Id,
+                    CancellationToken.None);
+            if (persisted != null
+                && persisted.State != LibraryDirectoryOwnershipState.Removed)
             {
-                if (Compare(retired, canonicalPath, semantics) == OwnershipComparison.Compatible)
-                {
-                    LibraryDirectoryOwnershipMarker.TryDeleteRetiredSiblingMarker(
-                        retired,
-                        out _);
-                }
+                var reason =
+                    $"The committed ownership path changed physical generation before publication completed: {exception.Message}";
+                persisted.State = LibraryDirectoryOwnershipState.Unavailable;
+                persisted.PathOwnershipKey = null;
+                persisted.StateReason = reason;
+                persisted.DirectoryObjectIdentityUnavailableReason = reason;
+                persisted.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
+                await repairDb.SaveChangesAsync(CancellationToken.None);
             }
-            catch (Exception exception) when (exception is
-                ArgumentException or InvalidOperationException or NotSupportedException or PathTooLongException)
-            {
-                // Removed rows are nonauthoritative. Corrupt retired metadata must not
-                // prevent a new, independently proven ownership claim for the live path.
-            }
+
+            throw new InvalidOperationException(
+                "The directory ownership claim committed, but its physical generation changed before publication completed.",
+                exception);
         }
     }
 

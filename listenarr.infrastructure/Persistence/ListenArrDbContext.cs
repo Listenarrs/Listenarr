@@ -31,7 +31,6 @@ namespace Listenarr.Infrastructure.Persistence
         public DbSet<MoveJobCreatedDirectory> MoveJobCreatedDirectories { get; set; } = null!;
         public DbSet<LibraryDirectoryOwnership> LibraryDirectoryOwnerships { get; set; } = null!;
         public DbSet<LibraryDirectoryOwnershipPathMigration> LibraryDirectoryOwnershipPathMigrations { get; set; } = null!;
-        public DbSet<LibraryDirectoryOwnershipRetiredMarker> LibraryDirectoryOwnershipRetiredMarkers { get; set; } = null!;
         public DbSet<MoveScanHandoff> MoveScanHandoffs { get; set; } = null!;
         public DbSet<ApplicationSettings> ApplicationSettings { get; set; } = null!;
         public DbSet<History> History { get; set; } = null!;

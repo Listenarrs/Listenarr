@@ -4,14 +4,10 @@ namespace Listenarr.Infrastructure.Persistence;
 
 internal static class ListenarrDatabaseMigrationPreflight
 {
-    internal const string DurableMoveSchemaMigrationId =
-        "20260708223635_AddDurableFilesystemMoves";
+    internal const string DurableMarkerlessLibraryMovesMigrationId =
+        "20260807200942_AddDurableMarkerlessLibraryMoves";
     internal const string RootFoldersMigrationId =
         "20260101172733_AddRootFolders";
-    internal const string DirectoryObjectIdentityMigrationId =
-        "20260726042801_AddDirectoryObjectIdentityAuthorization";
-    internal const string AudiobookFileOwnershipMigrationId =
-        "20260717143713_AddLibraryDirectoryOwnership";
 
     public static ListenarrDatabaseMigrationPreflightResult RepairLegacyData(
         ListenArrDbContext context)
@@ -22,7 +18,7 @@ internal static class ListenarrDatabaseMigrationPreflight
             .ToHashSet(StringComparer.Ordinal);
         var normalizeDefaultRoots =
             applied.Contains(RootFoldersMigrationId)
-            && !applied.Contains(DirectoryObjectIdentityMigrationId);
+            && !applied.Contains(DurableMarkerlessLibraryMovesMigrationId);
         if (!normalizeDefaultRoots)
         {
             return default;
@@ -52,64 +48,33 @@ internal static class ListenarrDatabaseMigrationPreflight
 
         var applied = context.Database.GetAppliedMigrations()
             .ToHashSet(StringComparer.Ordinal);
-        var repairLegacyMoveJobs = applied.Contains(DurableMoveSchemaMigrationId);
-        var repairAudiobookFileIdentityDefaults =
-            applied.Contains(AudiobookFileOwnershipMigrationId);
-        if (!repairLegacyMoveJobs && !repairAudiobookFileIdentityDefaults)
+        if (!applied.Contains(DurableMarkerlessLibraryMovesMigrationId))
         {
             return default;
         }
 
         using var transaction = context.Database.BeginTransaction();
-        // AddDurableFilesystemMoves gives pre-existing rows IdentityKeyVersion = 0.
-        // Treat that generated default as the durable one-time repair marker so normal
-        // startup retries cannot overwrite identity keys created by current code.
-        var moveJobsRepaired = repairLegacyMoveJobs
-            ? context.Database.ExecuteSqlRaw(
-                """
-                UPDATE "MoveJobs"
-                SET
-                    "Status" = CASE
-                        WHEN "Status" = 'Processing' THEN 'Running'
-                        ELSE "Status"
-                    END,
-                    "IdentityKeyVersion" = 1,
-                    "ActiveDeduplicationKey" = 'legacy:' || "Id"
-                WHERE "IdentityKeyVersion" = 0
-                  AND "Status" IN ('Queued', 'Processing', 'Running', 'RetryScheduled');
-                """)
-            : 0;
-        var audiobookFilesRepaired = repairAudiobookFileIdentityDefaults
-            ? context.Database.ExecuteSqlRaw(
-                """
-                UPDATE "AudiobookFiles"
-                SET
-                    "PathCaseSensitivity" = CASE
-                        WHEN "PathCaseSensitivity" = '' THEN 'Unknown'
-                        ELSE "PathCaseSensitivity"
-                    END,
-                    "PathCaseSensitivityMode" = CASE
-                        WHEN "PathCaseSensitivityMode" = '' THEN 'Auto'
-                        ELSE "PathCaseSensitivityMode"
-                    END,
-                    "PathIdentityVersion" = CASE
-                        WHEN "PathIdentityVersion" = 0 THEN 1
-                        ELSE "PathIdentityVersion"
-                    END,
-                    "PathIdentityState" = CASE
-                        WHEN "PathIdentityState" = '' THEN 'Unavailable'
-                        ELSE "PathIdentityState"
-                    END
-                WHERE "PathCaseSensitivity" = ''
-                   OR "PathCaseSensitivityMode" = ''
-                   OR "PathIdentityVersion" = 0
-                   OR "PathIdentityState" = '';
-                """)
-            : 0;
+        var moveJobsRepaired = context.Database.ExecuteSqlRaw(
+            """
+            UPDATE "MoveJobs"
+            SET
+                "Status" = 'NeedsAttention',
+                "Error" = 'This move job was created by a pre-durable released version and cannot be resumed safely after upgrade.',
+                "FailureKind" = 'Verification',
+                "ActiveDeduplicationKey" = NULL,
+                "UpdatedAt" = CURRENT_TIMESTAMP
+            WHERE "ExecutionProtocolVersion" = 0
+              AND "Status" NOT IN ('Completed', 'Failed')
+              AND (
+                  "Status" <> 'NeedsAttention'
+                  OR "ActiveDeduplicationKey" IS NOT NULL
+                  OR "FailureKind" <> 'Verification'
+                  OR "Error" IS NULL
+              );
+            """);
         transaction.Commit();
-        return new ListenarrDatabasePostMigrationRepairResult(
-            moveJobsRepaired,
-            audiobookFilesRepaired);
+
+        return new ListenarrDatabasePostMigrationRepairResult(moveJobsRepaired);
     }
 }
 
@@ -117,5 +82,4 @@ internal readonly record struct ListenarrDatabaseMigrationPreflightResult(
     int DefaultRootsNormalized);
 
 internal readonly record struct ListenarrDatabasePostMigrationRepairResult(
-    int MoveJobsRepaired,
-    int AudiobookFilesRepaired);
+    int MoveJobsRepaired);

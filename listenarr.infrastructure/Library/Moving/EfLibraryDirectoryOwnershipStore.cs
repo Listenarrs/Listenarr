@@ -27,6 +27,12 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore(
         set;
     }
 
+    internal Action? AfterOwnershipCommitForTest
+    {
+        get;
+        set;
+    }
+
     public async Task<LibraryDirectoryOwnership> RecordCreatedAsync(
         LibraryDirectoryOwnershipClaim claim,
         CancellationToken cancellationToken = default)
@@ -142,11 +148,6 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore(
         await using var transaction = db.Database.IsRelational()
             ? await db.Database.BeginTransactionAsync(cancellationToken)
             : null;
-        var retiredCandidates = await db.LibraryDirectoryOwnerships
-            .AsNoTracking()
-            .Where(ownership => ownership.PathIdentityLookupKey == lookupKey
-                && ownership.State == LibraryDirectoryOwnershipState.Removed)
-            .ToListAsync(cancellationToken);
         var candidates = await db.LibraryDirectoryOwnerships
             .Where(ownership => ownership.PathIdentityLookupKey == lookupKey
                 && ownership.State != LibraryDirectoryOwnershipState.Removed)
@@ -194,10 +195,10 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore(
             {
                 await transaction.CommitAsync(CancellationToken.None);
             }
-            CleanupRetiredSiblingMarkers(
-                retiredCandidates,
-                canonicalPath,
-                claim.Semantics);
+            await RevalidateCommittedOwnershipAsync(
+                existing,
+                markerCreation,
+                CancellationToken.None);
             return existing;
         }
 
@@ -252,6 +253,10 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore(
             {
                 await transaction.CommitAsync(CancellationToken.None);
             }
+            await RevalidateCommittedOwnershipAsync(
+                ownership,
+                markerCreation,
+                CancellationToken.None);
         }
         catch (UniqueConstraintViolationException)
         {
@@ -284,19 +289,15 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore(
                 concurrent.DirectoryObjectIdentityUnavailableReason = null;
                 concurrent.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
                 await retryDb.SaveChangesAsync(CancellationToken.None);
-                CleanupRetiredSiblingMarkers(
-                    retiredCandidates,
-                    canonicalPath,
-                    claim.Semantics);
+                await RevalidateCommittedOwnershipAsync(
+                    concurrent,
+                    markerCreation,
+                    CancellationToken.None);
                 return concurrent;
             }
             throw;
         }
 
-        CleanupRetiredSiblingMarkers(
-            retiredCandidates,
-            canonicalPath,
-            claim.Semantics);
         return ownership;
     }
 

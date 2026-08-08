@@ -121,13 +121,55 @@ public sealed class MoveRecoveryPolicyTests : BaseTests
             MoveJobPhase.CleaningSource,
             MoveFailureKind.Verification,
             MoveJobEntryCopyState.Verified,
-            MoveJobEntryCleanupState.Quarantined);
+            MoveJobEntryCleanupState.DeleteAuthorized);
 
         var state = MoveRecoveryPolicy.ClassifyAudiobookJobs([job]);
 
         Assert.Equal(MoveRecoveryDisposition.OperatorRepairRequired, state.Disposition);
         Assert.True(state.BlocksFilesystemMutation);
         Assert.False(state.CanRetry);
+    }
+
+    [Theory]
+    [InlineData(MoveJobStatus.NeedsAttention)]
+    [InlineData(MoveJobStatus.Failed)]
+    [InlineData(MoveJobStatus.Queued)]
+    public void ClassifyAudiobookJobs_PreDurableUnresolvedJob_BlocksWithoutCurrentExecutionEvidence(
+        MoveJobStatus status)
+    {
+        var job = CreateJob(
+            status,
+            MoveJobPhase.None,
+            MoveFailureKind.Verification,
+            MoveJobEntryCopyState.Pending,
+            MoveJobEntryCleanupState.Pending);
+        job.ExecutionProtocolVersion = MoveExecutionProtocol.PreDurableReleased;
+        job.Entries.Clear();
+
+        var state = MoveRecoveryPolicy.ClassifyAudiobookJobs([job]);
+
+        Assert.Equal(MoveRecoveryDisposition.OperatorRepairRequired, state.Disposition);
+        Assert.True(state.BlocksFilesystemMutation);
+        Assert.False(state.CanRetry);
+        Assert.Equal(job.Id, state.JobId);
+    }
+
+    [Fact]
+    public void ClassifyAudiobookJobs_PreDurableCompletedJob_DoesNotBlock()
+    {
+        var job = CreateJob(
+            MoveJobStatus.Completed,
+            MoveJobPhase.None,
+            MoveFailureKind.None,
+            MoveJobEntryCopyState.Pending,
+            MoveJobEntryCleanupState.Pending);
+        job.ExecutionProtocolVersion = MoveExecutionProtocol.PreDurableReleased;
+        job.Entries.Clear();
+
+        var state = MoveRecoveryPolicy.ClassifyAudiobookJobs([job]);
+
+        Assert.Equal(MoveRecoveryDisposition.None, state.Disposition);
+        Assert.False(state.BlocksFilesystemMutation);
     }
 
     [Fact]
@@ -144,7 +186,7 @@ public sealed class MoveRecoveryPolicyTests : BaseTests
             MoveJobPhase.CleaningSource,
             MoveFailureKind.Transient,
             MoveJobEntryCopyState.Verified,
-            MoveJobEntryCleanupState.Quarantined);
+            MoveJobEntryCleanupState.DeleteAuthorized);
 
         var state = MoveRecoveryPolicy.ClassifyAudiobookJobs([first, second]);
 

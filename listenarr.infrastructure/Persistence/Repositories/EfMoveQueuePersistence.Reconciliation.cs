@@ -6,10 +6,6 @@ namespace Listenarr.Infrastructure.Persistence.Repositories;
 
 public sealed partial class EfMoveQueuePersistence
 {
-    private const int MaximumEvidenceEntries = 10_000;
-    private const int MaximumEvidenceDepth = 128;
-    private const long MaximumOwnershipMarkerBytes = 64 * 1024;
-
     public async Task ReconcileIdentityKeysAsync(CancellationToken cancellationToken = default)
     {
         try
@@ -38,6 +34,13 @@ public sealed partial class EfMoveQueuePersistence
             var resolvedJobs = new List<(MoveJob Job, string Key, PathIdentitySnapshot TargetIdentity)>();
             foreach (var job in activeJobs)
             {
+                if (!MoveExecutionProtocol.IsCurrent(job.ExecutionProtocolVersion))
+                {
+                    MarkIdentityConflict(
+                        job,
+                        "This move job predates the durable database execution protocol and cannot resume filesystem mutation safely.");
+                    continue;
+                }
                 if (job.Entries.Count == 0
                     || job.Entries.All(entry => entry.EntryType != MoveJobEntryType.File))
                 {
@@ -156,52 +159,12 @@ public sealed partial class EfMoveQueuePersistence
             foreach (var group in resolvedJobs.GroupBy(item => item.Key, StringComparer.Ordinal))
             {
                 var candidates = group.ToList();
-                var markerEvidence = ReadTargetOwnershipEvidence(candidates);
-                if (markerEvidence.State == OwnershipEvidenceState.Ambiguous
-                    || (markerEvidence.OwnerJobId is { } ownerJobId
-                        && candidates.All(candidate => candidate.Job.Id != ownerJobId)))
-                {
-                    foreach (var candidate in candidates)
-                    {
-                        MarkIdentityConflict(
-                            candidate.Job,
-                            markerEvidence.Error
-                                ?? "The destination contains ambiguous or foreign ownership evidence.");
-                    }
-                    continue;
-                }
-
-                var evidenceBearing = new List<(MoveJob Job, string Key, PathIdentitySnapshot TargetIdentity)>();
-                var evidenceAmbiguous = false;
-                foreach (var candidate in candidates)
-                {
-                    var evidence = CollectJobSpecificRecoveryEvidence(
+                var evidenceBearing = candidates
+                    .Where(candidate => HasDurableExecutionEvidence(
                         candidate.Job,
                         manifestEvidence,
-                        scaffoldEvidence);
-                    if (evidence == JobEvidenceState.Ambiguous)
-                    {
-                        evidenceAmbiguous = true;
-                        break;
-                    }
-
-                    if (evidence == JobEvidenceState.Owned
-                        || markerEvidence.OwnerJobId == candidate.Job.Id)
-                    {
-                        evidenceBearing.Add(candidate);
-                    }
-                }
-
-                if (evidenceAmbiguous)
-                {
-                    foreach (var candidate in candidates)
-                    {
-                        MarkIdentityConflict(
-                            candidate.Job,
-                            "Move recovery evidence could not be inspected safely.");
-                    }
-                    continue;
-                }
+                        scaffoldEvidence))
+                    .ToList();
 
                 if (evidenceBearing.Count > 1)
                 {

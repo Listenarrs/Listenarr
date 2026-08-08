@@ -4,36 +4,6 @@ namespace Listenarr.Infrastructure.Library.Moving;
 
 internal sealed partial class AudiobookContentMoveService
 {
-    private async Task<List<MoveJobEntry>> SnapshotSourceAsync(
-        Guid jobId,
-        string source,
-        string target,
-        bool targetInsideSource,
-        FileSystemPathSemantics sourceSemantics,
-        CancellationToken cancellationToken,
-        string? ownedRecoveryMarkerPath = null)
-    {
-        var scaffolding = await GetCreatedDirectoriesAsync(jobId, cancellationToken);
-        var ownedSourceDirectories = await LoadValidatedOwnedSourceDirectoriesAsync(
-            source,
-            sourceSemantics,
-            cancellationToken);
-        var ownedSourceMarkerPaths = GetOwnedSourceMarkerPaths(
-            source,
-            ownedSourceDirectories,
-            sourceSemantics);
-        var validatedEntries = ValidateSourceTreeForMove(
-            source,
-            target,
-            targetInsideSource,
-            sourceSemantics,
-            cancellationToken,
-            ownedRecoveryMarkerPath,
-            scaffolding.Select(directory => directory.Path).ToList(),
-            ownedDirectoryMarkerPaths: ownedSourceMarkerPaths);
-        return await BuildManifestAsync(jobId, validatedEntries, cancellationToken);
-    }
-
     internal static void ValidateTargetManifest(
         string target,
         IReadOnlyCollection<MoveJobEntry> manifest,

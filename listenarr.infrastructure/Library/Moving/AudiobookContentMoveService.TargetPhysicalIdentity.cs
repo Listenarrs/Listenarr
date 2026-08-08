@@ -120,4 +120,38 @@ internal sealed partial class AudiobookContentMoveService
 
         return identities;
     }
+
+    private static (IReadOnlyList<string> DirectorySegments, string FileName)
+        SplitPinnedRelativeFilePath(
+            string relativePath,
+            FileSystemPathSemantics semantics)
+    {
+        if (string.IsNullOrWhiteSpace(relativePath))
+        {
+            throw new MoveNeedsAttentionException(
+                "A file manifest entry has no relative path.");
+        }
+
+        var separators = semantics.Syntax == FileSystemPathSyntax.Windows
+            ? new[] { '\\', '/' }
+            : new[] { '/' };
+        var lastSeparator = relativePath.LastIndexOfAny(separators);
+        var fileName = lastSeparator < 0
+            ? relativePath
+            : relativePath[(lastSeparator + 1)..];
+        var directoryPart = lastSeparator < 0
+            ? string.Empty
+            : relativePath[..lastSeparator];
+        var segments = directoryPart.Split(
+            separators,
+            StringSplitOptions.RemoveEmptyEntries);
+        if (string.IsNullOrWhiteSpace(fileName)
+            || segments.Any(segment => segment is "." or ".."))
+        {
+            throw new MoveNeedsAttentionException(
+                "A file manifest entry contains an invalid path segment.");
+        }
+
+        return (segments, fileName);
+    }
 }

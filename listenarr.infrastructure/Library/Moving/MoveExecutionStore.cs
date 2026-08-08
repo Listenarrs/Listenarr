@@ -32,14 +32,13 @@ internal interface IMoveExecutionStore
         MoveJobEntryCleanupState cleanupState,
         CancellationToken cancellationToken);
 
-    Task ValidateOrAdoptIdentityAsync(
+    Task ValidateIdentityAsync(
         Guid jobId,
         string source,
         string target,
         FileSystemPathSemantics sourceSemantics,
         FileSystemPathSemantics targetSemantics,
         MoveLeaseToken leaseToken,
-        bool hasFilesystemRecoveryArtifacts,
         CancellationToken cancellationToken);
 
     Task EnsureMutationAuthorizedAsync(

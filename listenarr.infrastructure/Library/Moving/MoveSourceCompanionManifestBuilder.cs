@@ -247,11 +247,6 @@ internal static class MoveSourceCompanionManifestBuilder
         foreach (var entryName in beforeNames)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (MoveFilesystemArtifactNames.IsReserved(entryName))
-            {
-                continue;
-            }
-
             var entryPath = Path.Join(current.FullPath, entryName);
             var attributes = File.GetAttributes(entryPath);
             if ((attributes & FileAttributes.ReparsePoint) != 0)

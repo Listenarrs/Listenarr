@@ -70,12 +70,7 @@ namespace Listenarr.Infrastructure.Library.Moving
             {
                 ValidateOwnedDirectoryForDelete(ownedParent);
                 if (Directory.Exists(parentFolder)
-                    && Directory.EnumerateFileSystemEntries(parentFolder).Any(path =>
-                        !LibraryDirectoryOwnershipMarker.GetMarkerPaths(ownedParent)
-                            .Any(markerPath => FileSystemPathIdentity.AreEquivalent(
-                                markerPath,
-                                path,
-                                semantics))))
+                    && Directory.EnumerateFileSystemEntries(parentFolder).Any())
                 {
                     return;
                 }

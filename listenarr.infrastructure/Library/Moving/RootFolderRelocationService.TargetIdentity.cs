@@ -29,12 +29,13 @@ public sealed partial class RootFolderRelocationService
         }
     }
 
-    private static Task RequireTargetDirectoryGenerationAsync(
-        string targetPath,
-        int? expectedVersion,
-        string? expectedValue,
-        string? unavailableReason,
-        CancellationToken cancellationToken)
+    private static PinnedDirectoryCreation.PinnedDirectoryAnchor
+        PinTargetDirectoryGeneration(
+            string targetPath,
+            int? expectedVersion,
+            string? expectedValue,
+            string? unavailableReason,
+            CancellationToken cancellationToken)
     {
         if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
                 targetPath,
@@ -44,33 +45,65 @@ public sealed partial class RootFolderRelocationService
             throw new InvalidOperationException(pathReason);
         }
 
+        PinnedDirectoryCreation.PinnedDirectoryAnchor? target = null;
         try
         {
-            using var target = PinnedDirectoryCreation.OpenPinnedBoundary(
+            target = PinnedDirectoryCreation.OpenPinnedBoundary(
                 canonicalTargetPath);
-            cancellationToken.ThrowIfCancellationRequested();
-            if (!string.IsNullOrWhiteSpace(unavailableReason)
-                || !ManagedDirectoryIdentity.MatchesNativeIdentity(
-                    expectedVersion,
-                    expectedValue,
-                    target.GetDirectoryObjectIdentity())
-                || !target.VisiblePathMatches())
-            {
-                throw new InvalidOperationException(
-                    "The managed directory no longer identifies its authorized physical generation.");
-            }
-
-            return Task.CompletedTask;
+            RevalidatePinnedTargetDirectoryGeneration(
+                target,
+                expectedVersion,
+                expectedValue,
+                unavailableReason,
+                cancellationToken);
+            return target;
         }
         catch (Exception exception) when (exception is
             IOException or UnauthorizedAccessException
                 or InvalidOperationException or NotSupportedException
                 or System.ComponentModel.Win32Exception)
         {
+            target?.Dispose();
             throw new InvalidOperationException(
                 "The relocation target no longer identifies its authorized physical directory generation.",
                 exception);
         }
+    }
+
+    private static void RevalidatePinnedTargetDirectoryGeneration(
+        PinnedDirectoryCreation.PinnedDirectoryAnchor target,
+        int? expectedVersion,
+        string? expectedValue,
+        string? unavailableReason,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!string.IsNullOrWhiteSpace(unavailableReason)
+            || !ManagedDirectoryIdentity.MatchesNativeIdentity(
+                expectedVersion,
+                expectedValue,
+                target.GetDirectoryObjectIdentity())
+            || !target.VisiblePathMatches())
+        {
+            throw new InvalidOperationException(
+                "The managed directory no longer identifies its authorized physical generation.");
+        }
+    }
+
+    private static Task RequireTargetDirectoryGenerationAsync(
+        string targetPath,
+        int? expectedVersion,
+        string? expectedValue,
+        string? unavailableReason,
+        CancellationToken cancellationToken)
+    {
+        using var target = PinTargetDirectoryGeneration(
+            targetPath,
+            expectedVersion,
+            expectedValue,
+            unavailableReason,
+            cancellationToken);
+        return Task.CompletedTask;
     }
 
     private static Task RequireTargetDirectoryGenerationAsync(

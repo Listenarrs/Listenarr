@@ -44,7 +44,7 @@ internal sealed class DirectoryObjectIdentityResolver(
                     "The live directory no longer matches its persisted physical identity."));
     }
 
-private Task<DirectoryObjectIdentityResolution> ResolvePinnedAsync(
+    private Task<DirectoryObjectIdentityResolution> ResolvePinnedAsync(
         string path,
         CancellationToken cancellationToken,
         Func<string, DirectoryObjectIdentityResolution> resolve)

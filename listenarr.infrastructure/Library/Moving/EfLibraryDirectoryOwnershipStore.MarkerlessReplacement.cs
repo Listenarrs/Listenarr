@@ -5,6 +5,12 @@ namespace Listenarr.Infrastructure.Library.Moving;
 
 internal sealed partial class EfLibraryDirectoryOwnershipStore
 {
+    internal Action? AfterMarkerlessReplacementCommitForTest
+    {
+        get;
+        set;
+    }
+
     public async Task<bool> TryRetireReplacedByMarkerlessMoveAsync(
         string path,
         FileSystemPathSemantics semantics,
@@ -69,6 +75,7 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
         }
 
         var stale = compatible[0];
+        var originalManagedRootFolderId = stale.ManagedRootFolderId;
         if (string.IsNullOrWhiteSpace(stale.PathOwnershipKey))
         {
             throw new InvalidOperationException(
@@ -80,7 +87,7 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
             .Include(job => job.CreatedDirectories)
             .SingleOrDefaultAsync(job => job.Id == moveJobId, cancellationToken);
         if (move == null
-            || move.ExecutionProtocolVersion < MoveExecutionProtocol.MarkerlessDatabaseState
+            || !MoveExecutionProtocol.IsCurrent(move.ExecutionProtocolVersion)
             || string.IsNullOrWhiteSpace(move.RequestedPath)
             || !FileSystemPathIdentity.AreEquivalent(
                 canonicalPath,
@@ -146,34 +153,6 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
             ? await db.Database.BeginTransactionAsync(cancellationToken)
             : null;
         var now = timeProvider.GetUtcNow().UtcDateTime;
-        if (!await db.LibraryDirectoryOwnershipRetiredMarkers.AnyAsync(
-                marker => marker.OwnershipId == stale.Id,
-                cancellationToken))
-        {
-            if (stale.ManagedRootFolderId.HasValue
-                && stale.DirectoryObjectIdentityVersion.HasValue
-                && !string.IsNullOrWhiteSpace(stale.DirectoryObjectIdentity))
-            {
-                db.LibraryDirectoryOwnershipRetiredMarkers.Add(
-                    LibraryDirectoryOwnershipRetiredMarkerEvidence.Create(
-                        stale,
-                        new LibraryDirectoryOwnershipMarker.MarkerPayload(
-                            LibraryDirectoryOwnershipMarker.Version,
-                            stale.OwnershipToken,
-                            stale.CanonicalPath,
-                            stale.ManagedRootFolderId,
-                            stale.DirectoryObjectIdentityVersion,
-                            stale.DirectoryObjectIdentity),
-                        now));
-            }
-            else
-            {
-                db.LibraryDirectoryOwnershipRetiredMarkers.Add(
-                    LibraryDirectoryOwnershipRetiredMarkerEvidence
-                        .CreateLegacyPending(stale));
-            }
-        }
-
         stale.State = LibraryDirectoryOwnershipState.Removed;
         stale.PathOwnershipKey = null;
         stale.ManagedRootFolderId = null;
@@ -184,6 +163,37 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
         {
             cancellationToken.ThrowIfCancellationRequested();
             await transaction.CommitAsync(CancellationToken.None);
+        }
+
+        AfterMarkerlessReplacementCommitForTest?.Invoke();
+        if (!string.Equals(
+                liveDirectory.GetDirectoryObjectIdentity(),
+                replacementDirectoryObjectIdentity,
+                StringComparison.Ordinal)
+            || !liveDirectory.VisiblePathMatches()
+            || !authorization.ParentAnchor.VisiblePathMatches())
+        {
+            var reason =
+                "The markerless replacement directory changed physical generation immediately after stale ownership retirement committed.";
+            await using var repairDb = await dbContextFactory.CreateDbContextAsync(
+                CancellationToken.None);
+            var persisted = await repairDb.LibraryDirectoryOwnerships
+                .SingleOrDefaultAsync(
+                    candidate => candidate.Id == stale.Id,
+                    CancellationToken.None);
+            if (persisted != null
+                && persisted.State == LibraryDirectoryOwnershipState.Removed)
+            {
+                persisted.State = LibraryDirectoryOwnershipState.Unavailable;
+                persisted.PathOwnershipKey = null;
+                persisted.ManagedRootFolderId = originalManagedRootFolderId;
+                persisted.StateReason = reason;
+                persisted.DirectoryObjectIdentityUnavailableReason = reason;
+                persisted.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
+                await repairDb.SaveChangesAsync(CancellationToken.None);
+            }
+
+            throw new InvalidOperationException(reason);
         }
 
         return true;

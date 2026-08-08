@@ -6,210 +6,133 @@
  * it under the terms of the GNU Affero General Public License as published
  * by the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU Affero General Public License for more details.
- *
- * You should have received a copy of the GNU Affero General Public License
- * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Reflection;
 using Listenarr.Infrastructure.Persistence.Migrations;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Migrations.Operations;
 
-namespace Listenarr.Tests.Features.Infrastructure.Migrations
+namespace Listenarr.Tests.Features.Infrastructure.Migrations;
+
+public class MigrationMetadataTests
 {
-    public class MigrationMetadataTests
+    [Fact]
+    public void AddImportBlacklistExtensionsMigration_IsDiscoverableByEf()
     {
-        [Fact]
-        public void AddImportBlacklistExtensionsMigration_IsDiscoverableByEf()
-        {
-            var attribute = typeof(AddImportBlacklistExtensionsToApplicationSettings)
-                .GetCustomAttribute<MigrationAttribute>();
+        AssertMigrationId<AddImportBlacklistExtensionsToApplicationSettings>(
+            "20260317123000_AddImportBlacklistExtensionsToApplicationSettings");
+    }
 
-            Assert.NotNull(attribute);
-            Assert.Equal("20260317123000_AddImportBlacklistExtensionsToApplicationSettings", attribute!.Id);
-        }
+    [Fact]
+    public void AddMoveJobSourcePathHistoryRepair_IsDiscoverableByEf()
+    {
+        AssertMigrationId<AddMoveJobSourcePath>(
+            "20251124102000_AddMoveJobSourcePath");
+    }
 
-        [Fact]
-        public void AddRootFolderRelocationSkippedItemsMigration_IsDiscoverableByEf()
-        {
-            var attribute = typeof(AddRootFolderRelocationSkippedItems)
-                .GetCustomAttribute<MigrationAttribute>();
+    [Fact]
+    public void AddProcessExecutionLogsHistoryRepair_IsDiscoverableByEf()
+    {
+        AssertMigrationId<AddProcessExecutionLogs>(
+            "20260702200000_AddProcessExecutionLogs");
+    }
 
-            Assert.NotNull(attribute);
-            Assert.Equal("20260708224900_AddRootFolderRelocationSkippedItems", attribute!.Id);
-        }
+    [Fact]
+    public void AddDurableMarkerlessLibraryMoves_IsDiscoverableAndConsolidated()
+    {
+        AssertMigrationId<AddDurableMarkerlessLibraryMoves>(
+            "20260807200942_AddDurableMarkerlessLibraryMoves");
 
-        [Fact]
-        public void AddLibraryDirectoryOwnershipRootForeignKey_IsDiscoverableAndIsolated()
-        {
-            var attribute = typeof(AddLibraryDirectoryOwnershipRootForeignKey)
-                .GetCustomAttribute<MigrationAttribute>();
-            Assert.NotNull(attribute);
-            Assert.Equal(
-                "20260805034058_AddLibraryDirectoryOwnershipRootForeignKey",
-                attribute!.Id);
+        var migration = new AddDurableMarkerlessLibraryMoves();
+        var upBuilder = BuildOperations(migration, "Up");
+        var downBuilder = BuildOperations(migration, "Down");
 
-            var migration = new AddLibraryDirectoryOwnershipRootForeignKey();
-            var upBuilder = new MigrationBuilder(
-                "Microsoft.EntityFrameworkCore.Sqlite");
-            var downBuilder = new MigrationBuilder(
-                "Microsoft.EntityFrameworkCore.Sqlite");
-            typeof(AddLibraryDirectoryOwnershipRootForeignKey)
-                .GetMethod(
-                    "Up",
-                    BindingFlags.Instance | BindingFlags.NonPublic)!
-                .Invoke(migration, [upBuilder]);
-            typeof(AddLibraryDirectoryOwnershipRootForeignKey)
-                .GetMethod(
-                    "Down",
-                    BindingFlags.Instance | BindingFlags.NonPublic)!
-                .Invoke(migration, [downBuilder]);
+        Assert.Equal(78, upBuilder.Operations.Count);
+        Assert.Equal(59, downBuilder.Operations.Count);
+        Assert.Empty(upBuilder.Operations.OfType<SqlOperation>());
 
-            var addForeignKey = Assert.Single(upBuilder.Operations);
-            Assert.Equal(
-                "FK_LibraryDirectoryOwnerships_RootFolders_ManagedRootFolderId",
-                Assert.IsType<AddForeignKeyOperation>(addForeignKey).Name);
-            var dropForeignKey = Assert.Single(downBuilder.Operations);
-            Assert.Equal(
-                "FK_LibraryDirectoryOwnerships_RootFolders_ManagedRootFolderId",
-                Assert.IsType<DropForeignKeyOperation>(dropForeignKey).Name);
-        }
+        var createdTables = upBuilder.Operations
+            .OfType<CreateTableOperation>()
+            .Select(operation => operation.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        Assert.Contains("FileMutationJournals", createdTables);
+        Assert.Contains("LibraryDirectoryOwnerships", createdTables);
+        Assert.Contains("MoveJobEntries", createdTables);
+        Assert.Contains("MoveScanHandoffs", createdTables);
+        Assert.Contains("RootFolderRelocations", createdTables);
+        Assert.DoesNotContain("LibraryDirectoryOwnershipRetiredMarkers", createdTables);
 
-        [Fact]
-        public void AddMarkerlessMoveExecutionState_IsDiscoverableAndContainsOnlyExpectedColumns()
-        {
-            var attribute = typeof(AddMarkerlessMoveExecutionState)
-                .GetCustomAttribute<MigrationAttribute>();
-            Assert.NotNull(attribute);
-            Assert.Equal(
-                "20260805192525_AddMarkerlessMoveExecutionState",
-                attribute!.Id);
+        Assert.DoesNotContain(upBuilder.Operations, operation =>
+            operation is DropTableOperation or DropColumnOperation);
+    }
 
-            var migration = new AddMarkerlessMoveExecutionState();
-            var upBuilder = new MigrationBuilder(
-                "Microsoft.EntityFrameworkCore.Sqlite");
-            var downBuilder = new MigrationBuilder(
-                "Microsoft.EntityFrameworkCore.Sqlite");
-            typeof(AddMarkerlessMoveExecutionState)
-                .GetMethod(
-                    "Up",
-                    BindingFlags.Instance | BindingFlags.NonPublic)!
-                .Invoke(migration, [upBuilder]);
-            typeof(AddMarkerlessMoveExecutionState)
-                .GetMethod(
-                    "Down",
-                    BindingFlags.Instance | BindingFlags.NonPublic)!
-                .Invoke(migration, [downBuilder]);
+    [Fact]
+    public void AddMoveJobRelocationForeignKey_IsDiscoverableAndIsolated()
+    {
+        AssertMigrationId<AddMoveJobRelocationForeignKey>(
+            "20260807204014_AddMoveJobRelocationForeignKey");
 
-            var expectedColumns = new[]
-            {
-                "DirectoryObjectIdentity",
-                "ExecutionProtocolVersion",
-                "SourceDirectoryCleanupState",
-                "SourceDirectoryObjectIdentity",
-                "SourcePhysicalObjectIdentity",
-                "TargetDirectoryObjectIdentity",
-                "TargetPhysicalObjectIdentity"
-            };
-            Assert.Equal(
-                expectedColumns,
-                upBuilder.Operations
-                    .Select(operation => Assert.IsType<AddColumnOperation>(operation).Name)
-                    .OrderBy(name => name, StringComparer.Ordinal)
-                    .ToArray());
-            Assert.Equal(
-                expectedColumns,
-                downBuilder.Operations
-                    .Select(operation => Assert.IsType<DropColumnOperation>(operation).Name)
-                    .OrderBy(name => name, StringComparer.Ordinal)
-                    .ToArray());
-        }
+        var migration = new AddMoveJobRelocationForeignKey();
+        var upBuilder = BuildOperations(migration, "Up");
+        var downBuilder = BuildOperations(migration, "Down");
 
-        [Fact]
-        public void AddMarkerlessFileMutationJournal_IsDiscoverableAndIsolated()
-        {
-            var attribute = typeof(AddMarkerlessFileMutationJournal)
-                .GetCustomAttribute<MigrationAttribute>();
-            Assert.NotNull(attribute);
-            Assert.Equal(
-                "20260805202154_AddMarkerlessFileMutationJournal",
-                attribute!.Id);
+        var add = Assert.Single(upBuilder.Operations.OfType<AddForeignKeyOperation>());
+        Assert.Equal("FK_MoveJobs_RootFolderRelocations_RelocationId", add.Name);
+        Assert.Equal("MoveJobs", add.Table);
+        Assert.Equal("RootFolderRelocations", add.PrincipalTable);
+        Assert.Equal("RelocationId", Assert.Single(add.Columns));
+        Assert.Equal(ReferentialAction.Restrict, add.OnDelete);
+        Assert.Single(upBuilder.Operations);
 
-            var migration = new AddMarkerlessFileMutationJournal();
-            var upBuilder = new MigrationBuilder(
-                "Microsoft.EntityFrameworkCore.Sqlite");
-            var downBuilder = new MigrationBuilder(
-                "Microsoft.EntityFrameworkCore.Sqlite");
-            typeof(AddMarkerlessFileMutationJournal)
-                .GetMethod(
-                    "Up",
-                    BindingFlags.Instance | BindingFlags.NonPublic)!
-                .Invoke(migration, [upBuilder]);
-            typeof(AddMarkerlessFileMutationJournal)
-                .GetMethod(
-                    "Down",
-                    BindingFlags.Instance | BindingFlags.NonPublic)!
-                .Invoke(migration, [downBuilder]);
+        var drop = Assert.Single(downBuilder.Operations.OfType<DropForeignKeyOperation>());
+        Assert.Equal("FK_MoveJobs_RootFolderRelocations_RelocationId", drop.Name);
+        Assert.Equal("MoveJobs", drop.Table);
+        Assert.Single(downBuilder.Operations);
+    }
 
-            var create = Assert.Single(
-                upBuilder.Operations.OfType<CreateTableOperation>());
-            Assert.Equal("FileMutationJournals", create.Name);
-            Assert.Equal(
-                [
-                    "Action",
-                    "AudiobookId",
-                    "CreatedAt",
-                    "DestinationPath",
-                    "Error",
-                    "OperationId",
-                    "ProtocolVersion",
-                    "SourceLength",
-                    "SourcePath",
-                    "SourcePhysicalObjectIdentity",
-                    "SourceSha256",
-                    "State",
-                    "TargetPhysicalObjectIdentity",
-                    "UpdatedAt"
-                ],
-                create.Columns
-                    .Select(column => column.Name)
-                    .OrderBy(name => name, StringComparer.Ordinal)
-                    .ToArray());
-            Assert.Equal(2, upBuilder.Operations.OfType<CreateIndexOperation>().Count());
-            Assert.Equal(3, upBuilder.Operations.Count);
-            Assert.Equal(
-                "FileMutationJournals",
-                Assert.Single(downBuilder.Operations.OfType<DropTableOperation>()).Name);
-            Assert.Single(downBuilder.Operations);
-        }
+    [Fact]
+    public void AddDurableMarkerlessLibraryMoves_TargetModelMatchesFinalContracts()
+    {
+        var model = new AddDurableMarkerlessLibraryMoves().TargetModel;
 
-        [Fact]
-        public void OwnershipRecoveryProtocols_ContainsNoRawSqlOperations()
-        {
-            var migration = new AddOwnershipRecoveryProtocols();
-            var upBuilder = new MigrationBuilder(
-                "Microsoft.EntityFrameworkCore.Sqlite");
-            var downBuilder = new MigrationBuilder(
-                "Microsoft.EntityFrameworkCore.Sqlite");
+        var moveJob = AssertEntity(model, "Listenarr.Domain.Audiobooks.MoveJob");
+        Assert.Equal(0, moveJob.FindProperty("ExecutionProtocolVersion")?.GetDefaultValue());
+        Assert.Equal("None", moveJob.FindProperty("FailureKind")?.GetDefaultValue());
+        Assert.Equal("None", moveJob.FindProperty("Phase")?.GetDefaultValue());
 
-            typeof(AddOwnershipRecoveryProtocols)
-                .GetMethod(
-                    "Up",
-                    BindingFlags.Instance | BindingFlags.NonPublic)!
-                .Invoke(migration, [upBuilder]);
-            typeof(AddOwnershipRecoveryProtocols)
-                .GetMethod(
-                    "Down",
-                    BindingFlags.Instance | BindingFlags.NonPublic)!
-                .Invoke(migration, [downBuilder]);
+        var rootFolder = AssertEntity(model, "Listenarr.Domain.Audiobooks.RootFolder");
+        Assert.Equal("Auto", rootFolder.FindProperty("CaseSensitivityMode")?.GetDefaultValue());
+        Assert.Equal("Unknown", rootFolder.FindProperty("ResolvedCaseSensitivity")?.GetDefaultValue());
+        Assert.Equal("Unavailable", rootFolder.FindProperty("PathIdentityState")?.GetDefaultValue());
 
-            Assert.Empty(upBuilder.Operations.OfType<SqlOperation>());
-            Assert.Empty(downBuilder.Operations.OfType<SqlOperation>());
-        }
+        var audiobookFile = AssertEntity(model, "Listenarr.Domain.Audiobooks.AudiobookFile");
+        Assert.Equal("Auto", audiobookFile.FindProperty("PathCaseSensitivityMode")?.GetDefaultValue());
+        Assert.Equal("Unknown", audiobookFile.FindProperty("PathCaseSensitivity")?.GetDefaultValue());
+        Assert.Equal("Unavailable", audiobookFile.FindProperty("PathIdentityState")?.GetDefaultValue());
+
+        Assert.Null(model.FindEntityType(
+            "Listenarr.Domain.Audiobooks.LibraryDirectoryOwnershipRetiredMarker"));
+    }
+
+    private static MigrationBuilder BuildOperations(Migration migration, string methodName)
+    {
+        var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.Sqlite");
+        migration.GetType()
+            .GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(migration, [builder]);
+        return builder;
+    }
+
+    private static IEntityType AssertEntity(IModel model, string name) =>
+        Assert.IsAssignableFrom<IEntityType>(model.FindEntityType(name));
+
+    private static void AssertMigrationId<TMigration>(string expected)
+        where TMigration : Migration
+    {
+        var attribute = typeof(TMigration).GetCustomAttribute<MigrationAttribute>();
+        Assert.NotNull(attribute);
+        Assert.Equal(expected, attribute!.Id);
     }
 }

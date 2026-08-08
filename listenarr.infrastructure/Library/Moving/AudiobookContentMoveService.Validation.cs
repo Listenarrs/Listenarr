@@ -32,12 +32,8 @@ internal sealed partial class AudiobookContentMoveService
         // the source subtree. That subtree is not a collision because it is the content being moved.
         var targetHasBlockingContent = Directory
             .EnumerateFileSystemEntries(target)
-            .Any(entry => !IsValidatedTargetOwnershipMarker(
-                    entry,
-                    targetDirectoryOwnership,
-                    semantics)
-                && !(sourceInsideTarget
-                    && IsTargetEntryAllowedBySourceSubtree(entry, source, semantics)));
+            .Any(entry => !(sourceInsideTarget
+                && IsTargetEntryAllowedBySourceSubtree(entry, source, semantics)));
         if (targetHasBlockingContent)
         {
             throw new MoveNeedsAttentionException(sourceInsideTarget

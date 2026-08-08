@@ -23,13 +23,8 @@ internal sealed partial class AudiobookContentMoveService
             request.Source,
             target,
             manifest,
-            request.JobId,
             request.TargetSemantics,
-            tempOwnership: null,
-            quarantineOwnership: null,
-            allowPartialFiles: false,
-            targetDirectoryOwnership: request.TargetDirectoryOwnership,
-            allowRecoveryMarker: false);
+            request.TargetDirectoryOwnership);
         var files = manifest
             .Where(IsPhysicalManifestEntry)
             .Where(entry => entry.EntryType == MoveJobEntryType.File)

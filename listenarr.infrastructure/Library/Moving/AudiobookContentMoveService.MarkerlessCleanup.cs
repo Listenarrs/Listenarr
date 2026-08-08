@@ -14,17 +14,11 @@ internal sealed partial class AudiobookContentMoveService
             .Where(candidate => candidate.EntryType == MoveJobEntryType.File)
             .Where(IsPhysicalManifestEntry)
             .ToList();
-        var resumingCleanup = manifest
-            .Where(IsPhysicalManifestEntry)
-            .Any(entry => entry.CleanupState != MoveJobEntryCleanupState.Pending);
-        if (resumingCleanup)
-        {
-            await VerifyMarkerlessTargetAsync(
-                request,
-                target,
-                manifest,
-                cancellationToken);
-        }
+        await VerifyMarkerlessTargetAsync(
+            request,
+            target,
+            manifest,
+            cancellationToken);
 
         var totalUnits = files.Sum(GetProgressUnits);
         var completedUnits = files
@@ -95,7 +89,7 @@ internal sealed partial class AudiobookContentMoveService
             "target");
         if (!File.Exists(sourcePath))
         {
-            if (entry.CleanupState == MoveJobEntryCleanupState.DeletionAuthorized)
+            if (entry.CleanupState == MoveJobEntryCleanupState.DeleteAuthorized)
             {
                 await UpdateCleanupStateAsync(
                     request.JobId,
@@ -174,9 +168,9 @@ internal sealed partial class AudiobookContentMoveService
                 request.JobId,
                 request.LeaseToken,
                 entry.RelativePath,
-                MoveJobEntryCleanupState.DeletionAuthorized,
+                MoveJobEntryCleanupState.DeleteAuthorized,
                 cancellationToken);
-            entry.CleanupState = MoveJobEntryCleanupState.DeletionAuthorized;
+            entry.CleanupState = MoveJobEntryCleanupState.DeleteAuthorized;
         }
         await EnsureMutationAuthorizedAsync(
             request,

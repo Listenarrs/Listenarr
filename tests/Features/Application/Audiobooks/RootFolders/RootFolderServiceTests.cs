@@ -366,7 +366,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
                     FileUtils.GetAbsolutePath("different-root")));
         }
 
-[Fact]
+        [Fact]
         public async Task ReauthorizeDirectoryIdentity_ActiveMoveTouchingRoot_IsBlockedBeforeEnrollment()
         {
             var directory = CreateTempDirectory("root-identity-reauthorize-active-move");
@@ -709,7 +709,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
             Assert.Contains("nested", exception.Message, StringComparison.OrdinalIgnoreCase);
         }
 
-[LinuxFact]
+        [LinuxFact]
         public async Task Create_InsensitiveRequestedRootRejectsCaseVariantNestedExistingRoot()
         {
 

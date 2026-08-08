@@ -2052,7 +2052,7 @@ namespace Listenarr.Tests.Features.Api.Services
             Assert.Equal("content", await File.ReadAllTextAsync(destinationFile));
             Assert.Empty(Directory.EnumerateFiles(
                 _root,
-                "*.listenarr-move-*.partial",
+                "*.partial",
                 SearchOption.TopDirectoryOnly));
         }
 

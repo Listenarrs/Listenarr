@@ -1245,7 +1245,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
                         LastWriteTimeUtc = DateTime.UnixEpoch,
                         Sha256 = new string('A', 64),
                         CopyState = MoveJobEntryCopyState.Verified,
-                        CleanupState = MoveJobEntryCleanupState.Quarantined
+                        CleanupState = MoveJobEntryCleanupState.DeleteAuthorized
                     },
                     MoveManifestIdentity.CreateTargetBoundaryAuthorization(
                         2,

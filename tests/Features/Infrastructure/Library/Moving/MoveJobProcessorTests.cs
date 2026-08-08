@@ -247,10 +247,6 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
             metrics.Verify(
                 service => service.Increment("worker.move.job.completed", It.IsAny<double>()),
                 Times.Never);
-            Assert.Empty(Directory.EnumerateFiles(
-                target,
-                $".listenarr-move-{job.Id:N}.pending",
-                SearchOption.TopDirectoryOnly));
             var persistedJob = Assert.IsType<MoveJob>(
                 await durableQueue.GetJobAsync(job.Id));
             Assert.Equal(MoveJobPhase.RecordingCompletion, persistedJob.Phase);
@@ -613,6 +609,52 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
         }
 
         [Fact]
+        public async Task ProcessJobAsync_TargetReplacedAfterSourceCleanup_DoesNotRewriteAudiobookMetadata()
+        {
+            var source = FileService.GetTempDirectory(
+                "move-processor-target-replaced-before-rewrite-src");
+            await FileService.GetFileAsync(source, "book.m4b", "audio");
+            var target = Path.Join(
+                FileService.GetTempPath(),
+                $"move-processor-target-replaced-before-rewrite-dst-{Guid.NewGuid():N}");
+            var audiobook = await _audiobookRepository.AddAsync(new Audiobook
+            {
+                Title = "Move Processor Target Replaced Before Rewrite",
+                BasePath = source
+            });
+            var (queue, job) = await CreateQueuedMoveJobAsync(audiobook, target, source);
+            var factory = _provider
+                .GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+            var processor = _provider.GetRequiredService<MoveJobProcessor>();
+            processor.AfterSourceCleanupBeforeMetadataRewriteForTest = async _ =>
+            {
+                var targetFile = Path.Join(target, "book.m4b");
+                File.Delete(targetFile);
+                await File.WriteAllTextAsync(targetFile, "replacement");
+            };
+
+            await processor.ProcessJobAsync(job, CancellationToken.None);
+
+            await using var verification = await factory.CreateDbContextAsync();
+            var audiobookAfter = await verification.Audiobooks
+                .AsNoTracking()
+                .SingleAsync(candidate => candidate.Id == audiobook.Id);
+            Assert.Equal(source, audiobookAfter.BasePath);
+            Assert.False(File.Exists(Path.Join(source, "book.m4b")));
+            Assert.Equal(
+                "replacement",
+                await File.ReadAllTextAsync(Path.Join(target, "book.m4b")));
+            var persistedJob = await verification.MoveJobs
+                .AsNoTracking()
+                .SingleAsync(candidate => candidate.Id == job.Id);
+            Assert.Equal(MoveJobStatus.NeedsAttention, persistedJob.Status);
+            Assert.Contains(
+                "target",
+                persistedJob.Error,
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
         public async Task ProcessJobAsync_CanceledToken_ThrowsBeforeStateChange()
         {
             var src = FileService.GetTempDirectory("move-processor-cancel");
@@ -688,88 +730,6 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                 .AnyAsync(handoff => handoff.MoveJobId == legacyJob.Id));
         }
 
-        [Theory]
-        [InlineData("temporary-directory", false)]
-        [InlineData("temporary-directory", true)]
-        [InlineData("quarantine-directory", false)]
-        [InlineData("quarantine-directory", true)]
-        [InlineData("target-scaffold-temporary", false)]
-        [InlineData("target-scaffold-temporary", true)]
-        [InlineData("target-scaffold-quarantine", false)]
-        [InlineData("target-scaffold-quarantine", true)]
-        public async Task ProcessJobAsync_LegacyIdenticalEndpointWithCleanupTombstone_PreservesForAttention(
-            string artifactType,
-            bool interruptedWrite)
-        {
-            var src = FileService.GetTempDirectory("move-processor-identical-tombstone");
-            var sourceFile = await FileService.GetFileAsync(src, "book.m4b", "audio");
-            var audiobook = await _audiobookRepository.AddAsync(new Audiobook
-            {
-                Title = "Move Processor Identical Tombstone",
-                BasePath = src
-            });
-            var identity = new PathIdentitySnapshot(
-                FileSystemPathSemantics.CurrentHostDefault.Syntax,
-                FileSystemPathSemantics.CurrentHostDefault.CaseSensitivity,
-                FileSystemCaseSensitivityMode.Auto,
-                src);
-            var legacyJob = new MoveJob
-            {
-                Id = Guid.NewGuid(),
-                AudiobookId = audiobook.Id,
-                SourcePath = src,
-                RequestedPath = src,
-                Status = MoveJobStatus.Queued,
-                ActiveDeduplicationKey = $"legacy-identical-tombstone:{Guid.NewGuid():N}"
-            };
-            legacyJob.SetSourceIdentity(identity);
-            legacyJob.SetTargetIdentity(identity);
-            var parent = Path.GetDirectoryName(src)!;
-            var tombstonePath = Path.Join(
-                parent,
-                $".listenarr-{artifactType}-{legacyJob.Id:N}.cleanup.json");
-            var evidencePath = interruptedWrite
-                ? tombstonePath + $".writing-{Guid.NewGuid():N}"
-                : tombstonePath;
-            await File.WriteAllTextAsync(evidencePath, "{}");
-
-            try
-            {
-                var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
-                await using (var db = await factory.CreateDbContextAsync())
-                {
-                    db.MoveJobs.Add(legacyJob);
-                    await db.SaveChangesAsync();
-                }
-
-                var queue = _provider.GetRequiredService<IMoveQueueService>();
-                var job = Assert.IsType<MoveJob>(
-                    await queue.GetJobAsync(legacyJob.Id));
-                await PrepareJobForProcessingAsync(queue, job);
-
-                await _provider.GetRequiredService<IMoveJobProcessor>()
-                    .ProcessJobAsync(job, CancellationToken.None);
-
-                var updatedJob = Assert.IsType<MoveJob>(
-                    await queue.GetJobAsync(legacyJob.Id));
-                Assert.Equal(MoveJobStatus.NeedsAttention, updatedJob.Status);
-                Assert.Contains("sibling artifacts", updatedJob.Error, StringComparison.OrdinalIgnoreCase);
-                Assert.True(File.Exists(sourceFile));
-                Assert.True(File.Exists(evidencePath));
-                Assert.Empty(await _historyRepository.GetByCorrelationIdAsync($"move:{legacyJob.Id:N}"));
-                await using var verification = await factory.CreateDbContextAsync();
-                Assert.False(await verification.MoveScanHandoffs
-                    .AnyAsync(handoff => handoff.MoveJobId == legacyJob.Id));
-            }
-            finally
-            {
-                if (File.Exists(evidencePath))
-                {
-                    File.Delete(evidencePath);
-                }
-            }
-        }
-
         [Fact]
         public async Task ProcessJobAsync_LegacyIdenticalEndpointWithExecutionState_PreservesForAttention()
         {
@@ -832,79 +792,6 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                 .AnyAsync(entry => entry.MoveJobId == legacyJob.Id));
             Assert.False(await verification.MoveScanHandoffs
                 .AnyAsync(handoff => handoff.MoveJobId == legacyJob.Id));
-        }
-
-        [Fact]
-        public async Task ProcessJobAsync_AtomicMarkerWithRecreatedSource_MarksNeedsAttention()
-        {
-            var src = FileService.GetTempDirectory("move-processor-recovery-src");
-            await FileService.GetFileAsync(src, "book.m4b", "audio");
-            var dst = Path.Join(FileService.GetTempPath(), $"move-processor-recovery-dst-{Guid.NewGuid():N}");
-            var audiobook = await _audiobookRepository.AddAsync(new Audiobook
-            {
-                Title = "Move Processor Recovery",
-                BasePath = src
-            });
-            var (queue, job) = await CreateQueuedMoveJobAsync(audiobook, dst, src);
-            await File.WriteAllTextAsync(
-                Path.Join(src, $".listenarr-move-{job.Id:N}.pending"),
-                System.Text.Json.JsonSerializer.Serialize(new
-                {
-                    Version = 1,
-                    JobId = job.Id,
-                    Source = Path.GetFullPath(src),
-                    Target = Path.GetFullPath(dst),
-                    Stage = "atomic-rename-complete"
-                }));
-            Directory.Move(src, dst);
-
-            Assert.False(Directory.Exists(src));
-            Assert.Single(Directory.EnumerateFiles(dst, ".listenarr-move-*.pending"));
-            Directory.CreateDirectory(src);
-            await FileService.GetFileAsync(src, "new-content.txt", "do not delete");
-
-            var processor = _provider.GetRequiredService<IMoveJobProcessor>();
-            await processor.ProcessJobAsync(job, CancellationToken.None);
-
-            var updatedJob = Assert.IsType<MoveJob>(
-                await queue.GetJobAsync(job.Id));
-            Assert.Equal(MoveJobStatus.NeedsAttention, updatedJob.Status);
-
-            using var verificationScope = _provider.CreateScope();
-            var verificationRepository = verificationScope.ServiceProvider.GetRequiredService<IAudiobookRepository>();
-            var updatedAudiobook = Assert.IsType<Audiobook>(
-                await verificationRepository.GetByIdAsync(audiobook.Id));
-            Assert.Equal(src, updatedAudiobook.BasePath);
-            Assert.True(File.Exists(Path.Join(dst, "book.m4b")));
-            Assert.Equal("do not delete", await File.ReadAllTextAsync(Path.Join(src, "new-content.txt")));
-            Assert.Single(Directory.EnumerateFiles(dst, ".listenarr-move-*.pending"));
-        }
-
-        [Fact]
-        public async Task ProcessJobAsync_CopyCompletedMarkerWithoutManifest_BlocksSourceCleanup()
-        {
-            var src = FileService.GetTempDirectory("move-processor-copy-complete-src");
-            await FileService.GetFileAsync(src, "book.m4b", "audio");
-            var dst = FileService.GetTempDirectory("move-processor-copy-complete-dst");
-            await FileService.GetFileAsync(dst, "book.m4b", "audio");
-            var audiobook = await _audiobookRepository.AddAsync(new Audiobook
-            {
-                Title = "Move Processor Copy Complete",
-                BasePath = src
-            });
-            var (queue, job) = await CreateQueuedMoveJobAsync(audiobook, dst, src);
-            await File.WriteAllTextAsync(
-                Path.Join(dst, $".listenarr-move-{job.Id:N}.pending"),
-                "copy-complete");
-
-            var processor = _provider.GetRequiredService<IMoveJobProcessor>();
-            await processor.ProcessJobAsync(job, CancellationToken.None);
-
-            var completedJob = Assert.IsType<MoveJob>(
-                await queue.GetJobAsync(job.Id));
-            Assert.Equal(MoveJobStatus.NeedsAttention, completedJob.Status);
-            Assert.True(Directory.Exists(src));
-            Assert.True(File.Exists(Path.Join(dst, "book.m4b")));
         }
 
         [Fact]

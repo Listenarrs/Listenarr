@@ -52,7 +52,7 @@ public sealed class RootFolderObjectIdentityReconcilerTests : BaseTests
             StringComparison.OrdinalIgnoreCase);
     }
 
-private sealed class TestDbContextFactory(
+    private sealed class TestDbContextFactory(
         DbContextOptions<ListenArrDbContext> options)
         : IDbContextFactory<ListenArrDbContext>
     {

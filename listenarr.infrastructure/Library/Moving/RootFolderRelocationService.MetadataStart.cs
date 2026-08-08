@@ -1,7 +1,6 @@
 using Listenarr.Domain.Common;
 using Listenarr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Listenarr.Infrastructure.Library.Moving;
 
@@ -13,7 +12,13 @@ public sealed partial class RootFolderRelocationService
         set;
     }
 
-    internal Action? AfterMetadataOnlyCommitForTest
+    internal Action? BeforeMetadataOnlyAtomicCommitForTest
+    {
+        get;
+        set;
+    }
+
+    internal Action? AfterMetadataOnlyAtomicCommitForTest
     {
         get;
         set;
@@ -21,7 +26,7 @@ public sealed partial class RootFolderRelocationService
 
     private async Task<StartOutcome> StartMetadataOnlyAsync(
         ListenArrDbContext db,
-        IDbContextTransaction transaction,
+        Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction,
         RootFolder root,
         RootFolderPathChangeCommand command,
         string targetPath,
@@ -139,35 +144,20 @@ public sealed partial class RootFolderRelocationService
             cancellationToken);
         await transaction.CommitAsync(completionToken);
         AfterMetadataOnlyJournalCommitForTest?.Invoke();
+        PinnedDirectoryCreation.PinnedDirectoryAnchor? targetGenerationLease = null;
+        IReadOnlyList<OwnershipMigrationTargetLease> ownershipGenerationLeases = [];
         try
         {
             if (targetObjectIdentity.IsAvailable)
             {
-                await RequireTargetDirectoryGenerationAsync(
+                targetGenerationLease = PinTargetDirectoryGeneration(
                     targetPath,
-                    targetObjectIdentity,
+                    targetObjectIdentity.Version,
+                    targetObjectIdentity.Value,
+                    targetObjectIdentity.UnavailableReason,
                     completionToken);
             }
-            ValidateMarkerlessOwnershipMigrationTargets(
-                ownershipPlans,
-                targetPath,
-                completionToken);
-            foreach (var plan in ownershipPlans)
-            {
-                plan.Journal.State =
-                    LibraryDirectoryOwnershipPathMigrationState
-                        .TargetValidated;
-                plan.Journal.UpdatedAt = DateTime.UtcNow;
-            }
-            await db.SaveChangesAsync(completionToken);
-            if (targetObjectIdentity.IsAvailable)
-            {
-                await RequireTargetDirectoryGenerationAsync(
-                    targetPath,
-                    targetObjectIdentity,
-                    completionToken);
-            }
-            ValidateMarkerlessOwnershipMigrationTargets(
+            ownershipGenerationLeases = PinOwnershipMigrationTargets(
                 ownershipPlans,
                 targetPath,
                 completionToken);
@@ -175,163 +165,140 @@ public sealed partial class RootFolderRelocationService
         catch (Exception exception) when (exception is not (
             OutOfMemoryException or StackOverflowException))
         {
+            DisposeOwnershipMigrationTargetLeases(ownershipGenerationLeases);
+            targetGenerationLease?.Dispose();
             metadataRelocation.Status =
                 RootFolderRelocationStatus.NeedsAttention;
             metadataRelocation.Error =
-                $"Directory ownership marker migration requires attention: {exception.Message}";
+                $"Directory ownership migration requires attention: {exception.Message}";
             metadataRelocation.UpdatedAt =
                 timeProvider.GetUtcNow().UtcDateTime;
             await db.SaveChangesAsync(completionToken);
             throw;
         }
 
-        await using var metadataTransaction =
-            await db.Database.BeginTransactionAsync(completionToken);
-        foreach (var plan in metadataPlans)
-        {
-            AudiobookPathReferenceRewriter.Rewrite(
-                plan.Candidate.Audiobook,
-                plan.Candidate.StoredBasePath,
-                plan.Destination,
-                metadataSourceSemantics!.Value,
-                targetResolution.Semantics,
-                command.TargetCaseSensitivityMode);
-            completed++;
-        }
-
-        RejectDuplicateAudiobookFileOwnership(db);
-        ApplyOwnershipMigrationMetadata(ownershipPlans, nowUtc);
-        await db.SaveChangesAsync(completionToken);
-        AssignOwnershipMigrationKeys(
-            ownershipPlans,
-            nowUtc,
-            LibraryDirectoryOwnershipPathMigrationState
-                .MarkerlessCommitted);
-        ApplyRootMetadata(
-            root,
-            command,
-            targetPath,
-            targetResolution,
-            targetIdentityKey);
-        ApplyRootDirectoryObjectIdentity(root, targetObjectIdentity);
-        if (command.DesiredIsDefault)
-        {
-            await ClearOtherDefaultsAsync(
-                db,
-                rootFolderId,
-                completionToken);
-        }
-
-        metadataRelocation.CompletedJobs = completed;
-        metadataRelocation.Status = skipped.Count > 0
-            ? RootFolderRelocationStatus.NeedsAttention
-            : RootFolderRelocationStatus.Completed;
-        metadataRelocation.ActiveRootFolderId =
-            skipped.Count > 0 ? root.Id : null;
-        metadataRelocation.CompletedAt =
-            skipped.Count > 0 ? null : nowUtc;
-        metadataRelocation.Error = skipped.Count > 0
-            ? BuildSkippedMetadataError(skipped.Count)
-            : null;
-        metadataRelocation.TargetIdentityEnrollmentState =
-            skipped.Count > 0
-                ? metadataRelocation.TargetIdentityEnrollmentState
-                : TargetIdentityEnrollmentState.NotRequired;
-        metadataRelocation.UpdatedAt = nowUtc;
-        await db.SaveChangesAsync(completionToken);
-        await metadataTransaction.CommitAsync(CancellationToken.None);
-
         try
         {
-            AfterMetadataOnlyCommitForTest?.Invoke();
-            if (targetObjectIdentity.IsAvailable)
+            await using var metadataTransaction =
+                await db.Database.BeginTransactionAsync(completionToken);
+            foreach (var plan in metadataPlans)
             {
-                await RequireTargetDirectoryGenerationAsync(
-                    targetPath,
-                    targetObjectIdentity,
-                    CancellationToken.None);
+                AudiobookPathReferenceRewriter.Rewrite(
+                    plan.Candidate.Audiobook,
+                    plan.Candidate.StoredBasePath,
+                    plan.Destination,
+                    metadataSourceSemantics!.Value,
+                    targetResolution.Semantics,
+                    command.TargetCaseSensitivityMode);
+                completed++;
             }
-            ValidateMarkerlessOwnershipMigrationTargets(
+
+            RejectDuplicateAudiobookFileOwnership(db);
+            ApplyOwnershipMigrationMetadata(ownershipPlans, nowUtc);
+            await db.SaveChangesAsync(completionToken);
+            AssignOwnershipMigrationKeys(
                 ownershipPlans,
+                nowUtc);
+            ApplyRootMetadata(
+                root,
+                command,
                 targetPath,
-                CancellationToken.None);
-            TryRetireMarkerlessOwnershipMigrationSourceArtifacts(
-                ownershipPlans,
-                sourcePath,
-                CancellationToken.None);
-            foreach (var plan in ownershipPlans)
+                targetResolution,
+                targetIdentityKey);
+            ApplyRootDirectoryObjectIdentity(root, targetObjectIdentity);
+            if (command.DesiredIsDefault)
             {
-                plan.Journal.State =
-                    LibraryDirectoryOwnershipPathMigrationState
-                        .MarkerlessRetired;
-                plan.Journal.UpdatedAt = DateTime.UtcNow;
+                await ClearOtherDefaultsAsync(
+                    db,
+                    rootFolderId,
+                    completionToken);
             }
-            await db.SaveChangesAsync(CancellationToken.None);
-            await RetireOwnershipMigrationTargetsAsync(
-                ownershipPlans,
-                targetPath,
-                targetObjectIdentity.Version,
-                targetObjectIdentity.Value,
-                targetObjectIdentity.UnavailableReason,
-                CancellationToken.None);
+
+            metadataRelocation.CompletedJobs = completed;
+            metadataRelocation.Status = skipped.Count > 0
+                ? RootFolderRelocationStatus.NeedsAttention
+                : RootFolderRelocationStatus.Completed;
+            metadataRelocation.ActiveRootFolderId =
+                skipped.Count > 0 ? root.Id : null;
+            metadataRelocation.CompletedAt =
+                skipped.Count > 0 ? null : nowUtc;
+            metadataRelocation.Error = skipped.Count > 0
+                ? BuildSkippedMetadataError(skipped.Count)
+                : null;
+            metadataRelocation.TargetIdentityEnrollmentState =
+                skipped.Count > 0
+                    ? metadataRelocation.TargetIdentityEnrollmentState
+                    : TargetIdentityEnrollmentState.NotRequired;
+            metadataRelocation.UpdatedAt = nowUtc;
             db.LibraryDirectoryOwnershipPathMigrations.RemoveRange(
                 ownershipPlans.Select(plan => plan.Journal));
             var completedWithoutAttention = skipped.Count == 0;
-            if (completedWithoutAttention)
-            {
-                db.RootFolderRelocations.Remove(metadataRelocation);
-            }
-            await db.SaveChangesAsync(CancellationToken.None);
             var metadataResult = new RootFolderPathChangeResult(
                 completedWithoutAttention ? null : metadataRelocation.Id,
                 root.Id,
-                root.Path,
+                targetPath,
                 targetPath,
                 metadataRelocation.Status,
                 metadataTotal,
                 completed,
                 metadataRelocation.Error,
                 metadataRelocation.TargetIdentityEnrollmentState);
+            await db.SaveChangesAsync(completionToken);
+            BeforeMetadataOnlyAtomicCommitForTest?.Invoke();
+            if (targetGenerationLease != null)
+            {
+                RevalidatePinnedTargetDirectoryGeneration(
+                    targetGenerationLease,
+                    targetObjectIdentity.Version,
+                    targetObjectIdentity.Value,
+                    targetObjectIdentity.UnavailableReason,
+                    completionToken);
+            }
+            RevalidateOwnershipMigrationTargetLeases(
+                ownershipGenerationLeases,
+                completionToken);
+            await metadataTransaction.CommitAsync(CancellationToken.None);
+            AfterMetadataOnlyAtomicCommitForTest?.Invoke();
+            if (targetGenerationLease != null)
+            {
+                RevalidatePinnedTargetDirectoryGeneration(
+                    targetGenerationLease,
+                    targetObjectIdentity.Version,
+                    targetObjectIdentity.Value,
+                    targetObjectIdentity.UnavailableReason,
+                    CancellationToken.None);
+            }
+            RevalidateOwnershipMigrationTargetLeases(
+                ownershipGenerationLeases,
+                CancellationToken.None);
+            if (completedWithoutAttention)
+            {
+                db.RootFolderRelocations.Remove(metadataRelocation);
+                await db.SaveChangesAsync(CancellationToken.None);
+            }
             return new StartOutcome(metadataResult, true);
         }
         catch (Exception exception) when (exception is not (
             OutOfMemoryException or StackOverflowException))
         {
-            return await PersistMetadataOnlyPostCommitAttentionAsync(
-                metadataRelocation.Id,
-                root.Id,
-                exception,
-                CancellationToken.None);
+            db.ChangeTracker.Clear();
+            var persistedRelocation = await db.RootFolderRelocations
+                .SingleAsync(
+                    candidate => candidate.Id == metadataRelocation.Id,
+                    CancellationToken.None);
+            persistedRelocation.Status = RootFolderRelocationStatus.NeedsAttention;
+            persistedRelocation.ActiveRootFolderId = rootFolderId;
+            persistedRelocation.CompletedAt = null;
+            persistedRelocation.Error =
+                $"Directory ownership migration completion requires attention: {exception.Message}";
+            persistedRelocation.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
+            await db.SaveChangesAsync(CancellationToken.None);
+            throw;
         }
-    }
-
-    private async Task<StartOutcome>
-        PersistMetadataOnlyPostCommitAttentionAsync(
-            Guid relocationId,
-            int rootFolderId,
-            Exception exception,
-            CancellationToken cancellationToken)
-    {
-        await using var recoveryDb =
-            await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var relocation = await recoveryDb.RootFolderRelocations
-            .SingleAsync(
-                candidate => candidate.Id == relocationId,
-                cancellationToken);
-        relocation.Status = RootFolderRelocationStatus.NeedsAttention;
-        relocation.ActiveRootFolderId = rootFolderId;
-        relocation.CompletedAt = null;
-        relocation.Error =
-            $"Directory ownership migration cleanup requires attention: {exception.Message}";
-        relocation.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
-        await recoveryDb.SaveChangesAsync(cancellationToken);
-        var currentPath = await recoveryDb.RootFolders
-            .AsNoTracking()
-            .Where(root => root.Id == rootFolderId)
-            .Select(root => root.Path)
-            .SingleAsync(cancellationToken);
-        return new StartOutcome(
-            Map(relocation, currentPath),
-            Broadcast: true);
+        finally
+        {
+            DisposeOwnershipMigrationTargetLeases(ownershipGenerationLeases);
+            targetGenerationLease?.Dispose();
+        }
     }
 }

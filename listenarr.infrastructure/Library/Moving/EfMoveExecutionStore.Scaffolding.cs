@@ -81,37 +81,49 @@ internal sealed partial class EfMoveExecutionStore
                 EnsureLeaseTokenProvided(jobId, leaseToken);
                 var nowUtc = timeProvider.GetUtcNow().UtcDateTime;
                 await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+                var directory = await db.MoveJobCreatedDirectories
+                    .Include(candidate => candidate.MoveJob)
+                    .SingleOrDefaultAsync(
+                        candidate => candidate.MoveJobId == jobId
+                            && candidate.Path == path,
+                        cancellationToken);
+                if (directory == null
+                    || directory.MoveJob.Status != MoveJobStatus.Running
+                    || !string.Equals(
+                        directory.MoveJob.LeaseOwner,
+                        leaseToken.Owner,
+                        StringComparison.Ordinal)
+                    || directory.MoveJob.LeaseGeneration != leaseToken.Generation
+                    || directory.MoveJob.LeaseExpiresAt == null
+                    || directory.MoveJob.LeaseExpiresAt <= nowUtc)
+                {
+                    throw new MoveLeaseLostException(jobId, leaseToken.Generation);
+                }
+
+                var observedState = directory.State;
+                var desiredState = AdvanceCreatedDirectoryState(observedState, state);
                 if (!db.Database.IsRelational())
                 {
-                    var directory = await db.MoveJobCreatedDirectories.SingleOrDefaultAsync(
-                        candidate => candidate.MoveJobId == jobId
-                            && candidate.Path == path
-                            && candidate.MoveJob.Status == MoveJobStatus.Running
-                            && candidate.MoveJob.LeaseOwner == leaseToken.Owner
-                            && candidate.MoveJob.LeaseGeneration == leaseToken.Generation
-                            && candidate.MoveJob.LeaseExpiresAt != null
-                            && candidate.MoveJob.LeaseExpiresAt > nowUtc,
-                        cancellationToken);
-                    if (directory == null)
-                    {
-                        throw new MoveLeaseLostException(jobId, leaseToken.Generation);
-                    }
-
-                    directory.State = state;
+                    directory.State = desiredState;
                     await db.SaveChangesAsync(cancellationToken);
                     return;
                 }
 
+                db.Entry(directory).State = EntityState.Detached;
+                db.Entry(directory.MoveJob).State = EntityState.Detached;
                 var affected = await db.MoveJobCreatedDirectories
-                    .Where(directory => directory.MoveJobId == jobId
-                        && directory.Path == path
-                        && directory.MoveJob.Status == MoveJobStatus.Running
-                        && directory.MoveJob.LeaseOwner == leaseToken.Owner
-                        && directory.MoveJob.LeaseGeneration == leaseToken.Generation
-                        && directory.MoveJob.LeaseExpiresAt != null
-                        && directory.MoveJob.LeaseExpiresAt > nowUtc)
+                    .Where(candidate => candidate.MoveJobId == jobId
+                        && candidate.Path == path
+                        && candidate.State == observedState
+                        && candidate.MoveJob.Status == MoveJobStatus.Running
+                        && candidate.MoveJob.LeaseOwner == leaseToken.Owner
+                        && candidate.MoveJob.LeaseGeneration == leaseToken.Generation
+                        && candidate.MoveJob.LeaseExpiresAt != null
+                        && candidate.MoveJob.LeaseExpiresAt > nowUtc)
                     .ExecuteUpdateAsync(
-                        updates => updates.SetProperty(directory => directory.State, state),
+                        updates => updates.SetProperty(
+                            candidate => candidate.State,
+                            desiredState),
                         cancellationToken);
                 if (affected != 1)
                 {

@@ -18,11 +18,7 @@ internal sealed partial class AudiobookContentMoveService
         bool targetInsideSource,
         FileSystemPathSemantics sourceSemantics,
         CancellationToken cancellationToken,
-        string? ownedRecoveryMarkerPath = null,
-        IReadOnlyCollection<string>? ownedScaffoldPaths = null,
-        IReadOnlyCollection<string>? structuralSpinePaths = null,
-        IReadOnlyCollection<string>? ownedDirectoryMarkerPaths = null,
-        string? persistentManagedRootBoundary = null)
+        IReadOnlyCollection<string>? structuralSpinePaths = null)
     {
         if (!Directory.Exists(source))
         {
@@ -48,11 +44,9 @@ internal sealed partial class AudiobookContentMoveService
                     continue;
                 }
 
-                var isOwnedScaffold = ownedScaffoldPaths?.Any(path =>
-                    FileSystemPathIdentity.AreEquivalent(path, entry, sourceSemantics)) == true;
                 var isStructuralSpine = structuralSpinePaths?.Any(path =>
                     FileSystemPathIdentity.AreEquivalent(path, entry, sourceSemantics)) == true;
-                if (isOwnedScaffold || isStructuralSpine)
+                if (isStructuralSpine)
                 {
                     if (!Directory.Exists(entry))
                     {
@@ -61,35 +55,6 @@ internal sealed partial class AudiobookContentMoveService
                     }
 
                     continue;
-                }
-
-                var isOwnedDirectoryMarker = ownedDirectoryMarkerPaths?.Any(path =>
-                    FileSystemPathIdentity.AreEquivalent(path, entry, sourceSemantics)) == true;
-                if (isOwnedDirectoryMarker)
-                {
-                    if (!File.Exists(entry)
-                        || (File.GetAttributes(entry) & FileAttributes.ReparsePoint) != 0)
-                    {
-                        throw new MoveNeedsAttentionException(
-                            "A validated directory ownership marker changed type or became linked.");
-                    }
-                    continue;
-                }
-
-                var entryName = Path.GetFileName(entry);
-                if (MoveFilesystemArtifactNames.IsReserved(entryName))
-                {
-                    if (!string.IsNullOrWhiteSpace(ownedRecoveryMarkerPath)
-                        && FileSystemPathIdentity.AreEquivalent(
-                            entry,
-                            ownedRecoveryMarkerPath,
-                            sourceSemantics))
-                    {
-                        continue;
-                    }
-
-                    throw new MoveNeedsAttentionException(
-                        $"Move source contains a reserved Listenarr recovery artifact that must be resolved before moving: {Path.GetRelativePath(source, entry)}");
                 }
 
                 var attributes = File.GetAttributes(entry);

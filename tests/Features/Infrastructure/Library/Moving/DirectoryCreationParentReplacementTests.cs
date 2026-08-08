@@ -39,11 +39,6 @@ public sealed class DirectoryCreationParentReplacementTests : BaseTests
 
             Assert.Equal(2, created.Count);
             Assert.True(Directory.Exists(Path.Join(physicalBoundary, "Author", "Book")));
-            Assert.False(File.Exists(Path.Join(
-                physicalBoundary,
-                "Author",
-                "Book",
-                ".listenarr-directory-owner.json")));
             var resolution = await store.ResolveOwnedAsync(
                 destination,
                 semantics,
@@ -196,9 +191,6 @@ public sealed class DirectoryCreationParentReplacementTests : BaseTests
             Assert.True(hookRan);
             Assert.Null(hookFailure);
             Assert.Empty(Directory.EnumerateFileSystemEntries(external));
-            Assert.False(File.Exists(Path.Join(
-                external,
-                ".listenarr-directory-owner.json")));
             Assert.False(Directory.Exists(Path.Join(external, "Book")));
             var resolution = await store.ResolveOwnedAsync(
                 destination,

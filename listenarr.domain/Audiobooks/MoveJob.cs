@@ -71,17 +71,18 @@ namespace Listenarr.Domain.Audiobooks
     public enum MoveJobEntryCleanupState
     {
         Pending,
-        Quarantined,
-        DeletionAuthorized,
+        DeleteAuthorized,
         Deleted,
         Retained
     }
 
     public static class MoveExecutionProtocol
     {
-        public const int LegacyFilesystemArtifacts = 1;
+        public const int PreDurableReleased = 0;
         public const int MarkerlessDatabaseState = 2;
         public const int Current = MarkerlessDatabaseState;
+
+        public static bool IsCurrent(int version) => version == Current;
     }
 
     public static class MoveJobStatusExtensions
@@ -102,7 +103,7 @@ namespace Listenarr.Domain.Audiobooks
         public MoveJobStatus Status { get; set; } = MoveJobStatus.Queued;
         public MoveJobPhase Phase { get; set; } = MoveJobPhase.None;
         public int ExecutionProtocolVersion { get; set; } =
-            MoveExecutionProtocol.LegacyFilesystemArtifacts;
+            MoveExecutionProtocol.Current;
         [MaxLength(512)]
         public string? SourceDirectoryObjectIdentity { get; set; }
         [MaxLength(512)]

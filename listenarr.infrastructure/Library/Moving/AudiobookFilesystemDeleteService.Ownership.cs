@@ -171,26 +171,9 @@ public sealed partial class AudiobookFilesystemDeleteService
             ownership.Id,
             ownershipKey,
             cancellationToken);
-        TryDeleteRetiredOwnershipMarker(ownership);
         ownership.State = LibraryDirectoryOwnershipState.Removed;
         ownership.PathOwnershipKey = null;
         return true;
-    }
-
-    private void TryDeleteRetiredOwnershipMarker(
-        LibraryDirectoryOwnership ownership)
-    {
-        if (LibraryDirectoryOwnershipMarker.TryDeleteRetiredSiblingMarker(
-                ownership,
-                out var reason))
-        {
-            return;
-        }
-
-        _logger.LogWarning(
-            "The retired directory ownership marker for {DirectoryPath} could not be deleted: {Reason}",
-            LogRedaction.SanitizeFilePath(ownership.CanonicalPath),
-            LogRedaction.SanitizeText(reason));
     }
 
     private async Task RecoverMissingOwnedDirectoryAsync(
@@ -269,17 +252,6 @@ public sealed partial class AudiobookFilesystemDeleteService
 
         return true;
     }
-
-    private static bool IsOwnershipMarkerPath(
-        string path,
-        IReadOnlyCollection<LibraryDirectoryOwnership> ownerships,
-        FileSystemPathSemantics semantics) =>
-        ownerships
-            .SelectMany(LibraryDirectoryOwnershipMarker.GetMarkerPaths)
-            .Any(markerPath => FileSystemPathIdentity.AreEquivalent(
-                markerPath,
-                path,
-                semantics));
 
     private static bool IsFilesystemRoot(
         string? path,

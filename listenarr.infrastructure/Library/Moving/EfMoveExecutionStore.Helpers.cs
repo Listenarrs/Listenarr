@@ -247,6 +247,61 @@ internal sealed partial class EfMoveExecutionStore
         return null;
     }
 
+    private static MoveCreatedDirectoryState AdvanceCreatedDirectoryState(
+        MoveCreatedDirectoryState current,
+        MoveCreatedDirectoryState requested)
+    {
+        if (current == requested)
+        {
+            return current;
+        }
+
+        if (current == MoveCreatedDirectoryState.Planned
+            && requested is MoveCreatedDirectoryState.Created
+                or MoveCreatedDirectoryState.Retained
+                or MoveCreatedDirectoryState.Removed)
+        {
+            return requested;
+        }
+
+        if (current == MoveCreatedDirectoryState.Created
+            && requested is MoveCreatedDirectoryState.Retained
+                or MoveCreatedDirectoryState.Removed)
+        {
+            return requested;
+        }
+
+        throw new MoveNeedsAttentionException(
+            $"The persisted move-created directory state cannot transition from {current} to {requested}.");
+    }
+
+    private static MoveJobEntryCleanupState AdvanceCleanupState(
+        MoveJobEntryCleanupState current,
+        MoveJobEntryCleanupState requested)
+    {
+        if (current == requested)
+        {
+            return current;
+        }
+
+        if (current == MoveJobEntryCleanupState.Pending
+            && requested is MoveJobEntryCleanupState.DeleteAuthorized
+                or MoveJobEntryCleanupState.Retained)
+        {
+            return requested;
+        }
+
+        if (current == MoveJobEntryCleanupState.DeleteAuthorized
+            && requested is MoveJobEntryCleanupState.Deleted
+                or MoveJobEntryCleanupState.Retained)
+        {
+            return requested;
+        }
+
+        throw new MoveNeedsAttentionException(
+            $"The persisted move cleanup state cannot transition from {current} to {requested}.");
+    }
+
     private static async Task<bool> IsLeaseActiveAsync(
         ListenArrDbContext db,
         Guid jobId,

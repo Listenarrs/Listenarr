@@ -41,33 +41,3 @@ public sealed class LibraryDirectoryOwnershipConfiguration
         });
     }
 }
-
-public sealed class LibraryDirectoryOwnershipRetiredMarkerConfiguration
-    : IEntityTypeConfiguration<LibraryDirectoryOwnershipRetiredMarker>
-{
-    public void Configure(
-        EntityTypeBuilder<LibraryDirectoryOwnershipRetiredMarker> builder)
-    {
-        builder.ToTable("LibraryDirectoryOwnershipRetiredMarkers");
-        builder.Property(marker => marker.OwnershipToken).HasMaxLength(64);
-        builder.Property(marker => marker.CanonicalMarkerPath).HasMaxLength(4096);
-        builder.Property(marker => marker.CanonicalOwnershipPath).HasMaxLength(4096);
-        builder.Property(marker => marker.PathSyntax).HasConversion<string>().HasMaxLength(16);
-        builder.Property(marker => marker.PathCaseSensitivity).HasConversion<string>().HasMaxLength(16);
-        builder.Property(marker => marker.PathCaseSensitivityMode).HasConversion<string>().HasMaxLength(16);
-        builder.Property(marker => marker.PathIdentityBoundary).HasMaxLength(4096);
-        builder.Property(marker => marker.CanonicalPayload).HasMaxLength(16384);
-        builder.Property(marker => marker.PayloadSha256).HasMaxLength(64);
-        builder.Property(marker => marker.DirectoryObjectIdentity).HasMaxLength(256);
-        builder.Property(marker => marker.State)
-            .HasConversion<string>()
-            .HasMaxLength(16);
-        builder.HasIndex(marker => marker.OwnershipId).IsUnique();
-        builder.HasIndex(marker => marker.CanonicalMarkerPath).IsUnique();
-        builder.HasOne(marker => marker.Ownership)
-            .WithOne(ownership => ownership.RetiredMarker)
-            .HasForeignKey<LibraryDirectoryOwnershipRetiredMarker>(
-                marker => marker.OwnershipId)
-            .OnDelete(DeleteBehavior.Cascade);
-    }
-}

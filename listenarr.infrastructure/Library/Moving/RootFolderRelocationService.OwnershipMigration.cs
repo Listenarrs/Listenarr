@@ -12,6 +12,68 @@ public sealed partial class RootFolderRelocationService
         LibraryDirectoryOwnership Target,
         LibraryDirectoryOwnershipPathMigration Journal);
 
+    private sealed class OwnershipMigrationTargetLease : IDisposable
+    {
+        private readonly OwnershipMigrationPlan _plan;
+        private readonly PinnedDirectoryCreation.PinnedDirectoryAnchor _parent;
+        private readonly PinnedDirectoryCreation.PinnedDirectoryAnchor _directory;
+
+        public OwnershipMigrationTargetLease(
+            OwnershipMigrationPlan plan,
+            string targetBoundary)
+        {
+            _plan = plan;
+            var targetParentPath = Path.GetDirectoryName(
+                plan.Target.CanonicalPath)
+                ?? throw new InvalidOperationException(
+                    "The migrated ownership target has no parent directory.");
+            _parent = OpenDirectoryParentWithinBoundary(
+                targetBoundary,
+                targetParentPath,
+                plan.Target.GetIdentity().Semantics);
+            try
+            {
+                _directory = _parent.OpenExistingChild(
+                    Path.GetFileName(plan.Target.CanonicalPath));
+                ValidateAndCapture();
+            }
+            catch
+            {
+                _parent.Dispose();
+                throw;
+            }
+        }
+
+        public void ValidateAndCapture()
+        {
+            var nativeIdentity = _directory.GetDirectoryObjectIdentity();
+            if (!ManagedDirectoryIdentity.Matches(
+                    _plan.Source.DirectoryObjectIdentityVersion,
+                    _plan.Source.DirectoryObjectIdentity,
+                    _plan.Source.OwnershipToken,
+                    nativeIdentity)
+                || !_directory.VisiblePathMatches()
+                || !_parent.VisiblePathMatches())
+            {
+                throw new InvalidOperationException(
+                    "Metadata-only relocation cannot transfer directory ownership to a different physical generation.");
+            }
+
+            _plan.Target.DirectoryObjectIdentityVersion =
+                ManagedDirectoryIdentity.CurrentVersion;
+            _plan.Target.DirectoryObjectIdentity = ManagedDirectoryIdentity.Create(
+                _plan.Target.OwnershipToken,
+                nativeIdentity);
+            _plan.Target.DirectoryObjectIdentityUnavailableReason = null;
+        }
+
+        public void Dispose()
+        {
+            _directory.Dispose();
+            _parent.Dispose();
+        }
+    }
+
     private sealed record MetadataRewriteSnapshot(
         Audiobook Audiobook,
         string? BasePath,
@@ -166,8 +228,6 @@ public sealed partial class RootFolderRelocationService
                 TargetIdentityLookupKey =
                     target.PathIdentityLookupKey,
                 TargetOwnershipKey = target.PathOwnershipKey!,
-                State =
-                    LibraryDirectoryOwnershipPathMigrationState.Prepared,
                 CreatedAt = now,
                 UpdatedAt = now
             };
@@ -208,70 +268,48 @@ public sealed partial class RootFolderRelocationService
         return plans;
     }
 
-    private static void ValidateMarkerlessOwnershipMigrationTargets(
-        IReadOnlyList<OwnershipMigrationPlan> plans,
-        string targetBoundary,
-        CancellationToken cancellationToken)
+    private static IReadOnlyList<OwnershipMigrationTargetLease>
+        PinOwnershipMigrationTargets(
+            IReadOnlyList<OwnershipMigrationPlan> plans,
+            string targetBoundary,
+            CancellationToken cancellationToken)
     {
-        foreach (var plan in plans)
+        var leases = new List<OwnershipMigrationTargetLease>(plans.Count);
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var targetParentPath = Path.GetDirectoryName(
-                plan.Target.CanonicalPath)
-                ?? throw new InvalidOperationException(
-                    "The migrated ownership target has no parent directory.");
-            using var targetParent = OpenMarkerParentWithinBoundary(
-                targetBoundary,
-                targetParentPath,
-                plan.Target.GetIdentity().Semantics);
-            using var directory = targetParent.OpenExistingChild(
-                Path.GetFileName(plan.Target.CanonicalPath));
-            var nativeIdentity = directory.GetDirectoryObjectIdentity();
-            if (!ManagedDirectoryIdentity.Matches(
-                    plan.Source.DirectoryObjectIdentityVersion,
-                    plan.Source.DirectoryObjectIdentity,
-                    plan.Source.OwnershipToken,
-                    nativeIdentity)
-                || !directory.VisiblePathMatches()
-                || !targetParent.VisiblePathMatches())
+            foreach (var plan in plans)
             {
-                throw new InvalidOperationException(
-                    "Metadata-only relocation cannot transfer directory ownership to a different physical generation.");
+                cancellationToken.ThrowIfCancellationRequested();
+                leases.Add(new OwnershipMigrationTargetLease(
+                    plan,
+                    targetBoundary));
             }
-
-            plan.Target.DirectoryObjectIdentityVersion =
-                ManagedDirectoryIdentity.CurrentVersion;
-            plan.Target.DirectoryObjectIdentity = ManagedDirectoryIdentity.Create(
-                plan.Target.OwnershipToken,
-                nativeIdentity);
-            plan.Target.DirectoryObjectIdentityUnavailableReason = null;
+            return leases;
+        }
+        catch
+        {
+            DisposeOwnershipMigrationTargetLeases(leases);
+            throw;
         }
     }
 
-    private static async Task PublishOwnershipMigrationTargetsAsync(
-        IReadOnlyList<OwnershipMigrationPlan> plans,
-        string targetBoundary,
-        CancellationToken cancellationToken,
-        bool allowPublication = true)
+    private static void RevalidateOwnershipMigrationTargetLeases(
+        IReadOnlyList<OwnershipMigrationTargetLease> leases,
+        CancellationToken cancellationToken)
     {
-        foreach (var plan in plans)
+        foreach (var lease in leases)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var targetParentPath = Path.GetDirectoryName(
-                plan.Target.CanonicalPath)
-                ?? throw new InvalidOperationException(
-                    "The migrated ownership target has no parent directory.");
-            using var targetParent = OpenMarkerParentWithinBoundary(
-                targetBoundary,
-                targetParentPath,
-                plan.Target.GetIdentity().Semantics);
-            await PinnedLibraryDirectoryOwnershipMarker
-                .PublishMigrationTargetAsync(
-                    plan.Source,
-                    plan.Target,
-                    targetParent,
-                    cancellationToken,
-                    allowPublication);
+            lease.ValidateAndCapture();
+        }
+    }
+
+    private static void DisposeOwnershipMigrationTargetLeases(
+        IEnumerable<OwnershipMigrationTargetLease> leases)
+    {
+        foreach (var lease in leases.Reverse())
+        {
+            lease.Dispose();
         }
     }
 
@@ -313,15 +351,12 @@ public sealed partial class RootFolderRelocationService
 
     private static void AssignOwnershipMigrationKeys(
         IReadOnlyList<OwnershipMigrationPlan> plans,
-        DateTime now,
-        LibraryDirectoryOwnershipPathMigrationState committedState =
-            LibraryDirectoryOwnershipPathMigrationState.MetadataCommitted)
+        DateTime now)
     {
         foreach (var plan in plans)
         {
             plan.Tracked.PathOwnershipKey =
                 plan.Target.PathOwnershipKey;
-            plan.Journal.State = committedState;
             plan.Journal.UpdatedAt = now;
         }
     }
@@ -357,4 +392,64 @@ public sealed partial class RootFolderRelocationService
             CreatedAt = source.CreatedAt,
             UpdatedAt = source.UpdatedAt
         };
+
+    private static PinnedDirectoryCreation.PinnedDirectoryAnchor
+        OpenDirectoryParentWithinBoundary(
+            string boundaryPath,
+            string parentPath,
+            FileSystemPathSemantics semantics)
+    {
+        var canonicalBoundary = FileSystemPathIdentity.Canonicalize(
+            boundaryPath,
+            semantics.Syntax);
+        var canonicalParent = FileSystemPathIdentity.Canonicalize(
+            parentPath,
+            semantics.Syntax);
+        if (!FileSystemPathIdentity.IsSameOrInside(
+                canonicalParent,
+                canonicalBoundary,
+                semantics))
+        {
+            throw new InvalidOperationException(
+                "An ownership migration directory escaped its authorized root boundary.");
+        }
+
+        var current = PinnedDirectoryCreation.OpenPinnedBoundary(
+            canonicalBoundary);
+        try
+        {
+            if (FileSystemPathIdentity.AreEquivalent(
+                    canonicalParent,
+                    canonicalBoundary,
+                    semantics))
+            {
+                return current;
+            }
+
+            var relative = Path.GetRelativePath(
+                canonicalBoundary,
+                canonicalParent);
+            foreach (var segment in relative.Split(
+                [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+                StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (segment is "." or "..")
+                {
+                    throw new InvalidOperationException(
+                        "An ownership migration directory contains navigation segments.");
+                }
+
+                var next = current.OpenExistingChild(segment);
+                current.Dispose();
+                current = next;
+            }
+
+            return current;
+        }
+        catch
+        {
+            current.Dispose();
+            throw;
+        }
+    }
 }

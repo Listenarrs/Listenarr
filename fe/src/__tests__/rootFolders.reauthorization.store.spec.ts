@@ -216,5 +216,4 @@ describe('root folder relocation store actions', () => {
     expect(apiService.reauthorizeRootFolderIdentity).toHaveBeenCalledWith(current.id, current.path)
     expect(apiService.getRootFolders).toHaveBeenCalledTimes(1)
   })
-
 })

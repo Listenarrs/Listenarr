@@ -139,7 +139,7 @@ describe('RootFoldersSettings', () => {
     expect(apiService.reauthorizeRootFolderIdentity).toHaveBeenCalledWith(folder.id, folder.path)
   })
 
-it('keeps ordinary retry separate for an authorized relocation', async () => {
+  it('keeps ordinary retry separate for an authorized relocation', async () => {
     vi.mocked(apiService.getRootFolders).mockResolvedValue([rootFolder(relocation('Authorized'))])
     const pinia = createPinia()
     setActivePinia(pinia)

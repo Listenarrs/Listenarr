@@ -61,7 +61,11 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
             try
             {
                 var comparison = Compare(candidate, canonicalPath, semantics);
-                if (comparison == OwnershipComparison.Compatible
+                if (candidate.State == LibraryDirectoryOwnershipState.Unavailable)
+                {
+                    hasUnavailable = true;
+                }
+                else if (comparison == OwnershipComparison.Compatible
                     && candidate.State is LibraryDirectoryOwnershipState.Owned
                         or LibraryDirectoryOwnershipState.Retained
                         or LibraryDirectoryOwnershipState.Removing)
@@ -72,10 +76,6 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
                     || candidate.State == LibraryDirectoryOwnershipState.Conflict)
                 {
                     hasConflict = true;
-                }
-                else if (candidate.State == LibraryDirectoryOwnershipState.Unavailable)
-                {
-                    hasUnavailable = true;
                 }
             }
             catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
@@ -149,11 +149,6 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
                     throw new InvalidOperationException(
                         "The owned directory changed after its physical identity was pinned.");
                 }
-                _ = LibraryDirectoryOwnershipMarker.TryRetireMatchingMarkers(
-                    resolved,
-                    live,
-                    authorization.ParentAnchor,
-                    out _);
             }
             catch (Exception exception) when (exception is
                 ArgumentException or IOException or UnauthorizedAccessException
@@ -166,8 +161,8 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
             }
         }
 
-        // Removing has separate restart semantics: its inside marker may already
-        // have been retired after the durable state transition.
+        // Removing has separate restart semantics: the durable state transition can
+        // outlive the final namespace deletion.
         return new LibraryDirectoryOwnershipResolution(
             LibraryDirectoryOwnershipResolutionState.Owned,
             resolved);
@@ -253,11 +248,6 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
                     throw new InvalidOperationException(
                         "A durable ownership claim no longer matches its persisted physical directory generation.");
                 }
-                _ = LibraryDirectoryOwnershipMarker.TryRetireMatchingMarkers(
-                    candidate,
-                    live,
-                    authorization.ParentAnchor,
-                    out _);
             }
 
             owned.Add(candidate);

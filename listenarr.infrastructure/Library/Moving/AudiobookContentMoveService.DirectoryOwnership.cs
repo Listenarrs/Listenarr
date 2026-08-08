@@ -1,5 +1,4 @@
 using Listenarr.Domain.Common;
-using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.Library.Moving;
 
@@ -14,16 +13,10 @@ internal sealed partial class AudiobookContentMoveService
             return request;
         }
 
-        if (await GetExecutionProtocolVersionAsync(
-                request.JobId,
-                cancellationToken)
-            >= MoveExecutionProtocol.MarkerlessDatabaseState)
-        {
-            await TryRetireReplacedMarkerlessTargetOwnershipAsync(
-                request,
-                request.Target,
-                cancellationToken);
-        }
+        await TryRetireReplacedMarkerlessTargetOwnershipAsync(
+            request,
+            request.Target,
+            cancellationToken);
 
         var ownership = await LoadValidatedTargetDirectoryOwnershipAsync(
             request.Target,
@@ -144,14 +137,6 @@ internal sealed partial class AudiobookContentMoveService
         }
     }
 
-    private static bool IsValidatedTargetOwnershipMarker(
-        string path,
-        LibraryDirectoryOwnership? ownership,
-        FileSystemPathSemantics semantics) =>
-        ownership != null
-        && LibraryDirectoryOwnershipMarker.GetMarkerPaths(ownership)
-            .Any(marker => FileSystemPathIdentity.AreEquivalent(marker, path, semantics));
-
     private async Task<IReadOnlyList<LibraryDirectoryOwnership>> LoadValidatedOwnedSourceDirectoriesAsync(
         string source,
         FileSystemPathSemantics sourceSemantics,
@@ -226,40 +211,11 @@ internal sealed partial class AudiobookContentMoveService
             catch (InvalidOperationException exception)
             {
                 throw new MoveNeedsAttentionException(
-                    $"A source-directory ownership marker is invalid during cleanup: {exception.Message}");
+                    $"Source-directory ownership is invalid during cleanup: {exception.Message}");
             }
         }
 
         return ownerships;
-    }
-
-    private static IReadOnlyCollection<string> GetOwnedSourceMarkerPaths(
-        string source,
-        IReadOnlyCollection<LibraryDirectoryOwnership> ownerships,
-        FileSystemPathSemantics sourceSemantics) =>
-        ownerships
-            .SelectMany(LibraryDirectoryOwnershipMarker.GetMarkerPaths)
-            .Where(path => FileSystemPathIdentity.IsSameOrInside(
-                path,
-                source,
-                sourceSemantics))
-            .Distinct(sourceSemantics.Comparer)
-            .ToList();
-
-    private void TryDeleteRetiredOwnershipMarker(
-        LibraryDirectoryOwnership ownership)
-    {
-        if (LibraryDirectoryOwnershipMarker.TryDeleteRetiredSiblingMarker(
-                ownership,
-                out var reason))
-        {
-            return;
-        }
-
-        logger.LogWarning(
-            "The retired directory ownership marker for {DirectoryPath} could not be deleted: {Reason}",
-            LogRedaction.SanitizeFilePath(ownership.CanonicalPath),
-            LogRedaction.SanitizeText(reason));
     }
 
     private async Task<LibraryDirectoryOwnership?>
@@ -379,7 +335,6 @@ internal sealed partial class AudiobookContentMoveService
             ownership.Id,
             ownershipKey,
             cancellationToken);
-        TryDeleteRetiredOwnershipMarker(ownership);
         return true;
     }
 

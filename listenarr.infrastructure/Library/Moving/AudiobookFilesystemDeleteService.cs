@@ -450,9 +450,8 @@ namespace Listenarr.Infrastructure.Library.Moving
                 return true;
             }
 
-            var ownershipMarkerPaths = deleteTarget.OwnedDirectories
-                .SelectMany(LibraryDirectoryOwnershipMarker.GetMarkerPaths)
-                .ToHashSet(deleteTarget.Semantics.Comparer);
+            IReadOnlySet<string> ownershipMarkerPaths = new HashSet<string>(
+                deleteTarget.Semantics.Comparer);
             var preflightIdentities = new Dictionary<string, string>(
                 deleteTarget.Semantics.Comparer);
             if (!TryValidatePinnedDirectoryTree(

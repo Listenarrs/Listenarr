@@ -63,7 +63,7 @@ public sealed class DirectoryObjectIdentityResolverTests : BaseTests
             StringComparison.OrdinalIgnoreCase);
     }
 
-[Fact]
+    [Fact]
     public async Task ResolveAsync_ForeignPersistedSyntax_FailsClosedBeforeNativeProbeOrMarkerWrite()
     {
         var directory = FileService.GetTempDirectory("directory-object-identity-foreign-syntax");

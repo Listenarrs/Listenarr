@@ -212,6 +212,145 @@ public sealed class EfMoveExecutionStoreTests : BaseTests
     }
 
     [Fact]
+    public async Task CleanupStateTransitions_AreMonotonicAndTerminal()
+    {
+        var jobId = Guid.NewGuid();
+        var lease = new MoveLeaseToken("worker", 1);
+        var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.MoveJobs.Add(new MoveJob
+            {
+                Id = jobId,
+                AudiobookId = 1,
+                RequestedPath = Path.Join(FileService.GetTempPath(), "cleanup-target"),
+                SourcePath = Path.Join(FileService.GetTempPath(), "cleanup-source"),
+                Status = MoveJobStatus.Running,
+                LeaseOwner = lease.Owner,
+                LeaseGeneration = lease.Generation,
+                LeaseExpiresAt = DateTime.UtcNow.AddMinutes(5),
+                ActiveDeduplicationKey = $"test:{jobId:N}",
+                Entries =
+                [
+                    new MoveJobEntry
+                    {
+                        RelativePath = "book.m4b",
+                        EntryType = MoveJobEntryType.File,
+                        Length = 5,
+                        Sha256 = new string('A', 64)
+                    }
+                ]
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var store = new EfMoveExecutionStore(factory, TimeProvider.System);
+        await store.UpdateCleanupStateAsync(
+            jobId,
+            lease,
+            "book.m4b",
+            MoveJobEntryCleanupState.DeleteAuthorized,
+            CancellationToken.None);
+        await store.UpdateCleanupStateAsync(
+            jobId,
+            lease,
+            "book.m4b",
+            MoveJobEntryCleanupState.Deleted,
+            CancellationToken.None);
+        await Assert.ThrowsAsync<MoveNeedsAttentionException>(() =>
+            store.UpdateCleanupStateAsync(
+                jobId,
+                lease,
+                "book.m4b",
+                MoveJobEntryCleanupState.Retained,
+                CancellationToken.None));
+
+        await store.UpdateSourceDirectoryCleanupStateAsync(
+            jobId,
+            lease,
+            MoveJobEntryCleanupState.Retained,
+            CancellationToken.None);
+        await Assert.ThrowsAsync<MoveNeedsAttentionException>(() =>
+            store.UpdateSourceDirectoryCleanupStateAsync(
+                jobId,
+                lease,
+                MoveJobEntryCleanupState.DeleteAuthorized,
+                CancellationToken.None));
+
+        await using var verification = await factory.CreateDbContextAsync();
+        var persisted = await verification.MoveJobs
+            .Include(candidate => candidate.Entries)
+            .SingleAsync(candidate => candidate.Id == jobId);
+        Assert.Equal(
+            MoveJobEntryCleanupState.Retained,
+            persisted.SourceDirectoryCleanupState);
+        Assert.Equal(
+            MoveJobEntryCleanupState.Deleted,
+            Assert.Single(persisted.Entries).CleanupState);
+    }
+
+    [Fact]
+    public async Task CreatedDirectoryStateTransitions_PreserveTerminalRetainedState()
+    {
+        var jobId = Guid.NewGuid();
+        var lease = new MoveLeaseToken("worker", 1);
+        var path = Path.Join(FileService.GetTempPath(), $"created-directory-{Guid.NewGuid():N}");
+        var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.MoveJobs.Add(new MoveJob
+            {
+                Id = jobId,
+                AudiobookId = 1,
+                RequestedPath = Path.Join(FileService.GetTempPath(), "created-target"),
+                SourcePath = Path.Join(FileService.GetTempPath(), "created-source"),
+                Status = MoveJobStatus.Running,
+                LeaseOwner = lease.Owner,
+                LeaseGeneration = lease.Generation,
+                LeaseExpiresAt = DateTime.UtcNow.AddMinutes(5),
+                ActiveDeduplicationKey = $"test:{jobId:N}",
+                CreatedDirectories =
+                [
+                    new MoveJobCreatedDirectory
+                    {
+                        Path = path,
+                        State = MoveCreatedDirectoryState.Planned
+                    }
+                ]
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var store = new EfMoveExecutionStore(factory, TimeProvider.System);
+        await store.UpdateCreatedDirectoryPublicationAsync(
+            jobId,
+            lease,
+            path,
+            MoveCreatedDirectoryState.Created,
+            "directory-generation",
+            CancellationToken.None);
+        await store.UpdateCreatedDirectoryStateAsync(
+            jobId,
+            lease,
+            path,
+            MoveCreatedDirectoryState.Retained,
+            CancellationToken.None);
+        await Assert.ThrowsAsync<MoveNeedsAttentionException>(() =>
+            store.UpdateCreatedDirectoryStateAsync(
+                jobId,
+                lease,
+                path,
+                MoveCreatedDirectoryState.Removed,
+                CancellationToken.None));
+
+        await using var verification = await factory.CreateDbContextAsync();
+        var persisted = await verification.MoveJobCreatedDirectories
+            .SingleAsync(candidate => candidate.MoveJobId == jobId);
+        Assert.Equal(MoveCreatedDirectoryState.Retained, persisted.State);
+        Assert.Equal("directory-generation", persisted.DirectoryObjectIdentity);
+    }
+
+    [Fact]
     public async Task ProviderFailures_AreTranslatedAcrossMoveExecutionBoundary()
     {
         var store = new EfMoveExecutionStore(
@@ -225,14 +364,13 @@ public sealed class EfMoveExecutionStoreTests : BaseTests
         var operations = new Func<Task>[]
         {
             () => store.EnsureLeaseOwnedAsync(jobId, lease, CancellationToken.None),
-            () => store.ValidateOrAdoptIdentityAsync(
+            () => store.ValidateIdentityAsync(
                 jobId,
                 source,
                 target,
                 semantics,
                 semantics,
                 lease,
-                hasFilesystemRecoveryArtifacts: false,
                 CancellationToken.None),
             () => store.EnsureMutationAuthorizedAsync(
                 jobId,

@@ -133,9 +133,7 @@ internal sealed partial class EfMoveExecutionStore
                 }
 
                 var observedState = job.SourceDirectoryCleanupState;
-                var desiredState = observedState < cleanupState
-                    ? cleanupState
-                    : observedState;
+                var desiredState = AdvanceCleanupState(observedState, cleanupState);
                 if (!db.Database.IsRelational())
                 {
                     job.SourceDirectoryCleanupState = desiredState;
@@ -343,17 +341,10 @@ internal sealed partial class EfMoveExecutionStore
                     throw new MoveNeedsAttentionException(
                         "A move-created target directory changed physical generation.");
                 }
-                if (state < directory.State
-                    || directory.State == MoveCreatedDirectoryState.Removed)
-                {
-                    throw new MoveNeedsAttentionException(
-                        "A markerless target-directory state transition would regress durable state.");
-                }
-
                 var observedIdentity = directory.DirectoryObjectIdentity;
                 var observedState = directory.State;
                 var desiredIdentity = observedIdentity ?? directoryObjectIdentity;
-                var desiredState = observedState < state ? state : observedState;
+                var desiredState = AdvanceCreatedDirectoryState(observedState, state);
                 if (!db.Database.IsRelational())
                 {
                     directory.DirectoryObjectIdentity = desiredIdentity;

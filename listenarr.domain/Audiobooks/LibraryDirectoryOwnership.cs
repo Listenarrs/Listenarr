@@ -13,12 +13,6 @@ public enum LibraryDirectoryOwnershipState
     Unavailable
 }
 
-public enum LibraryDirectoryOwnershipRetiredMarkerState
-{
-    Pending,
-    Removed
-}
-
 public sealed class LibraryDirectoryOwnership
 {
     public long Id { get; set; }
@@ -70,43 +64,9 @@ public sealed class LibraryDirectoryOwnership
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public ICollection<LibraryDirectoryOwnershipPathMigration> PathMigrations { get; set; } =
         new List<LibraryDirectoryOwnershipPathMigration>();
-    public LibraryDirectoryOwnershipRetiredMarker? RetiredMarker { get; set; }
-
     public PathIdentitySnapshot GetIdentity() => new(
         PathSyntax,
         PathCaseSensitivity,
         PathCaseSensitivityMode,
         PathIdentityBoundary);
-}
-
-public sealed class LibraryDirectoryOwnershipRetiredMarker
-{
-    [Key]
-    public long Id { get; set; }
-    public long OwnershipId { get; set; }
-    public LibraryDirectoryOwnership Ownership { get; set; } = null!;
-    [Required, MaxLength(64)]
-    public string OwnershipToken { get; set; } = string.Empty;
-    [MaxLength(4096)]
-    public string? CanonicalMarkerPath { get; set; }
-    [Required, MaxLength(4096)]
-    public string CanonicalOwnershipPath { get; set; } = string.Empty;
-    public FileSystemPathSyntax PathSyntax { get; set; }
-    public FileSystemCaseSensitivity PathCaseSensitivity { get; set; }
-    public FileSystemCaseSensitivityMode PathCaseSensitivityMode { get; set; }
-    [Required, MaxLength(4096)]
-    public string PathIdentityBoundary { get; set; } = string.Empty;
-    [MaxLength(16384)]
-    public string? CanonicalPayload { get; set; }
-    [MaxLength(64)]
-    public string? PayloadSha256 { get; set; }
-    public int PayloadVersion { get; set; }
-    public int? OriginalManagedRootFolderId { get; set; }
-    public int? DirectoryObjectIdentityVersion { get; set; }
-    [MaxLength(256)]
-    public string? DirectoryObjectIdentity { get; set; }
-    public LibraryDirectoryOwnershipRetiredMarkerState State { get; set; } =
-        LibraryDirectoryOwnershipRetiredMarkerState.Pending;
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }

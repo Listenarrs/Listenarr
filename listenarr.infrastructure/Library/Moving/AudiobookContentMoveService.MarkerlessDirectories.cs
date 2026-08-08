@@ -92,14 +92,15 @@ internal sealed partial class AudiobookContentMoveService
             var parentPath = Path.GetDirectoryName(path)
                 ?? throw new MoveNeedsAttentionException(
                     "A markerless target directory has no parent.");
+            using var parent = PinnedDirectoryCreation.OpenPinnedBoundary(parentPath);
             await EnsureMutationAuthorizedAsync(
                 request,
                 request.Source,
                 request.Target,
                 cancellationToken);
-            using var creation = PinnedDirectoryCreation.TryCreate(
-                parentPath,
-                Path.GetFileName(path));
+            using var creation = TryCreateMarkerlessTargetDirectoryForPublication(
+                parent,
+                path);
             if (!creation.Created)
             {
                 throw new MoveNeedsAttentionException(
@@ -275,6 +276,24 @@ internal sealed partial class AudiobookContentMoveService
             current = Path.GetDirectoryName(current)
                 ?? throw new MoveNeedsAttentionException(
                     "A markerless target directory chain has no parent.");
+        }
+    }
+
+    private static PinnedDirectoryCreation TryCreateMarkerlessTargetDirectoryForPublication(
+        PinnedDirectoryCreation.PinnedDirectoryAnchor parent,
+        string path)
+    {
+        try
+        {
+            return parent.TryCreateChildForPublication(Path.GetFileName(path));
+        }
+        catch (Exception exception) when (exception is
+            IOException or UnauthorizedAccessException or InvalidOperationException
+                or NotSupportedException or PathTooLongException
+                or System.ComponentModel.Win32Exception)
+        {
+            throw new MoveNeedsAttentionException(
+                $"The markerless target directory parent changed before creation: {path}. {exception.Message}");
         }
     }
 

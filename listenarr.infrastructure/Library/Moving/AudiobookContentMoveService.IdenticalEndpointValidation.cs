@@ -8,10 +8,16 @@ internal sealed partial class AudiobookContentMoveService
     {
         ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
+        await EnsureLeaseOwnedAsync(
+            request.JobId,
+            request.LeaseToken,
+            cancellationToken);
+        await EnsureCurrentExecutionProtocolAsync(
+            request.JobId,
+            cancellationToken);
 
         var source = NormalizeMoveDirectoryEndpoint(request.Source);
         var target = NormalizeMoveDirectoryEndpoint(request.Target);
-        await EnsureLeaseOwnedAsync(request.JobId, request.LeaseToken, cancellationToken);
         await ValidatePersistedMoveIdentityAsync(
             request.JobId,
             source,
@@ -22,7 +28,9 @@ internal sealed partial class AudiobookContentMoveService
             cancellationToken);
 
         var manifest = await LoadManifestAsync(request.JobId, cancellationToken);
-        var scaffolding = await GetCreatedDirectoriesAsync(request.JobId, cancellationToken);
+        var scaffolding = await GetCreatedDirectoriesAsync(
+            request.JobId,
+            cancellationToken);
         var manifestHasExecutionState = manifest.Any(entry =>
             entry.CopyState != MoveJobEntryCopyState.Pending
             || entry.CleanupState != MoveJobEntryCleanupState.Pending);
@@ -30,112 +38,6 @@ internal sealed partial class AudiobookContentMoveService
         {
             throw new MoveNeedsAttentionException(
                 "The identical-endpoint job has durable move execution state and cannot be superseded automatically.");
-        }
-
-        var endpoints = new HashSet<string>(StringComparer.Ordinal)
-        {
-            source,
-            target
-        };
-        foreach (var endpoint in endpoints)
-        {
-            VerifyEndpointContainsNoJobArtifacts(endpoint, request.JobId);
-            VerifyEndpointParentContainsNoJobArtifacts(endpoint, request.JobId);
-        }
-    }
-
-    private static void VerifyEndpointContainsNoJobArtifacts(
-        string endpoint,
-        Guid jobId)
-    {
-        if (!TryGetExistingPathAttributes(endpoint, out var attributes))
-        {
-            return;
-        }
-
-        if ((attributes & FileAttributes.Directory) == 0
-            || (attributes & FileAttributes.ReparsePoint) != 0)
-        {
-            throw new MoveNeedsAttentionException(
-                "The identical move endpoint is a file, symbolic link, or reparse point.");
-        }
-
-        if (!FileSystemSafety.TryEnumerateTreeWithoutLinks(
-                endpoint,
-                out var files,
-                out _,
-                out var reason))
-        {
-            throw new MoveNeedsAttentionException(reason);
-        }
-
-        var markerName = $".listenarr-move-{jobId:N}.pending";
-        var partialSuffix = $".listenarr-{jobId:N}.partial";
-        if (files.Any(file =>
-            string.Equals(Path.GetFileName(file), markerName, StringComparison.Ordinal)
-            || Path.GetFileName(file).StartsWith(markerName + ".writing-", StringComparison.Ordinal)
-            || file.EndsWith(partialSuffix, StringComparison.Ordinal)))
-        {
-            throw new MoveNeedsAttentionException(
-                "The identical-endpoint job has move-owned filesystem artifacts and cannot be superseded automatically.");
-        }
-    }
-
-    private static void VerifyEndpointParentContainsNoJobArtifacts(
-        string endpoint,
-        Guid jobId)
-    {
-        var parent = Path.GetDirectoryName(endpoint);
-        if (string.IsNullOrWhiteSpace(parent))
-        {
-            return;
-        }
-
-        var tempDirectory = Path.Join(
-            parent,
-            Path.GetFileName(endpoint) + ".tmp-" + jobId.ToString("N"));
-        var quarantine = Path.Join(parent, $".listenarr-quarantine-{jobId:N}");
-        var targetScaffoldTemporary = Path.Join(
-            parent,
-            $".listenarr-scaffold-{jobId:N}");
-        var targetScaffoldQuarantine = Path.Join(
-            parent,
-            $".listenarr-scaffold-cleanup-{jobId:N}");
-        var possibleArtifacts = new[]
-        {
-            tempDirectory,
-            quarantine,
-            targetScaffoldTemporary,
-            targetScaffoldQuarantine,
-            GetCleanupDirectoryPath(tempDirectory, TemporaryDirectoryArtifactType, jobId),
-            GetCleanupDirectoryPath(quarantine, QuarantineDirectoryArtifactType, jobId)
-        };
-        var cleanupTombstones = new[]
-        {
-            GetCleanupTombstonePath(tempDirectory, TemporaryDirectoryArtifactType, jobId),
-            GetCleanupTombstonePath(quarantine, QuarantineDirectoryArtifactType, jobId),
-            GetCleanupTombstonePath(
-                targetScaffoldTemporary,
-                TargetScaffoldTemporaryArtifactType,
-                jobId),
-            GetCleanupTombstonePath(
-                targetScaffoldQuarantine,
-                TargetScaffoldQuarantineArtifactType,
-                jobId)
-        };
-        var hasSiblingArtifact = possibleArtifacts.Any(path =>
-            TryGetExistingPathAttributes(path, out _));
-        var hasCleanupTombstone = false;
-        if (TryGetExistingPathAttributes(parent, out _))
-        {
-            ValidateExistingMoveDirectory(parent, "identical-endpoint artifact directory");
-            hasCleanupTombstone = cleanupTombstones.Any(HasCleanupTombstoneEvidence);
-        }
-
-        if (hasSiblingArtifact || hasCleanupTombstone)
-        {
-            throw new MoveNeedsAttentionException(
-                "The identical-endpoint job has move-owned sibling artifacts and cannot be superseded automatically.");
         }
     }
 }

@@ -202,7 +202,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                         RelativePath = "book.m4b",
                         EntryType = MoveJobEntryType.File,
                         CopyState = MoveJobEntryCopyState.Verified,
-                        CleanupState = MoveJobEntryCleanupState.Quarantined
+                        CleanupState = MoveJobEntryCleanupState.DeleteAuthorized
                     }
                 ]
             };
