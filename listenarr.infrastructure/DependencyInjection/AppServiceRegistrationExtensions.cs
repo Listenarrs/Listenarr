@@ -8,6 +8,7 @@
  * (at your option) any later version.
  */
 using Listenarr.Infrastructure.DependencyInjection.Downloads;
+using Listenarr.Infrastructure.DependencyInjection.Integrations;
 using Listenarr.Infrastructure.DependencyInjection.Library;
 using Listenarr.Infrastructure.DependencyInjection.Metadata;
 using Listenarr.Infrastructure.DependencyInjection.Notifications;
@@ -34,6 +35,7 @@ public static class AppServiceRegistrationExtensions
         services.AddLibraryServices();
         services.AddDownloadServices(configuration);
         services.AddNotificationAndRealtimeServices();
+        services.AddIntegrationServices();
         services.AddSystemDiagnosticServices();
         return services;
     }

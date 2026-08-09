@@ -377,6 +377,26 @@ export interface ProwlarrImportConnectionSettings {
   hasSavedApiKey: boolean
 }
 
+export interface AudiobookshelfConnectionSettings {
+  url: string
+  apiKey?: string | null
+  libraryId?: string | null
+  notifyOnImport: boolean
+  hasSavedApiKey: boolean
+}
+
+export interface AudiobookshelfLibrary {
+  id: string
+  name: string
+  mediaType: string
+}
+
+export interface AudiobookshelfActionResult {
+  success: boolean
+  message: string
+  libraries?: AudiobookshelfLibrary[] | null
+}
+
 export interface StartupConfig {
   logLevel?: string
   enableSsl?: boolean

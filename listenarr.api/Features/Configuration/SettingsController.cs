@@ -114,7 +114,49 @@ namespace Listenarr.Api.Features.Configuration
             clone.AdminUsername = null;
             clone.AdminPassword = null;
             clone.ProwlarrApiKeyEncrypted = null;
+            clone.AudiobookshelfApiKeyEncrypted = null;
             return clone;
+        }
+
+        /// <summary>
+        /// Get the saved Audiobookshelf connection metadata.
+        /// The API token itself is never returned; callers only receive whether a saved token exists.
+        /// </summary>
+        [Tags("Settings")]
+        [HttpGet("audiobookshelf")]
+        public async Task<ActionResult<AudiobookshelfConnectionSettings>> GetAudiobookshelfSettings()
+        {
+            try
+            {
+                var settings = await _configurationService.GetAudiobookshelfSettingsAsync();
+                settings.ApiKey = null;
+                return Ok(settings);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
+                _logger.LogError(ex, "Error retrieving saved Audiobookshelf settings");
+                return StatusCode(500, "Internal server error");
+            }
+        }
+
+        /// <summary>
+        /// Save the Audiobookshelf connection settings. A blank or redacted API token keeps the saved one.
+        /// </summary>
+        [Tags("Settings")]
+        [HttpPost("audiobookshelf")]
+        public async Task<ActionResult<AudiobookshelfConnectionSettings>> SaveAudiobookshelfSettings([FromBody] AudiobookshelfConnectionSettings settings)
+        {
+            try
+            {
+                var saved = await _configurationService.SaveAudiobookshelfSettingsAsync(settings);
+                saved.ApiKey = null;
+                return Ok(saved);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
+                _logger.LogError(ex, "Error saving Audiobookshelf settings");
+                return StatusCode(500, new { error = "Failed to save Audiobookshelf settings", message = ex.Message });
+            }
         }
 
         /// <summary>

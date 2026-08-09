@@ -200,6 +200,27 @@ namespace Listenarr.Domain.Configuration
         public string? ProwlarrTagFilter { get; set; }
 
         /// <summary>
+        /// Saved Audiobookshelf server URL used by the Audiobookshelf integration.
+        /// </summary>
+        public string? AudiobookshelfUrl { get; set; }
+
+        /// <summary>
+        /// Encrypted Audiobookshelf API token used by the Audiobookshelf integration.
+        /// </summary>
+        public string? AudiobookshelfApiKeyEncrypted { get; set; }
+
+        /// <summary>
+        /// Optional Audiobookshelf library id to scan. When empty, all book libraries are scanned.
+        /// </summary>
+        public string? AudiobookshelfLibraryId { get; set; }
+
+        /// <summary>
+        /// When true, an Audiobookshelf scan is requested automatically after imports.
+        /// Nullable so partial settings payloads preserve the saved value.
+        /// </summary>
+        public bool? AudiobookshelfNotifyOnImport { get; set; }
+
+        /// <summary>
         /// Primary command group name (e.g. "request"). We'll create a slash command with this group and
         /// a subcommand for specific request types (e.g. "audiobook").
         /// </summary>

@@ -48,6 +48,7 @@ global using Listenarr.Domain.Audiobooks.Rules;
 global using Listenarr.Domain.Configuration;
 global using Listenarr.Domain.Downloads;
 global using Listenarr.Domain.Identity;
+global using Listenarr.Domain.Integrations;
 global using Listenarr.Domain.Search;
 global using Listenarr.Domain.SystemDiagnostics;
 global using Listenarr.Domain.SystemDiagnostics.Exceptions;

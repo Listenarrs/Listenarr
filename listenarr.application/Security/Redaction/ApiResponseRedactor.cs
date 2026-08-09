@@ -75,6 +75,11 @@ public static class ApiResponseRedactor
             clone.ProwlarrApiKeyEncrypted = RedactedValue;
         }
 
+        if (!string.IsNullOrWhiteSpace(clone.AudiobookshelfApiKeyEncrypted))
+        {
+            clone.AudiobookshelfApiKeyEncrypted = RedactedValue;
+        }
+
         if (clone.Webhooks != null)
         {
             foreach (var webhook in clone.Webhooks.Where(w => !string.IsNullOrWhiteSpace(w.Url)))
