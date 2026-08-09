@@ -85,6 +85,14 @@
             Discord Bot
           </button>
           <button
+            @click="router.push({ hash: '#audiobookshelf' })"
+            :class="{ active: activeTab === 'audiobookshelf' }"
+            class="tab-button"
+          >
+            <PhBooks />
+            Audiobookshelf
+          </button>
+          <button
             @click="router.push({ hash: '#general' })"
             :class="{ active: activeTab === 'general' }"
             class="tab-button"
@@ -257,6 +265,8 @@
         ref="notificationsRef"
         :settings="settings"
       />
+
+      <AudiobookshelfTab v-if="activeTab === 'audiobookshelf'" />
     </div>
 
     <!-- Metadata Source Configuration Modal -->
@@ -400,6 +410,7 @@ import RootFoldersTab from '@/views/settings/RootFoldersTab.vue'
 import DownloadClientsTab from '@/views/settings/DownloadClientsTab.vue'
 import QualityProfilesTab from '@/views/settings/QualityProfilesTab.vue'
 import DiscordBotTab from '@/views/settings/DiscordBotTab.vue'
+import AudiobookshelfTab from '@/views/settings/AudiobookshelfTab.vue'
 import NotificationsTab from '@/views/settings/NotificationsTab.vue'
 import IndexersTab from '@/views/settings/IndexersTab.vue'
 import { Modal, ModalHeader, ModalFooter } from '@/components/feedback'
@@ -414,6 +425,7 @@ import {
   PhStar,
   PhBell,
   PhGlobe,
+  PhBooks,
   PhSliders,
   PhPlus,
   PhSpinner,
@@ -450,7 +462,14 @@ logger.debug(
   (globalThis as unknown as { __vitest?: unknown }).__vitest,
 )
 const activeTab = ref<
-  'rootfolders' | 'indexers' | 'clients' | 'quality-profiles' | 'notifications' | 'bot' | 'general'
+  | 'rootfolders'
+  | 'indexers'
+  | 'clients'
+  | 'quality-profiles'
+  | 'notifications'
+  | 'bot'
+  | 'audiobookshelf'
+  | 'general'
 >('rootfolders')
 
 const mobileTabOptions = computed(() => [
@@ -460,6 +479,7 @@ const mobileTabOptions = computed(() => [
   { value: 'quality-profiles', label: 'Quality Profiles', icon: PhStar },
   { value: 'notifications', label: 'Notifications', icon: PhBell },
   { value: 'bot', label: 'Discord Bot', icon: PhGlobe },
+  { value: 'audiobookshelf', label: 'Audiobookshelf', icon: PhBooks },
   { value: 'general', label: 'General Settings', icon: PhSliders },
   // Integrations removed
 ])
@@ -1124,6 +1144,7 @@ const syncTabFromHash = () => {
     | 'quality-profiles'
     | 'notifications'
     | 'bot'
+    | 'audiobookshelf'
     | 'general'
   if (
     hash &&
@@ -1134,6 +1155,7 @@ const syncTabFromHash = () => {
       'quality-profiles',
       'notifications',
       'bot',
+      'audiobookshelf',
       'general',
     ].includes(hash)
   ) {

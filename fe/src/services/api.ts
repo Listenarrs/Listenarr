@@ -22,6 +22,8 @@ import type {
   DownloadClientConfiguration,
   ApplicationSettings,
   ProwlarrImportConnectionSettings,
+  AudiobookshelfConnectionSettings,
+  AudiobookshelfActionResult,
   Audiobook,
   History,
   Indexer,
@@ -876,6 +878,40 @@ class ApiService {
 
   async getProwlarrImportSettings(): Promise<ProwlarrImportConnectionSettings> {
     return this.request<ProwlarrImportConnectionSettings>('/configuration/prowlarr-import')
+  }
+
+  // Audiobookshelf integration
+  async getAudiobookshelfSettings(): Promise<AudiobookshelfConnectionSettings> {
+    return this.request<AudiobookshelfConnectionSettings>('/configuration/audiobookshelf')
+  }
+
+  async saveAudiobookshelfSettings(
+    settings: AudiobookshelfConnectionSettings,
+  ): Promise<AudiobookshelfConnectionSettings> {
+    return this.request<AudiobookshelfConnectionSettings>('/configuration/audiobookshelf', {
+      method: 'POST',
+      body: JSON.stringify(settings),
+    })
+  }
+
+  async testAudiobookshelfConnection(payload: {
+    url?: string
+    apiKey?: string
+  }): Promise<AudiobookshelfActionResult> {
+    return this.request<AudiobookshelfActionResult>('/audiobookshelf/test', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  }
+
+  async getAudiobookshelfLibraries(): Promise<AudiobookshelfActionResult> {
+    return this.request<AudiobookshelfActionResult>('/audiobookshelf/libraries')
+  }
+
+  async triggerAudiobookshelfScan(): Promise<AudiobookshelfActionResult> {
+    return this.request<AudiobookshelfActionResult>('/audiobookshelf/scan', {
+      method: 'POST',
+    })
   }
 
   // Root Folders

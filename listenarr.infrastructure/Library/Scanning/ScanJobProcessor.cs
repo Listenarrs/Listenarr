@@ -401,6 +401,7 @@ namespace Listenarr.Infrastructure.Library.Scanning
                 }
 
                 await NotifyAvailableAsync(audiobook, createdFiles);
+                RequestAudiobookshelfScan(audiobook, createdFiles);
 
                 var updated = await audiobookRepository.GetByIdAsync(audiobook.Id);
                 if (updated != null)

@@ -21,16 +21,37 @@ using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Configuration.Core
 {
-    public class ConfigurationService(
-        IApplicationSettingsRepository settingsRepository,
-        IApiConfigurationRepository apiConfigRepository,
-        IDownloadClientConfigurationRepository downloadClientRepository,
-        ILogger<ConfigurationService> logger,
-        IUserService userService,
-        IStartupConfigService startupConfigService,
-        IRootFolderRepository rootFolderRepository,
-        ISecretProtector secretProtector) : IConfigurationService
+    public partial class ConfigurationService : IConfigurationService
     {
+        private readonly IApplicationSettingsRepository settingsRepository;
+        private readonly IApiConfigurationRepository apiConfigRepository;
+        private readonly IDownloadClientConfigurationRepository downloadClientRepository;
+        private readonly ILogger<ConfigurationService> logger;
+        private readonly IUserService userService;
+        private readonly IStartupConfigService startupConfigService;
+        private readonly IRootFolderRepository rootFolderRepository;
+        private readonly ISecretProtector secretProtector;
+
+        public ConfigurationService(
+            IApplicationSettingsRepository settingsRepository,
+            IApiConfigurationRepository apiConfigRepository,
+            IDownloadClientConfigurationRepository downloadClientRepository,
+            ILogger<ConfigurationService> logger,
+            IUserService userService,
+            IStartupConfigService startupConfigService,
+            IRootFolderRepository rootFolderRepository,
+            ISecretProtector secretProtector)
+        {
+            this.settingsRepository = settingsRepository;
+            this.apiConfigRepository = apiConfigRepository;
+            this.downloadClientRepository = downloadClientRepository;
+            this.logger = logger;
+            this.userService = userService;
+            this.startupConfigService = startupConfigService;
+            this.rootFolderRepository = rootFolderRepository;
+            this.secretProtector = secretProtector;
+        }
+
         // API Configuration methods
         public async Task<List<ApiConfiguration>> GetApiConfigurationsAsync()
         {
@@ -205,6 +226,17 @@ namespace Listenarr.Application.Configuration.Core
                     {
                         settings.ProwlarrApiKeyEncrypted = existing.ProwlarrApiKeyEncrypted;
                     }
+                    if (settings.AudiobookshelfUrl == null)
+                        settings.AudiobookshelfUrl = existing.AudiobookshelfUrl;
+                    if (settings.AudiobookshelfLibraryId == null)
+                        settings.AudiobookshelfLibraryId = existing.AudiobookshelfLibraryId;
+                    if (settings.AudiobookshelfNotifyOnImport == null)
+                        settings.AudiobookshelfNotifyOnImport = existing.AudiobookshelfNotifyOnImport;
+                    if (string.IsNullOrWhiteSpace(settings.AudiobookshelfApiKeyEncrypted)
+                        || string.Equals(settings.AudiobookshelfApiKeyEncrypted, ApiResponseRedactor.RedactedValue, StringComparison.Ordinal))
+                    {
+                        settings.AudiobookshelfApiKeyEncrypted = existing.AudiobookshelfApiKeyEncrypted;
+                    }
                     if (settings.EnabledNotificationTriggers == null)
                         settings.EnabledNotificationTriggers = existing.EnabledNotificationTriggers;
                     if (settings.Webhooks == null)
@@ -278,87 +310,6 @@ namespace Listenarr.Application.Configuration.Core
             {
                 logger.LogError(ex, "Error saving application settings to database (no runtime ALTERs will be attempted)");
                 throw;
-            }
-        }
-
-        public async Task<ProwlarrImportConnectionSettings> GetProwlarrImportSettingsAsync(bool includeSecret = false)
-        {
-            try
-            {
-                var settings = await settingsRepository.GetAsync();
-
-                if (settings == null)
-                {
-                    return new ProwlarrImportConnectionSettings();
-                }
-
-                var result = new ProwlarrImportConnectionSettings
-                {
-                    Url = settings.ProwlarrUrl?.Trim() ?? string.Empty,
-                    Port = settings.ProwlarrPort,
-                    TagFilter = settings.ProwlarrTagFilter?.Trim(),
-                    HasSavedApiKey = !string.IsNullOrWhiteSpace(settings.ProwlarrApiKeyEncrypted),
-                };
-
-                if (includeSecret && result.HasSavedApiKey)
-                {
-                    result.ApiKey = TryUnprotectProwlarrApiKey(settings.ProwlarrApiKeyEncrypted);
-                    if (string.IsNullOrWhiteSpace(result.ApiKey))
-                    {
-                        result.HasSavedApiKey = false;
-                    }
-                }
-
-                return result;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                logger.LogError(ex, "Error loading saved Prowlarr import settings");
-                return new ProwlarrImportConnectionSettings();
-            }
-        }
-
-        public async Task<ProwlarrImportConnectionSettings> SaveProwlarrImportSettingsAsync(ProwlarrImportConnectionSettings settings)
-        {
-            try
-            {
-                var existing = await settingsRepository.GetAsync() ?? new ApplicationSettings { Id = 1 };
-
-                existing.ProwlarrUrl = string.IsNullOrWhiteSpace(settings.Url) ? string.Empty : settings.Url.Trim();
-                existing.ProwlarrPort = settings.Port;
-                existing.ProwlarrTagFilter = string.IsNullOrWhiteSpace(settings.TagFilter) ? null : settings.TagFilter.Trim();
-
-                if (!string.IsNullOrWhiteSpace(settings.ApiKey)
-                    && !string.Equals(settings.ApiKey, ApiResponseRedactor.RedactedValue, StringComparison.Ordinal))
-                {
-                    existing.ProwlarrApiKeyEncrypted = secretProtector.Protect(settings.ApiKey.Trim());
-                }
-
-                await settingsRepository.SaveAsync(existing);
-                return await GetProwlarrImportSettingsAsync();
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                logger.LogError(ex, "Error saving Prowlarr import settings");
-                throw;
-            }
-        }
-
-        private string? TryUnprotectProwlarrApiKey(string? encryptedApiKey)
-        {
-            if (string.IsNullOrWhiteSpace(encryptedApiKey))
-            {
-                return null;
-            }
-
-            try
-            {
-                return secretProtector.Unprotect(encryptedApiKey);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                logger.LogWarning(ex, "Failed to decrypt saved Prowlarr import API key");
-                return null;
             }
         }
 

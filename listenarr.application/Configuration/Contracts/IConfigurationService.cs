@@ -85,6 +85,18 @@ namespace Listenarr.Application.Configuration.Contracts
         Task<ProwlarrImportConnectionSettings> SaveProwlarrImportSettingsAsync(ProwlarrImportConnectionSettings settings);
 
         /// <summary>
+        /// Gets the saved Audiobookshelf connection settings.
+        /// </summary>
+        /// <param name="includeSecret">When true, includes the decrypted API token for server-side use.</param>
+        Task<AudiobookshelfConnectionSettings> GetAudiobookshelfSettingsAsync(bool includeSecret = false);
+
+        /// <summary>
+        /// Saves the Audiobookshelf connection settings.
+        /// </summary>
+        /// <param name="settings">The connection settings to save.</param>
+        Task<AudiobookshelfConnectionSettings> SaveAudiobookshelfSettingsAsync(AudiobookshelfConnectionSettings settings);
+
+        /// <summary>
         /// Gets the startup configuration
         /// </summary>
         /// <returns>Startup configuration</returns>

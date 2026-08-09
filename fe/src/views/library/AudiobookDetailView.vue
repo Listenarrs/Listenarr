@@ -680,6 +680,7 @@ import {
   PhArrowLeft,
   PhArrowClockwise,
   PhBookmark,
+  PhBooks,
   PhSpinner,
   PhMagnifyingGlass,
   PhFolderOpen,
@@ -732,6 +733,8 @@ const deleteFilesOnDisk = ref(false)
 const deleteFolderOnDisk = ref(false)
 const showFullDescription = ref(false)
 const scanning = ref(false)
+const audiobookshelfScanning = ref(false)
+const audiobookshelfConfigured = ref(false)
 const rescanningMetadata = ref(false)
 const scanQueued = ref(false)
 const scanJobId = ref<string | null>(null)
@@ -833,6 +836,23 @@ const topActions = computed<DetailTopAction[]>(() => [
       showOrganizeModal.value = true
     },
   },
+  ...(audiobookshelfConfigured.value
+    ? [
+        {
+          key: 'audiobookshelf-scan' as const,
+          label: audiobookshelfScanning.value ? 'Updating Audiobookshelf...' : 'Update Audiobookshelf',
+          title: 'Request an Audiobookshelf scan so this book shows up there',
+          ariaLabel: 'Update Audiobookshelf',
+          icon: audiobookshelfScanning.value ? PhSpinner : PhBooks,
+          iconClass: audiobookshelfScanning.value ? 'ph-spin' : undefined,
+          disabled: audiobookshelfScanning.value,
+          desktopGroup: 'secondary' as const,
+          onClick: () => {
+            void updateAudiobookshelf()
+          },
+        },
+      ]
+    : []),
   {
     key: 'delete',
     label: 'Delete',
@@ -878,6 +898,7 @@ type DetailTopAction = {
     | 'edit'
     | 'rescan-metadata'
     | 'organize'
+    | 'audiobookshelf-scan'
     | 'delete'
   label: string
   title: string
@@ -1186,6 +1207,19 @@ onMounted(async () => {
   syncActiveTabFromRoute()
   document.addEventListener('click', handleClickOutside)
 
+  // Show the Audiobookshelf action only when the integration is configured
+  // (typeof guard keeps partial apiService mocks in tests working)
+  if (typeof apiService.getAudiobookshelfSettings === 'function') {
+    void apiService
+      .getAudiobookshelfSettings()
+      .then((settings) => {
+        audiobookshelfConfigured.value = Boolean(settings.url && settings.hasSavedApiKey)
+      })
+      .catch(() => {
+        audiobookshelfConfigured.value = false
+      })
+  }
+
   await loadAudiobook()
 
   // subscribe to scan job updates
@@ -1451,6 +1485,28 @@ function handleDownloaded(result: SearchResult) {
   const toast = useToast()
   toast.success('Download Added', `${result.title} has been sent to your download client`)
   closeManualSearch()
+}
+
+async function updateAudiobookshelf() {
+  const toast = useToast()
+  audiobookshelfScanning.value = true
+  try {
+    const result = await apiService.triggerAudiobookshelfScan()
+    if (result.success) {
+      toast.success('Audiobookshelf', result.message)
+    } else {
+      toast.error('Audiobookshelf scan failed', result.message)
+    }
+  } catch (err) {
+    errorTracking.captureException(err as Error, {
+      component: 'AudiobookDetailView',
+      operation: 'updateAudiobookshelf',
+      metadata: { audiobookId: audiobook.value?.id },
+    })
+    toast.error('Audiobookshelf scan failed', 'Could not reach the Listenarr API')
+  } finally {
+    audiobookshelfScanning.value = false
+  }
 }
 
 async function scanFiles() {
