@@ -53,6 +53,64 @@ public sealed class FileMoverMarkerlessMoveTests : BaseTests
         AssertNoLibraryArtifacts(scenario.Root);
     }
 
+    [LinuxFact]
+    public async Task MoveFileAsync_CaseDistinctRetryDoesNotAdoptJournal()
+    {
+        var scenario = await CreateScenarioAsync();
+        var interrupted = CreateMover(
+            afterJournalPlanned: () =>
+                throw new IOException("Injected crash after markerless move journal creation."));
+
+        await Assert.ThrowsAsync<IOException>(() => interrupted.MoveFileAsync(
+            scenario.Source,
+            scenario.Destination,
+            scenario.OperationId));
+        var distinctSource = Path.Join(scenario.Root, "SOURCE.m4b");
+        await File.WriteAllTextAsync(distinctSource, "different source");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            CreateMover().MoveFileAsync(
+                distinctSource,
+                scenario.Destination,
+                scenario.OperationId));
+
+        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Source));
+        Assert.Equal("different source", await File.ReadAllTextAsync(distinctSource));
+        Assert.False(File.Exists(scenario.Destination));
+        await AssertJournalStateAsync(
+            scenario.OperationId,
+            FileMutationJournalState.Planned,
+            targetIdentity: null);
+        AssertNoLibraryArtifacts(scenario.Root);
+    }
+
+    [WindowsFact]
+    public async Task MoveFileAsync_CaseAliasRetryUsesSameDurableJournal()
+    {
+        var scenario = await CreateScenarioAsync();
+        var interrupted = CreateMover(
+            afterJournalPlanned: () =>
+                throw new IOException("Injected crash after markerless move journal creation."));
+
+        await Assert.ThrowsAsync<IOException>(() => interrupted.MoveFileAsync(
+            scenario.Source,
+            scenario.Destination,
+            scenario.OperationId));
+
+        Assert.True(await CreateMover().MoveFileAsync(
+            scenario.Source.ToUpperInvariant(),
+            scenario.Destination.ToUpperInvariant(),
+            scenario.OperationId));
+
+        Assert.False(File.Exists(scenario.Source));
+        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Destination));
+        await AssertJournalStateAsync(
+            scenario.OperationId,
+            FileMutationJournalState.Completed,
+            scenario.SourceIdentity);
+        AssertNoLibraryArtifacts(scenario.Root);
+    }
+
     [Fact]
     public async Task MoveFileAsync_NativeRenameBeforeTargetStateCommitResumes()
     {
@@ -336,6 +394,7 @@ public sealed class FileMoverMarkerlessMoveTests : BaseTests
 
     private FileMover CreateMover(
         bool disableNativeRename = false,
+        Func<Task>? afterJournalPlanned = null,
         Func<Task>? afterPublishedBeforeTargetState = null,
         Func<Task>? afterTargetCreatedBeforeState = null,
         Func<Task>? afterTargetState = null,
@@ -352,6 +411,7 @@ public sealed class FileMoverMarkerlessMoveTests : BaseTests
             FileMoveLockDirectoryForTest = FileService.GetTempDirectory(
                 "file-mover-markerless-locks"),
             DisableNativeFileRenameForTest = disableNativeRename,
+            AfterMarkerlessMoveJournalPlannedForTestAsync = afterJournalPlanned,
             AfterMarkerlessMovePublishedBeforeTargetStateForTestAsync =
                 afterPublishedBeforeTargetState,
             AfterMarkerlessMoveTargetCreatedBeforeStateForTestAsync =

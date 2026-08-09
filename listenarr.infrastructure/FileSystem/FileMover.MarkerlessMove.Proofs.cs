@@ -1,5 +1,7 @@
 using System.Security.Cryptography;
 
+using Listenarr.Domain.Audiobooks.Enumerations;
+
 namespace Listenarr.Infrastructure.FileSystem;
 
 public partial class FileMover
@@ -76,10 +78,14 @@ public partial class FileMover
         CancellationToken cancellationToken)
     {
         if (!source.VisiblePathMatches()
-            || !string.Equals(
-                source.GetObjectIdentity(),
-                journal.SourcePhysicalObjectIdentity,
-                StringComparison.Ordinal))
+            || (journal.Action == FileAction.HardlinkCopy
+                ? !MatchesHardlinkSourceIdentity(
+                    source,
+                    journal.SourcePhysicalObjectIdentity)
+                : !string.Equals(
+                    source.GetObjectIdentity(),
+                    journal.SourcePhysicalObjectIdentity,
+                    StringComparison.Ordinal)))
         {
             return false;
         }
@@ -97,10 +103,14 @@ public partial class FileMover
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(journal.SourceSha256)
-            && !string.Equals(
-                target.GetObjectIdentity(),
-                journal.SourcePhysicalObjectIdentity,
-                StringComparison.Ordinal))
+            && (journal.Action == FileAction.HardlinkCopy
+                ? !MatchesHardlinkSourceIdentity(
+                    target,
+                    journal.SourcePhysicalObjectIdentity)
+                : !string.Equals(
+                    target.GetObjectIdentity(),
+                    journal.SourcePhysicalObjectIdentity,
+                    StringComparison.Ordinal)))
         {
             return false;
         }

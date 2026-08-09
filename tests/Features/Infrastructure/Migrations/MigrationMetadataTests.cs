@@ -33,17 +33,43 @@ public class MigrationMetadataTests
     }
 
     [Fact]
-    public void AddProcessExecutionLogsHistoryRepair_IsDiscoverableByEf()
+    public void AddProcessExecutionLogsHistoryRepair_IsDiscoverableAndPreservesCanaryModel()
     {
         AssertMigrationId<AddProcessExecutionLogs>(
-            "20260702200000_AddProcessExecutionLogs");
+            "20260809121006_AddProcessExecutionLogs");
+
+        var migration = new AddProcessExecutionLogs();
+        var upBuilder = BuildOperations(migration, "Up");
+        var downBuilder = BuildOperations(migration, "Down");
+
+        var create = Assert.Single(upBuilder.Operations.OfType<CreateTableOperation>());
+        Assert.Equal("ProcessExecutionLogs", create.Name);
+        Assert.Single(upBuilder.Operations);
+
+        var drop = Assert.Single(downBuilder.Operations.OfType<DropTableOperation>());
+        Assert.Equal("ProcessExecutionLogs", drop.Name);
+        Assert.Single(downBuilder.Operations);
+
+        var model = migration.TargetModel;
+        var applicationSettings = AssertEntity(
+            model,
+            "Listenarr.Domain.Configuration.ApplicationSettings");
+        Assert.NotNull(applicationSettings.FindProperty("Version"));
+
+        var download = AssertEntity(model, "Listenarr.Domain.Downloads.Download");
+        Assert.NotNull(download.FindProperty("ActiveAudiobookDeduplicationKey"));
+
+        var importJob = AssertEntity(
+            model,
+            "Listenarr.Domain.Downloads.DownloadProcessingJob");
+        Assert.NotNull(importJob.FindProperty("ActiveDeduplicationKey"));
     }
 
     [Fact]
     public void AddDurableMarkerlessLibraryMoves_IsDiscoverableAndConsolidated()
     {
         AssertMigrationId<AddDurableMarkerlessLibraryMoves>(
-            "20260807200942_AddDurableMarkerlessLibraryMoves");
+            "20260809141455_AddDurableMarkerlessLibraryMoves");
 
         var migration = new AddDurableMarkerlessLibraryMoves();
         var upBuilder = BuildOperations(migration, "Up");
@@ -64,6 +90,7 @@ public class MigrationMetadataTests
         Assert.Contains("RootFolderRelocations", createdTables);
         Assert.DoesNotContain("LibraryDirectoryOwnershipRetiredMarkers", createdTables);
 
+        Assert.Empty(upBuilder.Operations.OfType<AddForeignKeyOperation>());
         Assert.DoesNotContain(upBuilder.Operations, operation =>
             operation is DropTableOperation or DropColumnOperation);
     }
@@ -72,7 +99,7 @@ public class MigrationMetadataTests
     public void AddMoveJobRelocationForeignKey_IsDiscoverableAndIsolated()
     {
         AssertMigrationId<AddMoveJobRelocationForeignKey>(
-            "20260807204014_AddMoveJobRelocationForeignKey");
+            "20260809153711_AddMoveJobRelocationForeignKey");
 
         var migration = new AddMoveJobRelocationForeignKey();
         var upBuilder = BuildOperations(migration, "Up");
@@ -93,9 +120,9 @@ public class MigrationMetadataTests
     }
 
     [Fact]
-    public void AddDurableMarkerlessLibraryMoves_TargetModelMatchesFinalContracts()
+    public void FinalMoveMigration_TargetModelMatchesFinalContracts()
     {
-        var model = new AddDurableMarkerlessLibraryMoves().TargetModel;
+        var model = new AddMoveJobRelocationForeignKey().TargetModel;
 
         var moveJob = AssertEntity(model, "Listenarr.Domain.Audiobooks.MoveJob");
         Assert.Equal(0, moveJob.FindProperty("ExecutionProtocolVersion")?.GetDefaultValue());

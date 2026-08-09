@@ -105,6 +105,8 @@ public static class InfrastructureStartupCompositionExtensions
         }
 
         services.AddSingleton<IUnmatchedScanQueueService, UnmatchedScanQueueService>();
+        services.AddHostedService<LibraryFilesystemStartupReconciliationService>();
+
         if (!disableHostedServices)
         {
             services.AddListenarrHostedServices(configuration);

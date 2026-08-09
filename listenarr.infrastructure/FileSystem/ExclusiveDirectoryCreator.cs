@@ -40,11 +40,6 @@ internal static class ExclusiveDirectoryCreator
         return creation.Created;
     }
 
-    internal static PinnedDirectoryCreation TryCreatePinned(
-        string parentPath,
-        string childName) =>
-        PinnedDirectoryCreation.TryCreate(parentPath, childName);
-
     private sealed class HookScope(Action restore) : IDisposable
     {
         private bool _disposed;

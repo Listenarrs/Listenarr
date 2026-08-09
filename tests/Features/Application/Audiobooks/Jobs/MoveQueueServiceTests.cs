@@ -1395,7 +1395,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
                 FileSystemCaseSensitivity.Insensitive,
                 FileSystemCaseSensitivityMode.Insensitive,
                 syntax == FileSystemPathSyntax.Windows ? @"C:\Library" : "/library"));
-            job.IdentityKeyVersion = 3;
+            job.IdentityKeyVersion = MoveManifestIdentity.Version;
             var persistence = CreateInMemoryPersistence([job]);
             var service = new MoveQueueService(
                 NullLogger<MoveQueueService>.Instance,

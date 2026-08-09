@@ -5,7 +5,9 @@ namespace Listenarr.Api.Features.Library;
 [ApiController]
 [Route("api/v{version:apiVersion}/rootfolder-relocations")]
 [Tags("Root Folder Relocations")]
-public sealed class RootFolderRelocationsController(IRootFolderRelocationService relocationService)
+public sealed class RootFolderRelocationsController(
+    IRootFolderRelocationService relocationService,
+    ILibraryFilesystemMutationGate filesystemMutationGate)
     : ControllerBase
 {
     [HttpGet("{id:guid}", Name = "GetRootFolderRelocation")]
@@ -20,6 +22,8 @@ public sealed class RootFolderRelocationsController(IRootFolderRelocationService
     [HttpPost("{id:guid}/retry")]
     public async Task<IActionResult> Retry(Guid id, CancellationToken cancellationToken)
     {
+        filesystemMutationGate.EnsureReady();
+
         try
         {
             return Ok(RootFolderRelocationPublicProjection.Sanitize(

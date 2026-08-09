@@ -7,9 +7,9 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs;
 public sealed class MoveManifestIdentityTests : BaseTests
 {
     [Fact]
-    public void Version_IsSix()
+    public void Version_IsOne()
     {
-        Assert.Equal(6, MoveManifestIdentity.Version);
+        Assert.Equal(1, MoveManifestIdentity.Version);
     }
 
     [Fact]
@@ -23,7 +23,7 @@ public sealed class MoveManifestIdentityTests : BaseTests
         {
             PersistedFile("book.m4b", 1, 2, 'A'),
             MoveManifestIdentity.CreateTargetBoundaryAuthorization(
-                2,
+                1,
                 "target-generation")
         };
 
@@ -54,12 +54,12 @@ public sealed class MoveManifestIdentityTests : BaseTests
         var firstEntries = new List<MoveJobEntry>
         {
             PersistedFile("book.m4b", 1, 2, 'A'),
-            MoveManifestIdentity.CreateTargetBoundaryAuthorization(2, "generation-a")
+            MoveManifestIdentity.CreateTargetBoundaryAuthorization(1, "generation-a")
         };
         var secondEntries = new List<MoveJobEntry>
         {
             PersistedFile("book.m4b", 1, 2, 'A'),
-            MoveManifestIdentity.CreateTargetBoundaryAuthorization(2, "generation-b")
+            MoveManifestIdentity.CreateTargetBoundaryAuthorization(1, "generation-b")
         };
 
         var first = MoveManifestIdentity.CreateDeduplicationKey(

@@ -42,6 +42,7 @@ public partial class ManualImportController : ControllerBase
     private readonly IFilesystemMutationCoordinator _filesystemMutationCoordinator;
     private readonly IAudiobookOperationCoordinator _audiobookOperationCoordinator;
     private readonly IMoveQueueService _moveQueueService;
+    private readonly ILibraryFilesystemMutationGate _filesystemMutationGate;
     private readonly ManualImportPathPlanner _pathPlanner;
     private readonly ManualImportCompanionImporter _companionImporter;
     private readonly ILibraryDirectoryOwnershipStore _directoryOwnershipStore;
@@ -63,6 +64,7 @@ public partial class ManualImportController : ControllerBase
         IAudiobookOperationCoordinator audiobookOperationCoordinator,
         IMoveQueueService moveQueueService,
         ILibraryDirectoryOwnershipStore directoryOwnershipStore,
+        ILibraryFilesystemMutationGate filesystemMutationGate,
         ManualImportPathPlanner? pathPlanner = null,
         ManualImportCompanionImporter? companionImporter = null)
     {
@@ -83,6 +85,8 @@ public partial class ManualImportController : ControllerBase
         _audiobookOperationCoordinator = audiobookOperationCoordinator ?? throw new ArgumentNullException(nameof(audiobookOperationCoordinator));
         _moveQueueService = moveQueueService ?? throw new ArgumentNullException(nameof(moveQueueService));
         _directoryOwnershipStore = directoryOwnershipStore ?? throw new ArgumentNullException(nameof(directoryOwnershipStore));
+        _filesystemMutationGate = filesystemMutationGate
+            ?? throw new ArgumentNullException(nameof(filesystemMutationGate));
         _pathPlanner = pathPlanner ?? new ManualImportPathPlanner(fileNamingService);
         _companionImporter = companionImporter ?? new ManualImportCompanionImporter(
             metadataService,
@@ -177,6 +181,8 @@ public partial class ManualImportController : ControllerBase
         {
             return BadRequest(new { error = "No items to import" });
         }
+
+        _filesystemMutationGate.EnsureReady();
 
         var results = new List<ManualImportResultDto>();
         var destinationTracker = new ManualImportDestinationTracker(_fileSystem, _semanticsResolver);

@@ -118,10 +118,7 @@ internal partial class MoveJobProcessor
                     resolvedSourceIdentity.Semantics,
                     targetSemantics,
                     CreateLeaseToken(job),
-                    cleanupBoundaryResolution.Boundary,
-                    AllowUnownedSourceAncestorCleanup:
-                        cleanupBoundaryResolution.Kind
-                            == MoveCleanupBoundaryKind.ConfiguredRoot);
+                    cleanupBoundaryResolution.Boundary);
                 try
                 {
                     var resumedMove = await contentMoveService.GetRecoverableMoveAsync(recoveryRequest, stoppingToken);
@@ -369,10 +366,7 @@ internal partial class MoveJobProcessor
                         job.Id,
                         progress,
                         phase,
-                        token),
-                AllowUnownedSourceAncestorCleanup:
-                    cleanupBoundaryResolution.Kind
-                        == MoveCleanupBoundaryKind.ConfiguredRoot);
+                        token));
             moveResult ??= await contentMoveService.MoveContentsAsync(moveRequest, stoppingToken);
             moveResult = await contentMoveService.ResumeSourceCleanupAsync(moveRequest, moveResult, stoppingToken);
             source = moveResult.Source;

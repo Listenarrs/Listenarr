@@ -8,6 +8,11 @@ import { apiService } from '@/services/api'
 
 const success = vi.fn()
 const error = vi.fn()
+const filesystemReadinessMock = vi.hoisted(() => ({ filesystemReady: true }))
+
+vi.mock('@/stores/filesystemReadiness', () => ({
+  useFilesystemReadinessStore: () => filesystemReadinessMock,
+}))
 
 vi.mock('@/services/toastService', () => ({
   useToast: () => ({ success, error }),
@@ -17,6 +22,7 @@ describe('RootFolderFormModal', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
     vi.clearAllMocks()
+    filesystemReadinessMock.filesystemReady = true
   })
 
   it('rejects a Windows drive-relative root before submission', async () => {
@@ -94,6 +100,55 @@ describe('RootFolderFormModal', () => {
     await (wrapper.vm as unknown as { save: () => Promise<void> }).save()
 
     expect(error).not.toHaveBeenCalled()
+  })
+
+  it('keeps metadata editing available while filesystem path controls are locked', async () => {
+    filesystemReadinessMock.filesystemReady = false
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useRootFoldersStore()
+    const root = {
+      id: 11,
+      name: 'Library',
+      path: 'C:\\Library',
+      pathSyntax: 'Windows' as const,
+      isDefault: false,
+      caseSensitivityMode: 'Auto' as const,
+      resolvedCaseSensitivity: 'Insensitive' as const,
+      pathIdentityState: 'Valid' as const,
+    }
+    store.folders = [root]
+    const update = vi.spyOn(store, 'update').mockResolvedValue({
+      ...root,
+      name: 'Renamed Library',
+    })
+    const wrapper = mount(RootFolderFormModal, {
+      props: { root },
+      global: {
+        plugins: [pinia],
+        stubs: { FolderBrowserModal: true },
+      },
+    })
+
+    expect(wrapper.get('#root-path').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('#root-case-sensitivity').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('.btn-inline-browse').attributes('disabled')).toBeDefined()
+    const name = wrapper.get('input[placeholder="Enter a name for this root folder"]')
+    expect(name.attributes('disabled')).toBeUndefined()
+    await name.setValue('Renamed Library')
+
+    await (wrapper.vm as unknown as { save: () => Promise<void> }).save()
+
+    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1))
+    expect(update).toHaveBeenCalledWith(
+      root.id,
+      expect.objectContaining({
+        name: 'Renamed Library',
+        path: root.path,
+        caseSensitivityMode: root.caseSensitivityMode,
+      }),
+      { expectedCurrentPath: root.path },
+    )
   })
 
   it('updates metadata directly for an equivalent Windows path', async () => {

@@ -245,22 +245,10 @@ internal sealed partial class PinnedDirectoryCreation
             return HandlesIdentifySameDirectory(_fileHandle, candidate._fileHandle);
         }
 
-        internal uint GetLinkCount()
-        {
-            ThrowIfDisposed();
-            return GetHandleLinkCount(_fileHandle);
-        }
-
         internal string GetObjectIdentity()
         {
             ThrowIfDisposed();
             return GetDirectoryObjectIdentity(_fileHandle);
-        }
-
-        internal void FlushToDisk()
-        {
-            ThrowIfDisposed();
-            FlushHandleToDisk(_fileHandle, $"file '{FullPath}'");
         }
 
         internal bool IsOnSameVolume(PinnedDirectoryAnchor directory)

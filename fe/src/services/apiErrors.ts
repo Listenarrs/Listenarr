@@ -25,8 +25,16 @@ export function getApiValidationError(
   if (!candidate.body) return null
 
   try {
-    const payload = JSON.parse(candidate.body) as Partial<ApiValidationErrorPayload>
-    if (typeof payload.message !== 'string' || payload.message.trim().length === 0) {
+    const payload = JSON.parse(candidate.body) as Partial<ApiValidationErrorPayload> & {
+      detail?: unknown
+    }
+    const message =
+      typeof payload.message === 'string' && payload.message.trim().length > 0
+        ? payload.message
+        : typeof payload.detail === 'string' && payload.detail.trim().length > 0
+          ? payload.detail
+          : null
+    if (message == null) {
       return null
     }
     if (expectedField && payload.field !== expectedField) return null
@@ -34,7 +42,7 @@ export function getApiValidationError(
     return {
       code: typeof payload.code === 'string' ? payload.code : undefined,
       field: typeof payload.field === 'string' ? payload.field : undefined,
-      message: payload.message,
+      message,
       resolvedDestination:
         typeof payload.resolvedDestination === 'string' || payload.resolvedDestination === null
           ? payload.resolvedDestination

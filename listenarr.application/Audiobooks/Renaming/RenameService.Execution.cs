@@ -111,12 +111,14 @@ public partial class RenameService
 
             if (!PathsEqual(source, destination, semantics))
             {
-                var operationId = FileMoveOperationIdentity.Create(
+                var operationId = FileMoveOperationIdentity.CreateForPaths(
                     "audiobook-file-rename",
                     audiobook.Id,
                     fileOperation.FileId,
                     source,
-                    destination);
+                    semantics,
+                    destination,
+                    semantics);
                 bool moved;
                 if (databaseFile != null)
                 {

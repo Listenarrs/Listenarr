@@ -48,53 +48,6 @@ internal sealed partial class AudiobookContentMoveService
             }
         }
 
-        internal static async Task<PinnedMoveDirectoryPath> OpenOrCreateAsync(
-            string root,
-            IReadOnlyList<string> segments,
-            Func<Task> authorizeMutation)
-        {
-            ArgumentNullException.ThrowIfNull(authorizeMutation);
-            var anchors = new List<PinnedDirectoryCreation.PinnedDirectoryAnchor>();
-            try
-            {
-                var current = PinnedDirectoryCreation.OpenPinnedDirectoryNoFollow(root);
-                anchors.Add(current);
-                foreach (var segment in segments)
-                {
-                    var childPath = Path.Join(current.FullPath, segment);
-                    PinnedDirectoryCreation.PinnedDirectoryAnchor child;
-                    if (Directory.Exists(childPath))
-                    {
-                        child = current.OpenExistingChild(segment);
-                    }
-                    else
-                    {
-                        await authorizeMutation();
-                        using var creation = current.TryCreateChild(segment);
-                        if (!creation.Created || !creation.VisiblePathMatches())
-                        {
-                            throw new MoveNeedsAttentionException(
-                                "A move-owned child directory appeared before it could be claimed exclusively.");
-                        }
-
-                        child = creation.OpenCreatedDirectoryAnchor();
-                    }
-
-                    anchors.Add(child);
-                    current = child;
-                }
-
-                var path = new PinnedMoveDirectoryPath(anchors);
-                path.EnsureVisibleHierarchy();
-                return path;
-            }
-            catch
-            {
-                DisposeAnchors(anchors);
-                throw;
-            }
-        }
-
         internal void EnsureVisibleHierarchy()
         {
             ObjectDisposedException.ThrowIf(_disposed, this);

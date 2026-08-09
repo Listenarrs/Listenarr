@@ -25,52 +25,15 @@ public static class ListenarrStartupTasks
     public static async Task RunListenarrStartupTasksAsync(this WebApplication app)
     {
         await app.MigrateLegacyOutputPathAsync();
-        await app.ReconcileRootFolderObjectIdentitiesAsync();
-        await app.ReconcileRootFolderRelocationsAsync();
-        await app.ReconcileLibraryDirectoryOwnershipAsync();
-        await app.ReconcileAudiobookFileIdentitiesAsync();
         await app.WarnIfAuthenticationDisabledAsync();
     }
 
-    private static async Task ReconcileRootFolderRelocationsAsync(
-        this WebApplication app)
-    {
-        using var scope = app.Services.CreateScope();
-        var reconciler = scope.ServiceProvider
-            .GetRequiredService<IRootFolderRelocationService>();
-        await reconciler.ReconcileActiveAsync();
-    }
-
-    private static async Task ReconcileLibraryDirectoryOwnershipAsync(
-        this WebApplication app)
-    {
-        using var scope = app.Services.CreateScope();
-        var reconciler = scope.ServiceProvider
-            .GetRequiredService<ILibraryDirectoryOwnershipReconciler>();
-        await reconciler.ReconcileAsync();
-    }
 
     private static async Task MigrateLegacyOutputPathAsync(this WebApplication app)
     {
         using var scope = app.Services.CreateScope();
         var migrator = scope.ServiceProvider.GetRequiredService<ILegacyOutputPathMigrator>();
         await migrator.MigrateAsync();
-    }
-
-    private static async Task ReconcileRootFolderObjectIdentitiesAsync(
-        this WebApplication app)
-    {
-        using var scope = app.Services.CreateScope();
-        var reconciler = scope.ServiceProvider
-            .GetRequiredService<IRootFolderObjectIdentityReconciler>();
-        await reconciler.ReconcileAsync();
-    }
-
-    private static async Task ReconcileAudiobookFileIdentitiesAsync(this WebApplication app)
-    {
-        using var scope = app.Services.CreateScope();
-        var reconciler = scope.ServiceProvider.GetRequiredService<IAudiobookFileIdentityReconciler>();
-        await reconciler.ReconcileAsync();
     }
 
     private static async Task WarnIfAuthenticationDisabledAsync(this WebApplication app)

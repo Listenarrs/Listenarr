@@ -20,6 +20,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import RootFoldersSettings from '@/components/settings/RootFoldersSettings.vue'
 import { useRootFoldersStore } from '@/stores/rootFolders'
+import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
 import { apiService } from '@/services/api'
 import { signalRService } from '@/services/signalr'
 import type { RootFolder, RootFolderPathChangeResult } from '@/types'
@@ -59,6 +60,20 @@ function rootFolder(activeRelocation: RootFolderPathChangeResult | null): RootFo
   }
 }
 
+function createReadyPinia() {
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  useFilesystemReadinessStore().readiness = {
+    isReady: true,
+    status: 'ready',
+    databaseConnected: true,
+    migrationsCurrent: true,
+    filesystemReady: true,
+    filesystemStatus: 'Ready',
+  }
+  return pinia
+}
+
 describe('RootFoldersSettings', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
@@ -67,8 +82,7 @@ describe('RootFoldersSettings', () => {
   })
 
   it('shows header spinner and loading state when store.loading is true', async () => {
-    const pinia = createPinia()
-    setActivePinia(pinia)
+    const pinia = createReadyPinia()
 
     useRootFoldersStore()
 
@@ -107,8 +121,7 @@ describe('RootFoldersSettings', () => {
       connected = callback
       return unsubscribe
     })
-    const pinia = createPinia()
-    setActivePinia(pinia)
+    const pinia = createReadyPinia()
     const wrapper = mount(RootFoldersSettings, { global: { plugins: [pinia] } })
     await flushPromises()
 
@@ -148,8 +161,7 @@ describe('RootFoldersSettings', () => {
         confirmationToken: canConfirmCurrentFolder ? 'observation-token' : null,
       }
       vi.mocked(apiService.getRootFolders).mockResolvedValue([folder])
-      const pinia = createPinia()
-      setActivePinia(pinia)
+      const pinia = createReadyPinia()
       const wrapper = mount(RootFoldersSettings, { global: { plugins: [pinia] } })
       await flushPromises()
 
@@ -161,6 +173,39 @@ describe('RootFoldersSettings', () => {
       wrapper.unmount()
     },
   )
+
+  it('shows initializing, blocks filesystem actions, and keeps metadata editing available', async () => {
+    const folder = {
+      ...rootFolder(null),
+      storageState: 'Initializing' as const,
+      storageReason: 'Initializing' as const,
+      storageMessage: 'Library filesystem initialization is in progress.',
+      canMutateFilesystem: false,
+      canChangePath: false,
+      canConfirmCurrentFolder: false,
+      confirmationToken: null,
+    }
+    vi.mocked(apiService.getRootFolders).mockResolvedValue([folder])
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    useFilesystemReadinessStore().readiness = {
+      isReady: true,
+      status: 'ready',
+      databaseConnected: true,
+      migrationsCurrent: true,
+      filesystemReady: false,
+      filesystemStatus: 'Running',
+      filesystemPhase: 'AudiobookFileIdentities',
+    }
+    const wrapper = mount(RootFoldersSettings, { global: { plugins: [pinia] } })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Initializing')
+    expect(wrapper.text()).not.toContain('Needs confirmation')
+    expect(wrapper.get('[data-cy="scan-unmatched"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-cy="edit-root-folder"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('[data-cy="confirm-root-folder"]').exists()).toBe(false)
+  })
 
   it('confirms the exact observed folder generation only when confirmation is available', async () => {
     const folder = {
@@ -174,8 +219,7 @@ describe('RootFoldersSettings', () => {
     }
     vi.mocked(apiService.getRootFolders).mockResolvedValue([folder])
     vi.mocked(apiService.confirmRootFolder).mockResolvedValue(folder)
-    const pinia = createPinia()
-    setActivePinia(pinia)
+    const pinia = createReadyPinia()
     const wrapper = mount(RootFoldersSettings, { global: { plugins: [pinia] } })
     await flushPromises()
 
@@ -199,8 +243,7 @@ describe('RootFoldersSettings', () => {
 
   it('keeps ordinary retry separate for an authorized relocation', async () => {
     vi.mocked(apiService.getRootFolders).mockResolvedValue([rootFolder(relocation('Authorized'))])
-    const pinia = createPinia()
-    setActivePinia(pinia)
+    const pinia = createReadyPinia()
     const wrapper = mount(RootFoldersSettings, { global: { plugins: [pinia] } })
     await flushPromises()
 
@@ -210,8 +253,7 @@ describe('RootFoldersSettings', () => {
 
   it('fails closed when the target identity is unavailable', async () => {
     vi.mocked(apiService.getRootFolders).mockResolvedValue([rootFolder(relocation('Unavailable'))])
-    const pinia = createPinia()
-    setActivePinia(pinia)
+    const pinia = createReadyPinia()
     const wrapper = mount(RootFoldersSettings, { global: { plugins: [pinia] } })
     await flushPromises()
 

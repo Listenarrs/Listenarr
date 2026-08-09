@@ -26,15 +26,11 @@ namespace Listenarr.Application.Downloads.Contracts
     /// </summary>
     public interface IFileMover
     {
-        Task<bool> MoveDirectoryAsync(string source, string destination);
-
         Task<bool> MoveFilePreservingPhysicalIdentityAsync(
             string source,
             string destination,
             string expectedSourcePhysicalObjectIdentity,
-            Guid? operationId = null);
-
-        Task<bool> CopyDirectoryAsync(string source, string destination);
+            Guid operationId);
 
         /// <summary>
         /// Perform the given action on the given file
@@ -47,8 +43,8 @@ namespace Listenarr.Application.Downloads.Contracts
         Task<bool> PerformActionOn(
             FileAction action,
             string source,
-            string? destination = null,
-            Guid? operationId = null);
+            string? destination,
+            Guid operationId);
 
         /// <summary>
         /// Publishes the requested copy or hardlink destination and returns a lease
@@ -59,7 +55,7 @@ namespace Listenarr.Application.Downloads.Contracts
             FileAction action,
             string source,
             string destination,
-            Guid? operationId = null);
+            Guid operationId);
 
         /// <summary>
         /// Resumes a registration publication when durable audiobook-file
@@ -69,7 +65,7 @@ namespace Listenarr.Application.Downloads.Contracts
             FileAction action,
             string source,
             string destination,
-            Guid? operationId,
+            Guid operationId,
             string expectedRegisteredPhysicalObjectIdentity);
 
         /// <summary>
@@ -80,6 +76,6 @@ namespace Listenarr.Application.Downloads.Contracts
             string source,
             string destination,
             IAudiobookFileRegistrationLease registrationLease,
-            Guid? operationId = null);
+            Guid operationId);
     }
 }

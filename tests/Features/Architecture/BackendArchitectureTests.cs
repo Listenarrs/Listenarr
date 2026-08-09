@@ -60,7 +60,6 @@ public sealed class BackendArchitectureTests : BaseTests
             "Listenarr.Tests.Features.Api.SecurityPipelineEndToEndTests",
             "Listenarr.Tests.Features.Api.Services.DownloadNaming_AudiobookMetadataTests",
             "Listenarr.Tests.Features.Api.Services.DownloadNaming_PatternCollapseTests",
-            "Listenarr.Tests.Features.Api.Services.FileMoverHardlinkTests",
             "Listenarr.Tests.Features.Api.Services.FileNamingService_PathLengthTests",
             "Listenarr.Tests.Features.Api.Services.FileNamingService_PatternSelectionTests",
             "Listenarr.Tests.Features.Api.Services.Import_PatternIntegrationTests",
@@ -847,6 +846,188 @@ public sealed class BackendArchitectureTests : BaseTests
             .ToList();
 
         Assert.Empty(violations);
+    }
+
+    [Fact]
+    public void MoveSourceAncestorCleanup_RequiresDurableOwnership()
+    {
+        var requestSource = File.ReadAllText(Path.Join(
+            RepositoryRoot,
+            "listenarr.infrastructure",
+            "Library",
+            "Moving",
+            "AudiobookContentMoveService.cs"));
+        var cleanupSource = File.ReadAllText(Path.Join(
+            RepositoryRoot,
+            "listenarr.infrastructure",
+            "Library",
+            "Moving",
+            "AudiobookContentMoveService.SourceAncestorCleanup.cs"));
+
+        Assert.DoesNotContain(
+            "AllowUnownedSourceAncestorCleanup",
+            requestSource,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "TryDeleteEmptyDirectory",
+            cleanupSource,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DurableMoveArchitectureDocumentation_MatchesCurrentMarkerlessContracts()
+    {
+        var architecture = File.ReadAllText(Path.Join(
+            RepositoryRoot,
+            "BACKEND_ARCHITECTURE.md"));
+
+        Assert.Contains(
+            $"Identity-key version {MoveManifestIdentity.Version}",
+            architecture,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            $"Move manifest identity version {MoveManifestIdentity.Version}",
+            architecture,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "Generic `FileMover.MoveDirectoryAsync` fallback",
+            architecture,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "Named publication, move, and empty-source `.state` directories",
+            architecture,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "tombstoned scaffold cleanup",
+            architecture,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "Each owned directory has two matching structured proofs",
+            architecture,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void StartupFilesystemReconciliation_IsBackgroundAndCannotReenterBlockingStartupTasks()
+    {
+        var startupTasks = File.ReadAllText(Path.Join(
+            RepositoryRoot,
+            "listenarr.api",
+            "Startup",
+            "ListenarrStartupTasks.cs"));
+        var program = File.ReadAllText(Path.Join(
+            RepositoryRoot,
+            "listenarr.api",
+            "Program.cs"));
+        var reconciler = File.ReadAllText(Path.Join(
+            RepositoryRoot,
+            "listenarr.infrastructure",
+            "Persistence",
+            "LibraryFilesystemStartupReconciliationService.cs"));
+
+        Assert.Contains("ApplyListenarrDatabaseMigrations", program, StringComparison.Ordinal);
+        Assert.Contains("RunListenarrStartupTasksAsync", program, StringComparison.Ordinal);
+        Assert.DoesNotContain("IRootFolderObjectIdentityReconciler", startupTasks, StringComparison.Ordinal);
+        Assert.DoesNotContain("IRootFolderRelocationService", startupTasks, StringComparison.Ordinal);
+        Assert.DoesNotContain("ILibraryDirectoryOwnershipReconciler", startupTasks, StringComparison.Ordinal);
+        Assert.DoesNotContain("IAudiobookFileIdentityReconciler", startupTasks, StringComparison.Ordinal);
+        Assert.Contains(": BackgroundService", reconciler, StringComparison.Ordinal);
+        Assert.Contains("await Task.Yield()", reconciler, StringComparison.Ordinal);
+        Assert.Contains("IRootFolderObjectIdentityReconciler", reconciler, StringComparison.Ordinal);
+        Assert.Contains("IRootFolderRelocationService", reconciler, StringComparison.Ordinal);
+        Assert.Contains("ILibraryDirectoryOwnershipReconciler", reconciler, StringComparison.Ordinal);
+        Assert.Contains("IAudiobookFileIdentityReconciler", reconciler, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FilesystemDependentWorkers_WaitOnSharedStartupReadinessGate()
+    {
+        var workerFiles = new[]
+        {
+            "listenarr.infrastructure/Library/Moving/MoveBackgroundService.cs",
+            "listenarr.infrastructure/Library/Scanning/ScanBackgroundService.cs",
+            "listenarr.infrastructure/Library/Scanning/UnmatchedScanBackgroundService.cs",
+            "listenarr.infrastructure/Downloads/Processing/DownloadProcessingJobProcessor.cs",
+            "listenarr.infrastructure/Metadata/Jobs/MetadataRescanService.cs"
+        };
+
+        foreach (var relativePath in workerFiles)
+        {
+            var source = File.ReadAllText(Path.Join(
+                RepositoryRoot,
+                relativePath.Replace('/', Path.DirectorySeparatorChar)));
+            Assert.Contains("ILibraryFilesystemReadiness", source, StringComparison.Ordinal);
+            Assert.Contains("WaitUntilReadyAsync", source, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void FilesystemReadiness_HasOneSingletonStateOwnerAndBackgroundOrchestrator()
+    {
+        var persistenceRegistration = File.ReadAllText(Path.Join(
+            RepositoryRoot,
+            "listenarr.infrastructure",
+            "DependencyInjection",
+            "Persistence",
+            "PersistenceRegistrationExtensions.cs"));
+        var startupComposition = File.ReadAllText(Path.Join(
+            RepositoryRoot,
+            "listenarr.infrastructure",
+            "DependencyInjection",
+            "InfrastructureStartupCompositionExtensions.cs"));
+        var allDependencyInjectionSource = string.Join(
+            Environment.NewLine,
+            Directory.EnumerateFiles(
+                    Path.Join(RepositoryRoot, "listenarr.infrastructure", "DependencyInjection"),
+                    "*.cs",
+                    SearchOption.AllDirectories)
+                .Where(file => !IsBuildArtifact(file))
+                .Select(File.ReadAllText));
+
+        Assert.Single(Regex.Matches(
+            allDependencyInjectionSource,
+            @"AddSingleton<LibraryFilesystemReadiness>\s*\("));
+        Assert.Contains(
+            "AddSingleton<ILibraryFilesystemReadiness>",
+            persistenceRegistration,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "AddSingleton<ILibraryFilesystemMutationGate>",
+            persistenceRegistration,
+            StringComparison.Ordinal);
+        Assert.Single(Regex.Matches(
+            startupComposition,
+            @"AddHostedService<LibraryFilesystemStartupReconciliationService>\s*\("));
+        Assert.True(
+            startupComposition.IndexOf(
+                "AddHostedService<LibraryFilesystemStartupReconciliationService>",
+                StringComparison.Ordinal)
+            < startupComposition.IndexOf("AddListenarrHostedServices", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void FilesystemStartupArchitectureDocumentation_MatchesReadinessContract()
+    {
+        var architecture = File.ReadAllText(Path.Join(
+            RepositoryRoot,
+            "BACKEND_ARCHITECTURE.md"));
+
+        Assert.Contains(
+            "Filesystem startup reconciliation is deliberately **not** part of `IsReady`",
+            architecture,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "`503 filesystem_initializing`",
+            architecture,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "`503 filesystem_initialization_failed`",
+            architecture,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "root-folder physical identities, active root relocations, directory ownership, then audiobook-file identities",
+            architecture,
+            StringComparison.Ordinal);
     }
 
     [Fact]

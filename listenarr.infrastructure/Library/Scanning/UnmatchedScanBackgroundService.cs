@@ -25,12 +25,15 @@ namespace Listenarr.Infrastructure.Library.Scanning
     public class UnmatchedScanBackgroundService(
         IUnmatchedScanQueueService queue,
         IUnmatchedScanProcessor processor,
+        ILibraryFilesystemReadiness filesystemReadiness,
         ILogger<UnmatchedScanBackgroundService> logger,
         IHubContext<SettingsHub> hubContext,
         IAppMetricsService metrics) : BackgroundService
     {
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
+            logger.LogInformation("UnmatchedScanBackgroundService waiting for library filesystem initialization");
+            await filesystemReadiness.WaitUntilReadyAsync(stoppingToken);
             logger.LogInformation("UnmatchedScanBackgroundService started");
             try
             {

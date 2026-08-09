@@ -134,7 +134,8 @@ public sealed class ManualImportCompanionOwnershipTests : BaseTests
             service => service.PerformActionOn(
                 It.IsAny<FileAction>(),
                 It.IsAny<string>(),
-                It.IsAny<string>()),
+                It.IsAny<string>(),
+                It.IsAny<Guid>()),
             Times.Never);
     }
 }

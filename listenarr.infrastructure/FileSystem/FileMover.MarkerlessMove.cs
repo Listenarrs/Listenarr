@@ -8,13 +8,13 @@ public partial class FileMover
     private async Task<bool?> TryMoveFileMarkerlessAsync(
         string source,
         string destination,
-        Guid? operationId)
+        Guid operationId)
     {
-        if (!operationId.HasValue || _fileMutationJournalStore == null)
+        if (_fileMutationJournalStore == null)
         {
             return null;
         }
-        if (operationId.Value == Guid.Empty)
+        if (operationId == Guid.Empty)
         {
             throw new ArgumentException(
                 "A markerless file move requires a non-empty operation ID.",
@@ -32,7 +32,7 @@ public partial class FileMover
 
         var cancellationToken = CancellationToken.None;
         var journal = await _fileMutationJournalStore.GetAsync(
-            operationId.Value,
+            operationId,
             cancellationToken);
         if (journal == null)
         {
@@ -56,7 +56,7 @@ public partial class FileMover
                 includeSha256: false);
             journal = await _fileMutationJournalStore.GetOrCreateAsync(
                 new FileMutationJournalClaim(
-                    operationId.Value,
+                    operationId,
                     FileAction.Move,
                     pathLock.SourcePath,
                     pathLock.DestinationPath,
@@ -71,7 +71,7 @@ public partial class FileMover
         }
         else
         {
-            ValidateMarkerlessMoveJournal(journal, pathLock);
+            await ValidateMarkerlessMoveJournalAsync(journal, pathLock);
         }
 
         if (journal.State == FileMutationJournalState.NeedsAttention)
@@ -388,21 +388,14 @@ public partial class FileMover
         return true;
     }
 
-    private static void ValidateMarkerlessMoveJournal(
+    private async Task ValidateMarkerlessMoveJournalAsync(
         FileMutationJournal journal,
         FileMoveGateLease pathLock)
     {
         if (journal.ProtocolVersion
                 != FileMutationProtocol.MarkerlessDatabaseState
             || journal.Action != FileAction.Move
-            || !string.Equals(
-                journal.SourcePath,
-                Path.GetFullPath(pathLock.SourcePath),
-                StringComparison.Ordinal)
-            || !string.Equals(
-                journal.DestinationPath,
-                Path.GetFullPath(pathLock.DestinationPath),
-                StringComparison.Ordinal))
+            || !await JournalPathsMatchGateAsync(journal, pathLock))
         {
             throw new InvalidOperationException(
                 "The durable markerless move identity does not match the requested operation.");

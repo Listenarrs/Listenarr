@@ -174,12 +174,14 @@ public sealed class ManualImportCompanionImporter
                     destinationPath,
                     cancellationToken);
                 destinationPath = destinationReservation.Path;
-                var operationId = FileMoveOperationIdentity.Create(
+                var operationId = FileMoveOperationIdentity.CreateForPaths(
                     "manual-import-companion",
                     audiobookIds[0],
                     action,
-                    Path.GetFullPath(companionFile),
-                    Path.GetFullPath(destinationPath));
+                    companionFile,
+                    sourceSemantics,
+                    destinationPath,
+                    destinationResolution.Semantics);
 
                 var destinationDirectory = Path.GetDirectoryName(destinationPath)
                     ?? throw new InvalidOperationException(

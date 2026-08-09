@@ -495,9 +495,15 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
         Directory.Delete(destinationDirectory, recursive: true);
         var mover = new FileMover(
             new NullLogger<FileMover>(),
-            semanticsResolver: new FileSystemSemanticsResolver());
+            semanticsResolver: new FileSystemSemanticsResolver(),
+            dbContextFactory: _factory,
+            timeProvider: TimeProvider.System);
 
-        var copied = await mover.CopyFileAsync(source, destination);
+        var copied = await mover.PerformActionOn(
+            FileAction.Copy,
+            source,
+            destination,
+            Guid.NewGuid());
 
         Assert.False(copied);
         Assert.True(File.Exists(source));
@@ -562,6 +568,39 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
 
         Assert.True(Directory.Exists(destination));
         Assert.Equal("foreign", await File.ReadAllTextAsync(foreignFile));
+        var resolution = await _store.ResolveOwnedAsync(
+            destination,
+            FileSystemPathSemantics.CurrentHostDefault);
+        Assert.Equal(LibraryDirectoryOwnershipResolutionState.Unowned, resolution.State);
+    }
+
+    [Fact]
+    public async Task EnsureCreatedHierarchyAsync_PersistenceFailureReplacementDuringCompensationPreservesReplacement()
+    {
+        var destination = Path.Join(_root, "FailedCompensationReplacement");
+        var displacedCreation = destination + ".listenarr-created";
+        var factory = new FailFirstThenActOnSecondContextFactory(
+            _factory,
+            () =>
+            {
+                Directory.Move(destination, displacedCreation);
+                Directory.CreateDirectory(destination);
+            });
+        var store = new EfLibraryDirectoryOwnershipStore(
+            factory,
+            TimeProvider.System,
+            new LibraryDirectoryOwnershipBoundaryAuthorizer(_factory));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            store.EnsureCreatedHierarchyAsync(
+                destination,
+                _root,
+                FileSystemPathSemantics.CurrentHostDefault,
+                "test-failed-compensation-replacement"));
+
+        Assert.True(Directory.Exists(displacedCreation));
+        Assert.True(Directory.Exists(destination));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(destination));
         var resolution = await _store.ResolveOwnedAsync(
             destination,
             FileSystemPathSemantics.CurrentHostDefault);
@@ -1008,6 +1047,40 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
 
             beforeFailure?.Invoke();
             throw new InvalidOperationException("Injected ownership persistence failure.");
+        }
+    }
+
+    private sealed class FailFirstThenActOnSecondContextFactory(
+        IDbContextFactory<ListenArrDbContext> inner,
+        Action beforeSecondContext)
+        : IDbContextFactory<ListenArrDbContext>
+    {
+        private int _calls;
+
+        public ListenArrDbContext CreateDbContext()
+        {
+            BeforeCreate();
+            return inner.CreateDbContext();
+        }
+
+        public async Task<ListenArrDbContext> CreateDbContextAsync(
+            CancellationToken cancellationToken = default)
+        {
+            BeforeCreate();
+            return await inner.CreateDbContextAsync(cancellationToken);
+        }
+
+        private void BeforeCreate()
+        {
+            var call = Interlocked.Increment(ref _calls);
+            if (call == 1)
+            {
+                throw new InvalidOperationException("Injected ownership persistence failure.");
+            }
+            if (call == 2)
+            {
+                beforeSecondContext();
+            }
         }
     }
 

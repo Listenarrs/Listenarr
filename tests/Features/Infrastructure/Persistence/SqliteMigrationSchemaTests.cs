@@ -31,11 +31,11 @@ public class SqliteMigrationSchemaTests : BaseTests
     private const string MoveJobSourcePathRepairId =
         "20251124102000_AddMoveJobSourcePath";
     private const string ProcessExecutionLogRepairId =
-        "20260702200000_AddProcessExecutionLogs";
+        "20260809121006_AddProcessExecutionLogs";
     private const string ConsolidatedMigrationId =
-        "20260807200942_AddDurableMarkerlessLibraryMoves";
+        "20260809141455_AddDurableMarkerlessLibraryMoves";
     private const string MoveJobRelocationForeignKeyMigrationId =
-        "20260807204014_AddMoveJobRelocationForeignKey";
+        "20260809153711_AddMoveJobRelocationForeignKey";
 
     private static (SqliteConnection Connection, ListenArrDbContext Context)
         CreateMigratedSqliteContext()

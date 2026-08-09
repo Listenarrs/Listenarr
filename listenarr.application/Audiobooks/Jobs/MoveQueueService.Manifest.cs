@@ -46,13 +46,11 @@ public partial class MoveQueueService
             var sourceKey = FileSystemPathIdentity.CreateKey(
                 "move-source-entry",
                 sourcePath,
-                sourceIdentity.Semantics,
-                version: 4);
+                sourceIdentity.Semantics);
             var targetKey = FileSystemPathIdentity.CreateKey(
                 "move-target-entry",
                 targetPath,
-                targetIdentity.Semantics,
-                version: 4);
+                targetIdentity.Semantics);
             if (!sourcePaths.Add(sourceKey)
                 || !targetPaths.Add(targetKey))
             {

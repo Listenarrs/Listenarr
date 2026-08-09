@@ -65,6 +65,7 @@ namespace Listenarr.Api.Features.Library
         private readonly IAudiobookDestinationRewriteService _destinationRewriteService;
         private readonly IFilesystemMutationCoordinator _mutationCoordinator;
         private readonly IAudiobookOperationCoordinator _audiobookOperationCoordinator;
+        private readonly ILibraryFilesystemMutationGate _filesystemMutationGate;
         private readonly ILogger<LibraryMoveWorkflow> _logger;
 
         public LibraryMoveWorkflow(
@@ -77,6 +78,7 @@ namespace Listenarr.Api.Features.Library
             IAudiobookDestinationRewriteService destinationRewriteService,
             IFilesystemMutationCoordinator mutationCoordinator,
             IAudiobookOperationCoordinator audiobookOperationCoordinator,
+            ILibraryFilesystemMutationGate filesystemMutationGate,
             IMoveQueueService? moveQueueService = null)
         {
             _repo = repo;
@@ -88,6 +90,8 @@ namespace Listenarr.Api.Features.Library
             _destinationRewriteService = destinationRewriteService;
             _mutationCoordinator = mutationCoordinator ?? throw new ArgumentNullException(nameof(mutationCoordinator));
             _audiobookOperationCoordinator = audiobookOperationCoordinator ?? throw new ArgumentNullException(nameof(audiobookOperationCoordinator));
+            _filesystemMutationGate = filesystemMutationGate
+                ?? throw new ArgumentNullException(nameof(filesystemMutationGate));
             _moveQueueService = moveQueueService;
         }
 
@@ -140,6 +144,8 @@ namespace Listenarr.Api.Features.Library
                     };
                 }
             }
+
+            _filesystemMutationGate.EnsureReady();
 
             try
             {
@@ -294,6 +300,8 @@ namespace Listenarr.Api.Features.Library
         {
             if (_moveQueueService == null) return new NotFoundObjectResult(new { message = "Move queue not available" });
             if (!Guid.TryParse(jobId, out var gid)) return new BadRequestObjectResult(new { message = "Invalid jobId" });
+
+            _filesystemMutationGate.EnsureReady();
 
             Guid? newJobId;
             try

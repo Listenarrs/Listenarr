@@ -35,22 +35,4 @@ public sealed class FileMoverDirectoryCopyPathIdentityTests : BaseTests
             @"C:\Library\book",
             FileSystemPathSyntax.Windows));
     }
-
-    [Fact]
-    [Trait("Method", "DirectoryCopySnapshotPathComparer")]
-    [Trait("Scenario", "CaseDistinctSnapshotEntriesRemainDistinct")]
-    public void DirectoryCopySnapshotPathComparer_CaseDistinctSnapshotEntriesRemainDistinct()
-    {
-        var comparer = FileMover.DirectoryCopySnapshotPathComparer;
-        var paths = new HashSet<string>(comparer)
-        {
-            Path.Join("Disc", "Track.m4b"),
-            Path.Join("disc", "track.m4b")
-        };
-
-        Assert.Equal(2, paths.Count);
-        Assert.False(comparer.Equals(
-            Path.Join("Disc", "Track.m4b"),
-            Path.Join("disc", "track.m4b")));
-    }
 }

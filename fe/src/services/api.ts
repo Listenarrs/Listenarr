@@ -32,6 +32,7 @@ import type {
   // ...existing code...
   TranslatePathRequest,
   TranslatePathResponse,
+  SystemReadiness,
   SystemInfo,
   StorageInfo,
   ServiceHealth,
@@ -1871,6 +1872,10 @@ class ApiService {
   }
 
   // System endpoints
+  async getSystemReadiness(): Promise<SystemReadiness> {
+    return this.request<SystemReadiness>('/system/ready')
+  }
+
   async getSystemInfo(): Promise<SystemInfo> {
     return this.request<SystemInfo>('/system/info')
   }

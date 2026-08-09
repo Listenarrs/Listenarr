@@ -11,6 +11,71 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Scanning;
 public sealed class ScanBackgroundServiceTests : BaseTests
 {
     [Fact]
+    public async Task ExecuteAsync_FilesystemNotReady_DoesNotConsumeJobsUntilGateOpens()
+    {
+        var channel = Channel.CreateUnbounded<ScanJob>();
+        var job = new ScanJob { AudiobookId = 500 };
+        await channel.Writer.WriteAsync(job);
+        var queue = new Mock<IScanQueueService>(MockBehavior.Strict);
+        queue.SetupGet(service => service.Reader).Returns(channel.Reader);
+        var historyRepository = new Mock<IHistoryRepository>();
+        var audiobookRepository = new Mock<IAudiobookRepository>();
+        await using var services = new ServiceCollection()
+            .AddSingleton(historyRepository.Object)
+            .AddSingleton(audiobookRepository.Object)
+            .BuildServiceProvider();
+        var handoffStore = new Mock<IMoveScanHandoffStore>(MockBehavior.Strict);
+        handoffStore.Setup(store => store.GetClaimableIdsAsync(
+                It.IsAny<DateTimeOffset>(),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+        var recovery = new MoveScanHandoffRecoveryService(
+            queue.Object,
+            handoffStore.Object,
+            services.GetRequiredService<IServiceScopeFactory>(),
+            TimeProvider.System,
+            NullLogger<MoveScanHandoffRecoveryService>.Instance);
+        var readiness = new TestLibraryFilesystemReadiness();
+        readiness.SetRunning("AudiobookFileIdentities");
+        var processed = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var processor = new Mock<IScanJobProcessor>(MockBehavior.Strict);
+        processor.Setup(service => service.ProcessJobAsync(job, It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                processed.TrySetResult();
+                return Task.CompletedTask;
+            });
+        var service = new ScanBackgroundService(
+            queue.Object,
+            processor.Object,
+            recovery,
+            new ImmediateCycleRunner(),
+            readiness,
+            NullLogger<ScanBackgroundService>.Instance);
+
+        await service.StartAsync(CancellationToken.None);
+
+        Assert.False(processed.Task.IsCompleted);
+        processor.Verify(service => service.ProcessJobAsync(
+            It.IsAny<ScanJob>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+        handoffStore.Verify(store => store.GetClaimableIdsAsync(
+            It.IsAny<DateTimeOffset>(),
+            It.IsAny<int>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+
+        readiness.SetReady();
+        await processed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await service.StopAsync(CancellationToken.None);
+
+        processor.Verify(service => service.ProcessJobAsync(
+            job,
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_ProcessorFailure_ContinuesWithLaterJobs()
     {
         var queue = new ScanQueueService(
@@ -55,6 +120,7 @@ public sealed class ScanBackgroundServiceTests : BaseTests
             processor.Object,
             recovery,
             new ImmediateCycleRunner(),
+            TestLibraryFilesystemReadiness.Ready(),
             NullLogger<ScanBackgroundService>.Instance);
         var audiobook = new AudiobookBuilder()
             .WithId(501)
@@ -140,6 +206,7 @@ public sealed class ScanBackgroundServiceTests : BaseTests
             processor.Object,
             recovery,
             new ImmediateCycleRunner(),
+            TestLibraryFilesystemReadiness.Ready(),
             NullLogger<ScanBackgroundService>.Instance);
 
         await service.StartAsync(CancellationToken.None);

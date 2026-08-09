@@ -9,13 +9,13 @@ public partial class FileMover
         string source,
         string destination,
         string expectedSourcePhysicalObjectIdentity,
-        Guid? operationId)
+        Guid operationId)
     {
-        if (!operationId.HasValue || _fileMutationJournalStore == null)
+        if (_fileMutationJournalStore == null)
         {
             return null;
         }
-        if (operationId.Value == Guid.Empty)
+        if (operationId == Guid.Empty)
         {
             throw new ArgumentException(
                 "A markerless file rename requires a non-empty operation ID.",
@@ -33,7 +33,7 @@ public partial class FileMover
 
         var cancellationToken = CancellationToken.None;
         var journal = await _fileMutationJournalStore.GetAsync(
-            operationId.Value,
+            operationId,
             cancellationToken);
         if (journal == null)
         {
@@ -66,7 +66,7 @@ public partial class FileMover
             }
             journal = await _fileMutationJournalStore.GetOrCreateAsync(
                 new FileMutationJournalClaim(
-                    operationId.Value,
+                    operationId,
                     FileAction.Move,
                     pathLock.SourcePath,
                     pathLock.DestinationPath,
@@ -81,7 +81,7 @@ public partial class FileMover
         }
         else
         {
-            ValidateMarkerlessRenameJournal(
+            await ValidateMarkerlessRenameJournalAsync(
                 journal,
                 pathLock,
                 expectedSourcePhysicalObjectIdentity);
@@ -203,7 +203,7 @@ public partial class FileMover
         if (journal.State < FileMutationJournalState.TargetIdentityPersisted)
         {
             journal = await _fileMutationJournalStore.AdvanceAsync(
-                operationId.Value,
+                operationId,
                 FileMutationJournalState.TargetIdentityPersisted,
                 targetPhysicalObjectIdentity,
                 audiobookId: null,
@@ -217,7 +217,7 @@ public partial class FileMover
         if (journal.State < FileMutationJournalState.TargetVerified)
         {
             journal = await _fileMutationJournalStore.AdvanceAsync(
-                operationId.Value,
+                operationId,
                 FileMutationJournalState.TargetVerified,
                 targetPhysicalObjectIdentity,
                 audiobookId: null,
@@ -227,7 +227,7 @@ public partial class FileMover
         if (journal.State < FileMutationJournalState.SourceDeletionAuthorized)
         {
             journal = await _fileMutationJournalStore.AdvanceAsync(
-                operationId.Value,
+                operationId,
                 FileMutationJournalState.SourceDeletionAuthorized,
                 targetPhysicalObjectIdentity,
                 audiobookId: null,
@@ -237,7 +237,7 @@ public partial class FileMover
         if (journal.State < FileMutationJournalState.SourceDeleted)
         {
             journal = await _fileMutationJournalStore.AdvanceAsync(
-                operationId.Value,
+                operationId,
                 FileMutationJournalState.SourceDeleted,
                 targetPhysicalObjectIdentity,
                 audiobookId: null,
@@ -247,7 +247,7 @@ public partial class FileMover
         if (journal.State < FileMutationJournalState.Completed)
         {
             _ = await _fileMutationJournalStore.AdvanceAsync(
-                operationId.Value,
+                operationId,
                 FileMutationJournalState.Completed,
                 targetPhysicalObjectIdentity,
                 audiobookId: null,
@@ -264,7 +264,7 @@ public partial class FileMover
         return true;
     }
 
-    private static void ValidateMarkerlessRenameJournal(
+    private async Task ValidateMarkerlessRenameJournalAsync(
         FileMutationJournal journal,
         FileMoveGateLease pathLock,
         string expectedSourcePhysicalObjectIdentity)
@@ -272,14 +272,7 @@ public partial class FileMover
         if (journal.ProtocolVersion
                 != FileMutationProtocol.MarkerlessDatabaseState
             || journal.Action != FileAction.Move
-            || !string.Equals(
-                journal.SourcePath,
-                Path.GetFullPath(pathLock.SourcePath),
-                StringComparison.Ordinal)
-            || !string.Equals(
-                journal.DestinationPath,
-                Path.GetFullPath(pathLock.DestinationPath),
-                StringComparison.Ordinal)
+            || !await JournalPathsMatchGateAsync(journal, pathLock)
             || !string.Equals(
                 journal.SourcePhysicalObjectIdentity,
                 expectedSourcePhysicalObjectIdentity,

@@ -51,6 +51,9 @@ public sealed class ProductionCompositionValidationTests : BaseTests
                 typeof(IMoveQueuePersistence),
                 typeof(IMoveExecutionStore),
                 typeof(IMoveScanHandoffStore),
+                typeof(LibraryFilesystemReadiness),
+                typeof(ILibraryFilesystemReadiness),
+                typeof(ILibraryFilesystemMutationGate),
                 typeof(IFileSystemSemanticsResolver),
                 typeof(IFileSystem),
                 typeof(IStartupConfigService),
@@ -66,6 +69,8 @@ public sealed class ProductionCompositionValidationTests : BaseTests
                 typeof(UnmatchedScanProcessor),
                 typeof(IUnmatchedScanProcessor),
                 typeof(MetadataRescanService),
+                typeof(DownloadProcessingJobProcessor),
+                typeof(IDownloadImportProcessor),
                 typeof(UnmatchedScanBackgroundService)
             ];
             foreach (var serviceType in affectedSingletonServiceTypes)
@@ -91,10 +96,13 @@ public sealed class ProductionCompositionValidationTests : BaseTests
 
             Type[] affectedHostedServiceTypes =
             [
+                typeof(LibraryFilesystemStartupReconciliationService),
                 typeof(ScanBackgroundService),
                 typeof(MoveBackgroundService),
                 typeof(MetadataRescanService),
-                typeof(UnmatchedScanBackgroundService)
+                typeof(DownloadProcessingJobProcessor),
+                typeof(UnmatchedScanBackgroundService),
+                typeof(StartupDbNormalizer)
             ];
             Assert.All(
                 builder.Services.Where(descriptor =>
@@ -136,6 +144,15 @@ public sealed class ProductionCompositionValidationTests : BaseTests
             Assert.Same(
                 provider.GetRequiredService<UnmatchedScanProcessor>(),
                 provider.GetRequiredService<IUnmatchedScanProcessor>());
+            Assert.Same(
+                provider.GetRequiredService<LibraryFilesystemReadiness>(),
+                provider.GetRequiredService<ILibraryFilesystemReadiness>());
+            Assert.Same(
+                provider.GetRequiredService<LibraryFilesystemReadiness>(),
+                provider.GetRequiredService<ILibraryFilesystemMutationGate>());
+            Assert.Same(
+                provider.GetRequiredService<DownloadProcessingJobProcessor>(),
+                provider.GetRequiredService<IDownloadImportProcessor>());
             Assert.Same(
                 provider.GetRequiredService<MetadataRescanService>(),
                 Assert.Single(hostedServices.OfType<MetadataRescanService>()));

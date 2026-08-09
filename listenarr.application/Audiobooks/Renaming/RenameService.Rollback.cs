@@ -88,12 +88,14 @@ public partial class RenameService
                             cancellationToken);
                     }
 
-                    var rollbackOperationId = FileMoveOperationIdentity.Create(
+                    var rollbackOperationId = FileMoveOperationIdentity.CreateForPaths(
                         "audiobook-file-rename-rollback",
                         audiobook.Id,
                         item.FileId,
                         rollbackSource,
-                        rollbackDestination);
+                        semantics,
+                        rollbackDestination,
+                        semantics);
                     bool moved;
                     if (item.FileId == 0)
                     {

@@ -74,10 +74,6 @@ export function detectPathKind(
   return 'unknown'
 }
 
-export function isWindowsShapedPath(s: string | null | undefined): boolean {
-  return detectPathKind(s) === 'windows'
-}
-
 export function splitPathSegments(
   s: string | null | undefined,
   pathKind: PathKind = 'unknown',

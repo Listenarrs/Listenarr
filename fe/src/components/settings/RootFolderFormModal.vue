@@ -36,7 +36,12 @@
         </FormRow>
 
         <FormRow label="Filesystem case sensitivity" labelFor="root-case-sensitivity">
-          <select id="root-case-sensitivity" v-model="form.caseSensitivityMode" class="form-input">
+          <select
+            id="root-case-sensitivity"
+            v-model="form.caseSensitivityMode"
+            class="form-input"
+            :disabled="rootFilesystemMutationLocked"
+          >
             <option value="Auto">Auto-detect</option>
             <option value="Sensitive">Case-sensitive</option>
             <option value="Insensitive">Case-insensitive</option>
@@ -54,17 +59,24 @@
               v-model="form.path"
               class="form-input"
               placeholder="Select or enter a path..."
+              :disabled="rootFilesystemMutationLocked"
             />
             <button
               type="button"
               class="icon-btn btn-secondary btn-inline-browse"
               @click="openBrowser"
+              :disabled="rootFilesystemMutationLocked"
               title="Browse for folder"
               aria-label="Browse for folder"
             >
               <PhFolder :size="16" />
             </button>
           </div>
+
+          <small v-if="rootFilesystemMutationLocked" class="semantics-help">
+            Path and filesystem semantics changes are available after library filesystem
+            initialization completes.
+          </small>
 
           <!-- Folder browser modal (opens in a centered modal) -->
           <FolderBrowserModal
@@ -110,7 +122,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import FolderBrowserModal from '@/components/feedback/FolderBrowserModal.vue'
 import { Modal, ModalHeader, ModalFooter } from '@/components/feedback'
 import MoveAudiobookModal from '@/components/feedback/MoveAudiobookModal.vue'
@@ -121,6 +133,7 @@ import CheckboxCard from '@/components/settings/CheckboxCard.vue'
 import { PhFolder } from '@phosphor-icons/vue'
 import { useRootFoldersStore } from '@/stores/rootFolders'
 import { useToast } from '@/services/toastService'
+import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
 import type { RootFolder } from '@/types'
 import { detectPathKind, validateLibraryDestinationPath, type PathKind } from '@/utils/path'
 import { persistedRootPathKind, rootFolderPathChanged } from '@/utils/rootFolderPath'
@@ -132,7 +145,11 @@ const emit = defineEmits<{
 }>()
 
 const store = useRootFoldersStore()
+const filesystemReadinessStore = useFilesystemReadinessStore()
 const toast = useToast()
+const rootFilesystemMutationLocked = computed(
+  () => Boolean(root?.id) && !filesystemReadinessStore.filesystemReady,
+)
 
 const form = ref({
   name: root?.name || '',

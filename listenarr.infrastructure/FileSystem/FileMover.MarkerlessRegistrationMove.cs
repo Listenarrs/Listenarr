@@ -9,13 +9,13 @@ public partial class FileMover
         string source,
         string destination,
         IAudiobookFileRegistrationLease registrationLease,
-        Guid? operationId)
+        Guid operationId)
     {
-        if (!operationId.HasValue || _fileMutationJournalStore == null)
+        if (_fileMutationJournalStore == null)
         {
             return null;
         }
-        if (operationId.Value == Guid.Empty)
+        if (operationId == Guid.Empty)
         {
             throw new ArgumentException(
                 "A markerless registration move requires a non-empty operation ID.",
@@ -24,25 +24,18 @@ public partial class FileMover
 
         var cancellationToken = CancellationToken.None;
         var journal = await _fileMutationJournalStore.GetAsync(
-            operationId.Value,
+            operationId,
             cancellationToken);
         if (journal == null)
         {
-            // Legacy interrupted registration publications predate the database
-            // journal and must remain recoverable by the old read/retire path.
-            return null;
+            _logger.LogWarning(
+                "Blocked markerless prepared-move completion for {OperationId} because its durable journal is missing.",
+                operationId);
+            return false;
         }
 
         if (journal.ProtocolVersion != FileMutationProtocol.MarkerlessDatabaseState
-            || journal.Action != FileAction.Move
-            || !string.Equals(
-                journal.SourcePath,
-                Path.GetFullPath(source),
-                StringComparison.Ordinal)
-            || !string.Equals(
-                journal.DestinationPath,
-                Path.GetFullPath(destination),
-                StringComparison.Ordinal))
+            || journal.Action != FileAction.Move)
         {
             throw new InvalidOperationException(
                 "The markerless registration move identity does not match the requested completion.");
@@ -83,6 +76,11 @@ public partial class FileMover
         if (gate == null)
         {
             return false;
+        }
+        if (!await JournalPathsMatchGateAsync(journal, gate))
+        {
+            throw new InvalidOperationException(
+                "The markerless registration move paths do not match the requested completion.");
         }
 
         if (!await MarkerlessRegistrationTargetMatchesAsync(

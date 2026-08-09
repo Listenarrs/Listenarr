@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -321,7 +321,7 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                 columns: table => new
                 {
                     OperationId = table.Column<Guid>(type: "TEXT", nullable: false),
-                    ProtocolVersion = table.Column<int>(type: "INTEGER", nullable: false, defaultValue: 2),
+                    ProtocolVersion = table.Column<int>(type: "INTEGER", nullable: false, defaultValue: 1),
                     Action = table.Column<string>(type: "TEXT", maxLength: 24, nullable: false),
                     SourcePath = table.Column<string>(type: "TEXT", maxLength: 4096, nullable: false),
                     DestinationPath = table.Column<string>(type: "TEXT", maxLength: 4096, nullable: false),

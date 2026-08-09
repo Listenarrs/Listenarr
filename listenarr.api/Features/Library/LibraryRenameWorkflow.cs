@@ -12,7 +12,9 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Api.Features.Library;
 
-public sealed class LibraryRenameWorkflow(IRenameService? renameService = null)
+public sealed class LibraryRenameWorkflow(
+    ILibraryFilesystemMutationGate filesystemMutationGate,
+    IRenameService? renameService = null)
 {
     public async Task<IActionResult> PreviewAsync(
         BulkRenameRequest request,
@@ -55,6 +57,8 @@ public sealed class LibraryRenameWorkflow(IRenameService? renameService = null)
         {
             return new BadRequestObjectResult(new { message = "Cannot execute more than 500 rename operations at once" });
         }
+
+        filesystemMutationGate.EnsureReady();
 
         try
         {
@@ -99,6 +103,7 @@ public sealed class LibraryRenameWorkflow(IRenameService? renameService = null)
         }
 
         operation.AudiobookId = id;
+        filesystemMutationGate.EnsureReady();
         try
         {
             var result = (await renameService.ExecuteRenameAsync([operation], cancellationToken))

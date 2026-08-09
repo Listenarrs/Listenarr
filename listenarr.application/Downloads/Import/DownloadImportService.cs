@@ -101,9 +101,16 @@ namespace Listenarr.Application.Downloads.Import
                 var folderPattern = settings.FolderNamingPattern;
                 var candidateFiles = files.Where(file => !FileUtils.IsBlacklistedFile(file, settings.ImportBlacklistExtensions)).ToList();
                 var sourceRootPath = FileUtils.GetCommonDirectory(candidateFiles);
-                var sourcePathComparer = string.IsNullOrWhiteSpace(sourceRootPath)
-                    ? StringComparer.Ordinal
-                    : (await ResolvePathSemanticsAsync(sourceRootPath, "Source filesystem identity is unavailable.", ct)).Comparer;
+                FileSystemPathSemantics? sourceSemantics = null;
+                var sourcePathComparer = StringComparer.Ordinal;
+                if (!string.IsNullOrWhiteSpace(sourceRootPath))
+                {
+                    sourceSemantics = await ResolvePathSemanticsAsync(
+                        sourceRootPath,
+                        "Source filesystem identity is unavailable.",
+                        ct);
+                    sourcePathComparer = sourceSemantics.Value.Comparer;
+                }
                 var sourceFiles = candidateFiles.Distinct(sourcePathComparer).ToList();
                 sourceRootPath = FileUtils.GetCommonDirectory(sourceFiles);
                 var plannedAudioFiles = MultiFileImportPlanner.BuildPlans(
@@ -144,6 +151,11 @@ namespace Listenarr.Application.Downloads.Import
 
                     foreach (var file in orderedFiles)
                     {
+                        var fileSourceSemantics = sourceSemantics
+                            ?? await ResolvePathSemanticsAsync(
+                                file,
+                                "Source filesystem identity is unavailable.",
+                                ct);
                         if (!FileUtils.IsAudioFile(file))
                         {
                             var hasSuccessfulAudioImport = results.Any(r => r.Success && !string.IsNullOrWhiteSpace(r.FinalPath) && !string.IsNullOrWhiteSpace(r.SourcePath) && FileUtils.IsAudioFile(r.SourcePath!));
@@ -172,12 +184,14 @@ namespace Listenarr.Application.Downloads.Import
                                         destination,
                                         destinationOwnershipBoundary,
                                         destinationSemantics,
-                                        FileMoveOperationIdentity.Create(
+                                        FileMoveOperationIdentity.CreateForPaths(
                                             "download-import",
                                             audiobook.Id,
                                             completedFileAction,
-                                            Path.GetFullPath(file),
-                                            Path.GetFullPath(destination)),
+                                            file,
+                                            fileSourceSemantics,
+                                            destination,
+                                            destinationSemantics),
                                         audiobook.Id,
                                         ct))
                                 {
@@ -305,12 +319,14 @@ namespace Listenarr.Application.Downloads.Import
                                 continue;
                             }
 
-                            var operationId = FileMoveOperationIdentity.Create(
+                            var operationId = FileMoveOperationIdentity.CreateForPaths(
                                 "download-import",
                                 audiobook.Id,
                                 completedFileAction,
-                                Path.GetFullPath(file),
-                                Path.GetFullPath(destination));
+                                file,
+                                fileSourceSemantics,
+                                destination,
+                                destinationSemantics);
                             using var registrationLease =
                                 await PrepareOwnedFileActionForRegistrationAsync(
                                     completedFileAction,

@@ -26,12 +26,15 @@ namespace Listenarr.Infrastructure.Metadata.Jobs
     public class MetadataRescanService(
         ILogger<MetadataRescanService> logger,
         IMetadataRescanProcessor processor,
-        IWorkerCycleRunner cycleRunner) : BackgroundService
+        IWorkerCycleRunner cycleRunner,
+        ILibraryFilesystemReadiness filesystemReadiness) : BackgroundService
     {
         private static readonly TimeSpan Interval = TimeSpan.FromMinutes(5);
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
+            logger.LogInformation("MetadataRescanService waiting for library filesystem initialization");
+            await filesystemReadiness.WaitUntilReadyAsync(stoppingToken);
             logger.LogInformation("MetadataRescanService starting");
             await cycleRunner.RunPeriodicAsync(
                 nameof(MetadataRescanService),

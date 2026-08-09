@@ -105,7 +105,7 @@ public sealed class ManualImportCompanionImporterTests : BaseTests
                     It.IsAny<FileAction>(),
                     It.IsAny<string>(),
                     It.IsAny<string>(),
-                    It.IsAny<Guid?>()),
+                    It.IsAny<Guid>()),
                 Times.Never);
             fileService.VerifyAll();
             ownershipStore.VerifyAll();
@@ -157,7 +157,7 @@ public sealed class ManualImportCompanionImporterTests : BaseTests
                     FileAction.Move,
                     companionSource,
                     It.IsAny<string>(),
-                    It.IsAny<Guid?>()))
+                    It.IsAny<Guid>()))
                 .ReturnsAsync(lease.Object);
             var audiobook = new Audiobook
             {
@@ -246,7 +246,7 @@ public sealed class ManualImportCompanionImporterTests : BaseTests
                 It.IsAny<string>(),
                 It.IsAny<string>(),
                 It.IsAny<IAudiobookFileRegistrationLease>(),
-                It.IsAny<Guid?>()), Times.Never);
+                It.IsAny<Guid>()), Times.Never);
             mover.VerifyAll();
             fileService.VerifyAll();
             lease.VerifyAll();
@@ -287,8 +287,8 @@ public sealed class ManualImportCompanionImporterTests : BaseTests
                     FileAction.Copy,
                     companionSource,
                     It.IsAny<string>(),
-                    It.IsAny<Guid?>()))
-                .Callback<FileAction, string, string?, Guid?>((_, _, destination, _) =>
+                    It.IsAny<Guid>()))
+                .Callback<FileAction, string, string?, Guid>((_, _, destination, _) =>
                     capturedDestination = destination)
                 .ReturnsAsync(true);
             var audiobook = new Audiobook

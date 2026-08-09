@@ -73,6 +73,8 @@ namespace Listenarr.Api.Features.Library
         private readonly IRootFolderRelocationService _relocationService;
         private readonly IRootFolderStorageHealthResolver _storageHealthResolver;
         private readonly IRootFolderStorageConfirmationService _storageConfirmationService;
+        private readonly ILibraryFilesystemReadiness _filesystemReadiness;
+        private readonly ILibraryFilesystemMutationGate _filesystemMutationGate;
 
         public RootFoldersController(
             IRootFolderService service,
@@ -83,7 +85,9 @@ namespace Listenarr.Api.Features.Library
             IFileSystemSemanticsResolver semanticsResolver,
             IRootFolderRelocationService relocationService,
             IRootFolderStorageHealthResolver storageHealthResolver,
-            IRootFolderStorageConfirmationService storageConfirmationService)
+            IRootFolderStorageConfirmationService storageConfirmationService,
+            ILibraryFilesystemReadiness filesystemReadiness,
+            ILibraryFilesystemMutationGate filesystemMutationGate)
         {
             _service = service;
             _unmatchedQueue = unmatchedQueue;
@@ -94,6 +98,10 @@ namespace Listenarr.Api.Features.Library
             _relocationService = relocationService ?? throw new ArgumentNullException(nameof(relocationService));
             _storageHealthResolver = storageHealthResolver ?? throw new ArgumentNullException(nameof(storageHealthResolver));
             _storageConfirmationService = storageConfirmationService ?? throw new ArgumentNullException(nameof(storageConfirmationService));
+            _filesystemReadiness = filesystemReadiness
+                ?? throw new ArgumentNullException(nameof(filesystemReadiness));
+            _filesystemMutationGate = filesystemMutationGate
+                ?? throw new ArgumentNullException(nameof(filesystemMutationGate));
         }
 
         /// <summary>
@@ -136,6 +144,8 @@ namespace Listenarr.Api.Features.Library
             {
                 return BadRequest(new { message = "The root folder request is invalid." });
             }
+
+            _filesystemMutationGate.EnsureReady();
 
             try
             {
@@ -211,6 +221,8 @@ namespace Listenarr.Api.Features.Library
                     return Ok(await MapAsync(updatedMetadata));
                 }
 
+                _filesystemMutationGate.EnsureReady();
+
                 var relocationTargetPath = pathChanged
                     ? normalizedRequestedPath
                     : existing.Path;
@@ -276,6 +288,8 @@ namespace Listenarr.Api.Features.Library
                 });
             }
 
+            _filesystemMutationGate.EnsureReady();
+
             try
             {
                 var root = await _storageConfirmationService.ConfirmCurrentFolderAsync(
@@ -318,6 +332,8 @@ namespace Listenarr.Api.Features.Library
             {
                 return BadRequest(new { message = "Mode must be 'relocate' or 'metadataOnly', and case sensitivity must be valid." });
             }
+
+            _filesystemMutationGate.EnsureReady();
 
             try
             {
@@ -402,6 +418,8 @@ namespace Listenarr.Api.Features.Library
         [HttpPost("{id}/scan-unmatched")]
         public async Task<IActionResult> ScanUnmatched(int id)
         {
+            _filesystemMutationGate.EnsureReady();
+
             var folder = await _service.GetByIdAsync(id);
             if (folder == null) return NotFound(new { message = "Root folder not found" });
 

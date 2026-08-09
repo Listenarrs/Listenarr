@@ -21,6 +21,30 @@ describe('getApiValidationError', () => {
     })
   })
 
+  it('uses RFC problem-details detail for filesystem initialization failures', () => {
+    const error = Object.assign(new Error('API error'), {
+      status: 503,
+      body: JSON.stringify({
+        title: 'Service unavailable',
+        status: 503,
+        code: 'filesystem_initializing',
+        detail: 'Library filesystem initialization is still in progress.',
+      }),
+    })
+
+    expect(getApiValidationError(error)).toEqual({
+      code: 'filesystem_initializing',
+      field: undefined,
+      message: 'Library filesystem initialization is still in progress.',
+      resolvedDestination: undefined,
+      jobId: undefined,
+      status: undefined,
+      requestedPath: undefined,
+      recoveryDisposition: undefined,
+      canRetry: undefined,
+    })
+  })
+
   it('does not return an error for another field', () => {
     const error = Object.assign(new Error('API error'), {
       body: JSON.stringify({

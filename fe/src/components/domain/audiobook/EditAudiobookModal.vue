@@ -436,11 +436,16 @@
                     type="button"
                     class="icon-btn btn-primary btn-edit-destination"
                     @click="startEditingDestination"
-                    :disabled="Boolean(moveRecoveryState?.hasUnresolvedMove)"
+                    :disabled="
+                      filesystemReadinessStore.filesystemReady === false ||
+                      Boolean(moveRecoveryState?.hasUnresolvedMove)
+                    "
                     :title="
-                      moveRecoveryState?.hasUnresolvedMove
-                        ? 'Resolve the interrupted move before changing the destination'
-                        : 'Edit destination'
+                      filesystemReadinessStore.filesystemReady === false
+                        ? 'Available after library filesystem initialization completes'
+                        : moveRecoveryState?.hasUnresolvedMove
+                          ? 'Resolve the interrupted move before changing the destination'
+                          : 'Edit destination'
                     "
                     aria-label="Edit destination"
                   >
@@ -521,7 +526,7 @@
                     type="button"
                     class="btn btn-primary btn-sm"
                     data-testid="resume-move-button"
-                    :disabled="resumingMove"
+                    :disabled="resumingMove || filesystemReadinessStore.filesystemReady === false"
                     @click="resumeInterruptedMove"
                   >
                     <PhSpinner v-if="resumingMove" class="ph-spin" />
@@ -802,6 +807,7 @@ import MoveAudiobookModal from '@/components/feedback/MoveAudiobookModal.vue'
 // FormRow and CheckboxCard not used in this component script; UI uses local markup
 import { useRootFoldersStore } from '@/stores/rootFolders'
 import { useMoveJobsStore, type MoveRecoveryState } from '@/stores/moveJobs'
+import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
 import { usePathLengthCheck } from '@/composables/usePathLengthCheck'
 
 // Diagnostic: surface undefined imports that can cause `Invalid vnode type` warnings
@@ -876,6 +882,7 @@ const qualityProfiles = ref<QualityProfile[]>([])
 const configStore = useConfigurationStore()
 const rootStore = useRootFoldersStore()
 const moveJobsStore = useMoveJobsStore()
+const filesystemReadinessStore = useFilesystemReadinessStore()
 const moveRecoveryState = ref<MoveRecoveryState | null>(null)
 const resumingMove = ref(false)
 const selectedRootId = ref<number | null>(null)

@@ -568,6 +568,7 @@
                 type="checkbox"
                 class="checkbox-input"
                 aria-label="Remove all files in the audiobook folder from disk"
+                :disabled="!filesystemReadinessStore.filesystemReady"
               />
               <div class="checkbox-content">
                 <span class="checkbox-title"
@@ -588,6 +589,7 @@
                 type="checkbox"
                 class="checkbox-input"
                 aria-label="Remove audiobook folder from disk"
+                :disabled="!filesystemReadinessStore.filesystemReady"
               />
               <div class="checkbox-content">
                 <span class="checkbox-title">Also remove the audiobook folder</span>
@@ -653,6 +655,7 @@ import { useLibraryStore } from '@/stores/library'
 import { useConfigurationStore } from '@/stores/configuration'
 import { useRootFoldersStore } from '@/stores/rootFolders'
 import { useScanNotificationsStore } from '@/stores/scanNotifications'
+import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
 import { apiService, ensureImageCached } from '@/services/api'
 import { isApiImagesUrl } from '@/services/apiBase'
 import { handleImageError } from '@/utils/imageFallback'
@@ -719,6 +722,7 @@ const libraryStore = useLibraryStore()
 const configStore = useConfigurationStore()
 const rootFoldersStore = useRootFoldersStore()
 const scanNotificationsStore = useScanNotificationsStore()
+const filesystemReadinessStore = useFilesystemReadinessStore()
 const { getProtectedImageSrc } = useProtectedImages()
 
 type DetailTab = 'details' | 'files' | 'history'
@@ -799,11 +803,17 @@ const topActions = computed<DetailTopAction[]>(() => [
   {
     key: 'scan',
     label: scanning.value ? 'Scanning...' : scanQueued.value ? 'Scan queued' : 'Scan Folder',
-    title: scanning.value ? 'Scanning...' : scanQueued.value ? 'Scan queued' : 'Scan Folder',
+    title: !filesystemReadinessStore.filesystemReady
+      ? 'Available after library filesystem initialization completes'
+      : scanning.value
+        ? 'Scanning...'
+        : scanQueued.value
+          ? 'Scan queued'
+          : 'Scan Folder',
     ariaLabel: 'Scan Folder',
     icon: scanning.value ? PhSpinner : scanQueued.value ? PhClock : PhFolderOpen,
     iconClass: scanning.value ? 'ph-spin' : undefined,
-    disabled: scanning.value || scanQueued.value,
+    disabled: scanning.value || scanQueued.value || !filesystemReadinessStore.filesystemReady,
     desktopGroup: 'primary',
     onClick: () => {
       void scanFiles()

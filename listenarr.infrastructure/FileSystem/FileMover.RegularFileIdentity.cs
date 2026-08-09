@@ -41,6 +41,48 @@ public partial class FileMover
         }
     }
 
+    private static bool MatchesHardlinkSourceIdentity(
+        PinnedDirectoryCreation.PinnedFileEntry entry,
+        string persistedPhysicalObjectIdentity)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return string.Equals(
+                entry.GetObjectIdentity(),
+                persistedPhysicalObjectIdentity,
+                StringComparison.Ordinal);
+        }
+
+        var parts = persistedPhysicalObjectIdentity.Split(':');
+        if (parts.Length != 5
+            || !string.Equals(parts[0], "windows", StringComparison.Ordinal)
+            || !ulong.TryParse(
+                parts[1],
+                System.Globalization.NumberStyles.HexNumber,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var volume)
+            || !ulong.TryParse(
+                parts[2],
+                System.Globalization.NumberStyles.HexNumber,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var fileIdLow)
+            || !ulong.TryParse(
+                parts[3],
+                System.Globalization.NumberStyles.HexNumber,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var fileIdHigh))
+        {
+            return false;
+        }
+
+        using var handle = entry.DuplicateHandleForOperation();
+        return TryGetRegularFileIdentity(handle, out var identity)
+            && identity.Platform == 1
+            && identity.DeviceOrVolume == volume
+            && identity.FileIdLow == fileIdLow
+            && identity.FileIdHigh == fileIdHigh;
+    }
+
     private static bool TryGetRegularFileIdentity(
         SafeFileHandle handle,
         out RegularFileIdentity identity)
@@ -60,27 +102,6 @@ public partial class FileMover
         }
 
         return false;
-    }
-
-    private static bool TryGetDirectoryIdentity(
-        string path,
-        out RegularFileIdentity identity)
-    {
-        identity = default;
-        try
-        {
-            using var anchor =
-                PinnedDirectoryCreation.OpenPinnedDirectoryNoFollow(path);
-            using var handle = anchor.DuplicateHandleForOperation();
-            return TryGetRegularFileIdentity(handle, out identity);
-        }
-        catch (Exception exception) when (exception is
-            IOException or UnauthorizedAccessException or Win32Exception
-                or PlatformNotSupportedException or NotSupportedException
-                or InvalidOperationException)
-        {
-            return false;
-        }
     }
 
     private static bool TryGetWindowsRegularFileIdentity(

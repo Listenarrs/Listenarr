@@ -35,37 +35,9 @@ internal sealed partial class AudiobookContentMoveService
                 cancellationToken);
             if (ownership == null)
             {
-                if (!request.AllowUnownedSourceAncestorCleanup)
-                {
-                    return;
-                }
-
-                ValidateExistingMoveDirectory(
-                    current,
-                    "unowned source ancestor cleanup directory");
-                if (Directory.EnumerateFileSystemEntries(current).Any())
-                {
-                    return;
-                }
-
-                faultInjector?.OnMoveFinalization(
-                    request.JobId,
-                    MoveFinalizationFaultPoint.BeforeSourceAncestorDelete);
-                await EnsureMutationAuthorizedAsync(
-                    request,
-                    source,
-                    target,
-                    cancellationToken);
-                if (!FileSystemSafety.TryDeleteEmptyDirectory(
-                        current,
-                        [boundary],
-                        out _))
-                {
-                    return;
-                }
-
-                current = Path.GetDirectoryName(current) ?? boundary;
-                continue;
+                // A cleanup boundary is only an upper fence. Without a durable
+                // ownership claim, an empty ancestor has no deletion authority.
+                return;
             }
             if (ownership.State == LibraryDirectoryOwnershipState.Removing)
             {

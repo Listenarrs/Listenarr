@@ -63,6 +63,7 @@ public partial class MoveJobProcessorTests
         var source = Path.Join(sourceParent, "test");
         Directory.CreateDirectory(source);
         await FileService.GetFileAsync(source, "book.m4b", "audio");
+        await RecordOwnedDirectoryHierarchyAsync(sourceRoot, sourceParent);
         var target = Path.Join(
             FileService.GetTempPath(),
             $"move-processor-finalize-arrival-dst-{Guid.NewGuid():N}");

@@ -127,49 +127,6 @@ public sealed partial class RootFolderRelocationService
     }
 
     private Task<DirectoryObjectIdentityResolution>
-        ResolveOrCreateRelocationTargetIdentityAsync(
-            string targetPath,
-            CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        var parentPath = Path.GetDirectoryName(targetPath)
-            ?? throw new InvalidOperationException(
-                "The relocation target has no parent directory.");
-        var childName = Path.GetFileName(targetPath);
-        using var creation = PinnedDirectoryCreation.TryCreate(
-            parentPath,
-            childName);
-        if (creation.Created)
-        {
-            using var anchor = creation.OpenCreatedDirectoryAnchor();
-            if (!creation.VisiblePathMatches()
-                || !anchor.VisiblePathMatches())
-            {
-                throw new InvalidOperationException(
-                    "The relocation target changed while its physical identity was reserved.");
-            }
-
-            return Task.FromResult(CreateMarkerlessIdentity(anchor));
-        }
-
-        try
-        {
-            using var existing = PinnedDirectoryCreation.OpenPinnedBoundary(
-                targetPath);
-            return Task.FromResult(CreateMarkerlessIdentity(existing));
-        }
-        catch (Exception exception) when (exception is
-            IOException or UnauthorizedAccessException
-                or InvalidOperationException or NotSupportedException
-                or System.ComponentModel.Win32Exception)
-        {
-            throw new InvalidOperationException(
-                "The relocation target could not be reserved with a stable physical directory identity.",
-                exception);
-        }
-    }
-
-    private Task<DirectoryObjectIdentityResolution>
         ResolveOrEnrollDirectoryObjectIdentityAsync(
             string path,
             CancellationToken cancellationToken)

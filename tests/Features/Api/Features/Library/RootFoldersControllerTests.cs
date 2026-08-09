@@ -188,6 +188,88 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         }
 
         [Fact]
+        public async Task GetAll_FilesystemInitializing_DoesNotResolveStorageHealthOrShowFalseFailure()
+        {
+            var svc = new FakeService();
+            svc.Store.Add(new RootFolder
+            {
+                Id = 6,
+                Name = "Initializing Root",
+                Path = FileUtils.GetAbsolutePath("initializing-root")
+            });
+            using var db = CreateDb();
+            var storageHealthResolver = new Mock<IRootFolderStorageHealthResolver>(MockBehavior.Strict);
+            var readiness = new TestLibraryFilesystemReadiness();
+            readiness.SetRunning("AudiobookFileIdentities");
+            var controller = new RootFoldersController(
+                svc,
+                _fakeQueue,
+                new EfAudiobookFileRepository(db),
+                new AudiobookRepository(db),
+                new LocalFileSystem(),
+                storageHealthResolver: storageHealthResolver.Object,
+                filesystemReadiness: readiness,
+                filesystemMutationGate: readiness);
+
+            var result = await controller.GetAll();
+
+            var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(result);
+            var root = Assert.Single(Assert.IsAssignableFrom<List<RootFolderDto>>(ok.Value));
+            Assert.Equal("Initializing", root.StorageState);
+            Assert.Equal("Initializing", root.StorageReason);
+            Assert.False(root.CanConfirmCurrentFolder);
+            Assert.False(root.CanChangePath);
+            Assert.False(root.CanMutateFilesystem);
+            Assert.Null(root.ConfirmationToken);
+            storageHealthResolver.Verify(
+                service => service.ResolveAsync(
+                    It.IsAny<RootFolder>(),
+                    It.IsAny<CancellationToken>()),
+                Times.Never);
+        }
+
+        [Fact]
+        public async Task GetAll_FilesystemInitializationFailed_KeepsRootReadableButMutationDisabled()
+        {
+            var svc = new FakeService();
+            svc.Store.Add(new RootFolder
+            {
+                Id = 8,
+                Name = "Failed Initialization Root",
+                Path = FileUtils.GetAbsolutePath("failed-initialization-root")
+            });
+            using var db = CreateDb();
+            var storageHealthResolver = new Mock<IRootFolderStorageHealthResolver>(MockBehavior.Strict);
+            var readiness = new TestLibraryFilesystemReadiness();
+            readiness.SetFailed("Injected filesystem initialization failure.");
+            var controller = new RootFoldersController(
+                svc,
+                _fakeQueue,
+                new EfAudiobookFileRepository(db),
+                new AudiobookRepository(db),
+                new LocalFileSystem(),
+                storageHealthResolver: storageHealthResolver.Object,
+                filesystemReadiness: readiness,
+                filesystemMutationGate: readiness);
+
+            var result = await controller.GetAll();
+
+            var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(result);
+            var root = Assert.Single(Assert.IsAssignableFrom<List<RootFolderDto>>(ok.Value));
+            Assert.Equal("InitializationFailed", root.StorageState);
+            Assert.Equal("InitializationFailed", root.StorageReason);
+            Assert.Equal("Injected filesystem initialization failure.", root.StorageMessage);
+            Assert.False(root.CanMutateFilesystem);
+            Assert.False(root.CanChangePath);
+            Assert.False(root.CanConfirmCurrentFolder);
+            storageHealthResolver.Verify(
+                service => service.ResolveAsync(
+                    It.IsAny<RootFolder>(),
+                    It.IsAny<CancellationToken>()),
+                Times.Never);
+        }
+
+        [Fact]
         public async Task GetAll_AmbiguousPersistedRoot_DoesNotExposeBorrowedHostSyntax()
         {
             var svc = new FakeService();
@@ -1526,7 +1608,9 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             IFileSystemSemanticsResolver? semanticsResolver = null,
             IRootFolderRelocationService? relocationService = null,
             IRootFolderStorageHealthResolver? storageHealthResolver = null,
-            IRootFolderStorageConfirmationService? storageConfirmationService = null)
+            IRootFolderStorageConfirmationService? storageConfirmationService = null,
+            ILibraryFilesystemReadiness? filesystemReadiness = null,
+            ILibraryFilesystemMutationGate? filesystemMutationGate = null)
             : base(
                 service,
                 unmatchedQueue,
@@ -1536,7 +1620,9 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 semanticsResolver ?? RootFoldersControllerTests.BuildSemanticsResolver(),
                 relocationService ?? Mock.Of<IRootFolderRelocationService>(),
                 storageHealthResolver ?? new HealthyStorageResolver(),
-                storageConfirmationService ?? Mock.Of<IRootFolderStorageConfirmationService>())
+                storageConfirmationService ?? Mock.Of<IRootFolderStorageConfirmationService>(),
+                filesystemReadiness ?? TestLibraryFilesystemReadiness.Ready(),
+                filesystemMutationGate ?? TestLibraryFilesystemReadiness.Ready())
         {
         }
 

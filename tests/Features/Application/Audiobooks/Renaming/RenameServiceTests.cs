@@ -694,7 +694,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
                     It.IsAny<string>(),
                     It.Is<string>(dest => dest.EndsWith("Part 2.m4b", StringComparison.OrdinalIgnoreCase)),
                     It.IsAny<string>(),
-                    It.IsAny<Guid?>()))
+                    It.IsAny<Guid>()))
                     .ReturnsAsync(false);
             });
 
@@ -780,7 +780,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
                         sourcePath,
                         targetPath,
                         It.IsAny<string>(),
-                        It.IsAny<Guid?>()))
+                        It.IsAny<Guid>()))
                     .ThrowsAsync(new IOException(secret));
             });
             db.Audiobooks.Add(new Audiobook
@@ -1212,8 +1212,8 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
                         It.IsAny<string>(),
                         It.IsAny<string>(),
                         It.IsAny<string>(),
-                        It.IsAny<Guid?>()))
-                    .Returns<string, string, string, Guid?>((source, destination, _, _) =>
+                        It.IsAny<Guid>()))
+                    .Returns<string, string, string, Guid>((source, destination, _, _) =>
                     {
                         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
                         File.Move(source, destination, overwrite: true);
@@ -1733,8 +1733,8 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
                     FileAction.Move,
                     It.IsAny<string>(),
                     It.IsAny<string>(),
-                    It.IsAny<Guid?>()))
-                .Returns<FileAction, string, string, Guid?>((action, source, dest, _) =>
+                    It.IsAny<Guid>()))
+                .Returns<FileAction, string, string, Guid>((action, source, dest, _) =>
                 {
                     var dir = Path.GetDirectoryName(dest);
                     if (!string.IsNullOrWhiteSpace(dir))
@@ -1749,8 +1749,8 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
                     It.IsAny<string>(),
                     It.IsAny<string>(),
                     It.IsAny<string>(),
-                    It.IsAny<Guid?>()))
-                .Returns<string, string, string, Guid?>((source, dest, expectedIdentity, _) =>
+                    It.IsAny<Guid>()))
+                .Returns<string, string, string, Guid>((source, dest, expectedIdentity, _) =>
                 {
                     if (!string.Equals(
                             GetPhysicalObjectIdentity(source),
@@ -1771,18 +1771,6 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
                         GetPhysicalObjectIdentity(dest),
                         expectedIdentity,
                         StringComparison.Ordinal));
-                });
-            fileMover.Setup(mover => mover.MoveDirectoryAsync(It.IsAny<string>(), It.IsAny<string>()))
-                .Returns<string, string>((source, dest) =>
-                {
-                    var parent = Path.GetDirectoryName(dest);
-                    if (!string.IsNullOrWhiteSpace(parent))
-                    {
-                        Directory.CreateDirectory(parent);
-                    }
-
-                    Directory.Move(source, dest);
-                    return Task.FromResult(true);
                 });
             configureFileMover?.Invoke(fileMover);
             var semanticsResolver = semanticsResolverOverride

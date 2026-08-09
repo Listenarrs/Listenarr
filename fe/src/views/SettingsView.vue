@@ -115,6 +115,12 @@
             v-if="activeTab === 'rootfolders'"
             @click="openAddRootFolder()"
             class="add-button btn btn-primary"
+            :disabled="!filesystemReadinessStore.filesystemReady"
+            :title="
+              !filesystemReadinessStore.filesystemReady
+                ? 'Available after library filesystem initialization completes'
+                : undefined
+            "
           >
             <PhPlus />
             Add Root Folder
@@ -399,6 +405,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { logger } from '@/utils/logger'
 import { errorTracking } from '@/services/errorTracking'
 import { useConfigurationStore } from '@/stores/configuration'
+import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
 import { useAuthStore } from '@/stores/auth'
 import { sessionTokenManager } from '@/utils/sessionToken'
 import type { ApiConfiguration, DownloadClientConfiguration, ApplicationSettings } from '@/types'
@@ -444,6 +451,7 @@ function generateUUID(): string {
 const route = useRoute()
 const router = useRouter()
 const configStore = useConfigurationStore()
+const filesystemReadinessStore = useFilesystemReadinessStore()
 const auth = useAuthStore()
 const toast = useToast()
 const activeTab = ref<

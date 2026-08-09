@@ -1,4 +1,5 @@
 using Listenarr.Tests.Common;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -27,7 +28,8 @@ public sealed class FileMoverFileMoveLockDirectoryTests : BaseTests
         var result = await mover.PerformActionOn(
             FileAction.Copy,
             source,
-            destination);
+            destination,
+            Guid.NewGuid());
 
         Assert.True(result);
         Assert.Equal("audio", await File.ReadAllTextAsync(source));
@@ -57,7 +59,8 @@ public sealed class FileMoverFileMoveLockDirectoryTests : BaseTests
         var result = await mover.PerformActionOn(
             FileAction.Copy,
             source,
-            destination);
+            destination,
+            Guid.NewGuid());
 
         Assert.True(result);
         Assert.True(Directory.Exists(_applicationPathService.FileMoveLockRootPath));
@@ -82,7 +85,8 @@ public sealed class FileMoverFileMoveLockDirectoryTests : BaseTests
         var result = await mover.PerformActionOn(
             FileAction.Copy,
             source,
-            destination);
+            destination,
+            Guid.NewGuid());
 
         Assert.False(result);
         Assert.Equal("audio", await File.ReadAllTextAsync(source));
@@ -109,7 +113,8 @@ public sealed class FileMoverFileMoveLockDirectoryTests : BaseTests
         var result = await mover.PerformActionOn(
             FileAction.Copy,
             source,
-            destination);
+            destination,
+            Guid.NewGuid());
 
         Assert.False(result);
         Assert.False(Directory.Exists(Path.Join(external, "file-move-locks")));
@@ -117,10 +122,15 @@ public sealed class FileMoverFileMoveLockDirectoryTests : BaseTests
         Assert.False(File.Exists(destination));
     }
 
-    private static FileMover CreateMover(IApplicationPathService applicationPathService)
-        => new(
+    private FileMover CreateMover(IApplicationPathService applicationPathService)
+    {
+        var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+        return new FileMover(
             new NullLogger<FileMover>(),
             options: Options.Create(new FileMoverOptions { MaxRetries = 1 }),
             semanticsResolver: new FileSystemSemanticsResolver(),
-            applicationPathService: applicationPathService);
+            applicationPathService: applicationPathService,
+            dbContextFactory: factory,
+            timeProvider: TimeProvider.System);
+    }
 }

@@ -26,6 +26,12 @@ const toastMocks = vi.hoisted(() => ({
   error: vi.fn(),
 }))
 
+const filesystemReadinessMock = vi.hoisted(() => ({
+  filesystemReady: true,
+  filesystemInitializing: false,
+  filesystemFailed: false,
+}))
+
 const signalRMocks = vi.hoisted(() => {
   const state = {
     callback: null as ((job: MoveJobUpdate) => void) | null,
@@ -80,6 +86,10 @@ vi.mock('@/services/toastService', () => ({
   useToast: () => toastMocks,
 }))
 
+vi.mock('@/stores/filesystemReadiness', () => ({
+  useFilesystemReadinessStore: () => filesystemReadinessMock,
+}))
+
 vi.mock('@/services/signalr', () => ({
   signalRService: {
     onMoveJobUpdate: signalRMocks.onMoveJobUpdate,
@@ -101,6 +111,9 @@ const audiobook = {
 describe('EditAudiobookModal move options', () => {
   beforeEach(async () => {
     vi.clearAllMocks()
+    filesystemReadinessMock.filesystemReady = true
+    filesystemReadinessMock.filesystemInitializing = false
+    filesystemReadinessMock.filesystemFailed = false
     signalRMocks.callback = null
     signalRMocks.onMoveJobUpdate.mockImplementation((callback: (job: MoveJobUpdate) => void) => {
       signalRMocks.callback = callback
@@ -134,6 +147,36 @@ describe('EditAudiobookModal move options', () => {
         target: destination,
       }),
     )
+  })
+
+  it('disables destination edits and move resume while filesystem initialization is running', async () => {
+    const { apiService } = await import('@/services/api')
+    filesystemReadinessMock.filesystemReady = false
+    filesystemReadinessMock.filesystemInitializing = true
+    vi.mocked(apiService.getMoveRecoveryState).mockResolvedValue({
+      hasUnresolvedMove: true,
+      disposition: 'RetryAvailable',
+      jobId: 'recover-job-initializing',
+      status: 'Failed',
+      phase: 'Published',
+      requestedPath: 'C:\\root\\Recovered Author\\Recovered Book',
+      error: 'Interrupted move detected.',
+      canRetry: true,
+      blockingJobIds: ['recover-job-initializing'],
+    })
+
+    const wrapper = mount(EditAudiobookModal, {
+      props: { isOpen: true, audiobook },
+      attachTo: document.body,
+      global: { plugins: [(await import('pinia')).createPinia()] },
+    })
+    await new Promise((resolve) => setTimeout(resolve, 200))
+
+    expect(wrapper.get('.btn-edit-destination').attributes('disabled')).toBeDefined()
+    const resume = wrapper.get('[data-testid="resume-move-button"]')
+    expect(resume.attributes('disabled')).toBeDefined()
+    await resume.trigger('click')
+    expect(apiService.requeueMoveJob).not.toHaveBeenCalled()
   })
 
   it('rehydrates an interrupted move after a fresh open and resumes the original job', async () => {

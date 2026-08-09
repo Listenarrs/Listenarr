@@ -33,6 +33,36 @@ public sealed class FileMoverMarkerlessRenameTests : BaseTests
         AssertNoLibraryArtifacts(scenario.Root);
     }
 
+    [WindowsFact]
+    public async Task MoveFilePreservingPhysicalIdentityAsync_CaseAliasRetryUsesSameDurableJournal()
+    {
+        var scenario = await CreateScenarioAsync();
+        var interrupted = CreateMover(
+            afterJournalPlanned: () =>
+                throw new IOException("Injected crash after markerless rename journal plan."));
+
+        await Assert.ThrowsAsync<IOException>(() =>
+            interrupted.MoveFilePreservingPhysicalIdentityAsync(
+                scenario.Source,
+                scenario.Destination,
+                scenario.SourceIdentity,
+                scenario.OperationId));
+
+        Assert.True(await CreateMover().MoveFilePreservingPhysicalIdentityAsync(
+            scenario.Source.ToUpperInvariant(),
+            scenario.Destination.ToUpperInvariant(),
+            scenario.SourceIdentity,
+            scenario.OperationId));
+
+        Assert.False(File.Exists(scenario.Source));
+        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Destination));
+        await AssertJournalStateAsync(
+            scenario.OperationId,
+            FileMutationJournalState.Completed,
+            scenario.SourceIdentity);
+        AssertNoLibraryArtifacts(scenario.Root);
+    }
+
     [Fact]
     public async Task MoveFilePreservingPhysicalIdentityAsync_CrashAfterJournalPlanResumes()
     {

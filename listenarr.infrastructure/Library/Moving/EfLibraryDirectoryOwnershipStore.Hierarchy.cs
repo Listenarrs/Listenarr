@@ -149,8 +149,7 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
                         if (creation.VisiblePathMatches())
                         {
                             await TryCompensateFailedExclusiveCreationAsync(
-                                directory,
-                                currentAnchor.FullPath,
+                                creation,
                                 semantics);
                         }
                         throw;
@@ -180,25 +179,32 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
     }
 
     private async Task TryCompensateFailedExclusiveCreationAsync(
-        string directory,
-        string parent,
+        PinnedDirectoryCreation creation,
         FileSystemPathSemantics semantics)
     {
         try
         {
+            var directory = creation.FullPath;
             var resolution = await ResolveOwnedAsync(
                 directory,
                 semantics,
                 CancellationToken.None);
-            if (resolution.State != LibraryDirectoryOwnershipResolutionState.Unowned)
+            if (resolution.State != LibraryDirectoryOwnershipResolutionState.Unowned
+                || !creation.VisiblePathMatches())
             {
                 return;
             }
 
-            FileSystemSafety.TryDeleteEmptyDirectory(
-                directory,
-                [parent],
-                out _);
+            using var createdAnchor = creation.OpenCreatedDirectoryAnchor();
+            if (Directory.EnumerateFileSystemEntries(createdAnchor.FullPath).Any()
+                || !createdAnchor.VisiblePathMatches()
+                || !creation.VisiblePathMatches())
+            {
+                return;
+            }
+
+            creation.RetirePinnedEmptyDirectoryFromNamespace(
+                Path.GetFileName(directory));
         }
         catch (Exception exception) when (exception is not (
             OutOfMemoryException or StackOverflowException))
@@ -209,21 +215,4 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
         }
     }
 
-    private static void ValidateExistingDirectory(
-        string path,
-        string description,
-        bool allowReparsePoint)
-    {
-        if (!Directory.Exists(path))
-        {
-            throw new InvalidOperationException($"The {description} does not exist.");
-        }
-
-        var attributes = File.GetAttributes(path);
-        if (!allowReparsePoint && (attributes & FileAttributes.ReparsePoint) != 0)
-        {
-            throw new InvalidOperationException(
-                $"The {description} is a symbolic link or reparse point.");
-        }
-    }
 }

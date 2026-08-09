@@ -147,6 +147,9 @@ namespace Listenarr.Tests.Builders
             services.AddListenarrInfrastructure(
                 options => options.UseInMemoryDatabase(databaseName: Guid.NewGuid().ToString()),
                 contentRootPath: _contentRootPath);
+            var filesystemReadiness = new LibraryFilesystemReadiness();
+            filesystemReadiness.MarkReady();
+            services.Replace(ServiceDescriptor.Singleton(filesystemReadiness));
             services.Replace(
                 ServiceDescriptor.Scoped<ILibraryAddCommitStore, InMemoryLibraryAddCommitStore>());
 

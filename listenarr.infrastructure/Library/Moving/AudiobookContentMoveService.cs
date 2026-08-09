@@ -27,8 +27,7 @@ internal sealed record AudiobookContentMoveRequest(
     string? SourceCleanupBoundary = null,
     LibraryDirectoryOwnership? TargetDirectoryOwnership = null,
     IReadOnlyDictionary<string, string>? SourcePhysicalObjectIdentities = null,
-    Func<double, string, CancellationToken, Task>? ProgressReporter = null,
-    bool AllowUnownedSourceAncestorCleanup = false)
+    Func<double, string, CancellationToken, Task>? ProgressReporter = null)
 {
     public string LeaseOwner => LeaseToken.Owner;
     public int LeaseGeneration => LeaseToken.Generation;

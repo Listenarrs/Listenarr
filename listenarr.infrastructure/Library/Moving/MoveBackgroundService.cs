@@ -15,6 +15,7 @@ namespace Listenarr.Infrastructure.Library.Moving;
 public sealed class MoveBackgroundService(
     IMoveQueueService moveQueueService,
     IMoveJobProcessor processor,
+    ILibraryFilesystemReadiness filesystemReadiness,
     ILogger<MoveBackgroundService> logger,
     IAppMetricsService? metrics = null,
     TimeSpan? heartbeatInterval = null,
@@ -24,6 +25,10 @@ public sealed class MoveBackgroundService(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        logger.LogInformation("MoveBackgroundService waiting for library filesystem initialization");
+        await filesystemReadiness.WaitUntilReadyAsync(stoppingToken);
+        logger.LogInformation("MoveBackgroundService filesystem gate opened");
+
         var leaseOwner = $"{Environment.MachineName}:{Environment.ProcessId}:{Guid.NewGuid():N}";
         var retryDelay = TimeSpan.FromSeconds(1);
 

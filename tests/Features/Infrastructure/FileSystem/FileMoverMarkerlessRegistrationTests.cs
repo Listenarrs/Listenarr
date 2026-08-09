@@ -10,6 +10,28 @@ namespace Listenarr.Tests.Features.Infrastructure.FileSystem;
 public sealed class FileMoverMarkerlessRegistrationTests : BaseTests
 {
     [Fact]
+    public async Task PrepareMove_EmptyOperationId_FailsClosedWithoutPublication()
+    {
+        var scenario = await CreateScenarioAsync("registration-empty-operation-id");
+        var mover = CreateMover();
+
+        using var lease = await mover.PrepareActionForRegistrationAsync(
+            FileAction.Move,
+            scenario.Source,
+            scenario.Destination,
+            Guid.Empty);
+
+        Assert.Null(lease);
+        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Source));
+        Assert.False(File.Exists(scenario.Destination));
+        var factory = _provider.GetRequiredService<
+            IDbContextFactory<ListenArrDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        Assert.Empty(await db.FileMutationJournals.ToListAsync());
+        AssertNoLibraryArtifacts(scenario.Root);
+    }
+
+    [Fact]
     public async Task PrepareMove_RequiresRegistrationCommitBeforeSourceDeletion()
     {
         var scenario = await CreateScenarioAsync("move-authority");
@@ -129,6 +151,54 @@ public sealed class FileMoverMarkerlessRegistrationTests : BaseTests
         AssertNoLibraryArtifacts(scenario.Root);
     }
 
+    [WindowsFact]
+    public async Task PrepareMove_CaseAliasRetryReusesJournalAndCompletes()
+    {
+        var scenario = await CreateScenarioAsync("registration-case-alias-retry");
+        var firstMover = CreateMover();
+        string targetIdentity;
+        using (var firstLease = await firstMover.PrepareActionForRegistrationAsync(
+            FileAction.Move,
+            scenario.Source,
+            scenario.Destination,
+            scenario.OperationId))
+        {
+            Assert.NotNull(firstLease);
+            targetIdentity = firstLease.PhysicalObjectIdentity;
+        }
+
+        var retryMover = CreateMover();
+        using var retryLease = await retryMover.PrepareActionForRegistrationAsync(
+            FileAction.Move,
+            scenario.Source.ToUpperInvariant(),
+            scenario.Destination.ToUpperInvariant(),
+            scenario.OperationId,
+            targetIdentity);
+
+        Assert.NotNull(retryLease);
+        Assert.True(retryLease.PrepareCleanupRecovery(29));
+        Assert.Equal(
+            RegistrationPublicationCompletion.Completed,
+            retryLease.CompletePublication());
+        Assert.True(await retryMover.CompletePreparedMoveAsync(
+            scenario.Source.ToUpperInvariant(),
+            scenario.Destination.ToUpperInvariant(),
+            retryLease,
+            scenario.OperationId));
+
+        Assert.False(File.Exists(scenario.Source));
+        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Destination));
+        await AssertJournalStateAsync(
+            scenario.OperationId,
+            FileMutationJournalState.Completed,
+            audiobookId: 29);
+        var factory = _provider.GetRequiredService<
+            IDbContextFactory<ListenArrDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        Assert.Single(await db.FileMutationJournals.ToListAsync());
+        AssertNoLibraryArtifacts(scenario.Root);
+    }
+
     [Fact]
     public async Task PrepareMove_RetryAfterOwnershipCommitGapReusesVerifiedGeneration()
     {
@@ -232,6 +302,44 @@ public sealed class FileMoverMarkerlessRegistrationTests : BaseTests
             scenario.OperationId,
             FileMutationJournalState.Completed,
             audiobookId: 41);
+        AssertNoLibraryArtifacts(scenario.Root);
+    }
+
+    [Fact]
+    public async Task CompleteMove_MissingDurableJournal_FailsClosedWithoutFilesystemFallback()
+    {
+        var scenario = await CreateScenarioAsync("registration-journal-missing");
+        var mover = CreateMover();
+        using var lease = await mover.PrepareActionForRegistrationAsync(
+            FileAction.Move,
+            scenario.Source,
+            scenario.Destination,
+            scenario.OperationId);
+        Assert.NotNull(lease);
+        Assert.True(lease.PrepareCleanupRecovery(47));
+        Assert.Equal(
+            RegistrationPublicationCompletion.Completed,
+            lease.CompletePublication());
+
+        var factory = _provider.GetRequiredService<
+            IDbContextFactory<ListenArrDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var journal = await db.FileMutationJournals
+                .SingleAsync(candidate => candidate.OperationId == scenario.OperationId);
+            db.FileMutationJournals.Remove(journal);
+            await db.SaveChangesAsync();
+        }
+
+        Assert.False(await mover.CompletePreparedMoveAsync(
+            scenario.Source,
+            scenario.Destination,
+            lease,
+            scenario.OperationId));
+
+        Assert.True(File.Exists(scenario.Source));
+        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Source));
+        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Destination));
         AssertNoLibraryArtifacts(scenario.Root);
     }
 

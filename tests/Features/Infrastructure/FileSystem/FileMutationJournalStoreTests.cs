@@ -31,6 +31,46 @@ public sealed class FileMutationJournalStoreTests : BaseTests
         Assert.Equal(1, await db.FileMutationJournals.CountAsync());
     }
 
+    [WindowsFact]
+    public async Task GetOrCreateAsync_CaseAliasRetryReturnsExistingJournal()
+    {
+        var operationId = Guid.NewGuid();
+        var claim = CreateClaim(operationId);
+        var store = CreateStore();
+        var created = await store.GetOrCreateAsync(
+            claim,
+            CancellationToken.None);
+
+        var retried = await store.GetOrCreateAsync(
+            claim with
+            {
+                SourcePath = claim.SourcePath.ToUpperInvariant(),
+                DestinationPath = claim.DestinationPath.ToUpperInvariant()
+            },
+            CancellationToken.None);
+
+        Assert.Equal(created.OperationId, retried.OperationId);
+        Assert.Equal(created.SourcePath, retried.SourcePath);
+        Assert.Equal(created.DestinationPath, retried.DestinationPath);
+    }
+
+    [LinuxFact]
+    public async Task GetOrCreateAsync_CaseDistinctRetryFailsClosed()
+    {
+        var operationId = Guid.NewGuid();
+        var claim = CreateClaim(operationId);
+        var store = CreateStore();
+        await store.GetOrCreateAsync(claim, CancellationToken.None);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            store.GetOrCreateAsync(
+                claim with
+                {
+                    SourcePath = claim.SourcePath.ToUpperInvariant()
+                },
+                CancellationToken.None));
+    }
+
     [Fact]
     public async Task GetOrCreateAsync_ReusedOperationForDifferentIdentityFailsClosed()
     {

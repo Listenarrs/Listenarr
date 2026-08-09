@@ -315,55 +315,26 @@ public partial class FileMover
         return new FileMoveEndpoint(lockIdentity, identity);
     }
 
-    private static bool TryResolveLinkedPathComponents(
-        string path,
-        out string resolvedPath)
+    private async Task<bool> JournalPathsMatchGateAsync(
+        FileMutationJournal journal,
+        FileMoveGateLease gate) =>
+        await PersistedPathMatchesEndpointAsync(
+            journal.SourcePath,
+            gate.SourceIdentity)
+        && await PersistedPathMatchesEndpointAsync(
+            journal.DestinationPath,
+            gate.DestinationIdentity);
+
+    private async Task<bool> PersistedPathMatchesEndpointAsync(
+        string persistedPath,
+        string endpointIdentity)
     {
-        resolvedPath = string.Empty;
-        try
-        {
-            var fullPath = Path.GetFullPath(path);
-            var root = Path.GetPathRoot(fullPath);
-            if (string.IsNullOrWhiteSpace(root))
-            {
-                return false;
-            }
-
-            var lexicalPath = root;
-            var physicalPath = root;
-            var relative = fullPath[root.Length..];
-            foreach (var segment in relative.Split(
-                [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
-                StringSplitOptions.RemoveEmptyEntries))
-            {
-                lexicalPath = Path.Join(lexicalPath, segment);
-                var exists = File.Exists(lexicalPath)
-                    || Directory.Exists(lexicalPath);
-                if (!exists)
-                {
-                    physicalPath = Path.Join(physicalPath, segment);
-                    continue;
-                }
-
-                var attributes = File.GetAttributes(lexicalPath);
-                var info = (attributes & FileAttributes.Directory) != 0
-                    ? (FileSystemInfo)new DirectoryInfo(lexicalPath)
-                    : new FileInfo(lexicalPath);
-                var target = (attributes & FileAttributes.ReparsePoint) != 0
-                    ? info.ResolveLinkTarget(returnFinalTarget: true)
-                    : null;
-                physicalPath = Path.GetFullPath(
-                    target?.FullName ?? Path.Join(physicalPath, segment));
-            }
-
-            resolvedPath = physicalPath;
-            return true;
-        }
-        catch (Exception exception) when (exception is not (
-            OperationCanceledException or OutOfMemoryException or StackOverflowException))
-        {
-            return false;
-        }
+        var persistedEndpoint = await ResolveFileMoveEndpointAsync(persistedPath);
+        return persistedEndpoint != null
+            && string.Equals(
+                persistedEndpoint.LockIdentity,
+                endpointIdentity,
+                StringComparison.Ordinal);
     }
 
     private static IReadOnlyList<string> GetFileMoveStripeLockNames(

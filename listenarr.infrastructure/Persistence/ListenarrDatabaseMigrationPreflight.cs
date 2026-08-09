@@ -5,7 +5,7 @@ namespace Listenarr.Infrastructure.Persistence;
 internal static class ListenarrDatabaseMigrationPreflight
 {
     internal const string DurableMarkerlessLibraryMovesMigrationId =
-        "20260807200942_AddDurableMarkerlessLibraryMoves";
+        "20260809141455_AddDurableMarkerlessLibraryMoves";
     internal const string RootFoldersMigrationId =
         "20260101172733_AddRootFolders";
 

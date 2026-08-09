@@ -1,4 +1,5 @@
 using Listenarr.Tests.Common;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Listenarr.Tests.Features.Api.Services;
@@ -9,7 +10,7 @@ namespace Listenarr.Tests.Features.Api.Services;
 public sealed class FileMoverDestinationHierarchyOwnershipTests : BaseTests
 {
     [Fact]
-    public async Task CopyFileAsync_DestinationParentRemovedAfterResolution_DoesNotRecreateHierarchy()
+    public async Task PerformActionOn_DestinationParentRemovedAfterResolution_DoesNotRecreateHierarchy()
     {
         // Given
         var root = FileService.GetTempDirectory("file-mover-owned-file-parent-race");
@@ -21,9 +22,12 @@ public sealed class FileMoverDestinationHierarchyOwnershipTests : BaseTests
         var destination = Path.Join(destinationParent, "book.m4b");
         await File.WriteAllTextAsync(source, "audio");
         var removed = false;
+        var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
         var mover = new FileMover(
             new NullLogger<FileMover>(),
-            semanticsResolver: new FileSystemSemanticsResolver())
+            semanticsResolver: new FileSystemSemanticsResolver(),
+            dbContextFactory: factory,
+            timeProvider: TimeProvider.System)
         {
             AfterFileMoveEndpointsResolvedForTestAsync = (_, observedDestination) =>
             {
@@ -42,7 +46,11 @@ public sealed class FileMoverDestinationHierarchyOwnershipTests : BaseTests
         };
 
         // When
-        var copied = await mover.CopyFileAsync(source, destination);
+        var copied = await mover.PerformActionOn(
+            FileAction.Copy,
+            source,
+            destination,
+            Guid.NewGuid());
 
         // Then
         Assert.True(removed);
@@ -50,43 +58,5 @@ public sealed class FileMoverDestinationHierarchyOwnershipTests : BaseTests
         Assert.True(File.Exists(source));
         Assert.False(Directory.Exists(destinationParent));
         Assert.False(File.Exists(destination));
-    }
-
-    [Fact]
-    public async Task MoveDirectoryAsync_DestinationParentRemovedAtMutationBoundary_DoesNotRecreateHierarchy()
-    {
-        // Given
-        var root = FileService.GetTempDirectory("file-mover-owned-directory-parent-race");
-        var source = Path.Join(root, "source");
-        var destinationParent = Path.Join(root, "owned", "destination");
-        var destination = Path.Join(destinationParent, "book");
-        Directory.CreateDirectory(source);
-        Directory.CreateDirectory(destinationParent);
-        await File.WriteAllTextAsync(Path.Join(source, "book.m4b"), "audio");
-        var removed = false;
-        var mover = new FileMover(
-            new NullLogger<FileMover>(),
-            semanticsResolver: new FileSystemSemanticsResolver())
-        {
-            BeforeDirectoryMoveAttemptForTest = () =>
-            {
-                if (!removed)
-                {
-                    Directory.Delete(destinationParent);
-                    removed = true;
-                }
-            }
-        };
-
-        // When
-        var moved = await mover.MoveDirectoryAsync(source, destination);
-
-        // Then
-        Assert.True(removed);
-        Assert.False(moved);
-        Assert.True(Directory.Exists(source));
-        Assert.Equal("audio", await File.ReadAllTextAsync(Path.Join(source, "book.m4b")));
-        Assert.False(Directory.Exists(destinationParent));
-        Assert.False(Directory.Exists(destination));
     }
 }

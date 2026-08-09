@@ -5,8 +5,8 @@ namespace Listenarr.Infrastructure.FileSystem;
 
 internal static class ManagedDirectoryIdentity
 {
-    internal const int CurrentVersion = 2;
-    private const string Prefix = "listenarr-directory-v2";
+    internal const int CurrentVersion = 1;
+    private const string Prefix = "listenarr-directory-v1";
 
     internal static bool Matches(
         int? version,

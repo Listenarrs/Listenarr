@@ -65,6 +65,15 @@
                     <Pill v-else-if="folder.storageState === 'Unavailable'" variant="error">
                       Unavailable
                     </Pill>
+                    <Pill v-else-if="folder.storageState === 'Initializing'" variant="subtle">
+                      Initializing
+                    </Pill>
+                    <Pill
+                      v-else-if="folder.storageState === 'InitializationFailed'"
+                      variant="error"
+                    >
+                      Initialization failed
+                    </Pill>
                     <Pill v-else variant="subtle">{{ folder.resolvedCaseSensitivity }}</Pill>
                     <Pill v-if="folder.activeRelocation" variant="warning">
                       {{ folder.activeRelocation.status }}
@@ -78,7 +87,11 @@
                   @click="scanUnmatched(folder)"
                   title="Scan for unmatched files"
                   data-cy="scan-unmatched"
-                  :disabled="folder.canMutateFilesystem === false || !!folder.activeRelocation"
+                  :disabled="
+                    filesystemReadinessStore.filesystemReady === false ||
+                    folder.canMutateFilesystem === false ||
+                    !!folder.activeRelocation
+                  "
                 >
                   <PhMagnifyingGlass />
                 </button>
@@ -139,6 +152,7 @@
               <button
                 v-if="canRetryRelocation(folder)"
                 type="button"
+                :disabled="filesystemReadinessStore.filesystemReady === false"
                 class="btn btn-secondary"
                 @click="retryRelocation(folder)"
               >
@@ -211,8 +225,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRootFoldersStore } from '@/stores/rootFolders'
+import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
 import RootFolderFormModal from '@/components/settings/RootFolderFormModal.vue'
 import DeleteConfirmationModal from '@/components/feedback/DeleteConfirmationModal.vue'
 import UnmatchedFilesModal from '@/components/feedback/UnmatchedFilesModal.vue'
@@ -241,11 +256,11 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 const store = useRootFoldersStore()
+const filesystemReadinessStore = useFilesystemReadinessStore()
 const showForm = ref(false)
 const editing = ref<{ id?: number; name: string; path: string } | null>(null)
 const showUnmatchedModal = ref(false)
 const scanningFolder = ref<RootFolder | null>(null)
-import { computed } from 'vue'
 const editingRoot = computed(() => editing.value as RootFolder | undefined)
 const toast = useToast()
 const rootToConfirm = ref<{
@@ -259,6 +274,15 @@ const rootToConfirm = ref<{
 onMounted(async () => {
   await store.load()
 })
+
+watch(
+  () => filesystemReadinessStore.filesystemStatus,
+  (status, previous) => {
+    if (status !== previous && (status === 'Ready' || status === 'Failed')) {
+      void store.load()
+    }
+  },
+)
 
 const refreshRootFolders = () => {
   store.load().catch(() => {})

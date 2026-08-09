@@ -22,15 +22,17 @@ public partial class FileMover
         if (existingTarget != null)
         {
             if (action == FileAction.HardlinkCopy
+                && sourceEntry != null
+                && sourceEntry.VisiblePathMatches()
                 && existingTarget.VisiblePathMatches()
-                && string.Equals(
-                    existingTarget.GetObjectIdentity(),
-                    journal.SourcePhysicalObjectIdentity,
-                    StringComparison.Ordinal)
-                && await MatchesMarkerlessContentAsync(
+                && sourceEntry.IdentifiesSameEntry(existingTarget)
+                && await MatchesMarkerlessSourceProofAsync(
+                    sourceEntry,
+                    journal,
+                    cancellationToken)
+                && await MatchesMarkerlessTargetContentAsync(
                     existingTarget,
-                    journal.SourceLength,
-                    journal.SourceSha256,
+                    journal,
                     cancellationToken))
             {
                 return await _fileMutationJournalStore!.AdvanceAsync(
@@ -77,17 +79,30 @@ public partial class FileMover
         {
             try
             {
+                if (BeforePinnedHardlinkCreationForTestAsync != null)
+                {
+                    await BeforePinnedHardlinkCreationForTestAsync();
+                }
                 publishedHardlink = sourceEntry.CreateHardLinkTo(
                     gate.DestinationParent,
                     gate.DestinationName);
                 targetIdentity = publishedHardlink.GetObjectIdentity();
-                return await _fileMutationJournalStore!.AdvanceAsync(
+                if (AfterMarkerlessRegistrationTargetCreatedBeforeStateForTestAsync != null)
+                {
+                    await AfterMarkerlessRegistrationTargetCreatedBeforeStateForTestAsync();
+                }
+                journal = await _fileMutationJournalStore!.AdvanceAsync(
                     journal.OperationId,
                     FileMutationJournalState.TargetIdentityPersisted,
                     targetIdentity,
                     audiobookId: null,
                     error: null,
                     cancellationToken);
+                if (AfterMarkerlessRegistrationTargetStateForTestAsync != null)
+                {
+                    await AfterMarkerlessRegistrationTargetStateForTestAsync();
+                }
+                return journal;
             }
             catch (Exception exception) when (exception is
                 IOException or Win32Exception or PlatformNotSupportedException)
@@ -111,13 +126,22 @@ public partial class FileMover
         using var created = gate.DestinationParent.CreateNewFile(
             gate.DestinationName);
         targetIdentity = created.GetObjectIdentity();
-        return await _fileMutationJournalStore!.AdvanceAsync(
+        if (AfterMarkerlessRegistrationTargetCreatedBeforeStateForTestAsync != null)
+        {
+            await AfterMarkerlessRegistrationTargetCreatedBeforeStateForTestAsync();
+        }
+        journal = await _fileMutationJournalStore!.AdvanceAsync(
             journal.OperationId,
             FileMutationJournalState.TargetIdentityPersisted,
             targetIdentity,
             audiobookId: null,
             error: null,
             cancellationToken);
+        if (AfterMarkerlessRegistrationTargetStateForTestAsync != null)
+        {
+            await AfterMarkerlessRegistrationTargetStateForTestAsync();
+        }
+        return journal;
     }
 
     private async Task<FileMutationJournal> VerifyMarkerlessRegistrationTargetAsync(
@@ -172,6 +196,10 @@ public partial class FileMover
                 targetEntry,
                 cancellationToken);
             sourceEntry.PreserveMarkerlessMetadataTo(targetEntry);
+            if (AfterMarkerlessRegistrationTargetWrittenBeforeVerifiedStateForTestAsync != null)
+            {
+                await AfterMarkerlessRegistrationTargetWrittenBeforeVerifiedStateForTestAsync();
+            }
             if (!TargetMatchesMarkerlessJournal(targetEntry, journal)
                 || !await MatchesMarkerlessTargetContentAsync(
                     targetEntry,

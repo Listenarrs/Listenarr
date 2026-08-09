@@ -33,6 +33,7 @@ namespace Listenarr.Api.Features.Library
         private readonly IFilesystemMutationCoordinator _filesystemMutationCoordinator;
         private readonly IAudiobookOperationCoordinator _audiobookOperationCoordinator;
         private readonly IMoveQueueService _moveQueueService;
+        private readonly ILibraryFilesystemMutationGate _filesystemMutationGate;
         private readonly ILogger<LibraryDeleteWorkflow> _logger;
 
         public LibraryDeleteWorkflow(
@@ -44,6 +45,7 @@ namespace Listenarr.Api.Features.Library
             IFilesystemMutationCoordinator filesystemMutationCoordinator,
             IAudiobookOperationCoordinator audiobookOperationCoordinator,
             IMoveQueueService moveQueueService,
+            ILibraryFilesystemMutationGate filesystemMutationGate,
             ILogger<LibraryDeleteWorkflow> logger)
         {
             _deletionCommitService = deletionCommitService ?? throw new ArgumentNullException(nameof(deletionCommitService));
@@ -54,6 +56,8 @@ namespace Listenarr.Api.Features.Library
             _filesystemMutationCoordinator = filesystemMutationCoordinator ?? throw new ArgumentNullException(nameof(filesystemMutationCoordinator));
             _audiobookOperationCoordinator = audiobookOperationCoordinator ?? throw new ArgumentNullException(nameof(audiobookOperationCoordinator));
             _moveQueueService = moveQueueService ?? throw new ArgumentNullException(nameof(moveQueueService));
+            _filesystemMutationGate = filesystemMutationGate
+                ?? throw new ArgumentNullException(nameof(filesystemMutationGate));
             _logger = logger;
         }
 
@@ -79,6 +83,12 @@ namespace Listenarr.Api.Features.Library
             bool deleteFolder,
             CancellationToken cancellationToken)
         {
+            var deleteFilesystem = deleteFiles || deleteFolder;
+            if (deleteFilesystem)
+            {
+                _filesystemMutationGate.EnsureReady();
+            }
+
             try
             {
                 await _moveQueueService.EnsureFilesystemMutationAllowedAsync(
@@ -94,7 +104,6 @@ namespace Listenarr.Api.Features.Library
                 });
             }
 
-            var deleteFilesystem = deleteFiles || deleteFolder;
             var commit = await _deletionCommitService.DeleteAsync(
                 id,
                 includeFiles: deleteFilesystem,

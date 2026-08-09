@@ -34,63 +34,6 @@ public partial class FileMover
     private async Task<bool> IsSameFilesystemPathAsync(string source, string destination) =>
         await TryDetermineFilesystemPathEquivalenceAsync(source, destination) == true;
 
-    private async Task<bool?> TryDetermineDirectoryOverlapAsync(
-        string source,
-        string destination)
-    {
-        var sourcePath = Path.GetFullPath(
-            FileSystemPathIdentity.ResolveNativeAbsolutePath(source));
-        var destinationPath = Path.GetFullPath(
-            FileSystemPathIdentity.ResolveNativeAbsolutePath(destination));
-        if (!TryResolvePhysicalPath(sourcePath, out var sourceResolution)
-            || !TryResolvePhysicalPath(destinationPath, out var destinationResolution))
-        {
-            return null;
-        }
-
-        if (string.Equals(
-                sourceResolution.ResolvedPath,
-                destinationResolution.ResolvedPath,
-                StringComparison.Ordinal))
-        {
-            return true;
-        }
-
-        if (_semanticsResolver == null)
-        {
-            return null;
-        }
-
-        try
-        {
-            var resolution = await _semanticsResolver.ResolveAsync(sourcePath);
-            if (resolution.State != PathIdentityState.Valid)
-            {
-                return null;
-            }
-
-            return FileSystemPathIdentity.IsSameOrInside(
-                    destinationResolution.ResolvedPath,
-                    sourceResolution.ResolvedPath,
-                    resolution.Semantics)
-                || FileSystemPathIdentity.IsSameOrInside(
-                    sourceResolution.ResolvedPath,
-                    destinationResolution.ResolvedPath,
-                    resolution.Semantics);
-        }
-        catch (Exception exception) when (exception is
-            IOException or UnauthorizedAccessException or ArgumentException or
-            InvalidOperationException or NotSupportedException or PathTooLongException)
-        {
-            _logger.LogDebug(
-                exception,
-                "Filesystem identity resolution failed while checking directory overlap for {Source} and {Destination}",
-                LogRedaction.SanitizeFilePath(sourcePath),
-                LogRedaction.SanitizeFilePath(destinationPath));
-            return null;
-        }
-    }
-
     private async Task<bool?> TryDetermineFilesystemPathEquivalenceAsync(
         string source,
         string destination)

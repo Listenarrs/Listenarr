@@ -33,14 +33,18 @@ namespace Listenarr.Api.Features.Library
     {
         private readonly IScanQueueService? _scanQueueService;
         private readonly IServiceScopeFactory _scopeFactory;
+        private readonly ILibraryFilesystemMutationGate _filesystemMutationGate;
         private readonly ILogger<LibraryScanQueueWorkflow> _logger;
 
         public LibraryScanQueueWorkflow(
             IServiceScopeFactory scopeFactory,
+            ILibraryFilesystemMutationGate filesystemMutationGate,
             ILogger<LibraryScanQueueWorkflow> logger,
             IScanQueueService? scanQueueService = null)
         {
             _scopeFactory = scopeFactory;
+            _filesystemMutationGate = filesystemMutationGate
+                ?? throw new ArgumentNullException(nameof(filesystemMutationGate));
             _logger = logger;
             _scanQueueService = scanQueueService;
         }
@@ -52,6 +56,8 @@ namespace Listenarr.Api.Features.Library
             ScanPathPhysicalIdentity? physicalIdentity,
             bool isAuthoritativeScope)
         {
+            _filesystemMutationGate.EnsureReady();
+
             if (_scanQueueService == null)
             {
                 return null;
@@ -126,6 +132,8 @@ namespace Listenarr.Api.Features.Library
             {
                 return new BadRequestObjectResult(new { message = "Invalid jobId" });
             }
+
+            _filesystemMutationGate.EnsureReady();
 
             var newJobId = await _scanQueueService.RequeueScanAsync(parsedJobId);
             if (newJobId == null)

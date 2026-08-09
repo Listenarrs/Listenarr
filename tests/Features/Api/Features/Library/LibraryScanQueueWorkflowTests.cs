@@ -1,3 +1,4 @@
+using Listenarr.Application.Common.Exceptions;
 using Listenarr.Tests.Common;
 using Microsoft.AspNetCore.Mvc;
 
@@ -9,6 +10,33 @@ namespace Listenarr.Tests.Features.Api.Features.Library;
 public sealed class LibraryScanQueueWorkflowTests : BaseTests
 {
     [Fact]
+    public async Task TryEnqueueAsync_FilesystemInitializing_FailsBeforeQueuePublication()
+    {
+        var queue = new Mock<IScanQueueService>(MockBehavior.Strict);
+        var broadcaster = new Mock<IHubBroadcaster>(MockBehavior.Strict);
+        using var provider = BuildProvider(broadcaster.Object);
+        var readiness = new TestLibraryFilesystemReadiness();
+        readiness.SetRunning("AudiobookFileIdentities");
+        var workflow = new LibraryScanQueueWorkflow(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            readiness,
+            Mock.Of<ILogger<LibraryScanQueueWorkflow>>(),
+            queue.Object);
+
+        var exception = await Assert.ThrowsAsync<ApplicationUnavailableException>(() =>
+            workflow.TryEnqueueAsync(
+                new Audiobook { Id = 4400, Title = "Blocked scan" },
+                requestedPath: null,
+                pathIdentity: null,
+                physicalIdentity: null,
+                isAuthoritativeScope: true));
+
+        Assert.Equal("filesystem_initializing", exception.Code);
+        queue.Verify(service => service.EnqueueScanAsync(It.IsAny<ScanEnqueueCommand>()), Times.Never);
+        broadcaster.VerifyNoOtherCalls();
+    }
+
+    [Fact]
     public async Task TryEnqueueAsync_BroadcastCancellationAfterDurableEnqueue_ReturnsAccepted()
     {
         var jobId = Guid.NewGuid();
@@ -19,6 +47,7 @@ public sealed class LibraryScanQueueWorkflowTests : BaseTests
         using var provider = BuildProvider(broadcaster.Object);
         var workflow = new LibraryScanQueueWorkflow(
             provider.GetRequiredService<IServiceScopeFactory>(),
+            TestLibraryFilesystemReadiness.Ready(),
             Mock.Of<ILogger<LibraryScanQueueWorkflow>>(),
             queue.Object);
 
@@ -51,6 +80,7 @@ public sealed class LibraryScanQueueWorkflowTests : BaseTests
         using var provider = BuildProvider(broadcaster.Object);
         var workflow = new LibraryScanQueueWorkflow(
             provider.GetRequiredService<IServiceScopeFactory>(),
+            TestLibraryFilesystemReadiness.Ready(),
             Mock.Of<ILogger<LibraryScanQueueWorkflow>>(),
             queue.Object);
 

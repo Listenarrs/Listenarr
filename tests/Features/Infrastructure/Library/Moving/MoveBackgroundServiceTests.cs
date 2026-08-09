@@ -10,6 +10,70 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving;
 public sealed class MoveBackgroundServiceTests : BaseTests
 {
     [Fact]
+    public async Task FilesystemNotReady_DoesNotRecoverClaimOrProcessJobsUntilGateOpens()
+    {
+        var jobs = Channel.CreateUnbounded<MoveJob>();
+        var job = new MoveJob { Id = Guid.NewGuid(), AudiobookId = 42 };
+        await jobs.Writer.WriteAsync(job);
+        var readiness = new TestLibraryFilesystemReadiness();
+        readiness.SetRunning("AudiobookFileIdentities");
+        var recovered = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var processed = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var queue = new Mock<IMoveQueueService>(MockBehavior.Strict);
+        queue.SetupGet(service => service.Reader).Returns(jobs.Reader);
+        queue.Setup(service => service.RecoverActiveJobsAsync(It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                recovered.TrySetResult();
+                return Task.CompletedTask;
+            });
+        queue.Setup(service => service.TryClaimJobAsync(
+                job.Id,
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+        var processor = new Mock<IMoveJobProcessor>(MockBehavior.Strict);
+        processor.Setup(service => service.ProcessJobAsync(job, It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                processed.TrySetResult();
+                return Task.CompletedTask;
+            });
+        var worker = new MoveBackgroundService(
+            queue.Object,
+            processor.Object,
+            readiness,
+            NullLogger<MoveBackgroundService>.Instance,
+            heartbeatInterval: TimeSpan.FromHours(1));
+
+        await worker.StartAsync(CancellationToken.None);
+
+        Assert.False(recovered.Task.IsCompleted);
+        queue.Verify(service => service.TryClaimJobAsync(
+            It.IsAny<Guid>(),
+            It.IsAny<string>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+        processor.Verify(service => service.ProcessJobAsync(
+            It.IsAny<MoveJob>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+
+        readiness.SetReady();
+        await recovered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await processed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await worker.StopAsync(CancellationToken.None);
+
+        queue.Verify(service => service.TryClaimJobAsync(
+            job.Id,
+            It.IsAny<string>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+        processor.Verify(service => service.ProcessJobAsync(
+            job,
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task LeaseLoss_DoesNotRewriteJobAsFailed()
     {
         var jobs = Channel.CreateUnbounded<MoveJob>();
@@ -36,6 +100,7 @@ public sealed class MoveBackgroundServiceTests : BaseTests
         var worker = new MoveBackgroundService(
             queue.Object,
             processor.Object,
+            TestLibraryFilesystemReadiness.Ready(),
             NullLogger<MoveBackgroundService>.Instance,
             heartbeatInterval: TimeSpan.FromHours(1));
 
@@ -94,6 +159,7 @@ public sealed class MoveBackgroundServiceTests : BaseTests
         var worker = new MoveBackgroundService(
             queue.Object,
             processor.Object,
+            TestLibraryFilesystemReadiness.Ready(),
             NullLogger<MoveBackgroundService>.Instance,
             heartbeatInterval: TimeSpan.FromMilliseconds(10));
 
@@ -154,6 +220,7 @@ public sealed class MoveBackgroundServiceTests : BaseTests
         var worker = new MoveBackgroundService(
             queue.Object,
             processor.Object,
+            TestLibraryFilesystemReadiness.Ready(),
             NullLogger<MoveBackgroundService>.Instance,
             heartbeatInterval: TimeSpan.FromMilliseconds(10),
             ownershipDuration: TimeSpan.FromMilliseconds(50));
@@ -211,6 +278,7 @@ public sealed class MoveBackgroundServiceTests : BaseTests
         var worker = new MoveBackgroundService(
             queue.Object,
             processor.Object,
+            TestLibraryFilesystemReadiness.Ready(),
             NullLogger<MoveBackgroundService>.Instance,
             heartbeatInterval: TimeSpan.FromMilliseconds(10));
 

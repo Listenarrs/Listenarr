@@ -2093,7 +2093,7 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.Property<int>("ProtocolVersion")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")
-                        .HasDefaultValue(2);
+                        .HasDefaultValue(1);
 
                     b.Property<long>("SourceLength")
                         .HasColumnType("INTEGER");

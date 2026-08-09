@@ -93,15 +93,6 @@ public partial class RenameService
                 resolution.Semantics.Syntax));
     }
 
-    private async Task<FileSystemPathSemantics> ResolveRenameSemanticsAsync(
-        string path,
-        List<RootFolder> rootFolders,
-        CancellationToken cancellationToken) =>
-        (await ResolveRenamePathResolutionAsync(
-            path,
-            rootFolders,
-            cancellationToken)).Semantics;
-
     private static RenamePathSemanticsSnapshot ToSnapshot(
         RenamePathResolution resolution) =>
         new()

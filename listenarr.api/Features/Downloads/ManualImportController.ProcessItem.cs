@@ -179,12 +179,14 @@ public partial class ManualImportController
                 };
             }
 
-            var operationId = FileMoveOperationIdentity.Create(
+            var operationId = FileMoveOperationIdentity.CreateForPaths(
                 "manual-import",
                 audiobook.Id,
                 action,
-                Path.GetFullPath(item.FullPath),
-                Path.GetFullPath(destinationPath));
+                item.FullPath,
+                sourceSemantics,
+                destinationPath,
+                destinationSemantics);
             using (var registrationLease =
                 await PrepareOwnedManualImportActionForRegistrationAsync(
                     action,

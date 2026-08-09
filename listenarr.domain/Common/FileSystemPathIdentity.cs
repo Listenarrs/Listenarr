@@ -201,7 +201,7 @@ public static partial class FileSystemPathIdentity
         string scope,
         string path,
         FileSystemPathSemantics semantics,
-        int version = 2)
+        int version = 1)
     {
         if (semantics.CaseSensitivity == FileSystemCaseSensitivity.Unknown)
         {

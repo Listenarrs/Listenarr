@@ -17,8 +17,10 @@
  */
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
 import RenamePreviewModal from '@/components/domain/organize/RenamePreviewModal.vue'
 import { apiService } from '@/services/api'
+import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
 import type { RenamePathSemanticsSnapshot, RenamePreview } from '@/types'
 
 const currentFolderSemantics: RenamePathSemanticsSnapshot = {
@@ -26,6 +28,21 @@ const currentFolderSemantics: RenamePathSemanticsSnapshot = {
   caseSensitivity: 'Insensitive',
   requestedMode: 'Auto',
   boundaryPath: 'D:\\test\\Author\\Alchemised',
+}
+
+function createFilesystemPinia(filesystemStatus: 'Running' | 'Ready') {
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  useFilesystemReadinessStore().readiness = {
+    isReady: true,
+    status: 'ready',
+    databaseConnected: true,
+    migrationsCurrent: true,
+    filesystemReady: filesystemStatus === 'Ready',
+    filesystemStatus,
+    filesystemPhase: filesystemStatus === 'Running' ? 'AudiobookFileIdentities' : null,
+  }
+  return pinia
 }
 
 describe('RenamePreviewModal', () => {
@@ -56,11 +73,13 @@ describe('RenamePreviewModal', () => {
       },
     ] satisfies RenamePreview[])
 
+    const pinia = createFilesystemPinia('Ready')
     const wrapper = mount(RenamePreviewModal, {
       props: {
         visible: true,
         audiobookIds: [7],
       },
+      global: { plugins: [pinia] },
     })
 
     await flushPromises()
@@ -76,6 +95,38 @@ describe('RenamePreviewModal', () => {
     expect(wrapper.text()).toContain('Current')
     expect(wrapper.text()).toContain('New')
     expect(wrapper.find('.btn.btn-primary').text()).toContain('Organize 1')
+  })
+
+  it('keeps preview available but disables organize while filesystem initialization is running', async () => {
+    vi.mocked(apiService.previewRename).mockResolvedValue([
+      {
+        audiobookId: 7,
+        audiobookTitle: 'Alchemised',
+        currentFolderPath: 'D:\\test\\Author\\Alchemised',
+        currentFolderSemantics,
+        newFolderPath: 'D:\\test\\Author\\Alchemised test',
+        folderChanged: true,
+        hasChanges: true,
+        fileRenames: [],
+      },
+    ] satisfies RenamePreview[])
+    const pinia = createFilesystemPinia('Running')
+    const wrapper = mount(RenamePreviewModal, {
+      props: {
+        visible: true,
+        audiobookIds: [7],
+      },
+      global: { plugins: [pinia] },
+    })
+
+    await flushPromises()
+
+    expect(apiService.previewRename).toHaveBeenCalledWith([7])
+    const organize = wrapper.get('.btn.btn-primary')
+    expect(organize.attributes('disabled')).toBeDefined()
+    expect(organize.attributes('title')).toContain('filesystem initialization')
+    await organize.trigger('click')
+    expect(apiService.executeRename).not.toHaveBeenCalled()
   })
 
   it('sends expected current state and displays stale-preview conflicts as failures', async () => {
@@ -110,11 +161,13 @@ describe('RenamePreviewModal', () => {
       },
     ])
 
+    const pinia = createFilesystemPinia('Ready')
     const wrapper = mount(RenamePreviewModal, {
       props: {
         visible: true,
         audiobookIds: [7],
       },
+      global: { plugins: [pinia] },
     })
     await flushPromises()
 

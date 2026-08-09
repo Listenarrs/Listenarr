@@ -4,7 +4,7 @@ namespace Listenarr.Domain.Downloads;
 
 public static class FileMutationProtocol
 {
-    public const int MarkerlessDatabaseState = 2;
+    public const int MarkerlessDatabaseState = 1;
 }
 
 public enum FileMutationJournalState

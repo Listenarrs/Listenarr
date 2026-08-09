@@ -14,14 +14,14 @@ public partial class FileMover
             FileAction action,
             string source,
             string destination,
-            Guid? operationId,
+            Guid operationId,
             string? expectedRegisteredPhysicalObjectIdentity)
     {
-        if (!operationId.HasValue || _fileMutationJournalStore == null)
+        if (_fileMutationJournalStore == null)
         {
             return new MarkerlessRegistrationPreparation(false, null);
         }
-        if (operationId.Value == Guid.Empty)
+        if (operationId == Guid.Empty)
         {
             throw new ArgumentException(
                 "A markerless registration publication requires a non-empty operation ID.",
@@ -39,7 +39,7 @@ public partial class FileMover
 
         var cancellationToken = CancellationToken.None;
         var journal = await _fileMutationJournalStore.GetAsync(
-            operationId.Value,
+            operationId,
             cancellationToken);
         if (journal == null)
         {
@@ -85,7 +85,7 @@ public partial class FileMover
 
             journal = await _fileMutationJournalStore.GetOrCreateAsync(
                 new FileMutationJournalClaim(
-                    operationId.Value,
+                    operationId,
                     action,
                     gate.SourcePath,
                     gate.DestinationPath,
@@ -106,12 +106,31 @@ public partial class FileMover
         }
         else
         {
-            ValidateMarkerlessRegistrationJournal(journal, action, gate);
+            await ValidateMarkerlessRegistrationJournalAsync(journal, action, gate);
         }
 
         if (journal.State == FileMutationJournalState.NeedsAttention)
         {
             return new MarkerlessRegistrationPreparation(true, null);
+        }
+
+        if (action != FileAction.Move)
+        {
+            using var currentSource = gate.SourceParent.TryOpenExistingFile(
+                gate.SourceName,
+                requireDeleteAccess: false);
+            if (currentSource == null
+                || !await MatchesMarkerlessSourceProofAsync(
+                    currentSource,
+                    journal,
+                    cancellationToken))
+            {
+                await MarkMarkerlessRegistrationNeedsAttentionAsync(
+                    journal,
+                    "The file-publication source changed physical generation or content.",
+                    cancellationToken);
+                return new MarkerlessRegistrationPreparation(true, null);
+            }
         }
 
         if (journal.State == FileMutationJournalState.Planned)
@@ -274,21 +293,14 @@ public partial class FileMover
                 : journal.State >= FileMutationJournalState.Completed);
     }
 
-    private static void ValidateMarkerlessRegistrationJournal(
+    private async Task ValidateMarkerlessRegistrationJournalAsync(
         FileMutationJournal journal,
         FileAction action,
         FileMoveGateLease gate)
     {
         if (journal.ProtocolVersion != FileMutationProtocol.MarkerlessDatabaseState
             || journal.Action != action
-            || !string.Equals(
-                journal.SourcePath,
-                Path.GetFullPath(gate.SourcePath),
-                StringComparison.Ordinal)
-            || !string.Equals(
-                journal.DestinationPath,
-                Path.GetFullPath(gate.DestinationPath),
-                StringComparison.Ordinal))
+            || !await JournalPathsMatchGateAsync(journal, gate))
         {
             throw new InvalidOperationException(
                 "The durable registration identity does not match the requested operation.");

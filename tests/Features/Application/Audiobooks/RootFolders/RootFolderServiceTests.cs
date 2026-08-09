@@ -303,7 +303,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
                 PathIdentityState = PathIdentityState.Valid,
                 PathIdentityKey = FileSystemPathIdentity.CreateKey("root", rootPath, semantics),
                 DirectoryObjectIdentityVersion = ManagedDirectoryIdentity.CurrentVersion,
-                DirectoryObjectIdentity = "listenarr-directory-v2:00000000000000000000000000000000:"
+                DirectoryObjectIdentity = "listenarr-directory-v1:00000000000000000000000000000000:"
                     + new string('0', 64),
                 DirectoryObjectIdentityUnavailableReason = "The storage location is currently missing."
             };
@@ -828,7 +828,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
                 PathIdentityState = PathIdentityState.Valid,
                 PathIdentityKey = FileSystemPathIdentity.CreateKey("root", rootPath, semantics),
                 DirectoryObjectIdentityVersion = ManagedDirectoryIdentity.CurrentVersion,
-                DirectoryObjectIdentity = "listenarr-directory-v2:00000000000000000000000000000000:"
+                DirectoryObjectIdentity = "listenarr-directory-v1:00000000000000000000000000000000:"
                     + new string('0', 64),
                 DirectoryObjectIdentityUnavailableReason = "The storage location is currently missing."
             };

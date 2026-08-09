@@ -766,6 +766,6 @@ public sealed class EfMoveScanHandoffStoreTests : BaseTests
             FileSystemCaseSensitivityMode.Auto,
             targetBoundary,
             target));
-        job.IdentityKeyVersion = 3;
+        job.IdentityKeyVersion = MoveManifestIdentity.Version;
     }
 }

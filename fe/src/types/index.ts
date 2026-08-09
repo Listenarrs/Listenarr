@@ -295,7 +295,14 @@ export interface RootFolder {
   caseSensitivityMode?: 'Auto' | 'Sensitive' | 'Insensitive'
   resolvedCaseSensitivity?: 'Unknown' | 'Sensitive' | 'Insensitive'
   pathIdentityState?: 'Valid' | 'Conflict' | 'Unavailable'
-  storageState?: 'Healthy' | 'Missing' | 'Changed' | 'Unavailable' | 'Unconfirmed'
+  storageState?:
+    | 'Healthy'
+    | 'Missing'
+    | 'Changed'
+    | 'Unavailable'
+    | 'Unconfirmed'
+    | 'Initializing'
+    | 'InitializationFailed'
   storageReason?:
     | 'None'
     | 'PathMissing'
@@ -308,6 +315,8 @@ export interface RootFolder {
     | 'FilesystemSemanticsChanged'
     | 'NoAuthorizedIdentity'
     | 'InvalidPath'
+    | 'Initializing'
+    | 'InitializationFailed'
     | 'Unknown'
   storageMessage?: string | null
   canConfirmCurrentFolder?: boolean
@@ -774,6 +783,19 @@ export interface Indexer {
   lastTestedAt?: string
   lastTestSuccessful?: boolean
   lastTestError?: string
+}
+
+export interface SystemReadiness {
+  isReady: boolean
+  status: string
+  databaseConnected: boolean
+  migrationsCurrent: boolean
+  errorCode?: string | null
+  filesystemReady: boolean
+  filesystemStatus: 'Pending' | 'Running' | 'Ready' | 'Failed'
+  filesystemPhase?: string | null
+  filesystemErrorCode?: string | null
+  filesystemErrorMessage?: string | null
 }
 
 export interface SystemInfo {

@@ -63,7 +63,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 UpdatedAt = new DateTime(2026, 7, 28, 12, 5, 0, DateTimeKind.Utc),
                 NextAttemptAt = new DateTime(2026, 7, 28, 12, 10, 0, DateTimeKind.Utc),
                 ActiveDeduplicationKey = "dedupe-secret",
-                IdentityKeyVersion = 4,
+                IdentityKeyVersion = MoveManifestIdentity.Version,
                 LeaseOwner = "machine:123:secret",
                 LeaseExpiresAt = DateTime.UtcNow.AddMinutes(5),
                 LeaseGeneration = 9,

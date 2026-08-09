@@ -29,7 +29,8 @@ public sealed class ListenarrExceptionHandler(
         var mapping = Map(exception);
         var traceId = Activity.Current?.Id ?? httpContext.TraceIdentifier;
 
-        if (mapping.Status >= StatusCodes.Status500InternalServerError)
+        if (mapping.Status >= StatusCodes.Status500InternalServerError
+            && exception is not ApplicationUnavailableException)
         {
             logger.LogError(
                 exception,
@@ -89,6 +90,11 @@ public sealed class ListenarrExceptionHandler(
         ApplicationForbiddenException ex => new(
             StatusCodes.Status403Forbidden,
             "Forbidden",
+            ex.Code,
+            ex.SafeDetail),
+        ApplicationUnavailableException ex => new(
+            StatusCodes.Status503ServiceUnavailable,
+            "Service unavailable",
             ex.Code,
             ex.SafeDetail),
         UniqueConstraintViolationException => new(

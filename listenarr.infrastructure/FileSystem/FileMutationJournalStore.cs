@@ -1,4 +1,5 @@
 using Listenarr.Domain.Audiobooks.Enumerations;
+using Listenarr.Domain.Common;
 using Listenarr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -50,8 +51,12 @@ internal interface IFileMutationJournalStore
 
 internal sealed partial class EfFileMutationJournalStore(
     IDbContextFactory<ListenArrDbContext> dbContextFactory,
-    TimeProvider timeProvider) : IFileMutationJournalStore
+    TimeProvider timeProvider,
+    IFileSystemSemanticsResolver? semanticsResolver = null) : IFileMutationJournalStore
 {
+    private readonly IFileSystemSemanticsResolver _semanticsResolver =
+        semanticsResolver ?? new FileSystemSemanticsResolver();
+
     internal Func<Task>? AfterAdvanceLoadedForTestAsync { get; set; }
 
     public async Task<FileMutationJournal> GetOrCreateAsync(
@@ -69,7 +74,12 @@ internal sealed partial class EfFileMutationJournalStore(
                 cancellationToken);
         if (existing != null)
         {
-            ValidateIdentity(existing, claim, canonicalSource, canonicalDestination);
+            await ValidateIdentityAsync(
+                existing,
+                claim,
+                canonicalSource,
+                canonicalDestination,
+                cancellationToken);
             return existing;
         }
 
@@ -101,7 +111,12 @@ internal sealed partial class EfFileMutationJournalStore(
                 .SingleAsync(
                     candidate => candidate.OperationId == claim.OperationId,
                     cancellationToken);
-            ValidateIdentity(existing, claim, canonicalSource, canonicalDestination);
+            await ValidateIdentityAsync(
+                existing,
+                claim,
+                canonicalSource,
+                canonicalDestination,
+                cancellationToken);
             return existing;
         }
     }
@@ -422,23 +437,26 @@ internal sealed partial class EfFileMutationJournalStore(
         }
     }
 
-    private static void ValidateIdentity(
+    private async Task ValidateIdentityAsync(
         FileMutationJournal journal,
         FileMutationJournalClaim claim,
         string canonicalSource,
-        string canonicalDestination)
+        string canonicalDestination,
+        CancellationToken cancellationToken)
     {
+        var sourcePathsMatch = await PathsMatchAsync(
+            journal.SourcePath,
+            canonicalSource,
+            cancellationToken);
+        var destinationPathsMatch = await PathsMatchAsync(
+            journal.DestinationPath,
+            canonicalDestination,
+            cancellationToken);
         if (journal.ProtocolVersion
                 != FileMutationProtocol.MarkerlessDatabaseState
             || journal.Action != claim.Action
-            || !string.Equals(
-                journal.SourcePath,
-                canonicalSource,
-                StringComparison.Ordinal)
-            || !string.Equals(
-                journal.DestinationPath,
-                canonicalDestination,
-                StringComparison.Ordinal)
+            || !sourcePathsMatch
+            || !destinationPathsMatch
             || !string.Equals(
                 journal.SourcePhysicalObjectIdentity,
                 claim.SourcePhysicalObjectIdentity,
@@ -452,5 +470,20 @@ internal sealed partial class EfFileMutationJournalStore(
             throw new InvalidOperationException(
                 "The operation ID is already bound to another file-mutation identity.");
         }
+    }
+
+    private async Task<bool> PathsMatchAsync(
+        string persistedPath,
+        string requestedPath,
+        CancellationToken cancellationToken)
+    {
+        var resolution = await _semanticsResolver.ResolveAsync(
+            requestedPath,
+            cancellationToken: cancellationToken);
+        return resolution.State == PathIdentityState.Valid
+            && FileSystemPathIdentity.AreEquivalent(
+                persistedPath,
+                requestedPath,
+                resolution.Semantics);
     }
 }

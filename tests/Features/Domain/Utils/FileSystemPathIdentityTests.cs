@@ -184,7 +184,7 @@ public sealed class FileSystemPathIdentityTests : BaseTests
             "c:/books/title/",
             semantics);
 
-        Assert.StartsWith("v2:move:7:i:", first, StringComparison.Ordinal);
+        Assert.StartsWith("v1:move:7:i:", first, StringComparison.Ordinal);
         Assert.Equal(first, second);
     }
 

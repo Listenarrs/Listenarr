@@ -25,10 +25,13 @@ namespace Listenarr.Infrastructure.Library.Scanning
         IScanJobProcessor processor,
         MoveScanHandoffRecoveryService moveHandoffRecoveryService,
         IWorkerCycleRunner cycleRunner,
+        ILibraryFilesystemReadiness filesystemReadiness,
         ILogger<ScanBackgroundService> logger) : BackgroundService
     {
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
+            logger.LogInformation("ScanBackgroundService waiting for library filesystem initialization");
+            await filesystemReadiness.WaitUntilReadyAsync(stoppingToken);
             logger.LogInformation("ScanBackgroundService started");
 
             logger.LogInformation("ScanBackgroundService awaiting jobs from queue");

@@ -39,6 +39,16 @@
       </button>
     </div>
 
+    <div
+      v-if="showFilesystemInitializationBanner"
+      class="filesystem-initialization-banner"
+      :class="{ failed: filesystemReadinessStore.filesystemFailed }"
+      role="status"
+      aria-live="polite"
+    >
+      <span>{{ filesystemInitializationMessage }}</span>
+    </div>
+
     <!-- Top Navigation Bar -->
     <header
       v-if="!hideLayout"
@@ -567,6 +577,7 @@ import { useLibraryStore } from '@/stores/library'
 import { useMoveJobsStore } from '@/stores/moveJobs'
 import { useLibraryDeleteOperationsStore } from '@/stores/libraryDeleteOperations'
 import { useScanNotificationsStore } from '@/stores/scanNotifications'
+import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
 import { useAuthStore } from '@/stores/auth'
 import { apiService } from '@/services/api'
 import { getStartupConfigCached } from '@/services/startupConfigCache'
@@ -598,6 +609,7 @@ const libraryStore = useLibraryStore()
 const moveJobsStore = useMoveJobsStore()
 const deleteOperationsStore = useLibraryDeleteOperationsStore()
 const scanNotificationsStore = useScanNotificationsStore()
+const filesystemReadinessStore = useFilesystemReadinessStore()
 const auth = useAuthStore()
 const authEnabled = ref(false)
 const startupConfigLoaded = ref(false)
@@ -1346,6 +1358,7 @@ watch(
 
 // Initialize: Subscribe to SignalR for real-time updates (NO POLLING!)
 onMounted(async () => {
+  filesystemReadinessStore.start()
   logger.debug('Initializing real-time updates via SignalR...')
 
   // Session debugging utilities
@@ -1590,6 +1603,7 @@ onUnmounted(() => {
     unsubscribeSignalRConnected()
   }
   moveJobsStore.stop()
+  filesystemReadinessStore.stop()
   // Event listeners are automatically cleaned up by VueUse
 })
 
@@ -1636,14 +1650,35 @@ const dismissSecurityWarning = () => {
   securityWarningDismissed.value = true
 }
 
+const showFilesystemInitializationBanner = computed(
+  () =>
+    !hideLayout.value &&
+    (filesystemReadinessStore.filesystemInitializing || filesystemReadinessStore.filesystemFailed),
+)
+
+const filesystemInitializationMessage = computed(() => {
+  if (filesystemReadinessStore.filesystemFailed) {
+    return (
+      filesystemReadinessStore.readiness?.filesystemErrorMessage ||
+      'Library filesystem initialization failed. Browsing remains available, but file operations are disabled.'
+    )
+  }
+
+  return 'Library filesystem is initializing. Browsing is available, but file operations are temporarily disabled.'
+})
+
 const appShellCssVars = computed(() => {
   const topNavHeightPx = 60
-  const bannerHeightPx = showSecurityWarningBanner.value ? 44 : 0
+  const securityBannerHeightPx = showSecurityWarningBanner.value ? 44 : 0
+  const filesystemBannerHeightPx = showFilesystemInitializationBanner.value ? 38 : 0
+  const bannerHeightPx = securityBannerHeightPx + filesystemBannerHeightPx
   const topOffsetPx = hideLayout.value ? 0 : topNavHeightPx + bannerHeightPx
 
   return {
     '--top-nav-height': `${topNavHeightPx}px`,
-    '--security-banner-height': `${bannerHeightPx}px`,
+    '--security-banner-height': `${securityBannerHeightPx}px`,
+    '--filesystem-banner-height': `${filesystemBannerHeightPx}px`,
+    '--app-banner-height': `${bannerHeightPx}px`,
     '--app-top-offset': `${topOffsetPx}px`,
   } as Record<string, string>
 })
@@ -1669,6 +1704,8 @@ these are not present, the Google Fonts import in `fe/index.html` will be used a
 #app {
   --top-nav-height: 60px;
   --security-banner-height: 0px;
+  --filesystem-banner-height: 0px;
+  --app-banner-height: 0px;
   --app-top-offset: var(--top-nav-height);
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
   margin: 0;
@@ -1691,14 +1728,14 @@ these are not present, the Google Fonts import in `fe/index.html` will be used a
   justify-content: space-between;
   align-items: center;
   position: fixed;
-  top: var(--security-banner-height);
+  top: var(--app-banner-height);
   left: 0;
   right: 0;
   z-index: 1000;
 }
 
 .top-nav.auth-warning-visible {
-  top: var(--security-banner-height);
+  top: var(--app-banner-height);
 }
 
 .security-warning-banner {
@@ -1750,6 +1787,29 @@ these are not present, the Google Fonts import in `fe/index.html` will be used a
 .security-warning-dismiss:focus-visible {
   outline: 2px solid rgba(255, 216, 168, 0.5);
   outline-offset: 1px;
+}
+
+.filesystem-initialization-banner {
+  position: fixed;
+  top: var(--security-banner-height);
+  left: 0;
+  right: 0;
+  z-index: 1001;
+  height: var(--filesystem-banner-height);
+  display: flex;
+  align-items: center;
+  padding: 0 1rem;
+  background: #263548;
+  border-bottom: 1px solid rgba(144, 202, 249, 0.28);
+  color: #d7ebff;
+  font-size: 0.875rem;
+  line-height: 1.3;
+}
+
+.filesystem-initialization-banner.failed {
+  background: #4a2116;
+  border-bottom-color: rgba(255, 183, 77, 0.28);
+  color: #ffd8a8;
 }
 
 .nav-brand {

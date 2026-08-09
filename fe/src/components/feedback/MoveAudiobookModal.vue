@@ -99,16 +99,20 @@
               <input
                 type="checkbox"
                 class="checkbox-input"
-                :checked="moveFiles && allowMoveFiles"
-                :disabled="!allowMoveFiles"
+                :checked="moveFiles && effectiveAllowMoveFiles"
+                :disabled="!effectiveAllowMoveFiles"
                 @change="onToggleMoveFiles($event)"
                 aria-label="Move files now"
               />
               <div class="checkbox-content">
                 <span class="checkbox-title">Move files now</span>
-                <small v-if="allowMoveFiles"
+                <small v-if="effectiveAllowMoveFiles"
                   >Copy all audiobook files to the new location (recommended)</small
                 >
+                <small v-else-if="!filesystemReadinessStore.filesystemReady">
+                  Files can be moved after library filesystem initialization completes. The path can
+                  still be updated without moving files.
+                </small>
                 <small v-else>
                   Files cannot be moved from the current root on this system. The configured path
                   can still be updated.
@@ -117,7 +121,7 @@
             </label>
           </div>
 
-          <div class="checkbox-row" v-if="moveFiles && allowMoveFiles">
+          <div class="checkbox-row" v-if="moveFiles && effectiveAllowMoveFiles">
             <label class="checkbox-wrapper checkbox-label">
               <input
                 type="checkbox"
@@ -167,6 +171,7 @@ import type { Component } from 'vue'
 import { computed, watch, ref } from 'vue'
 import { apiService } from '@/services/api'
 import { usePathLengthCheck } from '@/composables/usePathLengthCheck'
+import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
 
 const props = withDefaults(
   defineProps<{
@@ -202,6 +207,10 @@ const props = withDefaults(
 )
 
 const emit = defineEmits(['cancel', 'confirm', 'update:moveFiles', 'update:deleteEmpty'])
+const filesystemReadinessStore = useFilesystemReadinessStore()
+const effectiveAllowMoveFiles = computed(
+  () => props.allowMoveFiles && filesystemReadinessStore.filesystemReady,
+)
 
 const volumeCheckResult = ref<{
   sameVolume: boolean
@@ -226,10 +235,10 @@ watch(
     props.currentRootPath,
     props.pendingRootPath,
     props.visible,
-    props.allowMoveFiles,
+    effectiveAllowMoveFiles.value,
   ],
   async () => {
-    if (!props.visible || !props.moveFiles || !props.allowMoveFiles) {
+    if (!props.visible || !props.moveFiles || !effectiveAllowMoveFiles.value) {
       showHardlinkWarning.value = false
       return
     }
@@ -253,7 +262,7 @@ watch(
 
 function onToggleMoveFiles(e: Event) {
   const t = e.target as HTMLInputElement | null
-  emit('update:moveFiles', Boolean(props.allowMoveFiles && t && t.checked))
+  emit('update:moveFiles', Boolean(effectiveAllowMoveFiles.value && t && t.checked))
 }
 function onToggleDeleteEmpty(e: Event) {
   const t = e.target as HTMLInputElement | null
@@ -263,14 +272,16 @@ function onToggleDeleteEmpty(e: Event) {
 const buttonLabel = computed(() => {
   if (props.rootFolderRepair) return 'Confirm Folder'
   if (props.rootFolderChange) {
-    return props.moveFiles && props.allowMoveFiles ? 'Confirm & Move Files' : 'Confirm New Folder'
+    return props.moveFiles && effectiveAllowMoveFiles.value
+      ? 'Confirm & Move Files'
+      : 'Confirm New Folder'
   }
-  return props.moveFiles ? 'Move Files' : 'Update Path'
+  return props.moveFiles && effectiveAllowMoveFiles.value ? 'Move Files' : 'Update Path'
 })
 
 function onSubmit() {
   emit('confirm', {
-    moveFiles: Boolean(props.moveFiles && props.allowMoveFiles),
+    moveFiles: Boolean(props.moveFiles && effectiveAllowMoveFiles.value),
     deleteEmpty: Boolean(props.deleteEmpty),
   })
 }

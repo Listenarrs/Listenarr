@@ -123,7 +123,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
         }
 
         [Fact]
-        public async Task ProcessJobAsync_RemovesEmptySourceAncestorsWithinConfiguredRoot()
+        public async Task ProcessJobAsync_PreservesUnownedEmptySourceAncestorsWithinConfiguredRoot()
         {
             var sourceRoot = FileService.GetTempDirectory("move-processor-cleanup-root");
             await AddAuthorizedRootAsync(sourceRoot, "Move Cleanup Source Root");
@@ -142,7 +142,10 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                 completed?.Status == MoveJobStatus.Completed,
                 completed?.Error ?? "The move job was not persisted.");
             Assert.True(Directory.Exists(sourceRoot));
-            Assert.False(Directory.Exists(Path.Join(sourceRoot, "Author")));
+            Assert.False(Directory.Exists(source));
+            Assert.True(Directory.Exists(Path.Join(sourceRoot, "Author")));
+            Assert.True(Directory.Exists(Path.Join(sourceRoot, "Author", "Series")));
+            Assert.True(Directory.Exists(Path.Join(sourceRoot, "Author", "Series", "Title")));
             Assert.True(File.Exists(Path.Join(target, "book.m4b")));
         }
 

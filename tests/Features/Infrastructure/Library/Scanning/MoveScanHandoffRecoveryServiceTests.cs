@@ -244,7 +244,7 @@ public sealed class MoveScanHandoffRecoveryServiceTests : BaseTests
             SourcePath = targetPath,
             Status = MoveJobStatus.Completed,
             Phase = MoveJobPhase.RecordingCompletion,
-            IdentityKeyVersion = 3
+            IdentityKeyVersion = MoveManifestIdentity.Version
         };
         moveJob.SetSourceIdentity(identity);
         moveJob.SetTargetIdentity(identity);
