@@ -94,8 +94,10 @@ namespace Listenarr.Api.Features.Library
                 });
             }
 
+            var deleteFilesystem = deleteFiles || deleteFolder;
             var commit = await _deletionCommitService.DeleteAsync(
                 id,
+                includeFiles: deleteFilesystem,
                 cancellationToken);
             if (commit.Outcome == AudiobookDeletionCommitOutcome.NotFound)
             {
@@ -112,10 +114,9 @@ namespace Listenarr.Api.Features.Library
             }
 
             var audiobook = commit.Audiobook;
-            deleteFiles = deleteFiles || deleteFolder;
 
             AudiobookFilesystemDeleteResult? filesystemResult = null;
-            if (deleteFiles)
+            if (deleteFilesystem)
             {
                 try
                 {

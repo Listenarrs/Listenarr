@@ -40,6 +40,7 @@ public sealed class ProductionCompositionValidationTests : BaseTests
                 typeof(TimeProvider),
                 typeof(IFilesystemMutationCoordinator),
                 typeof(IDirectoryObjectIdentityResolver),
+                typeof(IRootFolderStorageHealthResolver),
                 typeof(LibraryDirectoryOwnershipBoundaryAuthorizer),
                 typeof(IAudiobookOperationCoordinator),
                 typeof(IAudiobookUpdatePublisher),
@@ -77,7 +78,8 @@ public sealed class ProductionCompositionValidationTests : BaseTests
 
             Type[] affectedScopedServiceTypes =
             [
-                typeof(IAudiobookDeletionCommitService)
+                typeof(IAudiobookDeletionCommitService),
+                typeof(IRootFolderStorageConfirmationService)
             ];
             foreach (var serviceType in affectedScopedServiceTypes)
             {

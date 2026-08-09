@@ -37,7 +37,8 @@ public sealed partial class LibraryMoveWorkflow
         int? expectedDirectoryIdentityVersion = null,
         string? expectedDirectoryIdentity = null,
         string? directoryIdentityUnavailableReason = null,
-        FileSystemPathSemantics? persistedSemantics = null)
+        PersistedRootFolderPathSemantics? persistedSemantics = null,
+        bool isManagedRoot = false)
     {
         if (string.IsNullOrEmpty(normalizedRoot))
         {
@@ -48,47 +49,69 @@ public sealed partial class LibraryMoveWorkflow
             normalizedRoot,
             caseSensitivityMode,
             cancellationToken);
-        var semantics = resolution.State == PathIdentityState.Valid
-            ? resolution.Semantics
-            : persistedSemantics;
-        if (!semantics.HasValue)
+        FileSystemPathSemantics? semantics;
+        if (isManagedRoot)
         {
-            _logger.LogWarning(
-                "Skipping move boundary {Root}: {Reason}",
-                LogRedaction.SanitizeFilePath(normalizedRoot),
-                resolution.Reason ?? "filesystem identity unavailable");
-            return;
+            if (resolution.State != PathIdentityState.Valid
+                || !persistedSemantics.HasValue
+                || persistedSemantics.Value.DetectAmbiguousCaseMatches
+                || resolution.Semantics.Syntax != persistedSemantics.Value.Semantics.Syntax
+                || resolution.Semantics.CaseSensitivity
+                    != persistedSemantics.Value.Semantics.CaseSensitivity)
+            {
+                _logger.LogWarning(
+                    "Skipping managed move boundary {Root}: live filesystem semantics do not match its persisted root semantics.",
+                    LogRedaction.SanitizeFilePath(normalizedRoot));
+                return;
+            }
+
+            semantics = resolution.Semantics;
+        }
+        else
+        {
+            semantics = resolution.State == PathIdentityState.Valid
+                ? resolution.Semantics
+                : persistedSemantics?.Semantics;
+            if (!semantics.HasValue)
+            {
+                _logger.LogWarning(
+                    "Skipping move boundary {Root}: {Reason}",
+                    LogRedaction.SanitizeFilePath(normalizedRoot),
+                    resolution.Reason ?? "filesystem identity unavailable");
+                return;
+            }
         }
 
         var hasPersistedDirectoryIdentity =
             expectedDirectoryIdentityVersion.HasValue
-            || !string.IsNullOrWhiteSpace(expectedDirectoryIdentity)
-            || !string.IsNullOrWhiteSpace(directoryIdentityUnavailableReason);
+            && !string.IsNullOrWhiteSpace(expectedDirectoryIdentity);
         DirectoryObjectIdentityResolution directoryIdentity;
-        if (hasPersistedDirectoryIdentity)
+        if (isManagedRoot && hasPersistedDirectoryIdentity)
         {
-            var current = expectedDirectoryIdentityVersion.HasValue
-                && !string.IsNullOrWhiteSpace(expectedDirectoryIdentity)
-                    ? await directoryIdentityResolver.ResolveExistingAsync(
-                        normalizedRoot,
-                        expectedDirectoryIdentityVersion.Value,
-                        expectedDirectoryIdentity,
-                        cancellationToken)
-                    : DirectoryObjectIdentityResolution.Unavailable(
-                        directoryIdentityUnavailableReason
-                            ?? "The configured root has incomplete persisted physical identity.");
+            // The authorized generation plus a live pinned comparison is the authority.
+            // A persisted unavailable reason is only an observation from an earlier point
+            // in time and must not keep blocking a root after the same generation returns.
+            var current = await directoryIdentityResolver.ResolveExistingAsync(
+                normalizedRoot,
+                expectedDirectoryIdentityVersion!.Value,
+                expectedDirectoryIdentity!,
+                cancellationToken);
             directoryIdentity = current.IsAvailable
                 && current.Version == expectedDirectoryIdentityVersion
                 && string.Equals(
                     current.Value,
                     expectedDirectoryIdentity,
                     StringComparison.Ordinal)
-                && string.IsNullOrWhiteSpace(directoryIdentityUnavailableReason)
                     ? current
                     : DirectoryObjectIdentityResolution.Unavailable(
                         current.UnavailableReason
-                            ?? directoryIdentityUnavailableReason
-                            ?? "The configured root no longer identifies its enrolled physical generation.");
+                            ?? "The configured root no longer identifies its authorized physical generation.");
+        }
+        else if (isManagedRoot)
+        {
+            directoryIdentity = DirectoryObjectIdentityResolution.Unavailable(
+                directoryIdentityUnavailableReason
+                    ?? "The configured root has not confirmed its physical storage folder.");
         }
         else
         {
@@ -103,7 +126,7 @@ public sealed partial class LibraryMoveWorkflow
             semantics.Value));
         if (existingIndex >= 0)
         {
-            if (hasPersistedDirectoryIdentity
+            if (isManagedRoot
                 || (caseSensitivityMode != FileSystemCaseSensitivityMode.Auto
                     && allowedRoots[existingIndex].CaseSensitivityMode
                         == FileSystemCaseSensitivityMode.Auto))
@@ -113,7 +136,7 @@ public sealed partial class LibraryMoveWorkflow
                     semantics.Value,
                     caseSensitivityMode,
                     directoryIdentity,
-                    hasPersistedDirectoryIdentity);
+                    isManagedRoot);
             }
 
             return;
@@ -124,7 +147,7 @@ public sealed partial class LibraryMoveWorkflow
             semantics.Value,
             caseSensitivityMode,
             directoryIdentity,
-            hasPersistedDirectoryIdentity));
+            isManagedRoot));
     }
 
     private string? TryFindNearestExistingDirectory(string path)

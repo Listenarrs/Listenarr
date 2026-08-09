@@ -327,12 +327,6 @@ public sealed partial class RootFolderRelocationService
         await db.SaveChangesAsync(cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         await transaction.CommitAsync(CancellationToken.None);
-        if (relocation.Status == RootFolderRelocationStatus.Completed)
-        {
-            await RetireRetainedRelocationReservationMarkersAsync(
-                relocation.Id,
-                CancellationToken.None);
-        }
         var resultFallbackPath = ResolveCurrentPathFallback(relocation);
         string? rootPath = null;
         if (relocation.RootFolderId is int resultRootFolderId)

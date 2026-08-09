@@ -35,29 +35,25 @@ public sealed class RootFolderObjectIdentityReconciler(
                 continue;
             }
 
-            DirectoryObjectIdentityResolution current;
             if (root.DirectoryObjectIdentityVersion == null
                 || string.IsNullOrWhiteSpace(root.DirectoryObjectIdentity))
             {
-                current = await identityResolver.ResolveAsync(
-                    canonicalRootPath,
-                    cancellationToken);
-            }
-            else if (root.DirectoryObjectIdentityVersion
-                == ManagedDirectoryIdentity.CurrentVersion)
-            {
-                current = await identityResolver.ResolveExistingAsync(
-                    canonicalRootPath,
-                    root.DirectoryObjectIdentityVersion.Value,
-                    root.DirectoryObjectIdentity,
-                    cancellationToken);
-            }
-            else
-            {
-                current = DirectoryObjectIdentityResolution.Unavailable(
-                    $"Directory identity version {root.DirectoryObjectIdentityVersion} is unsupported.");
+                // Startup observation must never turn the first directory visible at a path
+                // into trusted storage. This is especially important for temporarily absent
+                // Docker/NAS mounts where the underlying mountpoint directory may still exist.
+                root.DirectoryObjectIdentityUnavailableReason =
+                    "The root folder physical directory has not been confirmed.";
+                logger.LogWarning(
+                    "Root folder {RootFolderId} has no authorized physical directory; filesystem mutation remains disabled until the folder is explicitly confirmed or the root path is changed.",
+                    root.Id);
+                continue;
             }
 
+            var current = await identityResolver.ResolveExistingAsync(
+                canonicalRootPath,
+                root.DirectoryObjectIdentityVersion.Value,
+                root.DirectoryObjectIdentity,
+                cancellationToken);
             if (!current.IsAvailable)
             {
                 root.DirectoryObjectIdentityUnavailableReason =
@@ -69,23 +65,6 @@ public sealed class RootFolderObjectIdentityReconciler(
                 continue;
             }
 
-            if (root.DirectoryObjectIdentityVersion
-                    == ManagedDirectoryIdentity.CurrentVersion
-                && !string.Equals(
-                    current.Value,
-                    root.DirectoryObjectIdentity,
-                    StringComparison.Ordinal))
-            {
-                root.DirectoryObjectIdentityUnavailableReason =
-                    "The live directory enrollment differs from the persisted root identity.";
-                logger.LogWarning(
-                    "Root folder {RootFolderId} enrolled identity changed; destructive ownership cleanup is disabled.",
-                    root.Id);
-                continue;
-            }
-
-            root.DirectoryObjectIdentityVersion = current.Version;
-            root.DirectoryObjectIdentity = current.Value;
             root.DirectoryObjectIdentityUnavailableReason = null;
         }
 

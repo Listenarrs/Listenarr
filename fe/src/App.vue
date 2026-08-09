@@ -139,7 +139,7 @@
           </button>
           <div v-if="notificationsOpen" class="notification-dropdown" role="menu">
             <div class="dropdown-header">
-              <strong>Recent Activity</strong>
+              <strong>Notifications</strong>
               <button class="clear-btn" @click.stop="clearNotifications" title="Clear">
                 Clear
               </button>
@@ -161,9 +161,10 @@
                     :value="item.progress"
                     variant="activity"
                     height="small"
-                    :show-percentage="true"
+                    :show-percentage="item.showProgressPercentage !== false"
                     :show-size="false"
-                    :animating="item.active === true"
+                    :animating="item.active === true && item.indeterminate !== true"
+                    :indeterminate="item.indeterminate === true"
                   />
                   <div v-if="item.timestamp" class="notif-time">
                     {{ formatTime(item.timestamp) }}
@@ -186,7 +187,7 @@
             </ul>
             <div class="dropdown-footer">
               <RouterLink to="/activity" class="view-all-link" @click="notificationsOpen = false"
-                >View all activity</RouterLink
+                >View activity</RouterLink
               >
             </div>
           </div>
@@ -564,6 +565,8 @@ import { useNotification } from '@/composables/useNotification'
 import { useDownloadsStore } from '@/stores/downloads'
 import { useLibraryStore } from '@/stores/library'
 import { useMoveJobsStore } from '@/stores/moveJobs'
+import { useLibraryDeleteOperationsStore } from '@/stores/libraryDeleteOperations'
+import { useScanNotificationsStore } from '@/stores/scanNotifications'
 import { useAuthStore } from '@/stores/auth'
 import { apiService } from '@/services/api'
 import { getStartupConfigCached } from '@/services/startupConfigCache'
@@ -593,6 +596,8 @@ const { getProtectedImageSrc } = useProtectedImages()
 const downloadsStore = useDownloadsStore()
 const libraryStore = useLibraryStore()
 const moveJobsStore = useMoveJobsStore()
+const deleteOperationsStore = useLibraryDeleteOperationsStore()
+const scanNotificationsStore = useScanNotificationsStore()
 const auth = useAuthStore()
 const authEnabled = ref(false)
 const startupConfigLoaded = ref(false)
@@ -883,6 +888,8 @@ type HistoryNotification = {
   progress?: number
   phase?: string
   active?: boolean
+  showProgressPercentage?: boolean
+  indeterminate?: boolean
 }
 
 const recentNotifications = reactive<HistoryNotification[]>([])
@@ -906,8 +913,101 @@ const activeMoveNotifications = computed<HistoryNotification[]>(() =>
   }),
 )
 
+const scanNotifications = computed<HistoryNotification[]>(() =>
+  scanNotificationsStore.jobs
+    .filter((job) => job.visible && !job.dismissed)
+    .sort((left, right) => right.timestamp.localeCompare(left.timestamp))
+    .map((job) => {
+      const normalizedStatus = job.status.toLowerCase()
+      const active = normalizedStatus === 'queued' || normalizedStatus === 'processing'
+      const audiobookTitle = job.audiobookId
+        ? libraryStore.audiobooks.find((book) => book.id === job.audiobookId)?.title
+        : undefined
+      const subject = audiobookTitle || 'audiobook folder'
+      const title =
+        normalizedStatus === 'queued'
+          ? `Scan queued: ${subject}`
+          : normalizedStatus === 'processing'
+            ? `Scanning ${subject}`
+            : normalizedStatus === 'completed'
+              ? `Scan complete: ${subject}`
+              : normalizedStatus === 'superseded'
+                ? `Scan stopped: ${subject}`
+                : `Scan failed: ${subject}`
+      const message =
+        normalizedStatus === 'queued'
+          ? 'Waiting to scan folder'
+          : normalizedStatus === 'processing'
+            ? 'Scanning folder'
+            : normalizedStatus === 'completed'
+              ? job.found != null
+                ? `${job.found} file${job.found === 1 ? '' : 's'} found${job.created != null ? ` · ${job.created} added` : ''}`
+                : 'Folder scan completed'
+              : job.error || 'The folder scan did not complete'
+
+      return {
+        id: `scan-${job.jobId}`,
+        title,
+        message,
+        icon: 'ph ph-folder-open',
+        timestamp: job.timestamp,
+        progress: active ? 0 : undefined,
+        active,
+        showProgressPercentage: false,
+        indeterminate: active,
+      }
+    }),
+)
+
+const deleteNotifications = computed<HistoryNotification[]>(() =>
+  deleteOperationsStore.operations
+    .filter((operation) => !operation.dismissed)
+    .map((operation) => {
+      const active = operation.status === 'deleting'
+      const isBulk = operation.kind === 'bulk'
+      const title = active
+        ? isBulk
+          ? operation.title
+          : `Deleting ${operation.title}`
+        : operation.status === 'completed'
+          ? isBulk
+            ? `Deleted ${operation.deleted} audiobook${operation.deleted === 1 ? '' : 's'}`
+            : `Deleted ${operation.title}`
+          : isBulk
+            ? `Delete incomplete: ${operation.deleted}/${operation.total} audiobooks`
+            : `Delete failed: ${operation.title}`
+      const message = isBulk
+        ? active
+          ? operation.currentTitle
+            ? `${operation.processed}/${operation.total} · ${operation.currentTitle}`
+            : `${operation.processed}/${operation.total}`
+          : operation.status === 'completed'
+            ? `${operation.deleted}/${operation.total} deleted`
+            : `${operation.deleted}/${operation.total} deleted · ${operation.failed} failed${operation.error ? ` · ${operation.error}` : ''}`
+        : active
+          ? 'Removing audiobook from library'
+          : operation.status === 'completed'
+            ? 'Removed from library'
+            : operation.error || 'Could not remove audiobook from library'
+
+      return {
+        id: operation.id,
+        title,
+        message,
+        icon: 'ph ph-file-remove',
+        timestamp: operation.startedAt,
+        progress: active ? operation.progress : undefined,
+        active,
+        showProgressPercentage: isBulk,
+        indeterminate: active && !isBulk,
+      }
+    }),
+)
+
 const visibleNotifications = computed(() => [
   ...activeMoveNotifications.value,
+  ...scanNotifications.value,
+  ...deleteNotifications.value,
   ...recentNotifications.filter((notification) => !notification.dismissed),
 ])
 
@@ -924,9 +1024,15 @@ function pushNotification(n: HistoryNotification) {
 function clearNotifications() {
   recentNotifications.length = 0
   recentDownloadTitles.value.clear()
+  deleteOperationsStore.clearFinished()
+  scanNotificationsStore.clearFinished()
 }
 
 function dismissNotification(id: string) {
+  deleteOperationsStore.dismiss(id)
+  if (id.startsWith('scan-')) {
+    scanNotificationsStore.dismiss(id.slice('scan-'.length))
+  }
   const notification = recentNotifications.find((n) => n.id === id)
   if (notification) {
     notification.dismissed = true
@@ -964,7 +1070,99 @@ function notificationIconComponent(icon?: string) {
 
 let unsubscribeQueue: (() => void) | null = null
 let unsubscribeFilesRemoved: (() => void) | null = null
+let unsubscribeScanJobs: (() => void) | null = null
 let unsubscribeSignalRConnected: (() => void) | null = null
+let scanStatusReconcileTimer: ReturnType<typeof setInterval> | null = null
+let scanStatusReconcileInFlight = false
+
+const hasActiveVisibleScan = () =>
+  auth.user.authenticated &&
+  scanNotificationsStore.jobs.some((job) => {
+    const status = job.status.toLowerCase()
+    return job.visible && !job.dismissed && (status === 'queued' || status === 'processing')
+  })
+
+const stopScanStatusReconciliation = () => {
+  if (scanStatusReconcileTimer != null) {
+    window.clearInterval(scanStatusReconcileTimer)
+    scanStatusReconcileTimer = null
+  }
+}
+
+const reconcileActiveScanStatuses = async () => {
+  if (scanStatusReconcileInFlight) return
+
+  const activeJobs = scanNotificationsStore.jobs.filter((job) => {
+    const status = job.status.toLowerCase()
+    return job.visible && !job.dismissed && (status === 'queued' || status === 'processing')
+  })
+  if (activeJobs.length === 0) {
+    stopScanStatusReconciliation()
+    return
+  }
+
+  scanStatusReconcileInFlight = true
+  try {
+    await Promise.all(
+      activeJobs.map(async (job) => {
+        try {
+          const status = await apiService.getScanJobStatus(job.jobId)
+          scanNotificationsStore.applyUpdate({
+            jobId: job.jobId,
+            audiobookId: status.audiobookId,
+            status: status.status,
+            error: status.error,
+          })
+        } catch (error) {
+          const status =
+            error && typeof error === 'object' && 'status' in error
+              ? Number((error as { status?: unknown }).status)
+              : undefined
+          if (status === 404) {
+            scanNotificationsStore.applyUpdate({
+              jobId: job.jobId,
+              audiobookId: job.audiobookId,
+              status: 'Failed',
+              error:
+                'Scan status is no longer available. Refresh the audiobook to verify the current files.',
+            })
+            return
+          }
+
+          logger.debug('Unable to reconcile scan job status', { jobId: job.jobId, error })
+        }
+      }),
+    )
+  } finally {
+    scanStatusReconcileInFlight = false
+    if (!hasActiveVisibleScan()) {
+      stopScanStatusReconciliation()
+    }
+  }
+}
+
+const syncScanStatusReconciliation = () => {
+  if (!hasActiveVisibleScan()) {
+    stopScanStatusReconciliation()
+    return
+  }
+
+  if (scanStatusReconcileTimer == null) {
+    void reconcileActiveScanStatuses()
+    scanStatusReconcileTimer = window.setInterval(() => {
+      void reconcileActiveScanStatuses()
+    }, 1500)
+  }
+}
+
+watch(
+  () =>
+    scanNotificationsStore.jobs
+      .map((job) => `${job.jobId}:${job.status}:${job.visible}:${job.dismissed === true}`)
+      .join('|'),
+  syncScanStatusReconciliation,
+  { flush: 'post' },
+)
 
 const syncLibrarySnapshot = async () => {
   try {
@@ -1140,6 +1338,7 @@ watch(
   () => auth.user.authenticated,
   () => {
     void refreshAuthPresentationFromStartupConfig(true)
+    syncScanStatusReconciliation()
   },
 )
 
@@ -1209,6 +1408,10 @@ onMounted(async () => {
       const queueSnapshot = normalizeQueueSnapshot(queue)
       logger.debug('Received queue update via SignalR:', queueSnapshot.items.length, 'items')
       queueItems.value = queueSnapshot.items
+    })
+
+    unsubscribeScanJobs = signalRService.onScanJobUpdate((job) => {
+      scanNotificationsStore.applyUpdate(job)
     })
 
     // Prepare toast helper for this mounted scope
@@ -1379,6 +1582,10 @@ onUnmounted(() => {
   if (unsubscribeFilesRemoved) {
     unsubscribeFilesRemoved()
   }
+  if (unsubscribeScanJobs) {
+    unsubscribeScanJobs()
+  }
+  stopScanStatusReconciliation()
   if (unsubscribeSignalRConnected) {
     unsubscribeSignalRConnected()
   }

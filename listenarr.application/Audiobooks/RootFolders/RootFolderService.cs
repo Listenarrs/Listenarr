@@ -82,6 +82,7 @@ namespace Listenarr.Application.Audiobooks.RootFolders
             }
 
             await CaptureInitialDirectoryObjectIdentityAsync(root);
+            AfterInitialDirectoryIdentityCapturedForTest?.Invoke();
 
             if (root.IsDefault)
             {
@@ -93,6 +94,7 @@ namespace Listenarr.Application.Audiobooks.RootFolders
                 await _repo.AddAsync(root);
             }
 
+            await RevalidateCreatedDirectoryObjectIdentityAsync(root);
             return root;
         }
 
@@ -111,9 +113,18 @@ namespace Listenarr.Application.Audiobooks.RootFolders
             await EnsureNoActiveRelocationAsync(root.Id);
             await EnsureNoNonRemovedDirectoryOwnershipAsync(root.Id);
 
-            var sourceSemantics = await ResolvePersistedSemanticsAsync(root.Path, root.CaseSensitivityMode);
-            await EnsureNoActiveMoveJobsTouchRootAsync(root.Path, sourceSemantics.Semantics);
-            var hasReferenced = await _repo.HasAudiobooksUnderPathAsync(root.Path, sourceSemantics.Semantics);
+            var sourcePersistedSemantics = RootFolderPathSemantics.ResolvePersisted(root)
+                ?? throw new InvalidOperationException(
+                    "The root folder has no usable persisted path semantics; change the root path before deleting or reassigning it.");
+            var sourceComparisonSemantics = sourcePersistedSemantics.DetectAmbiguousCaseMatches
+                ? new FileSystemPathSemantics(
+                    sourcePersistedSemantics.Semantics.Syntax,
+                    FileSystemCaseSensitivity.Insensitive)
+                : sourcePersistedSemantics.Semantics;
+            await EnsureNoActiveMoveJobsTouchRootAsync(root.Path, sourceComparisonSemantics);
+            var hasReferenced = await _repo.HasAudiobooksUnderPathAsync(
+                root.Path,
+                sourceComparisonSemantics);
             if (hasReferenced && !reassignRootId.HasValue)
             {
                 throw new InvalidOperationException("Root folder is in use by audiobooks; reassign before deletion or provide reassignRootId.");
@@ -124,16 +135,31 @@ namespace Listenarr.Application.Audiobooks.RootFolders
                 var newRoot = await _repo.GetByIdAsync(reassignRootId!.Value);
                 if (newRoot == null) throw new KeyNotFoundException("Reassign root not found");
                 await EnsureNoActiveRelocationAsync(newRoot.Id);
-                var targetSemantics = await ResolvePersistedSemanticsAsync(newRoot.Path, newRoot.CaseSensitivityMode);
-                await EnsureNoActiveMoveJobsTouchRootAsync(newRoot.Path, targetSemantics.Semantics);
+                var targetPersistedSemantics = RootFolderPathSemantics.ResolvePersisted(newRoot)
+                    ?? throw new InvalidOperationException(
+                        "The reassignment root has no usable persisted path semantics; change its path before reassigning audiobooks.");
+                var sourceRewriteSemantics = sourcePersistedSemantics.DetectAmbiguousCaseMatches
+                    ? (await ResolvePersistedSemanticsAsync(
+                        root.Path,
+                        root.CaseSensitivityMode)).Semantics
+                    : sourcePersistedSemantics.Semantics;
+                var targetRewriteSemantics = targetPersistedSemantics.DetectAmbiguousCaseMatches
+                    ? (await ResolvePersistedSemanticsAsync(
+                        newRoot.Path,
+                        newRoot.CaseSensitivityMode)).Semantics
+                    : targetPersistedSemantics.Semantics;
+
+                await EnsureNoActiveMoveJobsTouchRootAsync(
+                    newRoot.Path,
+                    targetRewriteSemantics);
                 var audiobookIds = await _repo.GetAllAudiobookIdsAsync();
                 await _audiobookOperationCoordinator.ExecuteExclusiveAsync(
                     audiobookIds,
                     token => _repo.ReassignAudiobooksAndRemoveAsync(
                         root.Id,
                         newRoot.Id,
-                        sourceSemantics.Semantics,
-                        targetSemantics.Semantics,
+                        sourceRewriteSemantics,
+                        targetRewriteSemantics,
                         token));
                 return;
             }
@@ -185,7 +211,6 @@ namespace Listenarr.Application.Audiobooks.RootFolders
             await EnsureNoActiveMoveJobsTouchRootAsync(
                 existing.Path,
                 persistedSemantics.Semantics);
-            await ValidateExistingDirectoryObjectIdentityAsync(existing);
             existing.Name = root.Name;
             existing.IsDefault = root.IsDefault;
             var conflict = await FindConflictingRootFolderAsync(

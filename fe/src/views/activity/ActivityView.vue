@@ -77,7 +77,14 @@
           <div
             v-for="item in visibleQueueItems"
             :key="item.id"
-            v-memo="[item.id, item.status, item.progress, item.eta, item.downloadSpeed]"
+            v-memo="[
+              item.id,
+              item.status,
+              item.progress,
+              item.eta,
+              item.downloadSpeed,
+              item.downloadClient,
+            ]"
             class="queue-row"
           >
             <div class="col-title">

@@ -67,7 +67,8 @@ public sealed partial class LibraryMoveWorkflow
                     rootFolder.DirectoryObjectIdentityVersion,
                     rootFolder.DirectoryObjectIdentity,
                     rootFolder.DirectoryObjectIdentityUnavailableReason,
-                    RootFolderPathSemantics.ResolvePersisted(rootFolder)?.Semantics);
+                    RootFolderPathSemantics.ResolvePersisted(rootFolder),
+                    isManagedRoot: true);
                 if (rootFolder.IsDefault && defaultRootPath == null)
                 {
                     defaultRootPath = normalizedRootPath;

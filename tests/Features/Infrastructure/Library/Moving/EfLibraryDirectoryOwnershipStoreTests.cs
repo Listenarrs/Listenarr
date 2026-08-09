@@ -67,6 +67,98 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
         await base.DisposeAsync();
     }
 
+    [Fact]
+    public async Task BoundaryAuthorizer_AuthorizedRootWithChangedFilesystemSemantics_IsRejectedUntilRepaired()
+    {
+        var actual = FileSystemPathSemantics.CurrentHostDefault;
+        var persistedSensitivity = actual.CaseSensitivity
+            == FileSystemCaseSensitivity.Sensitive
+                ? FileSystemCaseSensitivity.Insensitive
+                : FileSystemCaseSensitivity.Sensitive;
+        var persisted = new FileSystemPathSemantics(actual.Syntax, persistedSensitivity);
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            var root = await db.RootFolders.SingleAsync();
+            root.CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto;
+            root.ResolvedCaseSensitivity = persistedSensitivity;
+            root.PathIdentityState = PathIdentityState.Valid;
+            root.PathIdentityKey = FileSystemPathIdentity.CreateKey("root", _root, persisted);
+            await db.SaveChangesAsync();
+        }
+        var authorizer = new LibraryDirectoryOwnershipBoundaryAuthorizer(_factory);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            authorizer.AuthorizeAsync(
+                _root,
+                persisted,
+                CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task BoundaryAuthorizer_AuthorizedRootReturnsAfterTransientFailure_UsesLiveGeneration()
+    {
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            var root = await db.RootFolders.SingleAsync();
+            root.DirectoryObjectIdentityUnavailableReason =
+                "The directory was unavailable during startup.";
+            await db.SaveChangesAsync();
+        }
+        var authorizer = new LibraryDirectoryOwnershipBoundaryAuthorizer(_factory);
+
+        using var authorization = await authorizer.AuthorizeAsync(
+            _root,
+            FileSystemPathSemantics.CurrentHostDefault,
+            CancellationToken.None);
+
+        Assert.True(authorization.RootFolderId > 0);
+    }
+
+    [Fact]
+    public async Task BoundaryAuthorizer_ActiveRelocationUnavailableReason_RemainsBlocking()
+    {
+        var targetRoot = Path.Join(
+            Path.GetTempPath(),
+            "listenarr-tests",
+            $"relocation-target-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(targetRoot);
+        var identity = await new DirectoryObjectIdentityResolver().ResolveAsync(targetRoot);
+        Assert.True(identity.IsAvailable, identity.UnavailableReason);
+        int rootId;
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            rootId = (await db.RootFolders.SingleAsync()).Id;
+            db.RootFolderRelocations.Add(new RootFolderRelocation
+            {
+                RootFolderId = rootId,
+                ActiveRootFolderId = rootId,
+                SourcePath = _root,
+                TargetPath = targetRoot,
+                Mode = RootFolderRelocationMode.MetadataOnly,
+                Status = RootFolderRelocationStatus.NeedsAttention,
+                TargetCaseSensitivityMode = FileSystemCaseSensitivityMode.Auto,
+                TargetDirectoryObjectIdentityVersion = identity.Version,
+                TargetDirectoryObjectIdentity = identity.Value,
+                TargetDirectoryObjectIdentityUnavailableReason =
+                    "The relocation target requires operator recovery.",
+                TargetIdentityEnrollmentState = TargetIdentityEnrollmentState.Unavailable,
+                DesiredName = "Test library"
+            });
+            await db.SaveChangesAsync();
+        }
+        var authorizer = new LibraryDirectoryOwnershipBoundaryAuthorizer(_factory);
+        var childPath = Path.Join(targetRoot, "Author");
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            authorizer.AuthorizeContainingRootAsync(
+                childPath,
+                FileSystemPathSemantics.CurrentHostDefault,
+                CancellationToken.None));
+
+        Assert.Contains("authorized physical generation", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Directory.Delete(targetRoot, recursive: true);
+    }
+
     [WindowsFact]
     public async Task BoundaryAuthorizer_ForeignPersistedUnixRoot_CannotAuthorizeWindowsAlias()
     {

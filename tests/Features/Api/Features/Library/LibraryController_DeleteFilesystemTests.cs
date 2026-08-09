@@ -108,7 +108,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 Asin = "B000DELETE"
             };
             var repository = new Mock<IAudiobookRepository>(MockBehavior.Strict);
-            repository.Setup(service => service.GetByIdSnapshotAsync(
+            repository.Setup(service => service.GetForUpdateSnapshotAsync(
                     audiobook.Id,
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync(audiobook);
@@ -132,7 +132,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
 
             var failure = Assert.IsType<ObjectResult>(result);
             Assert.Equal(500, failure.StatusCode);
-            repository.Verify(service => service.GetByIdSnapshotAsync(
+            repository.Verify(service => service.GetForUpdateSnapshotAsync(
                 audiobook.Id,
                 It.IsAny<CancellationToken>()), Times.Once);
             repository.Verify(service => service.DeleteByIdAsync(audiobook.Id), Times.Once);
@@ -150,6 +150,10 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 Title = "Delete Files Commit Failure"
             };
             var repository = new Mock<IAudiobookRepository>(MockBehavior.Strict);
+            repository.Setup(service => service.GetForUpdateSnapshotAsync(
+                    audiobook.Id,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(audiobook);
             repository.Setup(service => service.GetByIdSnapshotAsync(
                     audiobook.Id,
                     It.IsAny<CancellationToken>()))
@@ -192,7 +196,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             var releasePreflight = new TaskCompletionSource<Audiobook?>(
                 TaskCreationOptions.RunContinuationsAsynchronously);
             var repository = new Mock<IAudiobookRepository>(MockBehavior.Strict);
-            repository.Setup(service => service.GetByIdSnapshotAsync(
+            repository.Setup(service => service.GetForUpdateSnapshotAsync(
                     audiobook.Id,
                     It.IsAny<CancellationToken>()))
                 .Returns(async () =>
@@ -240,7 +244,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             };
             using var cancellation = new CancellationTokenSource();
             var repository = new Mock<IAudiobookRepository>(MockBehavior.Strict);
-            repository.Setup(service => service.GetByIdSnapshotAsync(
+            repository.Setup(service => service.GetForUpdateSnapshotAsync(
                     audiobook.Id,
                     cancellation.Token))
                 .ReturnsAsync(audiobook);
@@ -285,7 +289,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 Asin = "B000CANCEL"
             };
             var repository = new Mock<IAudiobookRepository>(MockBehavior.Strict);
-            repository.Setup(service => service.GetByIdSnapshotAsync(
+            repository.Setup(service => service.GetForUpdateSnapshotAsync(
                     audiobook.Id,
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync(audiobook);
@@ -326,6 +330,10 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             };
             var deleteCommitted = false;
             var repository = new Mock<IAudiobookRepository>(MockBehavior.Strict);
+            repository.Setup(service => service.GetForUpdateSnapshotAsync(
+                    audiobook.Id,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(audiobook);
             repository.Setup(service => service.GetByIdSnapshotAsync(
                     audiobook.Id,
                     It.IsAny<CancellationToken>()))
@@ -1099,6 +1107,274 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         }
 
         [Fact]
+        public async Task DeleteAudiobook_ConfirmedReplacementRoot_RetiredOwnershipCannotDeleteReplacementTree()
+        {
+            var tempRoot = FileService.GetTempDirectory(
+                "listenarr-delete-confirmed-root-replacement");
+            var displacedRoot = tempRoot + ".old";
+            var bookFolder = Path.Join(tempRoot, "Book");
+            var audioPath = Path.Join(bookFolder, "book.mp3");
+            var sentinelPath = Path.Join(bookFolder, "replacement.txt");
+            var root = new RootFolderBuilder()
+                .WithId(905)
+                .WithName("Library")
+                .WithPath(tempRoot)
+                .WithCaseSensitivityMode(FileSystemCaseSensitivityMode.Auto)
+                .WithIsDefault()
+                .Build();
+            await AddAuthorizedRootAsync(root);
+
+            var ownershipStore = _provider
+                .GetRequiredService<ILibraryDirectoryOwnershipStore>();
+            var oldOwnership = Assert.Single(
+                await ownershipStore.EnsureCreatedHierarchyAsync(
+                    bookFolder,
+                    tempRoot,
+                    FileSystemPathSemantics.CurrentHostDefault,
+                    "test"));
+            await File.WriteAllTextAsync(audioPath, "old audio");
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithId(905)
+                .WithTitle("Confirmed Replacement Book")
+                .WithBasePath(bookFolder)
+                .WithFilePath(audioPath)
+                .Build());
+            await AddTrackedGenerationAsync(audiobook, audioPath);
+
+            Directory.Move(tempRoot, displacedRoot);
+            Directory.CreateDirectory(bookFolder);
+            await File.WriteAllTextAsync(audioPath, "replacement audio");
+            await File.WriteAllTextAsync(sentinelPath, "replacement sentinel");
+
+            var persistedRoot = await _rootFolderRepository.GetByIdAsync(root.Id);
+            Assert.NotNull(persistedRoot);
+            var healthResolver = _provider
+                .GetRequiredService<IRootFolderStorageHealthResolver>();
+            var observation = await healthResolver.ResolveAsync(persistedRoot!);
+            Assert.Equal(RootFolderStorageState.Changed, observation.State);
+            Assert.False(string.IsNullOrWhiteSpace(observation.ConfirmationToken));
+            await _provider.GetRequiredService<IRootFolderStorageConfirmationService>()
+                .ConfirmCurrentFolderAsync(
+                    root.Id,
+                    root.Path,
+                    observation.ConfirmationToken!);
+
+            var factory = _provider
+                .GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+            await using (var db = await factory.CreateDbContextAsync())
+            {
+                var retired = await db.LibraryDirectoryOwnerships
+                    .AsNoTracking()
+                    .SingleAsync(candidate => candidate.Id == oldOwnership.Id);
+                Assert.Equal(LibraryDirectoryOwnershipState.Removed, retired.State);
+                Assert.Null(retired.PathOwnershipKey);
+                Assert.Null(retired.ManagedRootFolderId);
+            }
+
+            var result = await _provider.GetRequiredService<LibraryController>()
+                .DeleteAudiobook(
+                    audiobook.Id,
+                    deleteFiles: true,
+                    deleteFolder: true);
+
+            Assert.IsType<OkObjectResult>(result);
+            Assert.True(File.Exists(audioPath));
+            Assert.Equal("replacement audio", await File.ReadAllTextAsync(audioPath));
+            Assert.True(File.Exists(sentinelPath));
+            Assert.True(Directory.Exists(bookFolder));
+            Assert.True(File.Exists(Path.Join(displacedRoot, "Book", "book.mp3")));
+        }
+
+        [Fact]
+        public async Task DeleteAudiobook_ConfirmedReplacementRoot_MissingTrackedGenerationCannotAuthorizeReplacementTree()
+        {
+            var tempRoot = FileService.GetTempDirectory(
+                "listenarr-delete-confirmed-root-replacement-missing-tracked");
+            var displacedRoot = tempRoot + ".old";
+            var bookFolder = Path.Join(tempRoot, "Book");
+            var audioPath = Path.Join(bookFolder, "book.mp3");
+            var sentinelPath = Path.Join(bookFolder, "replacement.txt");
+            var root = new RootFolderBuilder()
+                .WithId(908)
+                .WithName("Library")
+                .WithPath(tempRoot)
+                .WithCaseSensitivityMode(FileSystemCaseSensitivityMode.Auto)
+                .WithIsDefault()
+                .Build();
+            await AddAuthorizedRootAsync(root);
+
+            var ownershipStore = _provider
+                .GetRequiredService<ILibraryDirectoryOwnershipStore>();
+            _ = Assert.Single(await ownershipStore.EnsureCreatedHierarchyAsync(
+                bookFolder,
+                tempRoot,
+                FileSystemPathSemantics.CurrentHostDefault,
+                "test"));
+            await File.WriteAllTextAsync(audioPath, "old audio");
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithId(908)
+                .WithTitle("Confirmed Replacement Missing Tracked Book")
+                .WithBasePath(bookFolder)
+                .WithFilePath(audioPath)
+                .Build());
+            await AddTrackedGenerationAsync(audiobook, audioPath);
+
+            Directory.Move(tempRoot, displacedRoot);
+            Directory.CreateDirectory(bookFolder);
+            await File.WriteAllTextAsync(sentinelPath, "replacement sentinel");
+
+            var persistedRoot = await _rootFolderRepository.GetByIdAsync(root.Id);
+            Assert.NotNull(persistedRoot);
+            var observation = await _provider
+                .GetRequiredService<IRootFolderStorageHealthResolver>()
+                .ResolveAsync(persistedRoot!);
+            Assert.Equal(RootFolderStorageState.Changed, observation.State);
+            await _provider.GetRequiredService<IRootFolderStorageConfirmationService>()
+                .ConfirmCurrentFolderAsync(
+                    root.Id,
+                    root.Path,
+                    observation.ConfirmationToken!);
+
+            var result = await _provider.GetRequiredService<LibraryController>()
+                .DeleteAudiobook(
+                    audiobook.Id,
+                    deleteFiles: true,
+                    deleteFolder: true);
+
+            Assert.IsType<OkObjectResult>(result);
+            Assert.True(File.Exists(sentinelPath));
+            Assert.True(Directory.Exists(bookFolder));
+            Assert.True(File.Exists(Path.Join(displacedRoot, "Book", "book.mp3")));
+        }
+
+        [Fact]
+        public async Task DeleteAudiobook_ConfirmedReplacementRoot_LegacyFilePathOnlyCannotDeleteReplacementTree()
+        {
+            var tempRoot = FileService.GetTempDirectory(
+                "listenarr-delete-confirmed-root-replacement-legacy");
+            var displacedRoot = tempRoot + ".old";
+            var bookFolder = Path.Join(tempRoot, "Book");
+            var audioPath = Path.Join(bookFolder, "book.mp3");
+            var sentinelPath = Path.Join(bookFolder, "replacement.txt");
+            var root = new RootFolderBuilder()
+                .WithId(906)
+                .WithName("Library")
+                .WithPath(tempRoot)
+                .WithCaseSensitivityMode(FileSystemCaseSensitivityMode.Auto)
+                .WithIsDefault()
+                .Build();
+            await AddAuthorizedRootAsync(root);
+
+            var ownershipStore = _provider
+                .GetRequiredService<ILibraryDirectoryOwnershipStore>();
+            _ = Assert.Single(await ownershipStore.EnsureCreatedHierarchyAsync(
+                bookFolder,
+                tempRoot,
+                FileSystemPathSemantics.CurrentHostDefault,
+                "test"));
+            await File.WriteAllTextAsync(audioPath, "old audio");
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithId(906)
+                .WithTitle("Confirmed Replacement Legacy Book")
+                .WithBasePath(bookFolder)
+                .WithFilePath(audioPath)
+                .Build());
+
+            Directory.Move(tempRoot, displacedRoot);
+            Directory.CreateDirectory(bookFolder);
+            await File.WriteAllTextAsync(audioPath, "replacement audio");
+            await File.WriteAllTextAsync(sentinelPath, "replacement sentinel");
+
+            var persistedRoot = await _rootFolderRepository.GetByIdAsync(root.Id);
+            Assert.NotNull(persistedRoot);
+            var observation = await _provider
+                .GetRequiredService<IRootFolderStorageHealthResolver>()
+                .ResolveAsync(persistedRoot!);
+            Assert.Equal(RootFolderStorageState.Changed, observation.State);
+            await _provider.GetRequiredService<IRootFolderStorageConfirmationService>()
+                .ConfirmCurrentFolderAsync(
+                    root.Id,
+                    root.Path,
+                    observation.ConfirmationToken!);
+
+            var result = await _provider.GetRequiredService<LibraryController>()
+                .DeleteAudiobook(
+                    audiobook.Id,
+                    deleteFiles: true,
+                    deleteFolder: true);
+
+            Assert.IsType<OkObjectResult>(result);
+            Assert.True(File.Exists(audioPath));
+            Assert.Equal("replacement audio", await File.ReadAllTextAsync(audioPath));
+            Assert.True(File.Exists(sentinelPath));
+            Assert.True(Directory.Exists(bookFolder));
+            Assert.True(File.Exists(Path.Join(displacedRoot, "Book", "book.mp3")));
+        }
+
+        [Fact]
+        public async Task DeleteAudiobook_ConfirmedReplacementRoot_BasePathOnlyCannotDeleteReplacementTree()
+        {
+            var tempRoot = FileService.GetTempDirectory(
+                "listenarr-delete-confirmed-root-replacement-base-only");
+            var displacedRoot = tempRoot + ".old";
+            var bookFolder = Path.Join(tempRoot, "Book");
+            var audioPath = Path.Join(bookFolder, "book.mp3");
+            var sentinelPath = Path.Join(bookFolder, "replacement.txt");
+            var root = new RootFolderBuilder()
+                .WithId(907)
+                .WithName("Library")
+                .WithPath(tempRoot)
+                .WithCaseSensitivityMode(FileSystemCaseSensitivityMode.Auto)
+                .WithIsDefault()
+                .Build();
+            await AddAuthorizedRootAsync(root);
+
+            var ownershipStore = _provider
+                .GetRequiredService<ILibraryDirectoryOwnershipStore>();
+            _ = Assert.Single(await ownershipStore.EnsureCreatedHierarchyAsync(
+                bookFolder,
+                tempRoot,
+                FileSystemPathSemantics.CurrentHostDefault,
+                "test"));
+            await File.WriteAllTextAsync(audioPath, "old audio");
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithId(907)
+                .WithTitle("Confirmed Replacement Base Path Book")
+                .WithBasePath(bookFolder)
+                .Build());
+
+            Directory.Move(tempRoot, displacedRoot);
+            Directory.CreateDirectory(bookFolder);
+            await File.WriteAllTextAsync(audioPath, "replacement audio");
+            await File.WriteAllTextAsync(sentinelPath, "replacement sentinel");
+
+            var persistedRoot = await _rootFolderRepository.GetByIdAsync(root.Id);
+            Assert.NotNull(persistedRoot);
+            var observation = await _provider
+                .GetRequiredService<IRootFolderStorageHealthResolver>()
+                .ResolveAsync(persistedRoot!);
+            Assert.Equal(RootFolderStorageState.Changed, observation.State);
+            await _provider.GetRequiredService<IRootFolderStorageConfirmationService>()
+                .ConfirmCurrentFolderAsync(
+                    root.Id,
+                    root.Path,
+                    observation.ConfirmationToken!);
+
+            var result = await _provider.GetRequiredService<LibraryController>()
+                .DeleteAudiobook(
+                    audiobook.Id,
+                    deleteFiles: true,
+                    deleteFolder: true);
+
+            Assert.IsType<OkObjectResult>(result);
+            Assert.True(File.Exists(audioPath));
+            Assert.Equal("replacement audio", await File.ReadAllTextAsync(audioPath));
+            Assert.True(File.Exists(sentinelPath));
+            Assert.True(Directory.Exists(bookFolder));
+            Assert.True(File.Exists(Path.Join(displacedRoot, "Book", "book.mp3")));
+        }
+
+        [Fact]
         public async Task FilesystemDelete_LegacyTrackedFileWithoutPhysicalIdentity_ReplacedBeforeDelete_PreservesReplacement()
         {
             var tempRoot = FileService.GetTempDirectory(
@@ -1432,6 +1708,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 .WithBasePath(bookFolder)
                 .WithFilePath(audioPath)
                 .Build());
+            await AddTrackedGenerationAsync(audiobook, audioPath);
             await _audiobookRepository.AddAsync(new AudiobookBuilder()
                 .WithId(902)
                 .WithTitle("Other Case Book")
@@ -1468,6 +1745,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 .WithBasePath(bookFolder)
                 .WithFilePath(audioPath)
                 .Build());
+            await AddTrackedGenerationAsync(audiobook, audioPath);
             await _audiobookRepository.AddAsync(new AudiobookBuilder()
                 .WithId(902)
                 .WithTitle("Other Case Book")
@@ -1520,6 +1798,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 .WithBasePath(bookFolder)
                 .WithFilePath(audioPath)
                 .Build());
+            await AddTrackedGenerationAsync(audiobook, audioPath);
             await _audiobookRepository.AddAsync(new AudiobookBuilder()
                 .WithId(904)
                 .WithTitle("Other Nested Case Book")

@@ -99,12 +99,6 @@ public sealed partial class RootFolderRelocationService
         await db.SaveChangesAsync(cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         await transaction.CommitAsync(CancellationToken.None);
-        if (relocation.Status == RootFolderRelocationStatus.Completed)
-        {
-            await RetireRetainedRelocationReservationMarkersAsync(
-                relocation.Id,
-                CancellationToken.None);
-        }
         return Map(relocation, root?.Path ?? ResolveCurrentPathFallback(relocation));
     }
 
@@ -127,8 +121,6 @@ public sealed partial class RootFolderRelocationService
         var results =
             await ReconcileOwnershipPathMigrationsAsync(cancellationToken);
         await ReconcileRootIdentitiesAsync(cancellationToken);
-        await RetireAllRetainedRelocationReservationMarkersAsync(
-            cancellationToken);
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var recoverableReservationIds = await db.RootFolderRelocations
             .Where(relocation =>
@@ -228,36 +220,38 @@ public sealed partial class RootFolderRelocationService
             {
                 try
                 {
-                    if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
-                            root.Path,
-                            out var canonicalRootPath,
-                            out var pathReason))
+                    var persisted = RootFolderPathSemantics.ResolvePersisted(root);
+                    if (!persisted.HasValue
+                        || persisted.Value.DetectAmbiguousCaseMatches
+                        || persisted.Value.Semantics.CaseSensitivity
+                            == FileSystemCaseSensitivity.Unknown)
                     {
-                        throw new InvalidOperationException(pathReason);
+                        root.ResolvedCaseSensitivity =
+                            FileSystemCaseSensitivity.Unknown;
+                        root.PathIdentityState = PathIdentityState.Unavailable;
+                        root.PathIdentityKey = null;
+                        continue;
                     }
 
-                    var resolution = await semanticsResolver.ResolveAsync(
-                        canonicalRootPath,
-                        root.CaseSensitivityMode,
-                        cancellationToken);
-                    root.ResolvedCaseSensitivity = resolution.Semantics.CaseSensitivity;
-                    root.PathIdentityState = resolution.State;
-                    if (resolution.State == PathIdentityState.Valid)
-                    {
-                        resolvedRoots.Add((
-                            root,
-                            FileSystemPathIdentity.CreateKey(
-                                "root",
-                                canonicalRootPath,
-                                resolution.Semantics)));
-                    }
+                    var canonicalRootPath = FileSystemPathIdentity.Canonicalize(
+                        root.Path,
+                        persisted.Value.Semantics.Syntax);
+                    root.ResolvedCaseSensitivity =
+                        persisted.Value.Semantics.CaseSensitivity;
+                    resolvedRoots.Add((
+                        root,
+                        FileSystemPathIdentity.CreateKey(
+                            "root",
+                            canonicalRootPath,
+                            persisted.Value.Semantics)));
                 }
-                catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+                catch (Exception exception) when (exception is
+                    ArgumentException or InvalidOperationException
+                        or NotSupportedException or PathTooLongException)
                 {
-                    // Existing databases can contain a root path that is invalid on the
-                    // current host after switching between Docker/Linux paths and a
-                    // Windows development host. Keep the worker alive and surface the
-                    // root as unavailable until the path is repaired or deleted.
+                    // Persisted root semantics are normalized without probing the live
+                    // filesystem. Invalid or ambiguous stored roots remain unavailable
+                    // until an explicit path change or confirmation repairs them.
                     root.ResolvedCaseSensitivity = FileSystemCaseSensitivity.Unknown;
                     root.PathIdentityState = PathIdentityState.Unavailable;
                     root.PathIdentityKey = null;

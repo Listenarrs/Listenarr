@@ -78,7 +78,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 Asin = "B000DELETE"
             };
             var repository = new Mock<IAudiobookRepository>(MockBehavior.Strict);
-            repository.Setup(service => service.GetByIdSnapshotAsync(
+            repository.Setup(service => service.GetForUpdateSnapshotAsync(
                     audiobook.Id,
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync(audiobook);
@@ -105,7 +105,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 $"Failed to delete audiobook with ID {audiobook.Id}",
                 json,
                 StringComparison.Ordinal);
-            repository.Verify(service => service.GetByIdSnapshotAsync(
+            repository.Verify(service => service.GetForUpdateSnapshotAsync(
                 audiobook.Id,
                 It.IsAny<CancellationToken>()), Times.Once);
             repository.Verify(service => service.DeleteByIdAsync(audiobook.Id), Times.Once);

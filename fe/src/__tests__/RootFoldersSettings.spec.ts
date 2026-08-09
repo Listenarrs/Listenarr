@@ -50,6 +50,11 @@ function rootFolder(activeRelocation: RootFolderPathChangeResult | null): RootFo
     isDefault: true,
     pathIdentityState: 'Valid',
     resolvedCaseSensitivity: 'Sensitive',
+    storageState: 'Healthy',
+    storageReason: 'None',
+    canConfirmCurrentFolder: false,
+    canChangePath: true,
+    canMutateFilesystem: true,
     activeRelocation,
   }
 }
@@ -117,26 +122,79 @@ describe('RootFoldersSettings', () => {
     expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 
-  it('reauthorizes the exact configured root path only after confirmation', async () => {
-    const folder = rootFolder(null)
+  it.each([
+    ['Healthy', 'Healthy', true, false],
+    ['Missing', 'Missing', false, false],
+    ['Unavailable', 'Unavailable', false, false],
+    ['Unconfirmed', 'Needs confirmation', false, true],
+  ] as const)(
+    'renders %s storage state with the correct actions',
+    async (storageState, label, canMutateFilesystem, canConfirmCurrentFolder) => {
+      const folder = {
+        ...rootFolder(null),
+        storageState,
+        storageReason:
+          storageState === 'Healthy'
+            ? ('None' as const)
+            : storageState === 'Missing'
+              ? ('PathMissing' as const)
+              : storageState === 'Unconfirmed'
+                ? ('NoAuthorizedIdentity' as const)
+                : ('AccessDenied' as const),
+        storageMessage:
+          storageState === 'Healthy' ? null : `Storage is ${storageState.toLowerCase()}.`,
+        canMutateFilesystem,
+        canConfirmCurrentFolder,
+        confirmationToken: canConfirmCurrentFolder ? 'observation-token' : null,
+      }
+      vi.mocked(apiService.getRootFolders).mockResolvedValue([folder])
+      const pinia = createPinia()
+      setActivePinia(pinia)
+      const wrapper = mount(RootFoldersSettings, { global: { plugins: [pinia] } })
+      await flushPromises()
+
+      expect(wrapper.text()).toContain(label)
+      expect(wrapper.get('[data-cy="scan-unmatched"]').attributes('disabled') !== undefined).toBe(
+        !canMutateFilesystem,
+      )
+      expect(wrapper.find('[data-cy="confirm-root-folder"]').exists()).toBe(canConfirmCurrentFolder)
+      wrapper.unmount()
+    },
+  )
+
+  it('confirms the exact observed folder generation only when confirmation is available', async () => {
+    const folder = {
+      ...rootFolder(null),
+      storageState: 'Changed' as const,
+      storageReason: 'IdentityMismatch' as const,
+      storageMessage: 'The folder at this location changed.',
+      canConfirmCurrentFolder: true,
+      canMutateFilesystem: false,
+      confirmationToken: 'observation-token',
+    }
     vi.mocked(apiService.getRootFolders).mockResolvedValue([folder])
-    vi.mocked(apiService.reauthorizeRootFolderIdentity).mockResolvedValue(folder)
+    vi.mocked(apiService.confirmRootFolder).mockResolvedValue(folder)
     const pinia = createPinia()
     setActivePinia(pinia)
     const wrapper = mount(RootFoldersSettings, { global: { plugins: [pinia] } })
     await flushPromises()
 
-    const action = wrapper.get('[data-cy="reauthorize-root-identity"]')
+    expect(wrapper.text()).toContain('Folder changed')
+    const action = wrapper.get('[data-cy="confirm-root-folder"]')
     await action.trigger('click')
 
-    const displayedPath = wrapper.get('[data-testid="root-reauthorization-path"]')
+    const displayedPath = wrapper.get('[data-testid="root-folder-confirmation-path"]')
     expect(displayedPath.element.textContent).toBe(folder.path)
     const confirm = wrapper.get('.modal-delete-button')
-    expect(confirm.text()).toContain('Reauthorize root')
+    expect(confirm.text()).toContain('Confirm folder')
     await confirm.trigger('click')
     await flushPromises()
 
-    expect(apiService.reauthorizeRootFolderIdentity).toHaveBeenCalledWith(folder.id, folder.path)
+    expect(apiService.confirmRootFolder).toHaveBeenCalledWith(
+      folder.id,
+      folder.path,
+      folder.confirmationToken,
+    )
   })
 
   it('keeps ordinary retry separate for an authorized relocation', async () => {
@@ -146,7 +204,7 @@ describe('RootFoldersSettings', () => {
     const wrapper = mount(RootFoldersSettings, { global: { plugins: [pinia] } })
     await flushPromises()
 
-    expect(wrapper.find('[data-cy="reauthorize-relocation-target"]').exists()).toBe(false)
+    expect(wrapper.find('[data-cy="confirm-root-folder"]').exists()).toBe(false)
     expect(wrapper.findAll('button').some((button) => button.text().trim() === 'Retry')).toBe(true)
   })
 
@@ -157,7 +215,7 @@ describe('RootFoldersSettings', () => {
     const wrapper = mount(RootFoldersSettings, { global: { plugins: [pinia] } })
     await flushPromises()
 
-    expect(wrapper.find('[data-cy="reauthorize-relocation-target"]').exists()).toBe(false)
+    expect(wrapper.find('[data-cy="confirm-root-folder"]').exists()).toBe(false)
     expect(wrapper.findAll('button').some((button) => button.text().trim() === 'Retry')).toBe(false)
   })
 })

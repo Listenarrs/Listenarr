@@ -6,8 +6,11 @@ namespace Listenarr.Infrastructure.Library.Moving;
 
 internal sealed partial class EfMoveExecutionStore(
     IDbContextFactory<ListenArrDbContext> dbContextFactory,
-    TimeProvider timeProvider) : IMoveExecutionStore
+    TimeProvider timeProvider,
+    IFileSystemSemanticsResolver? semanticsResolver = null) : IMoveExecutionStore
 {
+    private readonly IFileSystemSemanticsResolver _semanticsResolver =
+        semanticsResolver ?? new FileSystemSemanticsResolver();
     internal Func<Task>? AfterMarkerlessStateLoadedForTestAsync { get; set; }
 
     public Task EnsureLeaseOwnedAsync(
@@ -123,7 +126,10 @@ internal sealed partial class EfMoveExecutionStore(
                     {
                         job.SourcePath,
                         job.RequestedPath,
+                        job.SourceIdentityBoundary,
+                        job.SourceCaseSensitivityMode,
                         job.TargetIdentityBoundary,
+                        job.TargetCaseSensitivityMode,
                         job.RelocationId
                     })
                     .SingleOrDefaultAsync(cancellationToken);
@@ -151,11 +157,26 @@ internal sealed partial class EfMoveExecutionStore(
                     targetSemantics,
                     "Persisted move identity changed before a filesystem mutation.",
                     "Persisted move identity became invalid before a filesystem mutation.");
-                if (string.IsNullOrWhiteSpace(state.TargetIdentityBoundary))
+                if (string.IsNullOrWhiteSpace(state.SourceIdentityBoundary)
+                    || !state.SourceCaseSensitivityMode.HasValue
+                    || string.IsNullOrWhiteSpace(state.TargetIdentityBoundary)
+                    || !state.TargetCaseSensitivityMode.HasValue)
                 {
                     throw new MoveNeedsAttentionException(
-                        "The move target has no durable authorization boundary.");
+                        "The move lacks durable source or target filesystem semantics authorization.");
                 }
+                await EnsureLiveFilesystemSemanticsAsync(
+                    state.SourceIdentityBoundary,
+                    state.SourceCaseSensitivityMode.Value,
+                    sourceSemantics,
+                    "source",
+                    cancellationToken);
+                await EnsureLiveFilesystemSemanticsAsync(
+                    state.TargetIdentityBoundary,
+                    state.TargetCaseSensitivityMode.Value,
+                    targetSemantics,
+                    "target",
+                    cancellationToken);
                 await EnsureTargetBoundaryGenerationAuthorizedAsync(
                     db,
                     jobId,

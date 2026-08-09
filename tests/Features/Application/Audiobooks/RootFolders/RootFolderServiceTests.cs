@@ -57,6 +57,92 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
         }
 
         [Fact]
+        public async Task Create_TargetReplacedAfterIdentityCapture_PersistsOriginalAuthorityAndMarksStorageUnsafe()
+        {
+            var parent = Path.Join(
+                Path.GetTempPath(),
+                "listenarr-tests",
+                $"root-create-replaced-{Guid.NewGuid():N}");
+            var rootPath = Path.Join(parent, "library");
+            Directory.CreateDirectory(rootPath);
+            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+            var repository = new EfRootFolderRepository(
+                new TestDbFactory(options),
+                Mock.Of<ILogger<EfRootFolderRepository>>());
+            var service = new RootFolderService(
+                repository,
+                null,
+                semanticsResolver: new FileSystemSemanticsResolver(),
+                directoryObjectIdentityResolver: new DirectoryObjectIdentityResolver());
+            service.AfterInitialDirectoryIdentityCapturedForTest = () =>
+            {
+                Directory.Move(rootPath, Path.Join(parent, "original"));
+                Directory.CreateDirectory(rootPath);
+            };
+
+            var created = await service.CreateAsync(new RootFolder
+            {
+                Name = "Library",
+                Path = rootPath,
+                CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto
+            });
+
+            Assert.Equal(ManagedDirectoryIdentity.CurrentVersion, created.DirectoryObjectIdentityVersion);
+            Assert.False(string.IsNullOrWhiteSpace(created.DirectoryObjectIdentity));
+            Assert.False(string.IsNullOrWhiteSpace(created.DirectoryObjectIdentityUnavailableReason));
+            var health = await new RootFolderStorageHealthResolver(
+                new DirectoryObjectIdentityResolver()).ResolveAsync(created);
+            Assert.Equal(RootFolderStorageState.Changed, health.State);
+            Assert.False(health.CanMutateFilesystem);
+        }
+
+        [Fact]
+        public async Task Create_MissingTarget_DoesNotManufactureAuthorization()
+        {
+            var parent = Path.Join(
+                Path.GetTempPath(),
+                "listenarr-tests",
+                $"root-create-missing-{Guid.NewGuid():N}");
+            Directory.CreateDirectory(parent);
+            var missingPath = Path.Join(parent, "library");
+            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+            var repository = new EfRootFolderRepository(
+                new TestDbFactory(options),
+                Mock.Of<ILogger<EfRootFolderRepository>>());
+            var service = new RootFolderService(
+                repository,
+                null,
+                semanticsResolver: new FileSystemSemanticsResolver(),
+                directoryObjectIdentityResolver: new DirectoryObjectIdentityResolver());
+
+            var created = await service.CreateAsync(new RootFolder
+            {
+                Name = "Future Library",
+                Path = missingPath,
+                CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto
+            });
+
+            Assert.Null(created.DirectoryObjectIdentityVersion);
+            Assert.Null(created.DirectoryObjectIdentity);
+            Assert.False(string.IsNullOrWhiteSpace(created.DirectoryObjectIdentityUnavailableReason));
+            var healthResolver = new RootFolderStorageHealthResolver(
+                new DirectoryObjectIdentityResolver());
+            var missing = await healthResolver.ResolveAsync(created);
+            Assert.Equal(RootFolderStorageState.Missing, missing.State);
+            Assert.False(missing.CanConfirmCurrentFolder);
+
+            Directory.CreateDirectory(missingPath);
+            var appeared = await healthResolver.ResolveAsync(created);
+            Assert.Equal(RootFolderStorageState.Unconfirmed, appeared.State);
+            Assert.True(appeared.CanConfirmCurrentFolder);
+            Assert.False(string.IsNullOrWhiteSpace(appeared.ConfirmationToken));
+        }
+
+        [Fact]
         public async Task Create_Throws_WhenPathDuplicate()
         {
             var options = new DbContextOptionsBuilder<ListenArrDbContext>()
@@ -163,252 +249,6 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
         }
 
         [Fact]
-        public async Task ReauthorizeDirectoryIdentity_MissingLegacyMarker_UsesDatabaseOnlyGeneration()
-        {
-            var directory = CreateTempDirectory("root-identity-reauthorize-missing");
-            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
-                .UseInMemoryDatabase(Guid.NewGuid().ToString())
-                .Options;
-            var repository = new EfRootFolderRepository(
-                new TestDbFactory(options),
-                Mock.Of<ILogger<EfRootFolderRepository>>());
-            var identityResolver = new DirectoryObjectIdentityResolver();
-            var originalIdentity = await identityResolver.ResolveAsync(directory);
-            Assert.True(originalIdentity.IsAvailable, originalIdentity.UnavailableReason);
-            var semantics = FileSystemPathSemantics.CurrentHostDefault;
-            var root = new RootFolder
-            {
-                Name = "Library",
-                Path = directory,
-                CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto,
-                ResolvedCaseSensitivity = semantics.CaseSensitivity,
-                PathIdentityState = PathIdentityState.Valid,
-                PathIdentityKey = FileSystemPathIdentity.CreateKey("root", directory, semantics),
-                DirectoryObjectIdentityVersion = originalIdentity.Version,
-                DirectoryObjectIdentity = originalIdentity.Value
-            };
-            await repository.AddAsync(root);
-            var service = new RootFolderService(
-                repository,
-                null,
-                directoryObjectIdentityResolver: identityResolver);
-
-            var updated = await service.ReauthorizeDirectoryIdentityAsync(
-                root.Id,
-                directory);
-            Assert.Equal(ManagedDirectoryIdentity.CurrentVersion, updated.DirectoryObjectIdentityVersion);
-            Assert.Equal(originalIdentity.Value, updated.DirectoryObjectIdentity);
-            Assert.Null(updated.DirectoryObjectIdentityUnavailableReason);
-            var persisted = await repository.GetByIdAsync(root.Id);
-            Assert.Equal(updated.DirectoryObjectIdentity, persisted!.DirectoryObjectIdentity);
-        }
-
-        [Fact]
-        public async Task ReauthorizeDirectoryIdentity_PersistenceFailure_DoesNotWriteFilesystemIdentityMarker()
-        {
-            var directory = CreateTempDirectory("root-identity-reauthorize-compensation");
-            var semantics = FileSystemPathSemantics.CurrentHostDefault;
-            RootFolder StoredRoot() => new()
-            {
-                Id = 7,
-                Name = "Library",
-                Path = directory,
-                CaseSensitivityMode = semantics.CaseSensitivity
-                    == FileSystemCaseSensitivity.Insensitive
-                        ? FileSystemCaseSensitivityMode.Insensitive
-                        : FileSystemCaseSensitivityMode.Sensitive,
-                ResolvedCaseSensitivity = semantics.CaseSensitivity,
-                PathIdentityState = PathIdentityState.Valid,
-                PathIdentityKey = FileSystemPathIdentity.CreateKey(
-                    "root",
-                    directory,
-                    semantics),
-                DirectoryObjectIdentityVersion = ManagedDirectoryIdentity.CurrentVersion,
-                DirectoryObjectIdentity = "listenarr-directory-v2:00000000000000000000000000000000:"
-                    + new string('0', 64)
-            };
-            var repository = new Mock<IRootFolderRepository>();
-            repository.SetupSequence(repo => repo.GetByIdAsync(7))
-                .ReturnsAsync(StoredRoot())
-                .ReturnsAsync(StoredRoot());
-            repository.Setup(repo => repo.GetAllAudiobookIdsAsync(It.IsAny<CancellationToken>()))
-                .ReturnsAsync([]);
-            repository.Setup(repo => repo.UpdateAsync(It.IsAny<RootFolder>()))
-                .ThrowsAsync(new InvalidOperationException("Injected persistence failure"));
-            var moveQueue = new Mock<IMoveQueueService>();
-            moveQueue.Setup(queue => queue.GetFilesystemBlockingJobsAsync(
-                    It.IsAny<CancellationToken>()))
-                .ReturnsAsync([]);
-            var relocationService = new Mock<IRootFolderRelocationService>();
-            relocationService.Setup(service => service.GetActiveForRootAsync(7))
-                .ReturnsAsync((RootFolderRelocation?)null);
-            var service = new RootFolderService(
-                repository.Object,
-                null,
-                moveQueue: moveQueue.Object,
-                relocationService: relocationService.Object,
-                directoryObjectIdentityResolver: new DirectoryObjectIdentityResolver());
-
-            await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                service.ReauthorizeDirectoryIdentityAsync(7, directory));
-        }
-
-        [Fact]
-        public async Task ReauthorizeDirectoryIdentity_CommittedThenThrow_LeavesDatabaseOutcomeToRepositoryContract()
-        {
-            var directory = CreateTempDirectory("root-identity-reauthorize-ambiguous-commit");
-            var semantics = FileSystemPathSemantics.CurrentHostDefault;
-            RootFolder StoredRoot() => new()
-            {
-                Id = 8,
-                Name = "Library",
-                Path = directory,
-                CaseSensitivityMode = semantics.CaseSensitivity
-                    == FileSystemCaseSensitivity.Insensitive
-                        ? FileSystemCaseSensitivityMode.Insensitive
-                        : FileSystemCaseSensitivityMode.Sensitive,
-                ResolvedCaseSensitivity = semantics.CaseSensitivity,
-                PathIdentityState = PathIdentityState.Valid,
-                PathIdentityKey = FileSystemPathIdentity.CreateKey(
-                    "root",
-                    directory,
-                    semantics),
-                DirectoryObjectIdentityVersion = ManagedDirectoryIdentity.CurrentVersion,
-                DirectoryObjectIdentity = "listenarr-directory-v2:00000000000000000000000000000000:"
-                    + new string('0', 64)
-            };
-            RootFolder? durableRoot = null;
-            var readCount = 0;
-            var repository = new Mock<IRootFolderRepository>();
-            repository.Setup(repo => repo.GetByIdAsync(8))
-                .ReturnsAsync(() =>
-                {
-                    readCount++;
-                    return readCount == 1
-                        ? StoredRoot()
-                        : durableRoot;
-                });
-            repository.Setup(repo => repo.GetAllAudiobookIdsAsync(It.IsAny<CancellationToken>()))
-                .ReturnsAsync([]);
-            repository.Setup(repo => repo.UpdateAsync(It.IsAny<RootFolder>()))
-                .Callback<RootFolder>(updated =>
-                {
-                    durableRoot = new RootFolder
-                    {
-                        Id = updated.Id,
-                        Name = updated.Name,
-                        Path = updated.Path,
-                        CaseSensitivityMode = updated.CaseSensitivityMode,
-                        ResolvedCaseSensitivity = updated.ResolvedCaseSensitivity,
-                        PathIdentityState = updated.PathIdentityState,
-                        PathIdentityKey = updated.PathIdentityKey,
-                        DirectoryObjectIdentityVersion = updated.DirectoryObjectIdentityVersion,
-                        DirectoryObjectIdentity = updated.DirectoryObjectIdentity,
-                        DirectoryObjectIdentityUnavailableReason = updated.DirectoryObjectIdentityUnavailableReason,
-                        UpdatedAt = updated.UpdatedAt
-                    };
-                })
-                .ThrowsAsync(new IOException("Injected post-commit transport failure"));
-            var moveQueue = new Mock<IMoveQueueService>();
-            moveQueue.Setup(queue => queue.GetFilesystemBlockingJobsAsync(
-                    It.IsAny<CancellationToken>()))
-                .ReturnsAsync([]);
-            var relocationService = new Mock<IRootFolderRelocationService>();
-            relocationService.Setup(service => service.GetActiveForRootAsync(8))
-                .ReturnsAsync((RootFolderRelocation?)null);
-            var identityResolver = new DirectoryObjectIdentityResolver();
-            var service = new RootFolderService(
-                repository.Object,
-                null,
-                moveQueue: moveQueue.Object,
-                relocationService: relocationService.Object,
-                directoryObjectIdentityResolver: identityResolver);
-
-            await Assert.ThrowsAsync<IOException>(() =>
-                service.ReauthorizeDirectoryIdentityAsync(8, directory));
-
-            Assert.NotNull(durableRoot);
-            var existing = await identityResolver.ResolveExistingAsync(
-                directory,
-                durableRoot!.DirectoryObjectIdentityVersion!.Value,
-                durableRoot.DirectoryObjectIdentity!);
-            Assert.Equal(durableRoot.DirectoryObjectIdentity, existing.Value);
-        }
-
-        [Fact]
-        public async Task ReauthorizeDirectoryIdentity_ExpectedPathChanged_DoesNotEnroll()
-        {
-            var directory = CreateTempDirectory("root-identity-reauthorize-stale-path");
-            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
-                .UseInMemoryDatabase(Guid.NewGuid().ToString())
-                .Options;
-            var repository = new EfRootFolderRepository(
-                new TestDbFactory(options),
-                Mock.Of<ILogger<EfRootFolderRepository>>());
-            var semantics = FileSystemPathSemantics.CurrentHostDefault;
-            var root = new RootFolder
-            {
-                Name = "Library",
-                Path = directory,
-                ResolvedCaseSensitivity = semantics.CaseSensitivity,
-                PathIdentityState = PathIdentityState.Valid,
-                PathIdentityKey = FileSystemPathIdentity.CreateKey("root", directory, semantics)
-            };
-            await repository.AddAsync(root);
-            var service = new RootFolderService(
-                repository,
-                null,
-                directoryObjectIdentityResolver: new DirectoryObjectIdentityResolver());
-
-            await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                service.ReauthorizeDirectoryIdentityAsync(
-                    root.Id,
-                    FileUtils.GetAbsolutePath("different-root")));
-        }
-
-        [Fact]
-        public async Task ReauthorizeDirectoryIdentity_ActiveMoveTouchingRoot_IsBlockedBeforeEnrollment()
-        {
-            var directory = CreateTempDirectory("root-identity-reauthorize-active-move");
-            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
-                .UseInMemoryDatabase(Guid.NewGuid().ToString())
-                .Options;
-            var repository = new EfRootFolderRepository(
-                new TestDbFactory(options),
-                Mock.Of<ILogger<EfRootFolderRepository>>());
-            var semantics = FileSystemPathSemantics.CurrentHostDefault;
-            var root = new RootFolder
-            {
-                Name = "Library",
-                Path = directory,
-                ResolvedCaseSensitivity = semantics.CaseSensitivity,
-                PathIdentityState = PathIdentityState.Valid,
-                PathIdentityKey = FileSystemPathIdentity.CreateKey("root", directory, semantics)
-            };
-            await repository.AddAsync(root);
-            var moveQueue = new Mock<IMoveQueueService>();
-            moveQueue.Setup(queue => queue.GetFilesystemBlockingJobsAsync(
-                    It.IsAny<CancellationToken>()))
-                .ReturnsAsync([
-                    new MoveJob
-                    {
-                        Id = Guid.NewGuid(),
-                        SourcePath = Path.Join(directory, "Author", "Title"),
-                        RequestedPath = FileUtils.GetAbsolutePath("elsewhere"),
-                        Status = MoveJobStatus.Running
-                    }
-                ]);
-            var service = new RootFolderService(
-                repository,
-                null,
-                moveQueue: moveQueue.Object,
-                directoryObjectIdentityResolver: new DirectoryObjectIdentityResolver());
-
-            await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                service.ReauthorizeDirectoryIdentityAsync(root.Id, directory));
-        }
-
-        [Fact]
         public async Task Update_CaseSensitivityChange_RequiresIdentityMigrationWorkflow()
         {
             var options = new DbContextOptionsBuilder<ListenArrDbContext>()
@@ -439,6 +279,56 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
                 }));
 
             Assert.Contains("path-change", exception.Message, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public async Task Update_MetadataOnly_WhenAuthorizedStorageIsOffline_DoesNotRequireFilesystemAccess()
+        {
+            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+            var repository = new EfRootFolderRepository(
+                new TestDbFactory(options),
+                Mock.Of<ILogger<EfRootFolderRepository>>());
+            var semantics = FileSystemPathSemantics.CurrentHostDefault;
+            var root = new RootFolder
+            {
+                Name = "Library",
+                Path = rootPath,
+                CaseSensitivityMode = semantics.CaseSensitivity
+                    == FileSystemCaseSensitivity.Sensitive
+                        ? FileSystemCaseSensitivityMode.Sensitive
+                        : FileSystemCaseSensitivityMode.Insensitive,
+                ResolvedCaseSensitivity = semantics.CaseSensitivity,
+                PathIdentityState = PathIdentityState.Valid,
+                PathIdentityKey = FileSystemPathIdentity.CreateKey("root", rootPath, semantics),
+                DirectoryObjectIdentityVersion = ManagedDirectoryIdentity.CurrentVersion,
+                DirectoryObjectIdentity = "listenarr-directory-v2:00000000000000000000000000000000:"
+                    + new string('0', 64),
+                DirectoryObjectIdentityUnavailableReason = "The storage location is currently missing."
+            };
+            await repository.AddAsync(root);
+            var identityResolver = new Mock<IDirectoryObjectIdentityResolver>(MockBehavior.Strict);
+            var service = new RootFolderService(
+                repository,
+                null,
+                directoryObjectIdentityResolver: identityResolver.Object);
+
+            var updated = await service.UpdateAsync(new RootFolder
+            {
+                Id = root.Id,
+                Name = "Renamed Library",
+                Path = root.Path,
+                IsDefault = root.IsDefault,
+                CaseSensitivityMode = root.CaseSensitivityMode
+            });
+
+            Assert.Equal("Renamed Library", updated.Name);
+            Assert.Equal(root.DirectoryObjectIdentity, updated.DirectoryObjectIdentity);
+            Assert.Equal(
+                "The storage location is currently missing.",
+                updated.DirectoryObjectIdentityUnavailableReason);
+            identityResolver.VerifyNoOtherCalls();
         }
 
         [Fact]
@@ -914,6 +804,45 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
 
             Assert.Equal("Renamed", updated.Name);
             Assert.True(FileUtils.AreFilesystemPathsEquivalentForCurrentOs(rootPath, updated.Path));
+        }
+
+        [Fact]
+        public async Task Delete_UnusedOfflineRoot_DoesNotRequireLiveFilesystemSemantics()
+        {
+            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+            var repository = new EfRootFolderRepository(
+                new TestDbFactory(options),
+                Mock.Of<ILogger<EfRootFolderRepository>>());
+            var semantics = FileSystemPathSemantics.CurrentHostDefault;
+            var root = new RootFolder
+            {
+                Name = "Offline Library",
+                Path = rootPath,
+                CaseSensitivityMode = semantics.CaseSensitivity
+                    == FileSystemCaseSensitivity.Sensitive
+                        ? FileSystemCaseSensitivityMode.Sensitive
+                        : FileSystemCaseSensitivityMode.Insensitive,
+                ResolvedCaseSensitivity = semantics.CaseSensitivity,
+                PathIdentityState = PathIdentityState.Valid,
+                PathIdentityKey = FileSystemPathIdentity.CreateKey("root", rootPath, semantics),
+                DirectoryObjectIdentityVersion = ManagedDirectoryIdentity.CurrentVersion,
+                DirectoryObjectIdentity = "listenarr-directory-v2:00000000000000000000000000000000:"
+                    + new string('0', 64),
+                DirectoryObjectIdentityUnavailableReason = "The storage location is currently missing."
+            };
+            await repository.AddAsync(root);
+            var semanticsResolver = new Mock<IFileSystemSemanticsResolver>(MockBehavior.Strict);
+            var service = new RootFolderService(
+                repository,
+                null,
+                semanticsResolver: semanticsResolver.Object);
+
+            await service.DeleteAsync(root.Id);
+
+            Assert.Null(await repository.GetByIdAsync(root.Id));
+            semanticsResolver.VerifyNoOtherCalls();
         }
 
         [Fact]

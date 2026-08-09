@@ -79,6 +79,88 @@ public sealed class EfAudiobookFileRepositoryTests : BaseTests
     }
 
     [Fact]
+    public async Task GetMissingMetadataAsync_ForeignLegacyRowsBeyondFirstPage_DoNotStarveHostRows()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        var foreignPrefix = OperatingSystem.IsWindows()
+            ? "/foreign/library"
+            : "C:\\foreign\\library";
+        var hostPath = OperatingSystem.IsWindows()
+            ? "C:\\library\\host.m4b"
+            : "/library/host.m4b";
+
+        await using var context = new ListenArrDbContext(options);
+        await context.Database.EnsureCreatedAsync();
+        var audiobook = new Audiobook { Title = "Copied database metadata" };
+        context.Audiobooks.Add(audiobook);
+        for (var index = 0; index < 1025; index++)
+        {
+            var separator = OperatingSystem.IsWindows() ? "/" : "\\";
+            var file = AudiobookFile.CreateUnresolved(
+                $"{foreignPrefix}{separator}foreign-{index:D4}.m4b");
+            file.Audiobook = audiobook;
+            context.AudiobookFiles.Add(file);
+        }
+
+        var hostFile = AudiobookFile.CreateUnresolved(hostPath);
+        hostFile.Audiobook = audiobook;
+        context.AudiobookFiles.Add(hostFile);
+        await context.SaveChangesAsync();
+
+        var repository = new EfAudiobookFileRepository(context);
+        var candidates = await repository.GetMissingMetadataAsync(1);
+
+        var candidate = Assert.Single(candidates);
+        Assert.Equal(hostFile.Id, candidate.Id);
+        Assert.Equal(hostPath, candidate.Path);
+    }
+
+    [Fact]
+    public async Task GetMissingMetadataAsync_RelativeRowsUnderForeignBase_DoNotStarveHostRows()
+    {
+        var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+        var foreignBase = OperatingSystem.IsWindows()
+            ? "/foreign/library"
+            : "C:\\foreign\\library";
+        var hostPath = OperatingSystem.IsWindows()
+            ? "C:\\library\\host-relative-test.m4b"
+            : "/library/host-relative-test.m4b";
+
+        await using var context = new ListenArrDbContext(options);
+        var foreignAudiobook = new Audiobook
+        {
+            Title = "Copied database relative metadata",
+            BasePath = foreignBase
+        };
+        context.Audiobooks.Add(foreignAudiobook);
+        for (var index = 0; index < 1025; index++)
+        {
+            var file = AudiobookFile.CreateUnresolved($"foreign-{index:D4}.m4b");
+            file.Audiobook = foreignAudiobook;
+            context.AudiobookFiles.Add(file);
+        }
+
+        var hostAudiobook = new Audiobook { Title = "Current host metadata" };
+        var hostFile = AudiobookFile.CreateUnresolved(hostPath);
+        hostFile.Audiobook = hostAudiobook;
+        context.AudiobookFiles.Add(hostFile);
+        await context.SaveChangesAsync();
+
+        var repository = new EfAudiobookFileRepository(context);
+        var candidates = await repository.GetMissingMetadataAsync(1);
+
+        var candidate = Assert.Single(candidates);
+        Assert.Equal(hostFile.Id, candidate.Id);
+        Assert.Equal(hostPath, candidate.Path);
+    }
+
+    [Fact]
     public async Task ReplacePhysicalGenerationAsync_RelationalUpdate_SynchronizesTrackedEntity()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");

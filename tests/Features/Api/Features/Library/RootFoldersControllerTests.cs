@@ -90,7 +90,6 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             public List<RootFolder> Store { get; } = new List<RootFolder>();
             public bool ThrowPersistenceConflictOnDelete { get; set; }
             public Exception? CreateException { get; set; }
-            public Exception? ReauthorizeException { get; set; }
 
             public Task<RootFolder?> GetDefaultAsync() => Task.FromResult(Store.Count > 0 ? Store.First() : null);
 
@@ -126,30 +125,6 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 if (root.Path?.Contains("/invalid/") == true) throw new InvalidOperationException("Invalid path")
 ;
                 Store[idx] = root;
-                return Task.FromResult(root);
-            }
-
-            public Task<RootFolder> ReauthorizeDirectoryIdentityAsync(
-                int id,
-                string expectedCurrentPath,
-                CancellationToken cancellationToken = default)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (ReauthorizeException != null)
-                {
-                    throw ReauthorizeException;
-                }
-
-                var root = Store.Find(item => item.Id == id)
-                    ?? throw new KeyNotFoundException("Root folder not found");
-                if (!string.Equals(
-                        root.Path,
-                        expectedCurrentPath,
-                        StringComparison.Ordinal))
-                {
-                    throw new InvalidOperationException("Root folder path changed");
-                }
-
                 return Task.FromResult(root);
             }
 
@@ -1423,59 +1398,82 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         }
 
         [Fact]
-        public async Task ReauthorizeIdentity_ConfirmedCurrentPath_ReturnsRoot()
+        public async Task ConfirmCurrentFolder_ConfirmedGeneration_ReturnsRoot()
         {
-            var path = FileUtils.GetAbsolutePath("reauthorize-root");
+            var path = FileUtils.GetAbsolutePath("confirm-root");
+            const string confirmationToken = "token";
             var svc = new FakeService();
-            svc.Store.Add(new RootFolder { Id = 1, Name = "R", Path = path });
+            var confirmedRoot = new RootFolder { Id = 1, Name = "R", Path = path };
+            svc.Store.Add(confirmedRoot);
+            var confirmationService = new Mock<IRootFolderStorageConfirmationService>(MockBehavior.Strict);
+            confirmationService
+                .Setup(service => service.ConfirmCurrentFolderAsync(
+                    1,
+                    path,
+                    confirmationToken,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(confirmedRoot);
             var db = CreateDb();
             var controller = new RootFoldersController(
                 svc,
                 _fakeQueue,
                 new EfAudiobookFileRepository(db),
                 new AudiobookRepository(db),
-                new LocalFileSystem());
+                new LocalFileSystem(),
+                storageConfirmationService: confirmationService.Object);
 
-            var result = await controller.ReauthorizeIdentity(
+            var result = await controller.ConfirmCurrentFolder(
                 1,
-                new RootFolderIdentityReauthorizationRequest(path),
+                new RootFolderConfirmationRequest(path, confirmationToken),
                 CancellationToken.None);
 
             var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(result);
             var root = Assert.IsType<RootFolderDto>(ok.Value);
             Assert.Equal(1, root.Id);
             Assert.Equal(path, root.Path);
+            confirmationService.VerifyAll();
         }
 
         [Fact]
-        public async Task ReauthorizeIdentity_BlockedState_ReturnsConflictCode()
+        public async Task ConfirmCurrentFolder_BlockedState_ReturnsConflictCode()
         {
-            var path = FileUtils.GetAbsolutePath("reauthorize-blocked-root");
-            var svc = new FakeService
-            {
-                ReauthorizeException = new InvalidOperationException("blocked")
-            };
-            svc.Store.Add(new RootFolder { Id = 1, Name = "R", Path = path });
+            var path = FileUtils.GetAbsolutePath("confirm-blocked-root");
+            const string confirmationToken = "token";
+            var svc = new FakeService();
+            var confirmationService = new Mock<IRootFolderStorageConfirmationService>(MockBehavior.Strict);
+            confirmationService
+                .Setup(service => service.ConfirmCurrentFolderAsync(
+                    1,
+                    path,
+                    confirmationToken,
+                    It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new InvalidOperationException("blocked"));
             var db = CreateDb();
             var controller = new RootFoldersController(
                 svc,
                 _fakeQueue,
                 new EfAudiobookFileRepository(db),
                 new AudiobookRepository(db),
-                new LocalFileSystem());
+                new LocalFileSystem(),
+                storageConfirmationService: confirmationService.Object);
 
-            var result = await controller.ReauthorizeIdentity(
+            var result = await controller.ConfirmCurrentFolder(
                 1,
-                new RootFolderIdentityReauthorizationRequest(path),
+                new RootFolderConfirmationRequest(path, confirmationToken),
                 CancellationToken.None);
 
             var conflict = Assert.IsType<Microsoft.AspNetCore.Mvc.ConflictObjectResult>(result);
             var json = JsonSerializer.Serialize(conflict.Value);
-            Assert.Contains("root_identity_reauthorization_blocked", json, StringComparison.Ordinal);
+            Assert.Contains("root_folder_confirmation_blocked", json, StringComparison.Ordinal);
+            confirmationService.VerifyAll();
         }
 
-        [Fact]
-        public async Task ReauthorizeIdentity_MissingConfirmation_ReturnsBadRequest()
+        [Theory]
+        [InlineData("", "token")]
+        [InlineData("path", "")]
+        public async Task ConfirmCurrentFolder_MissingConfirmationData_ReturnsBadRequest(
+            string expectedPath,
+            string confirmationToken)
         {
             var svc = new FakeService();
             var db = CreateDb();
@@ -1486,9 +1484,9 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 new AudiobookRepository(db),
                 new LocalFileSystem());
 
-            var result = await controller.ReauthorizeIdentity(
+            var result = await controller.ConfirmCurrentFolder(
                 1,
-                new RootFolderIdentityReauthorizationRequest(" "),
+                new RootFolderConfirmationRequest(expectedPath, confirmationToken),
                 CancellationToken.None);
 
             Assert.IsType<Microsoft.AspNetCore.Mvc.BadRequestObjectResult>(result);
@@ -1526,7 +1524,9 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             IAudiobookRepository audiobookRepository,
             IFileSystem fileSystem,
             IFileSystemSemanticsResolver? semanticsResolver = null,
-            IRootFolderRelocationService? relocationService = null)
+            IRootFolderRelocationService? relocationService = null,
+            IRootFolderStorageHealthResolver? storageHealthResolver = null,
+            IRootFolderStorageConfirmationService? storageConfirmationService = null)
             : base(
                 service,
                 unmatchedQueue,
@@ -1534,9 +1534,25 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 audiobookRepository,
                 fileSystem,
                 semanticsResolver ?? RootFoldersControllerTests.BuildSemanticsResolver(),
-                relocationService ?? Mock.Of<IRootFolderRelocationService>())
+                relocationService ?? Mock.Of<IRootFolderRelocationService>(),
+                storageHealthResolver ?? new HealthyStorageResolver(),
+                storageConfirmationService ?? Mock.Of<IRootFolderStorageConfirmationService>())
         {
         }
 
+        private sealed class HealthyStorageResolver : IRootFolderStorageHealthResolver
+        {
+            public Task<RootFolderStorageObservation> ResolveAsync(
+                RootFolder root,
+                CancellationToken cancellationToken = default) =>
+                Task.FromResult(new RootFolderStorageObservation(
+                    RootFolderStorageState.Healthy,
+                    RootFolderStorageReason.None,
+                    null,
+                    CanConfirmCurrentFolder: false,
+                    CanChangePath: true,
+                    CanMutateFilesystem: true,
+                    ConfirmationToken: null));
+        }
     }
 }

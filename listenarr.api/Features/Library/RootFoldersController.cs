@@ -30,7 +30,13 @@ namespace Listenarr.Api.Features.Library
         string CaseSensitivityMode,
         string ResolvedCaseSensitivity,
         string PathIdentityState,
-        string? PathIdentityKey,
+        string StorageState,
+        string StorageReason,
+        string? StorageMessage,
+        bool CanConfirmCurrentFolder,
+        bool CanChangePath,
+        bool CanMutateFilesystem,
+        string? ConfirmationToken,
         DateTime CreatedAt,
         DateTime? UpdatedAt,
         RootFolderPathChangeResult? ActiveRelocation);
@@ -49,8 +55,9 @@ namespace Listenarr.Api.Features.Library
         FileSystemCaseSensitivityMode TargetCaseSensitivityMode,
         string ExpectedCurrentPath);
 
-    public sealed record RootFolderIdentityReauthorizationRequest(
-        string ExpectedCurrentPath);
+    public sealed record RootFolderConfirmationRequest(
+        string ExpectedCurrentPath,
+        string ConfirmationToken);
 
     [ApiController]
     [Route("api/v{version:apiVersion}/rootfolders")]
@@ -64,6 +71,8 @@ namespace Listenarr.Api.Features.Library
         private readonly IFileSystem _fileSystem;
         private readonly IFileSystemSemanticsResolver _semanticsResolver;
         private readonly IRootFolderRelocationService _relocationService;
+        private readonly IRootFolderStorageHealthResolver _storageHealthResolver;
+        private readonly IRootFolderStorageConfirmationService _storageConfirmationService;
 
         public RootFoldersController(
             IRootFolderService service,
@@ -72,7 +81,9 @@ namespace Listenarr.Api.Features.Library
             IAudiobookRepository audiobookRepository,
             IFileSystem fileSystem,
             IFileSystemSemanticsResolver semanticsResolver,
-            IRootFolderRelocationService relocationService)
+            IRootFolderRelocationService relocationService,
+            IRootFolderStorageHealthResolver storageHealthResolver,
+            IRootFolderStorageConfirmationService storageConfirmationService)
         {
             _service = service;
             _unmatchedQueue = unmatchedQueue;
@@ -81,6 +92,8 @@ namespace Listenarr.Api.Features.Library
             _fileSystem = fileSystem;
             _semanticsResolver = semanticsResolver;
             _relocationService = relocationService ?? throw new ArgumentNullException(nameof(relocationService));
+            _storageHealthResolver = storageHealthResolver ?? throw new ArgumentNullException(nameof(storageHealthResolver));
+            _storageConfirmationService = storageConfirmationService ?? throw new ArgumentNullException(nameof(storageConfirmationService));
         }
 
         /// <summary>
@@ -248,25 +261,27 @@ namespace Listenarr.Api.Features.Library
             }
         }
 
-        [HttpPost("{id}/reauthorize-identity")]
-        public async Task<IActionResult> ReauthorizeIdentity(
+        [HttpPost("{id}/confirm-current-folder")]
+        public async Task<IActionResult> ConfirmCurrentFolder(
             int id,
-            [FromBody] RootFolderIdentityReauthorizationRequest request,
+            [FromBody] RootFolderConfirmationRequest request,
             CancellationToken cancellationToken)
         {
-            if (string.IsNullOrWhiteSpace(request.ExpectedCurrentPath))
+            if (string.IsNullOrWhiteSpace(request.ExpectedCurrentPath)
+                || string.IsNullOrWhiteSpace(request.ConfirmationToken))
             {
                 return BadRequest(new
                 {
-                    message = "The current root folder path must be confirmed."
+                    message = "The current root folder and confirmation token are required."
                 });
             }
 
             try
             {
-                var root = await _service.ReauthorizeDirectoryIdentityAsync(
+                var root = await _storageConfirmationService.ConfirmCurrentFolderAsync(
                     id,
                     request.ExpectedCurrentPath,
+                    request.ConfirmationToken,
                     cancellationToken);
                 return Ok(await MapAsync(root));
             }
@@ -278,15 +293,15 @@ namespace Listenarr.Api.Features.Library
             {
                 return BadRequest(new
                 {
-                    message = "The root folder physical identity reauthorization request is invalid."
+                    message = "The root folder confirmation request is invalid."
                 });
             }
             catch (InvalidOperationException)
             {
                 return Conflict(new
                 {
-                    message = "The root folder physical identity cannot be reauthorized in its current state.",
-                    code = "root_identity_reauthorization_blocked"
+                    message = "The current root folder could not be confirmed. Refresh its storage state and try again.",
+                    code = "root_folder_confirmation_blocked"
                 });
             }
         }
@@ -461,35 +476,5 @@ namespace Listenarr.Api.Features.Library
             return Ok(new { lastScannedAt = (DateTime?)null, items = new List<UnmatchedFileResult>() });
         }
 
-        private async Task<RootFolderDto> MapAsync(RootFolder root)
-        {
-            RootFolderPathChangeResult? active = null;
-            var relocation = await _relocationService.GetActiveForRootAsync(root.Id);
-            if (relocation != null)
-            {
-                var relocationResult = await _relocationService.GetAsync(relocation.Id);
-                active = relocationResult == null
-                    ? null
-                    : RootFolderRelocationPublicProjection.Sanitize(relocationResult);
-            }
-
-            return new RootFolderDto(
-                root.Id,
-                root.Name,
-                root.Path,
-                FileSystemPathIdentity.TryDetectAbsoluteSyntax(
-                    root.Path,
-                    out var pathSyntax)
-                        ? pathSyntax.ToString()
-                        : null,
-                root.IsDefault,
-                root.CaseSensitivityMode.ToString(),
-                root.ResolvedCaseSensitivity.ToString(),
-                root.PathIdentityState.ToString(),
-                root.PathIdentityKey,
-                root.CreatedAt,
-                root.UpdatedAt,
-                active);
-        }
     }
 }

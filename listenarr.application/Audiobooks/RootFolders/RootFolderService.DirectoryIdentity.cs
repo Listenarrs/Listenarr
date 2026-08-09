@@ -15,80 +15,11 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Listenarr.Domain.Common;
-
 namespace Listenarr.Application.Audiobooks.RootFolders
 {
     public partial class RootFolderService
     {
-        public Task<RootFolder> ReauthorizeDirectoryIdentityAsync(
-            int id,
-            string expectedCurrentPath,
-            CancellationToken cancellationToken = default) =>
-            _mutationCoordinator.ExecuteExclusiveAsync(
-                token => ReauthorizeDirectoryIdentityCoreAsync(
-                    id,
-                    expectedCurrentPath,
-                    token),
-                cancellationToken);
-
-        private async Task<RootFolder> ReauthorizeDirectoryIdentityCoreAsync(
-            int id,
-            string expectedCurrentPath,
-            CancellationToken cancellationToken)
-        {
-            ArgumentException.ThrowIfNullOrWhiteSpace(expectedCurrentPath);
-            var root = await _repo.GetByIdAsync(id)
-                ?? throw new KeyNotFoundException("Root folder not found");
-            await EnsureNoActiveRelocationAsync(root.Id);
-
-            var persistedSemantics = RootFolderPathSemantics.ResolvePersisted(root)
-                ?? throw new InvalidOperationException(
-                    "Root filesystem semantics are unavailable; repair the persisted root path before reauthorizing its physical identity.");
-            var normalizedExpectedPath = FileUtils.NormalizeRootFolderPathForStorage(
-                expectedCurrentPath);
-            if (!FileSystemPathIdentity.AreEquivalent(
-                    root.Path,
-                    normalizedExpectedPath,
-                    persistedSemantics.Semantics))
-            {
-                throw new InvalidOperationException(
-                    "Root folder path changed before physical identity reauthorization.");
-            }
-
-            var audiobookIds = await _repo.GetAllAudiobookIdsAsync();
-            return await _audiobookOperationCoordinator.ExecuteExclusiveAsync(
-                audiobookIds,
-                async lockedToken =>
-                {
-                    await EnsureNoActiveMoveJobsTouchRootAsync(
-                        root.Path,
-                        persistedSemantics.Semantics);
-                    if (_directoryObjectIdentityResolver == null)
-                    {
-                        throw new InvalidOperationException(
-                            "Root folder physical identity cannot be reauthorized.");
-                    }
-
-                    var identity = await _directoryObjectIdentityResolver.ResolveAsync(
-                        root.Path,
-                        lockedToken);
-                    if (!identity.IsAvailable)
-                    {
-                        throw new InvalidOperationException(
-                            identity.UnavailableReason
-                                ?? "The current root directory could not be enrolled safely.");
-                    }
-
-                    root.DirectoryObjectIdentityVersion = identity.Version;
-                    root.DirectoryObjectIdentity = identity.Value;
-                    root.DirectoryObjectIdentityUnavailableReason = null;
-                    root.UpdatedAt = DateTime.UtcNow;
-                    await _repo.UpdateAsync(root);
-                    return root;
-                },
-                cancellationToken);
-        }
+        internal Action? AfterInitialDirectoryIdentityCapturedForTest { get; set; }
 
         private async Task CaptureInitialDirectoryObjectIdentityAsync(RootFolder root)
         {
@@ -101,41 +32,36 @@ namespace Listenarr.Application.Audiobooks.RootFolders
             root.DirectoryObjectIdentityUnavailableReason = resolution.UnavailableReason;
         }
 
-        private async Task ValidateExistingDirectoryObjectIdentityAsync(RootFolder root)
+        private async Task RevalidateCreatedDirectoryObjectIdentityAsync(RootFolder root)
         {
-            if (root.DirectoryObjectIdentityVersion == null
+            if (_directoryObjectIdentityResolver == null
+                || root.DirectoryObjectIdentityVersion == null
                 || string.IsNullOrWhiteSpace(root.DirectoryObjectIdentity))
             {
                 return;
             }
-            if (_directoryObjectIdentityResolver == null)
-            {
-                throw new InvalidOperationException(
-                    "Root folder physical identity cannot be validated.");
-            }
-
-            if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
-                    root.Path,
-                    out var canonicalRootPath,
-                    out var pathReason))
-            {
-                throw new InvalidOperationException(pathReason);
-            }
 
             var current = await _directoryObjectIdentityResolver.ResolveExistingAsync(
-                canonicalRootPath,
+                root.Path,
                 root.DirectoryObjectIdentityVersion.Value,
-                root.DirectoryObjectIdentity);
-            if (!current.IsAvailable
-                || current.Version != root.DirectoryObjectIdentityVersion
-                || !string.Equals(
+                root.DirectoryObjectIdentity,
+                CancellationToken.None);
+            if (current.IsAvailable
+                && current.Version == root.DirectoryObjectIdentityVersion
+                && string.Equals(
                     current.Value,
                     root.DirectoryObjectIdentity,
                     StringComparison.Ordinal))
             {
-                throw new InvalidOperationException(
-                    "The configured root folder now identifies a different physical directory; use an explicit path-change operation to reauthorize it.");
+                return;
             }
+
+            root.DirectoryObjectIdentityUnavailableReason =
+                current.UnavailableReason
+                    ?? "The root folder changed while its initial storage authorization was being committed.";
+            root.UpdatedAt = DateTime.UtcNow;
+            await _repo.UpdateAsync(root);
         }
+
     }
 }

@@ -52,12 +52,20 @@
                   <h4>{{ folder.name }}</h4>
                   <div class="folder-badges">
                     <Pill variant="success" v-if="folder.isDefault">Default</Pill>
-                    <Pill v-if="folder.pathIdentityState !== 'Valid'" variant="error">
-                      Identity {{ folder.pathIdentityState }}
+                    <Pill v-if="folder.storageState === 'Healthy'" variant="success">Healthy</Pill>
+                    <Pill v-else-if="folder.storageState === 'Missing'" variant="warning"
+                      >Missing</Pill
+                    >
+                    <Pill v-else-if="folder.storageState === 'Changed'" variant="error">
+                      Folder changed
                     </Pill>
-                    <Pill v-else variant="subtle">
-                      {{ folder.resolvedCaseSensitivity }}
+                    <Pill v-else-if="folder.storageState === 'Unconfirmed'" variant="warning">
+                      Needs confirmation
                     </Pill>
+                    <Pill v-else-if="folder.storageState === 'Unavailable'" variant="error">
+                      Unavailable
+                    </Pill>
+                    <Pill v-else variant="subtle">{{ folder.resolvedCaseSensitivity }}</Pill>
                     <Pill v-if="folder.activeRelocation" variant="warning">
                       {{ folder.activeRelocation.status }}
                     </Pill>
@@ -70,6 +78,7 @@
                   @click="scanUnmatched(folder)"
                   title="Scan for unmatched files"
                   data-cy="scan-unmatched"
+                  :disabled="folder.canMutateFilesystem === false || !!folder.activeRelocation"
                 >
                   <PhMagnifyingGlass />
                 </button>
@@ -83,10 +92,11 @@
                   <PhPencil />
                 </button>
                 <button
+                  v-if="folder.canConfirmCurrentFolder && folder.confirmationToken"
                   class="icon-button action-secondary"
-                  @click="confirmRootIdentityReauthorization(folder)"
-                  title="Reauthorize storage identity"
-                  data-cy="reauthorize-root-identity"
+                  @click="openFolderConfirmation(folder)"
+                  title="Confirm this folder"
+                  data-cy="confirm-root-folder"
                   :disabled="!!folder.activeRelocation"
                 >
                   <PhShieldCheck />
@@ -114,6 +124,12 @@
               <PhFolder />
               <code>{{ folder.path }}</code>
             </div>
+            <p
+              v-if="folder.storageState !== 'Healthy' && folder.storageMessage"
+              class="storage-message"
+            >
+              {{ folder.storageMessage }}
+            </p>
             <div v-if="folder.activeRelocation" class="relocation-state">
               <span>
                 Pending path: <code>{{ folder.activeRelocation.targetPath }}</code> ({{
@@ -161,28 +177,33 @@
     </DeleteConfirmationModal>
 
     <DeleteConfirmationModal
-      :visible="rootToReauthorize !== null"
-      title="Reauthorize storage identity"
-      confirm-text="Reauthorize root"
-      @close="rootToReauthorize = null"
-      @confirm="executeRootIdentityReauthorization"
+      :visible="rootToConfirm !== null"
+      title="Confirm library folder"
+      confirm-text="Confirm folder"
+      @close="rootToConfirm = null"
+      @confirm="executeFolderConfirmation"
     >
       <template #confirm-icon><PhShieldCheck /></template>
       <template #default>
-        <p>
-          Confirm that this is the exact directory currently configured for
-          <strong>{{ rootToReauthorize?.name }}</strong
-          >:
+        <p v-if="rootToConfirm?.storageState === 'Changed'">
+          The folder currently at this location is different from the folder Listenarr previously
+          used for <strong>{{ rootToConfirm?.name }}</strong
+          >.
+        </p>
+        <p v-else>
+          Listenarr needs to confirm the folder currently configured for
+          <strong>{{ rootToConfirm?.name }}</strong> before using it for filesystem operations.
         </p>
         <p>
-          <code class="reauthorization-target-path" data-testid="root-reauthorization-path">{{
-            rootToReauthorize?.path
-          }}</code>
+          <code
+            class="folder-confirmation-target-path"
+            data-testid="root-folder-confirmation-path"
+            >{{ rootToConfirm?.path }}</code
+          >
         </p>
         <p>
-          This establishes the directory currently visible at that path as the authorized physical
-          generation for this root. Only continue after verifying the path points to the intended
-          storage location.
+          Confirm only if this is the folder you want Listenarr to use. Confirming it does not move,
+          modify, or delete any files.
         </p>
       </template>
     </DeleteConfirmationModal>
@@ -227,10 +248,12 @@ const scanningFolder = ref<RootFolder | null>(null)
 import { computed } from 'vue'
 const editingRoot = computed(() => editing.value as RootFolder | undefined)
 const toast = useToast()
-const rootToReauthorize = ref<{
+const rootToConfirm = ref<{
   id: number
   name: string
   path: string
+  storageState?: RootFolder['storageState']
+  confirmationToken: string
 } | null>(null)
 
 onMounted(async () => {
@@ -304,30 +327,36 @@ const setDefaultFolder = async (folder: RootFolder) => {
   }
 }
 
-function confirmRootIdentityReauthorization(folder: RootFolder) {
-  if (!folder.id || folder.activeRelocation) return
-  rootToReauthorize.value = {
+function openFolderConfirmation(folder: RootFolder) {
+  if (!folder.id || folder.activeRelocation || !folder.confirmationToken) return
+  rootToConfirm.value = {
     id: folder.id,
     name: folder.name,
     path: folder.path,
+    storageState: folder.storageState,
+    confirmationToken: folder.confirmationToken,
   }
 }
 
-async function executeRootIdentityReauthorization() {
-  const confirmation = rootToReauthorize.value
+async function executeFolderConfirmation() {
+  const confirmation = rootToConfirm.value
   if (!confirmation) return
-  rootToReauthorize.value = null
+  rootToConfirm.value = null
   try {
-    await store.reauthorizeIdentity(confirmation.id, confirmation.path)
-    toast.success('Root folder', 'Storage identity reauthorized')
+    await store.confirmCurrentFolder(
+      confirmation.id,
+      confirmation.path,
+      confirmation.confirmationToken,
+    )
+    toast.success('Root folder', 'Library folder confirmed')
   } catch (e: unknown) {
     errorTracking.captureException(e as Error, {
       component: 'RootFoldersSettings',
-      operation: 'reauthorizeRootIdentity',
+      operation: 'confirmRootFolder',
     })
     toast.error(
-      'Reauthorization failed',
-      (e as Error)?.message || 'Failed to reauthorize root folder storage identity',
+      'Folder confirmation failed',
+      (e as Error)?.message || 'Failed to confirm the current library folder',
     )
   }
 }
@@ -546,9 +575,16 @@ defineExpose({
   color: #4dabf7;
 }
 
-.reauthorization-target-path {
+.folder-confirmation-target-path {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.storage-message {
+  margin: -0.75rem 1.5rem 1.5rem;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  line-height: 1.4;
 }
 
 .folder-actions {

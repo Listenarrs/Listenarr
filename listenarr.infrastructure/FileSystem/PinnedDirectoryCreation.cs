@@ -1,6 +1,5 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
-using System.Text;
 using Microsoft.Win32.SafeHandles;
 
 namespace Listenarr.Infrastructure.FileSystem;
@@ -111,47 +110,6 @@ internal sealed partial class PinnedDirectoryCreation : IDisposable
         {
             return false;
         }
-    }
-
-    public Task WriteInsideFileAsync(
-        string fileName,
-        string contents,
-        CancellationToken cancellationToken,
-        bool hiddenFile = true)
-    {
-        ThrowIfDisposed();
-        if (!Created || _directoryHandle == null)
-        {
-            throw new InvalidOperationException(
-                "A pinned directory handle is required to write an inside marker.");
-        }
-
-        return WriteNewRelativeFileAsync(
-            _directoryHandle,
-            fileName,
-            contents,
-            cancellationToken,
-            hiddenFile);
-    }
-
-    public Task WriteParentFileAsync(
-        string fileName,
-        string contents,
-        CancellationToken cancellationToken)
-    {
-        ThrowIfDisposed();
-        if (!Created)
-        {
-            throw new InvalidOperationException(
-                "A newly created pinned directory is required to write a sibling marker.");
-        }
-
-        return WriteNewRelativeFileAsync(
-            _parentHandle,
-            fileName,
-            contents,
-            cancellationToken,
-            hiddenFile: true);
     }
 
     public void Dispose()
@@ -268,28 +226,6 @@ internal sealed partial class PinnedDirectoryCreation : IDisposable
         }
     }
 
-    private static async Task WriteNewRelativeFileAsync(
-        SafeFileHandle directoryHandle,
-        string fileName,
-        string contents,
-        CancellationToken cancellationToken,
-        bool hiddenFile)
-    {
-        ValidateLeafName(fileName);
-        using var fileHandle = OperatingSystem.IsWindows()
-            ? CreateRelativeFileWindows(directoryHandle, fileName, hiddenFile)
-            : CreateRelativeFileUnix(directoryHandle, fileName);
-        await using var stream = new FileStream(
-            fileHandle,
-            FileAccess.Write,
-            bufferSize: 4096,
-            isAsync: false);
-        var bytes = Encoding.UTF8.GetBytes(contents);
-        await stream.WriteAsync(bytes, cancellationToken);
-        await stream.FlushAsync(cancellationToken);
-        stream.Flush(flushToDisk: true);
-    }
-
     private static SafeFileHandle CreateRelativeFileWindows(
         SafeFileHandle directoryHandle,
         string fileName,
@@ -305,7 +241,7 @@ internal sealed partial class PinnedDirectoryCreation : IDisposable
         if (status == StatusObjectNameCollision)
         {
             throw new InvalidOperationException(
-                "A durable ownership marker unexpectedly already exists.");
+                "A pinned relative file unexpectedly already exists.");
         }
         if (status < 0)
         {
@@ -334,10 +270,10 @@ internal sealed partial class PinnedDirectoryCreation : IDisposable
         if (error == UnixAlreadyExists)
         {
             throw new InvalidOperationException(
-                "A durable ownership marker unexpectedly already exists.");
+                "A pinned relative file unexpectedly already exists.");
         }
 
-        throw new Win32Exception(error, "Could not create a pinned ownership marker.");
+        throw new Win32Exception(error, "Could not create a pinned relative file.");
     }
 
 }

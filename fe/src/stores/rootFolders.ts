@@ -94,10 +94,13 @@ export const useRootFoldersStore = defineStore('rootFolders', () => {
     const requestedMode = payload.caseSensitivityMode ?? current.caseSensitivityMode ?? 'Auto'
     const hasPathChange = rootFolderPathChanged(current, payload.path)
     const hasSemanticsChange = requestedMode !== (current.caseSensitivityMode ?? 'Auto')
+    const requiresStorageSemanticsRepair =
+      current.storageReason === 'FilesystemSemanticsChanged' ||
+      current.storageReason === 'FilesystemSemanticsUnavailable'
     let pathChangeError: string | null = null
-    if (hasPathChange || hasSemanticsChange) {
-      if (hasPathChange && opts?.pathChangeConfirmed !== true) {
-        throw new Error('Root folder path change requires confirmation')
+    if (hasPathChange || hasSemanticsChange || requiresStorageSemanticsRepair) {
+      if ((hasPathChange || requiresStorageSemanticsRepair) && opts?.pathChangeConfirmed !== true) {
+        throw new Error('Root folder storage change requires confirmation')
       }
 
       const result = await apiService.changeRootFolderPath(id, {
@@ -128,8 +131,12 @@ export const useRootFoldersStore = defineStore('rootFolders', () => {
     return folders.value.find((folder) => folder.id === id) ?? current!
   }
 
-  async function reauthorizeIdentity(id: number, expectedCurrentPath: string) {
-    const result = await apiService.reauthorizeRootFolderIdentity(id, expectedCurrentPath)
+  async function confirmCurrentFolder(
+    id: number,
+    expectedCurrentPath: string,
+    confirmationToken: string,
+  ) {
+    const result = await apiService.confirmRootFolder(id, expectedCurrentPath, confirmationToken)
     await load()
     return result
   }
@@ -153,7 +160,7 @@ export const useRootFoldersStore = defineStore('rootFolders', () => {
     load,
     create,
     update,
-    reauthorizeIdentity,
+    confirmCurrentFolder,
     retryRelocation,
     remove,
   }

@@ -21,4 +21,9 @@ public interface IAudiobookDeletionCommitService
     Task<AudiobookDeletionCommitResult> DeleteAsync(
         int id,
         CancellationToken requestCancellationToken = default);
+
+    Task<AudiobookDeletionCommitResult> DeleteAsync(
+        int id,
+        bool includeFiles,
+        CancellationToken requestCancellationToken = default);
 }

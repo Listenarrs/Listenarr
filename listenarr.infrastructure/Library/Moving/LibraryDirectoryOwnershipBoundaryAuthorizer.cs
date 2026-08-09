@@ -4,9 +4,12 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Listenarr.Infrastructure.Library.Moving;
 
-public sealed class LibraryDirectoryOwnershipBoundaryAuthorizer(
-    IDbContextFactory<ListenArrDbContext> dbContextFactory)
+public sealed partial class LibraryDirectoryOwnershipBoundaryAuthorizer(
+    IDbContextFactory<ListenArrDbContext> dbContextFactory,
+    IFileSystemSemanticsResolver? semanticsResolver = null)
 {
+    private readonly IFileSystemSemanticsResolver _semanticsResolver =
+        semanticsResolver ?? new FileSystemSemanticsResolver();
     internal async Task<AuthorizedLibraryDirectoryOwnership> AuthorizeOwnershipAsync(
         LibraryDirectoryOwnership ownership,
         CancellationToken cancellationToken)
@@ -33,24 +36,39 @@ public sealed class LibraryDirectoryOwnershipBoundaryAuthorizer(
         var canonicalPath = CanonicalizeHostAuthorizedPath(path, semantics);
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var roots = await db.RootFolders.AsNoTracking().ToListAsync(cancellationToken);
-        var root = roots
-            .Where(candidate => HasCompatibleSyntax(candidate.Path, semantics.Syntax))
+        var rootMatch = roots
+            .Select(candidate => new
+            {
+                Root = candidate,
+                Semantics = TryGetPersistedRootSemantics(candidate)
+            })
+            .Where(candidate => candidate.Semantics.HasValue
+                && candidate.Semantics.Value.Syntax == semantics.Syntax)
             .Where(candidate => FileSystemPathIdentity.IsSameOrInside(
                     canonicalPath,
-                    candidate.Path,
-                    semantics))
-            .OrderByDescending(candidate => candidate.Path.Length)
+                    candidate.Root.Path,
+                    candidate.Semantics!.Value))
+            .OrderByDescending(candidate => candidate.Root.Path.Length)
             .FirstOrDefault();
-        if (root != null)
+        if (rootMatch != null)
         {
+            if (!await ConfiguredRootSemanticsCurrentAsync(
+                    rootMatch.Root,
+                    rootMatch.Semantics!.Value,
+                    cancellationToken))
+            {
+                throw new InvalidOperationException(
+                    "The configured root filesystem semantics changed and require repair.");
+            }
             return await AuthorizePathWithinBoundaryAsync(
                 canonicalPath,
-                semantics,
-                root.Id,
-                root.Path,
-                root.DirectoryObjectIdentityVersion,
-                root.DirectoryObjectIdentity,
-                root.DirectoryObjectIdentityUnavailableReason,
+                rootMatch.Semantics.Value,
+                rootMatch.Root.Id,
+                rootMatch.Root.Path,
+                rootMatch.Root.DirectoryObjectIdentityVersion,
+                rootMatch.Root.DirectoryObjectIdentity,
+                rootMatch.Root.DirectoryObjectIdentityUnavailableReason,
+                ignoreUnavailableReason: true,
                 cancellationToken);
         }
 
@@ -78,6 +96,7 @@ public sealed class LibraryDirectoryOwnershipBoundaryAuthorizer(
             relocation.TargetDirectoryObjectIdentityVersion,
             relocation.TargetDirectoryObjectIdentity,
             relocation.TargetDirectoryObjectIdentityUnavailableReason,
+            ignoreUnavailableReason: false,
             cancellationToken);
     }
 
@@ -93,28 +112,42 @@ public sealed class LibraryDirectoryOwnershipBoundaryAuthorizer(
                 "The retained directory has no parent.");
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var roots = await db.RootFolders.AsNoTracking().ToListAsync(cancellationToken);
-        var root = roots
-            .Where(candidate => HasCompatibleSyntax(candidate.Path, semantics.Syntax))
+        var rootMatch = roots
+            .Select(candidate => new
+            {
+                Root = candidate,
+                Semantics = TryGetPersistedRootSemantics(candidate)
+            })
+            .Where(candidate => candidate.Semantics.HasValue
+                && candidate.Semantics.Value.Syntax == semantics.Syntax)
             .Where(candidate => FileSystemPathIdentity.IsSameOrInside(
                 canonicalPath,
-                candidate.Path,
-                semantics))
+                candidate.Root.Path,
+                candidate.Semantics!.Value))
             .Where(candidate => FileSystemPathIdentity.IsSameOrInside(
                 parentPath,
-                candidate.Path,
-                semantics))
-            .OrderByDescending(candidate => candidate.Path.Length)
+                candidate.Root.Path,
+                candidate.Semantics!.Value))
+            .OrderByDescending(candidate => candidate.Root.Path.Length)
             .FirstOrDefault();
-        if (root != null)
+        if (rootMatch != null)
         {
+            if (!await ConfiguredRootSemanticsCurrentAsync(
+                    rootMatch.Root,
+                    rootMatch.Semantics!.Value,
+                    cancellationToken))
+            {
+                return null;
+            }
             return await TryAuthorizePathWithinBoundaryAsync(
                 canonicalPath,
-                semantics,
-                root.Id,
-                root.Path,
-                root.DirectoryObjectIdentityVersion,
-                root.DirectoryObjectIdentity,
-                root.DirectoryObjectIdentityUnavailableReason,
+                rootMatch.Semantics.Value,
+                rootMatch.Root.Id,
+                rootMatch.Root.Path,
+                rootMatch.Root.DirectoryObjectIdentityVersion,
+                rootMatch.Root.DirectoryObjectIdentity,
+                rootMatch.Root.DirectoryObjectIdentityUnavailableReason,
+                ignoreUnavailableReason: true,
                 cancellationToken);
         }
 
@@ -149,6 +182,7 @@ public sealed class LibraryDirectoryOwnershipBoundaryAuthorizer(
             relocation.TargetDirectoryObjectIdentityVersion,
             relocation.TargetDirectoryObjectIdentity,
             relocation.TargetDirectoryObjectIdentityUnavailableReason,
+            ignoreUnavailableReason: false,
             cancellationToken);
     }
 
@@ -161,6 +195,7 @@ public sealed class LibraryDirectoryOwnershipBoundaryAuthorizer(
             int? expectedDirectoryIdentityVersion,
             string? expectedDirectoryIdentity,
             string? identityUnavailableReason,
+            bool ignoreUnavailableReason,
             CancellationToken cancellationToken)
     {
         try
@@ -173,6 +208,7 @@ public sealed class LibraryDirectoryOwnershipBoundaryAuthorizer(
                 expectedDirectoryIdentityVersion,
                 expectedDirectoryIdentity,
                 identityUnavailableReason,
+                ignoreUnavailableReason,
                 cancellationToken);
         }
         catch (Exception exception) when (exception is
@@ -194,27 +230,39 @@ public sealed class LibraryDirectoryOwnershipBoundaryAuthorizer(
             semantics);
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var roots = await db.RootFolders.AsNoTracking().ToListAsync(cancellationToken);
-        var root = roots.SingleOrDefault(candidate =>
-            HasCompatibleSyntax(candidate.Path, semantics.Syntax)
-            && FileSystemPathIdentity.AreEquivalent(
-                    candidate.Path,
+        var rootMatch = roots
+            .Select(candidate => new
+            {
+                Root = candidate,
+                Semantics = TryGetPersistedRootSemantics(candidate)
+            })
+            .SingleOrDefault(candidate => candidate.Semantics.HasValue
+                && candidate.Semantics.Value.Syntax == semantics.Syntax
+                && FileSystemPathIdentity.AreEquivalent(
+                    candidate.Root.Path,
                     canonicalBoundary,
-                    semantics));
-        if (root == null)
+                    candidate.Semantics.Value));
+        if (rootMatch == null)
         {
             throw new InvalidOperationException(
                 "The requested directory boundary is not a configured root folder.");
+        }
+        if (!await ConfiguredRootSemanticsCurrentAsync(
+                rootMatch.Root,
+                rootMatch.Semantics!.Value,
+                cancellationToken))
+        {
+            throw new InvalidOperationException(
+                "The configured root filesystem semantics changed and require repair.");
         }
         var anchor = PinnedDirectoryCreation.OpenPinnedBoundary(canonicalBoundary);
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
             var liveIdentity = anchor.GetDirectoryObjectIdentity();
-            if (!string.IsNullOrWhiteSpace(
-                    root.DirectoryObjectIdentityUnavailableReason)
-                || !ManagedDirectoryIdentity.MatchesNativeIdentity(
-                    root.DirectoryObjectIdentityVersion,
-                    root.DirectoryObjectIdentity,
+            if (!ManagedDirectoryIdentity.MatchesNativeIdentity(
+                    rootMatch.Root.DirectoryObjectIdentityVersion,
+                    rootMatch.Root.DirectoryObjectIdentity,
                     liveIdentity)
                 || !anchor.VisiblePathMatches())
             {
@@ -223,7 +271,7 @@ public sealed class LibraryDirectoryOwnershipBoundaryAuthorizer(
             }
 
             return new ManagedLibraryBoundaryAuthorization(
-                root.Id,
+                rootMatch.Root.Id,
                 liveIdentity,
                 anchor);
         }
@@ -250,24 +298,32 @@ public sealed class LibraryDirectoryOwnershipBoundaryAuthorizer(
             cancellationToken)
             ?? throw new InvalidOperationException(
                 "The managed root authorization no longer exists.");
-        if (!HasCompatibleSyntax(root.Path, semantics.Syntax))
+        var rootSemantics = TryGetPersistedRootSemantics(root)
+            ?? throw new InvalidOperationException(
+                "The managed root authorization has incomplete filesystem semantics.");
+        if (rootSemantics.Syntax != semantics.Syntax
+            || !await ConfiguredRootSemanticsCurrentAsync(
+                root,
+                rootSemantics,
+                cancellationToken))
         {
             throw new InvalidOperationException(
-                "The managed root authorization uses incompatible filesystem syntax.");
+                "The managed root authorization uses incompatible or stale filesystem semantics.");
         }
         if (FileSystemPathIdentity.IsSameOrInside(
                 parentPath,
                 root.Path,
-                semantics))
+                rootSemantics))
         {
             return await AuthorizePathWithinBoundaryAsync(
                 canonicalPath,
-                semantics,
+                rootSemantics,
                 root.Id,
                 root.Path,
                 root.DirectoryObjectIdentityVersion,
                 root.DirectoryObjectIdentity,
                 root.DirectoryObjectIdentityUnavailableReason,
+                ignoreUnavailableReason: true,
                 cancellationToken);
         }
 
@@ -296,6 +352,7 @@ public sealed class LibraryDirectoryOwnershipBoundaryAuthorizer(
             relocation.TargetDirectoryObjectIdentityVersion,
             relocation.TargetDirectoryObjectIdentity,
             relocation.TargetDirectoryObjectIdentityUnavailableReason,
+            ignoreUnavailableReason: false,
             cancellationToken);
     }
 
@@ -308,6 +365,7 @@ public sealed class LibraryDirectoryOwnershipBoundaryAuthorizer(
             int? expectedIdentityVersion,
             string? expectedIdentity,
             string? identityUnavailableReason,
+            bool ignoreUnavailableReason,
             CancellationToken cancellationToken)
     {
         boundaryPath = CanonicalizeHostAuthorizedPath(
@@ -329,7 +387,8 @@ public sealed class LibraryDirectoryOwnershipBoundaryAuthorizer(
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (!string.IsNullOrWhiteSpace(identityUnavailableReason)
+            if ((!ignoreUnavailableReason
+                    && !string.IsNullOrWhiteSpace(identityUnavailableReason))
                 || !ManagedDirectoryIdentity.MatchesNativeIdentity(
                     expectedIdentityVersion,
                     expectedIdentity,
@@ -403,11 +462,4 @@ public sealed class LibraryDirectoryOwnershipBoundaryAuthorizer(
         return canonicalPath;
     }
 
-    private static bool HasCompatibleSyntax(
-        string path,
-        FileSystemPathSyntax expectedSyntax) =>
-        FileSystemPathIdentity.TryDetectAbsoluteSyntax(
-            path,
-            out var syntax)
-        && syntax == expectedSyntax;
 }

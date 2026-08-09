@@ -148,7 +148,7 @@ type DownloadListCallback = (downloads: Download[]) => void
 type QueueUpdateCallback = (queueSnapshot: QueueSnapshot) => void
 type ScanJobCallback = (job: {
   jobId: string
-  audiobookId: number
+  audiobookId?: number | null
   status: string
   found?: number
   created?: number
@@ -425,7 +425,7 @@ class SignalRService {
         if (args && args[0]) {
           const job = args[0] as unknown as {
             jobId: string
-            audiobookId: number
+            audiobookId?: number | null
             status: string
             found?: number
             created?: number

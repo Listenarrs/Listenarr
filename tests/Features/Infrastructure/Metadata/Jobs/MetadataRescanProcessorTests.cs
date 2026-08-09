@@ -58,6 +58,114 @@ namespace Listenarr.Tests.Features.Infrastructure.Metadata.Jobs
         }
 
         [Fact]
+        public async Task RunCycleAsync_ForeignHostStoredPath_SkipsBeforePinning()
+        {
+            var metadataService = new Mock<IMetadataService>(MockBehavior.Strict);
+            Init(builder => builder.WithSingleton(metadataService.Object));
+            var foreignBasePath = OperatingSystem.IsWindows()
+                ? "/server/mnt/drive/Audiobooks/Imported"
+                : @"C:\server\Audiobooks\Imported";
+            var foreignFilePath = OperatingSystem.IsWindows()
+                ? "/server/mnt/drive/Audiobooks/Imported/book.m4b"
+                : @"C:\server\Audiobooks\Imported\book.m4b";
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Copied Database")
+                .WithBasePath(foreignBasePath)
+                .Build());
+            var file = await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
+                .WithAudiobook(audiobook)
+                .WithPath(foreignFilePath)
+                .Build());
+
+            var processor = new MetadataRescanProcessor(
+                _provider.GetRequiredService<IServiceScopeFactory>(),
+                _provider.GetRequiredService<IAudiobookOperationCoordinator>(),
+                _provider.GetRequiredService<IMoveQueueService>(),
+                NullLogger<MetadataRescanProcessor>.Instance);
+
+            await processor.RunCycleAsync(CancellationToken.None);
+
+            var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+            await using var verification = await factory.CreateDbContextAsync();
+            var persisted = await verification.AudiobookFiles.SingleAsync(candidate => candidate.Id == file.Id);
+            Assert.Null(persisted.DurationSeconds);
+            Assert.Null(persisted.Format);
+            metadataService.VerifyNoOtherCalls();
+        }
+
+        [Fact]
+        public async Task RunCycleAsync_KnownForeignCandidates_DoNotStarveHostCandidate()
+        {
+            var metadataService = new Mock<IMetadataService>();
+            metadataService.Setup(service => service.ExtractFileMetadataAsync(It.IsAny<MetadataFileSource>()))
+                .ReturnsAsync(new AudioMetadata
+                {
+                    Duration = TimeSpan.FromSeconds(90),
+                    Format = "m4b",
+                    SampleRate = 44100
+                });
+            Init(builder => builder.WithSingleton(metadataService.Object));
+
+            var foreignSyntax = OperatingSystem.IsWindows()
+                ? FileSystemPathSyntax.Unix
+                : FileSystemPathSyntax.Windows;
+            var foreignBasePath = OperatingSystem.IsWindows()
+                ? "/server/mnt/drive/Audiobooks/Imported"
+                : @"C:\server\Audiobooks\Imported";
+            var foreignAudiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Copied Foreign Database")
+                .WithBasePath(foreignBasePath)
+                .Build());
+            for (var index = 0; index < 25; index++)
+            {
+                var foreignPath = OperatingSystem.IsWindows()
+                    ? $"/server/mnt/drive/Audiobooks/Imported/foreign-{index:D2}.m4b"
+                    : $@"C:\server\Audiobooks\Imported\foreign-{index:D2}.m4b";
+                var foreignFile = AudiobookFile.CreateUnresolved(foreignPath);
+                foreignFile.AudiobookId = foreignAudiobook.Id;
+                foreignFile.ApplyPathIdentity(
+                    foreignPath,
+                    AudiobookFilePathIdentity.CreateUnavailable(
+                        foreignPath,
+                        foreignSyntax,
+                        FileSystemCaseSensitivityMode.Auto,
+                        foreignBasePath,
+                        "The persisted path belongs to a different host filesystem syntax."));
+                await _audiobookFileRepository.AddAsync(foreignFile);
+            }
+
+            var localPath = await FileService.GetFileAsync(
+                FileService.GetTempDirectory("metadata-rescan-host-candidate"),
+                "book.m4b",
+                "audio");
+            var localAudiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Host Candidate")
+                .WithBasePath(Path.GetDirectoryName(localPath)!)
+                .Build());
+            var localFile = await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
+                .WithAudiobook(localAudiobook)
+                .WithPath(localPath)
+                .Build());
+
+            var processor = new MetadataRescanProcessor(
+                _provider.GetRequiredService<IServiceScopeFactory>(),
+                _provider.GetRequiredService<IAudiobookOperationCoordinator>(),
+                _provider.GetRequiredService<IMoveQueueService>(),
+                NullLogger<MetadataRescanProcessor>.Instance);
+
+            await processor.RunCycleAsync(CancellationToken.None);
+
+            var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+            await using var verification = await factory.CreateDbContextAsync();
+            var persisted = await verification.AudiobookFiles.SingleAsync(candidate => candidate.Id == localFile.Id);
+            Assert.Equal(90, persisted.DurationSeconds);
+            Assert.Equal("m4b", persisted.Format);
+            Assert.Equal(44100, persisted.SampleRate);
+            metadataService.Verify(service => service.ExtractFileMetadataAsync(
+                It.IsAny<MetadataFileSource>()), Times.Once);
+        }
+
+        [Fact]
         public async Task RunCycleAsync_PathChangesDuringExtraction_DiscardsStaleMetadataResult()
         {
             var extractionStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

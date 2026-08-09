@@ -24,6 +24,7 @@ internal static class LibraryRegistrationExtensions
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<IFilesystemMutationCoordinator, FilesystemMutationCoordinator>();
         services.AddSingleton<IDirectoryObjectIdentityResolver, DirectoryObjectIdentityResolver>();
+        services.AddSingleton<IRootFolderStorageHealthResolver, RootFolderStorageHealthResolver>();
         services.AddSingleton<LibraryDirectoryOwnershipBoundaryAuthorizer>();
         services.AddSingleton<IAudiobookOperationCoordinator, AudiobookOperationCoordinator>();
         services.AddSingleton<IAudiobookUpdatePublisher, AudiobookUpdatePublisher>();
@@ -32,6 +33,7 @@ internal static class LibraryRegistrationExtensions
         services.AddSingleton<ILibraryDirectoryOwnershipStore, EfLibraryDirectoryOwnershipStore>();
         services.AddSingleton<IMoveQueueService, MoveQueueService>();
         services.AddScoped<IAudiobookDeletionCommitService, AudiobookDeletionCommitService>();
+        services.AddScoped<IRootFolderStorageConfirmationService, RootFolderStorageConfirmationService>();
         services.AddScoped<IAudiobookFilePathIdentityResolver, AudiobookFilePathIdentityResolver>();
         services.AddScoped<IAudiobookFileIdentityReconciler, AudiobookFileIdentityReconciler>();
         services.AddScoped<IRootFolderObjectIdentityReconciler, RootFolderObjectIdentityReconciler>();

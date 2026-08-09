@@ -166,7 +166,9 @@ public sealed partial class PinnedDirectoryCreationTests : BaseTests
         var parent = FileService.GetTempDirectory("pinned-directory-publication-released-hierarchy");
         using var creation = PinnedDirectoryCreation.TryCreateForPublication(parent, "prepared");
         Assert.True(creation.Created);
-        await creation.WriteInsideFileAsync("marker.json", "{}", CancellationToken.None);
+        await File.WriteAllTextAsync(
+            Path.Join(creation.FullPath, "marker.json"),
+            "{}");
         using (var rootAnchor = creation.OpenCreatedDirectoryAnchor())
         {
             using var childCreation = rootAnchor.TryCreateChild("child");
@@ -189,7 +191,9 @@ public sealed partial class PinnedDirectoryCreationTests : BaseTests
         var parent = FileService.GetTempDirectory("pinned-directory-publication-collision");
         using var creation = PinnedDirectoryCreation.TryCreateForPublication(parent, "prepared");
         Assert.True(creation.Created);
-        await creation.WriteInsideFileAsync("prepared.txt", "prepared", CancellationToken.None);
+        await File.WriteAllTextAsync(
+            Path.Join(creation.FullPath, "prepared.txt"),
+            "prepared");
         var published = Path.Join(parent, "published");
         Directory.CreateDirectory(published);
         await File.WriteAllTextAsync(Path.Join(published, "existing.txt"), "existing");
@@ -207,7 +211,9 @@ public sealed partial class PinnedDirectoryCreationTests : BaseTests
         var parent = FileService.GetTempDirectory("pinned-directory-publication-live-root");
         using var creation = PinnedDirectoryCreation.TryCreateForPublication(parent, "prepared");
         Assert.True(creation.Created);
-        await creation.WriteInsideFileAsync("marker.json", "{}", CancellationToken.None);
+        await File.WriteAllTextAsync(
+            Path.Join(creation.FullPath, "marker.json"),
+            "{}");
         using var rootAnchor = creation.OpenCreatedDirectoryAnchor();
         using (var childCreation = rootAnchor.TryCreateChild("child"))
         {
@@ -472,7 +478,9 @@ public sealed partial class PinnedDirectoryCreationTests : BaseTests
         var parent = FileService.GetTempDirectory("pinned-directory-publication-live-hierarchy");
         using var creation = PinnedDirectoryCreation.TryCreateForPublication(parent, "prepared");
         Assert.True(creation.Created);
-        await creation.WriteInsideFileAsync("marker.json", "{}", CancellationToken.None);
+        await File.WriteAllTextAsync(
+            Path.Join(creation.FullPath, "marker.json"),
+            "{}");
         using var rootAnchor = creation.OpenCreatedDirectoryAnchor();
         using var childCreation = rootAnchor.TryCreateChild("child");
         Assert.True(childCreation.Created);

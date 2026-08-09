@@ -5,27 +5,12 @@ namespace Listenarr.Infrastructure.Library.Moving;
 
 public sealed partial class RootFolderRelocationService
 {
-    private const string RelocationReservationMarkerName =
-        ".listenarr-relocation-directory.json";
-    private const string RelocationReservationParentMarkerPrefix =
-        ".listenarr-relocation-parent-";
-
     internal Action<string>? TargetReservationDirectoryFlushedForTest
     {
         get;
         set;
     }
     internal Action<string>? AfterReservationParentIntentPersistedForTest
-    {
-        get;
-        set;
-    }
-    internal Action<string>? BeforeReservationMarkerRetirementForTest
-    {
-        get;
-        set;
-    }
-    internal Action<string>? AfterReservationMarkerRetiredForTest
     {
         get;
         set;
@@ -73,10 +58,6 @@ public sealed partial class RootFolderRelocationService
                     Path.GetFileName(canonicalPath));
             if (publication == null)
             {
-                RetireReservationParentMarker(
-                    relocationId,
-                    reservation,
-                    parent);
                 reservation.State =
                     RootFolderRelocationCreatedDirectoryState.Removed;
                 reservation.UpdatedAt =
@@ -92,23 +73,14 @@ public sealed partial class RootFolderRelocationService
                 ValidatePlannedReservationParent(
                     reservation,
                     parent);
-                if (!TryValidateLegacyReservationMarkers(
-                        relocationId,
-                        reservation,
-                        parent,
-                        directory))
-                {
-                    RetainObservedReservation(
-                        reservation,
-                        directory);
-                    await db.SaveChangesAsync(cancellationToken);
-                    continue;
-                }
-
-                CaptureCreatedReservation(
+                // A directory visible while its reservation is still only Planned
+                // cannot be proven as Listenarr-created after a crash without writing
+                // sidecar evidence into the library. Preserve it as retained instead.
+                RetainObservedReservation(
                     reservation,
                     directory);
                 await db.SaveChangesAsync(cancellationToken);
+                continue;
             }
             else
             {
@@ -117,11 +89,6 @@ public sealed partial class RootFolderRelocationService
                     directory);
             }
 
-            RetireLegacyReservationMarkers(
-                relocationId,
-                reservation,
-                parent,
-                directory);
             if (Directory.EnumerateFileSystemEntries(canonicalPath).Any()
                 || !directory.VisiblePathMatches()
                 || !parent.VisiblePathMatches())
@@ -184,11 +151,6 @@ public sealed partial class RootFolderRelocationService
             using var directory = publication.OpenCreatedDirectoryAnchor();
             ValidateReservationDirectoryIdentity(
                 reservation,
-                directory);
-            RetireLegacyReservationMarkers(
-                relocationId,
-                reservation,
-                parent,
                 directory);
             if (!directory.VisiblePathMatches()
                 || !parent.VisiblePathMatches())
@@ -288,28 +250,15 @@ public sealed partial class RootFolderRelocationService
                         if (reservation.State ==
                             RootFolderRelocationCreatedDirectoryState.Planned)
                         {
-                            if (TryValidateLegacyReservationMarkers(
-                                    relocationId,
-                                    reservation,
-                                    current,
-                                    next))
+                            if (Directory.EnumerateFileSystemEntries(
+                                    canonicalPath).Any())
                             {
-                                CaptureCreatedReservation(
-                                    reservation,
-                                    next);
+                                throw new InvalidOperationException(
+                                    "An unproven relocation target directory contains content.");
                             }
-                            else
-                            {
-                                if (Directory.EnumerateFileSystemEntries(
-                                        canonicalPath).Any())
-                                {
-                                    throw new InvalidOperationException(
-                                        "An unproven relocation target directory contains content.");
-                                }
-                                RetainObservedReservation(
-                                    reservation,
-                                    next);
-                            }
+                            RetainObservedReservation(
+                                reservation,
+                                next);
                             await db.SaveChangesAsync(cancellationToken);
                             AfterTargetReservationStatePersistedForTest?.Invoke(
                                 canonicalPath);
@@ -322,11 +271,6 @@ public sealed partial class RootFolderRelocationService
                         }
                     }
 
-                    RetireLegacyReservationMarkers(
-                        relocationId,
-                        reservation,
-                        current,
-                        next);
                     if (!next.VisiblePathMatches()
                         || !current.VisiblePathMatches())
                     {

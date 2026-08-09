@@ -7,6 +7,26 @@ namespace Listenarr.Infrastructure.Library.Moving;
 
 internal sealed partial class EfMoveExecutionStore
 {
+    private async Task EnsureLiveFilesystemSemanticsAsync(
+        string boundaryPath,
+        FileSystemCaseSensitivityMode requestedMode,
+        FileSystemPathSemantics expectedSemantics,
+        string description,
+        CancellationToken cancellationToken)
+    {
+        var resolution = await _semanticsResolver.ResolveAsync(
+            boundaryPath,
+            requestedMode,
+            cancellationToken);
+        if (resolution.State != PathIdentityState.Valid
+            || resolution.Semantics.Syntax != expectedSemantics.Syntax
+            || resolution.Semantics.CaseSensitivity != expectedSemantics.CaseSensitivity)
+        {
+            throw new MoveNeedsAttentionException(
+                $"The move {description} filesystem semantics changed after the move was authorized.");
+        }
+    }
+
     private static void EnsureEquivalentIdentity(
         string persisted,
         string current,
@@ -212,8 +232,6 @@ internal sealed partial class EfMoveExecutionStore
             if (persisted == null
                 || root.DirectoryObjectIdentityVersion != expectedVersion
                 || string.IsNullOrWhiteSpace(root.DirectoryObjectIdentity)
-                || !string.IsNullOrWhiteSpace(
-                    root.DirectoryObjectIdentityUnavailableReason)
                 || !ManagedDirectoryIdentity.MatchesNativeIdentity(
                     root.DirectoryObjectIdentityVersion,
                     root.DirectoryObjectIdentity,

@@ -171,12 +171,15 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
 
         public async Task<bool> DeleteByIdAsync(int id)
         {
-            var audiobook = await GetByIdAsync(id);
+            var audiobook = await _db.Audiobooks
+                .FirstOrDefaultAsync(candidate => candidate.Id == id);
             if (audiobook == null)
             {
                 return false;
             }
 
+            // Delete the aggregate root without materializing its navigation graph.
+            // Relational foreign keys own cascade cleanup for file/identifier/series rows.
             _db.Audiobooks.Remove(audiobook);
             await _db.SaveChangesAsync();
             return true;

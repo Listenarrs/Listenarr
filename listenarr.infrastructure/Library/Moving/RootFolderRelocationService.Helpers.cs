@@ -192,6 +192,19 @@ public sealed partial class RootFolderRelocationService
             relocation.Error = "Target filesystem identity became unavailable during finalization.";
             return;
         }
+
+        var targetSemanticsError = await ValidateRelocationTargetSemanticsAsync(
+            db,
+            relocation,
+            resolution.Semantics,
+            cancellationToken);
+        if (targetSemanticsError != null)
+        {
+            relocation.Status = RootFolderRelocationStatus.NeedsAttention;
+            relocation.Error = targetSemanticsError;
+            return;
+        }
+
         if (!relocation.TargetDirectoryObjectIdentityVersion.HasValue
             || string.IsNullOrWhiteSpace(relocation.TargetDirectoryObjectIdentity))
         {

@@ -465,12 +465,6 @@ public sealed partial class RootFolderRelocationService(
             {
                 await transaction.CommitAsync(CancellationToken.None);
             }
-            if (relocation.Status == RootFolderRelocationStatus.Completed)
-            {
-                await RetireRetainedRelocationReservationMarkersAsync(
-                    relocation.Id,
-                    CancellationToken.None);
-            }
             var result = Map(relocation, root.Path);
             return new StartOutcome(result, true);
         }

@@ -83,6 +83,7 @@ namespace Listenarr.Infrastructure.Library.Moving
                 out var hasUnresolvedTrackedPaths);
             var trackedPhysicalObjectIdentities = ResolveTrackedPhysicalObjectIdentities(
                 audiobook,
+                trackedFilePaths,
                 deleteSemantics,
                 result,
                 out var hasConflictingTrackedPhysicalIdentities,
@@ -104,6 +105,18 @@ namespace Listenarr.Infrastructure.Library.Moving
 
             if (deleteTarget != null)
             {
+                if (trackedFilePaths.Count == 0
+                    && !deleteTarget.OwnedDirectories.Any(ownership =>
+                        FileSystemPathIdentity.AreEquivalent(
+                            ownership.CanonicalPath,
+                            deleteTarget.FolderPath,
+                            deleteTarget.Semantics)))
+                {
+                    result.Warnings.Add(
+                        "The audiobook folder has no tracked file generation or durable directory ownership, so filesystem deletion was blocked.");
+                    return result;
+                }
+
                 cancellationToken.ThrowIfCancellationRequested();
                 var targetAuthorization = await AuthorizeDeleteTargetAsync(
                     deleteTarget,
@@ -325,6 +338,7 @@ namespace Listenarr.Infrastructure.Library.Moving
 
         private static IReadOnlyDictionary<string, string> ResolveTrackedPhysicalObjectIdentities(
             Audiobook audiobook,
+            IReadOnlyCollection<string> trackedFilePaths,
             FileSystemPathSemantics semantics,
             AudiobookFilesystemDeleteResult result,
             out bool hasConflict,
@@ -366,6 +380,19 @@ namespace Listenarr.Infrastructure.Library.Moving
                 }
 
                 identities[resolvedPath] = file.PhysicalObjectIdentity;
+            }
+
+            foreach (var trackedFilePath in trackedFilePaths)
+            {
+                if (identities.ContainsKey(trackedFilePath))
+                {
+                    continue;
+                }
+
+                hasUnprovenTrackedPhysicalIdentities = true;
+                result.Warnings.Add(
+                    "A tracked audiobook path has no persisted physical generation, so filesystem deletion was blocked.");
+                break;
             }
 
             return identities;
@@ -436,59 +463,6 @@ namespace Listenarr.Infrastructure.Library.Moving
             _logger.LogInformation(
                 "Deleted audiobook file {Path}",
                 LogRedaction.SanitizeFilePath(path));
-        }
-
-        private bool TryDeleteFolderContents(
-            DeleteFolderTarget deleteTarget,
-            PinnedDirectoryCreation.PinnedDirectoryAnchor targetAuthorization,
-            IReadOnlyDictionary<string, string> trackedPhysicalObjectIdentities,
-            AudiobookFilesystemDeleteResult result)
-        {
-            var folderPath = deleteTarget.FolderPath;
-            if (!Directory.Exists(folderPath))
-            {
-                return true;
-            }
-
-            IReadOnlySet<string> ownershipMarkerPaths = new HashSet<string>(
-                deleteTarget.Semantics.Comparer);
-            var preflightIdentities = new Dictionary<string, string>(
-                deleteTarget.Semantics.Comparer);
-            if (!TryValidatePinnedDirectoryTree(
-                    targetAuthorization,
-                    targetAuthorization,
-                    trackedPhysicalObjectIdentities,
-                    preflightIdentities,
-                    out var reason))
-            {
-                result.Warnings.Add(
-                    "Refused to recursively delete the audiobook folder because it contains a symbolic link or its captured filesystem generation changed.");
-                _logger.LogWarning(
-                    "Blocked recursive audiobook delete preflight for {FolderPath}: {Reason}",
-                    LogRedaction.SanitizeFilePath(folderPath),
-                    LogRedaction.SanitizeText(reason));
-                return false;
-            }
-
-            if (!TryDeletePinnedDirectoryContents(
-                    targetAuthorization,
-                    targetAuthorization,
-                    deleteTarget,
-                    ownershipMarkerPaths,
-                    preflightIdentities,
-                    result,
-                    out reason))
-            {
-                result.Warnings.Add(
-                    "Refused to continue recursively deleting the audiobook folder because its captured filesystem generation changed.");
-                _logger.LogWarning(
-                    "Blocked recursive audiobook delete for {FolderPath}: {Reason}",
-                    LogRedaction.SanitizeFilePath(folderPath),
-                    LogRedaction.SanitizeText(reason));
-                return false;
-            }
-
-            return true;
         }
 
     }

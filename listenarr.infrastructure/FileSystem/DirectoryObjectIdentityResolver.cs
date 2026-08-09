@@ -29,6 +29,14 @@ internal sealed class DirectoryObjectIdentityResolver(
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(expectedValue);
+        if (expectedVersion != ManagedDirectoryIdentity.CurrentVersion)
+        {
+            return Task.FromResult(
+                DirectoryObjectIdentityResolution.Unavailable(
+                    $"Directory identity version {expectedVersion} is unsupported.",
+                    DirectoryObjectIdentityFailureKind.IdentityUnsupported));
+        }
+
         return ResolvePinnedAsync(
             path,
             cancellationToken,
@@ -41,7 +49,8 @@ internal sealed class DirectoryObjectIdentityResolver(
                     expectedValue,
                     null)
                 : DirectoryObjectIdentityResolution.Unavailable(
-                    "The live directory no longer matches its persisted physical identity."));
+                    "The live directory no longer matches its persisted physical identity.",
+                    DirectoryObjectIdentityFailureKind.IdentityMismatch));
     }
 
     private Task<DirectoryObjectIdentityResolution> ResolvePinnedAsync(
@@ -56,8 +65,12 @@ internal sealed class DirectoryObjectIdentityResolver(
                 out var canonicalPath,
                 out var pathReason))
         {
+            var failureKind = FileSystemPathIdentity.TryDetectAbsoluteSyntax(path, out _)
+                && !FileSystemPathIdentity.TryDetectAbsoluteSyntaxForHost(path, out _)
+                    ? DirectoryObjectIdentityFailureKind.ForeignPathSyntax
+                    : DirectoryObjectIdentityFailureKind.InvalidPath;
             return Task.FromResult(
-                DirectoryObjectIdentityResolution.Unavailable(pathReason));
+                DirectoryObjectIdentityResolution.Unavailable(pathReason, failureKind));
         }
 
         try
@@ -68,7 +81,8 @@ internal sealed class DirectoryObjectIdentityResolver(
             {
                 return Task.FromResult(
                     DirectoryObjectIdentityResolution.Unavailable(
-                        "The directory changed while its physical identity was captured."));
+                        "The directory changed while its physical identity was captured.",
+                        DirectoryObjectIdentityFailureKind.IdentityUnstable));
             }
 
             return Task.FromResult(resolve(nativeIdentity));
@@ -78,7 +92,26 @@ internal sealed class DirectoryObjectIdentityResolver(
                 or PlatformNotSupportedException or InvalidOperationException)
         {
             return Task.FromResult(
-                DirectoryObjectIdentityResolution.Unavailable(exception.Message));
+                DirectoryObjectIdentityResolution.Unavailable(
+                    exception.Message,
+                    ClassifyFailure(exception)));
         }
+    }
+
+    private static DirectoryObjectIdentityFailureKind ClassifyFailure(Exception exception)
+    {
+        return exception switch
+        {
+            DirectoryNotFoundException or FileNotFoundException =>
+                DirectoryObjectIdentityFailureKind.Missing,
+            UnauthorizedAccessException => DirectoryObjectIdentityFailureKind.AccessDenied,
+            Win32Exception win32 when win32.NativeErrorCode is 2 or 3 =>
+                DirectoryObjectIdentityFailureKind.Missing,
+            Win32Exception win32 when win32.NativeErrorCode == 5 =>
+                DirectoryObjectIdentityFailureKind.AccessDenied,
+            PlatformNotSupportedException => DirectoryObjectIdentityFailureKind.IdentityUnsupported,
+            InvalidOperationException => DirectoryObjectIdentityFailureKind.IdentityUnstable,
+            _ => DirectoryObjectIdentityFailureKind.Unknown
+        };
     }
 }

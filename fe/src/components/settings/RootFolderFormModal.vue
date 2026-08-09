@@ -42,8 +42,8 @@
             <option value="Insensitive">Case-insensitive</option>
           </select>
           <small v-if="root" class="semantics-help">
-            Detected: {{ root.resolvedCaseSensitivity ?? 'Unknown' }} · Identity:
-            {{ root.pathIdentityState ?? 'Unavailable' }}
+            Detected: {{ root.resolvedCaseSensitivity ?? 'Unknown' }} · Storage:
+            {{ root.storageState ?? 'Unavailable' }}
           </small>
         </FormRow>
 
@@ -94,7 +94,14 @@
 
   <MoveAudiobookModal
     :visible="showConfirm"
+    title="Change Library Folder"
     :pendingRootPath="form.path"
+    :currentRootPath="root?.path ?? null"
+    :rootFolderName="form.name"
+    :rootFolderChange="true"
+    :rootFolderRepair="rootStorageRepairRequired() && !rootPathChanged()"
+    :showMoveOption="rootPathChanged()"
+    :allowMoveFiles="rootPathChanged() && root?.storageState === 'Healthy'"
     v-model:moveFiles="modalMoveFiles"
     v-model:deleteEmpty="modalDeleteEmpty"
     @cancel="showConfirm = false"
@@ -161,6 +168,13 @@ function rootPathChanged(): boolean {
   return root ? rootFolderPathChanged(root, form.value.path) : false
 }
 
+function rootStorageRepairRequired(): boolean {
+  return (
+    root?.storageReason === 'FilesystemSemanticsChanged' ||
+    root?.storageReason === 'FilesystemSemanticsUnavailable'
+  )
+}
+
 async function save() {
   if (!form.value.name || !form.value.path) {
     toast.error('Validation Error', 'Name and Path are required')
@@ -180,7 +194,9 @@ async function save() {
     let newRoot
     if (root?.id) {
       // If path changed, show confirmation to choose whether to move files
-      if (rootPathChanged()) {
+      if (rootPathChanged() || rootStorageRepairRequired()) {
+        modalMoveFiles.value = rootPathChanged() && root.storageState === 'Healthy'
+        modalDeleteEmpty.value = modalMoveFiles.value
         showConfirm.value = true
         return
       }
@@ -231,7 +247,7 @@ async function confirmChange(moveFiles: boolean) {
         deleteEmptySource: modalDeleteEmpty.value,
       },
     )
-    toast.success('Success', moveFiles ? 'Root relocation started' : 'Root path metadata updated')
+    toast.success('Success', moveFiles ? 'Root relocation started' : 'Root folder changed')
     emit('saved', updated)
   } catch (e: unknown) {
     const error = e as Error

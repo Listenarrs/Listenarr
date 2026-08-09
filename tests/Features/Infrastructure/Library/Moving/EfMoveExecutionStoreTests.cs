@@ -151,6 +151,192 @@ public sealed class EfMoveExecutionStoreTests : BaseTests
     }
 
     [Fact]
+    public async Task EnsureMutationAuthorizedAsync_ConfiguredRootReturnedAfterTransientOutage_UsesAuthorizedNativeGeneration()
+    {
+        var databasePath = Path.Join(
+            FileService.GetTempPath(),
+            $"move-execution-returned-root-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+            .UseSqlite($"Data Source={databasePath};Foreign Keys=False")
+            .Options;
+        var factory = new TestDbContextFactory(options);
+        var jobId = Guid.NewGuid();
+        var lease = new MoveLeaseToken("worker", 1);
+        var source = FileService.GetTempDirectory("move-execution-returned-source");
+        var target = FileService.GetTempDirectory("move-execution-returned-target");
+        var semantics = FileSystemPathSemantics.CurrentHostDefault;
+        string rootAuthorizedIdentity;
+        using (var boundary = PinnedDirectoryCreation.OpenPinnedBoundary(target))
+        {
+            rootAuthorizedIdentity = ManagedDirectoryIdentity.Create(
+                Guid.NewGuid().ToString("N"),
+                boundary.GetDirectoryObjectIdentity());
+        }
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            await db.Database.EnsureCreatedAsync();
+            db.RootFolders.Add(new RootFolder
+            {
+                Name = "Returned Root",
+                Path = target,
+                CaseSensitivityMode = semantics.CaseSensitivity
+                    == FileSystemCaseSensitivity.Sensitive
+                        ? FileSystemCaseSensitivityMode.Sensitive
+                        : FileSystemCaseSensitivityMode.Insensitive,
+                ResolvedCaseSensitivity = semantics.CaseSensitivity,
+                PathIdentityState = PathIdentityState.Valid,
+                PathIdentityKey = FileSystemPathIdentity.CreateKey("root", target, semantics),
+                DirectoryObjectIdentityVersion = ManagedDirectoryIdentity.CurrentVersion,
+                DirectoryObjectIdentity = rootAuthorizedIdentity,
+                DirectoryObjectIdentityUnavailableReason =
+                    "The directory was unavailable during startup."
+            });
+            db.MoveJobs.Add(new MoveJob
+            {
+                Id = jobId,
+                AudiobookId = 1,
+                RequestedPath = target,
+                SourcePath = source,
+                SourcePathSyntax = semantics.Syntax,
+                SourceCaseSensitivity = semantics.CaseSensitivity,
+                SourceCaseSensitivityMode = semantics.CaseSensitivity
+                    == FileSystemCaseSensitivity.Sensitive
+                        ? FileSystemCaseSensitivityMode.Sensitive
+                        : FileSystemCaseSensitivityMode.Insensitive,
+                SourceIdentityBoundary = source,
+                TargetPathSyntax = semantics.Syntax,
+                TargetCaseSensitivity = semantics.CaseSensitivity,
+                TargetCaseSensitivityMode = semantics.CaseSensitivity
+                    == FileSystemCaseSensitivity.Sensitive
+                        ? FileSystemCaseSensitivityMode.Sensitive
+                        : FileSystemCaseSensitivityMode.Insensitive,
+                TargetIdentityBoundary = target,
+                Status = MoveJobStatus.Running,
+                LeaseOwner = lease.Owner,
+                LeaseGeneration = lease.Generation,
+                LeaseExpiresAt = DateTime.UtcNow.AddMinutes(5),
+                ActiveDeduplicationKey = $"test:{jobId:N}",
+                Entries =
+                [
+                    MoveManifestIdentity.CreateTargetBoundaryAuthorization(
+                        ManagedDirectoryIdentity.CurrentVersion,
+                        rootAuthorizedIdentity)
+                ]
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var store = new EfMoveExecutionStore(factory, TimeProvider.System);
+
+        await store.EnsureMutationAuthorizedAsync(
+            jobId,
+            lease,
+            source,
+            target,
+            semantics,
+            semantics,
+            CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task EnsureMutationAuthorizedAsync_TargetFilesystemSemanticsChangedAfterEnqueue_FailsClosed()
+    {
+        var databasePath = Path.Join(
+            FileService.GetTempPath(),
+            $"move-execution-semantics-changed-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+            .UseSqlite($"Data Source={databasePath};Foreign Keys=False")
+            .Options;
+        var factory = new TestDbContextFactory(options);
+        var jobId = Guid.NewGuid();
+        var lease = new MoveLeaseToken("worker", 1);
+        var source = FileService.GetTempDirectory("move-execution-semantics-source");
+        var target = FileService.GetTempDirectory("move-execution-semantics-target");
+        var semantics = FileSystemPathSemantics.CurrentHostDefault;
+        var opposite = new FileSystemPathSemantics(
+            semantics.Syntax,
+            semantics.CaseSensitivity == FileSystemCaseSensitivity.Sensitive
+                ? FileSystemCaseSensitivity.Insensitive
+                : FileSystemCaseSensitivity.Sensitive);
+        string targetBoundaryIdentity;
+        using (var boundary = PinnedDirectoryCreation.OpenPinnedBoundary(target))
+        {
+            targetBoundaryIdentity = ManagedDirectoryIdentity.CreateMarkerless(
+                boundary.GetDirectoryObjectIdentity());
+        }
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            await db.Database.EnsureCreatedAsync();
+            db.MoveJobs.Add(new MoveJob
+            {
+                Id = jobId,
+                AudiobookId = 1,
+                RequestedPath = target,
+                SourcePath = source,
+                SourcePathSyntax = semantics.Syntax,
+                SourceCaseSensitivity = semantics.CaseSensitivity,
+                SourceCaseSensitivityMode = FileSystemCaseSensitivityMode.Auto,
+                SourceIdentityBoundary = source,
+                TargetPathSyntax = semantics.Syntax,
+                TargetCaseSensitivity = semantics.CaseSensitivity,
+                TargetCaseSensitivityMode = FileSystemCaseSensitivityMode.Auto,
+                TargetIdentityBoundary = target,
+                Status = MoveJobStatus.Running,
+                LeaseOwner = lease.Owner,
+                LeaseGeneration = lease.Generation,
+                LeaseExpiresAt = DateTime.UtcNow.AddMinutes(5),
+                ActiveDeduplicationKey = $"test:{jobId:N}",
+                Entries =
+                [
+                    MoveManifestIdentity.CreateTargetBoundaryAuthorization(
+                        ManagedDirectoryIdentity.CurrentVersion,
+                        targetBoundaryIdentity)
+                ]
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var semanticsResolver = new Mock<IFileSystemSemanticsResolver>(MockBehavior.Strict);
+        semanticsResolver
+            .Setup(resolver => resolver.ResolveAsync(
+                source,
+                FileSystemCaseSensitivityMode.Auto,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileSystemSemanticsResolution(
+                semantics,
+                PathIdentityState.Valid,
+                source));
+        semanticsResolver
+            .Setup(resolver => resolver.ResolveAsync(
+                target,
+                FileSystemCaseSensitivityMode.Auto,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileSystemSemanticsResolution(
+                opposite,
+                PathIdentityState.Valid,
+                target));
+        var store = new EfMoveExecutionStore(
+            factory,
+            TimeProvider.System,
+            semanticsResolver.Object);
+
+        var exception = await Assert.ThrowsAsync<MoveNeedsAttentionException>(() =>
+            store.EnsureMutationAuthorizedAsync(
+                jobId,
+                lease,
+                source,
+                target,
+                semantics,
+                semantics,
+                CancellationToken.None));
+
+        Assert.Contains("target filesystem semantics changed", exception.Message, StringComparison.OrdinalIgnoreCase);
+        semanticsResolver.VerifyAll();
+    }
+
+    [Fact]
     public async Task EnsureMutationAuthorizedAsync_RowLimitedBoundaryProofQuery_IsDeterministicallyOrdered()
     {
         var databasePath = Path.Join(
@@ -183,6 +369,19 @@ public sealed class EfMoveExecutionStoreTests : BaseTests
                 AudiobookId = 1,
                 RequestedPath = target,
                 SourcePath = source,
+                SourcePathSyntax = semantics.Syntax,
+                SourceCaseSensitivity = semantics.CaseSensitivity,
+                SourceCaseSensitivityMode = semantics.CaseSensitivity
+                    == FileSystemCaseSensitivity.Sensitive
+                        ? FileSystemCaseSensitivityMode.Sensitive
+                        : FileSystemCaseSensitivityMode.Insensitive,
+                SourceIdentityBoundary = source,
+                TargetPathSyntax = semantics.Syntax,
+                TargetCaseSensitivity = semantics.CaseSensitivity,
+                TargetCaseSensitivityMode = semantics.CaseSensitivity
+                    == FileSystemCaseSensitivity.Sensitive
+                        ? FileSystemCaseSensitivityMode.Sensitive
+                        : FileSystemCaseSensitivityMode.Insensitive,
                 TargetIdentityBoundary = target,
                 Status = MoveJobStatus.Running,
                 LeaseOwner = lease.Owner,

@@ -23,7 +23,7 @@ public sealed class LibraryBulkDeleteCancellationTests : BaseTests
         var releasePreflight = new TaskCompletionSource<Audiobook?>(
             TaskCreationOptions.RunContinuationsAsynchronously);
         var repository = new Mock<IAudiobookRepository>(MockBehavior.Strict);
-        repository.Setup(service => service.GetByIdSnapshotAsync(
+        repository.Setup(service => service.GetForUpdateSnapshotAsync(
                 audiobookId,
                 It.IsAny<CancellationToken>()))
             .Returns(async () =>
@@ -70,7 +70,7 @@ public sealed class LibraryBulkDeleteCancellationTests : BaseTests
         };
         using var cancellation = new CancellationTokenSource();
         var repository = new Mock<IAudiobookRepository>(MockBehavior.Strict);
-        repository.Setup(service => service.GetByIdSnapshotAsync(
+        repository.Setup(service => service.GetForUpdateSnapshotAsync(
                 audiobookId,
                 cancellation.Token))
             .ReturnsAsync(audiobook);
@@ -125,7 +125,7 @@ public sealed class LibraryBulkDeleteCancellationTests : BaseTests
         };
         using var cancellation = new CancellationTokenSource();
         var repository = new Mock<IAudiobookRepository>(MockBehavior.Strict);
-        repository.Setup(service => service.GetByIdSnapshotAsync(
+        repository.Setup(service => service.GetForUpdateSnapshotAsync(
                 firstId,
                 cancellation.Token))
             .ReturnsAsync(first);
@@ -169,7 +169,7 @@ public sealed class LibraryBulkDeleteCancellationTests : BaseTests
             payload.GetType().GetProperty("ids")!.GetValue(payload));
         Assert.Equal([firstId], deletedIds);
         repository.Verify(service => service.DeleteByIdAsync(firstId), Times.Once);
-        repository.Verify(service => service.GetByIdSnapshotAsync(
+        repository.Verify(service => service.GetForUpdateSnapshotAsync(
             secondId,
             It.IsAny<CancellationToken>()), Times.Never);
         repository.Verify(service => service.DeleteByIdAsync(secondId), Times.Never);
@@ -187,7 +187,7 @@ public sealed class LibraryBulkDeleteCancellationTests : BaseTests
             Asin = "BULKCANCEL"
         };
         var repository = new Mock<IAudiobookRepository>(MockBehavior.Strict);
-        repository.Setup(service => service.GetByIdSnapshotAsync(
+        repository.Setup(service => service.GetForUpdateSnapshotAsync(
                 audiobookId,
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(audiobook);

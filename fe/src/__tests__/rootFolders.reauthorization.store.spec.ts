@@ -12,7 +12,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { apiService } from '@/services/api'
 import { useRootFoldersStore } from '@/stores/rootFolders'
 
-describe('root folder relocation store actions', () => {
+describe('root folder storage and relocation store actions', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     setActivePinia(createPinia())
@@ -128,6 +128,55 @@ describe('root folder relocation store actions', () => {
     expect(apiService.getRootFolders).toHaveBeenCalledTimes(1)
   })
 
+  it('routes same-path storage-semantics repair through confirmed metadata-only migration', async () => {
+    const current = {
+      id: 3,
+      name: 'Library',
+      path: '/srv/Library',
+      isDefault: false,
+      caseSensitivityMode: 'Auto' as const,
+      storageState: 'Unavailable' as const,
+      storageReason: 'FilesystemSemanticsChanged' as const,
+    }
+    vi.mocked(apiService.changeRootFolderPath).mockResolvedValueOnce({
+      relocationId: null,
+      rootFolderId: 3,
+      currentPath: current.path,
+      targetPath: current.path,
+      status: 'Completed',
+      totalJobs: 0,
+      completedJobs: 0,
+      targetIdentityEnrollmentState: 'Authorized',
+    })
+    vi.mocked(apiService.getRootFolders).mockResolvedValueOnce([
+      {
+        ...current,
+        storageState: 'Healthy' as const,
+        storageReason: 'None' as const,
+      },
+    ])
+    const store = useRootFoldersStore()
+    store.folders = [current]
+
+    await store.update(3, current, {
+      expectedCurrentPath: current.path,
+      pathChangeConfirmed: true,
+      moveFiles: false,
+      deleteEmptySource: false,
+    })
+
+    expect(apiService.updateRootFolder).not.toHaveBeenCalled()
+    expect(apiService.changeRootFolderPath).toHaveBeenCalledWith(3, {
+      targetPath: current.path,
+      mode: 'metadataOnly',
+      deleteEmptySource: false,
+      desiredName: current.name,
+      desiredIsDefault: false,
+      targetCaseSensitivityMode: 'Auto',
+      expectedCurrentPath: current.path,
+    })
+  })
+
   it('surfaces semantics-migration attention instead of reporting success', async () => {
     const current = {
       id: 3,
@@ -199,21 +248,29 @@ describe('root folder relocation store actions', () => {
     expect(apiService.getRootFolders).toHaveBeenCalledTimes(1)
   })
 
-  it('passes the exact confirmed root path and reloads after identity reauthorization', async () => {
+  it('passes the exact path and observation token when confirming a root folder', async () => {
     const current = {
       id: 3,
       name: 'Library',
       path: '/srv/Library ',
       isDefault: false,
       caseSensitivityMode: 'Auto' as const,
+      storageState: 'Unconfirmed' as const,
+      confirmationToken: 'observation-token',
     }
-    vi.mocked(apiService.reauthorizeRootFolderIdentity).mockResolvedValueOnce(current)
+    vi.mocked(apiService.confirmRootFolder).mockResolvedValueOnce(current)
     vi.mocked(apiService.getRootFolders).mockResolvedValueOnce([current])
     const store = useRootFoldersStore()
 
-    await expect(store.reauthorizeIdentity(current.id, current.path)).resolves.toEqual(current)
+    await expect(
+      store.confirmCurrentFolder(current.id, current.path, current.confirmationToken),
+    ).resolves.toEqual(current)
 
-    expect(apiService.reauthorizeRootFolderIdentity).toHaveBeenCalledWith(current.id, current.path)
+    expect(apiService.confirmRootFolder).toHaveBeenCalledWith(
+      current.id,
+      current.path,
+      current.confirmationToken,
+    )
     expect(apiService.getRootFolders).toHaveBeenCalledTimes(1)
   })
 })

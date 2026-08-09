@@ -931,13 +931,14 @@ class ApiService {
     )
   }
 
-  async reauthorizeRootFolderIdentity(
+  async confirmRootFolder(
     id: number,
     expectedCurrentPath: string,
+    confirmationToken: string,
   ): Promise<RootFolder> {
-    return this.request<RootFolder>(`/rootfolders/${id}/reauthorize-identity`, {
+    return this.request<RootFolder>(`/rootfolders/${id}/confirm-current-folder`, {
       method: 'POST',
-      body: JSON.stringify({ expectedCurrentPath }),
+      body: JSON.stringify({ expectedCurrentPath, confirmationToken }),
     })
   }
 
@@ -1254,6 +1255,17 @@ class ApiService {
       method: 'POST',
       body: JSON.stringify({ path }),
     })
+  }
+
+  async getScanJobStatus(jobId: string): Promise<{
+    id: string
+    audiobookId: number
+    status: string
+    error?: string
+    enqueuedAt: string
+    canRequeue: boolean
+  }> {
+    return this.request(`/library/scan/${encodeURIComponent(jobId)}`)
   }
 
   async updateAudiobook(

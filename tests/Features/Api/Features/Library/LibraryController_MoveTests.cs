@@ -1332,6 +1332,153 @@ namespace Listenarr.Tests.Features.Api.Features.Library
 
         [Fact]
         [Trait("Method", "EnqueueMove")]
+        [Trait("Scenario", "AuthorizedRootReturnedAfterTransientFailure")]
+        public async Task MoveAudiobook_AuthorizedRootReturnedAfterTransientFailure_UsesLiveGeneration()
+        {
+            var rootPath = FileService.GetTempDirectory("listenarr-move-returned-root");
+            var identity = await new DirectoryObjectIdentityResolver().ResolveAsync(rootPath);
+            Assert.True(identity.IsAvailable, identity.UnavailableReason);
+            var root = new RootFolderBuilder()
+                .WithName("Move Root")
+                .WithPath(rootPath)
+                .WithIsDefault()
+                .Build();
+            root.ResolvedCaseSensitivity =
+                FileSystemPathSemantics.CurrentHostDefault.CaseSensitivity;
+            root.PathIdentityState = PathIdentityState.Valid;
+            root.DirectoryObjectIdentityVersion = identity.Version;
+            root.DirectoryObjectIdentity = identity.Value;
+            root.DirectoryObjectIdentityUnavailableReason =
+                "The directory was unavailable during startup.";
+            await _rootFolderRepository.AddAsync(root);
+
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Test")
+                .WithBasePath(FileService.GetTempDirectory("listenarr-move-returned-src"))
+                .Build());
+            var target = Path.Join(rootPath, "Author", "Title");
+
+            var result = await _provider.GetRequiredService<LibraryController>().EnqueueMove(
+                audiobook.Id,
+                new LibraryController.MoveRequest
+                {
+                    DestinationPath = target,
+                    MoveFiles = false
+                });
+
+            var ok = Assert.IsAssignableFrom<ObjectResult>(result);
+            Assert.Equal(200, ok.StatusCode);
+            Assert.Equal(
+                FileUtils.NormalizeStoredPath(target),
+                (await _audiobookRepository.GetByIdAsync(audiobook.Id))!.BasePath);
+        }
+
+        [Fact]
+        [Trait("Method", "EnqueueMove")]
+        [Trait("Scenario", "ManagedRootChangedFilesystemSemanticsBlocksPhysicalMove")]
+        public async Task MoveAudiobook_ManagedRootChangedFilesystemSemantics_BlocksPhysicalMove()
+        {
+            var moveQueue = CreateMoveQueueMock();
+            Init(services => services.WithSingleton(moveQueue.Object));
+            var rootPath = FileService.GetTempDirectory("listenarr-move-semantics-changed-root");
+            var actualSemantics = FileSystemPathSemantics.CurrentHostDefault;
+            var persistedSensitivity = actualSemantics.CaseSensitivity
+                == FileSystemCaseSensitivity.Sensitive
+                    ? FileSystemCaseSensitivity.Insensitive
+                    : FileSystemCaseSensitivity.Sensitive;
+            var persistedSemantics = new FileSystemPathSemantics(
+                actualSemantics.Syntax,
+                persistedSensitivity);
+            var identity = await new DirectoryObjectIdentityResolver().ResolveAsync(rootPath);
+            Assert.True(identity.IsAvailable, identity.UnavailableReason);
+            var root = new RootFolderBuilder()
+                .WithName("Changed Semantics Root")
+                .WithPath(rootPath)
+                .WithIsDefault()
+                .Build();
+            root.CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto;
+            root.ResolvedCaseSensitivity = persistedSensitivity;
+            root.PathIdentityState = PathIdentityState.Valid;
+            root.PathIdentityKey = FileSystemPathIdentity.CreateKey(
+                "root",
+                rootPath,
+                persistedSemantics);
+            root.DirectoryObjectIdentityVersion = identity.Version;
+            root.DirectoryObjectIdentity = identity.Value;
+            await _rootFolderRepository.AddAsync(root);
+
+            var sourcePath = FileService.GetTempDirectory("listenarr-move-semantics-changed-source");
+            await FileService.GetFileAsync(sourcePath, "book.m4b", "audio");
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Test")
+                .WithBasePath(sourcePath)
+                .Build());
+            await AddTrackedFileAsync(audiobook, sourcePath);
+
+            var result = await _provider.GetRequiredService<LibraryController>().EnqueueMove(
+                audiobook.Id,
+                new LibraryController.MoveRequest
+                {
+                    DestinationPath = Path.Join(rootPath, "Author", "Title"),
+                    SourcePath = sourcePath,
+                    MoveFiles = true
+                });
+
+            Assert.IsType<BadRequestObjectResult>(result);
+            moveQueue.Verify(service => service.EnqueueMoveAsync(
+                It.IsAny<MoveEnqueueCommand>(),
+                It.IsAny<CancellationToken>()), Times.Never);
+        }
+
+        [Fact]
+        [Trait("Method", "EnqueueMove")]
+        [Trait("Scenario", "UnconfirmedManagedRootBlocksPhysicalMove")]
+        public async Task MoveAudiobook_UnconfirmedManagedRoot_BlocksPhysicalMove()
+        {
+            var moveQueue = CreateMoveQueueMock();
+            Init(services => services.WithSingleton(moveQueue.Object));
+            var rootPath = FileService.GetTempDirectory("listenarr-move-unconfirmed-root");
+            var root = new RootFolderBuilder()
+                .WithName("Unconfirmed Root")
+                .WithPath(rootPath)
+                .WithIsDefault()
+                .Build();
+            root.ResolvedCaseSensitivity =
+                FileSystemPathSemantics.CurrentHostDefault.CaseSensitivity;
+            root.PathIdentityState = PathIdentityState.Valid;
+            root.DirectoryObjectIdentityUnavailableReason =
+                "The root folder physical directory has not been confirmed.";
+            await _rootFolderRepository.AddAsync(root);
+
+            var sourcePath = FileService.GetTempDirectory("listenarr-move-unconfirmed-source");
+            await FileService.GetFileAsync(sourcePath, "book.m4b", "audio");
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Test")
+                .WithBasePath(sourcePath)
+                .Build());
+            await AddTrackedFileAsync(audiobook, sourcePath);
+
+            var result = await _provider.GetRequiredService<LibraryController>().EnqueueMove(
+                audiobook.Id,
+                new LibraryController.MoveRequest
+                {
+                    DestinationPath = Path.Join(rootPath, "Author", "Title"),
+                    SourcePath = sourcePath,
+                    MoveFiles = true
+                });
+
+            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+            Assert.Contains(
+                "physical identity is unavailable",
+                badRequest.Value?.ToString() ?? string.Empty,
+                StringComparison.OrdinalIgnoreCase);
+            moveQueue.Verify(service => service.EnqueueMoveAsync(
+                It.IsAny<MoveEnqueueCommand>(),
+                It.IsAny<CancellationToken>()), Times.Never);
+        }
+
+        [Fact]
+        [Trait("Method", "EnqueueMove")]
         [Trait("Scenario", "AllowsAbsoluteDestinationInsideConfiguredRootFolder")]
         public async Task MoveAudiobook_AllowsAbsoluteDestinationInsideConfiguredRootFolder()
         {
@@ -1707,12 +1854,12 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
                 .WithOutputPath(rootPath)
                 .Build());
-            await _rootFolderRepository.AddAsync(new RootFolderBuilder()
-                .WithName("Insensitive Move Root")
-                .WithPath(rootPath)
-                .WithCaseSensitivityMode(FileSystemCaseSensitivityMode.Insensitive)
-                .WithIsDefault()
-                .Build());
+            var insensitiveRoot = await AddAuthorizedRootAsync(
+                rootPath,
+                "Insensitive Move Root",
+                FileSystemCaseSensitivityMode.Insensitive);
+            insensitiveRoot.IsDefault = true;
+            await _rootFolderRepository.UpdateAsync(insensitiveRoot);
 
             var sourcePath = Path.Join(rootPath, "CaseOnlyBook");
             Directory.CreateDirectory(sourcePath);
@@ -1756,12 +1903,12 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
                 .WithOutputPath(rootPath)
                 .Build());
-            await _rootFolderRepository.AddAsync(new RootFolderBuilder()
-                .WithName("Sensitive Move Root")
-                .WithPath(rootPath)
-                .WithCaseSensitivityMode(FileSystemCaseSensitivityMode.Sensitive)
-                .WithIsDefault()
-                .Build());
+            var sensitiveRoot = await AddAuthorizedRootAsync(
+                rootPath,
+                "Sensitive Move Root",
+                FileSystemCaseSensitivityMode.Sensitive);
+            sensitiveRoot.IsDefault = true;
+            await _rootFolderRepository.UpdateAsync(sensitiveRoot);
 
             var sourcePath = Path.Join(rootPath, "CaseOnlyBook");
             Directory.CreateDirectory(sourcePath);
@@ -1810,11 +1957,10 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
                 .WithOutputPath(outputPath)
                 .Build());
-            await _rootFolderRepository.AddAsync(new RootFolderBuilder()
-                .WithName("Nested Sensitive Root")
-                .WithPath(sensitiveRoot)
-                .WithCaseSensitivityMode(FileSystemCaseSensitivityMode.Sensitive)
-                .Build());
+            await AddAuthorizedRootAsync(
+                sensitiveRoot,
+                "Nested Sensitive Root",
+                FileSystemCaseSensitivityMode.Sensitive);
 
             var sourcePath = Path.Join(sensitiveRoot, "CaseOnlyBook");
             Directory.CreateDirectory(sourcePath);

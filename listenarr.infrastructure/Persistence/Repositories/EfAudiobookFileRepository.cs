@@ -44,12 +44,92 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
 
         public async Task<List<AudiobookFile>> GetMissingMetadataAsync(int max, CancellationToken ct = default)
         {
-            return await _db.AudiobookFiles
-                .AsNoTracking()
-                .Where(f => f.DurationSeconds == null || f.Format == null || f.SampleRate == null)
-                .OrderBy(f => f.Id)
-                .Take(max)
-                .ToListAsync(ct);
+            if (max <= 0)
+            {
+                return [];
+            }
+
+            var hostSyntax = OperatingSystem.IsWindows()
+                ? FileSystemPathSyntax.Windows
+                : FileSystemPathSyntax.Unix;
+            var results = new List<AudiobookFile>(max);
+            var lastSeenId = 0;
+            var pageSize = Math.Max(1024, max * 8);
+
+            while (results.Count < max)
+            {
+                var page = await _db.AudiobookFiles
+                    .AsNoTracking()
+                    .Where(f => f.Id > lastSeenId)
+                    .Where(f => f.DurationSeconds == null || f.Format == null || f.SampleRate == null)
+                    .Where(f => f.PathSyntax == null || f.PathSyntax == hostSyntax)
+                    .OrderBy(f => f.Id)
+                    .Take(pageSize)
+                    .Select(f => new
+                    {
+                        File = f,
+                        BasePath = f.Audiobook == null ? null : f.Audiobook.BasePath
+                    })
+                    .ToListAsync(ct);
+                if (page.Count == 0)
+                {
+                    break;
+                }
+
+                foreach (var candidate in page)
+                {
+                    if (CanRescanOnCurrentHost(candidate.File, candidate.BasePath, hostSyntax))
+                    {
+                        results.Add(candidate.File);
+                        if (results.Count == max)
+                        {
+                            break;
+                        }
+                    }
+                }
+
+                lastSeenId = page[^1].File.Id;
+                if (page.Count < pageSize)
+                {
+                    break;
+                }
+            }
+
+            return results;
+        }
+
+        private static bool CanRescanOnCurrentHost(
+            AudiobookFile file,
+            string? audiobookBasePath,
+            FileSystemPathSyntax hostSyntax)
+        {
+            if (file.PathSyntax.HasValue)
+            {
+                return file.PathSyntax.Value == hostSyntax;
+            }
+
+            if (string.IsNullOrWhiteSpace(file.Path))
+            {
+                return false;
+            }
+
+            if (FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+                    file.Path,
+                    out var detectedSyntax))
+            {
+                return detectedSyntax == hostSyntax;
+            }
+
+            if (file.Path.StartsWith("//", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            return !string.IsNullOrWhiteSpace(audiobookBasePath)
+                && FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+                    audiobookBasePath,
+                    out var baseSyntax)
+                && baseSyntax == hostSyntax;
         }
 
         internal async Task<AudiobookFile> AddUnresolvedForTestingAsync(

@@ -2491,6 +2491,13 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                         targetDirectoryIdentity.Value!)
                 ]
             };
+            var effectiveSourceSemantics =
+                sourceSemantics ?? FileSystemPathSemantics.CurrentHostDefault;
+            job.SetSourceIdentity(new PathIdentitySnapshot(
+                effectiveSourceSemantics.Syntax,
+                effectiveSourceSemantics.CaseSensitivity,
+                FileSystemCaseSensitivityMode.Auto,
+                source));
             job.SetTargetIdentity(new PathIdentitySnapshot(
                 effectiveTargetSemantics.Syntax,
                 effectiveTargetSemantics.CaseSensitivity,

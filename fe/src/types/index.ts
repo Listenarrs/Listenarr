@@ -295,7 +295,25 @@ export interface RootFolder {
   caseSensitivityMode?: 'Auto' | 'Sensitive' | 'Insensitive'
   resolvedCaseSensitivity?: 'Unknown' | 'Sensitive' | 'Insensitive'
   pathIdentityState?: 'Valid' | 'Conflict' | 'Unavailable'
-  pathIdentityKey?: string | null
+  storageState?: 'Healthy' | 'Missing' | 'Changed' | 'Unavailable' | 'Unconfirmed'
+  storageReason?:
+    | 'None'
+    | 'PathMissing'
+    | 'ForeignPathSyntax'
+    | 'AccessDenied'
+    | 'IdentityUnsupported'
+    | 'IdentityMismatch'
+    | 'IdentityUnstable'
+    | 'FilesystemSemanticsUnavailable'
+    | 'FilesystemSemanticsChanged'
+    | 'NoAuthorizedIdentity'
+    | 'InvalidPath'
+    | 'Unknown'
+  storageMessage?: string | null
+  canConfirmCurrentFolder?: boolean
+  canChangePath?: boolean
+  canMutateFilesystem?: boolean
+  confirmationToken?: string | null
   activeRelocation?: RootFolderPathChangeResult | null
 }
 

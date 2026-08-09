@@ -113,6 +113,10 @@ namespace Listenarr.Tests.Common
                 FileSystemCaseSensitivityMode.Auto)
         {
             Directory.CreateDirectory(path);
+            var semanticsResolution = await _provider
+                .GetRequiredService<IFileSystemSemanticsResolver>()
+                .ResolveAsync(path, caseSensitivityMode);
+            Assert.Equal(PathIdentityState.Valid, semanticsResolution.State);
             var identity = await _provider
                 .GetRequiredService<IDirectoryObjectIdentityResolver>()
                 .ResolveAsync(path);
@@ -121,7 +125,7 @@ namespace Listenarr.Tests.Common
                 identity.UnavailableReason
                     ?? "The test library root has no physical directory identity.");
 
-            var semantics = FileSystemPathSemantics.CurrentHostDefault;
+            var semantics = semanticsResolution.Semantics;
             var canonicalPath = FileSystemPathIdentity.Canonicalize(
                 path,
                 semantics.Syntax);
@@ -136,6 +140,13 @@ namespace Listenarr.Tests.Common
                 .WithPath(canonicalPath)
                 .WithCaseSensitivityMode(caseSensitivityMode)
                 .Build();
+            root.CaseSensitivityMode = caseSensitivityMode;
+            root.ResolvedCaseSensitivity = semantics.CaseSensitivity;
+            root.PathIdentityState = PathIdentityState.Valid;
+            root.PathIdentityKey = FileSystemPathIdentity.CreateKey(
+                "root",
+                canonicalPath,
+                semantics);
             root.DirectoryObjectIdentityVersion = identity.Version;
             root.DirectoryObjectIdentity = identity.Value;
             root.DirectoryObjectIdentityUnavailableReason = identity.UnavailableReason;

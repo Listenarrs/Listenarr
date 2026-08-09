@@ -23,7 +23,7 @@ public sealed class AudiobookDeletionCommitServiceTests : BaseTests
         var releasePreflight = new TaskCompletionSource<Audiobook?>(
             TaskCreationOptions.RunContinuationsAsynchronously);
         var repository = new Mock<IAudiobookRepository>(MockBehavior.Strict);
-        repository.Setup(service => service.GetByIdSnapshotAsync(
+        repository.Setup(service => service.GetForUpdateSnapshotAsync(
                 audiobookId,
                 It.IsAny<CancellationToken>()))
             .Returns(async () =>
@@ -57,7 +57,7 @@ public sealed class AudiobookDeletionCommitServiceTests : BaseTests
         };
         using var cancellation = new CancellationTokenSource();
         var repository = new Mock<IAudiobookRepository>(MockBehavior.Strict);
-        repository.Setup(service => service.GetByIdSnapshotAsync(
+        repository.Setup(service => service.GetForUpdateSnapshotAsync(
                 audiobookId,
                 cancellation.Token))
             .ReturnsAsync(audiobook);
@@ -80,6 +80,88 @@ public sealed class AudiobookDeletionCommitServiceTests : BaseTests
     }
 
     [Fact]
+    public async Task DeleteAsync_IncludeFiles_UsesFullSnapshotForPostCommitFilesystemCleanup()
+    {
+        // Given
+        const int audiobookId = 4104;
+        var audiobook = new Audiobook
+        {
+            Id = audiobookId,
+            Title = "Filesystem delete",
+            Files = [AudiobookFile.CreateUnresolved("/library/book.m4b")]
+        };
+        var repository = new Mock<IAudiobookRepository>(MockBehavior.Strict);
+        repository.Setup(service => service.GetForUpdateSnapshotAsync(
+                audiobookId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Audiobook
+            {
+                Id = audiobookId,
+                Title = audiobook.Title
+            });
+        repository.Setup(service => service.GetByIdSnapshotAsync(
+                audiobookId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(audiobook);
+        repository.Setup(service => service.DeleteByIdAsync(audiobookId))
+            .ReturnsAsync(true);
+        var service = new AudiobookDeletionCommitService(repository.Object);
+
+        // When
+        var result = await service.DeleteAsync(
+            audiobookId,
+            includeFiles: true,
+            CancellationToken.None);
+
+        // Then
+        Assert.Equal(AudiobookDeletionCommitOutcome.Deleted, result.Outcome);
+        Assert.Same(audiobook, result.Audiobook);
+        repository.Verify(service => service.GetForUpdateSnapshotAsync(
+            audiobookId,
+            It.IsAny<CancellationToken>()), Times.Once);
+        repository.Verify(service => service.GetByIdSnapshotAsync(
+            audiobookId,
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task DeleteAsync_IncludeFilesWithForeignHostBoundary_DoesNotLoadFileGraph()
+    {
+        // Given
+        const int audiobookId = 4105;
+        var foreignBasePath = OperatingSystem.IsWindows()
+            ? "/server/mnt/drive/Audiobooks/Imported"
+            : @"C:\server\Audiobooks\Imported";
+        var audiobook = new Audiobook
+        {
+            Id = audiobookId,
+            Title = "Copied database",
+            BasePath = foreignBasePath
+        };
+        var repository = new Mock<IAudiobookRepository>(MockBehavior.Strict);
+        repository.Setup(service => service.GetForUpdateSnapshotAsync(
+                audiobookId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(audiobook);
+        repository.Setup(service => service.DeleteByIdAsync(audiobookId))
+            .ReturnsAsync(true);
+        var service = new AudiobookDeletionCommitService(repository.Object);
+
+        // When
+        var result = await service.DeleteAsync(
+            audiobookId,
+            includeFiles: true,
+            CancellationToken.None);
+
+        // Then
+        Assert.Equal(AudiobookDeletionCommitOutcome.Deleted, result.Outcome);
+        Assert.Same(audiobook, result.Audiobook);
+        repository.Verify(service => service.GetByIdSnapshotAsync(
+            It.IsAny<int>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task DeleteAsync_CanceledBeforePreflight_DoesNotCommit()
     {
         // Given
@@ -92,7 +174,7 @@ public sealed class AudiobookDeletionCommitServiceTests : BaseTests
         // When / Then
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => service.DeleteAsync(audiobookId, cancellation.Token));
-        repository.Verify(service => service.GetByIdSnapshotAsync(
+        repository.Verify(service => service.GetForUpdateSnapshotAsync(
             audiobookId,
             It.IsAny<CancellationToken>()), Times.Never);
         repository.Verify(service => service.DeleteByIdAsync(audiobookId), Times.Never);

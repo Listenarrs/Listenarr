@@ -138,6 +138,7 @@ internal sealed class ScanPathAuthorizationService(
                 root.Path,
                 root.CaseSensitivityMode,
                 RequiresEnrollment: true,
+                RootFolderPathSemantics.ResolvePersisted(root),
                 root.DirectoryObjectIdentityVersion,
                 root.DirectoryObjectIdentity,
                 root.DirectoryObjectIdentityUnavailableReason))
@@ -148,6 +149,7 @@ internal sealed class ScanPathAuthorizationService(
                 settings.OutputPath,
                 FileSystemCaseSensitivityMode.Auto,
                 RequiresEnrollment: false,
+                PersistedSemantics: null,
                 DirectoryObjectIdentityVersion: null,
                 DirectoryObjectIdentity: null,
                 DirectoryObjectIdentityUnavailableReason: null));
@@ -175,6 +177,19 @@ internal sealed class ScanPathAuthorizationService(
                     candidate,
                     "Ignoring configured scan root {Path}: {Reason}",
                     resolution.Reason);
+                continue;
+            }
+            if (candidate.RequiresEnrollment
+                && (!candidate.PersistedSemantics.HasValue
+                    || candidate.PersistedSemantics.Value.DetectAmbiguousCaseMatches
+                    || candidate.PersistedSemantics.Value.Semantics.Syntax
+                        != resolution.Semantics.Syntax
+                    || candidate.PersistedSemantics.Value.Semantics.CaseSensitivity
+                        != resolution.Semantics.CaseSensitivity))
+            {
+                LogUnavailableCandidate(
+                    candidate,
+                    "Ignoring configured scan root {Path}: live filesystem semantics do not match its persisted root semantics.");
                 continue;
             }
 
@@ -271,12 +286,10 @@ internal sealed class ScanPathAuthorizationService(
             cancellationToken.ThrowIfCancellationRequested();
             var boundaryIdentity = boundary.GetDirectoryObjectIdentity();
             if (authorizedRoot.RequiresEnrollment
-                && (!string.IsNullOrWhiteSpace(
-                        authorizedRoot.DirectoryObjectIdentityUnavailableReason)
-                    || !ManagedDirectoryIdentity.MatchesNativeIdentity(
-                        authorizedRoot.DirectoryObjectIdentityVersion,
-                        authorizedRoot.DirectoryObjectIdentity,
-                        boundaryIdentity)))
+                && !ManagedDirectoryIdentity.MatchesNativeIdentity(
+                    authorizedRoot.DirectoryObjectIdentityVersion,
+                    authorizedRoot.DirectoryObjectIdentity,
+                    boundaryIdentity))
             {
                 throw new InvalidOperationException(
                     "The configured scan root no longer identifies its authorized physical generation.");
@@ -388,6 +401,7 @@ internal sealed class ScanPathAuthorizationService(
         string Path,
         FileSystemCaseSensitivityMode RequestedMode,
         bool RequiresEnrollment,
+        PersistedRootFolderPathSemantics? PersistedSemantics,
         int? DirectoryObjectIdentityVersion,
         string? DirectoryObjectIdentity,
         string? DirectoryObjectIdentityUnavailableReason);

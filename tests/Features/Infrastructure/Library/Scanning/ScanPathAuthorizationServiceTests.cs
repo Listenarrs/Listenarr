@@ -121,6 +121,66 @@ public sealed class ScanPathAuthorizationServiceTests : BaseTests
     }
 
     [Fact]
+    public async Task AuthorizeAsync_AuthorizedRootWithChangedFilesystemSemantics_IsRejectedUntilRepaired()
+    {
+        var configuredRoot = FileService.GetTempDirectory(
+            "scan-authorization-semantics-changed-root");
+        var scanRoot = Path.Join(configuredRoot, "Book");
+        Directory.CreateDirectory(scanRoot);
+        await AddAuthorizedRootAsync(configuredRoot);
+        var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var root = await db.RootFolders.SingleAsync();
+            var actual = FileSystemPathSemantics.CurrentHostDefault;
+            var persistedSensitivity = actual.CaseSensitivity
+                == FileSystemCaseSensitivity.Sensitive
+                    ? FileSystemCaseSensitivity.Insensitive
+                    : FileSystemCaseSensitivity.Sensitive;
+            var persisted = new FileSystemPathSemantics(actual.Syntax, persistedSensitivity);
+            root.CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto;
+            root.ResolvedCaseSensitivity = persistedSensitivity;
+            root.PathIdentityState = PathIdentityState.Valid;
+            root.PathIdentityKey = FileSystemPathIdentity.CreateKey(
+                "root",
+                configuredRoot,
+                persisted);
+            await db.SaveChangesAsync();
+        }
+        var service = _provider.GetRequiredService<IScanPathAuthorizationService>();
+
+        var result = await service.AuthorizeAsync(scanRoot);
+
+        Assert.False(result.IsAuthorized);
+        Assert.NotEqual(ScanPathAuthorizationFailure.None, result.Failure);
+        Assert.Null(result.PhysicalIdentity);
+    }
+
+    [Fact]
+    public async Task AuthorizeAsync_AuthorizedRootReturnsAfterTransientFailure_UsesLiveGeneration()
+    {
+        var configuredRoot = FileService.GetTempDirectory(
+            "scan-authorization-transient-root-failure");
+        var scanRoot = Path.Join(configuredRoot, "Book");
+        Directory.CreateDirectory(scanRoot);
+        await AddAuthorizedRootAsync(configuredRoot);
+        var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var root = await db.RootFolders.SingleAsync();
+            root.DirectoryObjectIdentityUnavailableReason =
+                "The directory was unavailable during startup.";
+            await db.SaveChangesAsync();
+        }
+        var service = _provider.GetRequiredService<IScanPathAuthorizationService>();
+
+        var result = await service.AuthorizeAsync(scanRoot);
+
+        Assert.True(result.IsAuthorized, result.Error);
+        Assert.NotNull(result.PhysicalIdentity);
+    }
+
+    [Fact]
     public async Task AuthorizeAsync_ReplacedEnrolledRoot_IsRejected()
     {
         var parent = FileService.GetTempDirectory("scan-authorization-root-replacement");

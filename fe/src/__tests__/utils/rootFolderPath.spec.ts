@@ -12,7 +12,6 @@ function createRoot(path: string, pathSyntax: RootFolder['pathSyntax'] = null): 
     caseSensitivityMode: 'Auto',
     resolvedCaseSensitivity: 'Unknown',
     pathIdentityState: 'Unavailable',
-    pathIdentityKey: null,
   }
 }
 

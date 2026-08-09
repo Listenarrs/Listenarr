@@ -103,17 +103,44 @@ namespace Listenarr.Infrastructure.Metadata.Jobs
                             return;
                         }
 
+                        var taskAudiobookRepository = taskScope.ServiceProvider.GetRequiredService<IAudiobookRepository>();
+                        var filePathIdentityResolver = taskScope.ServiceProvider.GetRequiredService<IAudiobookFilePathIdentityResolver>();
+                        var audiobook = await taskAudiobookRepository.GetForScanSnapshotAsync(
+                            file.AudiobookId,
+                            cancellationToken);
+                        if (audiobook == null)
+                        {
+                            logger.LogDebug(
+                                "Skipping metadata rescan for file id={Id}; audiobook {AudiobookId} no longer exists",
+                                file.Id,
+                                file.AudiobookId);
+                            return;
+                        }
+
+                        var resolvedIdentity = await filePathIdentityResolver.ResolveAsync(
+                            audiobook,
+                            observedPath,
+                            cancellationToken);
+                        if (resolvedIdentity.State != PathIdentityState.Valid)
+                        {
+                            logger.LogDebug(
+                                "Skipping metadata rescan for file id={Id}; the stored path is unavailable on this host: {Reason}",
+                                file.Id,
+                                LogRedaction.SanitizeText(resolvedIdentity.Reason));
+                            return;
+                        }
+
                         logger.LogInformation(
                             "Re-extracting metadata for file id={Id} path={Path}",
                             file.Id,
-                            LogRedaction.SanitizeFilePath(observedPath));
+                            LogRedaction.SanitizeFilePath(resolvedIdentity.CanonicalPath));
 
                         var taskFileService = taskScope.ServiceProvider
                             .GetRequiredService<IAudiobookFileService>();
                         cancellationToken.ThrowIfCancellationRequested();
                         using var registrationLease =
                             PinnedAudiobookFileRegistrationLease.Open(
-                                observedPath,
+                                resolvedIdentity.CanonicalPath,
                                 file.PhysicalObjectIdentity);
                         if (!registrationLease.MatchesCurrentPublication())
                         {

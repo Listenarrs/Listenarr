@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import RootFolderFormModal from '@/components/settings/RootFolderFormModal.vue'
+import MoveAudiobookModal from '@/components/feedback/MoveAudiobookModal.vue'
 import { useRootFoldersStore } from '@/stores/rootFolders'
 import { apiService } from '@/services/api'
 
@@ -201,6 +202,125 @@ describe('RootFolderFormModal', () => {
 
     expect(update).not.toHaveBeenCalled()
     expect((wrapper.vm as unknown as { showConfirm: boolean }).showConfirm).toBe(true)
+  })
+
+  it('same-path filesystem-semantics repair requires confirmation without offering file movement', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useRootFoldersStore()
+    const root = {
+      id: 23,
+      name: 'Library',
+      path: 'D:\\Listenarr Test',
+      pathSyntax: 'Windows' as const,
+      isDefault: true,
+      caseSensitivityMode: 'Auto' as const,
+      resolvedCaseSensitivity: 'Sensitive' as const,
+      pathIdentityState: 'Valid' as const,
+      storageState: 'Unavailable' as const,
+      storageReason: 'FilesystemSemanticsChanged' as const,
+      canMutateFilesystem: false,
+    }
+    store.folders = [root]
+    const update = vi.spyOn(store, 'update').mockResolvedValue({
+      ...root,
+      storageState: 'Healthy',
+      storageReason: 'None',
+      canMutateFilesystem: true,
+    })
+    const wrapper = mount(RootFolderFormModal, {
+      props: { root },
+      global: {
+        plugins: [pinia],
+        stubs: { FolderBrowserModal: true },
+      },
+    })
+
+    await (wrapper.vm as unknown as { save: () => Promise<void> }).save()
+    await wrapper.vm.$nextTick()
+
+    const moveModal = wrapper.findComponent(MoveAudiobookModal)
+    expect(moveModal.props('rootFolderRepair')).toBe(true)
+    expect(moveModal.props('showMoveOption')).toBe(false)
+    expect(moveModal.props('allowMoveFiles')).toBe(false)
+    moveModal.vm.$emit('confirm', { moveFiles: false, deleteEmpty: false })
+
+    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1))
+    expect(update).toHaveBeenCalledWith(
+      root.id,
+      expect.objectContaining({ path: root.path }),
+      expect.objectContaining({
+        expectedCurrentPath: root.path,
+        pathChangeConfirmed: true,
+        moveFiles: false,
+      }),
+    )
+  })
+
+  it('foreign source path change disables physical move and confirms metadata-only repair', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useRootFoldersStore()
+    const root = {
+      id: 22,
+      name: 'Copied Linux Library',
+      path: '/server/mnt/drive/Audiobooks',
+      pathSyntax: 'Unix' as const,
+      isDefault: true,
+      caseSensitivityMode: 'Auto' as const,
+      resolvedCaseSensitivity: 'Sensitive' as const,
+      pathIdentityState: 'Unavailable' as const,
+      storageState: 'Unavailable' as const,
+      storageReason: 'ForeignPathSyntax' as const,
+      canMutateFilesystem: false,
+    }
+    store.folders = [root]
+    const update = vi.spyOn(store, 'update').mockResolvedValue({
+      ...root,
+      path: 'D:\\Listenarr Test',
+      pathSyntax: 'Windows',
+      storageState: 'Healthy',
+      storageReason: 'None',
+      canMutateFilesystem: true,
+    })
+    const wrapper = mount(RootFolderFormModal, {
+      props: { root },
+      attachTo: document.body,
+      global: {
+        plugins: [pinia],
+        stubs: { FolderBrowserModal: true },
+      },
+    })
+    await wrapper.get('#root-path').setValue('D:\\Listenarr Test')
+
+    await (wrapper.vm as unknown as { save: () => Promise<void> }).save()
+    await wrapper.vm.$nextTick()
+
+    const moveFiles = document.body.querySelector<HTMLInputElement>(
+      'input[aria-label="Move files now"]',
+    )
+    expect(moveFiles).not.toBeNull()
+    expect(moveFiles!.disabled).toBe(true)
+    expect(moveFiles!.checked).toBe(false)
+    expect(document.body.textContent).toContain(
+      'Files cannot be moved from the current root on this system',
+    )
+    const moveModal = wrapper.findComponent(MoveAudiobookModal)
+    expect(moveModal.props('allowMoveFiles')).toBe(false)
+    expect(moveModal.props('moveFiles')).toBe(false)
+    moveModal.vm.$emit('confirm', { moveFiles: false, deleteEmpty: false })
+
+    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1))
+    expect(update).toHaveBeenCalledWith(
+      root.id,
+      expect.objectContaining({ path: 'D:\\Listenarr Test' }),
+      expect.objectContaining({
+        expectedCurrentPath: root.path,
+        pathChangeConfirmed: true,
+        moveFiles: false,
+      }),
+    )
+    wrapper.unmount()
   })
 
   it('requires relocation confirmation when a sensitive persisted root changes only by case', async () => {
@@ -448,7 +568,7 @@ describe('RootFolderFormModal', () => {
 
   it.each([
     [true, 'Root relocation started'],
-    [false, 'Root path metadata updated'],
+    [false, 'Root folder changed'],
   ])('reports the path change accurately when moveFiles is %s', async (moveFiles, message) => {
     const pinia = createPinia()
     setActivePinia(pinia)
