@@ -61,14 +61,14 @@ internal sealed partial class PinnedDirectoryCreation
     }
 
     internal void DeletePinnedEmptyDirectory(string currentName) =>
-        DeletePinnedEmptyDirectoryCore(currentName, requireImmediateNamespaceRetirement: false);
+        DeletePinnedEmptyDirectoryCore(currentName, requireImmediateDeletion: false);
 
-    internal void RetirePinnedEmptyDirectoryFromNamespace(string currentName) =>
-        DeletePinnedEmptyDirectoryCore(currentName, requireImmediateNamespaceRetirement: true);
+    internal void DeletePinnedEmptyDirectoryImmediately(string currentName) =>
+        DeletePinnedEmptyDirectoryCore(currentName, requireImmediateDeletion: true);
 
     private void DeletePinnedEmptyDirectoryCore(
         string currentName,
-        bool requireImmediateNamespaceRetirement)
+        bool requireImmediateDeletion)
     {
         ThrowIfDisposed();
         ValidateLeafName(currentName);
@@ -93,31 +93,31 @@ internal sealed partial class PinnedDirectoryCreation
 
         if (OperatingSystem.IsWindows())
         {
-            if (!requireImmediateNamespaceRetirement)
+            if (!requireImmediateDeletion)
             {
                 DeleteOpenedFileWindows(_directoryHandle);
                 return;
             }
 
             // POSIX delete semantics are applied through a distinct file object. Closing
-            // that handle before returning is the namespace-retirement boundary; using a
+            // that handle before returning is the immediate-deletion boundary; using a
             // duplicate of _directoryHandle would keep cleanup tied to the original file
             // object's lifetime and could leave a child delete-pending while its parent is
-            // retired immediately afterwards.
-            using (var retirementHandle = OpenRelativeDirectoryWindows(
+            // deleted immediately afterwards.
+            using (var deletionHandle = OpenRelativeDirectoryWindows(
                 _parentHandle,
                 currentName,
                 currentPath,
                 requireDeleteAccess: true))
             {
-                if (!HandlesIdentifySameDirectory(_directoryHandle, retirementHandle))
+                if (!HandlesIdentifySameDirectory(_directoryHandle, deletionHandle))
                 {
                     throw new InvalidOperationException(
-                        "The directory changed before immediate pinned retirement.");
+                        "The directory changed before immediate pinned deletion.");
                 }
 
                 DeleteOpenedFileImmediatelyWindows(
-                    retirementHandle,
+                    deletionHandle,
                     allowLegacyFallback: false);
             }
 
@@ -131,31 +131,26 @@ internal sealed partial class PinnedDirectoryCreation
                 {
                     throw new System.ComponentModel.Win32Exception(
                         145,
-                        "The verified empty directory remained visible after immediate retirement.");
+                        "The verified empty directory remained visible after immediate deletion.");
                 }
             }
 
             return;
         }
 
-        var retiredName = $".listenarr-retired-directory-{Guid.NewGuid():N}.state";
-        RenameRelativeEntry(
-            _parentHandle,
-            _directoryHandle,
-            currentName,
-            _parentHandle,
-            retiredName);
-        using var reopened = OpenDirectoryAtUnix(_parentHandle, retiredName);
+        PinnedFilesystemMutationHooks.InvokeBeforeUnixDirectoryDeleteRevalidation(
+            currentPath);
+        using var reopened = OpenDirectoryAtUnix(_parentHandle, currentName);
         if (!HandlesIdentifySameDirectory(_directoryHandle, reopened))
         {
             throw new InvalidOperationException(
-                "The retired directory no longer identifies the pinned directory.");
+                "The empty directory changed before handle-relative deletion.");
         }
 
         var flags = OperatingSystem.IsMacOS() ? AtRemovedirMac : AtRemovedirLinux;
         if (UnlinkAt(
                 _parentHandle.DangerousGetHandle().ToInt32(),
-                retiredName,
+                currentName,
                 flags) != 0)
         {
             throw new System.ComponentModel.Win32Exception(

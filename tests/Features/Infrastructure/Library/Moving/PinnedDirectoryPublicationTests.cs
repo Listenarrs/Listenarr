@@ -9,7 +9,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving;
 public sealed partial class PinnedDirectoryCreationTests : BaseTests
 {
     [WindowsFact]
-    public void RetirePinnedEmptyDirectoryFromNamespace_NestedLiveAnchors_RetiresChildBeforeParent()
+    public void DeletePinnedEmptyDirectoryImmediately_NestedLiveAnchors_DeletesChildBeforeParent()
     {
         var parent = FileService.GetTempDirectory(
             "pinned-directory-immediate-nested-retirement");
@@ -25,11 +25,11 @@ public sealed partial class PinnedDirectoryCreationTests : BaseTests
         Assert.True(claimAnchor.VisiblePathMatches());
         Assert.True(stateAnchor.VisiblePathMatches());
 
-        claim.RetirePinnedEmptyDirectoryFromNamespace("claim");
+        claim.DeletePinnedEmptyDirectoryImmediately("claim");
 
         Assert.False(Directory.Exists(claimPath));
         Assert.True(stateAnchor.VisiblePathMatches());
-        state.RetirePinnedEmptyDirectoryFromNamespace("state");
+        state.DeletePinnedEmptyDirectoryImmediately("state");
 
         Assert.False(Directory.Exists(statePath));
     }
@@ -329,9 +329,8 @@ public sealed partial class PinnedDirectoryCreationTests : BaseTests
     }
 
     [LinuxFact]
-    public async Task DeleteOpenedFile_UnixReplacementAtRetirementBoundary_IsPreserved()
+    public async Task DeleteOpenedFile_UnixReplacementBeforeFinalRevalidation_IsPreservedWithoutScratchArtifacts()
     {
-
         var parent = FileService.GetTempDirectory("pinned-file-delete-race");
         var file = await FileService.GetFileAsync(parent, "marker.json", "owned");
         var displaced = Path.Join(parent, "marker.original");
@@ -340,12 +339,9 @@ public sealed partial class PinnedDirectoryCreationTests : BaseTests
             "marker.json",
             requireDeleteAccess: true);
         var replaced = false;
-        using var hook = ExclusiveDirectoryCreator.PushBeforeCreateHook(path =>
+        using var hook = PinnedFilesystemMutationHooks.PushBeforeUnixFileDeleteRevalidation(path =>
         {
-            if (replaced
-                || !Path.GetFileName(path).StartsWith(
-                    ".listenarr-retire-",
-                    StringComparison.Ordinal))
+            if (replaced || !string.Equals(path, file, StringComparison.Ordinal))
             {
                 return;
             }
@@ -360,6 +356,89 @@ public sealed partial class PinnedDirectoryCreationTests : BaseTests
         Assert.True(replaced);
         Assert.Equal("owned", await File.ReadAllTextAsync(displaced));
         Assert.Equal("external", await File.ReadAllTextAsync(file));
+        Assert.DoesNotContain(
+            Directory.EnumerateFileSystemEntries(parent),
+            path => Path.GetFileName(path).StartsWith(
+                ".listenarr-",
+                StringComparison.Ordinal));
+    }
+
+    [LinuxFact]
+    public void TryCreateChildForPublication_UnixReplacementBeforeOpenIsNotGrantedCreationAuthority()
+    {
+        var parent = FileService.GetTempDirectory("pinned-directory-create-final-name-race");
+        var child = Path.Join(parent, "Book");
+        var displaced = Path.Join(parent, "Book.original");
+        using var anchor = PinnedDirectoryCreation.OpenPinnedDirectoryNoFollow(parent);
+        var replaced = false;
+        using var hook = PinnedFilesystemMutationHooks.PushAfterUnixDirectoryCreateBeforeOpen(path =>
+        {
+            if (replaced || !string.Equals(path, child, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            replaced = true;
+            Directory.Move(child, displaced);
+            Directory.CreateDirectory(child);
+            File.WriteAllText(Path.Join(child, "external.txt"), "external");
+        });
+
+        using var creation = anchor.TryCreateChildForPublication("Book");
+        using var observed = creation.OpenCreatedDirectoryAnchor();
+
+        Assert.True(replaced);
+        Assert.True(creation.Created);
+        Assert.False(creation.CreationGenerationIsProvable);
+        Assert.True(observed.VisiblePathMatches());
+        Assert.True(Directory.Exists(displaced));
+        Assert.Equal(
+            "external",
+            File.ReadAllText(Path.Join(child, "external.txt")));
+        Assert.DoesNotContain(
+            Directory.EnumerateFileSystemEntries(parent),
+            path => Path.GetFileName(path).StartsWith(
+                ".listenarr-",
+                StringComparison.Ordinal));
+    }
+
+    [LinuxFact]
+    public void DeletePinnedEmptyDirectoryImmediately_UnixReplacementBeforeFinalRevalidationIsPreserved()
+    {
+        var parent = FileService.GetTempDirectory("pinned-directory-delete-final-name-race");
+        var child = Path.Join(parent, "Book");
+        var displaced = Path.Join(parent, "Book.original");
+        Directory.CreateDirectory(child);
+        using var anchor = PinnedDirectoryCreation.OpenPinnedDirectoryNoFollow(parent);
+        using var publication = anchor.OpenExistingChildForPublication("Book");
+        var replaced = false;
+        using var hook = PinnedFilesystemMutationHooks.PushBeforeUnixDirectoryDeleteRevalidation(path =>
+        {
+            if (replaced || !string.Equals(path, child, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            replaced = true;
+            Directory.Move(child, displaced);
+            Directory.CreateDirectory(child);
+            File.WriteAllText(Path.Join(child, "external.txt"), "external");
+        });
+
+        Assert.ThrowsAny<Exception>(() =>
+            publication.DeletePinnedEmptyDirectoryImmediately("Book"));
+
+        Assert.True(replaced);
+        Assert.True(Directory.Exists(displaced));
+        Assert.True(Directory.Exists(child));
+        Assert.Equal(
+            "external",
+            File.ReadAllText(Path.Join(child, "external.txt")));
+        Assert.DoesNotContain(
+            Directory.EnumerateFileSystemEntries(parent),
+            path => Path.GetFileName(path).StartsWith(
+                ".listenarr-",
+                StringComparison.Ordinal));
     }
 
     [Fact]

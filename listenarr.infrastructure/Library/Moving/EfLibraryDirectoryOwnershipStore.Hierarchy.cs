@@ -66,7 +66,7 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
                 var childName = Path.GetFileName(directory);
                 using var creation = currentAnchor.TryCreateChild(childName);
                 PinnedDirectoryCreation.PinnedDirectoryAnchor nextAnchor;
-                if (!creation.Created)
+                if (!creation.Created || !creation.CreationGenerationIsProvable)
                 {
                     using var existingPublication =
                         currentAnchor.OpenExistingChildForPublication(childName);
@@ -203,7 +203,7 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
                 return;
             }
 
-            creation.RetirePinnedEmptyDirectoryFromNamespace(
+            creation.DeletePinnedEmptyDirectoryImmediately(
                 Path.GetFileName(directory));
         }
         catch (Exception exception) when (exception is not (

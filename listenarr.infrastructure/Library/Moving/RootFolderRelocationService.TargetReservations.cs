@@ -101,7 +101,7 @@ public sealed partial class RootFolderRelocationService
                 continue;
             }
 
-            publication.RetirePinnedEmptyDirectoryFromNamespace(
+            publication.DeletePinnedEmptyDirectoryImmediately(
                 Path.GetFileName(canonicalPath));
             reservation.State =
                 RootFolderRelocationCreatedDirectoryState.Removed;
@@ -230,7 +230,7 @@ public sealed partial class RootFolderRelocationService
                 {
                     using var creation =
                         current.TryCreateChildForPublication(childName);
-                    if (creation.Created)
+                    if (creation.Created && creation.CreationGenerationIsProvable)
                     {
                         next = creation.OpenCreatedDirectoryAnchor();
                         next.FlushDirectoryEntry();

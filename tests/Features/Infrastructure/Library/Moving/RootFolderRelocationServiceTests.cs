@@ -774,10 +774,13 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
                 .RootFolderRelocationCreatedDirectories
                 .Where(candidate => candidate.RelocationId == relocationId)
                 .ToListAsync();
+            var expectedState = OperatingSystem.IsWindows()
+                ? RootFolderRelocationCreatedDirectoryState.Created
+                : RootFolderRelocationCreatedDirectoryState.Retained;
             Assert.All(
                 recoveredReservations,
                 reservation => Assert.Equal(
-                    RootFolderRelocationCreatedDirectoryState.Created,
+                    expectedState,
                     reservation.State));
         }
         Assert.DoesNotContain(

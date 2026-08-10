@@ -450,7 +450,7 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
         Assert.Equal(ownership.Id, persisted.Id);
     }
 
-    [Fact]
+    [WindowsFact]
     public async Task EnsureCreatedHierarchyAsync_ClaimsOnlyDirectoriesCreatedExclusively()
     {
         var destination = Path.Join(_root, "Author", "Book");
@@ -471,7 +471,38 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
         Assert.Equal(LibraryDirectoryOwnershipResolutionState.Unowned, rootResolution.State);
     }
 
-    [Fact]
+    [LinuxFact]
+    public async Task EnsureCreatedHierarchyAsync_UnixFinalNameCreationRemainsUnownedWithoutScratchArtifacts()
+    {
+        var destination = Path.Join(_root, "Author", "Book");
+
+        var ownerships = await _store.EnsureCreatedHierarchyAsync(
+            destination,
+            _root,
+            FileSystemPathSemantics.CurrentHostDefault,
+            "test",
+            Guid.NewGuid(),
+            audiobookId: 7);
+
+        Assert.Empty(ownerships);
+        Assert.True(Directory.Exists(destination));
+        var resolution = await _store.ResolveOwnedAsync(
+            destination,
+            FileSystemPathSemantics.CurrentHostDefault);
+        Assert.Equal(
+            LibraryDirectoryOwnershipResolutionState.Unowned,
+            resolution.State);
+        Assert.DoesNotContain(
+            Directory.EnumerateFileSystemEntries(
+                _root,
+                "*",
+                SearchOption.AllDirectories),
+            path => Path.GetFileName(path).StartsWith(
+                ".listenarr-",
+                StringComparison.Ordinal));
+    }
+
+    [WindowsFact]
     public async Task EnrolledDestinationRemovedBeforePublication_IsNotRecreatedAndOwnershipFailsClosed()
     {
         var sourceDirectory = Path.Join(_root, "Source");
@@ -524,7 +555,7 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
             durableOwnership.State);
     }
 
-    [Fact]
+    [WindowsFact]
     public async Task EnsureCreatedHierarchyAsync_PersistenceFailureRemovesOnlyUnchangedEmptyCreation()
     {
         var destination = Path.Join(_root, "FailedEmptyCreation");
@@ -547,7 +578,7 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
         Assert.Equal(LibraryDirectoryOwnershipResolutionState.Unowned, resolution.State);
     }
 
-    [Fact]
+    [WindowsFact]
     public async Task EnsureCreatedHierarchyAsync_PersistenceFailurePreservesChangedCreation()
     {
         var destination = Path.Join(_root, "FailedChangedCreation");
@@ -574,11 +605,11 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
         Assert.Equal(LibraryDirectoryOwnershipResolutionState.Unowned, resolution.State);
     }
 
-    [Fact]
+    [WindowsFact]
     public async Task EnsureCreatedHierarchyAsync_PersistenceFailureReplacementDuringCompensationPreservesReplacement()
     {
         var destination = Path.Join(_root, "FailedCompensationReplacement");
-        var displacedCreation = destination + ".listenarr-created";
+        var displacedCreation = destination + ".created-original";
         var factory = new FailFirstThenActOnSecondContextFactory(
             _factory,
             () =>
@@ -607,7 +638,7 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
         Assert.Equal(LibraryDirectoryOwnershipResolutionState.Unowned, resolution.State);
     }
 
-    [Fact]
+    [WindowsFact]
     public async Task EnsureCreatedHierarchyAsync_CancellationAfterExclusiveCreationFinishesDurableClaim()
     {
         var destination = Path.Join(_root, "CanceledAfterCreate");
@@ -633,7 +664,7 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
         Assert.Equal(ownership.Id, resolution.Ownership?.Id);
     }
 
-    [Fact]
+    [WindowsFact]
     public async Task EnsureCreatedHierarchyAsync_ExistingDurableClaimResolvesFromDatabaseState()
     {
         var destination = Path.Join(_root, "Author", "Book");
@@ -663,7 +694,7 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
             resolution.State);
     }
 
-    [Fact]
+    [WindowsFact]
     public async Task EnsureCreatedHierarchyAsync_DoesNotClaimPreExistingParent()
     {
         var author = Path.Join(_root, "Author");

@@ -115,6 +115,9 @@ internal sealed partial class AudiobookContentMoveService
                     $"A newly created target directory changed before persistence: {path}");
             }
 
+            var persistedState = creation.CreationGenerationIsProvable
+                ? MoveCreatedDirectoryState.Created
+                : MoveCreatedDirectoryState.Retained;
             faultInjector?.OnTargetScaffoldPreparation(
                 request.JobId,
                 TargetScaffoldPreparationFaultPoint
@@ -125,7 +128,7 @@ internal sealed partial class AudiobookContentMoveService
                     request.JobId,
                     request.LeaseToken,
                     path,
-                    MoveCreatedDirectoryState.Created,
+                    persistedState,
                     identity,
                     cancellationToken);
             }
@@ -135,7 +138,7 @@ internal sealed partial class AudiobookContentMoveService
                 throw;
             }
 
-            planned.State = MoveCreatedDirectoryState.Created;
+            planned.State = persistedState;
             planned.DirectoryObjectIdentity = identity;
             faultInjector?.OnTargetScaffoldPreparation(
                 request.JobId,
@@ -327,7 +330,7 @@ internal sealed partial class AudiobookContentMoveService
             if (!Directory.EnumerateFileSystemEntries(path).Any()
                 && directory.VisiblePathMatches())
             {
-                creation.RetirePinnedEmptyDirectoryFromNamespace(Path.GetFileName(path));
+                creation.DeletePinnedEmptyDirectoryImmediately(Path.GetFileName(path));
             }
         }
         catch

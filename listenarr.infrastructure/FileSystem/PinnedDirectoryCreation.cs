@@ -67,6 +67,9 @@ internal sealed partial class PinnedDirectoryCreation : IDisposable
 
     public bool Created { get; }
 
+    internal bool CreationGenerationIsProvable =>
+        Created && OperatingSystem.IsWindows();
+
     public string FullPath => Path.Join(_parentPath, _childName);
 
     public static PinnedDirectoryCreation TryCreate(string parentPath, string childName) =>

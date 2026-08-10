@@ -127,7 +127,7 @@ internal sealed partial class AudiobookContentMoveService
                 continue;
             }
 
-            publication.RetirePinnedEmptyDirectoryFromNamespace(
+            publication.DeletePinnedEmptyDirectoryImmediately(
                 Path.GetFileName(planned.Path));
             await UpdateCreatedDirectoryStateAsync(
                 request.JobId,

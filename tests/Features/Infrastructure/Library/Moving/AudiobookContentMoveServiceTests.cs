@@ -1467,7 +1467,11 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                 Assert.Equal(LibraryDirectoryOwnershipState.Owned, stale.State);
                 Assert.False(string.IsNullOrWhiteSpace(
                     stale.DirectoryObjectIdentityUnavailableReason));
-                Assert.Equal(MoveCreatedDirectoryState.Created, createdTarget.State);
+                Assert.Equal(
+                    OperatingSystem.IsWindows()
+                        ? MoveCreatedDirectoryState.Created
+                        : MoveCreatedDirectoryState.Retained,
+                    createdTarget.State);
                 Assert.Equal(
                     createdTarget.DirectoryObjectIdentity,
                     stuckJob.TargetDirectoryObjectIdentity);
@@ -2124,6 +2128,56 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
             AssertNoListenarrArtifacts(root);
         }
 
+        [LinuxFact]
+        public async Task MoveContentsAsync_ForcedCrossVolumeRejectsBeforeFilePublicationWithoutScratchArtifacts()
+        {
+            var root = FileService.GetTempDirectory(
+                "content-move-markerless-cross-volume-blocked");
+            var source = Path.Join(root, "source");
+            Directory.CreateDirectory(source);
+            var sourceFile = await FileService.GetFileAsync(
+                source,
+                "book.m4b",
+                "audio");
+            var target = Path.Join(root, "destination", "Book");
+            var request = await CreateLeasedMoveRequestAsync(
+                source,
+                target,
+                sourceCleanupBoundary: root,
+                executionProtocolVersion:
+                    MoveExecutionProtocol.MarkerlessDatabaseState);
+            var service = new AudiobookContentMoveService(
+                _provider.GetRequiredService<
+                    ILogger<AudiobookContentMoveService>>(),
+                _provider.GetRequiredService<
+                    IDbContextFactory<ListenArrDbContext>>(),
+                TimeProvider.System,
+                new ForceCrossVolumeMoveFaultInjector());
+
+            var exception = await Assert.ThrowsAsync<MoveNeedsAttentionException>(() =>
+                service.MoveContentsAsync(
+                    request,
+                    CancellationToken.None));
+
+            Assert.Contains(
+                "cross-volume",
+                exception.Message,
+                StringComparison.OrdinalIgnoreCase);
+            Assert.Equal("audio", await File.ReadAllTextAsync(sourceFile));
+            Assert.False(File.Exists(Path.Join(target, "book.m4b")));
+            Assert.False(Directory.Exists(target));
+            AssertNoListenarrArtifacts(root);
+            await using var db = await _provider
+                .GetRequiredService<IDbContextFactory<ListenArrDbContext>>()
+                .CreateDbContextAsync();
+            Assert.DoesNotContain(
+                await db.MoveJobCreatedDirectories
+                    .AsNoTracking()
+                    .Where(directory => directory.MoveJobId == request.JobId)
+                    .ToListAsync(),
+                directory => Directory.Exists(directory.Path));
+        }
+
         [Fact]
         public async Task MoveContentsAsync_MarkerlessRetryAfterDirectoryCreationBeforeStateUpdate_RetainsAndCompletes()
         {
@@ -2140,7 +2194,9 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
             await AssertMarkerlessDirectoryCreationRetryAsync(
                 TargetScaffoldPreparationFaultPoint
                     .AfterMarkerlessDirectoryStateUpdate,
-                MoveCreatedDirectoryState.Created,
+                OperatingSystem.IsWindows()
+                    ? MoveCreatedDirectoryState.Created
+                    : MoveCreatedDirectoryState.Retained,
                 expectIdentity: true);
         }
 
@@ -2952,6 +3008,11 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                 File.WriteAllText(targetFile, "replacement");
                 File.SetLastWriteTimeUtc(targetFile, replacementTimestamp);
             }
+        }
+
+        private sealed class ForceCrossVolumeMoveFaultInjector : IMoveFaultInjector
+        {
+            public bool ForceCrossVolumeForTest => true;
         }
 
         private sealed class FailOnceAtTargetScaffoldPreparationPoint(

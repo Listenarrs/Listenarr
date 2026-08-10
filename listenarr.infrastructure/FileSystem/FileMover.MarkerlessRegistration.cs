@@ -54,6 +54,20 @@ public partial class FileMover
                 return new MarkerlessRegistrationPreparation(true, null);
             }
 
+            if (action == FileAction.Move
+                && !OperatingSystem.IsWindows()
+                && (ForceCrossVolumeForTest
+                    || !initialSource.IsOnSameVolume(gate.DestinationParent)))
+            {
+                LogMutation(
+                    FileMutationOutcome.Blocked,
+                    action,
+                    source,
+                    destination,
+                    "Unix cross-volume registration moves require source retirement that cannot be generation-fenced without a library-side namespace claim");
+                return new MarkerlessRegistrationPreparation(true, null);
+            }
+
             var proof = await CaptureMarkerlessSourceProofAsync(
                 initialSource,
                 cancellationToken,

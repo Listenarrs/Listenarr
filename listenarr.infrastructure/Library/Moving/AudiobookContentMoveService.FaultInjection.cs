@@ -40,6 +40,7 @@ internal enum FinalizedVerificationFaultPoint
 internal interface IMoveFaultInjector
 {
     bool AllowMarkerlessFileRename => false;
+    bool ForceCrossVolumeForTest => false;
 
     Task AfterPublishedAsync(Guid jobId, CancellationToken cancellationToken) =>
         Task.CompletedTask;

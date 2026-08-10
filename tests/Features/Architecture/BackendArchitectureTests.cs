@@ -1062,6 +1062,41 @@ public sealed class BackendArchitectureTests : BaseTests
     }
 
     [Fact]
+    public void LibraryFilesystem_HasNoListenarrScratchNamespaceProtocol()
+    {
+        var productionRoots = new[]
+        {
+            Path.Join(RepositoryRoot, "listenarr.application"),
+            Path.Join(RepositoryRoot, "listenarr.domain"),
+            Path.Join(RepositoryRoot, "listenarr.infrastructure"),
+            Path.Join(RepositoryRoot, "listenarr.api")
+        };
+        var forbidden = new[]
+        {
+            ".listenarr-",
+            "entry.claim"
+        };
+
+        var violations = productionRoots
+            .SelectMany(root => Directory.EnumerateFiles(
+                root,
+                "*.cs",
+                SearchOption.AllDirectories))
+            .Where(file => !IsBuildArtifact(file))
+            .Select(file => new
+            {
+                File = Normalize(Path.GetRelativePath(RepositoryRoot, file)),
+                Source = File.ReadAllText(file)
+            })
+            .SelectMany(candidate => forbidden
+                .Where(token => candidate.Source.Contains(token, StringComparison.Ordinal))
+                .Select(token => $"{candidate.File}: {token}"))
+            .ToList();
+
+        Assert.Empty(violations);
+    }
+
+    [Fact]
     public void DurableMoveBoundary_RequiresExplicitFilesystemSemantics()
     {
         var files = new[]

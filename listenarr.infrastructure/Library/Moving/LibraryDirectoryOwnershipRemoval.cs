@@ -89,7 +89,7 @@ internal static class LibraryDirectoryOwnershipRemoval
 
         cancellationToken.ThrowIfCancellationRequested();
         EnsurePhysicalIdentity(ownership, directory);
-        publication.RetirePinnedEmptyDirectoryFromNamespace(
+        publication.DeletePinnedEmptyDirectoryImmediately(
             Path.GetFileName(originalPath));
         return LibraryDirectoryRemovalOutcome.Removed;
     }

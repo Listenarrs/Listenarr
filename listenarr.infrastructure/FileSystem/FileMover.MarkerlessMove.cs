@@ -50,6 +50,19 @@ public partial class FileMover
                 return false;
             }
 
+            if (!OperatingSystem.IsWindows()
+                && (ForceCrossVolumeForTest
+                    || !initialSource.IsOnSameVolume(pathLock.DestinationParent)))
+            {
+                LogMutation(
+                    FileMutationOutcome.Blocked,
+                    FileAction.Move,
+                    source,
+                    destination,
+                    "Unix cross-volume moves require source retirement that cannot be generation-fenced without a library-side namespace claim");
+                return false;
+            }
+
             var proof = await CaptureMarkerlessSourceProofAsync(
                 initialSource,
                 cancellationToken,

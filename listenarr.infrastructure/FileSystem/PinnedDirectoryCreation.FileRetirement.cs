@@ -30,52 +30,29 @@ internal sealed partial class PinnedDirectoryCreation
                 return;
             }
 
-            var retirementDirectoryName = $".listenarr-retire-{Guid.NewGuid():N}.state";
             using var parent = new PinnedDirectoryAnchor(
                 DuplicateSafeHandle(_parentHandle),
                 _parentPath,
                 _parentFollowsVisibleFinalLink);
-            using var retirementDirectory = parent.TryCreateChild(retirementDirectoryName);
-            if (!retirementDirectory.Created
-                || !retirementDirectory.VisiblePathMatches())
+            if (!parent.VisiblePathMatches())
             {
                 throw new InvalidOperationException(
-                    "Could not create an exclusive private retirement directory.");
+                    "The pinned file parent changed before deletion.");
             }
 
-            retirementDirectory.RestrictToCurrentUser();
-
-            {
-                using var retirementAnchor = retirementDirectory.OpenCreatedDirectoryAnchor();
-                const string retirementName = "entry.claim";
-                MoveTo(retirementAnchor, retirementName);
-                using var claimedEntry = retirementAnchor.OpenExistingFile(
-                    retirementName,
-                    requireDeleteAccess: false);
-                claimedEntry.DeleteFromPrivateDirectoryUnix();
-                if (Directory.EnumerateFileSystemEntries(retirementDirectory.FullPath).Any())
-                {
-                    throw new InvalidOperationException(
-                        "The private retirement directory contains unexpected entries.");
-                }
-            }
-
-            retirementDirectory.DeleteCreatedEmptyDirectoryUnix();
-        }
-
-        private void DeleteFromPrivateDirectoryUnix()
-        {
-            ThrowIfDisposed();
-            if (OperatingSystem.IsWindows())
-            {
-                throw new PlatformNotSupportedException(
-                    "Private-directory unlink is only used on Unix-like platforms.");
-            }
-            if (!VisiblePathMatches())
+            PinnedFilesystemMutationHooks.InvokeBeforeUnixFileDeleteRevalidation(
+                FullPath);
+            using var visible = OpenRelativeFileUnix(
+                _parentHandle,
+                _fileName,
+                FullPath);
+            if (!HandlesIdentifySameDirectory(_fileHandle, visible)
+                || !parent.VisiblePathMatches())
             {
                 throw new InvalidOperationException(
-                    "The private claimed file changed before retirement.");
+                    "The pinned file changed before handle-relative deletion.");
             }
+
             if (UnlinkAt(
                     _parentHandle.DangerousGetHandle().ToInt32(),
                     _fileName,
@@ -83,53 +60,8 @@ internal sealed partial class PinnedDirectoryCreation
             {
                 throw new Win32Exception(
                     Marshal.GetLastWin32Error(),
-                    "Could not remove the verified private file claim.");
+                    "Could not remove the verified pinned file entry.");
             }
-        }
-    }
-
-    private void DeleteCreatedEmptyDirectoryUnix()
-    {
-        ThrowIfDisposed();
-        if (OperatingSystem.IsWindows())
-        {
-            throw new PlatformNotSupportedException(
-                "Private-directory retirement is only used on Unix-like platforms.");
-        }
-        if (!Created || _directoryHandle == null || _directoryHandle.IsInvalid)
-        {
-            throw new InvalidOperationException(
-                "A pinned created directory is required for retirement.");
-        }
-        if (!VisiblePathMatches())
-        {
-            throw new InvalidOperationException(
-                "The private retirement directory changed before deletion.");
-        }
-
-        var retirementName = $".listenarr-retired-{Guid.NewGuid():N}.state";
-        RenameRelativeEntry(
-            _parentHandle,
-            _directoryHandle,
-            _childName,
-            _parentHandle,
-            retirementName);
-        using var reopened = OpenDirectoryAtUnix(_parentHandle, retirementName);
-        if (!HandlesIdentifySameDirectory(_directoryHandle, reopened))
-        {
-            throw new InvalidOperationException(
-                "The renamed retirement directory no longer identifies the pinned directory.");
-        }
-
-        var flags = OperatingSystem.IsMacOS() ? AtRemovedirMac : AtRemovedirLinux;
-        if (UnlinkAt(
-                _parentHandle.DangerousGetHandle().ToInt32(),
-                retirementName,
-                flags) != 0)
-        {
-            throw new Win32Exception(
-                Marshal.GetLastWin32Error(),
-                "Could not delete the verified private retirement directory.");
         }
     }
 

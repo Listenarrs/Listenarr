@@ -28,8 +28,11 @@ public partial class AudiobookContentMoveServiceTests
             .OrderBy(directory => directory.Path)
             .ToListAsync();
         Assert.Equal(3, scaffolding.Count);
+        var expectedState = OperatingSystem.IsWindows()
+            ? MoveCreatedDirectoryState.Created
+            : MoveCreatedDirectoryState.Retained;
         Assert.All(scaffolding, directory =>
-            Assert.Equal(MoveCreatedDirectoryState.Created, directory.State));
+            Assert.Equal(expectedState, directory.State));
     }
 
     [Fact]

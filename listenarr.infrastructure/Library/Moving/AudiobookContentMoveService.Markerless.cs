@@ -89,6 +89,14 @@ internal sealed partial class AudiobookContentMoveService
             request.SourceSemantics,
             cancellationToken,
             structuralSpinePaths: targetStructuralSpine);
+        ValidateUnixMarkerlessMoveVolumes(
+            request,
+            source,
+            target,
+            manifest
+                .Where(candidate => candidate.EntryType == MoveJobEntryType.File)
+                .Where(IsPhysicalManifestEntry)
+                .ToList());
 
         await ReportProgressAsync(request, 3, "Capturing source", cancellationToken);
         await CaptureMarkerlessSourceIdentitiesAsync(

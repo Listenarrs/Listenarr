@@ -235,7 +235,7 @@ namespace Listenarr.Infrastructure.Library.Moving
                                 return false;
                             }
 
-                            childPublication.RetirePinnedEmptyDirectoryFromNamespace(
+                            childPublication.DeletePinnedEmptyDirectoryImmediately(
                                 entryName);
                         }
 

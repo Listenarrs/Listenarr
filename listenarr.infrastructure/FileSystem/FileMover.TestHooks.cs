@@ -74,6 +74,7 @@ public partial class FileMover
         init;
     }
     internal bool DisableNativeFileRenameForTest { get; init; }
+    internal bool ForceCrossVolumeForTest { get; init; }
     internal Action<string>? BeforeFileMoveDurabilityBarrierForTest { get; init; }
     internal string? FileMoveLockDirectoryForTest { get; init; }
 }

@@ -31,6 +31,30 @@ public sealed class FileMoverMarkerlessRegistrationTests : BaseTests
         AssertNoLibraryArtifacts(scenario.Root);
     }
 
+    [LinuxFact]
+    public async Task PrepareMove_ForcedCrossVolumeRejectsBeforePublicationOrJournalCreation()
+    {
+        var scenario = await CreateScenarioAsync("registration-cross-volume-blocked");
+        var mover = CreateMover(forceCrossVolume: true);
+
+        using var lease = await mover.PrepareActionForRegistrationAsync(
+            FileAction.Move,
+            scenario.Source,
+            scenario.Destination,
+            scenario.OperationId);
+
+        Assert.Null(lease);
+        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Source));
+        Assert.False(File.Exists(scenario.Destination));
+        var factory = _provider.GetRequiredService<
+            IDbContextFactory<ListenArrDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        Assert.False(await db.FileMutationJournals
+            .AsNoTracking()
+            .AnyAsync(candidate => candidate.OperationId == scenario.OperationId));
+        AssertNoLibraryArtifacts(scenario.Root);
+    }
+
     [Fact]
     public async Task PrepareMove_RequiresRegistrationCommitBeforeSourceDeletion()
     {
@@ -378,7 +402,8 @@ public sealed class FileMoverMarkerlessRegistrationTests : BaseTests
     }
 
     private FileMover CreateMover(
-        Func<Task>? afterSourceDeletedBeforeState = null)
+        Func<Task>? afterSourceDeletedBeforeState = null,
+        bool forceCrossVolume = false)
     {
         var factory = _provider.GetRequiredService<
             IDbContextFactory<ListenArrDbContext>>();
@@ -389,6 +414,7 @@ public sealed class FileMoverMarkerlessRegistrationTests : BaseTests
         {
             FileMoveLockDirectoryForTest = FileService.GetTempDirectory(
                 "file-mover-markerless-registration-locks"),
+            ForceCrossVolumeForTest = forceCrossVolume,
             AfterMarkerlessMoveSourceDeletedBeforeStateForTestAsync =
                 afterSourceDeletedBeforeState
         };

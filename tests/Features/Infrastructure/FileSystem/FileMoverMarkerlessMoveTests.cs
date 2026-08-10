@@ -54,6 +54,27 @@ public sealed class FileMoverMarkerlessMoveTests : BaseTests
     }
 
     [LinuxFact]
+    public async Task MoveFileAsync_ForcedCrossVolumeRejectsBeforePublicationOrJournalCreation()
+    {
+        var scenario = await CreateScenarioAsync();
+
+        Assert.False(await CreateMover(forceCrossVolume: true).MoveFileAsync(
+            scenario.Source,
+            scenario.Destination,
+            scenario.OperationId));
+
+        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Source));
+        Assert.False(File.Exists(scenario.Destination));
+        var factory = _provider.GetRequiredService<
+            IDbContextFactory<ListenArrDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        Assert.False(await db.FileMutationJournals
+            .AsNoTracking()
+            .AnyAsync(candidate => candidate.OperationId == scenario.OperationId));
+        AssertNoLibraryArtifacts(scenario.Root);
+    }
+
+    [LinuxFact]
     public async Task MoveFileAsync_CaseDistinctRetryDoesNotAdoptJournal()
     {
         var scenario = await CreateScenarioAsync();
@@ -394,6 +415,7 @@ public sealed class FileMoverMarkerlessMoveTests : BaseTests
 
     private FileMover CreateMover(
         bool disableNativeRename = false,
+        bool forceCrossVolume = false,
         Func<Task>? afterJournalPlanned = null,
         Func<Task>? afterPublishedBeforeTargetState = null,
         Func<Task>? afterTargetCreatedBeforeState = null,
@@ -411,6 +433,7 @@ public sealed class FileMoverMarkerlessMoveTests : BaseTests
             FileMoveLockDirectoryForTest = FileService.GetTempDirectory(
                 "file-mover-markerless-locks"),
             DisableNativeFileRenameForTest = disableNativeRename,
+            ForceCrossVolumeForTest = forceCrossVolume,
             AfterMarkerlessMoveJournalPlannedForTestAsync = afterJournalPlanned,
             AfterMarkerlessMovePublishedBeforeTargetStateForTestAsync =
                 afterPublishedBeforeTargetState,

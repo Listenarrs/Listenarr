@@ -127,7 +127,7 @@ internal sealed partial class AudiobookContentMoveService
                     return;
                 }
 
-                publication.RetirePinnedEmptyDirectoryFromNamespace(
+                publication.DeletePinnedEmptyDirectoryImmediately(
                     Path.GetFileName(sourcePath));
             }
         }
@@ -299,7 +299,7 @@ internal sealed partial class AudiobookContentMoveService
                     return;
                 }
 
-                publication.RetirePinnedEmptyDirectoryFromNamespace(
+                publication.DeletePinnedEmptyDirectoryImmediately(
                     Path.GetFileName(source));
             }
         }

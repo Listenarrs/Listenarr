@@ -78,43 +78,15 @@ internal sealed partial class PinnedDirectoryCreation
         bool parentFollowsVisibleFinalLink)
     {
         var ownedParentHandle = DuplicateSafeHandle(parentHandle);
-        var temporaryName = $".listenarr-create-{Guid.NewGuid():N}";
         SafeFileHandle? directoryHandle = null;
-        var temporaryExists = false;
         try
         {
             var parentFd = parentHandle.DangerousGetHandle().ToInt32();
-            if (MkdirAt(parentFd, temporaryName, UnixDirectoryMode) != 0)
-            {
-                throw new Win32Exception(
-                    Marshal.GetLastWin32Error(),
-                    $"Could not create a pinned temporary directory beneath '{parentPath}'.");
-            }
-            temporaryExists = true;
-
-            directoryHandle = OpenDirectoryAtUnix(parentHandle, temporaryName);
-            var renameResult = OperatingSystem.IsMacOS()
-                ? RenameAtExclusiveMac(
-                    parentFd,
-                    temporaryName,
-                    parentFd,
-                    childName,
-                    RenameExclusiveMac)
-                : RenameAtNoReplaceLinux(
-                    parentFd,
-                    temporaryName,
-                    parentFd,
-                    childName,
-                    RenameNoReplace);
-            if (renameResult != 0)
+            if (MkdirAt(parentFd, childName, UnixDirectoryMode) != 0)
             {
                 var error = Marshal.GetLastWin32Error();
                 if (error == UnixAlreadyExists)
                 {
-                    directoryHandle.Dispose();
-                    directoryHandle = null;
-                    RemoveDirectoryAtUnix(parentHandle, temporaryName);
-                    temporaryExists = false;
                     return new PinnedDirectoryCreation(
                         ownedParentHandle,
                         directoryHandle: null,
@@ -126,25 +98,32 @@ internal sealed partial class PinnedDirectoryCreation
 
                 throw new Win32Exception(
                     error,
-                    $"Could not publish a pinned directory beneath '{parentPath}'.");
+                    $"Could not create the requested directory beneath '{parentPath}'.");
             }
 
-            temporaryExists = false;
-            return new PinnedDirectoryCreation(
+            PinnedFilesystemMutationHooks.InvokeAfterUnixDirectoryCreateBeforeOpen(
+                Path.Join(parentPath, childName));
+            directoryHandle = OpenDirectoryAtUnix(parentHandle, childName);
+            var created = new PinnedDirectoryCreation(
                 ownedParentHandle,
                 directoryHandle,
                 parentPath,
                 childName,
                 created: true,
                 parentFollowsVisibleFinalLink);
+            directoryHandle = null;
+            if (!created.VisiblePathMatches())
+            {
+                created.Dispose();
+                throw new InvalidOperationException(
+                    "The newly created directory changed before it could be pinned.");
+            }
+
+            return created;
         }
         catch
         {
             directoryHandle?.Dispose();
-            if (temporaryExists)
-            {
-                TryRemoveDirectoryAtUnix(parentHandle, temporaryName);
-            }
             ownedParentHandle.Dispose();
             throw;
         }

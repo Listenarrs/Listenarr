@@ -92,7 +92,7 @@ public sealed class DirectoryCreationParentReplacementTests : BaseTests
     }
 
     [DirectoryLinkFact]
-    public void PinnedFileEntry_DeleteUnderLinkedBoundary_RetiresThroughPinnedTarget()
+    public void PinnedFileEntry_DeleteUnderLinkedBoundary_DeletesThroughPinnedTarget()
     {
         var root = FileService.GetTempDirectory("pinned-file-retirement-linked-boundary");
         var physicalBoundary = Path.Join(root, "physical");
@@ -127,10 +127,11 @@ public sealed class DirectoryCreationParentReplacementTests : BaseTests
             }
 
             Assert.False(File.Exists(Path.Join(physicalBoundary, fileName)));
-            Assert.Empty(Directory.EnumerateDirectories(
-                physicalBoundary,
-                ".listenarr-retire-*.state",
-                SearchOption.TopDirectoryOnly));
+            Assert.DoesNotContain(
+                Directory.EnumerateFileSystemEntries(physicalBoundary),
+                path => Path.GetFileName(path).StartsWith(
+                    ".listenarr-",
+                    StringComparison.Ordinal));
         }
         finally
         {
