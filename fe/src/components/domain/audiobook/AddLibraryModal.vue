@@ -480,6 +480,7 @@ import {
   normalizeForCompare,
   detectPathKind,
   isRootedPath,
+  joinPaths,
   validateLibraryDestinationPath,
 } from '@/utils/path'
 import { formatDate } from '@/utils/searchResultFormatting'
@@ -800,9 +801,7 @@ const estimatedFullPath = computed(() => {
   const rel = relativePath.trim().length > 0 ? relativePath : ''
   if (!root) return rel
   if (!rel) return root
-  const sep = root.includes('\\') ? '\\' : '/'
-  const normalizedRelativePath = rel.replace(/\\|\//g, sep)
-  return root.endsWith(sep) ? root + normalizedRelativePath : root + sep + normalizedRelativePath
+  return joinPaths(root, rel, detectPathKind(root))
 })
 const serverDestinationValidationError = ref<string | null>(null)
 const { pathLengthWarning: destinationPathWarning } = usePathLengthCheck(estimatedFullPath)

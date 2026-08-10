@@ -194,6 +194,34 @@ describe('EditAudiobookModal configured-root destination editing', () => {
     expect(vm.editingDestination).toBe(false)
   })
 
+  it('uses Unix separators when the configured Unix root contains a literal backslash', async () => {
+    vi.mocked(apiService.getRootFolders).mockResolvedValueOnce([
+      {
+        id: 9,
+        name: 'Unix root with backslash',
+        path: '/library/Books\\Archive',
+        pathSyntax: 'Unix',
+        isDefault: true,
+        resolvedCaseSensitivity: 'Sensitive',
+      },
+    ])
+    vi.mocked(apiService.getApplicationSettings).mockResolvedValueOnce({
+      outputPath: '/library/Books\\Archive',
+    })
+
+    const { vm } = await mountModal({
+      ...audiobook,
+      basePath: '/library/Books\\Archive/Author/Title',
+    })
+
+    vm.startEditingDestination()
+    vm.formData.relativePath = 'Other/Book'
+    vm.finishEditingDestination()
+
+    expect(vm.combinedBasePath()).toBe('/library/Books\\Archive/Other/Book')
+    expect(vm.editingDestination).toBe(false)
+  })
+
   it('treats a leading backslash as relative under an explicit Unix root', async () => {
     vi.mocked(apiService.getRootFolders).mockResolvedValueOnce([
       {

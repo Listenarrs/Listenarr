@@ -109,6 +109,43 @@ describe('AddLibraryModal relative path derivation', () => {
     wrapper.unmount()
   })
 
+  it('preserves a literal backslash in a Unix relative destination segment', async () => {
+    const { apiService } = await import('@/services/api')
+    vi.mocked(apiService.addToLibrary).mockClear()
+    vi.mocked(apiService.getApplicationSettings).mockResolvedValueOnce({ outputPath: '/library' })
+    vi.mocked(apiService.previewLibraryPath).mockResolvedValueOnce({
+      fullPath: '/library/Author/Title',
+      relativePath: 'Author/Title',
+    })
+    const wrapper = mount(AddLibraryModal, {
+      props: {
+        visible: false,
+        book: fakeBook,
+      },
+      attachTo: document.body,
+      global: {
+        plugins: [(await import('pinia')).createPinia()],
+      },
+    })
+
+    await wrapper.setProps({ visible: true })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const vm = wrapper.vm as unknown as {
+      options: { relativePath: string }
+      addToLibrary: () => Promise<void>
+    }
+    vm.options.relativePath = 'Author\\Title'
+    await wrapper.vm.$nextTick()
+    await vm.addToLibrary()
+
+    expect(apiService.addToLibrary).toHaveBeenCalledTimes(1)
+    expect(apiService.addToLibrary).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ destinationPath: '/library/Author\\Title' }),
+    )
+    wrapper.unmount()
+  })
+
   it('does not offer an arbitrary custom-path destination', async () => {
     const wrapper = mount(AddLibraryModal, {
       props: {

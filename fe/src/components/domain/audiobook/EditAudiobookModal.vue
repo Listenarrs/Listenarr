@@ -1432,6 +1432,7 @@ import {
   trimTrailingDirectorySeparators,
   normalizeForCompare,
   isRootedPath,
+  joinPaths,
   validateLibraryDestinationPath,
   detectPathKind,
   pathsEqual,
@@ -1500,9 +1501,7 @@ function combinedBasePath(): string | null {
   if (!r && !rel) return null
   if (!r) return rel
   if (!rel) return r
-  const needsSep = !(r.endsWith('/') || r.endsWith('\\'))
-  const sep = r.includes('\\') ? '\\' : '/'
-  return r + (needsSep ? sep : '') + rel
+  return joinPaths(r, rel, selectedDestinationPathKind())
 }
 
 // Path-length warning and validation for the destination path
