@@ -1025,7 +1025,7 @@ public sealed class BackendArchitectureTests : BaseTests
             architecture,
             StringComparison.Ordinal);
         Assert.Contains(
-            "root-folder physical identities, active root relocations, directory ownership, then audiobook-file identities",
+            "root-folder physical identities, active root relocations, directory ownership, durable audiobook-deletion intents, owner-bound file-rename journals, then audiobook-file identities",
             architecture,
             StringComparison.Ordinal);
     }

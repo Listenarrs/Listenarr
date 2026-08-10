@@ -16,6 +16,7 @@ public enum FileMutationJournalState
     SourceDeletionAuthorized,
     SourceDeleted,
     Completed,
+    OwnerMetadataReconciled,
     NeedsAttention
 }
 
@@ -44,6 +45,7 @@ public sealed class FileMutationJournal
     public FileMutationJournalState State { get; set; } =
         FileMutationJournalState.Planned;
     public int? AudiobookId { get; set; }
+    public int? AudiobookFileId { get; set; }
     [MaxLength(2048)]
     public string? Error { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

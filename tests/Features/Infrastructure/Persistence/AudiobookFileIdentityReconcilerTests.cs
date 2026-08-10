@@ -56,7 +56,7 @@ public sealed class AudiobookFileIdentityReconcilerTests : BaseTests
     }
 
     [Fact]
-    public async Task ReconcileAsync_LegacyFileBackfillsPhysicalIdentityWithoutReplacingKnownGeneration()
+    public async Task ReconcileAsync_LegacyBackfillAndChangedKnownGeneration_FailClosedWithoutAdoptingReplacement()
     {
         var root = FileService.GetTempDirectory("audiobook-file-identity-physical-backfill");
         var legacyPath = await FileService.GetFileAsync(root, "legacy.m4b", "legacy");
@@ -109,7 +109,146 @@ public sealed class AudiobookFileIdentityReconcilerTests : BaseTests
             .ToListAsync();
         Assert.False(string.IsNullOrWhiteSpace(files[0].PhysicalObjectIdentity));
         Assert.NotNull(files[0].PhysicalIdentityObservedAtUtc);
+        Assert.Equal(PathIdentityState.Valid, files[0].PathIdentityState);
         Assert.Equal(knownPhysicalIdentity, files[1].PhysicalObjectIdentity);
+        Assert.Equal(PathIdentityState.Unavailable, files[1].PathIdentityState);
+        Assert.Contains(
+            "different physical generation",
+            files[1].PathIdentityReason ?? string.Empty,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ReconcileAsync_KnownMatchingPhysicalGeneration_RemainsValid()
+    {
+        var root = FileService.GetTempDirectory("audiobook-file-identity-known-match");
+        var knownPath = await FileService.GetFileAsync(root, "known.m4b", "known");
+        string knownPhysicalIdentity;
+        using (var lease = PinnedAudiobookFileRegistrationLease.Open(knownPath))
+        {
+            knownPhysicalIdentity = lease.PhysicalObjectIdentity;
+        }
+        var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+        await using (var setup = new ListenArrDbContext(options))
+        {
+            var known = BuildAudiobook(22, root, Path.GetFileName(knownPath));
+            known.Files![0].ApplyPhysicalObjectIdentity(
+                knownPhysicalIdentity,
+                DateTime.UtcNow);
+            setup.Audiobooks.Add(known);
+            await setup.SaveChangesAsync();
+        }
+
+        var identityResolver = new Mock<IAudiobookFilePathIdentityResolver>(MockBehavior.Strict);
+        identityResolver.Setup(resolver => resolver.ResolveAsync(
+                It.IsAny<Audiobook>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .Returns<Audiobook, string, CancellationToken>((audiobook, path, _) =>
+            {
+                var semantics = FileSystemPathSemantics.CurrentHostDefault;
+                Assert.True(FileSystemPathIdentity.TryResolveRelativePathWithinBase(
+                    audiobook.BasePath!,
+                    path,
+                    semantics,
+                    out var absolutePath));
+                return ValueTask.FromResult(AudiobookFilePathIdentity.CreateValid(
+                    absolutePath,
+                    semantics,
+                    FileSystemCaseSensitivityMode.Auto,
+                    audiobook.BasePath!));
+            });
+        var reconciler = new AudiobookFileIdentityReconciler(
+            new TestDbContextFactory(options),
+            identityResolver.Object,
+            NullLogger<AudiobookFileIdentityReconciler>.Instance);
+
+        var result = await reconciler.ReconcileAsync();
+
+        Assert.Equal(new AudiobookFileIdentityReconciliationResult(1, 1, 0, 0), result);
+        await using var verification = new ListenArrDbContext(options);
+        var file = await verification.AudiobookFiles.AsNoTracking().SingleAsync();
+        Assert.Equal(PathIdentityState.Valid, file.PathIdentityState);
+        Assert.Equal(knownPhysicalIdentity, file.PhysicalObjectIdentity);
+    }
+
+    [LinuxFact]
+    public async Task ReconcileAsync_ParentGenerationReplacedAfterPin_DoesNotValidateOldChildAgainstNewPath()
+    {
+        var container = FileService.GetTempDirectory(
+            "audiobook-file-identity-parent-replacement");
+        var root = Path.Join(container, "Book");
+        var displacedRoot = Path.Join(container, "Book.original");
+        Directory.CreateDirectory(root);
+        var filePath = await FileService.GetFileAsync(root, "book.m4b", "owned");
+        string originalPhysicalIdentity;
+        using (var lease = PinnedAudiobookFileRegistrationLease.Open(filePath))
+        {
+            originalPhysicalIdentity = lease.PhysicalObjectIdentity;
+        }
+        var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+        await using (var setup = new ListenArrDbContext(options))
+        {
+            var audiobook = BuildAudiobook(23, root, Path.GetFileName(filePath));
+            audiobook.Files![0].ApplyPhysicalObjectIdentity(
+                originalPhysicalIdentity,
+                DateTime.UtcNow);
+            setup.Audiobooks.Add(audiobook);
+            await setup.SaveChangesAsync();
+        }
+
+        var identityResolver = new Mock<IAudiobookFilePathIdentityResolver>(MockBehavior.Strict);
+        identityResolver.Setup(resolver => resolver.ResolveAsync(
+                It.IsAny<Audiobook>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .Returns<Audiobook, string, CancellationToken>((audiobook, path, _) =>
+            {
+                var semantics = FileSystemPathSemantics.CurrentHostDefault;
+                Assert.True(FileSystemPathIdentity.TryResolveRelativePathWithinBase(
+                    audiobook.BasePath!,
+                    path,
+                    semantics,
+                    out var absolutePath));
+                return ValueTask.FromResult(AudiobookFilePathIdentity.CreateValid(
+                    absolutePath,
+                    semantics,
+                    FileSystemCaseSensitivityMode.Auto,
+                    audiobook.BasePath!));
+            });
+        var reconciler = new AudiobookFileIdentityReconciler(
+            new TestDbContextFactory(options),
+            identityResolver.Object,
+            NullLogger<AudiobookFileIdentityReconciler>.Instance);
+        var replaced = false;
+        reconciler.AfterPhysicalIdentityParentPinnedForTest = _ =>
+        {
+            if (replaced)
+            {
+                return;
+            }
+            replaced = true;
+            Directory.Move(root, displacedRoot);
+            Directory.CreateDirectory(root);
+            File.WriteAllText(Path.Join(root, "book.m4b"), "replacement");
+        };
+
+        var result = await reconciler.ReconcileAsync();
+
+        Assert.True(replaced);
+        Assert.Equal(new AudiobookFileIdentityReconciliationResult(1, 0, 0, 1), result);
+        await using var verification = new ListenArrDbContext(options);
+        var file = await verification.AudiobookFiles.AsNoTracking().SingleAsync();
+        Assert.Equal(PathIdentityState.Unavailable, file.PathIdentityState);
+        Assert.Equal(originalPhysicalIdentity, file.PhysicalObjectIdentity);
+        Assert.Equal("owned", await File.ReadAllTextAsync(
+            Path.Join(displacedRoot, "book.m4b")));
+        Assert.Equal("replacement", await File.ReadAllTextAsync(
+            Path.Join(root, "book.m4b")));
     }
 
     [Fact]

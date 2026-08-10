@@ -32,6 +32,14 @@ namespace Listenarr.Application.Downloads.Contracts
             string expectedSourcePhysicalObjectIdentity,
             Guid operationId);
 
+        Task<bool> MoveFilePreservingPhysicalIdentityAsync(
+            string source,
+            string destination,
+            string expectedSourcePhysicalObjectIdentity,
+            Guid operationId,
+            int audiobookId,
+            int audiobookFileId);
+
         /// <summary>
         /// Perform the given action on the given file
         /// </summary>
@@ -45,6 +53,14 @@ namespace Listenarr.Application.Downloads.Contracts
             string source,
             string? destination,
             Guid operationId);
+
+        Task<bool> PerformActionOn(
+            FileAction action,
+            string source,
+            string? destination,
+            Guid operationId,
+            int audiobookId,
+            int audiobookFileId);
 
         /// <summary>
         /// Publishes the requested copy or hardlink destination and returns a lease

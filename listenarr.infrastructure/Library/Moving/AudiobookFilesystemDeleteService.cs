@@ -71,6 +71,8 @@ namespace Listenarr.Infrastructure.Library.Moving
                 cancellationToken);
             if (semantics == null)
             {
+                result.TrackedFileCleanupComplete =
+                    storedTrackedFilePaths.Count == 0 && !deleteFolder;
                 return result;
             }
 
@@ -190,6 +192,8 @@ namespace Listenarr.Infrastructure.Library.Moving
                 }
             }
 
+            result.TrackedFileCleanupComplete =
+                VerifyTrackedFileCleanupComplete(trackedPhysicalObjectIdentities);
             return result;
         }
 

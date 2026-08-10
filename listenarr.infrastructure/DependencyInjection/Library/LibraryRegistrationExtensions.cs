@@ -31,10 +31,16 @@ internal static class LibraryRegistrationExtensions
         services.AddSingleton<IRootFolderRelocationService, RootFolderRelocationService>();
         services.AddSingleton<IMoveCleanupBoundaryResolver, MoveCleanupBoundaryResolver>();
         services.AddSingleton<ILibraryDirectoryOwnershipStore, EfLibraryDirectoryOwnershipStore>();
+        services.AddSingleton<IAudiobookDeletionIntentProbe, AudiobookDeletionIntentProbe>();
+        services.AddSingleton<IFileRenameRecoveryProbe, FileRenameRecoveryProbe>();
         services.AddSingleton<IMoveQueueService, MoveQueueService>();
         services.AddScoped<IAudiobookDeletionCommitService, AudiobookDeletionCommitService>();
+        services.AddScoped<IAudiobookDeletionIntentStore, AudiobookDeletionIntentStore>();
+        services.AddScoped<IAudiobookDeletionIntentReconciler, AudiobookDeletionIntentReconciler>();
         services.AddScoped<IRootFolderStorageConfirmationService, RootFolderStorageConfirmationService>();
         services.AddScoped<IAudiobookFilePathIdentityResolver, AudiobookFilePathIdentityResolver>();
+        services.AddScoped<IFileRenameCommitStore, FileRenameCommitStore>();
+        services.AddScoped<IFileRenameRecoveryReconciler, FileRenameRecoveryReconciler>();
         services.AddScoped<IAudiobookFileIdentityReconciler, AudiobookFileIdentityReconciler>();
         services.AddScoped<IRootFolderObjectIdentityReconciler, RootFolderObjectIdentityReconciler>();
         services.AddScoped<ILibraryDirectoryOwnershipReconciler, LibraryDirectoryOwnershipReconciler>();

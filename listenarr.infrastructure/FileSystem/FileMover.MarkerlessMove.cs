@@ -8,7 +8,9 @@ public partial class FileMover
     private async Task<bool?> TryMoveFileMarkerlessAsync(
         string source,
         string destination,
-        Guid operationId)
+        Guid operationId,
+        int? audiobookId = null,
+        int? audiobookFileId = null)
     {
         if (_fileMutationJournalStore == null)
         {
@@ -75,7 +77,9 @@ public partial class FileMover
                     pathLock.DestinationPath,
                     proof.PhysicalObjectIdentity,
                     proof.Length,
-                    proof.Sha256),
+                    proof.Sha256,
+                    audiobookId,
+                    audiobookFileId),
                 cancellationToken);
             if (AfterMarkerlessMoveJournalPlannedForTestAsync != null)
             {
@@ -84,12 +88,20 @@ public partial class FileMover
         }
         else
         {
-            await ValidateMarkerlessMoveJournalAsync(journal, pathLock);
+            await ValidateMarkerlessMoveJournalAsync(
+                journal,
+                pathLock,
+                audiobookId,
+                audiobookFileId);
         }
 
         if (journal.State == FileMutationJournalState.NeedsAttention)
         {
             return false;
+        }
+        if (journal.State == FileMutationJournalState.OwnerMetadataReconciled)
+        {
+            return OwnerMetadataReconciledTargetMatches(pathLock, journal);
         }
 
         using (var observedSource = pathLock.SourceParent.TryOpenExistingFile(
@@ -403,11 +415,15 @@ public partial class FileMover
 
     private async Task ValidateMarkerlessMoveJournalAsync(
         FileMutationJournal journal,
-        FileMoveGateLease pathLock)
+        FileMoveGateLease pathLock,
+        int? audiobookId,
+        int? audiobookFileId)
     {
         if (journal.ProtocolVersion
                 != FileMutationProtocol.MarkerlessDatabaseState
             || journal.Action != FileAction.Move
+            || journal.AudiobookId != audiobookId
+            || journal.AudiobookFileId != audiobookFileId
             || !await JournalPathsMatchGateAsync(journal, pathLock))
         {
             throw new InvalidOperationException(

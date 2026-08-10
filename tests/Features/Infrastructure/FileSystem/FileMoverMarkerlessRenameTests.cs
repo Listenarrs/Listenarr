@@ -202,6 +202,50 @@ public sealed class FileMoverMarkerlessRenameTests : BaseTests
     }
 
     [Fact]
+    public async Task MoveFilePreservingPhysicalIdentityAsync_OwnerMetadataReconciledRetryIgnoresLaterSourceReuse()
+    {
+        var scenario = await CreateScenarioAsync();
+        var mover = CreateMover();
+
+        Assert.True(await mover.MoveFilePreservingPhysicalIdentityAsync(
+            scenario.Source,
+            scenario.Destination,
+            scenario.SourceIdentity,
+            scenario.OperationId,
+            audiobookId: 42,
+            audiobookFileId: 420));
+
+        var factory = _provider.GetRequiredService<
+            IDbContextFactory<ListenArrDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var journal = await db.FileMutationJournals
+                .SingleAsync(candidate => candidate.OperationId == scenario.OperationId);
+            Assert.Equal(42, journal.AudiobookId);
+            Assert.Equal(420, journal.AudiobookFileId);
+            journal.State = FileMutationJournalState.OwnerMetadataReconciled;
+            await db.SaveChangesAsync();
+        }
+
+        await File.WriteAllTextAsync(scenario.Source, "recreated-source");
+
+        Assert.True(await CreateMover().MoveFilePreservingPhysicalIdentityAsync(
+            scenario.Source,
+            scenario.Destination,
+            scenario.SourceIdentity,
+            scenario.OperationId,
+            audiobookId: 42,
+            audiobookFileId: 420));
+        Assert.Equal("recreated-source", await File.ReadAllTextAsync(scenario.Source));
+        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Destination));
+        await AssertJournalStateAsync(
+            scenario.OperationId,
+            FileMutationJournalState.OwnerMetadataReconciled,
+            scenario.SourceIdentity);
+        AssertNoLibraryArtifacts(scenario.Root);
+    }
+
+    [Fact]
     public async Task MoveFilePreservingPhysicalIdentityAsync_CompletedJournalWithRecreatedSourcePreservesSourceAndBlocks()
     {
         var scenario = await CreateScenarioAsync();

@@ -142,7 +142,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         }
 
         [Fact]
-        public async Task DeleteAudiobook_DatabaseFailure_DoesNotDeleteFiles()
+        public async Task DeleteAudiobook_DatabaseFailure_AfterFilesystemCleanup_RetrySkipsCleanupAndCompletesIntent()
         {
             var audiobook = new Audiobook
             {
@@ -158,11 +158,20 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                     audiobook.Id,
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync(audiobook);
-            repository.Setup(service => service.DeleteByIdAsync(audiobook.Id))
-                .ReturnsAsync(false);
+            repository.SetupSequence(service => service.DeleteByIdAsync(audiobook.Id))
+                .ReturnsAsync(false)
+                .ReturnsAsync(true);
             var imageCache = new Mock<IImageCacheService>(MockBehavior.Strict);
             var filesystemDelete = new Mock<IAudiobookFilesystemDeleteService>(
                 MockBehavior.Strict);
+            filesystemDelete.Setup(service => service.DeleteAsync(
+                    audiobook,
+                    true,
+                    CancellationToken.None))
+                .ReturnsAsync(new AudiobookFilesystemDeleteResult
+                {
+                    TrackedFileCleanupComplete = true
+                });
             var fileSystem = new Mock<IFileSystem>(MockBehavior.Strict);
             Init(services => services
                 .WithSingleton<IAudiobookRepository>(repository.Object)
@@ -178,7 +187,41 @@ namespace Listenarr.Tests.Features.Api.Features.Library
 
             var failure = Assert.IsType<ObjectResult>(result);
             Assert.Equal(500, failure.StatusCode);
-            filesystemDelete.VerifyNoOtherCalls();
+            var json = System.Text.Json.JsonSerializer.Serialize(failure.Value);
+            Assert.Contains("delete_recovery_pending", json, StringComparison.Ordinal);
+            filesystemDelete.Verify(service => service.DeleteAsync(
+                audiobook,
+                true,
+                CancellationToken.None), Times.Once);
+            var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+            await using var intentDb = await factory.CreateDbContextAsync();
+            var intentId = await intentDb.AudiobookDeletionIntents
+                .Where(intent => intent.AudiobookId == audiobook.Id)
+                .Select(intent => intent.Id)
+                .SingleAsync();
+            Assert.Equal(
+                AudiobookDeletionIntentState.FilesystemCleanupCompleted,
+                await intentDb.AudiobookDeletionIntents
+                    .Where(intent => intent.Id == intentId)
+                    .Select(intent => intent.State)
+                    .SingleAsync());
+
+            var retry = await _provider.GetRequiredService<LibraryController>()
+                .DeleteAudiobook(
+                    audiobook.Id,
+                    deleteFiles: true,
+                    deleteFolder: true);
+
+            Assert.IsType<OkObjectResult>(retry);
+            filesystemDelete.Verify(service => service.DeleteAsync(
+                audiobook,
+                true,
+                CancellationToken.None), Times.Once);
+            Assert.Equal(
+                AudiobookDeletionIntentState.Completed,
+                (await intentDb.AudiobookDeletionIntents
+                    .AsNoTracking()
+                    .SingleAsync(intent => intent.Id == intentId)).State);
             imageCache.VerifyNoOtherCalls();
             fileSystem.VerifyNoOtherCalls();
         }
@@ -321,14 +364,13 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         }
 
         [Fact]
-        public async Task DeleteAudiobook_FilesystemFailureAfterCommit_ReturnsSuccessWithWarning()
+        public async Task DeleteAudiobook_FilesystemFailure_PreservesDatabaseRowAndCanRetrySameIntent()
         {
             var audiobook = new Audiobook
             {
                 Id = 9903,
                 Title = "Delete Cleanup Failure"
             };
-            var deleteCommitted = false;
             var repository = new Mock<IAudiobookRepository>(MockBehavior.Strict);
             repository.Setup(service => service.GetForUpdateSnapshotAsync(
                     audiobook.Id,
@@ -339,23 +381,18 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync(audiobook);
             repository.Setup(service => service.DeleteByIdAsync(audiobook.Id))
-                .ReturnsAsync(() =>
-                {
-                    deleteCommitted = true;
-                    return true;
-                });
+                .ReturnsAsync(true);
             var imageCache = new Mock<IImageCacheService>(MockBehavior.Strict);
             var filesystemDelete = new Mock<IAudiobookFilesystemDeleteService>(
                 MockBehavior.Strict);
-            filesystemDelete.Setup(service => service.DeleteAsync(
+            filesystemDelete.SetupSequence(service => service.DeleteAsync(
                     audiobook,
                     true,
                     CancellationToken.None))
-                .Returns(() =>
+                .ThrowsAsync(new IOException("Injected cleanup failure."))
+                .ReturnsAsync(new AudiobookFilesystemDeleteResult
                 {
-                    Assert.True(deleteCommitted);
-                    return Task.FromException<AudiobookFilesystemDeleteResult>(
-                        new IOException("Injected cleanup failure."));
+                    TrackedFileCleanupComplete = true
                 });
             var fileSystem = new Mock<IFileSystem>(MockBehavior.Strict);
             Init(services => services
@@ -370,14 +407,43 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                     deleteFiles: true,
                     deleteFolder: true);
 
-            var ok = Assert.IsType<OkObjectResult>(result);
-            var json = System.Text.Json.JsonSerializer.Serialize(ok.Value);
-            Assert.Contains("could not be fully deleted", json, StringComparison.Ordinal);
-            repository.Verify(service => service.DeleteByIdAsync(audiobook.Id), Times.Once);
+            var failure = Assert.IsType<ObjectResult>(result);
+            Assert.Equal(500, failure.StatusCode);
+            var json = System.Text.Json.JsonSerializer.Serialize(failure.Value);
+            Assert.Contains("delete_recovery_pending", json, StringComparison.Ordinal);
+            repository.Verify(service => service.DeleteByIdAsync(audiobook.Id), Times.Never);
             filesystemDelete.Verify(service => service.DeleteAsync(
                 audiobook,
                 true,
                 CancellationToken.None), Times.Once);
+            var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+            await using var intentDb = await factory.CreateDbContextAsync();
+            Assert.Equal(
+                AudiobookDeletionIntentState.Planned,
+                await intentDb.AudiobookDeletionIntents
+                    .Where(intent => intent.AudiobookId == audiobook.Id)
+                    .Select(intent => intent.State)
+                    .SingleAsync());
+
+            var retry = await _provider.GetRequiredService<LibraryController>()
+                .DeleteAudiobook(
+                    audiobook.Id,
+                    deleteFiles: true,
+                    deleteFolder: true);
+
+            Assert.IsType<OkObjectResult>(retry);
+            repository.Verify(service => service.DeleteByIdAsync(audiobook.Id), Times.Once);
+            filesystemDelete.Verify(service => service.DeleteAsync(
+                audiobook,
+                true,
+                CancellationToken.None), Times.Exactly(2));
+            intentDb.ChangeTracker.Clear();
+            Assert.Equal(
+                AudiobookDeletionIntentState.Completed,
+                await intentDb.AudiobookDeletionIntents
+                    .Where(intent => intent.AudiobookId == audiobook.Id)
+                    .Select(intent => intent.State)
+                    .SingleAsync());
             imageCache.VerifyNoOtherCalls();
             fileSystem.VerifyNoOtherCalls();
         }
@@ -536,7 +602,13 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                     deleteFiles: true,
                     deleteFolder: false);
 
-            Assert.IsType<OkObjectResult>(result);
+            var pending = Assert.IsType<ObjectResult>(result);
+            Assert.Equal(500, pending.StatusCode);
+            Assert.Contains(
+                "delete_recovery_pending",
+                System.Text.Json.JsonSerializer.Serialize(pending.Value),
+                StringComparison.Ordinal);
+            Assert.NotNull(await _audiobookRepository.GetByIdAsync(audiobook.Id));
             Assert.True(File.Exists(audioPath));
             Assert.True(File.Exists(sidecarPath));
             Assert.True(Directory.Exists(bookFolder));
@@ -578,7 +650,13 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                     deleteFiles: true,
                     deleteFolder: true);
 
-            Assert.IsType<OkObjectResult>(result);
+            var pending = Assert.IsType<ObjectResult>(result);
+            Assert.Equal(500, pending.StatusCode);
+            Assert.Contains(
+                "delete_recovery_pending",
+                System.Text.Json.JsonSerializer.Serialize(pending.Value),
+                StringComparison.Ordinal);
+            Assert.NotNull(await _audiobookRepository.GetByIdAsync(audiobook.Id));
             Assert.True(File.Exists(audioPath));
             Assert.True(File.Exists(sidecarPath));
             Assert.True(Directory.Exists(bookFolder));
@@ -1308,7 +1386,13 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                     deleteFiles: true,
                     deleteFolder: true);
 
-            Assert.IsType<OkObjectResult>(result);
+            var pending = Assert.IsType<ObjectResult>(result);
+            Assert.Equal(500, pending.StatusCode);
+            Assert.Contains(
+                "delete_recovery_pending",
+                System.Text.Json.JsonSerializer.Serialize(pending.Value),
+                StringComparison.Ordinal);
+            Assert.NotNull(await _audiobookRepository.GetByIdAsync(audiobook.Id));
             Assert.True(File.Exists(audioPath));
             Assert.Equal("replacement audio", await File.ReadAllTextAsync(audioPath));
             Assert.True(File.Exists(sentinelPath));
@@ -1373,7 +1457,13 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                     deleteFiles: true,
                     deleteFolder: true);
 
-            Assert.IsType<OkObjectResult>(result);
+            var pending = Assert.IsType<ObjectResult>(result);
+            Assert.Equal(500, pending.StatusCode);
+            Assert.Contains(
+                "delete_recovery_pending",
+                System.Text.Json.JsonSerializer.Serialize(pending.Value),
+                StringComparison.Ordinal);
+            Assert.NotNull(await _audiobookRepository.GetByIdAsync(audiobook.Id));
             Assert.True(File.Exists(audioPath));
             Assert.Equal("replacement audio", await File.ReadAllTextAsync(audioPath));
             Assert.True(File.Exists(sentinelPath));

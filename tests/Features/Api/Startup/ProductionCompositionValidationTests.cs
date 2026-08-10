@@ -47,6 +47,8 @@ public sealed class ProductionCompositionValidationTests : BaseTests
                 typeof(IRootFolderRelocationService),
                 typeof(IMoveCleanupBoundaryResolver),
                 typeof(ILibraryDirectoryOwnershipStore),
+                typeof(IAudiobookDeletionIntentProbe),
+                typeof(IFileRenameRecoveryProbe),
                 typeof(IMoveQueueService),
                 typeof(IMoveQueuePersistence),
                 typeof(IMoveExecutionStore),
@@ -84,6 +86,13 @@ public sealed class ProductionCompositionValidationTests : BaseTests
             Type[] affectedScopedServiceTypes =
             [
                 typeof(IAudiobookDeletionCommitService),
+                typeof(IAudiobookDeletionIntentStore),
+                typeof(IAudiobookDeletionIntentReconciler),
+                typeof(IFileRenameCommitStore),
+                typeof(IFileRenameRecoveryReconciler),
+                typeof(IAudiobookFileIdentityReconciler),
+                typeof(IAudiobookFilesystemDeleteService),
+                typeof(IRenameService),
                 typeof(IRootFolderStorageConfirmationService)
             ];
             foreach (var serviceType in affectedScopedServiceTypes)

@@ -45,6 +45,18 @@ internal sealed class LibraryFilesystemStartupReconciliationService(
                 static (service, token) => service.ReconcileAsync(token),
                 stoppingToken);
 
+            phase = "AudiobookDeletionRecovery";
+            readiness.MarkRunning(phase);
+            await RunScopedAsync<IAudiobookDeletionIntentReconciler>(
+                static (service, token) => service.ReconcileAsync(token),
+                stoppingToken);
+
+            phase = "FileRenameRecovery";
+            readiness.MarkRunning(phase);
+            await RunScopedAsync<IFileRenameRecoveryReconciler>(
+                static (service, token) => service.ReconcileAsync(token),
+                stoppingToken);
+
             phase = "AudiobookFileIdentities";
             readiness.MarkRunning(phase);
             await RunScopedAsync<IAudiobookFileIdentityReconciler>(

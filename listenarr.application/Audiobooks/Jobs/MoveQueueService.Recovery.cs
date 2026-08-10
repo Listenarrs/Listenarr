@@ -50,8 +50,14 @@ public partial class MoveQueueService
 
     public async Task EnsureFilesystemMutationAllowedAsync(
         int audiobookId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool allowActiveDeletionIntent = false)
     {
+        await EnsureExternalRecoveryAllowsMutationAsync(
+            audiobookId,
+            allowActiveDeletionIntent,
+            cancellationToken);
+
         var recovery = await GetRecoveryStateForAudiobookAsync(
             audiobookId,
             cancellationToken);
@@ -78,5 +84,32 @@ public partial class MoveQueueService
                 "move_recovery_required",
                 "An unresolved move must be completed before changing this audiobook's files.")
         };
+    }
+
+    private async Task EnsureExternalRecoveryAllowsMutationAsync(
+        int audiobookId,
+        bool allowActiveDeletionIntent,
+        CancellationToken cancellationToken)
+    {
+        if (_fileRenameRecoveryProbe != null
+            && await _fileRenameRecoveryProbe.HasBlockingAsync(
+                audiobookId,
+                cancellationToken))
+        {
+            throw new ApplicationConflictException(
+                "rename_recovery_pending",
+                "An interrupted file organize operation still owns this audiobook's filesystem state. Restart recovery must reconcile it before changing the audiobook's files.");
+        }
+
+        if (!allowActiveDeletionIntent
+            && _deletionIntentProbe != null
+            && await _deletionIntentProbe.HasActiveAsync(
+                audiobookId,
+                cancellationToken))
+        {
+            throw new ApplicationConflictException(
+                "delete_recovery_pending",
+                "An audiobook deletion still owns this audiobook's filesystem state. Complete or retry that deletion before changing its files.");
+        }
     }
 }

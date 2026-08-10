@@ -17,6 +17,7 @@
  */
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.EntityFrameworkCore;
+using Listenarr.Application.Common.Exceptions;
 using Listenarr.Tests.Common;
 using Listenarr.Tests.Mocks;
 using AppMoveQueueService = Listenarr.Application.Audiobooks.Jobs.MoveQueueService;
@@ -27,6 +28,106 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
     public class MoveQueueServiceTests
     {
         private const string LeaseOwner = "test-worker";
+
+        [Fact]
+        public async Task EnsureFilesystemMutationAllowedAsync_ActiveDeletionIntentBlocksOtherMutationsButAllowsDeletionRecovery()
+        {
+            const int audiobookId = 4242;
+            var persistence = new Mock<IMoveQueuePersistence>(MockBehavior.Strict);
+            persistence.Setup(store => store.GetRecoveryCandidatesByAudiobookAsync(
+                    audiobookId,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync([]);
+            var deletionProbe = new Mock<IAudiobookDeletionIntentProbe>(MockBehavior.Strict);
+            deletionProbe.Setup(probe => probe.HasActiveAsync(
+                    audiobookId,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(true);
+            var service = new MoveQueueService(
+                NullLogger<MoveQueueService>.Instance,
+                persistence.Object,
+                new NoopHubBroadcaster(),
+                TimeProvider.System,
+                BuildSemanticsResolver(),
+                deletionIntentProbe: deletionProbe.Object);
+
+            var blocked = await Assert.ThrowsAsync<ApplicationConflictException>(() =>
+                service.EnsureFilesystemMutationAllowedAsync(audiobookId));
+            Assert.Equal("delete_recovery_pending", blocked.Code);
+            persistence.Verify(store => store.GetRecoveryCandidatesByAudiobookAsync(
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()), Times.Never);
+
+            await service.EnsureFilesystemMutationAllowedAsync(
+                audiobookId,
+                allowActiveDeletionIntent: true);
+            persistence.Verify(store => store.GetRecoveryCandidatesByAudiobookAsync(
+                audiobookId,
+                It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [Fact]
+        public async Task EnqueueMoveAsync_ActiveDeletionIntentBlocksBeforeMovePersistence()
+        {
+            const int audiobookId = 4243;
+            var persistence = new Mock<IMoveQueuePersistence>(MockBehavior.Strict);
+            var deletionProbe = new Mock<IAudiobookDeletionIntentProbe>(MockBehavior.Strict);
+            deletionProbe.Setup(probe => probe.HasActiveAsync(
+                    audiobookId,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(true);
+            var service = new MoveQueueServiceTestAdapter(
+                NullLogger<MoveQueueService>.Instance,
+                persistence.Object,
+                new NoopHubBroadcaster(),
+                TimeProvider.System,
+                BuildSemanticsResolver(),
+                deletionIntentProbe: deletionProbe.Object);
+            var root = Path.Join(
+                Path.GetTempPath(),
+                $"listenarr-move-enqueue-delete-intent-{Guid.NewGuid():N}");
+            var source = Path.Join(root, "source");
+            var target = Path.Join(root, "target");
+            Directory.CreateDirectory(source);
+            try
+            {
+                var blocked = await Assert.ThrowsAsync<ApplicationConflictException>(() =>
+                    service.EnqueueMoveAsync(audiobookId, target, source));
+
+                Assert.Equal("delete_recovery_pending", blocked.Code);
+                persistence.VerifyNoOtherCalls();
+            }
+            finally
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+
+        [Fact]
+        public async Task EnsureFilesystemMutationAllowedAsync_UnreconciledOwnerBoundRenameBlocksMutation()
+        {
+            const int audiobookId = 4343;
+            var persistence = new Mock<IMoveQueuePersistence>(MockBehavior.Strict);
+            var renameProbe = new Mock<IFileRenameRecoveryProbe>(MockBehavior.Strict);
+            renameProbe.Setup(probe => probe.HasBlockingAsync(
+                    audiobookId,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(true);
+            var service = new MoveQueueService(
+                NullLogger<MoveQueueService>.Instance,
+                persistence.Object,
+                new NoopHubBroadcaster(),
+                TimeProvider.System,
+                BuildSemanticsResolver(),
+                fileRenameRecoveryProbe: renameProbe.Object);
+
+            var blocked = await Assert.ThrowsAsync<ApplicationConflictException>(() =>
+                service.EnsureFilesystemMutationAllowedAsync(audiobookId));
+
+            Assert.Equal("rename_recovery_pending", blocked.Code);
+            persistence.VerifyNoOtherCalls();
+        }
+
         [Fact]
         public async Task UpdateJobStatus_ExhaustedPersistenceRetries_PropagatesWithoutBroadcasting()
         {
@@ -1849,7 +1950,9 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
             TimeProvider timeProvider,
             IFileSystemSemanticsResolver semanticsResolver,
             IRootFolderRelocationService? relocationService = null,
-            IFilesystemMutationCoordinator? mutationCoordinator = null)
+            IFilesystemMutationCoordinator? mutationCoordinator = null,
+            IAudiobookDeletionIntentProbe? deletionIntentProbe = null,
+            IFileRenameRecoveryProbe? fileRenameRecoveryProbe = null)
             : base(
                 NullLogger<AppMoveQueueService>.Instance,
                 persistence,
@@ -1857,7 +1960,9 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
                 timeProvider,
                 semanticsResolver,
                 relocationService ?? Mock.Of<IRootFolderRelocationService>(),
-                mutationCoordinator ?? new FilesystemMutationCoordinator())
+                mutationCoordinator ?? new FilesystemMutationCoordinator(),
+                deletionIntentProbe,
+                fileRenameRecoveryProbe)
         {
             _semanticsResolver = semanticsResolver;
         }

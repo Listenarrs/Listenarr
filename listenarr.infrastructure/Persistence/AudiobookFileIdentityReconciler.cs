@@ -11,6 +11,8 @@ public sealed class AudiobookFileIdentityReconciler(
 {
     private const int BatchSize = 100;
 
+    internal Action<string>? AfterPhysicalIdentityParentPinnedForTest { get; set; }
+
     public async Task<AudiobookFileIdentityReconciliationResult> ReconcileAsync(
         CancellationToken cancellationToken = default)
     {
@@ -47,6 +49,30 @@ public sealed class AudiobookFileIdentityReconciler(
                     file.Audiobook,
                     file.Path,
                     cancellationToken);
+                var livePhysicalObjectIdentity = identity.State == PathIdentityState.Valid
+                    ? TryResolvePhysicalObjectIdentity(identity)
+                    : null;
+                if (!string.IsNullOrWhiteSpace(file.PhysicalObjectIdentity))
+                {
+                    if (string.IsNullOrWhiteSpace(livePhysicalObjectIdentity))
+                    {
+                        plans.Add(ReconciliationPlan.Unavailable(
+                            file,
+                            "The tracked audiobook file physical generation is unavailable at its stored path."));
+                        continue;
+                    }
+                    if (!string.Equals(
+                            file.PhysicalObjectIdentity,
+                            livePhysicalObjectIdentity,
+                            StringComparison.Ordinal))
+                    {
+                        plans.Add(ReconciliationPlan.Unavailable(
+                            file,
+                            "The tracked audiobook file path now identifies a different physical generation."));
+                        continue;
+                    }
+                }
+
                 plans.Add(new ReconciliationPlan(
                     file.Id,
                     file.Path,
@@ -54,7 +80,7 @@ public sealed class AudiobookFileIdentityReconciler(
                     identity,
                     physicalObjectIdentity: string.IsNullOrWhiteSpace(
                         file.PhysicalObjectIdentity)
-                        ? TryResolvePhysicalObjectIdentity(identity)
+                        ? livePhysicalObjectIdentity
                         : null));
             }
             catch (Exception exception) when (exception is
@@ -212,11 +238,13 @@ public sealed class AudiobookFileIdentityReconciler(
             using var parent = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
                 parentPath,
                 createMissing: false);
+            AfterPhysicalIdentityParentPinnedForTest?.Invoke(parentPath);
             using var file = parent.OpenExistingFileForStableRead(
                 Path.GetFileName(canonicalPath));
-            return file.VisiblePathMatches()
-                ? file.GetObjectIdentity()
-                : null;
+            return parent.VisiblePathMatches()
+                && file.VisiblePathMatches()
+                    ? file.GetObjectIdentity()
+                    : null;
         }
         catch (Exception exception) when (exception is
             IOException or UnauthorizedAccessException

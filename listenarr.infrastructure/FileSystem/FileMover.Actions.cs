@@ -88,11 +88,52 @@ public partial class FileMover
         return null;
     }
 
-    public async Task<bool> PerformActionOn(
+    public Task<bool> PerformActionOn(
         FileAction action,
         string source,
         string? destination,
-        Guid operationId)
+        Guid operationId) =>
+        PerformActionOnCore(
+            action,
+            source,
+            destination,
+            operationId,
+            audiobookId: null,
+            audiobookFileId: null);
+
+    public Task<bool> PerformActionOn(
+        FileAction action,
+        string source,
+        string? destination,
+        Guid operationId,
+        int audiobookId,
+        int audiobookFileId)
+    {
+        if (audiobookId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(audiobookId));
+        }
+        if (audiobookFileId < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(audiobookFileId));
+        }
+
+        return PerformActionOnCore(
+            action,
+            source,
+            destination,
+            operationId,
+            audiobookId,
+            audiobookFileId);
+    }
+
+    private async Task<bool> PerformActionOnCore(
+        FileAction action,
+        string source,
+        string? destination,
+        Guid operationId,
+        int? audiobookId,
+        int? audiobookFileId)
     {
         if (action == FileAction.None || destination == null) return true;
         if (operationId == Guid.Empty)
@@ -139,9 +180,19 @@ public partial class FileMover
             switch (action)
             {
                 case FileAction.Move:
-                    return await MoveFileAsync(source, destination, operationId);
+                    return await MoveFileAsync(
+                        source,
+                        destination,
+                        operationId,
+                        audiobookId,
+                        audiobookFileId);
                 case FileAction.HardlinkCopy:
                 case FileAction.Copy:
+                    if (audiobookId.HasValue || audiobookFileId.HasValue)
+                    {
+                        throw new InvalidOperationException(
+                            "Owned mutation recovery binding is supported only for moves.");
+                    }
                     return await PerformMarkerlessCopyOrHardlinkAsync(
                         action,
                         source,

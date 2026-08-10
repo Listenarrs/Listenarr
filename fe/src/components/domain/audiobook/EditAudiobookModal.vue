@@ -1851,7 +1851,7 @@ async function handleSave() {
 
         if (userWantsMove) {
           const jobId = typeof res.jobId === 'string' ? res.jobId.trim() : ''
-          const resolvedTarget = typeof res.target === 'string' ? res.target.trim() : ''
+          const resolvedTarget = typeof res.target === 'string' ? res.target : ''
           if (!jobId || !resolvedTarget) {
             throw new Error(
               'The server did not return a durable move job ID and resolved destination.',

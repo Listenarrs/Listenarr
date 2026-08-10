@@ -37,6 +37,8 @@ namespace Listenarr.Application.Audiobooks.Jobs
         private readonly IRootFolderRelocationService _relocationService;
         private readonly IFileSystemSemanticsResolver _semanticsResolver;
         private readonly IFilesystemMutationCoordinator _mutationCoordinator;
+        private readonly IAudiobookDeletionIntentProbe? _deletionIntentProbe;
+        private readonly IFileRenameRecoveryProbe? _fileRenameRecoveryProbe;
 
         public MoveQueueService(
             ILogger<MoveQueueService> logger,
@@ -45,7 +47,9 @@ namespace Listenarr.Application.Audiobooks.Jobs
             TimeProvider timeProvider,
             IFileSystemSemanticsResolver semanticsResolver,
             IRootFolderRelocationService relocationService,
-            IFilesystemMutationCoordinator mutationCoordinator)
+            IFilesystemMutationCoordinator mutationCoordinator,
+            IAudiobookDeletionIntentProbe? deletionIntentProbe = null,
+            IFileRenameRecoveryProbe? fileRenameRecoveryProbe = null)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _persistence = persistence ?? throw new ArgumentNullException(nameof(persistence));
@@ -54,6 +58,8 @@ namespace Listenarr.Application.Audiobooks.Jobs
             _semanticsResolver = semanticsResolver ?? throw new ArgumentNullException(nameof(semanticsResolver));
             _mutationCoordinator = mutationCoordinator ?? throw new ArgumentNullException(nameof(mutationCoordinator));
             _relocationService = relocationService ?? throw new ArgumentNullException(nameof(relocationService));
+            _deletionIntentProbe = deletionIntentProbe;
+            _fileRenameRecoveryProbe = fileRenameRecoveryProbe;
         }
 
         public ChannelReader<MoveJob> Reader => _channel.Reader;
@@ -63,6 +69,10 @@ namespace Listenarr.Application.Audiobooks.Jobs
             CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(command);
+            await EnsureExternalRecoveryAllowsMutationAsync(
+                command.AudiobookId,
+                allowActiveDeletionIntent: false,
+                cancellationToken);
             await EnsureIdentityKeysReconciledAsync(cancellationToken);
 
             var source = FileSystemPathIdentity.Canonicalize(

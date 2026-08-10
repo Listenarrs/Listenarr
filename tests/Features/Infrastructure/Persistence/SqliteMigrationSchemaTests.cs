@@ -36,6 +36,8 @@ public class SqliteMigrationSchemaTests : BaseTests
         "20260809141455_AddDurableMarkerlessLibraryMoves";
     private const string MoveJobRelocationForeignKeyMigrationId =
         "20260809153711_AddMoveJobRelocationForeignKey";
+    private const string FilesystemRecoveryIntentsMigrationId =
+        "20260810024341_AddFilesystemRecoveryIntents";
 
     private static (SqliteConnection Connection, ListenArrDbContext Context)
         CreateMigratedSqliteContext()
@@ -158,7 +160,8 @@ public class SqliteMigrationSchemaTests : BaseTests
             [
                 ProcessExecutionLogRepairId,
                 ConsolidatedMigrationId,
-                MoveJobRelocationForeignKeyMigrationId
+                MoveJobRelocationForeignKeyMigrationId,
+                FilesystemRecoveryIntentsMigrationId
             ],
             postCanary);
         Assert.Contains("20251124102000_AddMoveJobSourcePath", applied);
@@ -208,6 +211,8 @@ public class SqliteMigrationSchemaTests : BaseTests
 
         Assert.True(await ColumnExistsAsync(connection, "MoveJobs", "SourcePath"));
         Assert.True(await TableExistsAsync(connection, "ProcessExecutionLogs"));
+        Assert.True(await TableExistsAsync(connection, "AudiobookDeletionIntents"));
+        Assert.True(await ColumnExistsAsync(connection, "FileMutationJournals", "AudiobookFileId"));
         Assert.Equal(
             ("NeedsAttention", "Verification", 0, null),
             await ReadMoveJobUpgradeStateAsync(connection, queuedId));
@@ -240,6 +245,13 @@ public class SqliteMigrationSchemaTests : BaseTests
         await migrator.MigrateAsync();
         Assert.True(await TableExistsAsync(connection, "FileMutationJournals"));
         Assert.True(await ColumnExistsAsync(connection, "MoveJobs", "ExecutionProtocolVersion"));
+        Assert.True(await TableExistsAsync(connection, "AudiobookDeletionIntents"));
+        Assert.True(await ColumnExistsAsync(connection, "FileMutationJournals", "AudiobookFileId"));
+
+        await migrator.MigrateAsync(MoveJobRelocationForeignKeyMigrationId);
+        Assert.False(await TableExistsAsync(connection, "AudiobookDeletionIntents"));
+        Assert.False(await ColumnExistsAsync(connection, "FileMutationJournals", "AudiobookFileId"));
+        Assert.True(await TableExistsAsync(connection, "FileMutationJournals"));
 
         await migrator.MigrateAsync(ProcessExecutionLogRepairId);
         Assert.False(await TableExistsAsync(connection, "FileMutationJournals"));
@@ -250,6 +262,8 @@ public class SqliteMigrationSchemaTests : BaseTests
         await migrator.MigrateAsync();
         Assert.True(await TableExistsAsync(connection, "FileMutationJournals"));
         Assert.True(await ColumnExistsAsync(connection, "MoveJobs", "ExecutionProtocolVersion"));
+        Assert.True(await TableExistsAsync(connection, "AudiobookDeletionIntents"));
+        Assert.True(await ColumnExistsAsync(connection, "FileMutationJournals", "AudiobookFileId"));
         Assert.False(context.Database.HasPendingModelChanges());
     }
 

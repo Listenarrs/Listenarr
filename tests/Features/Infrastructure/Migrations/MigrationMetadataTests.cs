@@ -120,9 +120,40 @@ public class MigrationMetadataTests
     }
 
     [Fact]
+    public void AddFilesystemRecoveryIntents_IsDiscoverableAndIsolated()
+    {
+        AssertMigrationId<AddFilesystemRecoveryIntents>(
+            "20260810024341_AddFilesystemRecoveryIntents");
+
+        var migration = new AddFilesystemRecoveryIntents();
+        var upBuilder = BuildOperations(migration, "Up");
+        var downBuilder = BuildOperations(migration, "Down");
+
+        var addColumn = Assert.Single(upBuilder.Operations.OfType<AddColumnOperation>());
+        Assert.Equal("FileMutationJournals", addColumn.Table);
+        Assert.Equal("AudiobookFileId", addColumn.Name);
+        var create = Assert.Single(upBuilder.Operations.OfType<CreateTableOperation>());
+        Assert.Equal("AudiobookDeletionIntents", create.Name);
+        var indexes = upBuilder.Operations.OfType<CreateIndexOperation>().ToArray();
+        Assert.Equal(3, indexes.Length);
+        var activeIntentIndex = Assert.Single(
+            indexes,
+            index => index.Name == "IX_AudiobookDeletionIntents_AudiobookId");
+        Assert.True(activeIntentIndex.IsUnique);
+        Assert.Equal("\"State\" <> 'Completed'", activeIntentIndex.Filter);
+        Assert.DoesNotContain(upBuilder.Operations, operation =>
+            operation is SqlOperation or DropTableOperation or DropColumnOperation);
+
+        Assert.Single(downBuilder.Operations.OfType<DropTableOperation>());
+        var dropColumn = Assert.Single(downBuilder.Operations.OfType<DropColumnOperation>());
+        Assert.Equal("FileMutationJournals", dropColumn.Table);
+        Assert.Equal("AudiobookFileId", dropColumn.Name);
+    }
+
+    [Fact]
     public void FinalMoveMigration_TargetModelMatchesFinalContracts()
     {
-        var model = new AddMoveJobRelocationForeignKey().TargetModel;
+        var model = new AddFilesystemRecoveryIntents().TargetModel;
 
         var moveJob = AssertEntity(model, "Listenarr.Domain.Audiobooks.MoveJob");
         Assert.Equal(0, moveJob.FindProperty("ExecutionProtocolVersion")?.GetDefaultValue());
@@ -138,6 +169,13 @@ public class MigrationMetadataTests
         Assert.Equal("Auto", audiobookFile.FindProperty("PathCaseSensitivityMode")?.GetDefaultValue());
         Assert.Equal("Unknown", audiobookFile.FindProperty("PathCaseSensitivity")?.GetDefaultValue());
         Assert.Equal("Unavailable", audiobookFile.FindProperty("PathIdentityState")?.GetDefaultValue());
+
+        var fileMutationJournal = AssertEntity(
+            model,
+            "Listenarr.Domain.Downloads.FileMutationJournal");
+        Assert.NotNull(fileMutationJournal.FindProperty("AudiobookFileId"));
+        Assert.NotNull(model.FindEntityType(
+            "Listenarr.Domain.Audiobooks.AudiobookDeletionIntent"));
 
         Assert.Null(model.FindEntityType(
             "Listenarr.Domain.Audiobooks.LibraryDirectoryOwnershipRetiredMarker"));

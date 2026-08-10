@@ -66,7 +66,8 @@ namespace Listenarr.Application.Audiobooks.Contracts
             CancellationToken cancellationToken = default);
         Task EnsureFilesystemMutationAllowedAsync(
             int audiobookId,
-            CancellationToken cancellationToken = default);
+            CancellationToken cancellationToken = default,
+            bool allowActiveDeletionIntent = false);
         Task<MoveQueueHealthSnapshot> GetQueueHealthAsync(CancellationToken cancellationToken = default);
         Task<MoveJob?> GetJobAsync(Guid id, CancellationToken cancellationToken = default);
         Task IncrementAttemptAsync(Guid id, string leaseOwner, int leaseGeneration, CancellationToken cancellationToken = default);

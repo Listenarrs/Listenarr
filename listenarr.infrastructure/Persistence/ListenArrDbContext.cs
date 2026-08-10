@@ -26,6 +26,7 @@ namespace Listenarr.Infrastructure.Persistence
         public DbSet<AudiobookSeriesMembership> AudiobookSeriesMemberships { get; set; } = null!;
         public DbSet<AudiobookExternalIdentifier> AudiobookExternalIdentifiers { get; set; } = null!;
         public DbSet<AudiobookFile> AudiobookFiles { get; set; } = null!;
+        public DbSet<AudiobookDeletionIntent> AudiobookDeletionIntents { get; set; } = null!;
         public DbSet<MoveJob> MoveJobs { get; set; } = null!;
         public DbSet<MoveJobEntry> MoveJobEntries { get; set; } = null!;
         public DbSet<MoveJobCreatedDirectory> MoveJobCreatedDirectories { get; set; } = null!;

@@ -111,14 +111,12 @@ public partial class RenameService
 
             if (!PathsEqual(source, destination, semantics))
             {
-                var operationId = FileMoveOperationIdentity.CreateForPaths(
-                    "audiobook-file-rename",
-                    audiobook.Id,
-                    fileOperation.FileId,
-                    source,
-                    semantics,
-                    destination,
-                    semantics);
+                // Rename journals are owner-bound and discovered directly during startup
+                // recovery. Use a fresh durable ID for each organize attempt so a fully
+                // compensated terminal journal can never block a later legitimate retry of
+                // the same source/destination paths.
+                var operationId = Guid.NewGuid();
+                item.OperationId = operationId;
                 bool moved;
                 if (databaseFile != null)
                 {
@@ -135,7 +133,9 @@ public partial class RenameService
                             source,
                             destination,
                             databaseFile.PhysicalObjectIdentity,
-                            operationId);
+                            operationId,
+                            audiobook.Id,
+                            databaseFile.Id);
                 }
                 else
                 {
@@ -143,7 +143,9 @@ public partial class RenameService
                         FileAction.Move,
                         source,
                         destination,
-                        operationId);
+                        operationId,
+                        audiobook.Id,
+                        audiobookFileId: 0);
                 }
 
                 if (!moved)

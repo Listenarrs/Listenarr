@@ -153,6 +153,22 @@ public partial class FileMover
             journal.TargetPhysicalObjectIdentity,
             StringComparison.Ordinal);
 
+    private static bool OwnerMetadataReconciledTargetMatches(
+        FileMoveGateLease gate,
+        FileMutationJournal journal)
+    {
+        if (journal.State != FileMutationJournalState.OwnerMetadataReconciled
+            || !gate.DestinationParent.VisiblePathMatches())
+        {
+            return false;
+        }
+
+        using var target = gate.DestinationParent.TryOpenExistingFile(
+            gate.DestinationName,
+            requireDeleteAccess: false);
+        return target != null && TargetMatchesMarkerlessJournal(target, journal);
+    }
+
     private static async Task CopyMarkerlessFileAsync(
         PinnedDirectoryCreation.PinnedFileEntry source,
         PinnedDirectoryCreation.PinnedFileEntry target,

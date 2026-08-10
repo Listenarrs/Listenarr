@@ -775,6 +775,35 @@ describe('EditAudiobookModal move options', () => {
     )
   })
 
+  it('preserves legal whitespace in the server-authoritative move destination', async () => {
+    const { apiService } = await import('@/services/api')
+    const serverTarget = '/library/Author/Book '
+    vi.mocked(apiService.moveAudiobook).mockResolvedValueOnce({
+      message: 'queued',
+      jobId: 'job-whitespace',
+      target: serverTarget,
+    })
+    const wrapper = mount(EditAudiobookModal, {
+      props: { isOpen: true, audiobook },
+      attachTo: document.body,
+      global: { plugins: [(await import('pinia')).createPinia()] },
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    ;(wrapper.vm as unknown).formData.relativePath = 'New Author\\New Book'
+    await wrapper.vm.$nextTick()
+
+    const savePromise = (wrapper.vm as unknown).handleSave()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const resolver = (wrapper.vm as unknown).moveConfirmResolver
+    if (resolver) resolver({ proceed: true, moveFiles: true, deleteEmptySource: true })
+    await savePromise
+
+    const { useMoveJobsStore } = await import('@/stores/moveJobs')
+    const moveJobsStore = useMoveJobsStore()
+    expect(moveJobsStore.trackedById['job-whitespace']?.target).toBe(serverTarget)
+  })
+
   it('rejects an untrackable physical move response', async () => {
     const { apiService } = await import('@/services/api')
     vi.mocked(apiService.moveAudiobook).mockResolvedValueOnce({ message: 'queued' })

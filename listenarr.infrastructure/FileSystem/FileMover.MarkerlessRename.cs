@@ -9,7 +9,9 @@ public partial class FileMover
         string source,
         string destination,
         string expectedSourcePhysicalObjectIdentity,
-        Guid operationId)
+        Guid operationId,
+        int? audiobookId = null,
+        int? audiobookFileId = null)
     {
         if (_fileMutationJournalStore == null)
         {
@@ -72,7 +74,9 @@ public partial class FileMover
                     pathLock.DestinationPath,
                     expectedSourcePhysicalObjectIdentity,
                     sourceLength,
-                    SourceSha256: null),
+                    SourceSha256: null,
+                    audiobookId,
+                    audiobookFileId),
                 cancellationToken);
             if (AfterMarkerlessRenameJournalPlannedForTestAsync != null)
             {
@@ -84,12 +88,18 @@ public partial class FileMover
             await ValidateMarkerlessRenameJournalAsync(
                 journal,
                 pathLock,
-                expectedSourcePhysicalObjectIdentity);
+                expectedSourcePhysicalObjectIdentity,
+                audiobookId,
+                audiobookFileId);
         }
 
         if (journal.State == FileMutationJournalState.NeedsAttention)
         {
             return false;
+        }
+        if (journal.State == FileMutationJournalState.OwnerMetadataReconciled)
+        {
+            return OwnerMetadataReconciledTargetMatches(pathLock, journal);
         }
 
         using var sourceEntry = pathLock.SourceParent.TryOpenExistingFile(
@@ -267,11 +277,15 @@ public partial class FileMover
     private async Task ValidateMarkerlessRenameJournalAsync(
         FileMutationJournal journal,
         FileMoveGateLease pathLock,
-        string expectedSourcePhysicalObjectIdentity)
+        string expectedSourcePhysicalObjectIdentity,
+        int? audiobookId,
+        int? audiobookFileId)
     {
         if (journal.ProtocolVersion
                 != FileMutationProtocol.MarkerlessDatabaseState
             || journal.Action != FileAction.Move
+            || journal.AudiobookId != audiobookId
+            || journal.AudiobookFileId != audiobookFileId
             || !await JournalPathsMatchGateAsync(journal, pathLock)
             || !string.Equals(
                 journal.SourcePhysicalObjectIdentity,

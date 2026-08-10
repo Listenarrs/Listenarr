@@ -687,14 +687,33 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
                 FolderNamingPattern = "{Author}/{Title}",
                 FileNamingPattern = "{Title}"
             };
+            var forwardOperationIds = new List<Guid>();
 
             var (service, db, dbName) = BuildService(settings, fileMover =>
             {
                 fileMover.Setup(mover => mover.MoveFilePreservingPhysicalIdentityAsync(
+                        It.Is<string>(source => PathsEqualForTest(source, firstSourcePath)),
+                        It.Is<string>(dest => PathsEqualForTest(dest, firstTargetPath)),
+                        It.IsAny<string>(),
+                        It.IsAny<Guid>(),
+                        7,
+                        71))
+                    .Returns<string, string, string, Guid, int, int>(
+                        (source, dest, expectedIdentity, operationId, _, _) =>
+                        {
+                            Assert.Equal(expectedIdentity, GetPhysicalObjectIdentity(source));
+                            forwardOperationIds.Add(operationId);
+                            Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+                            File.Move(source, dest, overwrite: true);
+                            return Task.FromResult(true);
+                        });
+                fileMover.Setup(mover => mover.MoveFilePreservingPhysicalIdentityAsync(
                     It.IsAny<string>(),
                     It.Is<string>(dest => dest.EndsWith("Part 2.m4b", StringComparison.OrdinalIgnoreCase)),
                     It.IsAny<string>(),
-                    It.IsAny<Guid>()))
+                    It.IsAny<Guid>(),
+                    It.IsAny<int>(),
+                    It.IsAny<int>()))
                     .ReturnsAsync(false);
             });
 
@@ -713,7 +732,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
             });
             await db.SaveChangesAsync();
 
-            var results = await service.ExecuteRenameAsync(new List<RenameOperation>
+            var operations = new List<RenameOperation>
             {
                 new()
                 {
@@ -737,7 +756,8 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
                         }
                     }
                 }
-            });
+            };
+            var results = await service.ExecuteRenameAsync(operations);
 
             var result = Assert.Single(results);
             Assert.False(result.Success);
@@ -755,6 +775,15 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
             Assert.True(File.Exists(secondSourcePath));
             Assert.False(File.Exists(firstTargetPath));
             Assert.False(File.Exists(secondTargetPath));
+
+            var retry = Assert.Single(await service.ExecuteRenameAsync(operations));
+            Assert.False(retry.Success);
+            Assert.True(File.Exists(firstSourcePath));
+            Assert.True(File.Exists(secondSourcePath));
+            Assert.False(File.Exists(firstTargetPath));
+            Assert.False(File.Exists(secondTargetPath));
+            Assert.Equal(2, forwardOperationIds.Count);
+            Assert.NotEqual(forwardOperationIds[0], forwardOperationIds[1]);
         }
 
         [Fact]
@@ -780,7 +809,9 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
                         sourcePath,
                         targetPath,
                         It.IsAny<string>(),
-                        It.IsAny<Guid>()))
+                        It.IsAny<Guid>(),
+                        It.IsAny<int>(),
+                        It.IsAny<int>()))
                     .ThrowsAsync(new IOException(secret));
             });
             db.Audiobooks.Add(new Audiobook
@@ -1212,8 +1243,10 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
                         It.IsAny<string>(),
                         It.IsAny<string>(),
                         It.IsAny<string>(),
-                        It.IsAny<Guid>()))
-                    .Returns<string, string, string, Guid>((source, destination, _, _) =>
+                        It.IsAny<Guid>(),
+                        It.IsAny<int>(),
+                        It.IsAny<int>()))
+                    .Returns<string, string, string, Guid, int, int>((source, destination, _, _, _, _) =>
                     {
                         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
                         File.Move(source, destination, overwrite: true);
@@ -1751,27 +1784,62 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
                     It.IsAny<string>(),
                     It.IsAny<Guid>()))
                 .Returns<string, string, string, Guid>((source, dest, expectedIdentity, _) =>
-                {
-                    if (!string.Equals(
-                            GetPhysicalObjectIdentity(source),
-                            expectedIdentity,
-                            StringComparison.Ordinal))
-                    {
-                        return Task.FromResult(false);
-                    }
+                    MovePreservingIdentity(source, dest, expectedIdentity));
+            fileMover.Setup(mover => mover.MoveFilePreservingPhysicalIdentityAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<Guid>(),
+                    It.IsAny<int>(),
+                    It.IsAny<int>()))
+                .Returns<string, string, string, Guid, int, int>(
+                    (source, dest, expectedIdentity, _, _, _) =>
+                        MovePreservingIdentity(source, dest, expectedIdentity));
 
-                    var dir = Path.GetDirectoryName(dest);
-                    if (!string.IsNullOrWhiteSpace(dir))
-                    {
-                        Directory.CreateDirectory(dir);
-                    }
-
-                    File.Move(source, dest, true);
-                    return Task.FromResult(string.Equals(
-                        GetPhysicalObjectIdentity(dest),
+            Task<bool> MovePreservingIdentity(
+                string source,
+                string dest,
+                string expectedIdentity)
+            {
+                if (!string.Equals(
+                        GetPhysicalObjectIdentity(source),
                         expectedIdentity,
-                        StringComparison.Ordinal));
-                });
+                        StringComparison.Ordinal))
+                {
+                    return Task.FromResult(false);
+                }
+
+                var dir = Path.GetDirectoryName(dest);
+                if (!string.IsNullOrWhiteSpace(dir))
+                {
+                    Directory.CreateDirectory(dir);
+                }
+
+                File.Move(source, dest, true);
+                return Task.FromResult(string.Equals(
+                    GetPhysicalObjectIdentity(dest),
+                    expectedIdentity,
+                    StringComparison.Ordinal));
+            }
+            fileMover.Setup(mover => mover.PerformActionOn(
+                    FileAction.Move,
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<Guid>(),
+                    It.IsAny<int>(),
+                    It.IsAny<int>()))
+                .Returns<FileAction, string, string, Guid, int, int>(
+                    (action, source, dest, _, _, _) =>
+                    {
+                        var dir = Path.GetDirectoryName(dest);
+                        if (!string.IsNullOrWhiteSpace(dir))
+                        {
+                            Directory.CreateDirectory(dir);
+                        }
+
+                        File.Move(source, dest, true);
+                        return Task.FromResult(true);
+                    });
             configureFileMover?.Invoke(fileMover);
             var semanticsResolver = semanticsResolverOverride
                 ?? BuildSemanticsResolver(caseSensitivity);
@@ -1812,8 +1880,16 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
             var moveQueueService = new Mock<IMoveQueueService>();
             moveQueueService.Setup(service => service.EnsureFilesystemMutationAllowedAsync(
                     It.IsAny<int>(),
-                    It.IsAny<CancellationToken>()))
+                    It.IsAny<CancellationToken>(),
+                    It.IsAny<bool>()))
                 .Returns(Task.CompletedTask);
+            var renameCommitStore = new Mock<IFileRenameCommitStore>(MockBehavior.Strict);
+            renameCommitStore.Setup(store => store.CommitOwnerMetadataAsync(
+                    It.IsAny<int>(),
+                    It.IsAny<IReadOnlyCollection<Guid>>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns<int, IReadOnlyCollection<Guid>, CancellationToken>(
+                    (_, _, cancellationToken) => repo.SaveChangesAsync(cancellationToken));
             var service = new RenameService(
                 config.Object,
                 fileNaming,
@@ -1828,6 +1904,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
                 operationCoordinator ?? _operationCoordinator,
                 moveQueueServiceOverride ?? moveQueueService.Object,
                 directoryOwnershipStore.Object,
+                renameCommitStore.Object,
                 rootFolderServiceOverride);
 
             return (service, db, dbName);

@@ -39,6 +39,7 @@ namespace Listenarr.Application.Audiobooks.Renaming
         private readonly IAudiobookOperationCoordinator _audiobookOperationCoordinator;
         private readonly IMoveQueueService _moveQueueService;
         private readonly ILibraryDirectoryOwnershipStore _directoryOwnershipStore;
+        private readonly IFileRenameCommitStore _fileRenameCommitStore;
 
         public RenameService(
             IConfigurationService configService,
@@ -54,6 +55,7 @@ namespace Listenarr.Application.Audiobooks.Renaming
             IAudiobookOperationCoordinator audiobookOperationCoordinator,
             IMoveQueueService moveQueueService,
             ILibraryDirectoryOwnershipStore directoryOwnershipStore,
+            IFileRenameCommitStore fileRenameCommitStore,
             IRootFolderService? rootFolderService = null,
             IHistoryRepository? historyRepository = null)
         {
@@ -72,6 +74,7 @@ namespace Listenarr.Application.Audiobooks.Renaming
             _audiobookOperationCoordinator = audiobookOperationCoordinator ?? throw new ArgumentNullException(nameof(audiobookOperationCoordinator));
             _moveQueueService = moveQueueService ?? throw new ArgumentNullException(nameof(moveQueueService));
             _directoryOwnershipStore = directoryOwnershipStore ?? throw new ArgumentNullException(nameof(directoryOwnershipStore));
+            _fileRenameCommitStore = fileRenameCommitStore ?? throw new ArgumentNullException(nameof(fileRenameCommitStore));
         }
 
         public async Task<List<RenamePreview>> PreviewRenameAsync(int[] audiobookIds, CancellationToken ct = default)
@@ -278,13 +281,28 @@ namespace Listenarr.Application.Audiobooks.Renaming
                     result.RenamedFiles.Add(fileResult);
                     if (!fileResult.Success)
                     {
-                        await RollBackFileRenamesAsync(
+                        _ = await RollBackFileRenamesAsync(
                             audiobook,
                             result.RenamedFiles.Where(item => item.Success).ToList(),
                             audiobookRollbackState,
                             allowedRoots,
                             semantics,
                             mutationToken);
+                        try
+                        {
+                            await CommitRollbackStateAsync(
+                                audiobook,
+                                result.RenamedFiles,
+                                CancellationToken.None);
+                        }
+                        catch (Exception recoveryException) when (recoveryException is not (
+                            OutOfMemoryException or StackOverflowException))
+                        {
+                            _logger.LogCritical(
+                                recoveryException,
+                                "Failed to persist organize rollback journal state for audiobook {AudiobookId}",
+                                audiobook.Id);
+                        }
                         result.Success = false;
                         result.Error = fileResult.Error ?? "One or more file organize operations failed.";
                         return result;
@@ -301,7 +319,10 @@ namespace Listenarr.Application.Audiobooks.Renaming
                         semantics);
                     try
                     {
-                        await _audiobookRepository.SaveChangesAsync(mutationToken);
+                        await CommitSuccessfulRenameStateAsync(
+                            audiobook,
+                            result.RenamedFiles,
+                            mutationToken);
                     }
                     catch (Exception persistenceException) when (persistenceException is not OutOfMemoryException
                         && persistenceException is not StackOverflowException)
@@ -314,20 +335,20 @@ namespace Listenarr.Application.Audiobooks.Renaming
                             semantics,
                             CancellationToken.None);
 
-                        if (!rollbackSucceeded)
+                        try
                         {
-                            try
-                            {
-                                await _audiobookRepository.SaveChangesAsync(CancellationToken.None);
-                            }
-                            catch (Exception recoveryException) when (recoveryException is not OutOfMemoryException
-                                && recoveryException is not StackOverflowException)
-                            {
-                                _logger.LogCritical(
-                                    recoveryException,
-                                    "Failed to persist actual filesystem state after organize persistence failure for audiobook {AudiobookId}",
-                                    audiobook.Id);
-                            }
+                            await CommitRollbackStateAsync(
+                                audiobook,
+                                result.RenamedFiles,
+                                CancellationToken.None);
+                        }
+                        catch (Exception recoveryException) when (recoveryException is not (
+                            OutOfMemoryException or StackOverflowException))
+                        {
+                            _logger.LogCritical(
+                                recoveryException,
+                                "Failed to persist actual filesystem and rollback journal state after organize persistence failure for audiobook {AudiobookId}",
+                                audiobook.Id);
                         }
 
                         if (persistenceException is OperationCanceledException)

@@ -14,11 +14,52 @@ namespace Listenarr.Infrastructure.FileSystem
 {
     public partial class FileMover
     {
-        public async Task<bool> MoveFilePreservingPhysicalIdentityAsync(
+        public Task<bool> MoveFilePreservingPhysicalIdentityAsync(
             string source,
             string destination,
             string expectedSourcePhysicalObjectIdentity,
-            Guid operationId)
+            Guid operationId) =>
+            MoveFilePreservingPhysicalIdentityCoreAsync(
+                source,
+                destination,
+                expectedSourcePhysicalObjectIdentity,
+                operationId,
+                audiobookId: null,
+                audiobookFileId: null);
+
+        public Task<bool> MoveFilePreservingPhysicalIdentityAsync(
+            string source,
+            string destination,
+            string expectedSourcePhysicalObjectIdentity,
+            Guid operationId,
+            int audiobookId,
+            int audiobookFileId)
+        {
+            if (audiobookId <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(audiobookId));
+            }
+            if (audiobookFileId <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(audiobookFileId));
+            }
+
+            return MoveFilePreservingPhysicalIdentityCoreAsync(
+                source,
+                destination,
+                expectedSourcePhysicalObjectIdentity,
+                operationId,
+                audiobookId,
+                audiobookFileId);
+        }
+
+        private async Task<bool> MoveFilePreservingPhysicalIdentityCoreAsync(
+            string source,
+            string destination,
+            string expectedSourcePhysicalObjectIdentity,
+            Guid operationId,
+            int? audiobookId,
+            int? audiobookFileId)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(
                 expectedSourcePhysicalObjectIdentity);
@@ -60,7 +101,9 @@ namespace Listenarr.Infrastructure.FileSystem
                     source,
                     destination,
                     expectedSourcePhysicalObjectIdentity,
-                    operationId);
+                    operationId,
+                    audiobookId,
+                    audiobookFileId);
             if (markerlessResult.HasValue)
             {
                 return markerlessResult.Value;
@@ -78,7 +121,9 @@ namespace Listenarr.Infrastructure.FileSystem
         internal async Task<bool> MoveFileAsync(
             string sourceFile,
             string destFile,
-            Guid operationId)
+            Guid operationId,
+            int? audiobookId = null,
+            int? audiobookFileId = null)
         {
             if (operationId == Guid.Empty)
             {
@@ -101,7 +146,9 @@ namespace Listenarr.Infrastructure.FileSystem
             var markerlessResult = await TryMoveFileMarkerlessAsync(
                 sourceFile,
                 destFile,
-                operationId);
+                operationId,
+                audiobookId,
+                audiobookFileId);
             if (markerlessResult.HasValue)
             {
                 return markerlessResult.Value;

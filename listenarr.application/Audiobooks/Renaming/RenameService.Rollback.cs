@@ -88,14 +88,10 @@ public partial class RenameService
                             cancellationToken);
                     }
 
-                    var rollbackOperationId = FileMoveOperationIdentity.CreateForPaths(
-                        "audiobook-file-rename-rollback",
-                        audiobook.Id,
-                        item.FileId,
-                        rollbackSource,
-                        semantics,
-                        rollbackDestination,
-                        semantics);
+                    // Compensation is also owner-bound and startup-discoverable. A fresh ID
+                    // keeps completed compensation history from colliding with a later retry.
+                    var rollbackOperationId = Guid.NewGuid();
+                    item.RollbackOperationId = rollbackOperationId;
                     bool moved;
                     if (item.FileId == 0)
                     {
@@ -103,7 +99,9 @@ public partial class RenameService
                             FileAction.Move,
                             rollbackSource,
                             rollbackDestination,
-                            rollbackOperationId);
+                            rollbackOperationId,
+                            audiobook.Id,
+                            audiobookFileId: 0);
                     }
                     else
                     {
@@ -123,7 +121,9 @@ public partial class RenameService
                                 rollbackSource,
                                 rollbackDestination,
                                 trackedFile.PhysicalObjectIdentity,
-                                rollbackOperationId);
+                                rollbackOperationId,
+                                audiobook.Id,
+                                item.FileId);
                     }
                     if (!moved)
                     {
@@ -175,20 +175,9 @@ public partial class RenameService
         }
         else
         {
+            // The caller persists this actual partial state together with the
+            // terminal state of every journal whose rollback was proven.
             UpdateAudiobookPathSummary(audiobook, null, semantics);
-            try
-            {
-                await _audiobookRepository.SaveChangesAsync(cancellationToken);
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException
-                && exception is not OutOfMemoryException
-                && exception is not StackOverflowException)
-            {
-                _logger.LogCritical(
-                    exception,
-                    "Failed to persist actual partial organize state for audiobook {AudiobookId}",
-                    audiobook.Id);
-            }
         }
 
         return rollbackSucceeded;

@@ -1,5 +1,4 @@
 using Listenarr.Domain.Audiobooks.Enumerations;
-using Listenarr.Domain.Common;
 using Listenarr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -12,7 +11,9 @@ internal sealed record FileMutationJournalClaim(
     string DestinationPath,
     string SourcePhysicalObjectIdentity,
     long SourceLength,
-    string? SourceSha256);
+    string? SourceSha256,
+    int? AudiobookId = null,
+    int? AudiobookFileId = null);
 
 internal interface IFileMutationJournalStore
 {
@@ -94,6 +95,8 @@ internal sealed partial class EfFileMutationJournalStore(
             SourcePhysicalObjectIdentity = claim.SourcePhysicalObjectIdentity,
             SourceLength = claim.SourceLength,
             SourceSha256 = claim.SourceSha256,
+            AudiobookId = claim.AudiobookId,
+            AudiobookFileId = claim.AudiobookFileId,
             State = FileMutationJournalState.Planned,
             CreatedAt = now,
             UpdatedAt = now
@@ -346,6 +349,11 @@ internal sealed partial class EfFileMutationJournalStore(
                 "A file-mutation operation ID must not be empty.",
                 nameof(operationId));
         }
+        if (state == FileMutationJournalState.OwnerMetadataReconciled)
+        {
+            throw new InvalidOperationException(
+                "Owner metadata reconciliation must be committed atomically with the owning audiobook metadata, not through the filesystem journal store.");
+        }
         if (state >= FileMutationJournalState.TargetIdentityPersisted
             && state != FileMutationJournalState.NeedsAttention
             && string.IsNullOrWhiteSpace(targetPhysicalObjectIdentity))
@@ -372,6 +380,11 @@ internal sealed partial class EfFileMutationJournalStore(
         {
             throw new InvalidOperationException(
                 "The durable file-mutation journal uses an unsupported protocol.");
+        }
+        if (journal.State == FileMutationJournalState.OwnerMetadataReconciled)
+        {
+            throw new InvalidOperationException(
+                "A file mutation whose owner metadata is reconciled is terminal and cannot be advanced.");
         }
         if (journal.State == FileMutationJournalState.NeedsAttention
             && state != FileMutationJournalState.NeedsAttention)
@@ -415,75 +428,4 @@ internal sealed partial class EfFileMutationJournalStore(
         journal.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
     }
 
-    private static void ValidateClaim(FileMutationJournalClaim claim)
-    {
-        if (claim.OperationId == Guid.Empty)
-        {
-            throw new ArgumentException(
-                "A file-mutation operation ID must not be empty.",
-                nameof(claim));
-        }
-        ArgumentException.ThrowIfNullOrWhiteSpace(claim.SourcePath);
-        ArgumentException.ThrowIfNullOrWhiteSpace(claim.DestinationPath);
-        ArgumentException.ThrowIfNullOrWhiteSpace(
-            claim.SourcePhysicalObjectIdentity);
-        if (claim.SourceLength < 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(claim));
-        }
-        if (claim.SourceSha256 is { Length: > 0 })
-        {
-            ValidateSha256(claim.SourceSha256, nameof(claim));
-        }
-    }
-
-    private async Task ValidateIdentityAsync(
-        FileMutationJournal journal,
-        FileMutationJournalClaim claim,
-        string canonicalSource,
-        string canonicalDestination,
-        CancellationToken cancellationToken)
-    {
-        var sourcePathsMatch = await PathsMatchAsync(
-            journal.SourcePath,
-            canonicalSource,
-            cancellationToken);
-        var destinationPathsMatch = await PathsMatchAsync(
-            journal.DestinationPath,
-            canonicalDestination,
-            cancellationToken);
-        if (journal.ProtocolVersion
-                != FileMutationProtocol.MarkerlessDatabaseState
-            || journal.Action != claim.Action
-            || !sourcePathsMatch
-            || !destinationPathsMatch
-            || !string.Equals(
-                journal.SourcePhysicalObjectIdentity,
-                claim.SourcePhysicalObjectIdentity,
-                StringComparison.Ordinal)
-            || journal.SourceLength != claim.SourceLength
-            || !string.Equals(
-                journal.SourceSha256,
-                claim.SourceSha256,
-                StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException(
-                "The operation ID is already bound to another file-mutation identity.");
-        }
-    }
-
-    private async Task<bool> PathsMatchAsync(
-        string persistedPath,
-        string requestedPath,
-        CancellationToken cancellationToken)
-    {
-        var resolution = await _semanticsResolver.ResolveAsync(
-            requestedPath,
-            cancellationToken: cancellationToken);
-        return resolution.State == PathIdentityState.Valid
-            && FileSystemPathIdentity.AreEquivalent(
-                persistedPath,
-                requestedPath,
-                resolution.Semantics);
-    }
 }

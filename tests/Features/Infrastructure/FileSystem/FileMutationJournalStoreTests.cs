@@ -226,6 +226,61 @@ public sealed class FileMutationJournalStoreTests : BaseTests
     }
 
     [Fact]
+    public async Task AdvanceAsync_OwnerMetadataReconciledCannotBeWrittenOrReopenedByFilesystemStore()
+    {
+        var operationId = Guid.NewGuid();
+        var store = CreateStore();
+        var claim = CreateClaim(operationId) with
+        {
+            AudiobookId = 42,
+            AudiobookFileId = 420
+        };
+        await store.GetOrCreateAsync(claim, CancellationToken.None);
+        await store.AdvanceAsync(
+            operationId,
+            FileMutationJournalState.TargetIdentityPersisted,
+            "target-generation",
+            audiobookId: null,
+            error: null,
+            CancellationToken.None);
+        await store.AdvanceAsync(
+            operationId,
+            FileMutationJournalState.Completed,
+            "target-generation",
+            audiobookId: null,
+            error: null,
+            CancellationToken.None);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            store.AdvanceAsync(
+                operationId,
+                FileMutationJournalState.OwnerMetadataReconciled,
+                "target-generation",
+                audiobookId: 42,
+                error: null,
+                CancellationToken.None));
+
+        var factory = _provider.GetRequiredService<
+            IDbContextFactory<ListenArrDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var journal = await db.FileMutationJournals
+                .SingleAsync(candidate => candidate.OperationId == operationId);
+            journal.State = FileMutationJournalState.OwnerMetadataReconciled;
+            await db.SaveChangesAsync();
+        }
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            store.AdvanceAsync(
+                operationId,
+                FileMutationJournalState.NeedsAttention,
+                "target-generation",
+                audiobookId: 42,
+                error: "late source reuse",
+                CancellationToken.None));
+    }
+
+    [Fact]
     public async Task AdvanceAsync_NeedsAttentionIsTerminal()
     {
         var operationId = Guid.NewGuid();
