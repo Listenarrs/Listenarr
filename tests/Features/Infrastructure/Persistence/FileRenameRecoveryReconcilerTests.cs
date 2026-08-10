@@ -33,6 +33,48 @@ public sealed class FileRenameRecoveryReconcilerTests : BaseTests
     }
 
     [Fact]
+    public async Task ReconcileAsync_OwnerBindingChangesAfterInitialRead_MarksJournalNeedsAttention()
+    {
+        var scenario = await CreateScenarioAsync("owner-binding-changed");
+        var mover = _provider.GetRequiredService<FileMover>();
+        Assert.True(await mover.MoveFilePreservingPhysicalIdentityAsync(
+            scenario.Source,
+            scenario.Destination,
+            scenario.SourceIdentity,
+            scenario.OperationId,
+            scenario.AudiobookId,
+            scenario.FileId));
+
+        var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+        var reconciler = new FileRenameRecoveryReconciler(
+            factory,
+            mover,
+            _provider.GetRequiredService<IAudiobookFilePathIdentityResolver>(),
+            _provider.GetRequiredService<IFileSystemSemanticsResolver>(),
+            TimeProvider.System,
+            NullLogger<FileRenameRecoveryReconciler>.Instance)
+        {
+            AfterInitialOwnerBindingLoadedForTestAsync = async operationId =>
+            {
+                await using var db = await factory.CreateDbContextAsync();
+                var journal = await db.FileMutationJournals
+                    .SingleAsync(candidate => candidate.OperationId == operationId);
+                journal.AudiobookFileId = null;
+                await db.SaveChangesAsync();
+            }
+        };
+
+        await reconciler.ReconcileAsync();
+
+        await AssertJournalStateAsync(
+            scenario.OperationId,
+            FileMutationJournalState.NeedsAttention);
+        await AssertStoredPathAsync(scenario.FileId, scenario.Source);
+        Assert.False(File.Exists(scenario.Source));
+        Assert.True(File.Exists(scenario.Destination));
+    }
+
+    [Fact]
     public async Task ReconcileAsync_CompletedForwardRenameThatWasRolledBack_RecognizesCompensation()
     {
         var scenario = await CreateScenarioAsync("completed-then-rolled-back");

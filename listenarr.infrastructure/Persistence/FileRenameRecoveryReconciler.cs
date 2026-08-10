@@ -17,6 +17,8 @@ public sealed class FileRenameRecoveryReconciler(
     TimeProvider timeProvider,
     ILogger<FileRenameRecoveryReconciler> logger) : IFileRenameRecoveryReconciler
 {
+    internal Func<Guid, Task>? AfterInitialOwnerBindingLoadedForTestAsync { get; set; }
+
     public async Task ReconcileAsync(CancellationToken cancellationToken = default)
     {
         await using var readContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
@@ -63,6 +65,8 @@ public sealed class FileRenameRecoveryReconciler(
         FileMutationJournal journal;
         Audiobook audiobook;
         AudiobookFile? audiobookFile;
+        int ownerAudiobookId;
+        int ownerAudiobookFileId;
         await using (var context = await dbContextFactory.CreateDbContextAsync(cancellationToken))
         {
             journal = await context.FileMutationJournals
@@ -79,6 +83,8 @@ public sealed class FileRenameRecoveryReconciler(
                 return;
             }
 
+            ownerAudiobookId = journal.AudiobookId.Value;
+            ownerAudiobookFileId = journal.AudiobookFileId.Value;
             audiobook = await context.Audiobooks
                 .AsNoTracking()
                 .Include(candidate => candidate.Files)
@@ -92,6 +98,11 @@ public sealed class FileRenameRecoveryReconciler(
                 : audiobook.Files?.SingleOrDefault(file => file.Id == journal.AudiobookFileId.Value)
                     ?? throw new InvalidOperationException(
                         "An owned file-mutation journal references a missing audiobook file before metadata reconciliation.");
+        }
+
+        if (AfterInitialOwnerBindingLoadedForTestAsync != null)
+        {
+            await AfterInitialOwnerBindingLoadedForTestAsync(operationId);
         }
 
         if (journal.State < FileMutationJournalState.Completed)
@@ -137,17 +148,26 @@ public sealed class FileRenameRecoveryReconciler(
                 cancellationToken);
             return;
         }
+        if (journal.AudiobookId != ownerAudiobookId
+            || journal.AudiobookFileId != ownerAudiobookFileId)
+        {
+            await MarkNeedsAttentionAsync(
+                operationId,
+                "The interrupted organize journal owner binding changed during recovery.",
+                cancellationToken);
+            return;
+        }
 
         var trackedAudiobook = await db.Audiobooks
             .Include(candidate => candidate.Files)
             .SingleOrDefaultAsync(
-                candidate => candidate.Id == journal.AudiobookId!.Value,
+                candidate => candidate.Id == ownerAudiobookId,
                 cancellationToken)
             ?? throw new InvalidOperationException(
                 "The audiobook disappeared before its completed organize journal could be reconciled.");
-        var trackedFile = journal.AudiobookFileId!.Value == 0
+        var trackedFile = ownerAudiobookFileId == 0
             ? null
-            : trackedAudiobook.Files?.SingleOrDefault(file => file.Id == journal.AudiobookFileId.Value)
+            : trackedAudiobook.Files?.SingleOrDefault(file => file.Id == ownerAudiobookFileId)
                 ?? throw new InvalidOperationException(
                     "The audiobook file disappeared before its completed organize journal could be reconciled.");
 
