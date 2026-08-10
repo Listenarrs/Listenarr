@@ -204,14 +204,10 @@ namespace Listenarr.Api.Features.Library
                     return NotFound(new { message = "Root folder not found" });
                 }
 
-                var persistedSourceSemantics =
-                    RootFolderPathSemantics.ResolvePersisted(existing)?.Semantics;
                 var normalizedRequestedPath = FileUtils.NormalizeRootFolderPathForStorage(request.Path);
-                var pathChanged = persistedSourceSemantics == null
-                    || !FileSystemPathIdentity.AreEquivalent(
-                        existing.Path,
-                        normalizedRequestedPath,
-                        persistedSourceSemantics.Value);
+                var pathChanged = HasRootPathChanged(
+                    existing,
+                    normalizedRequestedPath);
                 var semanticsChanged =
                     existing.CaseSensitivityMode != request.CaseSensitivityMode;
                 if (!pathChanged && !semanticsChanged)

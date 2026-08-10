@@ -629,6 +629,71 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         }
 
         [Fact]
+        public async Task Update_CrossSyntaxUnavailableRoot_UsesMetadataOnlyRepair()
+        {
+            var sourcePath = OperatingSystem.IsWindows()
+                ? "/server/mnt/drive/Audiobooks"
+                : @"D:\Listenarr Test";
+            var targetPath = OperatingSystem.IsWindows()
+                ? @"D:\Listenarr Test"
+                : "/server/mnt/drive/Audiobooks";
+            var svc = new FakeService();
+            svc.Store.Add(new RootFolder
+            {
+                Id = 1,
+                Name = "Unavailable Root",
+                Path = sourcePath,
+                PathIdentityState = PathIdentityState.Unavailable
+            });
+            var relocationService = new Mock<IRootFolderRelocationService>();
+            relocationService.Setup(service => service.StartAsync(
+                    1,
+                    It.IsAny<RootFolderPathChangeCommand>(),
+                    It.IsAny<CancellationToken>()))
+                .Callback<int, RootFolderPathChangeCommand, CancellationToken>((_, command, _) =>
+                {
+                    svc.Store.Single().Path = command.TargetPath;
+                })
+                .ReturnsAsync(new RootFolderPathChangeResult(
+                    null,
+                    1,
+                    sourcePath,
+                    targetPath,
+                    RootFolderRelocationStatus.Completed,
+                    0,
+                    0,
+                    null));
+            var db = CreateDb();
+            var controller = new RootFoldersController(
+                svc,
+                _fakeQueue,
+                new EfAudiobookFileRepository(db),
+                new AudiobookRepository(db),
+                new LocalFileSystem(),
+                relocationService: relocationService.Object);
+
+            var result = await controller.Update(
+                1,
+                new RootFolder
+                {
+                    Id = 1,
+                    Name = "Repaired Root",
+                    Path = targetPath
+                },
+                moveFiles: false);
+
+            var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(result);
+            Assert.Equal(targetPath, Assert.IsType<RootFolderDto>(ok.Value).Path);
+            relocationService.Verify(service => service.StartAsync(
+                1,
+                It.Is<RootFolderPathChangeCommand>(command =>
+                    command.Mode == RootFolderRelocationMode.MetadataOnly
+                    && command.TargetPath == targetPath
+                    && command.ExpectedCurrentPath == sourcePath),
+                It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [Fact]
         public async Task Update_InvalidPersistedSourceSyntax_StillAllowsMetadataRepairThroughDurableWorkflow()
         {
             var invalidSourcePath = "invalid::legacy-root";
