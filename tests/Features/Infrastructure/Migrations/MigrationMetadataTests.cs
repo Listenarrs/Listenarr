@@ -66,40 +66,52 @@ public class MigrationMetadataTests
     }
 
     [Fact]
-    public void AddDurableMarkerlessLibraryMoves_IsDiscoverableAndConsolidated()
+    public void AddDurableFilesystemRecovery_IsDiscoverableAndConsolidated()
     {
-        AssertMigrationId<AddDurableMarkerlessLibraryMoves>(
-            "20260809141455_AddDurableMarkerlessLibraryMoves");
+        AssertMigrationId<AddDurableFilesystemRecovery>(
+            "20260810160602_AddDurableFilesystemRecovery");
 
-        var migration = new AddDurableMarkerlessLibraryMoves();
+        var migration = new AddDurableFilesystemRecovery();
         var upBuilder = BuildOperations(migration, "Up");
         var downBuilder = BuildOperations(migration, "Down");
 
-        Assert.Equal(78, upBuilder.Operations.Count);
-        Assert.Equal(59, downBuilder.Operations.Count);
+        Assert.Equal(82, upBuilder.Operations.Count);
+        Assert.Equal(60, downBuilder.Operations.Count);
         Assert.Empty(upBuilder.Operations.OfType<SqlOperation>());
 
         var createdTables = upBuilder.Operations
             .OfType<CreateTableOperation>()
-            .Select(operation => operation.Name)
-            .ToHashSet(StringComparer.Ordinal);
-        Assert.Contains("FileMutationJournals", createdTables);
-        Assert.Contains("LibraryDirectoryOwnerships", createdTables);
-        Assert.Contains("MoveJobEntries", createdTables);
-        Assert.Contains("MoveScanHandoffs", createdTables);
-        Assert.Contains("RootFolderRelocations", createdTables);
-        Assert.DoesNotContain("LibraryDirectoryOwnershipRetiredMarkers", createdTables);
+            .ToDictionary(operation => operation.Name, StringComparer.Ordinal);
+        Assert.Contains("AudiobookDeletionIntents", createdTables.Keys);
+        Assert.Contains("FileMutationJournals", createdTables.Keys);
+        Assert.Contains("LibraryDirectoryOwnerships", createdTables.Keys);
+        Assert.Contains("MoveJobEntries", createdTables.Keys);
+        Assert.Contains("MoveScanHandoffs", createdTables.Keys);
+        Assert.Contains("RootFolderRelocations", createdTables.Keys);
+        Assert.DoesNotContain("ProcessExecutionLogs", createdTables.Keys);
+        Assert.DoesNotContain("LibraryDirectoryOwnershipRetiredMarkers", createdTables.Keys);
+        Assert.Contains(
+            createdTables["FileMutationJournals"].Columns,
+            column => column.Name == "AudiobookFileId");
 
         Assert.Empty(upBuilder.Operations.OfType<AddForeignKeyOperation>());
+
+        var activeIntentIndex = Assert.Single(
+            upBuilder.Operations.OfType<CreateIndexOperation>(),
+            index => index.Name == "IX_AudiobookDeletionIntents_AudiobookId");
+        Assert.True(activeIntentIndex.IsUnique);
+        Assert.Equal("\"State\" <> 'Completed'", activeIntentIndex.Filter);
+
         Assert.DoesNotContain(upBuilder.Operations, operation =>
             operation is DropTableOperation or DropColumnOperation);
+        Assert.Empty(downBuilder.Operations.OfType<DropForeignKeyOperation>());
     }
 
     [Fact]
     public void AddMoveJobRelocationForeignKey_IsDiscoverableAndIsolated()
     {
         AssertMigrationId<AddMoveJobRelocationForeignKey>(
-            "20260809153711_AddMoveJobRelocationForeignKey");
+            "20260810160640_AddMoveJobRelocationForeignKey");
 
         var migration = new AddMoveJobRelocationForeignKey();
         var upBuilder = BuildOperations(migration, "Up");
@@ -120,40 +132,9 @@ public class MigrationMetadataTests
     }
 
     [Fact]
-    public void AddFilesystemRecoveryIntents_IsDiscoverableAndIsolated()
-    {
-        AssertMigrationId<AddFilesystemRecoveryIntents>(
-            "20260810024341_AddFilesystemRecoveryIntents");
-
-        var migration = new AddFilesystemRecoveryIntents();
-        var upBuilder = BuildOperations(migration, "Up");
-        var downBuilder = BuildOperations(migration, "Down");
-
-        var addColumn = Assert.Single(upBuilder.Operations.OfType<AddColumnOperation>());
-        Assert.Equal("FileMutationJournals", addColumn.Table);
-        Assert.Equal("AudiobookFileId", addColumn.Name);
-        var create = Assert.Single(upBuilder.Operations.OfType<CreateTableOperation>());
-        Assert.Equal("AudiobookDeletionIntents", create.Name);
-        var indexes = upBuilder.Operations.OfType<CreateIndexOperation>().ToArray();
-        Assert.Equal(3, indexes.Length);
-        var activeIntentIndex = Assert.Single(
-            indexes,
-            index => index.Name == "IX_AudiobookDeletionIntents_AudiobookId");
-        Assert.True(activeIntentIndex.IsUnique);
-        Assert.Equal("\"State\" <> 'Completed'", activeIntentIndex.Filter);
-        Assert.DoesNotContain(upBuilder.Operations, operation =>
-            operation is SqlOperation or DropTableOperation or DropColumnOperation);
-
-        Assert.Single(downBuilder.Operations.OfType<DropTableOperation>());
-        var dropColumn = Assert.Single(downBuilder.Operations.OfType<DropColumnOperation>());
-        Assert.Equal("FileMutationJournals", dropColumn.Table);
-        Assert.Equal("AudiobookFileId", dropColumn.Name);
-    }
-
-    [Fact]
     public void FinalMoveMigration_TargetModelMatchesFinalContracts()
     {
-        var model = new AddFilesystemRecoveryIntents().TargetModel;
+        var model = new AddMoveJobRelocationForeignKey().TargetModel;
 
         var moveJob = AssertEntity(model, "Listenarr.Domain.Audiobooks.MoveJob");
         Assert.Equal(0, moveJob.FindProperty("ExecutionProtocolVersion")?.GetDefaultValue());

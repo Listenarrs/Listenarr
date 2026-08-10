@@ -11,8 +11,8 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Listenarr.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(ListenArrDbContext))]
-    [Migration("20260809153711_AddMoveJobRelocationForeignKey")]
-    partial class AddMoveJobRelocationForeignKey
+    [Migration("20260810160602_AddDurableFilesystemRecovery")]
+    partial class AddDurableFilesystemRecovery
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -327,6 +327,46 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.HasIndex("QualityProfileId");
 
                     b.ToTable("Audiobooks");
+                });
+
+            modelBuilder.Entity("Listenarr.Domain.Audiobooks.AudiobookDeletionIntent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("AudiobookId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("DeleteFolder")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(2048)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AudiobookId")
+                        .IsUnique()
+                        .HasFilter("\"State\" <> 'Completed'");
+
+                    b.HasIndex("UpdatedAt");
+
+                    b.HasIndex("AudiobookId", "State");
+
+                    b.ToTable("AudiobookDeletionIntents", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Audiobooks.AudiobookExternalIdentifier", b =>
@@ -2078,6 +2118,9 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                         .HasMaxLength(24)
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("AudiobookFileId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int?>("AudiobookId")
                         .HasColumnType("INTEGER");
 
@@ -2390,16 +2433,6 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.Navigation("Relocation");
                 });
 
-            modelBuilder.Entity("Listenarr.Domain.Audiobooks.MoveJob", b =>
-                {
-                    b.HasOne("Listenarr.Domain.Audiobooks.RootFolderRelocation", "Relocation")
-                        .WithMany("MoveJobs")
-                        .HasForeignKey("RelocationId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("Relocation");
-                });
-
             modelBuilder.Entity("Listenarr.Domain.Audiobooks.MoveJobCreatedDirectory", b =>
                 {
                     b.HasOne("Listenarr.Domain.Audiobooks.MoveJob", "MoveJob")
@@ -2496,8 +2529,6 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("Listenarr.Domain.Audiobooks.RootFolderRelocation", b =>
                 {
                     b.Navigation("CreatedDirectories");
-
-                    b.Navigation("MoveJobs");
 
                     b.Navigation("OwnershipPathMigrations");
 

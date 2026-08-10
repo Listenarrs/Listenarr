@@ -4,8 +4,8 @@ namespace Listenarr.Infrastructure.Persistence;
 
 internal static class ListenarrDatabaseMigrationPreflight
 {
-    internal const string DurableMarkerlessLibraryMovesMigrationId =
-        "20260809141455_AddDurableMarkerlessLibraryMoves";
+    internal const string DurableFilesystemRecoveryMigrationId =
+        "20260810160602_AddDurableFilesystemRecovery";
     internal const string RootFoldersMigrationId =
         "20260101172733_AddRootFolders";
 
@@ -18,7 +18,7 @@ internal static class ListenarrDatabaseMigrationPreflight
             .ToHashSet(StringComparer.Ordinal);
         var normalizeDefaultRoots =
             applied.Contains(RootFoldersMigrationId)
-            && !applied.Contains(DurableMarkerlessLibraryMovesMigrationId);
+            && !applied.Contains(DurableFilesystemRecoveryMigrationId);
         if (!normalizeDefaultRoots)
         {
             return default;
@@ -48,7 +48,7 @@ internal static class ListenarrDatabaseMigrationPreflight
 
         var applied = context.Database.GetAppliedMigrations()
             .ToHashSet(StringComparer.Ordinal);
-        if (!applied.Contains(DurableMarkerlessLibraryMovesMigrationId))
+        if (!applied.Contains(DurableFilesystemRecoveryMigrationId))
         {
             return default;
         }
