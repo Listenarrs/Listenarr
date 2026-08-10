@@ -37,15 +37,25 @@ public sealed class DirectoryCreationParentReplacementTests : BaseTests
                 semantics,
                 "linked-boundary-regression");
 
-            Assert.Equal(2, created.Count);
+            Assert.Equal(OperatingSystem.IsWindows() ? 2 : 0, created.Count);
             Assert.True(Directory.Exists(Path.Join(physicalBoundary, "Author", "Book")));
             var resolution = await store.ResolveOwnedAsync(
                 destination,
                 semantics,
                 CancellationToken.None);
             Assert.Equal(
-                LibraryDirectoryOwnershipResolutionState.Owned,
+                OperatingSystem.IsWindows()
+                    ? LibraryDirectoryOwnershipResolutionState.Owned
+                    : LibraryDirectoryOwnershipResolutionState.Unowned,
                 resolution.State);
+            Assert.DoesNotContain(
+                Directory.EnumerateFileSystemEntries(
+                    physicalBoundary,
+                    "*",
+                    SearchOption.AllDirectories),
+                path => Path.GetFileName(path).StartsWith(
+                    ".listenarr-",
+                    StringComparison.Ordinal));
         }
         finally
         {
@@ -54,7 +64,7 @@ public sealed class DirectoryCreationParentReplacementTests : BaseTests
     }
 
     [DirectoryLinkFact]
-    public async Task EnsureCreatedHierarchyAsync_LinkedManagedBoundary_TopLevelOwnershipResolves()
+    public async Task EnsureCreatedHierarchyAsync_LinkedManagedBoundary_TopLevelUsesPlatformOwnershipContract()
     {
         var root = FileService.GetTempDirectory("directory-create-linked-top-level");
         var physicalBoundary = Path.Join(root, "physical");
@@ -75,15 +85,22 @@ public sealed class DirectoryCreationParentReplacementTests : BaseTests
                 semantics,
                 "linked-top-level-regression");
 
-            Assert.Single(created);
+            Assert.Equal(OperatingSystem.IsWindows() ? 1 : 0, created.Count);
             Assert.True(Directory.Exists(Path.Join(physicalBoundary, "Book")));
             var resolution = await store.ResolveOwnedAsync(
                 destination,
                 semantics,
                 CancellationToken.None);
             Assert.Equal(
-                LibraryDirectoryOwnershipResolutionState.Owned,
+                OperatingSystem.IsWindows()
+                    ? LibraryDirectoryOwnershipResolutionState.Owned
+                    : LibraryDirectoryOwnershipResolutionState.Unowned,
                 resolution.State);
+            Assert.DoesNotContain(
+                Directory.EnumerateFileSystemEntries(physicalBoundary),
+                path => Path.GetFileName(path).StartsWith(
+                    ".listenarr-",
+                    StringComparison.Ordinal));
         }
         finally
         {

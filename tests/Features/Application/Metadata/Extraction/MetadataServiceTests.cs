@@ -62,9 +62,7 @@ namespace Listenarr.Tests.Features.Application.Metadata.Extraction
             var movedDestination = Path.Join(
                 destinationDirectory,
                 "renamed-after-lease.bin");
-            var mover = new FileMover(
-                Microsoft.Extensions.Logging.Abstractions.NullLogger<FileMover>.Instance,
-                semanticsResolver: new FileSystemSemanticsResolver());
+            var mover = _provider.GetRequiredService<FileMover>();
             using var lease = await mover.PrepareActionForRegistrationAsync(
                 FileAction.Copy,
                 source,

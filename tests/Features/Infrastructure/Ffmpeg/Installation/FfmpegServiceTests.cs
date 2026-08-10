@@ -109,9 +109,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
             var movedDestination = Path.Join(
                 Path.GetDirectoryName(destination)!,
                 "renamed-after-lease.bin");
-            var mover = new FileMover(
-                Microsoft.Extensions.Logging.Abstractions.NullLogger<FileMover>.Instance,
-                semanticsResolver: new FileSystemSemanticsResolver());
+            var mover = _provider.GetRequiredService<FileMover>();
             using var lease = await mover.PrepareActionForRegistrationAsync(
                 FileAction.Copy,
                 source,

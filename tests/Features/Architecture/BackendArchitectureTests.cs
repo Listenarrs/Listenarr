@@ -1097,6 +1097,47 @@ public sealed class BackendArchitectureTests : BaseTests
     }
 
     [Fact]
+    public void LibraryDirectoryOwnership_ProductionDoesNotAdoptExistingDirectories()
+    {
+        var excludedFiles = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "listenarr.application/Audiobooks/Contracts/ILibraryDirectoryOwnershipStore.cs",
+            "listenarr.infrastructure/Library/Moving/EfLibraryDirectoryOwnershipStore.cs"
+        };
+        var forbidden = new[]
+        {
+            ".RecordCreatedAsync(",
+            ".ClaimRetainedAsync("
+        };
+        var productionRoots = new[]
+        {
+            Path.Join(RepositoryRoot, "listenarr.application"),
+            Path.Join(RepositoryRoot, "listenarr.domain"),
+            Path.Join(RepositoryRoot, "listenarr.infrastructure"),
+            Path.Join(RepositoryRoot, "listenarr.api")
+        };
+
+        var violations = productionRoots
+            .SelectMany(root => Directory.EnumerateFiles(
+                root,
+                "*.cs",
+                SearchOption.AllDirectories))
+            .Where(file => !IsBuildArtifact(file))
+            .Select(file => new
+            {
+                File = Normalize(Path.GetRelativePath(RepositoryRoot, file)),
+                Source = File.ReadAllText(file)
+            })
+            .Where(candidate => !excludedFiles.Contains(candidate.File))
+            .SelectMany(candidate => forbidden
+                .Where(token => candidate.Source.Contains(token, StringComparison.Ordinal))
+                .Select(token => $"{candidate.File}: {token}"))
+            .ToList();
+
+        Assert.Empty(violations);
+    }
+
+    [Fact]
     public void DurableMoveBoundary_RequiresExplicitFilesystemSemantics()
     {
         var files = new[]

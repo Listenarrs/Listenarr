@@ -246,18 +246,28 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
             .OrderBy(candidate => candidate.CanonicalPath.Length)
             .ToListAsync();
         Assert.True(reservations.Count >= 3);
-        Assert.Equal(
-            reservations.Select(reservation => reservation.CanonicalPath),
-            flushOrder);
-        Assert.All(statesObservedAtFlush, state =>
+        if (OperatingSystem.IsWindows())
+        {
             Assert.Equal(
-                RootFolderRelocationCreatedDirectoryState.Planned,
-                state));
+                reservations.Select(reservation => reservation.CanonicalPath),
+                flushOrder);
+            Assert.All(statesObservedAtFlush, state =>
+                Assert.Equal(
+                    RootFolderRelocationCreatedDirectoryState.Planned,
+                    state));
+        }
+        else
+        {
+            Assert.Empty(flushOrder);
+            Assert.Empty(statesObservedAtFlush);
+        }
         Assert.All(reservations, reservation =>
         {
             Assert.Equal(
                 RootFolderRelocationCreatedDirectoryState.Retained,
                 reservation.State);
+            Assert.False(string.IsNullOrWhiteSpace(
+                reservation.DirectoryObjectIdentity));
             Assert.True(Directory.Exists(reservation.CanonicalPath));
             Assert.DoesNotContain(
                 Directory.EnumerateFileSystemEntries(
@@ -441,7 +451,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
     }
 
     [Fact]
-    public async Task ReconcileActive_FailedNestedTarget_RemovesOnlyReservedEmptyDirectories()
+    public async Task ReconcileActive_FailedNestedTarget_CleansOnlyProvablyCreatedDirectories()
     {
         var source = Path.Join(
             TempRoot,
@@ -506,6 +516,13 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
             await db.SaveChangesAsync();
         }
 
+        string? retainedSentinel = null;
+        if (!OperatingSystem.IsWindows())
+        {
+            retainedSentinel = Path.Join(target, "user-content.txt");
+            await File.WriteAllTextAsync(retainedSentinel, "preserve");
+        }
+
         await CreateService().ReconcileActiveAsync();
 
         await using var verification =
@@ -528,9 +545,6 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
                 .Order(StringComparer.Ordinal)
                 .ToList()
             : [];
-        Assert.False(
-            Directory.Exists(targetRoot),
-            $"Remaining entries: {string.Join(", ", remainingEntries)}; states: {string.Join(", ", persistedStates.Select(item => $"{item.CanonicalPath}={item.State}"))}");
         Assert.True(Directory.Exists(source));
         var reservations = await verification
             .RootFolderRelocationCreatedDirectories
@@ -538,10 +552,30 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
                 candidate.RelocationId == relocationId)
             .ToListAsync();
         Assert.NotEmpty(reservations);
-        Assert.All(reservations, reservation =>
-            Assert.Equal(
-                RootFolderRelocationCreatedDirectoryState.Removed,
-                reservation.State));
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.False(
+                Directory.Exists(targetRoot),
+                $"Remaining entries: {string.Join(", ", remainingEntries)}; states: {string.Join(", ", persistedStates.Select(item => $"{item.CanonicalPath}={item.State}"))}");
+            Assert.All(reservations, reservation =>
+                Assert.Equal(
+                    RootFolderRelocationCreatedDirectoryState.Removed,
+                    reservation.State));
+        }
+        else
+        {
+            Assert.True(Directory.Exists(targetRoot));
+            Assert.NotNull(retainedSentinel);
+            Assert.True(File.Exists(retainedSentinel));
+            Assert.Equal("preserve", await File.ReadAllTextAsync(retainedSentinel));
+            Assert.All(reservations, reservation =>
+            {
+                Assert.Equal(
+                    RootFolderRelocationCreatedDirectoryState.Retained,
+                    reservation.State);
+                Assert.True(Directory.Exists(reservation.CanonicalPath));
+            });
+        }
     }
 
     [Fact]
@@ -615,21 +649,44 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
             rootId = root.Id;
         }
 
-        var flushCount = 0;
         var interrupted = CreateService();
-        interrupted.TargetReservationDirectoryFlushedForTest = _ =>
+        if (OperatingSystem.IsWindows())
         {
-            flushCount++;
-            if (flushCount == 2)
+            var flushCount = 0;
+            interrupted.TargetReservationDirectoryFlushedForTest = _ =>
             {
-                throw new IOException(
-                    "Injected crash after marker and parent durability barriers.");
-            }
-        };
-        await Assert.ThrowsAsync<IOException>(() =>
-            interrupted.StartAsync(
-                rootId,
-                BuildRelocationCommand(target)));
+                flushCount++;
+                if (flushCount == 2)
+                {
+                    throw new IOException(
+                        "Injected crash after the Windows directory durability barrier.");
+                }
+            };
+            await Assert.ThrowsAsync<IOException>(() =>
+                interrupted.StartAsync(
+                    rootId,
+                    BuildRelocationCommand(target)));
+            Assert.Equal(2, flushCount);
+        }
+        else
+        {
+            var createCount = 0;
+            using var hook =
+                PinnedFilesystemMutationHooks.PushAfterUnixDirectoryCreateBeforeOpen(_ =>
+                {
+                    createCount++;
+                    if (createCount == 2)
+                    {
+                        throw new IOException(
+                            "Injected crash after Unix final-name creation before reopen.");
+                    }
+                });
+            await Assert.ThrowsAsync<IOException>(() =>
+                interrupted.StartAsync(
+                    rootId,
+                    BuildRelocationCommand(target)));
+            Assert.Equal(2, createCount);
+        }
 
         Guid relocationId;
         await using (var verification =
@@ -666,19 +723,30 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
             var recoveredReservations = await recovered
                 .RootFolderRelocationCreatedDirectories
                 .ToListAsync();
-            Assert.Single(
-                recoveredReservations,
-                reservation => reservation.State ==
-                    RootFolderRelocationCreatedDirectoryState.Retained);
-            Assert.All(
-                recoveredReservations,
-                reservation => Assert.Contains(
-                    reservation.State,
-                    new[]
-                    {
-                        RootFolderRelocationCreatedDirectoryState.Created,
-                        RootFolderRelocationCreatedDirectoryState.Retained
-                    }));
+            if (OperatingSystem.IsWindows())
+            {
+                Assert.Single(
+                    recoveredReservations,
+                    reservation => reservation.State ==
+                        RootFolderRelocationCreatedDirectoryState.Retained);
+                Assert.All(
+                    recoveredReservations,
+                    reservation => Assert.Contains(
+                        reservation.State,
+                        new[]
+                        {
+                            RootFolderRelocationCreatedDirectoryState.Created,
+                            RootFolderRelocationCreatedDirectoryState.Retained
+                        }));
+            }
+            else
+            {
+                Assert.All(
+                    recoveredReservations,
+                    reservation => Assert.Equal(
+                        RootFolderRelocationCreatedDirectoryState.Retained,
+                        reservation.State));
+            }
         }
 
         var result = await restarted.RetryAsync(relocationId);
@@ -820,23 +888,40 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
         }
 
         var interrupted = CreateService();
-        interrupted.TargetReservationDirectoryFlushedForTest = path =>
+        if (OperatingSystem.IsWindows())
         {
-            if (string.Equals(
-                    path,
-                    target,
-                    OperatingSystem.IsWindows()
-                        ? StringComparison.OrdinalIgnoreCase
-                        : StringComparison.Ordinal))
+            interrupted.TargetReservationDirectoryFlushedForTest = path =>
             {
-                throw new IOException(
-                    "Injected crash after child publication but before enrollment.");
-            }
-        };
-        await Assert.ThrowsAsync<IOException>(() =>
-            interrupted.StartAsync(
-                rootId,
-                BuildRelocationCommand(target)));
+                if (string.Equals(
+                        path,
+                        target,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new IOException(
+                        "Injected crash after Windows child publication before enrollment.");
+                }
+            };
+            await Assert.ThrowsAsync<IOException>(() =>
+                interrupted.StartAsync(
+                    rootId,
+                    BuildRelocationCommand(target)));
+        }
+        else
+        {
+            using var hook =
+                PinnedFilesystemMutationHooks.PushAfterUnixDirectoryCreateBeforeOpen(path =>
+                {
+                    if (string.Equals(path, target, StringComparison.Ordinal))
+                    {
+                        throw new IOException(
+                            "Injected crash after Unix final-name creation before reopen.");
+                    }
+                });
+            await Assert.ThrowsAsync<IOException>(() =>
+                interrupted.StartAsync(
+                    rootId,
+                    BuildRelocationCommand(target)));
+        }
 
         Guid relocationId;
         RootFolderRelocationCreatedDirectory reservation;

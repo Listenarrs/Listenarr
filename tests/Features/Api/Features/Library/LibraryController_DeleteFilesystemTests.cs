@@ -1126,12 +1126,13 @@ namespace Listenarr.Tests.Features.Api.Features.Library
 
             var ownershipStore = _provider
                 .GetRequiredService<ILibraryDirectoryOwnershipStore>();
-            var oldOwnership = Assert.Single(
-                await ownershipStore.EnsureCreatedHierarchyAsync(
+            Directory.CreateDirectory(bookFolder);
+            var oldOwnership = await ownershipStore.RecordCreatedAsync(
+                new LibraryDirectoryOwnershipClaim(
                     bookFolder,
-                    tempRoot,
                     FileSystemPathSemantics.CurrentHostDefault,
-                    "test"));
+                    "test-fixture",
+                    Guid.NewGuid()));
             await File.WriteAllTextAsync(audioPath, "old audio");
             var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
                 .WithId(905)
@@ -1205,11 +1206,13 @@ namespace Listenarr.Tests.Features.Api.Features.Library
 
             var ownershipStore = _provider
                 .GetRequiredService<ILibraryDirectoryOwnershipStore>();
-            _ = Assert.Single(await ownershipStore.EnsureCreatedHierarchyAsync(
-                bookFolder,
-                tempRoot,
-                FileSystemPathSemantics.CurrentHostDefault,
-                "test"));
+            Directory.CreateDirectory(bookFolder);
+            _ = await ownershipStore.RecordCreatedAsync(
+                new LibraryDirectoryOwnershipClaim(
+                    bookFolder,
+                    FileSystemPathSemantics.CurrentHostDefault,
+                    "test-fixture",
+                    Guid.NewGuid()));
             await File.WriteAllTextAsync(audioPath, "old audio");
             var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
                 .WithId(908)
@@ -1267,11 +1270,13 @@ namespace Listenarr.Tests.Features.Api.Features.Library
 
             var ownershipStore = _provider
                 .GetRequiredService<ILibraryDirectoryOwnershipStore>();
-            _ = Assert.Single(await ownershipStore.EnsureCreatedHierarchyAsync(
-                bookFolder,
-                tempRoot,
-                FileSystemPathSemantics.CurrentHostDefault,
-                "test"));
+            Directory.CreateDirectory(bookFolder);
+            _ = await ownershipStore.RecordCreatedAsync(
+                new LibraryDirectoryOwnershipClaim(
+                    bookFolder,
+                    FileSystemPathSemantics.CurrentHostDefault,
+                    "test-fixture",
+                    Guid.NewGuid()));
             await File.WriteAllTextAsync(audioPath, "old audio");
             var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
                 .WithId(906)
@@ -1331,11 +1336,13 @@ namespace Listenarr.Tests.Features.Api.Features.Library
 
             var ownershipStore = _provider
                 .GetRequiredService<ILibraryDirectoryOwnershipStore>();
-            _ = Assert.Single(await ownershipStore.EnsureCreatedHierarchyAsync(
-                bookFolder,
-                tempRoot,
-                FileSystemPathSemantics.CurrentHostDefault,
-                "test"));
+            Directory.CreateDirectory(bookFolder);
+            _ = await ownershipStore.RecordCreatedAsync(
+                new LibraryDirectoryOwnershipClaim(
+                    bookFolder,
+                    FileSystemPathSemantics.CurrentHostDefault,
+                    "test-fixture",
+                    Guid.NewGuid()));
             await File.WriteAllTextAsync(audioPath, "old audio");
             var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
                 .WithId(907)

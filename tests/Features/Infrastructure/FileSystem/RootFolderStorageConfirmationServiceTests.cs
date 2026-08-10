@@ -201,11 +201,7 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
         var initialRoot = await fixture.ConfirmInitialGenerationAsync();
         var semantics = FileSystemPathSemantics.CurrentHostDefault;
         var oldAuthorPath = Path.Join(initialRoot.Path, "Author");
-        var oldOwnership = Assert.Single(await fixture.OwnershipStore.EnsureCreatedHierarchyAsync(
-            oldAuthorPath,
-            initialRoot.Path,
-            semantics,
-            "test"));
+        var oldOwnership = await fixture.CreateOwnedDirectoryAsync(oldAuthorPath);
         var oldOwnershipKey = Assert.IsType<string>(oldOwnership.PathOwnershipKey);
 
         fixture.ReplaceVisibleRoot();
@@ -238,14 +234,28 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
             fixture.OwnershipStore.BeginRemovalAsync(oldOwnership.Id, oldOwnershipKey));
 
         var newBookPath = Path.Join(oldAuthorPath, "New Book");
-        var created = Assert.Single(await fixture.OwnershipStore.EnsureCreatedHierarchyAsync(
+        var created = await fixture.OwnershipStore.EnsureCreatedHierarchyAsync(
             newBookPath,
             changedRoot.Path,
             semantics,
-            "test"));
-        Assert.Equal(newBookPath, created.CanonicalPath);
-        Assert.Equal(LibraryDirectoryOwnershipState.Owned, created.State);
-        Assert.Equal(changedRoot.Id, created.ManagedRootFolderId);
+            "test");
+        if (OperatingSystem.IsWindows())
+        {
+            var createdOwnership = Assert.Single(created);
+            Assert.Equal(newBookPath, createdOwnership.CanonicalPath);
+            Assert.Equal(LibraryDirectoryOwnershipState.Owned, createdOwnership.State);
+            Assert.Equal(changedRoot.Id, createdOwnership.ManagedRootFolderId);
+        }
+        else
+        {
+            Assert.Empty(created);
+            var createdResolution = await fixture.OwnershipStore.ResolveOwnedAsync(
+                newBookPath,
+                semantics);
+            Assert.Equal(
+                LibraryDirectoryOwnershipResolutionState.Unowned,
+                createdResolution.State);
+        }
         Assert.True(File.Exists(replacementSentinel));
         Assert.True(Directory.Exists(oldAuthorPath));
         Assert.True(Directory.Exists(newBookPath));
@@ -258,11 +268,7 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
         await using var cleanup = fixture;
         var root = await fixture.ConfirmInitialGenerationAsync();
         var authorPath = Path.Join(root.Path, "Author");
-        var ownership = Assert.Single(await fixture.OwnershipStore.EnsureCreatedHierarchyAsync(
-            authorPath,
-            root.Path,
-            FileSystemPathSemantics.CurrentHostDefault,
-            "test"));
+        var ownership = await fixture.CreateOwnedDirectoryAsync(authorPath);
         var ownershipKey = Assert.IsType<string>(ownership.PathOwnershipKey);
         var token = await fixture.CreateCurrentGenerationConfirmationTokenAsync(root);
 
@@ -285,11 +291,8 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
         await using var cleanup = fixture;
         var initialRoot = await fixture.ConfirmInitialGenerationAsync();
         var initialRootIdentity = initialRoot.DirectoryObjectIdentity;
-        var ownership = Assert.Single(await fixture.OwnershipStore.EnsureCreatedHierarchyAsync(
-            Path.Join(initialRoot.Path, "Author"),
-            initialRoot.Path,
-            FileSystemPathSemantics.CurrentHostDefault,
-            "test"));
+        var ownership = await fixture.CreateOwnedDirectoryAsync(
+            Path.Join(initialRoot.Path, "Author"));
         var ownershipKey = Assert.IsType<string>(ownership.PathOwnershipKey);
         fixture.ReplaceVisibleRoot();
         var changedRoot = await fixture.LoadRootAsync();
@@ -319,11 +322,8 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
         await using var cleanup = fixture;
         var initialRoot = await fixture.ConfirmInitialGenerationAsync();
         var initialRootIdentity = initialRoot.DirectoryObjectIdentity;
-        var ownership = Assert.Single(await fixture.OwnershipStore.EnsureCreatedHierarchyAsync(
-            Path.Join(initialRoot.Path, "Author"),
-            initialRoot.Path,
-            FileSystemPathSemantics.CurrentHostDefault,
-            "test"));
+        var ownership = await fixture.CreateOwnedDirectoryAsync(
+            Path.Join(initialRoot.Path, "Author"));
         var ownershipKey = Assert.IsType<string>(ownership.PathOwnershipKey);
         fixture.ReplaceVisibleRoot();
         var changedRoot = await fixture.LoadRootAsync();
@@ -352,11 +352,8 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
         var fixture = await CreateFixtureAsync("confirm-replacement-stale-token-ownership");
         await using var cleanup = fixture;
         var root = await fixture.ConfirmInitialGenerationAsync();
-        var ownership = Assert.Single(await fixture.OwnershipStore.EnsureCreatedHierarchyAsync(
-            Path.Join(root.Path, "Author"),
-            root.Path,
-            FileSystemPathSemantics.CurrentHostDefault,
-            "test"));
+        var ownership = await fixture.CreateOwnedDirectoryAsync(
+            Path.Join(root.Path, "Author"));
         var ownershipKey = Assert.IsType<string>(ownership.PathOwnershipKey);
         fixture.ReplaceVisibleRoot();
         var changedRoot = await fixture.LoadRootAsync();
@@ -381,21 +378,15 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
         var fixture = await CreateFixtureAsync("confirm-replacement-multiple-ownerships");
         await using var cleanup = fixture;
         var root = await fixture.ConfirmInitialGenerationAsync();
-        var firstHierarchy = await fixture.OwnershipStore.EnsureCreatedHierarchyAsync(
-            Path.Join(root.Path, "Author", "Series"),
-            root.Path,
-            FileSystemPathSemantics.CurrentHostDefault,
-            "test");
-        var secondHierarchy = await fixture.OwnershipStore.EnsureCreatedHierarchyAsync(
-            Path.Join(root.Path, "Another Author"),
-            root.Path,
-            FileSystemPathSemantics.CurrentHostDefault,
-            "test");
-        var ownershipIds = firstHierarchy
-            .Concat(secondHierarchy)
-            .Select(ownership => ownership.Id)
-            .ToArray();
-        Assert.Equal(3, ownershipIds.Length);
+        var ownershipIds = new[]
+        {
+            (await fixture.CreateOwnedDirectoryAsync(
+                Path.Join(root.Path, "Author"))).Id,
+            (await fixture.CreateOwnedDirectoryAsync(
+                Path.Join(root.Path, "Author", "Series"))).Id,
+            (await fixture.CreateOwnedDirectoryAsync(
+                Path.Join(root.Path, "Another Author"))).Id
+        };
         fixture.ReplaceVisibleRoot();
         Directory.CreateDirectory(Path.Join(root.Path, "Author"));
         var changedRoot = await fixture.LoadRootAsync();
@@ -426,11 +417,8 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
         var fixture = await CreateFixtureAsync($"confirm-replacement-state-{state}");
         await using var cleanup = fixture;
         var root = await fixture.ConfirmInitialGenerationAsync();
-        var ownership = Assert.Single(await fixture.OwnershipStore.EnsureCreatedHierarchyAsync(
-            Path.Join(root.Path, "Author"),
-            root.Path,
-            FileSystemPathSemantics.CurrentHostDefault,
-            "test"));
+        var ownership = await fixture.CreateOwnedDirectoryAsync(
+            Path.Join(root.Path, "Author"));
         await fixture.UpdateOwnershipAsync(ownership.Id, persisted =>
         {
             persisted.State = state;
@@ -460,11 +448,8 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
         var fixture = await CreateFixtureAsync("confirm-replacement-incomplete-ownership-migration");
         await using var cleanup = fixture;
         var root = await fixture.ConfirmInitialGenerationAsync();
-        var ownership = Assert.Single(await fixture.OwnershipStore.EnsureCreatedHierarchyAsync(
-            Path.Join(root.Path, "Author"),
-            root.Path,
-            FileSystemPathSemantics.CurrentHostDefault,
-            "test"));
+        var ownership = await fixture.CreateOwnedDirectoryAsync(
+            Path.Join(root.Path, "Author"));
         await fixture.AddIncompleteOwnershipPathMigrationAsync(root, ownership);
         fixture.ReplaceVisibleRoot();
         var changedRoot = await fixture.LoadRootAsync();
@@ -491,11 +476,7 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
         await using var cleanup = fixture;
         var root = await fixture.ConfirmInitialGenerationAsync();
         var authorPath = Path.Join(root.Path, "Author");
-        var ownership = Assert.Single(await fixture.OwnershipStore.EnsureCreatedHierarchyAsync(
-            authorPath,
-            root.Path,
-            FileSystemPathSemantics.CurrentHostDefault,
-            "test"));
+        var ownership = await fixture.CreateOwnedDirectoryAsync(authorPath);
         fixture.ReplaceVisibleRoot();
         Directory.CreateDirectory(authorPath);
         var changedRoot = await fixture.LoadRootAsync();
@@ -514,13 +495,28 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
         Assert.Equal(LibraryDirectoryOwnershipState.Removed, retired.State);
 
         var childPath = Path.Join(authorPath, "After Restart");
-        var created = Assert.Single(await recreatedStore.EnsureCreatedHierarchyAsync(
+        var created = await recreatedStore.EnsureCreatedHierarchyAsync(
             childPath,
             root.Path,
             FileSystemPathSemantics.CurrentHostDefault,
-            "test"));
-        Assert.Equal(childPath, created.CanonicalPath);
-        Assert.Equal(LibraryDirectoryOwnershipState.Owned, created.State);
+            "test");
+        if (OperatingSystem.IsWindows())
+        {
+            var createdOwnership = Assert.Single(created);
+            Assert.Equal(childPath, createdOwnership.CanonicalPath);
+            Assert.Equal(LibraryDirectoryOwnershipState.Owned, createdOwnership.State);
+        }
+        else
+        {
+            Assert.Empty(created);
+            var resolution = await recreatedStore.ResolveOwnedAsync(
+                childPath,
+                FileSystemPathSemantics.CurrentHostDefault);
+            Assert.Equal(
+                LibraryDirectoryOwnershipResolutionState.Unowned,
+                resolution.State);
+        }
+        Assert.True(Directory.Exists(childPath));
     }
 
     private async Task<ConfirmationFixture> CreateFixtureAsync(
@@ -642,6 +638,18 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
 
         public EfLibraryDirectoryOwnershipStore CreateOwnershipStore() =>
             new(dbFactory, TimeProvider.System);
+
+        public async Task<LibraryDirectoryOwnership> CreateOwnedDirectoryAsync(
+            string path)
+        {
+            Directory.CreateDirectory(path);
+            return await OwnershipStore.RecordCreatedAsync(
+                new LibraryDirectoryOwnershipClaim(
+                    path,
+                    FileSystemPathSemantics.CurrentHostDefault,
+                    "test-fixture",
+                    Guid.NewGuid()));
+        }
 
         public async Task<RootFolder> LoadRootAsync()
         {
