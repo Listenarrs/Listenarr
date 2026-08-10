@@ -1275,6 +1275,91 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             relocationService.VerifyNoOtherCalls();
         }
 
+        [Fact]
+        public async Task ChangePath_KnownRejectedState_ReturnsActionablePublicConflictWithoutInternalDetails()
+        {
+            const string secret = "C:\\private\\root-relocation-secret";
+            var targetPath = FileUtils.GetAbsolutePath("known-rejection-target");
+            var sourcePath = FileUtils.GetAbsolutePath("known-rejection-source");
+            var relocationService = new Mock<IRootFolderRelocationService>();
+            relocationService.Setup(service => service.StartAsync(
+                    1,
+                    It.IsAny<RootFolderPathChangeCommand>(),
+                    It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new RootFolderPathChangeRejectedException(
+                    "root_folder_relocation_active",
+                    "This root folder already has a path change in progress. Wait for it to finish, or resolve and retry the existing relocation before changing the path again.",
+                    $"Internal relocation failure at {secret}"));
+            using var db = CreateDb();
+            var controller = new RootFoldersController(
+                new FakeService(),
+                _fakeQueue,
+                new EfAudiobookFileRepository(db),
+                new AudiobookRepository(db),
+                new LocalFileSystem(),
+                relocationService: relocationService.Object);
+
+            var result = await controller.ChangePath(
+                1,
+                new RootFolderPathChangeRequest(
+                    targetPath,
+                    "relocate",
+                    false,
+                    "Root",
+                    false,
+                    FileSystemCaseSensitivityMode.Auto,
+                    sourcePath),
+                CancellationToken.None);
+
+            var conflict = Assert.IsType<Microsoft.AspNetCore.Mvc.ConflictObjectResult>(result);
+            var json = JsonSerializer.Serialize(conflict.Value);
+            Assert.Contains("root_folder_relocation_active", json, StringComparison.Ordinal);
+            Assert.Contains("path change in progress", json, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(secret, json, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("Internal relocation failure", json, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public async Task ChangePath_UnknownInvalidState_ReturnsActionableGenericConflictWithoutInternalDetails()
+        {
+            const string secret = "C:\\private\\unknown-root-secret";
+            var targetPath = FileUtils.GetAbsolutePath("unknown-rejection-target");
+            var sourcePath = FileUtils.GetAbsolutePath("unknown-rejection-source");
+            var relocationService = new Mock<IRootFolderRelocationService>();
+            relocationService.Setup(service => service.StartAsync(
+                    1,
+                    It.IsAny<RootFolderPathChangeCommand>(),
+                    It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new InvalidOperationException($"Unexpected internal state at {secret}"));
+            using var db = CreateDb();
+            var controller = new RootFoldersController(
+                new FakeService(),
+                _fakeQueue,
+                new EfAudiobookFileRepository(db),
+                new AudiobookRepository(db),
+                new LocalFileSystem(),
+                relocationService: relocationService.Object);
+
+            var result = await controller.ChangePath(
+                1,
+                new RootFolderPathChangeRequest(
+                    targetPath,
+                    "relocate",
+                    false,
+                    "Root",
+                    false,
+                    FileSystemCaseSensitivityMode.Auto,
+                    sourcePath),
+                CancellationToken.None);
+
+            var conflict = Assert.IsType<Microsoft.AspNetCore.Mvc.ConflictObjectResult>(result);
+            var json = JsonSerializer.Serialize(conflict.Value);
+            Assert.Contains("root_folder_path_change_blocked", json, StringComparison.Ordinal);
+            Assert.Contains("storage or recovery state", json, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(secret, json, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("Unexpected internal state", json, StringComparison.OrdinalIgnoreCase);
+        }
+
         [Theory]
         [InlineData(RootFolderRelocationStatus.Completed, typeof(Microsoft.AspNetCore.Mvc.OkObjectResult))]
         [InlineData(RootFolderRelocationStatus.NeedsAttention, typeof(Microsoft.AspNetCore.Mvc.ConflictObjectResult))]

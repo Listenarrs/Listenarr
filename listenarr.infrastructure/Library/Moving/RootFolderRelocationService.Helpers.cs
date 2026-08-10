@@ -16,7 +16,9 @@ public sealed partial class RootFolderRelocationService
                 command.ExpectedCurrentPath,
                 StringComparison.Ordinal))
         {
-            throw new InvalidOperationException(
+            throw new RootFolderPathChangeRejectedException(
+                "root_folder_changed_while_editing",
+                "This root folder changed while you were editing it. Refresh the root folder and try the path change again.",
                 "The root folder path changed after the relocation was confirmed.");
         }
     }

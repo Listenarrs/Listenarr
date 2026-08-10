@@ -36,7 +36,9 @@ public sealed partial class RootFolderRelocationService
                 || PathTouchesBoundary(job.RequestedPath, targetPath, targetSemantics)));
         if (conflictingMoveJob != null)
         {
-            throw new InvalidOperationException(
+            throw new RootFolderPathChangeRejectedException(
+                "root_folder_move_recovery_blocked",
+                "An unresolved audiobook move overlaps this root folder. Resolve or retry the affected move before changing the root folder path.",
                 $"Unresolved move job {conflictingMoveJob.Id} overlaps this root folder relocation; resolve it before starting the relocation.");
         }
     }

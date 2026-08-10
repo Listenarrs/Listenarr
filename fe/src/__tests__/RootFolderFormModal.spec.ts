@@ -621,6 +621,47 @@ describe('RootFolderFormModal', () => {
     },
   )
 
+  it('shows the structured root-folder conflict message without the raw API wrapper', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useRootFoldersStore()
+    const publicMessage =
+      'This root folder already has a path change in progress. Wait for it to finish, or resolve and retry the existing relocation before changing the path again.'
+    vi.spyOn(store, 'update').mockRejectedValue(
+      Object.assign(new Error(`API error: 409 {"message":"${publicMessage}"}`), {
+        status: 409,
+        body: JSON.stringify({
+          message: publicMessage,
+          code: 'root_folder_relocation_active',
+        }),
+      }),
+    )
+    const wrapper = mount(RootFolderFormModal, {
+      props: {
+        root: {
+          id: 7,
+          name: 'Library',
+          path: '/old-library',
+          isDefault: true,
+        },
+      },
+      global: {
+        plugins: [pinia],
+        stubs: {
+          FolderBrowserModal: true,
+        },
+      },
+    })
+    await wrapper.get('#root-path').setValue('/new-library')
+
+    await (
+      wrapper.vm as unknown as { confirmChange: (moveFiles: boolean) => Promise<void> }
+    ).confirmChange(false)
+
+    expect(error).toHaveBeenCalledWith('Error', publicMessage)
+    expect(error).not.toHaveBeenCalledWith('Error', expect.stringContaining('API error: 409'))
+  })
+
   it.each([
     [true, 'Root relocation started'],
     [false, 'Root folder changed'],

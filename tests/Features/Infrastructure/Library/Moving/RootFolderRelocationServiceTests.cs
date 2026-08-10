@@ -56,7 +56,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
 
         var service = CreateService();
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var exception = await Assert.ThrowsAsync<RootFolderPathChangeRejectedException>(() =>
             service.StartAsync(
                 rootId,
                 new RootFolderPathChangeCommand(
@@ -68,6 +68,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
                     FileSystemCaseSensitivityMode.Auto,
                     staleSource)));
 
+        Assert.Equal("root_folder_changed_while_editing", exception.Code);
         Assert.Contains("changed", exception.Message, StringComparison.OrdinalIgnoreCase);
         await using var verification = await _factory.CreateDbContextAsync();
         Assert.Empty(verification.RootFolderRelocations);
@@ -1801,7 +1802,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
             rootId = root.Id;
         }
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var exception = await Assert.ThrowsAsync<RootFolderPathChangeRejectedException>(() =>
             CreateService().StartAsync(
                 rootId,
                 new RootFolderPathChangeCommand(
@@ -1812,6 +1813,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
                     false,
                     FileSystemCaseSensitivityMode.Auto)));
 
+        Assert.Equal("root_folder_source_unavailable", exception.Code);
         Assert.Contains("metadata-only", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -1988,7 +1990,8 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
 
         coordinator.ReleaseFirst();
         await moveTask;
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => relocationTask);
+        var exception = await Assert.ThrowsAsync<RootFolderPathChangeRejectedException>(() => relocationTask);
+        Assert.Equal("root_folder_move_recovery_blocked", exception.Code);
         Assert.Contains("unresolved move job", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -3972,7 +3975,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
         }
 
         var service = CreateService();
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => service.StartAsync(
+        var exception = await Assert.ThrowsAsync<RootFolderPathChangeRejectedException>(() => service.StartAsync(
             rootId,
             new RootFolderPathChangeCommand(
                 target,
@@ -3981,6 +3984,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
                 "Library",
                 false,
                 FileSystemCaseSensitivityMode.Sensitive)));
+        Assert.Equal("root_folder_target_conflict", exception.Code);
         Assert.Contains("already exists", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -4010,7 +4014,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
         }
 
         var service = CreateService();
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => service.StartAsync(
+        var exception = await Assert.ThrowsAsync<RootFolderPathChangeRejectedException>(() => service.StartAsync(
             rootId,
             new RootFolderPathChangeCommand(
                 target,
@@ -4019,6 +4023,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
                 "Library",
                 false,
                 FileSystemCaseSensitivityMode.Sensitive)));
+        Assert.Equal("root_folder_target_conflict", exception.Code);
         Assert.Contains("already exists", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -4048,7 +4053,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
         }
 
         var service = CreateService();
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => service.StartAsync(
+        var exception = await Assert.ThrowsAsync<RootFolderPathChangeRejectedException>(() => service.StartAsync(
             rootId,
             new RootFolderPathChangeCommand(
                 target,
@@ -4057,6 +4062,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
                 "Library",
                 false,
                 FileSystemCaseSensitivityMode.Insensitive)));
+        Assert.Equal("root_folder_target_conflict", exception.Code);
         Assert.Contains("already exists", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -4661,7 +4667,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
                     PathIdentityState.Valid,
                     Path.GetPathRoot(path) ?? path)));
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var exception = await Assert.ThrowsAsync<RootFolderPathChangeRejectedException>(() =>
             CreateService(semanticsResolver: semanticsResolver.Object).StartAsync(
                 rootId,
                 new RootFolderPathChangeCommand(
@@ -4672,6 +4678,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
                     false,
                     FileSystemCaseSensitivityMode.Auto)));
 
+        Assert.Equal("root_folder_move_recovery_blocked", exception.Code);
         Assert.Contains("unresolved move job", exception.Message, StringComparison.OrdinalIgnoreCase);
         await using var verification = await _factory.CreateDbContextAsync();
         Assert.Empty(await verification.RootFolderRelocations.ToListAsync());
@@ -4725,7 +4732,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
             await db.SaveChangesAsync();
         }
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var exception = await Assert.ThrowsAsync<RootFolderPathChangeRejectedException>(() =>
             CreateService().StartAsync(
                 rootId,
                 new RootFolderPathChangeCommand(
@@ -4736,6 +4743,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
                     false,
                     FileSystemCaseSensitivityMode.Auto)));
 
+        Assert.Equal("root_folder_move_recovery_blocked", exception.Code);
         Assert.Contains("unresolved move job", exception.Message, StringComparison.OrdinalIgnoreCase);
         await using var verification = await _factory.CreateDbContextAsync();
         Assert.Empty(await verification.RootFolderRelocations.ToListAsync());
@@ -4791,7 +4799,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
             await db.SaveChangesAsync();
         }
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => CreateService().StartAsync(
+        var exception = await Assert.ThrowsAsync<RootFolderPathChangeRejectedException>(() => CreateService().StartAsync(
             rootId,
             new RootFolderPathChangeCommand(
                 target,
@@ -4801,6 +4809,8 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
                 false,
                 FileSystemCaseSensitivityMode.Insensitive)));
 
+        Assert.Equal("root_folder_move_recovery_blocked", exception.Code);
+        Assert.Contains("unresolved audiobook move", exception.PublicMessage, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("unresolved move job", exception.Message, StringComparison.OrdinalIgnoreCase);
         await using var verification = await _factory.CreateDbContextAsync();
         Assert.Empty(await verification.RootFolderRelocations.ToListAsync());

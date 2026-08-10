@@ -48,7 +48,9 @@ public sealed partial class RootFolderRelocationService(
             cancellationToken);
         if (targetResolution.State != PathIdentityState.Valid)
         {
-            throw new InvalidOperationException(
+            throw new RootFolderPathChangeRejectedException(
+                "root_folder_target_unavailable",
+                "Listenarr cannot verify the new root folder path. Make sure the destination is mounted and accessible, or choose an explicit filesystem case-sensitivity setting, then try again.",
                 targetResolution.Reason ?? "Target filesystem semantics are unavailable; select an explicit override.");
         }
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
@@ -63,7 +65,10 @@ public sealed partial class RootFolderRelocationService(
             relocation => relocation.ActiveRootFolderId == rootFolderId,
             cancellationToken))
         {
-            throw new InvalidOperationException("The root folder already has an active relocation.");
+            throw new RootFolderPathChangeRejectedException(
+                "root_folder_relocation_active",
+                "This root folder already has a path change in progress. Wait for it to finish, or resolve and retry the existing relocation before changing the path again.",
+                "The root folder already has an active relocation.");
         }
 
         FileSystemSemanticsResolution? sourceResolution = null;
@@ -94,7 +99,9 @@ public sealed partial class RootFolderRelocationService(
 
         if (sourceResolution == null && command.Mode != RootFolderRelocationMode.MetadataOnly)
         {
-            throw new InvalidOperationException(
+            throw new RootFolderPathChangeRejectedException(
+                "root_folder_source_unavailable",
+                "Listenarr cannot access or verify the current root folder, so its files cannot be moved safely. Restore access to the current folder, or change the path without moving files to repair the stored location.",
                 "The current root folder path is invalid or unavailable; use metadata-only path change to repair it before relocating files.");
         }
 
@@ -166,7 +173,10 @@ public sealed partial class RootFolderRelocationService(
         }
         if (targetConflict)
         {
-            throw new InvalidOperationException("A root folder with that filesystem identity already exists.");
+            throw new RootFolderPathChangeRejectedException(
+                "root_folder_target_conflict",
+                "The selected destination overlaps another root folder or an active root-folder path change. Choose a different destination and try again.",
+                "A root folder with that filesystem identity already exists.");
         }
 
         var audiobookRows = await db.Audiobooks
@@ -195,7 +205,9 @@ public sealed partial class RootFolderRelocationService(
 
         if (command.Mode != RootFolderRelocationMode.MetadataOnly && invalidStoredBasePaths.Count > 0)
         {
-            throw new InvalidOperationException(
+            throw new RootFolderPathChangeRejectedException(
+                "root_folder_metadata_repair_required",
+                "One or more audiobooks under this root have invalid stored paths, so Listenarr cannot move them safely. Change the root path without moving files first to repair the stored metadata.",
                 "One or more audiobook base paths are invalid; use metadata-only path change to repair stored metadata before relocating files.");
         }
 

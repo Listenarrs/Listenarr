@@ -133,6 +133,7 @@ import CheckboxCard from '@/components/settings/CheckboxCard.vue'
 import { PhFolder } from '@phosphor-icons/vue'
 import { useRootFoldersStore } from '@/stores/rootFolders'
 import { useToast } from '@/services/toastService'
+import { getApiValidationError } from '@/services/apiErrors'
 import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
 import type { RootFolder } from '@/types'
 import { detectPathKind, validateLibraryDestinationPath, type PathKind } from '@/utils/path'
@@ -192,6 +193,13 @@ function rootStorageRepairRequired(): boolean {
   )
 }
 
+function rootFolderSaveError(error: unknown): string {
+  return (
+    getApiValidationError(error)?.message ||
+    (error instanceof Error ? error.message : 'Failed to save root folder')
+  )
+}
+
 async function save() {
   if (!form.value.name || !form.value.path) {
     toast.error('Validation Error', 'Name and Path are required')
@@ -240,8 +248,7 @@ async function save() {
     }
     emit('saved', newRoot)
   } catch (e: unknown) {
-    const error = e as Error
-    toast.error('Error', error?.message || 'Failed to save root folder')
+    toast.error('Error', rootFolderSaveError(e))
   }
 }
 
@@ -267,8 +274,7 @@ async function confirmChange(moveFiles: boolean) {
     toast.success('Success', moveFiles ? 'Root relocation started' : 'Root folder changed')
     emit('saved', updated)
   } catch (e: unknown) {
-    const error = e as Error
-    toast.error('Error', error?.message || 'Failed to save root folder')
+    toast.error('Error', rootFolderSaveError(e))
   }
 }
 </script>

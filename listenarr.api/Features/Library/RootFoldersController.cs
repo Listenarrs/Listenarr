@@ -264,12 +264,13 @@ namespace Listenarr.Api.Features.Library
             {
                 return BadRequest(new { message = "The root folder path change request is invalid." });
             }
+            catch (RootFolderPathChangeRejectedException exception)
+            {
+                return RootFolderPathChangeConflict(exception);
+            }
             catch (InvalidOperationException)
             {
-                return BadRequest(new
-                {
-                    message = "The root folder path cannot be changed in its current state."
-                });
+                return RootFolderPathChangeBlocked();
             }
         }
 
@@ -365,12 +366,13 @@ namespace Listenarr.Api.Features.Library
             {
                 return NotFound(new { message = "Root folder not found" });
             }
+            catch (RootFolderPathChangeRejectedException exception)
+            {
+                return RootFolderPathChangeConflict(exception);
+            }
             catch (InvalidOperationException)
             {
-                return Conflict(new
-                {
-                    message = "The root folder path cannot be changed in its current state."
-                });
+                return RootFolderPathChangeBlocked();
             }
             catch (ArgumentException)
             {
