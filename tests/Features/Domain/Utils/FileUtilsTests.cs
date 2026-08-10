@@ -335,6 +335,24 @@ namespace Listenarr.Tests.Features.Domain.Utils
                 result);
         }
 
+        [Theory]
+        [InlineData("/downloads/audiobooks", "Book Title", "/downloads/audiobooks/Book Title")]
+        [InlineData("/downloads/audiobooks/", "Book Title", "/downloads/audiobooks/Book Title")]
+        [InlineData("/downloads/audiobooks", "Author/Book Title/chapter1.m4b", "/downloads/audiobooks/Author/Book Title/chapter1.m4b")]
+        [InlineData(@"C:\Downloads\Audiobooks", "Book Title", @"C:\Downloads\Audiobooks\Book Title")]
+        [InlineData(@"C:\Downloads\Audiobooks\", "Book Title", @"C:\Downloads\Audiobooks\Book Title")]
+        [InlineData(@"C:\Downloads\Audiobooks", "Author/Book Title/chapter1.m4b", @"C:\Downloads\Audiobooks\Author\Book Title\chapter1.m4b")]
+        [InlineData(@"C:\Downloads\Audiobooks", @"Author\Book Title\chapter1.m4b", @"C:\Downloads\Audiobooks\Author\Book Title\chapter1.m4b")]
+        [InlineData("/downloads/audiobooks", "/downloads/audiobooks/Book Title", "/downloads/audiobooks/Book Title")]
+        [InlineData(@"C:\Downloads\Audiobooks", @"C:\Downloads\Audiobooks\Book Title", @"C:\Downloads\Audiobooks\Book Title")]
+        [InlineData("/downloads/audiobooks", "", "/downloads/audiobooks")]
+        [InlineData("", "Book.m4b", "Book.m4b")]
+        public void CombineExternalPath_PreservesRemotePathSeparatorSemantics(string basePath, string candidatePath, string expected)
+        {
+            var result = FileUtils.CombineExternalPath(basePath, candidatePath);
+            Assert.Equal(expected, result);
+        }
+
         [Fact]
         public void CombineRelativePath_JoinsRelativeSegmentsAndTrimsLeadingSeparators()
         {

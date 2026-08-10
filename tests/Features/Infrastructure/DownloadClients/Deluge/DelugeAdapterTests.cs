@@ -60,6 +60,46 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Deluge
             Assert.Equal("/downloads/Book.m4b", items[0].OutputPath);
         }
 
+        [Theory]
+        [InlineData("/downloads/audiobooks", "Book.m4b", "/downloads/audiobooks/Book.m4b")]
+        [InlineData(@"C:\Downloads\Audiobooks", "Book.m4b", @"C:\Downloads\Audiobooks\Book.m4b")]
+        public async Task GetItemsAsync_PreservesCrossPlatformPathSemantics(string savePath, string name, string expectedPath)
+        {
+            var mock = _provider.GetRequiredService<DelugeApiMock>();
+            mock.UpdateUiResponseOverride = $$"""
+            {
+              "id": 1,
+              "result": {
+                "torrents": {
+                  "HASH123": {
+                    "name": "{{name}}",
+                    "total_size": 100,
+                    "total_done": 100,
+                    "progress": 100.0,
+                    "download_payload_rate": 0,
+                    "eta": 0,
+                    "state": "Seeding",
+                    "save_path": "{{savePath.Replace("\\", "\\\\")}}",
+                    "label": "listenarr",
+                    "ratio": 1.0,
+                    "num_seeds": 1,
+                    "num_peers": 0,
+                    "time_added": 1700000000,
+                    "message": ""
+                  }
+                }
+              },
+              "error": null
+            }
+            """;
+
+            var adapter = MockUtils.CreateDelugeAdapter(_provider);
+            var items = await adapter.GetItemsAsync(_client, CancellationToken.None);
+
+            Assert.Single(items);
+            Assert.Equal(expectedPath, items[0].OutputPath);
+        }
+
         [Fact]
         public async Task GetItemsAsync_FiltersByConfiguredCategory()
         {

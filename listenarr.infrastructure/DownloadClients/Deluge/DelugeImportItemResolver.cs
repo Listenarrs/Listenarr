@@ -38,9 +38,9 @@ namespace Listenarr.Infrastructure.DownloadClients.Deluge
             var savePath = torrent.Value.TryGetProperty("save_path", out var savePathProp) ? savePathProp.GetString() : null;
             var name = torrent.Value.TryGetProperty("name", out var nameProp) ? nameProp.GetString() : null;
 
-            if (!string.IsNullOrEmpty(savePath) && !string.IsNullOrEmpty(name))
+            if (!string.IsNullOrEmpty(savePath))
             {
-                result.OutputPath = Path.Combine(savePath, name);
+                result.OutputPath = FileUtils.CombineExternalPath(savePath, name);
             }
 
             return result;
@@ -74,9 +74,9 @@ namespace Listenarr.Infrastructure.DownloadClients.Deluge
             var state = torrent.Value.TryGetProperty("state", out var stateProp) ? stateProp.GetString() : null;
             var progress = torrent.Value.TryGetProperty("progress", out var progressProp) && progressProp.TryGetDouble(out var d) ? d : 0.0;
 
-            if (!string.IsNullOrEmpty(savePath) && !string.IsNullOrEmpty(name))
+            if (!string.IsNullOrEmpty(savePath))
             {
-                result.ContentPath = Path.Combine(savePath, name);
+                result.ContentPath = FileUtils.CombineExternalPath(savePath, name);
             }
 
             if (!string.IsNullOrEmpty(name))
@@ -99,7 +99,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Deluge
                         var relPath = pathProp.GetString();
                         if (!string.IsNullOrWhiteSpace(relPath))
                         {
-                            filesList.Add(Path.Combine(savePath, relPath));
+                            filesList.Add(FileUtils.CombineExternalPath(savePath, relPath));
                         }
                     }
                 }

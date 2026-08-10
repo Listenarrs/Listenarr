@@ -107,13 +107,9 @@ namespace Listenarr.Infrastructure.DownloadClients.Deluge
 
         private static string BuildOutputPath(JsonElement t)
         {
-            var savePath = GetString(t, "save_path").TrimEnd('/', '\\');
+            var savePath = GetString(t, "save_path");
             var name = GetString(t, "name");
-            if (string.IsNullOrWhiteSpace(savePath))
-            {
-                return string.Empty;
-            }
-            return string.IsNullOrWhiteSpace(name) ? savePath : Path.Combine(savePath, name);
+            return FileUtils.CombineExternalPath(savePath, name);
         }
 
         private static string GetString(JsonElement e, string key) =>
