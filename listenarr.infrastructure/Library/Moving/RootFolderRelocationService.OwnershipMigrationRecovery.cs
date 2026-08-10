@@ -182,17 +182,28 @@ public sealed partial class RootFolderRelocationService
             sourceSemantics,
             detectAmbiguousCaseMatches: false);
 
-        var targetGenerationLease = PinTargetDirectoryGeneration(
-            relocation.TargetPath,
-            relocation.TargetDirectoryObjectIdentityVersion,
-            relocation.TargetDirectoryObjectIdentity,
-            relocation.TargetDirectoryObjectIdentityUnavailableReason,
+        var ownershipPreparation = await RevalidateRecoveredOwnershipPlansAsync(
+            plans,
             cancellationToken);
+        var transferPlans = ownershipPreparation.Transfers;
+        PinnedDirectoryCreation.PinnedDirectoryAnchor? targetGenerationLease = null;
+        if (relocation.TargetDirectoryObjectIdentityVersion.HasValue
+            && !string.IsNullOrWhiteSpace(relocation.TargetDirectoryObjectIdentity)
+            && string.IsNullOrWhiteSpace(
+                relocation.TargetDirectoryObjectIdentityUnavailableReason))
+        {
+            targetGenerationLease = PinTargetDirectoryGeneration(
+                relocation.TargetPath,
+                relocation.TargetDirectoryObjectIdentityVersion,
+                relocation.TargetDirectoryObjectIdentity,
+                relocation.TargetDirectoryObjectIdentityUnavailableReason,
+                cancellationToken);
+        }
         IReadOnlyList<OwnershipMigrationTargetLease> ownershipGenerationLeases = [];
         try
         {
             ownershipGenerationLeases = PinOwnershipMigrationTargets(
-                plans,
+                transferPlans,
                 relocation.TargetPath,
                 cancellationToken);
             await using var transaction =
@@ -231,11 +242,14 @@ public sealed partial class RootFolderRelocationService
             }
 
             var now = timeProvider.GetUtcNow().UtcDateTime;
-            ApplyOwnershipMigrationMetadata(plans, now);
+            ApplyOwnershipMigrationMetadata(transferPlans, now);
+            RetireUntransferredOwnerships(
+                ownershipPreparation.Retirements,
+                now);
             BeforeOwnershipMigrationMetadataSaveForTest?.Invoke();
             await db.SaveChangesAsync(cancellationToken);
             AssignOwnershipMigrationKeys(
-                plans,
+                transferPlans,
                 now);
             var command = new RootFolderPathChangeCommand(
                 relocation.TargetPath,
@@ -280,24 +294,30 @@ public sealed partial class RootFolderRelocationService
                 plans.Select(plan => plan.Journal));
             await db.SaveChangesAsync(cancellationToken);
             BeforeOwnershipMigrationAtomicCommitForTest?.Invoke();
-            RevalidatePinnedTargetDirectoryGeneration(
-                targetGenerationLease,
-                relocation.TargetDirectoryObjectIdentityVersion,
-                relocation.TargetDirectoryObjectIdentity,
-                relocation.TargetDirectoryObjectIdentityUnavailableReason,
-                cancellationToken);
+            if (targetGenerationLease != null)
+            {
+                RevalidatePinnedTargetDirectoryGeneration(
+                    targetGenerationLease,
+                    relocation.TargetDirectoryObjectIdentityVersion,
+                    relocation.TargetDirectoryObjectIdentity,
+                    relocation.TargetDirectoryObjectIdentityUnavailableReason,
+                    cancellationToken);
+            }
             RevalidateOwnershipMigrationTargetLeases(
                 ownershipGenerationLeases,
                 cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
             await transaction.CommitAsync(CancellationToken.None);
             AfterOwnershipMigrationAtomicCommitForTest?.Invoke();
-            RevalidatePinnedTargetDirectoryGeneration(
-                targetGenerationLease,
-                relocation.TargetDirectoryObjectIdentityVersion,
-                relocation.TargetDirectoryObjectIdentity,
-                relocation.TargetDirectoryObjectIdentityUnavailableReason,
-                CancellationToken.None);
+            if (targetGenerationLease != null)
+            {
+                RevalidatePinnedTargetDirectoryGeneration(
+                    targetGenerationLease,
+                    relocation.TargetDirectoryObjectIdentityVersion,
+                    relocation.TargetDirectoryObjectIdentity,
+                    relocation.TargetDirectoryObjectIdentityUnavailableReason,
+                    CancellationToken.None);
+            }
             RevalidateOwnershipMigrationTargetLeases(
                 ownershipGenerationLeases,
                 CancellationToken.None);
@@ -305,7 +325,7 @@ public sealed partial class RootFolderRelocationService
         finally
         {
             DisposeOwnershipMigrationTargetLeases(ownershipGenerationLeases);
-            targetGenerationLease.Dispose();
+            targetGenerationLease?.Dispose();
         }
     }
 

@@ -127,7 +127,7 @@ public sealed partial class RootFolderRelocationService
         }
     }
 
-    private async Task<IReadOnlyList<OwnershipMigrationPlan>>
+    private async Task<OwnershipMigrationPreparation>
         PrepareOwnershipMigrationsAsync(
             ListenArrDbContext db,
             RootFolderRelocation relocation,
@@ -143,42 +143,73 @@ public sealed partial class RootFolderRelocationService
             .ToListAsync(cancellationToken);
         if (ownerships.Count == 0)
         {
-            return [];
+            return new OwnershipMigrationPreparation([], []);
         }
-        if (!sourceSemantics.HasValue)
+        if (ownerships.Any(ownership =>
+            ownership.State == LibraryDirectoryOwnershipState.Removing))
         {
-            throw new InvalidOperationException(
-                "Stored source path semantics are unavailable for live directory ownership migration.");
-        }
-        if (ownerships.Any(ownership => ownership.State is not (
-            LibraryDirectoryOwnershipState.Owned
-                or LibraryDirectoryOwnershipState.Retained)))
-        {
-            throw new InvalidOperationException(
-                "Metadata-only relocation is blocked while directory ownership is removing, conflicted, or unavailable.");
+            throw new RootFolderPathChangeRejectedException(
+                "root_folder_ownership_recovery_blocked",
+                "This root folder has unfinished directory cleanup. Let Listenarr finish or recover that cleanup before changing the root folder path.",
+                "Metadata-only relocation is blocked while directory ownership cleanup is removing a directory.");
         }
 
         var now = timeProvider.GetUtcNow().UtcDateTime;
         var plans = new List<OwnershipMigrationPlan>(ownerships.Count);
+        var retirements = new List<LibraryDirectoryOwnership>();
         foreach (var ownership in ownerships)
         {
-            if (ownership.DirectoryObjectIdentityVersion
-                    != ManagedDirectoryIdentity.CurrentVersion
-                || string.IsNullOrWhiteSpace(
-                    ownership.DirectoryObjectIdentity)
-                || !string.IsNullOrWhiteSpace(
-                    ownership.DirectoryObjectIdentityUnavailableReason))
+            if (ownership.State is LibraryDirectoryOwnershipState.Unavailable
+                or LibraryDirectoryOwnershipState.Conflict)
             {
-                throw new InvalidOperationException(
-                    "Metadata-only relocation requires an enrolled physical identity for every owned directory.");
+                retirements.Add(ownership);
+                continue;
             }
 
-            var targetPath = MapTargetPath(
-                root.Path,
-                relocation.TargetPath,
-                ownership.CanonicalPath,
-                sourceSemantics.Value,
-                targetSemantics);
+            if (!sourceSemantics.HasValue
+                || ownership.DirectoryObjectIdentityVersion
+                    != ManagedDirectoryIdentity.CurrentVersion
+                || string.IsNullOrWhiteSpace(ownership.DirectoryObjectIdentity)
+                || !string.IsNullOrWhiteSpace(
+                    ownership.DirectoryObjectIdentityUnavailableReason)
+                || string.IsNullOrWhiteSpace(ownership.PathOwnershipKey))
+            {
+                retirements.Add(ownership);
+                continue;
+            }
+
+            string targetPath;
+            try
+            {
+                targetPath = MapTargetPath(
+                    root.Path,
+                    relocation.TargetPath,
+                    ownership.CanonicalPath,
+                    sourceSemantics.Value,
+                    targetSemantics);
+            }
+            catch (Exception exception) when (exception is
+                ArgumentException or InvalidOperationException)
+            {
+                retirements.Add(ownership);
+                continue;
+            }
+
+            var targetGeneration = await ResolveExistingDirectoryObjectIdentityAsync(
+                targetPath,
+                ownership.DirectoryObjectIdentityVersion.Value,
+                ownership.DirectoryObjectIdentity!,
+                cancellationToken);
+            if (!targetGeneration.IsAvailable)
+            {
+                // Metadata-only repair must never transfer cleanup authority to
+                // a directory whose exact physical generation cannot be proven.
+                // Retiring the old claim is conservative: it deletes nothing and
+                // lets the configured root move away from unavailable storage.
+                retirements.Add(ownership);
+                continue;
+            }
+
             var source = SnapshotOwnership(ownership);
             var target = SnapshotOwnership(ownership);
             target.Path = targetPath;
@@ -214,9 +245,7 @@ public sealed partial class RootFolderRelocationService
                     source.PathIdentityBoundary,
                 SourceIdentityLookupKey =
                     source.PathIdentityLookupKey,
-                SourceOwnershipKey = source.PathOwnershipKey
-                    ?? throw new InvalidOperationException(
-                        "A live ownership claim has no reserved path key."),
+                SourceOwnershipKey = source.PathOwnershipKey!,
                 TargetCanonicalPath = target.CanonicalPath,
                 TargetPathSyntax = target.PathSyntax,
                 TargetCaseSensitivity =
@@ -238,34 +267,47 @@ public sealed partial class RootFolderRelocationService
                 journal));
         }
 
-        var duplicateTarget = plans
+        var duplicateTargetOwnershipIds = plans
             .GroupBy(plan => plan.Journal.TargetOwnershipKey)
-            .FirstOrDefault(group => group.Count() > 1);
-        if (duplicateTarget != null)
+            .Where(group => group.Count() > 1)
+            .SelectMany(group => group.Select(plan => plan.Tracked.Id))
+            .ToHashSet();
+        if (duplicateTargetOwnershipIds.Count > 0)
         {
-            throw new InvalidOperationException(
-                "Multiple ownership claims map to the same relocation target.");
+            retirements.AddRange(plans
+                .Where(plan => duplicateTargetOwnershipIds.Contains(plan.Tracked.Id))
+                .Select(plan => plan.Tracked));
+            plans.RemoveAll(plan =>
+                duplicateTargetOwnershipIds.Contains(plan.Tracked.Id));
         }
+
         var migratingIds = plans.Select(plan => plan.Tracked.Id).ToArray();
         var targetKeys = plans
             .Select(plan => plan.Journal.TargetOwnershipKey)
             .ToArray();
-        if (targetKeys.Length > 0
-            && await db.LibraryDirectoryOwnerships.AnyAsync(
-                candidate => !migratingIds.Contains(candidate.Id)
-                    && candidate.State
-                        != LibraryDirectoryOwnershipState.Removed
-                    && candidate.PathOwnershipKey != null
-                    && targetKeys.Contains(candidate.PathOwnershipKey),
-                cancellationToken))
+        if (targetKeys.Length > 0)
         {
-            throw new InvalidOperationException(
-                "A relocation ownership target is already reserved.");
+            var reservedTargetKeys = await db.LibraryDirectoryOwnerships
+                .Where(candidate => !migratingIds.Contains(candidate.Id)
+                    && candidate.State != LibraryDirectoryOwnershipState.Removed
+                    && candidate.PathOwnershipKey != null
+                    && targetKeys.Contains(candidate.PathOwnershipKey))
+                .Select(candidate => candidate.PathOwnershipKey!)
+                .ToListAsync(cancellationToken);
+            if (reservedTargetKeys.Count > 0)
+            {
+                var reserved = reservedTargetKeys.ToHashSet(StringComparer.Ordinal);
+                retirements.AddRange(plans
+                    .Where(plan => reserved.Contains(plan.Journal.TargetOwnershipKey))
+                    .Select(plan => plan.Tracked));
+                plans.RemoveAll(plan =>
+                    reserved.Contains(plan.Journal.TargetOwnershipKey));
+            }
         }
 
         db.LibraryDirectoryOwnershipPathMigrations.AddRange(
             plans.Select(plan => plan.Journal));
-        return plans;
+        return new OwnershipMigrationPreparation(plans, retirements);
     }
 
     private static IReadOnlyList<OwnershipMigrationTargetLease>

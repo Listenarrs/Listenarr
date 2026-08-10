@@ -132,13 +132,14 @@ public sealed partial class RootFolderRelocationService
         }
         db.RootFolderRelocations.Add(metadataRelocation);
 
-        var ownershipPlans = await PrepareOwnershipMigrationsAsync(
+        var ownershipPreparation = await PrepareOwnershipMigrationsAsync(
             db,
             metadataRelocation,
             root,
             ownershipSourceSemantics,
             targetResolution.Semantics,
             cancellationToken);
+        var ownershipPlans = ownershipPreparation.Transfers;
         await db.SaveChangesAsync(cancellationToken);
         var completionToken = RequestCancellationBoundary.EnterNonCancelablePhase(
             cancellationToken);
@@ -195,6 +196,9 @@ public sealed partial class RootFolderRelocationService
 
             RejectDuplicateAudiobookFileOwnership(db);
             ApplyOwnershipMigrationMetadata(ownershipPlans, nowUtc);
+            RetireUntransferredOwnerships(
+                ownershipPreparation.Retirements,
+                nowUtc);
             await db.SaveChangesAsync(completionToken);
             AssignOwnershipMigrationKeys(
                 ownershipPlans,

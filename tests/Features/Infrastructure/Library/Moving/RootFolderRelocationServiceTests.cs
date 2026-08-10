@@ -1676,7 +1676,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
     }
 
     [Fact]
-    public async Task MetadataOnlyPathChange_AmbiguousStoredRootWithLiveOwnership_RemainsBlocked()
+    public async Task MetadataOnlyPathChange_AmbiguousStoredRootWithLiveOwnership_RetiresUnprovableCleanupAuthority()
     {
         var nativeSource = Path.Join(TempRoot, $"ambiguous-owned-source-{Guid.NewGuid():N}");
         var target = Path.Join(TempRoot, $"ambiguous-owned-target-{Guid.NewGuid():N}");
@@ -1730,23 +1730,29 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
             await db.SaveChangesAsync();
         }
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            CreateService().StartAsync(
-                rootId,
-                new RootFolderPathChangeCommand(
-                    target,
-                    RootFolderRelocationMode.MetadataOnly,
-                    false,
-                    "Repaired Ambiguous Owned Root",
-                    false,
-                    FileSystemCaseSensitivityMode.Auto)));
+        var result = await CreateService().StartAsync(
+            rootId,
+            new RootFolderPathChangeCommand(
+                target,
+                RootFolderRelocationMode.MetadataOnly,
+                false,
+                "Repaired Ambiguous Owned Root",
+                false,
+                FileSystemCaseSensitivityMode.Auto));
 
-        Assert.Contains("source path semantics", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(RootFolderRelocationStatus.Completed, result.Status);
         await using var verification = await _factory.CreateDbContextAsync();
-        Assert.Equal(ambiguousSource, (await verification.RootFolders.SingleAsync()).Path);
-        Assert.Equal(ambiguousBook, (await verification.Audiobooks.SingleAsync()).BasePath);
+        Assert.Equal(target, (await verification.RootFolders.SingleAsync()).Path);
+        Assert.Equal(
+            Path.Join(target, "Author", "Title"),
+            (await verification.Audiobooks.SingleAsync()).BasePath);
+        var retired = await verification.LibraryDirectoryOwnerships.SingleAsync();
+        Assert.Equal(LibraryDirectoryOwnershipState.Removed, retired.State);
+        Assert.Null(retired.PathOwnershipKey);
+        Assert.Null(retired.ManagedRootFolderId);
         Assert.Empty(await verification.RootFolderRelocations.ToListAsync());
         Assert.Empty(await verification.LibraryDirectoryOwnershipPathMigrations.ToListAsync());
+        Assert.True(Directory.Exists(ownedDirectory));
     }
 
     [Fact]
@@ -1786,6 +1792,122 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
         var repairedRoot = await verification.RootFolders.SingleAsync();
         Assert.Equal(target, repairedRoot.Path);
         Assert.Equal("Repaired", repairedRoot.Name);
+    }
+
+    [Theory]
+    [InlineData(LibraryDirectoryOwnershipState.Owned)]
+    [InlineData(LibraryDirectoryOwnershipState.Unavailable)]
+    public async Task MetadataOnlyPathChange_UnavailableOwnedSource_RetiresCleanupAuthorityAndRepairsRoot(
+        LibraryDirectoryOwnershipState ownershipState)
+    {
+        var source = Path.Join(TempRoot, $"unavailable-owned-source-{Guid.NewGuid():N}");
+        var target = Path.Join(TempRoot, $"unavailable-owned-target-{Guid.NewGuid():N}");
+        var sourceOwned = Path.Join(source, "Author", "Book");
+        Directory.CreateDirectory(sourceOwned);
+        Directory.CreateDirectory(target);
+        var sourceResolution = await new FileSystemSemanticsResolver().ResolveAsync(source);
+        Assert.Equal(PathIdentityState.Valid, sourceResolution.State);
+        var rootIdentity = await new DirectoryObjectIdentityResolver().ResolveAsync(source);
+        Assert.True(rootIdentity.IsAvailable, rootIdentity.UnavailableReason);
+        var ownershipToken = Guid.NewGuid().ToString("N");
+        string ownershipIdentity;
+        using (var ownedAnchor = PinnedDirectoryCreation.OpenPinnedBoundary(sourceOwned))
+        {
+            ownershipIdentity = ManagedDirectoryIdentity.Create(
+                ownershipToken,
+                ownedAnchor.GetDirectoryObjectIdentity());
+        }
+
+        int rootId;
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            var root = new RootFolder
+            {
+                Name = "Unavailable Library",
+                Path = source,
+                CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto,
+                ResolvedCaseSensitivity = sourceResolution.Semantics.CaseSensitivity,
+                PathIdentityState = PathIdentityState.Valid,
+                PathIdentityKey = FileSystemPathIdentity.CreateKey(
+                    "root",
+                    source,
+                    sourceResolution.Semantics),
+                DirectoryObjectIdentityVersion = rootIdentity.Version,
+                DirectoryObjectIdentity = rootIdentity.Value
+            };
+            var audiobook = new Audiobook
+            {
+                Title = "Book",
+                BasePath = sourceOwned
+            };
+            db.RootFolders.Add(root);
+            db.Audiobooks.Add(audiobook);
+            await db.SaveChangesAsync();
+            rootId = root.Id;
+            db.LibraryDirectoryOwnerships.Add(new LibraryDirectoryOwnership
+            {
+                Path = sourceOwned,
+                CanonicalPath = sourceOwned,
+                PathSyntax = sourceResolution.Semantics.Syntax,
+                PathCaseSensitivity = sourceResolution.Semantics.CaseSensitivity,
+                PathCaseSensitivityMode = FileSystemCaseSensitivityMode.Auto,
+                PathIdentityBoundary = sourceOwned,
+                PathIdentityLookupKey = FileSystemPathIdentity.CreateLookupKey(
+                    "library-directory",
+                    sourceOwned,
+                    sourceResolution.Semantics.Syntax),
+                PathOwnershipKey = ownershipState == LibraryDirectoryOwnershipState.Unavailable
+                    ? null
+                    : FileSystemPathIdentity.CreateKey(
+                        "library-directory",
+                        sourceOwned,
+                        sourceResolution.Semantics),
+                OwnershipToken = ownershipToken,
+                State = ownershipState,
+                CreationWorkflow = "Test",
+                AudiobookId = audiobook.Id,
+                ManagedRootFolderId = root.Id,
+                DirectoryObjectIdentityVersion = ManagedDirectoryIdentity.CurrentVersion,
+                DirectoryObjectIdentity = ownershipIdentity,
+                DirectoryObjectIdentityUnavailableReason =
+                    ownershipState == LibraryDirectoryOwnershipState.Unavailable
+                        ? "The source directory is unavailable."
+                        : null,
+                StateReason = ownershipState == LibraryDirectoryOwnershipState.Unavailable
+                    ? "Physical directory ownership could not be reconciled safely."
+                    : null
+            });
+            await db.SaveChangesAsync();
+        }
+
+        Directory.Delete(source, recursive: true);
+        Assert.False(Directory.Exists(source));
+        Assert.False(Directory.Exists(Path.Join(target, "Author", "Book")));
+
+        var result = await CreateService().StartAsync(
+            rootId,
+            new RootFolderPathChangeCommand(
+                target,
+                RootFolderRelocationMode.MetadataOnly,
+                false,
+                "Repaired Library",
+                false,
+                FileSystemCaseSensitivityMode.Auto,
+                source));
+
+        Assert.Equal(RootFolderRelocationStatus.Completed, result.Status);
+        await using var verification = await _factory.CreateDbContextAsync();
+        var repairedRoot = await verification.RootFolders.SingleAsync();
+        var repairedBook = await verification.Audiobooks.SingleAsync();
+        var retired = await verification.LibraryDirectoryOwnerships.SingleAsync();
+        Assert.Equal(target, repairedRoot.Path);
+        Assert.Equal(Path.Join(target, "Author", "Book"), repairedBook.BasePath);
+        Assert.Equal(LibraryDirectoryOwnershipState.Removed, retired.State);
+        Assert.Null(retired.PathOwnershipKey);
+        Assert.Null(retired.ManagedRootFolderId);
+        Assert.Empty(await verification.RootFolderRelocations.ToListAsync());
+        Assert.Empty(await verification.LibraryDirectoryOwnershipPathMigrations.ToListAsync());
+        Assert.True(Directory.Exists(target));
     }
 
     [Fact]
@@ -2636,6 +2758,29 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
         Assert.Equal(
             RootFolderRelocationStatus.NeedsAttention,
             relocationAfter.Status);
+    }
+
+    [Fact]
+    public async Task RetryOwnershipMigration_MissingTargetDirectory_RetiresCleanupAuthorityAndCompletes()
+    {
+        var scenario = await SeedPublishedOwnershipMigrationAsync();
+        Directory.Delete(scenario.OwnedPath, recursive: true);
+        Assert.False(Directory.Exists(scenario.OwnedPath));
+
+        var result = await CreateService().RetryAsync(scenario.RelocationId);
+
+        Assert.Equal(RootFolderRelocationStatus.Completed, result.Status);
+        await using var verification = await _factory.CreateDbContextAsync();
+        var rootAfter = await verification.RootFolders.SingleAsync();
+        var ownershipAfter = await verification.LibraryDirectoryOwnerships.SingleAsync();
+        var relocationAfter = await verification.RootFolderRelocations.SingleAsync();
+        Assert.Equal("Renamed Library", rootAfter.Name);
+        Assert.Equal(LibraryDirectoryOwnershipState.Removed, ownershipAfter.State);
+        Assert.Null(ownershipAfter.PathOwnershipKey);
+        Assert.Null(ownershipAfter.ManagedRootFolderId);
+        Assert.Equal(RootFolderRelocationStatus.Completed, relocationAfter.Status);
+        Assert.Null(relocationAfter.ActiveRootFolderId);
+        Assert.False(await verification.LibraryDirectoryOwnershipPathMigrations.AnyAsync());
     }
 
     [Fact]
