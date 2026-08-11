@@ -29,6 +29,26 @@ internal sealed class LibraryFilesystemReadiness :
     public Task WaitUntilReadyAsync(CancellationToken cancellationToken = default) =>
         _ready.Task.WaitAsync(cancellationToken);
 
+    public void EnsureMetadataRepairReady()
+    {
+        var snapshot = Current;
+        if (snapshot.IsReady)
+        {
+            return;
+        }
+
+        if (snapshot.Status == LibraryFilesystemInitializationStatus.Failed)
+        {
+            throw new ApplicationUnavailableException(
+                "metadata_repair_initialization_failed",
+                "Library recovery did not complete safely. Resolve the startup recovery failure and restart Listenarr before repairing root-folder metadata.");
+        }
+
+        throw new ApplicationUnavailableException(
+            "metadata_repair_initializing",
+            "Library recovery is still running. Wait for startup reconciliation to finish before repairing root-folder metadata.");
+    }
+
     internal Task WaitUntilSettledAsync(CancellationToken cancellationToken = default) =>
         _settled.Task.WaitAsync(cancellationToken);
 

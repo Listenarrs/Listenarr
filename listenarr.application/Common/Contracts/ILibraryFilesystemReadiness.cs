@@ -32,6 +32,8 @@ public interface ILibraryFilesystemReadiness
     LibraryFilesystemReadinessSnapshot Current { get; }
 
     Task WaitUntilReadyAsync(CancellationToken cancellationToken = default);
+
+    void EnsureMetadataRepairReady();
 }
 
 public interface ILibraryFilesystemMutationGate

@@ -30,6 +30,34 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
         private const string LeaseOwner = "test-worker";
 
         [Fact]
+        public async Task EnsureFilesystemMutationAllowedAsync_ActiveMetadataRootRepairBlocksAudiobookMutation()
+        {
+            const int audiobookId = 4141;
+            var persistence = new Mock<IMoveQueuePersistence>(MockBehavior.Strict);
+            var relocation = new Mock<IRootFolderRelocationService>(MockBehavior.Strict);
+            relocation.Setup(service => service.IsAudiobookPathStateProtectedAsync(
+                    audiobookId,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(true);
+            var service = new MoveQueueService(
+                NullLogger<MoveQueueService>.Instance,
+                persistence.Object,
+                new NoopHubBroadcaster(),
+                TimeProvider.System,
+                BuildSemanticsResolver(),
+                relocationService: relocation.Object);
+
+            var blocked = await Assert.ThrowsAsync<ApplicationConflictException>(() =>
+                service.EnsureFilesystemMutationAllowedAsync(audiobookId));
+
+            Assert.Equal("root_folder_relocation_active", blocked.Code);
+            persistence.VerifyNoOtherCalls();
+            relocation.Verify(service => service.IsAudiobookPathStateProtectedAsync(
+                audiobookId,
+                It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [Fact]
         public async Task EnsureFilesystemMutationAllowedAsync_ActiveDeletionIntentBlocksOtherMutationsButAllowsDeletionRecovery()
         {
             const int audiobookId = 4242;
@@ -958,6 +986,10 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
             var jobs = new List<MoveJob>();
             var persistence = CreateInMemoryPersistence(jobs);
             var relocation = new Mock<IRootFolderRelocationService>(MockBehavior.Strict);
+            relocation.Setup(service => service.IsAudiobookPathStateProtectedAsync(
+                    It.IsAny<int>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(false);
             relocation.Setup(service => service.IsBoundaryProtectedAsync(
                     It.IsAny<string>(),
                     It.IsAny<FileSystemPathSemantics>(),
@@ -1081,6 +1113,10 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
             var jobs = new List<MoveJob>();
             var persistence = CreateInMemoryPersistence(jobs);
             var relocation = new Mock<IRootFolderRelocationService>(MockBehavior.Strict);
+            relocation.Setup(service => service.IsAudiobookPathStateProtectedAsync(
+                    It.IsAny<int>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(false);
             relocation.Setup(service => service.IsBoundaryProtectedAsync(
                     It.IsAny<string>(),
                     It.IsAny<FileSystemPathSemantics>(),

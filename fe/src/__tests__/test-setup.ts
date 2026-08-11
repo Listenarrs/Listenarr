@@ -169,6 +169,9 @@ vi.mock('@/services/api', () => {
     updateRootFolder: vi.fn(async (_id: number, payload: unknown) => payload),
     changeRootFolderPath: vi.fn(async () => ({})),
     confirmRootFolder: vi.fn(async () => ({})),
+    getRootFolderMetadataRepairDetails: vi.fn(async () => ({})),
+    removeRootFolderMetadataRepairFile: vi.fn(async () => ({})),
+    abandonUnpublishedRootFolderRelocation: vi.fn(async () => ({})),
     retryRootFolderRelocation: vi.fn(async () => ({})),
 
     // add checkVolume to apiService so components that call `apiService.checkVolume` in

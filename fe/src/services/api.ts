@@ -943,6 +943,35 @@ class ApiService {
     })
   }
 
+  async getRootFolderMetadataRepairDetails(
+    relocationId: string,
+    audiobookId: number,
+  ): Promise<import('@/types').RootFolderMetadataRepairDetails> {
+    return this.request<import('@/types').RootFolderMetadataRepairDetails>(
+      `/rootfolder-relocations/${relocationId}/skipped/${audiobookId}`,
+    )
+  }
+
+  async removeRootFolderMetadataRepairFile(
+    relocationId: string,
+    audiobookId: number,
+    audiobookFileId: number,
+  ): Promise<import('@/types').RootFolderMetadataRepairDetails> {
+    return this.request<import('@/types').RootFolderMetadataRepairDetails>(
+      `/rootfolder-relocations/${relocationId}/skipped/${audiobookId}/files/${audiobookFileId}`,
+      { method: 'DELETE' },
+    )
+  }
+
+  async abandonUnpublishedRootFolderRelocation(
+    relocationId: string,
+  ): Promise<import('@/types').RootFolderPathChangeResult> {
+    return this.request<import('@/types').RootFolderPathChangeResult>(
+      `/rootfolder-relocations/${relocationId}/abandon-unpublished`,
+      { method: 'POST' },
+    )
+  }
+
   async retryRootFolderRelocation(
     relocationId: string,
   ): Promise<import('@/types').RootFolderPathChangeResult> {

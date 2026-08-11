@@ -79,9 +79,9 @@ public sealed partial class RootFolderRelocationService
                         candidate => candidate.Id == relocationId,
                         CancellationToken.None);
                 persistedRelocation.Status =
-                    RootFolderRelocationStatus.NeedsAttention;
+                    RootFolderRelocationStatus.Failed;
                 persistedRelocation.Error =
-                    $"Directory ownership migration recovery is blocked: {exception.Message}";
+                    $"{MetadataOnlyRecoveryAttentionPrefix}{exception.Message}";
                 persistedRelocation.UpdatedAt =
                     timeProvider.GetUtcNow().UtcDateTime;
                 await db.SaveChangesAsync(CancellationToken.None);
@@ -89,6 +89,7 @@ public sealed partial class RootFolderRelocationService
 
             var resultRelocation = await db.RootFolderRelocations
                 .AsNoTracking()
+                .Include(candidate => candidate.SkippedItems)
                 .SingleAsync(
                     candidate => candidate.Id == relocationId,
                     CancellationToken.None);
@@ -122,38 +123,52 @@ public sealed partial class RootFolderRelocationService
             cancellationToken)
             ?? throw new InvalidOperationException(
                 "The ownership migration root no longer exists.");
-        var sourceSemantics = new FileSystemPathSemantics(
-            plans[0].Journal.SourcePathSyntax,
-            plans[0].Journal.SourceCaseSensitivity);
-        var targetSemantics = new FileSystemPathSemantics(
-            plans[0].Journal.TargetPathSyntax,
-            plans[0].Journal.TargetCaseSensitivity);
-        var sourcePathAvailable =
-            FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
-                relocation.SourcePath,
-                out var canonicalSourcePath,
-                out var sourceReason);
-        var targetPathAvailable =
-            FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+        FileSystemPathSemantics sourceSemantics;
+        FileSystemPathSemantics? journalTargetSemantics = null;
+        if (plans.Count > 0)
+        {
+            sourceSemantics = new FileSystemPathSemantics(
+                plans[0].Journal.SourcePathSyntax,
+                plans[0].Journal.SourceCaseSensitivity);
+            journalTargetSemantics = new FileSystemPathSemantics(
+                plans[0].Journal.TargetPathSyntax,
+                plans[0].Journal.TargetCaseSensitivity);
+        }
+        else if (!TryResolvePersistedRelocationSourceSemantics(
+            relocation,
+            out sourceSemantics,
+            out var sourceReason))
+        {
+            throw new InvalidOperationException(sourceReason);
+        }
+
+        if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
                 relocation.TargetPath,
                 out var canonicalTargetPath,
-                out var targetReason);
-        if (!sourcePathAvailable || !targetPathAvailable)
+                out var targetReason))
         {
             throw new InvalidOperationException(
-                $"The relocation path is unavailable for ownership recovery: {sourceReason}{targetReason}");
+                $"The relocation target is unavailable for ownership recovery: {targetReason}");
         }
 
         var targetResolution = await semanticsResolver.ResolveAsync(
             canonicalTargetPath,
             relocation.TargetCaseSensitivityMode,
             cancellationToken);
-        if (targetResolution.State != PathIdentityState.Valid
-            || targetResolution.Semantics != targetSemantics)
+        if (targetResolution.State != PathIdentityState.Valid)
+        {
+            throw new InvalidOperationException(
+                targetResolution.Reason
+                    ?? "The relocation target semantics are unavailable during metadata recovery.");
+        }
+        if (journalTargetSemantics.HasValue
+            && targetResolution.Semantics != journalTargetSemantics.Value)
         {
             throw new InvalidOperationException(
                 "The relocation target semantics changed before ownership recovery.");
         }
+        var targetSemantics = journalTargetSemantics
+            ?? targetResolution.Semantics;
 
         var audiobookRows = await db.Audiobooks
             .Where(audiobook => audiobook.BasePath != null)
@@ -165,25 +180,80 @@ public sealed partial class RootFolderRelocationService
                     nameof(Audiobook.BasePath))!
             })
             .ToListAsync(cancellationToken);
-        var audiobookIds = audiobookRows
-            .Select(row => row.Audiobook.Id)
-            .ToList();
-        await db.AudiobookFiles
-            .Where(file => audiobookIds.Contains(file.AudiobookId))
-            .LoadAsync(cancellationToken);
+        await db.AudiobookFiles.LoadAsync(cancellationToken);
         var candidates = audiobookRows
             .Select(row => new AudiobookPathCandidate(
                 row.Audiobook,
                 row.StoredBasePath))
             .ToList();
+        var allowContextualAmbiguousSourceSyntax =
+            !FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+                relocation.SourcePath,
+                out _)
+            && relocation.SourcePath.StartsWith("//", StringComparison.Ordinal)
+            && FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+                relocation.SourcePath,
+                sourceSemantics.Syntax,
+                out _);
         var (affected, invalid) = DiscoverAffectedAudiobooks(
             candidates,
-            canonicalSourcePath,
+            relocation.SourcePath,
             sourceSemantics,
-            detectAmbiguousCaseMatches: false);
+            detectAmbiguousCaseMatches: false,
+            allowContextualAmbiguousSourceSyntax);
+        var alreadySkippedAudiobookIds = relocation.SkippedItems
+            .Select(item => item.AudiobookId)
+            .ToHashSet();
+        var recoveryPlanning = PlanMetadataPathRewrites(
+            db,
+            affected
+                .Where(candidate =>
+                    !alreadySkippedAudiobookIds.Contains(candidate.Audiobook.Id))
+                .ToArray(),
+            relocation.SourcePath,
+            relocation.TargetPath,
+            sourceSemantics,
+            targetSemantics,
+            relocation.TargetCaseSensitivityMode,
+            timeProvider.GetUtcNow());
+        foreach (var skippedItem in recoveryPlanning.SkippedItems)
+        {
+            if (relocation.SkippedItems.All(item =>
+                item.AudiobookId != skippedItem.AudiobookId))
+            {
+                relocation.SkippedItems.Add(skippedItem);
+            }
+        }
+        foreach (var candidate in invalid)
+        {
+            if (relocation.SkippedItems.All(item =>
+                item.AudiobookId != candidate.Audiobook.Id))
+            {
+                relocation.SkippedItems.Add(
+                    new RootFolderRelocationSkippedItem
+                    {
+                        AudiobookId = candidate.Audiobook.Id,
+                        Reason = EncodeMetadataSkipReason(
+                            RootFolderRelocationSkipReasonCode.InvalidStoredPath,
+                            InvalidStoredMetadataPathReason),
+                        CreatedAt = timeProvider.GetUtcNow()
+                    });
+            }
+        }
+        var nonRepairableSkip = relocation.SkippedItems.FirstOrDefault(item =>
+            !IsRepairableMetadataSkipReason(
+                ClassifyMetadataSkipReason(item.Reason)));
+        if (nonRepairableSkip != null)
+        {
+            throw new InvalidOperationException(
+                $"Metadata-only recovery cannot safely publish a partial repair for audiobook {nonRepairableSkip.AudiobookId}: {nonRepairableSkip.Reason}");
+        }
 
         var ownershipPreparation = await RevalidateRecoveredOwnershipPlansAsync(
+            db,
+            root,
             plans,
+            relocation.SkippedItems.Select(item => item.AudiobookId).ToHashSet(),
             cancellationToken);
         var transferPlans = ownershipPreparation.Transfers;
         PinnedDirectoryCreation.PinnedDirectoryAnchor? targetGenerationLease = null;
@@ -192,12 +262,34 @@ public sealed partial class RootFolderRelocationService
             && string.IsNullOrWhiteSpace(
                 relocation.TargetDirectoryObjectIdentityUnavailableReason))
         {
-            targetGenerationLease = PinTargetDirectoryGeneration(
-                relocation.TargetPath,
-                relocation.TargetDirectoryObjectIdentityVersion,
-                relocation.TargetDirectoryObjectIdentity,
-                relocation.TargetDirectoryObjectIdentityUnavailableReason,
-                cancellationToken);
+            var currentTargetGeneration =
+                await ResolveExistingDirectoryObjectIdentityAsync(
+                    relocation.TargetPath,
+                    relocation.TargetDirectoryObjectIdentityVersion.Value,
+                    relocation.TargetDirectoryObjectIdentity!,
+                    cancellationToken);
+            if (currentTargetGeneration.IsAvailable)
+            {
+                targetGenerationLease = PinTargetDirectoryGeneration(
+                    relocation.TargetPath,
+                    relocation.TargetDirectoryObjectIdentityVersion,
+                    relocation.TargetDirectoryObjectIdentity,
+                    relocation.TargetDirectoryObjectIdentityUnavailableReason,
+                    cancellationToken);
+            }
+            else
+            {
+                // Metadata-only repair does not require physical authority over the
+                // target generation. If that generation changed while the metadata
+                // saga was incomplete, drop the stale authority and require a later
+                // explicit root confirmation rather than adopting the replacement.
+                relocation.TargetDirectoryObjectIdentityVersion = null;
+                relocation.TargetDirectoryObjectIdentity = null;
+                relocation.TargetDirectoryObjectIdentityUnavailableReason =
+                    "The root folder directory changed during metadata repair and must be confirmed before filesystem mutations.";
+                relocation.TargetIdentityEnrollmentState =
+                    TargetIdentityEnrollmentState.Unavailable;
+            }
         }
         IReadOnlyList<OwnershipMigrationTargetLease> ownershipGenerationLeases = [];
         try
@@ -208,38 +300,17 @@ public sealed partial class RootFolderRelocationService
                 cancellationToken);
             await using var transaction =
                 await db.Database.BeginTransactionAsync(cancellationToken);
-            foreach (var candidate in affected)
+            foreach (var plan in recoveryPlanning.SafePlans)
             {
-                var destination = MapTargetPath(
-                    relocation.SourcePath,
-                    relocation.TargetPath,
-                    candidate.StoredBasePath,
-                    sourceSemantics,
-                    targetSemantics);
                 AudiobookPathReferenceRewriter.Rewrite(
-                    candidate.Audiobook,
-                    candidate.StoredBasePath,
-                    destination,
+                    plan.Candidate.Audiobook,
+                    plan.Candidate.StoredBasePath,
+                    plan.Destination,
                     sourceSemantics,
                     targetSemantics,
                     relocation.TargetCaseSensitivityMode);
             }
-            foreach (var candidate in invalid)
-            {
-                if (relocation.SkippedItems.All(item =>
-                    item.AudiobookId != candidate.Audiobook.Id))
-                {
-                    relocation.SkippedItems.Add(
-                        new RootFolderRelocationSkippedItem
-                        {
-                            AudiobookId = candidate.Audiobook.Id,
-                            Reason =
-                                "Stored audiobook base path is invalid or case-ambiguous and could not be compared safely with the source root.",
-                            CreatedAt =
-                                timeProvider.GetUtcNow()
-                        });
-                }
-            }
+            RejectDuplicateAudiobookFileOwnership(db);
 
             var now = timeProvider.GetUtcNow().UtcDateTime;
             ApplyOwnershipMigrationMetadata(transferPlans, now);
@@ -267,13 +338,22 @@ public sealed partial class RootFolderRelocationService
                     "root",
                     relocation.TargetPath,
                     targetSemantics));
+            if (relocation.DesiredIsDefault)
+            {
+                await ClearOtherDefaultsAsync(
+                    db,
+                    rootId,
+                    cancellationToken);
+            }
             root.DirectoryObjectIdentityVersion =
                 relocation.TargetDirectoryObjectIdentityVersion;
             root.DirectoryObjectIdentity =
                 relocation.TargetDirectoryObjectIdentity;
             root.DirectoryObjectIdentityUnavailableReason =
                 relocation.TargetDirectoryObjectIdentityUnavailableReason;
-            relocation.CompletedJobs = affected.Count;
+            relocation.CompletedJobs = Math.Max(
+                0,
+                relocation.TotalJobs - relocation.SkippedItems.Count);
             relocation.Status = relocation.SkippedItems.Count == 0
                 ? RootFolderRelocationStatus.Completed
                 : RootFolderRelocationStatus.NeedsAttention;

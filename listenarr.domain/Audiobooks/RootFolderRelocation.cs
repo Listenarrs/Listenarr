@@ -18,6 +18,16 @@ public enum RootFolderRelocationStatus
     Failed
 }
 
+public enum RootFolderRelocationSkipReasonCode
+{
+    Unknown,
+    InvalidStoredPath,
+    SourceSemanticsUnavailable,
+    TargetPathInvalid,
+    TargetIdentityCollision,
+    TargetIdentityUnresolvedConflict
+}
+
 public enum TargetIdentityEnrollmentState
 {
     Authorized,

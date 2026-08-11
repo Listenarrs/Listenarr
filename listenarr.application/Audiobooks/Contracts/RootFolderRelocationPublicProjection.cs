@@ -9,6 +9,7 @@ public static class RootFolderRelocationPublicProjection
         var publicError = ToPublicError(
             result.Status,
             result.TargetIdentityEnrollmentState,
+            result.Mode,
             result.Error);
         return string.Equals(
                 publicError,
@@ -21,6 +22,7 @@ public static class RootFolderRelocationPublicProjection
     public static string? ToPublicError(
         RootFolderRelocationStatus status,
         TargetIdentityEnrollmentState enrollmentState,
+        RootFolderRelocationMode mode,
         string? internalError)
     {
         if (string.IsNullOrWhiteSpace(internalError))
@@ -30,12 +32,13 @@ public static class RootFolderRelocationPublicProjection
 
         return enrollmentState switch
         {
-            TargetIdentityEnrollmentState.Unavailable =>
+            TargetIdentityEnrollmentState.Unavailable
+                when mode == RootFolderRelocationMode.Relocate =>
                 "The relocation target identity is unavailable. Review the target and retry.",
             _ => status switch
             {
                 RootFolderRelocationStatus.NeedsAttention =>
-                    "The relocation requires attention. Review the affected move jobs and retry after resolving the underlying issue.",
+                    "The relocation requires attention. Review the affected items and retry after resolving the underlying issue.",
                 RootFolderRelocationStatus.Failed =>
                     "The relocation failed. Review the server logs and retry after resolving the underlying issue.",
                 RootFolderRelocationStatus.Pending or

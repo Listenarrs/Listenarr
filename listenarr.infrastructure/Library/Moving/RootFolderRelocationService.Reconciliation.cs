@@ -120,6 +120,18 @@ public sealed partial class RootFolderRelocationService
     {
         var results =
             await ReconcileOwnershipPathMigrationsAsync(cancellationToken);
+        results.AddRange(
+            await ReconcileCommittedMetadataOnlyRelocationsAsync(
+                cancellationToken));
+        var failedMetadataRecovery = results.FirstOrDefault(result =>
+            result.Mode == RootFolderRelocationMode.MetadataOnly
+            && result.Status == RootFolderRelocationStatus.Failed);
+        if (failedMetadataRecovery != null)
+        {
+            throw new InvalidOperationException(
+                $"Metadata-only root repair recovery {failedMetadataRecovery.RelocationId} remains failed.");
+        }
+
         await ReconcileRootIdentitiesAsync(cancellationToken);
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var recoverableReservationIds = await db.RootFolderRelocations

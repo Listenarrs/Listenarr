@@ -7,6 +7,7 @@ import { useRootFoldersStore } from '@/stores/rootFolders'
 import { apiService } from '@/services/api'
 
 const success = vi.fn()
+const warning = vi.fn()
 const error = vi.fn()
 const filesystemReadinessMock = vi.hoisted(() => ({ filesystemReady: true }))
 
@@ -15,7 +16,7 @@ vi.mock('@/stores/filesystemReadiness', () => ({
 }))
 
 vi.mock('@/services/toastService', () => ({
-  useToast: () => ({ success, error }),
+  useToast: () => ({ success, warning, error }),
 }))
 
 describe('RootFolderFormModal', () => {
@@ -100,6 +101,35 @@ describe('RootFolderFormModal', () => {
     await (wrapper.vm as unknown as { save: () => Promise<void> }).save()
 
     expect(error).not.toHaveBeenCalled()
+  })
+
+  it('locks root path repair while filesystem startup reconciliation is unavailable', async () => {
+    filesystemReadinessMock.filesystemReady = false
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const root = {
+      id: 12,
+      name: 'Unavailable Library',
+      path: '/server/mnt/drive/Audiobooks',
+      pathSyntax: 'Unix' as const,
+      isDefault: false,
+      caseSensitivityMode: 'Auto' as const,
+      resolvedCaseSensitivity: 'Unknown' as const,
+      pathIdentityState: 'Unavailable' as const,
+      canChangePath: true,
+      canMutateFilesystem: false,
+    }
+    const wrapper = mount(RootFolderFormModal, {
+      props: { root },
+      global: {
+        plugins: [pinia],
+        stubs: { FolderBrowserModal: true },
+      },
+    })
+
+    expect(wrapper.get('#root-path').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('#root-case-sensitivity').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('.btn-inline-browse').attributes('disabled')).toBeDefined()
   })
 
   it('keeps metadata editing available while filesystem path controls are locked', async () => {
@@ -660,6 +690,57 @@ describe('RootFolderFormModal', () => {
 
     expect(error).toHaveBeenCalledWith('Error', publicMessage)
     expect(error).not.toHaveBeenCalledWith('Error', expect.stringContaining('API error: 409'))
+  })
+
+  it('reports metadata-only partial success as a warning instead of a failed save', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useRootFoldersStore()
+    vi.spyOn(store, 'update').mockResolvedValue({
+      id: 7,
+      name: 'Library',
+      path: '/new-library',
+      isDefault: true,
+      activeRelocation: {
+        relocationId: 'repair-1',
+        rootFolderId: 7,
+        currentPath: '/new-library',
+        targetPath: '/new-library',
+        status: 'NeedsAttention',
+        totalJobs: 2,
+        completedJobs: 1,
+        error: 'The relocation requires attention.',
+        targetIdentityEnrollmentState: 'Authorized',
+      },
+    })
+    const wrapper = mount(RootFolderFormModal, {
+      props: {
+        root: {
+          id: 7,
+          name: 'Library',
+          path: '/old-library',
+          isDefault: true,
+        },
+      },
+      global: {
+        plugins: [pinia],
+        stubs: {
+          FolderBrowserModal: true,
+        },
+      },
+    })
+    await wrapper.get('#root-path').setValue('/new-library')
+
+    await (
+      wrapper.vm as unknown as { confirmChange: (moveFiles: boolean) => Promise<void> }
+    ).confirmChange(false)
+
+    expect(warning).toHaveBeenCalledWith(
+      'Root folder changed',
+      expect.stringContaining('audiobooks still need path repair'),
+    )
+    expect(error).not.toHaveBeenCalled()
+    expect(success).not.toHaveBeenCalled()
   })
 
   it.each([

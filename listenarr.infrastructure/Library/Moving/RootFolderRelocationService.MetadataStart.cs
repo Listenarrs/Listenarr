@@ -48,53 +48,34 @@ public sealed partial class RootFolderRelocationService
             .Select(candidate => new RootFolderRelocationSkippedItem
             {
                 AudiobookId = candidate.Audiobook.Id,
-                Reason = "Stored audiobook base path is invalid or case-ambiguous and could not be compared safely with the source root.",
+                Reason = EncodeMetadataSkipReason(
+                    RootFolderRelocationSkipReasonCode.InvalidStoredPath,
+                    InvalidStoredMetadataPathReason),
                 CreatedAt = now
             })
             .ToList();
         var metadataTotal = affected.Count + skipped.Count;
         var completed = 0;
-        var metadataPlans =
-            new List<(AudiobookPathCandidate Candidate, string Destination)>();
-
-        foreach (var candidate in affected)
+        var metadataPlanning = PlanMetadataPathRewrites(
+            db,
+            affected,
+            sourcePath,
+            targetPath,
+            metadataSourceSemantics,
+            targetResolution.Semantics,
+            command.TargetCaseSensitivityMode,
+            now);
+        var metadataPlans = metadataPlanning.SafePlans;
+        skipped.AddRange(metadataPlanning.SkippedItems);
+        var nonRepairableSkip = skipped.FirstOrDefault(item =>
+            !IsRepairableMetadataSkipReason(
+                ClassifyMetadataSkipReason(item.Reason)));
+        if (nonRepairableSkip != null)
         {
-            var audiobook = candidate.Audiobook;
-            var sourceSemantics = metadataSourceSemantics
-                ?? throw new InvalidOperationException(
-                    "Stored source path semantics are unavailable.");
-            var sourceBasePath = candidate.StoredBasePath;
-            try
-            {
-                var destinationBasePath = MapTargetPath(
-                    sourcePath,
-                    targetPath,
-                    sourceBasePath,
-                    sourceSemantics,
-                    targetResolution.Semantics);
-                metadataPlans.Add((candidate, destinationBasePath));
-            }
-            catch (InvalidOperationException exception)
-            {
-                skipped.Add(new RootFolderRelocationSkippedItem
-                {
-                    AudiobookId = audiobook.Id,
-                    Reason = exception.Message,
-                    CreatedAt = now
-                });
-            }
-        }
-
-        if (metadataPlans.Count > 0)
-        {
-            PreflightMetadataPathRewrites(
-                db,
-                metadataPlans,
-                metadataSourceSemantics
-                    ?? throw new InvalidOperationException(
-                        "Stored source path semantics are unavailable."),
-                targetResolution.Semantics,
-                command.TargetCaseSensitivityMode);
+            throw new RootFolderPathChangeRejectedException(
+                "root_folder_metadata_path_repair_required",
+                "One or more audiobooks under this root have stored paths that cannot be rebased safely to the selected destination. Repair those audiobook paths or choose a compatible destination before changing this root folder.",
+                $"Metadata-only relocation cannot safely publish a partial repair for audiobook {nonRepairableSkip.AudiobookId}: {nonRepairableSkip.Reason}");
         }
 
         var metadataRelocation = new RootFolderRelocation
@@ -138,6 +119,7 @@ public sealed partial class RootFolderRelocationService
             root,
             ownershipSourceSemantics,
             targetResolution.Semantics,
+            skipped.Select(item => item.AudiobookId).ToHashSet(),
             cancellationToken);
         var ownershipPlans = ownershipPreparation.Transfers;
         await db.SaveChangesAsync(cancellationToken);
@@ -169,9 +151,9 @@ public sealed partial class RootFolderRelocationService
             DisposeOwnershipMigrationTargetLeases(ownershipGenerationLeases);
             targetGenerationLease?.Dispose();
             metadataRelocation.Status =
-                RootFolderRelocationStatus.NeedsAttention;
+                RootFolderRelocationStatus.Failed;
             metadataRelocation.Error =
-                $"Directory ownership migration requires attention: {exception.Message}";
+                $"{MetadataOnlyTargetVerificationAttentionPrefix}{exception.Message}";
             metadataRelocation.UpdatedAt =
                 timeProvider.GetUtcNow().UtcDateTime;
             await db.SaveChangesAsync(completionToken);
@@ -246,7 +228,19 @@ public sealed partial class RootFolderRelocationService
                 metadataTotal,
                 completed,
                 metadataRelocation.Error,
-                metadataRelocation.TargetIdentityEnrollmentState);
+                metadataRelocation.TargetIdentityEnrollmentState,
+                skipped
+                    .Select(item => item.AudiobookId)
+                    .Distinct()
+                    .OrderBy(id => id)
+                    .ToArray(),
+                RootFolderRelocationMode.MetadataOnly,
+                skipped
+                    .OrderBy(item => item.AudiobookId)
+                    .Select(item => new RootFolderRelocationSkippedItemResult(
+                        item.AudiobookId,
+                        ClassifyMetadataSkipReason(item.Reason)))
+                    .ToArray());
             await db.SaveChangesAsync(completionToken);
             BeforeMetadataOnlyAtomicCommitForTest?.Invoke();
             if (targetGenerationLease != null)
@@ -290,11 +284,11 @@ public sealed partial class RootFolderRelocationService
                 .SingleAsync(
                     candidate => candidate.Id == metadataRelocation.Id,
                     CancellationToken.None);
-            persistedRelocation.Status = RootFolderRelocationStatus.NeedsAttention;
+            persistedRelocation.Status = RootFolderRelocationStatus.Failed;
             persistedRelocation.ActiveRootFolderId = rootFolderId;
             persistedRelocation.CompletedAt = null;
             persistedRelocation.Error =
-                $"Directory ownership migration completion requires attention: {exception.Message}";
+                $"{MetadataOnlyCompletionAttentionPrefix}{exception.Message}";
             persistedRelocation.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
             await db.SaveChangesAsync(CancellationToken.None);
             throw;

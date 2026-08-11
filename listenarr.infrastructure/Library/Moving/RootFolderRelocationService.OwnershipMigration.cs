@@ -74,59 +74,6 @@ public sealed partial class RootFolderRelocationService
         }
     }
 
-    private sealed record MetadataRewriteSnapshot(
-        Audiobook Audiobook,
-        string? BasePath,
-        string? FilePath,
-        string? ImageUrl,
-        IReadOnlyList<(AudiobookFile File, AudiobookFilePathState State)> Files);
-
-    private static void PreflightMetadataPathRewrites(
-        ListenArrDbContext db,
-        IReadOnlyList<(AudiobookPathCandidate Candidate, string Destination)> plans,
-        FileSystemPathSemantics sourceSemantics,
-        FileSystemPathSemantics targetSemantics,
-        FileSystemCaseSensitivityMode targetMode)
-    {
-        var snapshots = plans.Select(plan =>
-            new MetadataRewriteSnapshot(
-                plan.Candidate.Audiobook,
-                plan.Candidate.Audiobook.BasePath,
-                plan.Candidate.Audiobook.FilePath,
-                plan.Candidate.Audiobook.ImageUrl,
-                (plan.Candidate.Audiobook.Files ?? [])
-                    .Select(file => (file, file.CapturePathState()))
-                    .ToArray()))
-            .ToArray();
-        try
-        {
-            foreach (var plan in plans)
-            {
-                AudiobookPathReferenceRewriter.Rewrite(
-                    plan.Candidate.Audiobook,
-                    plan.Candidate.StoredBasePath,
-                    plan.Destination,
-                    sourceSemantics,
-                    targetSemantics,
-                    targetMode);
-            }
-            RejectDuplicateAudiobookFileOwnership(db);
-        }
-        finally
-        {
-            foreach (var snapshot in snapshots)
-            {
-                snapshot.Audiobook.BasePath = snapshot.BasePath;
-                snapshot.Audiobook.FilePath = snapshot.FilePath;
-                snapshot.Audiobook.ImageUrl = snapshot.ImageUrl;
-                foreach (var (file, state) in snapshot.Files)
-                {
-                    file.RestorePathState(state);
-                }
-            }
-        }
-    }
-
     private async Task<OwnershipMigrationPreparation>
         PrepareOwnershipMigrationsAsync(
             ListenArrDbContext db,
@@ -134,6 +81,7 @@ public sealed partial class RootFolderRelocationService
             RootFolder root,
             FileSystemPathSemantics? sourceSemantics,
             FileSystemPathSemantics targetSemantics,
+            IReadOnlySet<int> skippedAudiobookIds,
             CancellationToken cancellationToken)
     {
         var ownerships = await db.LibraryDirectoryOwnerships
@@ -159,6 +107,13 @@ public sealed partial class RootFolderRelocationService
         var retirements = new List<LibraryDirectoryOwnership>();
         foreach (var ownership in ownerships)
         {
+            if (ownership.AudiobookId is int audiobookId
+                && skippedAudiobookIds.Contains(audiobookId))
+            {
+                retirements.Add(ownership);
+                continue;
+            }
+
             if (ownership.State is LibraryDirectoryOwnershipState.Unavailable
                 or LibraryDirectoryOwnershipState.Conflict)
             {

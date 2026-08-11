@@ -23,6 +23,39 @@ public sealed class LibraryFilesystemReadinessTests : BaseTests
         Assert.Equal("filesystem_initializing", exception.Code);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void EnsureMetadataRepairReady_PendingOrRunning_FailsClosed(bool running)
+    {
+        var readiness = new LibraryFilesystemReadiness();
+        if (running)
+        {
+            readiness.MarkRunning("AudiobookFileIdentities");
+        }
+
+        var exception = Assert.Throws<ApplicationUnavailableException>(
+            readiness.EnsureMetadataRepairReady);
+
+        Assert.Equal("metadata_repair_initializing", exception.Code);
+    }
+
+    [Fact]
+    public void EnsureMetadataRepairReady_Failed_FailsClosed()
+    {
+        var readiness = new LibraryFilesystemReadiness();
+        readiness.MarkRunning("FileRenameRecovery");
+        readiness.MarkFailed(
+            "filesystem_initialization_failed",
+            "Injected startup recovery failure.",
+            "FileRenameRecovery");
+
+        var exception = Assert.Throws<ApplicationUnavailableException>(
+            readiness.EnsureMetadataRepairReady);
+
+        Assert.Equal("metadata_repair_initialization_failed", exception.Code);
+    }
+
     [Fact]
     public async Task MarkReady_ReleasesWaitersAndAllowsMutation()
     {
@@ -36,6 +69,7 @@ public sealed class LibraryFilesystemReadinessTests : BaseTests
 
         await waiter;
         readiness.EnsureReady();
+        readiness.EnsureMetadataRepairReady();
         Assert.True(readiness.Current.IsReady);
         Assert.Equal(LibraryFilesystemInitializationStatus.Ready, readiness.Current.Status);
     }

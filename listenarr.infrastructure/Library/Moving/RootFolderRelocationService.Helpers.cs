@@ -92,7 +92,9 @@ public sealed partial class RootFolderRelocationService
                         sourceSemantics.Syntax,
                         out storedSyntax))
                 {
-                    invalidStoredBasePaths.Add(audiobook);
+                    // A syntactically unresolvable BasePath cannot be attributed to
+                    // this root safely. Do not claim unrelated broken metadata as a
+                    // skipped item for this relocation.
                     continue;
                 }
             }
@@ -111,7 +113,8 @@ public sealed partial class RootFolderRelocationService
             }
             catch (ArgumentException)
             {
-                invalidStoredBasePaths.Add(audiobook);
+                // Canonicalization failure leaves root ownership unknown. Preserve
+                // the audiobook unchanged without claiming it for this relocation.
                 continue;
             }
 
@@ -139,7 +142,8 @@ public sealed partial class RootFolderRelocationService
             }
             catch (ArgumentException)
             {
-                invalidStoredBasePaths.Add(audiobook);
+                // Boundary comparison failure is not evidence that this audiobook
+                // belongs to the relocating root.
             }
         }
 
@@ -303,42 +307,30 @@ public sealed partial class RootFolderRelocationService
         FileSystemPathSemantics targetSemantics,
         CancellationToken cancellationToken)
     {
-        if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
-                relocation.SourcePath,
-                out var canonicalSourcePath,
-                out var sourcePathReason))
-        {
-            foreach (var skippedItem in relocation.SkippedItems)
-            {
-                skippedItem.Reason = sourcePathReason;
-            }
-
-            return;
-        }
-
-        var sourceResolution = await semanticsResolver.ResolveAsync(
-            canonicalSourcePath,
-            relocation.SourceCaseSensitivityMode,
-            cancellationToken);
-        if (sourceResolution.State != PathIdentityState.Valid)
-        {
-            var reason = sourceResolution.Reason
-                ?? "Source filesystem identity is unavailable.";
-            foreach (var skippedItem in relocation.SkippedItems)
-            {
-                skippedItem.Reason = reason;
-            }
-
-            return;
-        }
-
         var skippedItems = relocation.SkippedItems.ToList();
         var audiobookIds = skippedItems.Select(item => item.AudiobookId).ToList();
         var audiobooks = await db.Audiobooks
             .Include(audiobook => audiobook.Files)
             .Where(audiobook => audiobookIds.Contains(audiobook.Id))
             .ToDictionaryAsync(audiobook => audiobook.Id, cancellationToken);
+        await db.AudiobookFiles.LoadAsync(cancellationToken);
 
+        if (!TryResolvePersistedRelocationSourceSemantics(
+                relocation,
+                out var sourceSemantics,
+                out var sourceReason))
+        {
+            foreach (var skippedItem in skippedItems)
+            {
+                skippedItem.Reason = EncodeMetadataSkipReason(
+                    RootFolderRelocationSkipReasonCode.SourceSemanticsUnavailable,
+                    sourceReason);
+            }
+
+            return;
+        }
+
+        var retryCandidates = new List<AudiobookPathCandidate>();
         var resolvedCount = 0;
         foreach (var skippedItem in skippedItems)
         {
@@ -352,33 +344,53 @@ public sealed partial class RootFolderRelocationService
 
             if (string.IsNullOrWhiteSpace(audiobook.BasePath))
             {
-                skippedItem.Reason = "Audiobook no longer has a base path to rewrite.";
+                skippedItem.Reason = EncodeMetadataSkipReason(
+                    RootFolderRelocationSkipReasonCode.InvalidStoredPath,
+                    "Audiobook no longer has a base path to rewrite.");
                 continue;
             }
 
-            try
+            retryCandidates.Add(new AudiobookPathCandidate(
+                audiobook,
+                audiobook.BasePath!));
+        }
+
+        var now = timeProvider.GetUtcNow();
+        var planning = PlanMetadataPathRewrites(
+            db,
+            retryCandidates,
+            relocation.SourcePath,
+            relocation.TargetPath,
+            sourceSemantics,
+            targetSemantics,
+            relocation.TargetCaseSensitivityMode,
+            now);
+        var remainingReasons = planning.SkippedItems.ToDictionary(
+            item => item.AudiobookId);
+        foreach (var plan in planning.SafePlans)
+        {
+            AudiobookPathReferenceRewriter.Rewrite(
+                plan.Candidate.Audiobook,
+                plan.Candidate.StoredBasePath,
+                plan.Destination,
+                sourceSemantics,
+                targetSemantics,
+                relocation.TargetCaseSensitivityMode);
+            var skippedItem = skippedItems.Single(item =>
+                item.AudiobookId == plan.Candidate.Audiobook.Id);
+            relocation.SkippedItems.Remove(skippedItem);
+            db.RootFolderRelocationSkippedItems.Remove(skippedItem);
+            resolvedCount++;
+        }
+
+        RejectDuplicateAudiobookFileOwnership(db);
+        foreach (var skippedItem in relocation.SkippedItems)
+        {
+            if (remainingReasons.TryGetValue(
+                    skippedItem.AudiobookId,
+                    out var plannedSkip))
             {
-                var sourceBasePath = audiobook.BasePath!;
-                var destinationBasePath = MapTargetPath(
-                    relocation.SourcePath,
-                    relocation.TargetPath,
-                    sourceBasePath,
-                    sourceResolution.Semantics,
-                    targetSemantics);
-                AudiobookPathReferenceRewriter.Rewrite(
-                    audiobook,
-                    sourceBasePath,
-                    destinationBasePath,
-                    sourceResolution.Semantics,
-                    targetSemantics,
-                    relocation.TargetCaseSensitivityMode);
-                relocation.SkippedItems.Remove(skippedItem);
-                db.RootFolderRelocationSkippedItems.Remove(skippedItem);
-                resolvedCount++;
-            }
-            catch (InvalidOperationException ex)
-            {
-                skippedItem.Reason = ex.Message;
+                skippedItem.Reason = plannedSkip.Reason;
             }
         }
 
@@ -411,7 +423,10 @@ public sealed partial class RootFolderRelocationService
             ? relocation.TargetPath
             : relocation.SourcePath;
 
-    private static RootFolderPathChangeResult Map(RootFolderRelocation relocation, string currentPath) => new(
+    private static RootFolderPathChangeResult Map(
+        RootFolderRelocation relocation,
+        string currentPath,
+        bool canAbandon = false) => new(
         relocation.Id,
         relocation.RootFolderId,
         currentPath,
@@ -420,7 +435,20 @@ public sealed partial class RootFolderRelocationService
         relocation.TotalJobs,
         relocation.CompletedJobs,
         relocation.Error,
-        relocation.TargetIdentityEnrollmentState);
+        relocation.TargetIdentityEnrollmentState,
+        relocation.SkippedItems
+            .Select(item => item.AudiobookId)
+            .Distinct()
+            .OrderBy(id => id)
+            .ToArray(),
+        relocation.Mode,
+        relocation.SkippedItems
+            .OrderBy(item => item.AudiobookId)
+            .Select(item => new RootFolderRelocationSkippedItemResult(
+                item.AudiobookId,
+                ClassifyMetadataSkipReason(item.Reason)))
+            .ToArray(),
+        canAbandon);
 
     private async Task BroadcastAsync(
         RootFolderPathChangeResult result,

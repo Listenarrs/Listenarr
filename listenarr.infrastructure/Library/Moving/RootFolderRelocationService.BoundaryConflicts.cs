@@ -6,6 +6,16 @@ namespace Listenarr.Infrastructure.Library.Moving;
 
 public sealed partial class RootFolderRelocationService
 {
+    private static FileSystemPathSyntax? TryResolveMetadataSourceSyntaxHint(
+        RootFolderRelocationMode mode,
+        string targetPath) =>
+        mode == RootFolderRelocationMode.MetadataOnly
+            && FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+                targetPath,
+                out var targetSyntax)
+                ? targetSyntax
+                : null;
+
     private static async Task EnsureNoUnresolvedMoveConflictsAsync(
         ListenArrDbContext db,
         IReadOnlySet<int> affectedAudiobookIds,
@@ -72,62 +82,109 @@ public sealed partial class RootFolderRelocationService
         FileSystemPathSemantics targetSemantics,
         string boundaryPath,
         FileSystemCaseSensitivityMode boundaryMode,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        FileSystemPathSyntax? contextualBoundarySyntax = null)
     {
-        if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+        FileSystemPathSyntax boundarySyntax;
+        if (!FileSystemPathIdentity.TryDetectAbsoluteSyntax(
                 boundaryPath,
-                out var canonicalBoundaryPath,
-                out _))
+                out boundarySyntax))
         {
-            return true;
-        }
-
-        try
-        {
-            if (FileSystemPathIdentity.EvaluateBoundaryConflict(
-                    targetPath,
-                    targetSemantics,
-                    canonicalBoundaryPath,
-                    targetSemantics) != FileSystemPathBoundaryConflict.None)
+            if (!contextualBoundarySyntax.HasValue
+                || !FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+                    boundaryPath,
+                    contextualBoundarySyntax.Value,
+                    out boundarySyntax))
             {
                 return true;
             }
         }
+        if (boundarySyntax != targetSemantics.Syntax)
+        {
+            // Unambiguous Windows and Unix paths are different filesystem
+            // namespaces and cannot overlap even when one is foreign to this host.
+            return false;
+        }
+
+        string canonicalBoundaryPath;
+        try
+        {
+            canonicalBoundaryPath = FileSystemPathIdentity.Canonicalize(
+                boundaryPath,
+                boundarySyntax);
+        }
         catch (ArgumentException)
         {
-            return false;
+            return true;
+        }
+
+        var persistedSensitivity = boundaryMode switch
+        {
+            FileSystemCaseSensitivityMode.Sensitive =>
+                FileSystemCaseSensitivity.Sensitive,
+            FileSystemCaseSensitivityMode.Insensitive =>
+                FileSystemCaseSensitivity.Insensitive,
+            _ => FileSystemCaseSensitivity.Unknown
+        };
+        if (persistedSensitivity != FileSystemCaseSensitivity.Unknown)
+        {
+            var persistedSemantics = new FileSystemPathSemantics(
+                boundarySyntax,
+                persistedSensitivity);
+            try
+            {
+                return FileSystemPathIdentity.EvaluateBoundaryConflict(
+                    targetPath,
+                    targetSemantics,
+                    canonicalBoundaryPath,
+                    persistedSemantics) != FileSystemPathBoundaryConflict.None;
+            }
+            catch (ArgumentException)
+            {
+                return true;
+            }
+        }
+
+        if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                boundaryPath,
+                out var hostBoundaryPath,
+                out _))
+        {
+            // Same-syntax Auto state cannot be resolved on this host, so retain
+            // the conservative overlap fence rather than borrowing host semantics.
+            return true;
         }
 
         FileSystemSemanticsResolution boundaryResolution;
         try
         {
             boundaryResolution = await semanticsResolver.ResolveAsync(
-                canonicalBoundaryPath,
+                hostBoundaryPath,
                 boundaryMode,
                 cancellationToken);
         }
         catch (ArgumentException)
         {
-            return false;
+            return true;
         }
         if (boundaryResolution.State == PathIdentityState.Valid)
         {
             return FileSystemPathIdentity.EvaluateBoundaryConflict(
                 targetPath,
                 targetSemantics,
-                canonicalBoundaryPath,
+                hostBoundaryPath,
                 boundaryResolution.Semantics) != FileSystemPathBoundaryConflict.None;
         }
 
-        // If an in-flight relocation boundary cannot be resolved, over-block
-        // case-only overlaps rather than allowing a second relocation to race it.
+        // If an in-flight same-syntax boundary cannot be resolved, over-block
+        // case-only overlaps rather than allowing a second mutation to race it.
         var insensitiveTargetSemantics = new FileSystemPathSemantics(
             targetSemantics.Syntax,
             FileSystemCaseSensitivity.Insensitive);
         return FileSystemPathIdentity.EvaluateBoundaryConflict(
             targetPath,
             insensitiveTargetSemantics,
-            canonicalBoundaryPath,
+            hostBoundaryPath,
             insensitiveTargetSemantics) != FileSystemPathBoundaryConflict.None;
     }
 }

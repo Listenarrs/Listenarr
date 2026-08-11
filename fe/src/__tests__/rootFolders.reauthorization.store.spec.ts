@@ -177,7 +177,7 @@ describe('root folder storage and relocation store actions', () => {
     })
   })
 
-  it('surfaces semantics-migration attention instead of reporting success', async () => {
+  it('returns metadata-only attention as a successful root repair', async () => {
     const current = {
       id: 3,
       name: 'Library',
@@ -201,11 +201,25 @@ describe('root folder storage and relocation store actions', () => {
         'The relocation requires attention. Review the affected move jobs and retry after resolving the underlying issue.',
       targetIdentityEnrollmentState: 'Authorized',
     })
-    vi.mocked(apiService.getRootFolders).mockResolvedValueOnce([updated])
+    const updatedWithAttention = {
+      ...updated,
+      activeRelocation: {
+        relocationId: 'relocation-semantics',
+        rootFolderId: 3,
+        currentPath: current.path,
+        targetPath: current.path,
+        status: 'NeedsAttention' as const,
+        totalJobs: 1,
+        completedJobs: 0,
+        error: 'The relocation requires attention.',
+        targetIdentityEnrollmentState: 'Authorized' as const,
+      },
+    }
+    vi.mocked(apiService.getRootFolders).mockResolvedValueOnce([updatedWithAttention])
     const store = useRootFoldersStore()
     store.folders = [current]
 
-    await expect(store.update(3, updated)).rejects.toThrow('relocation requires attention')
+    await expect(store.update(3, updated)).resolves.toEqual(updatedWithAttention)
 
     expect(apiService.updateRootFolder).not.toHaveBeenCalled()
     expect(apiService.getRootFolders).toHaveBeenCalledTimes(1)

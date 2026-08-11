@@ -67,7 +67,7 @@ public partial class RootFoldersController
             storage.Reason.ToString(),
             storage.Message,
             storage.CanConfirmCurrentFolder,
-            storage.CanChangePath,
+            storage.CanChangePath && active == null,
             storage.CanMutateFilesystem,
             storage.ConfirmationToken,
             root.CreatedAt,

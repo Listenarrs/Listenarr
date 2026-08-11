@@ -298,24 +298,54 @@ namespace Listenarr.Application.Downloads.Import
                                 continue;
                             }
 
-                            var destinationReservation = await destinationPlanner.PlanIdempotentOrUniqueAsync(file, destination, usedDestinations, destinationSemantics, ct);
-                            destination = destinationReservation.Path;
-                            var ownership = await audiobookFileService.CheckAudiobookFileOwnershipAsync(
-                                audiobook,
-                                destination,
-                                cancellationToken: ct);
-                            if (ownership.Outcome is not (
-                                    AudiobookFileOwnershipCheckOutcome.Available or
-                                    AudiobookFileOwnershipCheckOutcome.AlreadyOwnedByAudiobook))
+                            var requestedDestination = destination;
+                            ImportDestinationReservation? destinationReservation = null;
+                            AudiobookFileOwnershipCheckResult? ownership = null;
+                            while (true)
                             {
-                                results.Add(ImportResult.ImportFailure(completedFileAction, file, destination));
-                                logger.LogWarning(
-                                    "Blocked audio import because destination ownership is unavailable. Audiobook {AudiobookId}, Source {Source}, Destination {Destination}, Outcome {Outcome}, Reason {Reason}",
-                                    audiobook.Id,
+                                destinationReservation = await destinationPlanner.PlanIdempotentOrUniqueAsync(
                                     file,
+                                    requestedDestination,
+                                    usedDestinations,
+                                    destinationSemantics,
+                                    ct);
+                                destination = destinationReservation.Path;
+                                ownership = await audiobookFileService.CheckAudiobookFileOwnershipAsync(
+                                    audiobook,
                                     destination,
-                                    ownership.Outcome,
-                                    ownership.Reason);
+                                    cancellationToken: ct);
+                                if (ownership.Outcome is
+                                    AudiobookFileOwnershipCheckOutcome.Available or
+                                    AudiobookFileOwnershipCheckOutcome.AlreadyOwnedByAudiobook)
+                                {
+                                    break;
+                                }
+
+                                if (!destinationReservation.ReusesExistingFile)
+                                {
+                                    results.Add(ImportResult.ImportFailure(
+                                        completedFileAction,
+                                        file,
+                                        destination));
+                                    logger.LogWarning(
+                                        "Blocked audio import because destination ownership is unavailable. Audiobook {AudiobookId}, Source {Source}, Destination {Destination}, Outcome {Outcome}, Reason {Reason}",
+                                        audiobook.Id,
+                                        file,
+                                        destination,
+                                        ownership.Outcome,
+                                        ownership.Reason);
+                                    destinationReservation = null;
+                                    break;
+                                }
+
+                                // An existing byte-identical suffix may legitimately
+                                // belong to another audiobook. Exclude that occupied
+                                // path and continue planning instead of turning a safe
+                                // import into an ownership conflict.
+                                usedDestinations.Add(destination);
+                            }
+                            if (destinationReservation == null || ownership == null)
+                            {
                                 continue;
                             }
 

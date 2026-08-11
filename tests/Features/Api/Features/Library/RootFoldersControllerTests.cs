@@ -894,10 +894,93 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         }
 
         [Fact]
-        public async Task Update_SynchronousNeedsAttention_ReturnsRecoveryResultInsteadOfRootSuccess()
+        public async Task Update_MetadataOnlyNeedsAttention_ReturnsUpdatedRootWithActiveRepair()
         {
             var sourcePath = FileUtils.GetAbsolutePath("AttentionSourceRoot");
             var targetPath = FileUtils.GetAbsolutePath("AttentionTargetRoot");
+            var svc = new FakeService();
+            svc.Store.Add(new RootFolder
+            {
+                Id = 1,
+                Name = "Root",
+                Path = sourcePath,
+                CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto
+            });
+            var relocationId = Guid.NewGuid();
+            var relocationService = new Mock<IRootFolderRelocationService>();
+            var attention = new RootFolderPathChangeResult(
+                relocationId,
+                1,
+                targetPath,
+                targetPath,
+                RootFolderRelocationStatus.NeedsAttention,
+                2,
+                1,
+                "1 audiobook(s) could not have stored paths rewritten automatically.",
+                TargetIdentityEnrollmentState.Authorized);
+            relocationService.Setup(service => service.StartAsync(
+                    1,
+                    It.IsAny<RootFolderPathChangeCommand>(),
+                    It.IsAny<CancellationToken>()))
+                .Callback<int, RootFolderPathChangeCommand, CancellationToken>((_, command, _) =>
+                {
+                    var stored = svc.Store.Single();
+                    stored.Path = command.TargetPath;
+                    stored.Name = command.DesiredName;
+                })
+                .ReturnsAsync(attention);
+            relocationService.Setup(service => service.GetActiveForRootAsync(
+                    1,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new RootFolderRelocation
+                {
+                    Id = relocationId,
+                    RootFolderId = 1,
+                    ActiveRootFolderId = 1,
+                    SourcePath = sourcePath,
+                    TargetPath = targetPath,
+                    Mode = RootFolderRelocationMode.MetadataOnly,
+                    Status = RootFolderRelocationStatus.NeedsAttention,
+                    DesiredName = "Renamed"
+                });
+            relocationService.Setup(service => service.GetAsync(
+                    relocationId,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(attention);
+            var db = CreateDb();
+            var controller = new RootFoldersController(
+                svc,
+                _fakeQueue,
+                new EfAudiobookFileRepository(db),
+                new AudiobookRepository(db),
+                new LocalFileSystem(),
+                relocationService: relocationService.Object);
+
+            var result = await controller.Update(
+                1,
+                new RootFolder
+                {
+                    Id = 1,
+                    Name = "Renamed",
+                    Path = targetPath,
+                    CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto
+                });
+
+            var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(result);
+            var payload = Assert.IsType<RootFolderDto>(ok.Value);
+            Assert.Equal(targetPath, payload.Path);
+            Assert.Equal("Renamed", payload.Name);
+            Assert.NotNull(payload.ActiveRelocation);
+            Assert.Equal(
+                RootFolderRelocationStatus.NeedsAttention,
+                payload.ActiveRelocation!.Status);
+        }
+
+        [Fact]
+        public async Task Update_RelocateNeedsAttention_RemainsConflict()
+        {
+            var sourcePath = FileUtils.GetAbsolutePath("AttentionMoveSourceRoot");
+            var targetPath = FileUtils.GetAbsolutePath("AttentionMoveTargetRoot");
             var svc = new FakeService();
             svc.Store.Add(new RootFolder
             {
@@ -918,7 +1001,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                     sourcePath,
                     targetPath,
                     RootFolderRelocationStatus.NeedsAttention,
-                    0,
+                    1,
                     0,
                     $"Internal failure at {targetPath}",
                     TargetIdentityEnrollmentState.Authorized));
@@ -939,14 +1022,14 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                     Name = "Renamed",
                     Path = targetPath,
                     CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto
-                });
+                },
+                moveFiles: true);
 
             var conflict = Assert.IsType<Microsoft.AspNetCore.Mvc.ConflictObjectResult>(result);
             var payload = Assert.IsType<RootFolderPathChangeResult>(conflict.Value);
             Assert.Equal(relocationId, payload.RelocationId);
             Assert.Equal(RootFolderRelocationStatus.NeedsAttention, payload.Status);
             Assert.DoesNotContain(targetPath, payload.Error, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("requires attention", payload.Error!, StringComparison.OrdinalIgnoreCase);
         }
 
         [Fact]
@@ -1341,6 +1424,92 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         }
 
         [Fact]
+        public async Task ChangePath_MetadataOnly_RequiresMetadataRepairReadiness()
+        {
+            var readiness = new TestLibraryFilesystemReadiness();
+            readiness.SetFailed("Injected filesystem initialization failure.");
+            var targetPath = FileUtils.GetAbsolutePath("metadata-attention-target");
+            var sourcePath = FileUtils.GetAbsolutePath("metadata-attention-source");
+            var relocationId = Guid.NewGuid();
+            var relocationService = new Mock<IRootFolderRelocationService>();
+            relocationService.Setup(service => service.StartAsync(
+                    1,
+                    It.IsAny<RootFolderPathChangeCommand>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new RootFolderPathChangeResult(
+                    relocationId,
+                    1,
+                    targetPath,
+                    targetPath,
+                    RootFolderRelocationStatus.NeedsAttention,
+                    2,
+                    1,
+                    "1 audiobook(s) could not have stored paths rewritten automatically."));
+            using var db = CreateDb();
+            var controller = new RootFoldersController(
+                new FakeService(),
+                _fakeQueue,
+                new EfAudiobookFileRepository(db),
+                new AudiobookRepository(db),
+                new LocalFileSystem(),
+                relocationService: relocationService.Object,
+                filesystemReadiness: readiness,
+                filesystemMutationGate: readiness);
+
+            var exception = await Assert.ThrowsAsync<
+                Listenarr.Application.Common.Exceptions.ApplicationUnavailableException>(() =>
+                    controller.ChangePath(
+                        1,
+                        new RootFolderPathChangeRequest(
+                            targetPath,
+                            "metadataOnly",
+                            false,
+                            "Root",
+                            false,
+                            FileSystemCaseSensitivityMode.Auto,
+                            sourcePath),
+                        CancellationToken.None));
+
+            Assert.Equal("metadata_repair_initialization_failed", exception.Code);
+            relocationService.Verify(service => service.StartAsync(
+                It.IsAny<int>(),
+                It.IsAny<RootFolderPathChangeCommand>(),
+                It.IsAny<CancellationToken>()), Times.Never);
+        }
+
+        [Fact]
+        public async Task ChangePath_Relocate_StillRequiresFilesystemMutationReadiness()
+        {
+            var readiness = new TestLibraryFilesystemReadiness();
+            readiness.SetFailed("Injected filesystem initialization failure.");
+            var relocationService = new Mock<IRootFolderRelocationService>(MockBehavior.Strict);
+            using var db = CreateDb();
+            var controller = new RootFoldersController(
+                new FakeService(),
+                _fakeQueue,
+                new EfAudiobookFileRepository(db),
+                new AudiobookRepository(db),
+                new LocalFileSystem(),
+                relocationService: relocationService.Object,
+                filesystemReadiness: readiness,
+                filesystemMutationGate: readiness);
+
+            await Assert.ThrowsAsync<Listenarr.Application.Common.Exceptions.ApplicationUnavailableException>(() =>
+                controller.ChangePath(
+                    1,
+                    new RootFolderPathChangeRequest(
+                        FileUtils.GetAbsolutePath("relocate-gated-target"),
+                        "relocate",
+                        false,
+                        "Root",
+                        false,
+                        FileSystemCaseSensitivityMode.Auto,
+                        FileUtils.GetAbsolutePath("relocate-gated-source")),
+                    CancellationToken.None));
+            relocationService.VerifyNoOtherCalls();
+        }
+
+        [Fact]
         public async Task ChangePath_KnownRejectedState_ReturnsActionablePublicConflictWithoutInternalDetails()
         {
             const string secret = "C:\\private\\root-relocation-secret";
@@ -1382,6 +1551,99 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             Assert.Contains("path change in progress", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain(secret, json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("Internal relocation failure", json, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public async Task Update_KnownPathChangeConflict_PreservesLegacyBadRequestStatusWithStructuredMessage()
+        {
+            var sourcePath = FileUtils.GetAbsolutePath("legacy-known-source");
+            var targetPath = FileUtils.GetAbsolutePath("legacy-known-target");
+            var svc = new FakeService();
+            svc.Store.Add(new RootFolder
+            {
+                Id = 1,
+                Name = "Root",
+                Path = sourcePath
+            });
+            var relocationService = new Mock<IRootFolderRelocationService>();
+            relocationService.Setup(service => service.StartAsync(
+                    1,
+                    It.IsAny<RootFolderPathChangeCommand>(),
+                    It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new RootFolderPathChangeRejectedException(
+                    "root_folder_relocation_active",
+                    "This root folder already has a path change in progress.",
+                    "Internal relocation detail"));
+            using var db = CreateDb();
+            var controller = new RootFoldersController(
+                svc,
+                _fakeQueue,
+                new EfAudiobookFileRepository(db),
+                new AudiobookRepository(db),
+                new LocalFileSystem(),
+                relocationService: relocationService.Object);
+
+            var result = await controller.Update(
+                1,
+                new RootFolder
+                {
+                    Id = 1,
+                    Name = "Root",
+                    Path = targetPath
+                },
+                moveFiles: false);
+
+            var badRequest = Assert.IsType<Microsoft.AspNetCore.Mvc.BadRequestObjectResult>(result);
+            var json = JsonSerializer.Serialize(badRequest.Value);
+            Assert.Contains("root_folder_relocation_active", json, StringComparison.Ordinal);
+            Assert.Contains("path change in progress", json, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("Internal relocation detail", json, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public async Task Update_UnknownPathChangeState_PreservesLegacyBadRequestStatusWithoutInternalDetails()
+        {
+            const string secret = "C:\\private\\legacy-root-secret";
+            var sourcePath = FileUtils.GetAbsolutePath("legacy-unknown-source");
+            var targetPath = FileUtils.GetAbsolutePath("legacy-unknown-target");
+            var svc = new FakeService();
+            svc.Store.Add(new RootFolder
+            {
+                Id = 1,
+                Name = "Root",
+                Path = sourcePath
+            });
+            var relocationService = new Mock<IRootFolderRelocationService>();
+            relocationService.Setup(service => service.StartAsync(
+                    1,
+                    It.IsAny<RootFolderPathChangeCommand>(),
+                    It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new InvalidOperationException($"Unexpected internal state at {secret}"));
+            using var db = CreateDb();
+            var controller = new RootFoldersController(
+                svc,
+                _fakeQueue,
+                new EfAudiobookFileRepository(db),
+                new AudiobookRepository(db),
+                new LocalFileSystem(),
+                relocationService: relocationService.Object);
+
+            var result = await controller.Update(
+                1,
+                new RootFolder
+                {
+                    Id = 1,
+                    Name = "Root",
+                    Path = targetPath
+                },
+                moveFiles: false);
+
+            var badRequest = Assert.IsType<Microsoft.AspNetCore.Mvc.BadRequestObjectResult>(result);
+            var json = JsonSerializer.Serialize(badRequest.Value);
+            Assert.Contains("root_folder_path_change_blocked", json, StringComparison.Ordinal);
+            Assert.Contains("storage or recovery state", json, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(secret, json, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("Unexpected internal state", json, StringComparison.OrdinalIgnoreCase);
         }
 
         [Fact]

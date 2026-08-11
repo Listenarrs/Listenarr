@@ -76,6 +76,185 @@ namespace Listenarr.Tests.Features.Application.Downloads.Import
         }
 
         [Fact]
+        public async Task ImportDestinationPlanner_RepeatedBatch_ReusesMatchingExistingSuffix()
+        {
+            var fileSystem = new Mock<IFileSystem>(MockBehavior.Strict);
+            var source = Path.Join(
+                Path.GetTempPath(),
+                $"planner-repeat-source-{Guid.NewGuid():N}.mp3");
+            var destination = Path.Join(
+                Path.GetTempPath(),
+                $"planner-repeat-destination-{Guid.NewGuid():N}.mp3");
+            var directory = Path.GetDirectoryName(destination)!;
+            var firstSuffix = Path.Join(
+                directory,
+                $"{Path.GetFileNameWithoutExtension(destination)} (1){Path.GetExtension(destination)}");
+            fileSystem.Setup(service => service.DirectoryExists(directory)).Returns(true);
+            fileSystem.Setup(service => service.EnumerateFiles(directory))
+                .Returns([destination, firstSuffix]);
+            fileSystem.Setup(service => service.FilesHaveSameContentAsync(
+                    source,
+                    destination,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(false);
+            fileSystem.Setup(service => service.FilesHaveSameContentAsync(
+                    source,
+                    firstSuffix,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(true);
+            var planner = new ImportDestinationPlanner(fileSystem.Object);
+            var semantics = FileSystemPathSemantics.CurrentHostDefault;
+
+            var reservation = await planner.PlanIdempotentOrUniqueAsync(
+                source,
+                destination,
+                new HashSet<string>(semantics.Comparer),
+                semantics);
+
+            Assert.Equal(firstSuffix, reservation.Path);
+            fileSystem.VerifyAll();
+        }
+
+        [Fact]
+        public async Task ImportDestinationPlanner_RepeatedBatch_ReusesMatchingSuffixAcrossGap()
+        {
+            var fileSystem = new Mock<IFileSystem>(MockBehavior.Strict);
+            var source = Path.Join(
+                Path.GetTempPath(),
+                $"planner-gap-source-{Guid.NewGuid():N}.mp3");
+            var destination = Path.Join(
+                Path.GetTempPath(),
+                $"planner-gap-destination-{Guid.NewGuid():N}.mp3");
+            var directory = Path.GetDirectoryName(destination)!;
+            var secondSuffix = Path.Join(
+                directory,
+                $"{Path.GetFileNameWithoutExtension(destination)} (2){Path.GetExtension(destination)}");
+            fileSystem.Setup(service => service.DirectoryExists(directory)).Returns(true);
+            fileSystem.Setup(service => service.EnumerateFiles(directory))
+                .Returns([destination, secondSuffix]);
+            fileSystem.Setup(service => service.FilesHaveSameContentAsync(
+                    source,
+                    destination,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(false);
+            fileSystem.Setup(service => service.FilesHaveSameContentAsync(
+                    source,
+                    secondSuffix,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(true);
+            var planner = new ImportDestinationPlanner(fileSystem.Object);
+            var semantics = FileSystemPathSemantics.CurrentHostDefault;
+
+            var reservation = await planner.PlanIdempotentOrUniqueAsync(
+                source,
+                destination,
+                new HashSet<string>(semantics.Comparer),
+                semantics);
+
+            Assert.Equal(secondSuffix, reservation.Path);
+            fileSystem.VerifyAll();
+        }
+
+        [Fact]
+        public async Task ImportDownloadFilesAsync_ReplayedCompletedSource_ReusesPriorMatchingSuffixWithoutDuplicateRow()
+        {
+            var basePath = FileService.GetTempDirectory("download-import-idempotent-replay");
+            var sourceDirectory = FileService.GetTempDirectory("download-import-idempotent-source");
+            var sourceFile = await FileService.GetFileAsync(
+                sourceDirectory,
+                "incoming.mp3",
+                "same-completed-download-content");
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Replay Book")
+                .WithBasePath(basePath)
+                .Build());
+            await FileService.GetFileAsync(
+                basePath,
+                "Replay Book.mp3",
+                "different-existing-library-content");
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
+                .WithCopyFileOnCompleted()
+                .WithoutMetadataProcessing()
+                .WithFolderNamingPattern("")
+                .WithFileNamingPattern("{Title}")
+                .WithMultiFileNamingPattern("{Title}")
+                .Build());
+            var service = _provider.GetRequiredService<IDownloadImportService>();
+
+            var first = Assert.Single(await service.ImportDownloadFilesAsync(
+                audiobook,
+                [sourceFile]));
+            var second = Assert.Single(await service.ImportDownloadFilesAsync(
+                audiobook,
+                [sourceFile]));
+
+            var expectedSuffix = Path.Join(basePath, "Replay Book (1).mp3");
+            Assert.True(first.Success);
+            Assert.True(second.Success);
+            Assert.Equal(expectedSuffix, first.FinalPath);
+            Assert.Equal(expectedSuffix, second.FinalPath);
+            Assert.True(File.Exists(expectedSuffix));
+            Assert.False(File.Exists(Path.Join(basePath, "Replay Book (2).mp3")));
+            var tracked = await _audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id);
+            var imported = Assert.Single(tracked);
+            Assert.Equal(expectedSuffix, imported.Path);
+        }
+
+        [Fact]
+        public async Task ImportDownloadFilesAsync_MatchingSuffixOwnedByOtherAudiobook_UsesNextFreeSuffix()
+        {
+            var basePath = FileService.GetTempDirectory("download-import-owned-replay");
+            var sourceDirectory = FileService.GetTempDirectory("download-import-owned-replay-source");
+            var sourceFile = await FileService.GetFileAsync(
+                sourceDirectory,
+                "incoming.mp3",
+                "shared-source-content");
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Replay Book")
+                .WithBasePath(basePath)
+                .Build());
+            var otherAudiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Other Owner")
+                .WithBasePath(basePath)
+                .Build());
+            await FileService.GetFileAsync(
+                basePath,
+                "Replay Book.mp3",
+                "different-existing-library-content");
+            var ownedSuffix = await FileService.GetFileAsync(
+                basePath,
+                "Replay Book (1).mp3",
+                "shared-source-content");
+            Assert.True(await _provider
+                .GetRequiredService<IAudiobookFileService>()
+                .EnsureAudiobookFileAsync(otherAudiobook, ownedSuffix, "test"));
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
+                .WithCopyFileOnCompleted()
+                .WithoutMetadataProcessing()
+                .WithFolderNamingPattern("")
+                .WithFileNamingPattern("{Title}")
+                .WithMultiFileNamingPattern("{Title}")
+                .Build());
+
+            var result = Assert.Single(await _provider
+                .GetRequiredService<IDownloadImportService>()
+                .ImportDownloadFilesAsync(audiobook, [sourceFile]));
+
+            var expected = Path.Join(basePath, "Replay Book (2).mp3");
+            Assert.True(result.Success);
+            Assert.Equal(expected, result.FinalPath);
+            Assert.True(File.Exists(expected));
+            Assert.Equal(
+                ownedSuffix,
+                Assert.Single(await _audiobookFileRepository
+                    .GetByAudiobookIdAsync(otherAudiobook.Id)).Path);
+            Assert.Equal(
+                expected,
+                Assert.Single(await _audiobookFileRepository
+                    .GetByAudiobookIdAsync(audiobook.Id)).Path);
+        }
+
+        [Fact]
         public async Task ImportDownloadFilesAsync_UnresolvedMoveExecution_BlocksBeforeDestinationPlanning()
         {
             var basePath = FileService.GetTempDirectory("download-import-unresolved-move");

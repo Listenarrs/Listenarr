@@ -326,6 +326,39 @@ export interface RootFolder {
   activeRelocation?: RootFolderPathChangeResult | null
 }
 
+export type RootFolderRelocationSkipReasonCode =
+  | 'Unknown'
+  | 'InvalidStoredPath'
+  | 'SourceSemanticsUnavailable'
+  | 'TargetPathInvalid'
+  | 'TargetIdentityCollision'
+  | 'TargetIdentityUnresolvedConflict'
+
+export interface RootFolderRelocationSkippedItem {
+  audiobookId: number
+  reasonCode: RootFolderRelocationSkipReasonCode
+}
+
+export interface RootFolderMetadataRepairCollisionFile {
+  audiobookFileId: number
+  audiobookId: number
+  relativePath: string
+  canRemove: boolean
+}
+
+export interface RootFolderMetadataRepairCollisionGroup {
+  targetRelativePath: string
+  files: RootFolderMetadataRepairCollisionFile[]
+}
+
+export interface RootFolderMetadataRepairDetails {
+  relocationId: string
+  audiobookId: number
+  audiobookTitle: string
+  reasonCode: RootFolderRelocationSkipReasonCode
+  collisionGroups: RootFolderMetadataRepairCollisionGroup[]
+}
+
 export interface RootFolderPathChangeResult {
   relocationId?: string | null
   rootFolderId: number | null
@@ -336,6 +369,10 @@ export interface RootFolderPathChangeResult {
   completedJobs: number
   error?: string | null
   targetIdentityEnrollmentState: 'NotRequired' | 'Authorized' | 'Unavailable'
+  skippedAudiobookIds?: number[] | null
+  mode?: 'Relocate' | 'MetadataOnly'
+  skippedItems?: RootFolderRelocationSkippedItem[] | null
+  canAbandon?: boolean
 }
 
 export interface TranslatePathRequest {

@@ -125,6 +125,12 @@ internal static class AudiobookPathReferenceRewriter
                     physicalObjectIdentity,
                     targetPhysicalIdentityObservedAtUtc!.Value);
             }
+            else
+            {
+                // A metadata-only rewrite has no proof that the target pathname
+                // identifies the same physical generation as the old source.
+                file.ClearPhysicalObjectIdentity();
+            }
         }
 
         audiobook.BasePath = targetBasePath;

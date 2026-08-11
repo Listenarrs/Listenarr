@@ -91,6 +91,15 @@ public partial class MoveQueueService
         bool allowActiveDeletionIntent,
         CancellationToken cancellationToken)
     {
+        if (await _relocationService.IsAudiobookPathStateProtectedAsync(
+                audiobookId,
+                cancellationToken))
+        {
+            throw new ApplicationConflictException(
+                "root_folder_relocation_active",
+                "An active root-folder path repair still owns this audiobook's path state. Resolve or retry that repair before changing the audiobook's files.");
+        }
+
         if (_fileRenameRecoveryProbe != null
             && await _fileRenameRecoveryProbe.HasBlockingAsync(
                 audiobookId,

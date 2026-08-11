@@ -36,6 +36,20 @@ internal sealed class TestLibraryFilesystemReadiness :
             Current.ErrorMessage ?? "Filesystem initialization is not ready.");
     }
 
+    public void EnsureMetadataRepairReady()
+    {
+        if (Current.IsReady)
+        {
+            return;
+        }
+
+        throw new ApplicationUnavailableException(
+            Current.Status == LibraryFilesystemInitializationStatus.Failed
+                ? "metadata_repair_initialization_failed"
+                : "metadata_repair_initializing",
+            Current.ErrorMessage ?? "Filesystem initialization is not ready for metadata repair.");
+    }
+
     public void SetRunning(string phase = "Test") =>
         Current = new LibraryFilesystemReadinessSnapshot(
             LibraryFilesystemInitializationStatus.Running,

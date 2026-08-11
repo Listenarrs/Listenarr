@@ -75,9 +75,6 @@
                       Initialization failed
                     </Pill>
                     <Pill v-else variant="subtle">{{ folder.resolvedCaseSensitivity }}</Pill>
-                    <Pill v-if="folder.activeRelocation" variant="warning">
-                      {{ folder.activeRelocation.status }}
-                    </Pill>
                   </div>
                 </div>
               </div>
@@ -119,6 +116,7 @@
                   class="icon-button action-secondary"
                   @click="setDefaultFolder(folder)"
                   title="Set as Default"
+                  :disabled="!!folder.activeRelocation"
                 >
                   <PhStar />
                 </button>
@@ -143,23 +141,186 @@
             >
               {{ folder.storageMessage }}
             </p>
-            <div v-if="folder.activeRelocation" class="relocation-state">
-              <span>
-                Pending path: <code>{{ folder.activeRelocation.targetPath }}</code> ({{
-                  folder.activeRelocation.completedJobs
-                }}/{{ folder.activeRelocation.totalJobs }})
-              </span>
-              <button
-                v-if="canRetryRelocation(folder)"
-                type="button"
-                :disabled="filesystemReadinessStore.filesystemReady === false"
-                class="btn btn-secondary"
-                @click="retryRelocation(folder)"
+            <section
+              v-if="folder.activeRelocation"
+              class="relocation-state"
+              :class="{ 'needs-attention': folder.activeRelocation.status === 'NeedsAttention' }"
+            >
+              <div class="relocation-header">
+                <div class="relocation-heading">
+                  <PhWarningCircle
+                    v-if="
+                      folder.activeRelocation.status === 'NeedsAttention' ||
+                      folder.activeRelocation.status === 'Failed'
+                    "
+                    class="relocation-icon"
+                  />
+                  <PhSpinner v-else class="ph-spin relocation-icon" />
+                  <div>
+                    <strong>{{ relocationTitle(folder.activeRelocation) }}</strong>
+                    <span class="relocation-progress-copy">
+                      {{ relocationProgressLabel(folder.activeRelocation) }}
+                    </span>
+                  </div>
+                </div>
+                <div
+                  v-if="canRetryRelocation(folder) || folder.activeRelocation.canAbandon"
+                  class="relocation-actions"
+                >
+                  <button
+                    v-if="canRetryRelocation(folder)"
+                    type="button"
+                    :disabled="
+                      retryingRelocationId === folder.activeRelocation.relocationId ||
+                      abandoningRelocationId === folder.activeRelocation.relocationId ||
+                      filesystemReadinessStore.filesystemReady === false
+                    "
+                    class="btn btn-secondary relocation-retry"
+                    @click="retryRelocation(folder)"
+                  >
+                    <PhSpinner
+                      v-if="retryingRelocationId === folder.activeRelocation.relocationId"
+                      class="ph-spin"
+                    />
+                    {{
+                      retryingRelocationId === folder.activeRelocation.relocationId
+                        ? 'Retrying...'
+                        : folder.activeRelocation.mode === 'MetadataOnly'
+                          ? folder.activeRelocation.status === 'Failed'
+                            ? 'Retry repair'
+                            : 'Retry remaining'
+                          : 'Retry'
+                    }}
+                  </button>
+                  <button
+                    v-if="folder.activeRelocation.canAbandon"
+                    type="button"
+                    class="btn btn-secondary relocation-retry"
+                    :disabled="
+                      abandoningRelocationId === folder.activeRelocation.relocationId ||
+                      retryingRelocationId === folder.activeRelocation.relocationId ||
+                      filesystemReadinessStore.filesystemReady === false
+                    "
+                    @click="confirmAbandonRelocation(folder)"
+                  >
+                    <PhSpinner
+                      v-if="abandoningRelocationId === folder.activeRelocation.relocationId"
+                      class="ph-spin"
+                    />
+                    {{
+                      abandoningRelocationId === folder.activeRelocation.relocationId
+                        ? 'Canceling...'
+                        : 'Cancel unfinished'
+                    }}
+                  </button>
+                </div>
+              </div>
+
+              <div
+                class="relocation-progress"
+                role="progressbar"
+                aria-label="Root folder path change progress"
+                aria-valuemin="0"
+                aria-valuemax="100"
+                :aria-valuenow="relocationProgressPercent(folder.activeRelocation)"
               >
-                Retry
-              </button>
-              <p v-if="folder.activeRelocation.error">{{ folder.activeRelocation.error }}</p>
-            </div>
+                <span
+                  class="relocation-progress-bar"
+                  :style="{ width: `${relocationProgressPercent(folder.activeRelocation)}%` }"
+                />
+              </div>
+
+              <p class="relocation-description">
+                {{ relocationDescription(folder.activeRelocation) }}
+              </p>
+
+              <p v-if="showRelocationTarget(folder)" class="relocation-target">
+                Destination: <code>{{ folder.activeRelocation.targetPath }}</code>
+              </p>
+
+              <details
+                v-if="folder.activeRelocation.skippedAudiobookIds?.length"
+                class="relocation-affected"
+              >
+                <summary>
+                  {{ folder.activeRelocation.skippedAudiobookIds.length }}
+                  {{
+                    folder.activeRelocation.skippedAudiobookIds.length === 1
+                      ? 'audiobook needs attention'
+                      : 'audiobooks need attention'
+                  }}
+                </summary>
+                <div class="relocation-audiobooks">
+                  <div
+                    v-for="audiobookId in folder.activeRelocation.skippedAudiobookIds"
+                    :key="audiobookId"
+                    class="relocation-audiobook-item"
+                  >
+                    <div class="relocation-audiobook-row">
+                      <a :href="`/audiobooks/${audiobookId}`" class="relocation-audiobook-link">
+                        Audiobook #{{ audiobookId }}
+                      </a>
+                      <span class="relocation-audiobook-reason">
+                        {{ skippedReasonLabel(folder.activeRelocation, audiobookId) }}
+                      </span>
+                      <button
+                        v-if="canReviewSkippedRepair(folder.activeRelocation)"
+                        type="button"
+                        class="btn btn-secondary relocation-review"
+                        :disabled="loadingRepairAudiobookId === audiobookId"
+                        @click="loadMetadataRepairDetails(folder.activeRelocation, audiobookId)"
+                      >
+                        <PhSpinner
+                          v-if="loadingRepairAudiobookId === audiobookId"
+                          class="ph-spin"
+                        />
+                        {{ loadingRepairAudiobookId === audiobookId ? 'Loading...' : 'Review' }}
+                      </button>
+                    </div>
+
+                    <div v-if="metadataRepairDetails[audiobookId]" class="metadata-repair-details">
+                      <strong>{{ metadataRepairDetails[audiobookId].audiobookTitle }}</strong>
+                      <p v-if="metadataRepairDetails[audiobookId].collisionGroups.length === 0">
+                        No remaining conflicting tracked file records were found. Retry the path
+                        repair to finish updating this audiobook.
+                      </p>
+                      <div
+                        v-for="group in metadataRepairDetails[audiobookId].collisionGroups"
+                        :key="group.targetRelativePath"
+                        class="metadata-repair-collision"
+                      >
+                        <p>
+                          These records would refer to the same destination:
+                          <code>{{ group.targetRelativePath }}</code>
+                        </p>
+                        <div
+                          v-for="file in group.files"
+                          :key="file.audiobookFileId"
+                          class="metadata-repair-file"
+                        >
+                          <div class="metadata-repair-file-label">
+                            <code>{{ file.relativePath }}</code>
+                            <span v-if="!file.canRemove">
+                              Tracked by Audiobook #{{ file.audiobookId }}
+                            </span>
+                          </div>
+                          <button
+                            v-if="file.canRemove"
+                            type="button"
+                            class="btn btn-secondary"
+                            @click="
+                              confirmRemoveTrackedFile(folder.activeRelocation, audiobookId, file)
+                            "
+                          >
+                            Remove tracked record
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </details>
+            </section>
           </div>
         </div>
       </div>
@@ -187,6 +348,48 @@
           >?
         </p>
         <p>This will only remove the reference and will not delete files from disk.</p>
+      </template>
+    </DeleteConfirmationModal>
+
+    <DeleteConfirmationModal
+      :visible="relocationToAbandon !== null"
+      title="Cancel unfinished relocation"
+      confirm-text="Cancel relocation"
+      @close="relocationToAbandon = null"
+      @confirm="abandonUnpublishedRelocation"
+    >
+      <template #default>
+        <p>
+          Cancel the unfinished relocation for
+          <strong>{{ relocationToAbandon?.rootName }}</strong
+          >?
+        </p>
+        <p>
+          No audiobook move jobs were published. Listenarr will release this failed relocation and
+          remove only empty destination directories it can still prove it created. It will not move
+          or delete audiobook files, and any unproven or non-empty destination directory will be
+          left in place.
+        </p>
+      </template>
+    </DeleteConfirmationModal>
+
+    <DeleteConfirmationModal
+      :visible="repairFileToRemove !== null"
+      title="Remove tracked file record"
+      confirm-text="Remove record"
+      @close="repairFileToRemove = null"
+      @confirm="removeTrackedRepairFile"
+    >
+      <template #default>
+        <p>
+          Remove <code>{{ repairFileToRemove?.relativePath }}</code> from this audiobook's tracked
+          file records?
+        </p>
+        <p>
+          This changes Listenarr metadata only. It does <strong>not</strong> delete or rename any
+          file on disk. Use this only when this tracked record is stale or should no longer belong
+          to the audiobook.
+        </p>
       </template>
     </DeleteConfirmationModal>
 
@@ -233,6 +436,8 @@ import DeleteConfirmationModal from '@/components/feedback/DeleteConfirmationMod
 import UnmatchedFilesModal from '@/components/feedback/UnmatchedFilesModal.vue'
 import { useToast } from '@/services/toastService'
 import { errorTracking } from '@/services/errorTracking'
+import { apiService } from '@/services/api'
+import { getApiValidationError } from '@/services/apiErrors'
 import { Pill } from '@/components/base'
 import {
   PhFolder,
@@ -243,8 +448,15 @@ import {
   PhStar,
   PhMagnifyingGlass,
   PhShieldCheck,
+  PhWarningCircle,
 } from '@phosphor-icons/vue'
-import type { RootFolder } from '@/types'
+import type {
+  RootFolder,
+  RootFolderMetadataRepairCollisionFile,
+  RootFolderMetadataRepairDetails,
+  RootFolderPathChangeResult,
+  RootFolderRelocationSkipReasonCode,
+} from '@/types'
 import { signalRService } from '@/services/signalr'
 
 interface Props {
@@ -263,6 +475,20 @@ const showUnmatchedModal = ref(false)
 const scanningFolder = ref<RootFolder | null>(null)
 const editingRoot = computed(() => editing.value as RootFolder | undefined)
 const toast = useToast()
+const retryingRelocationId = ref<string | null>(null)
+const abandoningRelocationId = ref<string | null>(null)
+const relocationToAbandon = ref<{
+  relocationId: string
+  rootName: string
+} | null>(null)
+const loadingRepairAudiobookId = ref<number | null>(null)
+const metadataRepairDetails = ref<Record<number, RootFolderMetadataRepairDetails>>({})
+const repairFileToRemove = ref<{
+  relocationId: string
+  audiobookId: number
+  audiobookFileId: number
+  relativePath: string
+} | null>(null)
 const rootToConfirm = ref<{
   id: number
   name: string
@@ -338,7 +564,7 @@ const executeDeleteFolder = async () => {
 }
 
 const setDefaultFolder = async (folder: RootFolder) => {
-  if (!folder.id) return
+  if (!folder.id || folder.activeRelocation) return
   try {
     await store.update(folder.id, { ...folder, isDefault: true })
     toast.success('Root folder', `${folder.name} set as default`)
@@ -385,22 +611,246 @@ async function executeFolderConfirmation() {
   }
 }
 
-const retryRelocation = async (folder: RootFolder) => {
-  const relocationId = folder.activeRelocation?.relocationId
-  if (!relocationId) return
+function skippedReasonCode(
+  relocation: RootFolderPathChangeResult,
+  audiobookId: number,
+): RootFolderRelocationSkipReasonCode {
+  return (
+    relocation.skippedItems?.find((item) => item.audiobookId === audiobookId)?.reasonCode ??
+    'Unknown'
+  )
+}
+
+function skippedReasonLabel(relocation: RootFolderPathChangeResult, audiobookId: number): string {
+  switch (skippedReasonCode(relocation, audiobookId)) {
+    case 'TargetIdentityCollision':
+      return 'Tracked file paths collide at this destination.'
+    case 'TargetIdentityUnresolvedConflict':
+      return 'A destination file identity is unresolved.'
+    case 'InvalidStoredPath':
+      return 'Stored audiobook paths need repair.'
+    case 'SourceSemanticsUnavailable':
+      return 'The old path semantics could not be reconstructed.'
+    case 'TargetPathInvalid':
+      return 'One or more stored paths are invalid for this destination.'
+    default:
+      return 'Stored paths could not be updated safely.'
+  }
+}
+
+function canReviewSkippedRepair(relocation: RootFolderPathChangeResult): boolean {
+  return (
+    !!relocation.relocationId &&
+    relocation.mode === 'MetadataOnly' &&
+    relocation.status === 'NeedsAttention'
+  )
+}
+
+async function loadMetadataRepairDetails(
+  relocation: RootFolderPathChangeResult,
+  audiobookId: number,
+) {
+  if (!relocation.relocationId || loadingRepairAudiobookId.value !== null) return
+  loadingRepairAudiobookId.value = audiobookId
   try {
-    await store.retryRelocation(relocationId)
-    toast.success('Root relocation', 'Relocation queued for retry')
+    const details = await apiService.getRootFolderMetadataRepairDetails(
+      relocation.relocationId,
+      audiobookId,
+    )
+    metadataRepairDetails.value = {
+      ...metadataRepairDetails.value,
+      [audiobookId]: details,
+    }
+  } catch (error: unknown) {
+    toast.error(
+      'Unable to load path repair',
+      getApiValidationError(error)?.message ||
+        (error instanceof Error ? error.message : 'Failed to load path repair details'),
+    )
+  } finally {
+    loadingRepairAudiobookId.value = null
+  }
+}
+
+function confirmRemoveTrackedFile(
+  relocation: RootFolderPathChangeResult,
+  audiobookId: number,
+  file: RootFolderMetadataRepairCollisionFile,
+) {
+  if (!relocation.relocationId) return
+  repairFileToRemove.value = {
+    relocationId: relocation.relocationId,
+    audiobookId,
+    audiobookFileId: file.audiobookFileId,
+    relativePath: file.relativePath,
+  }
+}
+
+async function removeTrackedRepairFile() {
+  const pending = repairFileToRemove.value
+  if (!pending) return
+  try {
+    const details = await apiService.removeRootFolderMetadataRepairFile(
+      pending.relocationId,
+      pending.audiobookId,
+      pending.audiobookFileId,
+    )
+    metadataRepairDetails.value = {
+      ...metadataRepairDetails.value,
+      [pending.audiobookId]: details,
+    }
+    if (details.collisionGroups.length === 0) {
+      toast.success(
+        'Path conflict resolved',
+        'Retry the remaining path repair to update this audiobook.',
+      )
+    } else {
+      toast.success(
+        'Tracked record removed',
+        'Review the remaining conflicting records before retrying.',
+      )
+    }
+  } catch (error: unknown) {
+    toast.error(
+      'Unable to remove tracked record',
+      getApiValidationError(error)?.message ||
+        (error instanceof Error ? error.message : 'Failed to remove tracked file record'),
+    )
+  } finally {
+    repairFileToRemove.value = null
+  }
+}
+
+function relocationRemainingCount(relocation: RootFolderPathChangeResult): number {
+  if (relocation.mode === 'MetadataOnly' && relocation.skippedAudiobookIds?.length) {
+    return relocation.skippedAudiobookIds.length
+  }
+  return Math.max(0, relocation.totalJobs - relocation.completedJobs)
+}
+
+function relocationProgressPercent(relocation: RootFolderPathChangeResult): number {
+  if (relocation.totalJobs <= 0) return 0
+  return Math.min(100, Math.round((relocation.completedJobs / relocation.totalJobs) * 100))
+}
+
+function relocationTitle(relocation: RootFolderPathChangeResult): string {
+  if (relocation.status === 'NeedsAttention') {
+    return relocation.mode === 'MetadataOnly'
+      ? 'Path repair needs attention'
+      : 'Library move needs attention'
+  }
+  if (relocation.status === 'Failed') {
+    return relocation.mode === 'MetadataOnly' ? 'Path repair failed' : 'Path change failed'
+  }
+  return relocation.mode === 'MetadataOnly' ? 'Repairing audiobook paths' : 'Moving library'
+}
+
+function relocationProgressLabel(relocation: RootFolderPathChangeResult): string {
+  if (relocation.mode === 'MetadataOnly') {
+    return `${relocation.completedJobs} of ${relocation.totalJobs} audiobooks updated`
+  }
+  return `${relocation.completedJobs} of ${relocation.totalJobs} move jobs completed`
+}
+
+function relocationDescription(relocation: RootFolderPathChangeResult): string {
+  const remaining = relocationRemainingCount(relocation)
+  if (relocation.mode === 'MetadataOnly' && relocation.status === 'NeedsAttention') {
+    const subject = remaining === 1 ? 'audiobook still needs' : 'audiobooks still need'
+    return `The root folder path is updated. ${remaining} ${subject} manual review because the stored paths could not be updated safely. Open the affected audiobooks, correct the path conflicts, then retry.`
+  }
+  return (
+    relocation.error ||
+    (relocation.mode === 'MetadataOnly'
+      ? 'Listenarr is updating stored audiobook paths.'
+      : 'Listenarr is moving the library to the selected destination.')
+  )
+}
+
+function showRelocationTarget(folder: RootFolder): boolean {
+  const relocation = folder.activeRelocation
+  return (
+    !!relocation && (relocation.mode !== 'MetadataOnly' || folder.path !== relocation.targetPath)
+  )
+}
+
+function confirmAbandonRelocation(folder: RootFolder) {
+  const relocation = folder.activeRelocation
+  if (!relocation?.relocationId || !relocation.canAbandon) return
+  relocationToAbandon.value = {
+    relocationId: relocation.relocationId,
+    rootName: folder.name,
+  }
+}
+
+const abandonUnpublishedRelocation = async () => {
+  const pending = relocationToAbandon.value
+  if (!pending || abandoningRelocationId.value) return
+  relocationToAbandon.value = null
+  abandoningRelocationId.value = pending.relocationId
+  try {
+    await store.abandonUnpublishedRelocation(pending.relocationId)
+    toast.success(
+      'Root relocation canceled',
+      'No audiobook files were moved. Any unproven or non-empty destination directories were left in place.',
+    )
   } catch (e: unknown) {
-    toast.error('Retry failed', (e as Error)?.message || 'Failed to retry relocation')
+    toast.error(
+      'Cancel relocation failed',
+      getApiValidationError(e)?.message ||
+        (e instanceof Error ? e.message : 'Failed to cancel the unfinished relocation'),
+    )
+  } finally {
+    abandoningRelocationId.value = null
+  }
+}
+
+const retryRelocation = async (folder: RootFolder) => {
+  const relocation = folder.activeRelocation
+  const relocationId = relocation?.relocationId
+  if (!relocationId || retryingRelocationId.value) return
+  retryingRelocationId.value = relocationId
+  try {
+    const result = await store.retryRelocation(relocationId)
+    metadataRepairDetails.value = {}
+    if (result.status === 'Completed') {
+      toast.success(
+        'Root folder',
+        relocation.mode === 'MetadataOnly' ? 'Path repair complete' : 'Relocation complete',
+      )
+    } else if (result.status === 'Failed') {
+      toast.error(
+        relocation.mode === 'MetadataOnly' ? 'Path repair failed' : 'Root relocation failed',
+        result.error || 'The recovery attempt failed. Review the server logs and try again.',
+      )
+    } else if (relocation.mode === 'MetadataOnly') {
+      const remaining = relocationRemainingCount(result)
+      toast.warning(
+        'Path repair still needs attention',
+        `${remaining} ${remaining === 1 ? 'audiobook still needs' : 'audiobooks still need'} review.`,
+      )
+    } else {
+      toast.info('Root relocation', 'Relocation queued for retry')
+    }
+  } catch (e: unknown) {
+    toast.error(
+      'Retry failed',
+      getApiValidationError(e)?.message ||
+        (e instanceof Error ? e.message : 'Failed to retry relocation'),
+    )
+  } finally {
+    retryingRelocationId.value = null
   }
 }
 
 function canRetryRelocation(folder: RootFolder): boolean {
   const relocation = folder.activeRelocation
   return (
-    relocation?.status === 'NeedsAttention' &&
-    (relocation.targetIdentityEnrollmentState === 'Authorized' ||
+    !!relocation &&
+    !relocation.canAbandon &&
+    (relocation.status === 'NeedsAttention' ||
+      (relocation.mode === 'MetadataOnly' && relocation.status === 'Failed')) &&
+    (relocation.mode === 'MetadataOnly' ||
+      relocation.targetIdentityEnrollmentState === 'Authorized' ||
       relocation.targetIdentityEnrollmentState === 'NotRequired')
   )
 }
@@ -609,6 +1059,249 @@ defineExpose({
   color: var(--text-secondary);
   font-size: 0.85rem;
   line-height: 1.4;
+}
+
+.relocation-state {
+  margin: 0 1.5rem 1.5rem;
+  padding: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.relocation-state.needs-attention {
+  border-color: color-mix(in srgb, var(--warning-500) 42%, transparent);
+  background: color-mix(in srgb, var(--warning-500) 8%, transparent);
+}
+
+.relocation-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.relocation-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.relocation-heading strong {
+  display: block;
+  color: var(--text-primary, #fff);
+  font-size: 0.95rem;
+  line-height: 1.3;
+}
+
+.relocation-icon {
+  flex: 0 0 auto;
+  width: 1.25rem;
+  height: 1.25rem;
+  margin-top: 0.05rem;
+  color: var(--warning-500);
+}
+
+.relocation-progress-copy {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+
+.relocation-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 0 0 auto;
+}
+
+.relocation-retry {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  flex: 0 0 auto;
+  min-width: 8.25rem;
+  white-space: nowrap;
+}
+
+.relocation-retry svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.relocation-progress {
+  height: 5px;
+  margin-top: 0.9rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.relocation-progress-bar {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--info-600);
+  transition: width 0.25s ease;
+}
+
+.relocation-state.needs-attention .relocation-progress-bar {
+  background: var(--warning-500);
+}
+
+.relocation-description,
+.relocation-target {
+  margin: 0.85rem 0 0;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.relocation-target code {
+  color: var(--text-primary, #fff);
+  overflow-wrap: anywhere;
+}
+
+.relocation-affected {
+  margin-top: 0.9rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.relocation-affected summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--text-primary, #fff);
+  font-size: 0.85rem;
+  font-weight: 500;
+  user-select: none;
+}
+
+.relocation-affected summary:hover {
+  color: var(--warning-500);
+}
+
+.relocation-audiobooks {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 0.75rem;
+}
+
+.relocation-audiobook-item {
+  padding: 0.65rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.relocation-audiobook-row {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.relocation-audiobook-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.16);
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  text-decoration: none;
+}
+
+.relocation-audiobook-link:hover {
+  border-color: color-mix(in srgb, var(--warning-500) 55%, transparent);
+  color: var(--text-primary, #fff);
+}
+
+.relocation-audiobook-reason {
+  flex: 1 1 auto;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.relocation-review {
+  flex: 0 0 auto;
+  min-width: 5.5rem;
+}
+
+.metadata-repair-details {
+  margin-top: 0.7rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.metadata-repair-details > strong {
+  display: block;
+  margin-bottom: 0.45rem;
+  color: var(--text-primary, #fff);
+  font-size: 0.85rem;
+}
+
+.metadata-repair-details p {
+  margin: 0.45rem 0;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.metadata-repair-collision + .metadata-repair-collision {
+  margin-top: 0.8rem;
+}
+
+.metadata-repair-collision code,
+.metadata-repair-file code {
+  overflow-wrap: anywhere;
+  color: var(--text-primary, #fff);
+}
+
+.metadata-repair-file {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.4rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.metadata-repair-file-label {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.metadata-repair-file-label span {
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+}
+
+.metadata-repair-file .btn {
+  flex: 0 0 auto;
+  font-size: 0.75rem;
+}
+
+@media (max-width: 640px) {
+  .relocation-header {
+    flex-direction: column;
+  }
+
+  .relocation-actions {
+    width: 100%;
+    flex-direction: column;
+  }
+
+  .relocation-retry {
+    width: 100%;
+  }
 }
 
 .folder-actions {

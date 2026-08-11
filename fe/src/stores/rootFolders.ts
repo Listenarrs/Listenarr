@@ -103,16 +103,21 @@ export const useRootFoldersStore = defineStore('rootFolders', () => {
         throw new Error('Root folder storage change requires confirmation')
       }
 
+      const pathChangeMode =
+        hasPathChange && opts?.moveFiles !== false ? 'relocate' : 'metadataOnly'
       const result = await apiService.changeRootFolderPath(id, {
         targetPath: hasPathChange ? payload.path : current.path,
-        mode: hasPathChange && opts?.moveFiles !== false ? 'relocate' : 'metadataOnly',
+        mode: pathChangeMode,
         deleteEmptySource: hasPathChange && opts?.deleteEmptySource !== false,
         desiredName: payload.name,
         desiredIsDefault: payload.isDefault === true,
         targetCaseSensitivityMode: requestedMode,
         expectedCurrentPath: current.path,
       })
-      if (result.status === 'NeedsAttention' || result.status === 'Failed') {
+      if (
+        result.status === 'Failed' ||
+        (result.status === 'NeedsAttention' && pathChangeMode !== 'metadataOnly')
+      ) {
         pathChangeError =
           result.error ||
           (result.status === 'NeedsAttention'
@@ -141,6 +146,12 @@ export const useRootFoldersStore = defineStore('rootFolders', () => {
     return result
   }
 
+  async function abandonUnpublishedRelocation(relocationId: string) {
+    const result = await apiService.abandonUnpublishedRootFolderRelocation(relocationId)
+    await load()
+    return result
+  }
+
   async function retryRelocation(relocationId: string) {
     const result = await apiService.retryRootFolderRelocation(relocationId)
     await load()
@@ -161,6 +172,7 @@ export const useRootFoldersStore = defineStore('rootFolders', () => {
     create,
     update,
     confirmCurrentFolder,
+    abandonUnpublishedRelocation,
     retryRelocation,
     remove,
   }

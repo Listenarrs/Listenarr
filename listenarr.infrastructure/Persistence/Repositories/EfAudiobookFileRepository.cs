@@ -212,7 +212,11 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
                 .OrderBy(candidate => candidate.Id)
                 .ToListAsync(ct);
             var unresolved = unresolvedCandidates.FirstOrDefault(
-                candidate => UnresolvedIdentityOverlaps(candidate, identity));
+                candidate => AudiobookFileOwnershipValidator.UnresolvedIdentityOverlaps(
+                    candidate,
+                    identity.Syntax,
+                    identity.CaseSensitivity,
+                    identity.CanonicalPath));
             if (unresolved != null)
             {
                 var outcome = unresolved.PathIdentityState == PathIdentityState.Conflict
@@ -393,36 +397,6 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
             nameof(AudiobookFile.PhysicalIdentityVersion),
             nameof(AudiobookFile.PhysicalIdentityObservedAtUtc)
         ];
-
-        private static bool UnresolvedIdentityOverlaps(
-            AudiobookFile candidate,
-            AudiobookFilePathIdentity identity)
-        {
-            if (string.IsNullOrWhiteSpace(candidate.CanonicalPath)
-                || candidate.PathSyntax == null)
-            {
-                return true;
-            }
-
-            if (candidate.PathSyntax != identity.Syntax)
-            {
-                return false;
-            }
-
-            if (candidate.PathCaseSensitivity == FileSystemCaseSensitivity.Unknown)
-            {
-                return true;
-            }
-
-            var comparison = candidate.PathCaseSensitivity == FileSystemCaseSensitivity.Insensitive
-                || identity.CaseSensitivity == FileSystemCaseSensitivity.Insensitive
-                    ? StringComparison.OrdinalIgnoreCase
-                    : StringComparison.Ordinal;
-            return string.Equals(
-                candidate.CanonicalPath,
-                identity.CanonicalPath,
-                comparison);
-        }
 
         private static AudiobookFilePathIdentity ToIdentity(AudiobookFile file) =>
             new(

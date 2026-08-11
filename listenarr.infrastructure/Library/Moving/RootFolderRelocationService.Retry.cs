@@ -27,6 +27,7 @@ public sealed partial class RootFolderRelocationService
             CancellationToken cancellationToken)
     {
         bool hasOwnershipMigration;
+        bool requiresMetadataCompletionRecovery;
         await using (var preflight =
             await dbContextFactory.CreateDbContextAsync(cancellationToken))
         {
@@ -36,20 +37,45 @@ public sealed partial class RootFolderRelocationService
                 .Select(candidate => new
                 {
                     candidate.Status,
+                    candidate.Mode,
                     HasOwnershipMigration =
                         candidate.OwnershipPathMigrations.Count != 0
                 })
                 .SingleOrDefaultAsync(cancellationToken)
                 ?? throw new KeyNotFoundException(
                     "Root folder relocation not found");
-            if (state.Status !=
-                RootFolderRelocationStatus.NeedsAttention)
+            var retryableAttention =
+                state.Status == RootFolderRelocationStatus.NeedsAttention;
+            var retryableMetadataFailure =
+                state.Mode == RootFolderRelocationMode.MetadataOnly
+                && state.Status == RootFolderRelocationStatus.Failed;
+            if (!retryableAttention && !retryableMetadataFailure)
             {
                 throw new InvalidOperationException(
-                    "Only relocations needing attention can be retried.");
+                    "Only relocations needing attention or failed metadata repairs can be retried.");
+            }
+
+            if (state.Mode == RootFolderRelocationMode.MetadataOnly)
+            {
+                _filesystemReadiness.EnsureMetadataRepairReady();
+            }
+            else
+            {
+                EnsureFilesystemMutationReady();
             }
 
             hasOwnershipMigration = state.HasOwnershipMigration;
+            requiresMetadataCompletionRecovery =
+                state.Mode == RootFolderRelocationMode.MetadataOnly
+                && !hasOwnershipMigration
+                && state.Status == RootFolderRelocationStatus.Failed;
+        }
+
+        if (requiresMetadataCompletionRecovery)
+        {
+            return await RecoverCommittedMetadataOnlyRelocationAsync(
+                relocationId,
+                cancellationToken);
         }
 
         if (!hasOwnershipMigration)
@@ -84,8 +110,9 @@ public sealed partial class RootFolderRelocationService
         {
             throw new InvalidOperationException("Only relocations needing attention can be retried.");
         }
-        if (relocation.TargetIdentityEnrollmentState
-            == TargetIdentityEnrollmentState.Unavailable)
+        if (relocation.Mode == RootFolderRelocationMode.Relocate
+            && relocation.TargetIdentityEnrollmentState
+                == TargetIdentityEnrollmentState.Unavailable)
         {
             throw new InvalidOperationException(
                 "The relocation target identity is unavailable and cannot be retried safely.");
@@ -136,6 +163,31 @@ public sealed partial class RootFolderRelocationService
 
                 var unavailableResult = Map(relocation, unavailableRootPath ?? fallbackPath);
                 return unavailableResult;
+            }
+
+            if (relocation.Mode == RootFolderRelocationMode.MetadataOnly
+                && relocation.RootFolderId is int metadataRootId)
+            {
+                var repairedRoot = await db.RootFolders
+                    .SingleOrDefaultAsync(
+                        root => root.Id == metadataRootId,
+                        cancellationToken)
+                    ?? throw new InvalidOperationException(
+                        "The root folder no longer exists; this metadata repair cannot be retried.");
+                var persistedTargetSemantics =
+                    RootFolderPathSemantics.ResolvePersisted(repairedRoot)?.Semantics;
+                if (!persistedTargetSemantics.HasValue
+                    || persistedTargetSemantics.Value != targetResolution.Semantics)
+                {
+                    relocation.Status = RootFolderRelocationStatus.NeedsAttention;
+                    relocation.Error =
+                        "The target filesystem case semantics changed after the root repair. Confirm or repair the root folder before retrying skipped audiobooks.";
+                    relocation.UpdatedAt = now;
+                    await db.SaveChangesAsync(cancellationToken);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    await transaction.CommitAsync(CancellationToken.None);
+                    return Map(relocation, repairedRoot.Path);
+                }
             }
         }
 
@@ -260,7 +312,8 @@ public sealed partial class RootFolderRelocationService
         }
         else if (relocation.MoveJobs.Count == 0)
         {
-            if (relocation.TotalJobs > 0)
+            if (relocation.Mode == RootFolderRelocationMode.Relocate
+                && relocation.TotalJobs > 0)
             {
                 throw new InvalidOperationException(
                     "The relocation was interrupted before its persisted move jobs were published and cannot be retried automatically.");

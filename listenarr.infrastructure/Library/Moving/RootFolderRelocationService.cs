@@ -13,6 +13,7 @@ public sealed partial class RootFolderRelocationService(
     IFilesystemMutationCoordinator mutationCoordinator,
     IAudiobookOperationCoordinator audiobookOperationCoordinator,
     IServiceScopeFactory manifestScopeFactory,
+    ILibraryFilesystemReadiness filesystemReadiness,
     IDirectoryObjectIdentityResolver? directoryObjectIdentityResolver = null) : IRootFolderRelocationService
 {
     private readonly SemaphoreSlim _rootIdentityGate = new(1, 1);
@@ -143,6 +144,7 @@ public sealed partial class RootFolderRelocationService(
             .AsNoTracking()
             .Select(relocation => new
             {
+                relocation.Mode,
                 relocation.SourcePath,
                 relocation.SourceCaseSensitivityMode,
                 relocation.TargetPath,
@@ -153,13 +155,17 @@ public sealed partial class RootFolderRelocationService(
             RootBoundaryConflictsWithTarget(candidate, targetPath, targetIdentityKey, targetResolution.Semantics));
         foreach (var boundary in activeBoundaries)
         {
+            var sourceSyntaxHint = TryResolveMetadataSourceSyntaxHint(
+                boundary.Mode,
+                boundary.TargetPath);
             targetConflict = targetConflict
                 || await ActiveBoundaryConflictsWithTargetAsync(
                     targetPath,
                     targetResolution.Semantics,
                     boundary.SourcePath,
                     boundary.SourceCaseSensitivityMode,
-                    cancellationToken)
+                    cancellationToken,
+                    sourceSyntaxHint)
                 || await ActiveBoundaryConflictsWithTargetAsync(
                     targetPath,
                     targetResolution.Semantics,
@@ -187,10 +193,7 @@ public sealed partial class RootFolderRelocationService(
                 StoredBasePath = EF.Property<string>(audiobook, nameof(Audiobook.BasePath))!
             })
             .ToListAsync(cancellationToken);
-        var audiobookIds = audiobookRows.Select(row => row.Audiobook.Id).ToList();
-        await db.AudiobookFiles
-            .Where(file => audiobookIds.Contains(file.AudiobookId))
-            .LoadAsync(cancellationToken);
+        await db.AudiobookFiles.LoadAsync(cancellationToken);
         var audiobooks = audiobookRows
             .Select(row => new AudiobookPathCandidate(row.Audiobook, row.StoredBasePath))
             .ToList();

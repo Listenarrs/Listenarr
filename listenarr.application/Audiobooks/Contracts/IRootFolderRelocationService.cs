@@ -11,6 +11,27 @@ public sealed record RootFolderPathChangeCommand(
     FileSystemCaseSensitivityMode TargetCaseSensitivityMode,
     string? ExpectedCurrentPath = null);
 
+public sealed record RootFolderRelocationSkippedItemResult(
+    int AudiobookId,
+    RootFolderRelocationSkipReasonCode ReasonCode);
+
+public sealed record RootFolderMetadataRepairCollisionFile(
+    int AudiobookFileId,
+    int AudiobookId,
+    string RelativePath,
+    bool CanRemove);
+
+public sealed record RootFolderMetadataRepairCollisionGroup(
+    string TargetRelativePath,
+    IReadOnlyList<RootFolderMetadataRepairCollisionFile> Files);
+
+public sealed record RootFolderMetadataRepairDetails(
+    Guid RelocationId,
+    int AudiobookId,
+    string AudiobookTitle,
+    RootFolderRelocationSkipReasonCode ReasonCode,
+    IReadOnlyList<RootFolderMetadataRepairCollisionGroup> CollisionGroups);
+
 public sealed record RootFolderPathChangeResult(
     Guid? RelocationId,
     int? RootFolderId,
@@ -21,7 +42,11 @@ public sealed record RootFolderPathChangeResult(
     int CompletedJobs,
     string? Error,
     TargetIdentityEnrollmentState TargetIdentityEnrollmentState =
-        TargetIdentityEnrollmentState.NotRequired);
+        TargetIdentityEnrollmentState.NotRequired,
+    IReadOnlyList<int>? SkippedAudiobookIds = null,
+    RootFolderRelocationMode Mode = RootFolderRelocationMode.Relocate,
+    IReadOnlyList<RootFolderRelocationSkippedItemResult>? SkippedItems = null,
+    bool CanAbandon = false);
 
 public interface IRootFolderRelocationService
 {
@@ -43,8 +68,27 @@ public interface IRootFolderRelocationService
         FileSystemPathSemantics semantics,
         CancellationToken cancellationToken = default);
 
+    Task<bool> IsAudiobookPathStateProtectedAsync(
+        int audiobookId,
+        CancellationToken cancellationToken = default);
+
     Task<RootFolderPathChangeResult> RetryAsync(
         Guid relocationId,
+        CancellationToken cancellationToken = default);
+
+    Task<RootFolderPathChangeResult> AbandonUnpublishedAsync(
+        Guid relocationId,
+        CancellationToken cancellationToken = default);
+
+    Task<RootFolderMetadataRepairDetails?> GetSkippedMetadataRepairDetailsAsync(
+        Guid relocationId,
+        int audiobookId,
+        CancellationToken cancellationToken = default);
+
+    Task<RootFolderMetadataRepairDetails> RemoveSkippedMetadataRepairFileAsync(
+        Guid relocationId,
+        int audiobookId,
+        int audiobookFileId,
         CancellationToken cancellationToken = default);
 
     Task OnMoveJobStateChangedAsync(

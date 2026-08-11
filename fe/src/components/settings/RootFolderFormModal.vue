@@ -149,7 +149,9 @@ const store = useRootFoldersStore()
 const filesystemReadinessStore = useFilesystemReadinessStore()
 const toast = useToast()
 const rootFilesystemMutationLocked = computed(
-  () => Boolean(root?.id) && !filesystemReadinessStore.filesystemReady,
+  () =>
+    Boolean(root?.id) &&
+    (root?.canChangePath === false || filesystemReadinessStore.filesystemReady === false),
 )
 
 const form = ref({
@@ -236,7 +238,14 @@ async function save() {
         },
         { expectedCurrentPath: root.path },
       )
-      toast.success('Success', 'Root folder updated')
+      if (newRoot.activeRelocation?.status === 'NeedsAttention') {
+        toast.warning(
+          'Root folder changed',
+          'The root folder was updated, but one or more audiobooks still need path repair.',
+        )
+      } else {
+        toast.success('Success', 'Root folder updated')
+      }
     } else {
       newRoot = await store.create({
         name: form.value.name,
@@ -271,7 +280,14 @@ async function confirmChange(moveFiles: boolean) {
         deleteEmptySource: modalDeleteEmpty.value,
       },
     )
-    toast.success('Success', moveFiles ? 'Root relocation started' : 'Root folder changed')
+    if (!moveFiles && updated.activeRelocation?.status === 'NeedsAttention') {
+      toast.warning(
+        'Root folder changed',
+        'The root folder was updated, but one or more audiobooks still need path repair.',
+      )
+    } else {
+      toast.success('Success', moveFiles ? 'Root relocation started' : 'Root folder changed')
+    }
     emit('saved', updated)
   } catch (e: unknown) {
     toast.error('Error', rootFolderSaveError(e))

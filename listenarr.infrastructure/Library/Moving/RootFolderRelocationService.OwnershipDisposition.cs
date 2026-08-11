@@ -1,3 +1,6 @@
+using Listenarr.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
+
 namespace Listenarr.Infrastructure.Library.Moving;
 
 public sealed partial class RootFolderRelocationService
@@ -8,7 +11,10 @@ public sealed partial class RootFolderRelocationService
 
     private async Task<OwnershipMigrationPreparation>
         RevalidateRecoveredOwnershipPlansAsync(
+            ListenArrDbContext db,
+            RootFolder root,
             IReadOnlyList<OwnershipMigrationPlan> plans,
+            IReadOnlySet<int> skippedAudiobookIds,
             CancellationToken cancellationToken)
     {
         var transfers = new List<OwnershipMigrationPlan>(plans.Count);
@@ -20,6 +26,12 @@ public sealed partial class RootFolderRelocationService
             {
                 throw new InvalidOperationException(
                     "Directory cleanup began before ownership migration recovery completed.");
+            }
+            if (ownership.AudiobookId is int audiobookId
+                && skippedAudiobookIds.Contains(audiobookId))
+            {
+                retirements.Add(ownership);
+                continue;
             }
             if (ownership.State is LibraryDirectoryOwnershipState.Unavailable
                 or LibraryDirectoryOwnershipState.Conflict
@@ -46,7 +58,29 @@ public sealed partial class RootFolderRelocationService
             transfers.Add(plan);
         }
 
-        return new OwnershipMigrationPreparation(transfers, retirements);
+        var journaledOwnershipIds = plans
+            .Select(plan => plan.Tracked.Id)
+            .ToHashSet();
+        var unjournaledOwnerships = await db.LibraryDirectoryOwnerships
+            .Where(ownership =>
+                ownership.ManagedRootFolderId == root.Id
+                && ownership.State != LibraryDirectoryOwnershipState.Removed
+                && !journaledOwnershipIds.Contains(ownership.Id))
+            .ToListAsync(cancellationToken);
+        if (unjournaledOwnerships.Any(ownership =>
+            ownership.State == LibraryDirectoryOwnershipState.Removing))
+        {
+            throw new InvalidOperationException(
+                "Directory cleanup began before metadata-only recovery completed.");
+        }
+
+        // A committed metadata-only journal can transfer cleanup authority only
+        // for ownerships that have an explicit path-migration journal. Any
+        // unjournaled claim is conservatively retired during recovery.
+        retirements.AddRange(unjournaledOwnerships);
+        return new OwnershipMigrationPreparation(
+            transfers,
+            retirements.DistinctBy(ownership => ownership.Id).ToArray());
     }
 
     private static void RetireUntransferredOwnerships(

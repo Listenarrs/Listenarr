@@ -29,7 +29,10 @@ public sealed partial class RootFolderRelocationService
             mode == RootFolderRelocationMode.MetadataOnly
             && storedSourcePathSemantics == null
             && metadataSourcePathSemantics.HasValue;
-        var sourceCaseSensitivityMode = sourceOperationSemantics?.CaseSensitivity switch
+        var persistedSourceSensitivity = mode == RootFolderRelocationMode.MetadataOnly
+            ? metadataSourcePathSemantics?.Semantics.CaseSensitivity
+            : sourceOperationSemantics?.CaseSensitivity;
+        var sourceCaseSensitivityMode = persistedSourceSensitivity switch
         {
             FileSystemCaseSensitivity.Sensitive => FileSystemCaseSensitivityMode.Sensitive,
             FileSystemCaseSensitivity.Insensitive => FileSystemCaseSensitivityMode.Insensitive,
