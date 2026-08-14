@@ -172,6 +172,89 @@ public sealed class FileMoverMarkerlessRenameTests : BaseTests
         AssertNoLibraryArtifacts(scenario.Root);
     }
 
+    [LinuxFact]
+    public async Task MoveFilePreservingPhysicalIdentityAsync_CompatibleExpectedSourceToken_PersistsSameDurableTargetToken()
+    {
+        var scenario = await CreateScenarioAsync();
+        Assert.StartsWith(
+            "linux-generation:",
+            scenario.SourceIdentity,
+            StringComparison.Ordinal);
+        var durableSourceIdentity =
+            LinuxIdentityTestHelper.ToMergedV1AugmentedIdentity(
+                scenario.SourceIdentity);
+
+        Assert.True(await CreateMover().MoveFilePreservingPhysicalIdentityAsync(
+            scenario.Source,
+            scenario.Destination,
+            durableSourceIdentity,
+            scenario.OperationId));
+
+        var factory = _provider.GetRequiredService<
+            IDbContextFactory<ListenArrDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        var journal = await db.FileMutationJournals
+            .AsNoTracking()
+            .SingleAsync(candidate => candidate.OperationId == scenario.OperationId);
+        Assert.Equal(FileMutationJournalState.Completed, journal.State);
+        Assert.Equal(durableSourceIdentity, journal.SourcePhysicalObjectIdentity);
+        Assert.Equal(durableSourceIdentity, journal.TargetPhysicalObjectIdentity);
+        Assert.False(File.Exists(scenario.Source));
+        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Destination));
+        AssertNoLibraryArtifacts(scenario.Root);
+    }
+
+    [LinuxFact]
+    public async Task MoveFilePreservingPhysicalIdentityAsync_CompatiblePersistedTargetToken_RemainsDurableAcrossRecovery()
+    {
+        var scenario = await CreateScenarioAsync();
+        var interrupted = CreateMover(
+            afterTargetState: () =>
+                throw new IOException("Injected crash after markerless target state."));
+
+        await Assert.ThrowsAsync<IOException>(() =>
+            interrupted.MoveFilePreservingPhysicalIdentityAsync(
+                scenario.Source,
+                scenario.Destination,
+                scenario.SourceIdentity,
+                scenario.OperationId));
+
+        Assert.StartsWith(
+            "linux-generation:",
+            scenario.SourceIdentity,
+            StringComparison.Ordinal);
+        var persistedCompatibleTargetIdentity =
+            LinuxIdentityTestHelper.ToMergedV1AugmentedIdentity(
+                scenario.SourceIdentity);
+        var factory = _provider.GetRequiredService<
+            IDbContextFactory<ListenArrDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var journal = await db.FileMutationJournals.SingleAsync(
+                candidate => candidate.OperationId == scenario.OperationId);
+            Assert.Equal(
+                FileMutationJournalState.TargetIdentityPersisted,
+                journal.State);
+            journal.TargetPhysicalObjectIdentity =
+                persistedCompatibleTargetIdentity;
+            await db.SaveChangesAsync();
+        }
+
+        Assert.True(await CreateMover().MoveFilePreservingPhysicalIdentityAsync(
+            scenario.Source,
+            scenario.Destination,
+            scenario.SourceIdentity,
+            scenario.OperationId));
+
+        await AssertJournalStateAsync(
+            scenario.OperationId,
+            FileMutationJournalState.Completed,
+            persistedCompatibleTargetIdentity);
+        Assert.False(File.Exists(scenario.Source));
+        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Destination));
+        AssertNoLibraryArtifacts(scenario.Root);
+    }
+
     [Fact]
     public async Task MoveFilePreservingPhysicalIdentityAsync_CompletedRetryIsIdempotent()
     {

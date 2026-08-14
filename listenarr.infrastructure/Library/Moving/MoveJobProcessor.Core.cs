@@ -20,7 +20,6 @@ internal partial class MoveJobProcessor
 
             using var scope = scopeFactory.CreateScope();
             var audiobookRepository = scope.ServiceProvider.GetRequiredService<IAudiobookRepository>();
-            var rootFolderRepository = scope.ServiceProvider.GetRequiredService<IRootFolderRepository>();
             var audiobook = await audiobookRepository.GetByIdAsync(job.AudiobookId);
             if (audiobook == null)
             {
@@ -29,7 +28,6 @@ internal partial class MoveJobProcessor
                 return;
             }
 
-            var rootFolders = await rootFolderRepository.GetAllAsync();
             var requested = job.RequestedPath ?? string.Empty;
             if (string.IsNullOrWhiteSpace(requested))
             {
@@ -104,12 +102,7 @@ internal partial class MoveJobProcessor
                     return;
                 }
 
-                cleanupBoundaryResolution = await cleanupBoundaryResolver.ResolveAsync(
-                    source,
-                    target,
-                    rootFolders,
-                    job.SourceCleanupBoundary,
-                    stoppingToken);
+                cleanupBoundaryResolution = GetPersistedCleanupBoundary(job);
                 var recoveryRequest = new AudiobookContentMoveRequest(
                     source,
                     target,
@@ -277,12 +270,7 @@ internal partial class MoveJobProcessor
             }
 
             var sourceSemantics = sourceIdentity.Semantics;
-            cleanupBoundaryResolution ??= await cleanupBoundaryResolver.ResolveAsync(
-                source,
-                target,
-                rootFolders,
-                job.SourceCleanupBoundary,
-                stoppingToken);
+            cleanupBoundaryResolution ??= GetPersistedCleanupBoundary(job);
             LogCleanupBoundary(job, cleanupBoundaryResolution);
 
             if (IsFilesystemRoot(source, sourceSemantics)
@@ -421,6 +409,7 @@ internal partial class MoveJobProcessor
                     target,
                     contentMoveService,
                     moveRequest,
+                    moveResult.TargetVerificationLease,
                     registerPostCommit,
                     stoppingToken))
             {

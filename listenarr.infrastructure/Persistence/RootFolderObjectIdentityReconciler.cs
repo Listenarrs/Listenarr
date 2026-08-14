@@ -60,8 +60,9 @@ public sealed class RootFolderObjectIdentityReconciler(
                     current.UnavailableReason
                     ?? "The live directory no longer matches its enrolled identity.";
                 logger.LogWarning(
-                    "Root folder {RootFolderId} enrolled identity is unavailable or mismatched; destructive ownership cleanup is disabled.",
-                    root.Id);
+                    "Root folder {RootFolderId} enrolled identity is unavailable or mismatched; destructive ownership cleanup is disabled. Reason: {Reason}",
+                    root.Id,
+                    root.DirectoryObjectIdentityUnavailableReason);
                 continue;
             }
 

@@ -7,11 +7,39 @@ namespace Listenarr.Application.Audiobooks.Contracts
         CommittedCleanupPending
     }
 
+    public interface IAudiobookFileRegistrationIdentityVerifier
+    {
+        bool MatchesPhysicalObjectIdentity(string expectedPhysicalObjectIdentity);
+    }
+
+    public static class AudiobookFileRegistrationLeaseExtensions
+    {
+        public static bool MatchesPhysicalObjectIdentity(
+            this IAudiobookFileRegistrationLease lease,
+            string expectedPhysicalObjectIdentity)
+        {
+            ArgumentNullException.ThrowIfNull(lease);
+            ArgumentException.ThrowIfNullOrWhiteSpace(expectedPhysicalObjectIdentity);
+            if (!lease.HasDurablePhysicalObjectIdentity)
+            {
+                return false;
+            }
+
+            return lease is IAudiobookFileRegistrationIdentityVerifier verifier
+                ? verifier.MatchesPhysicalObjectIdentity(expectedPhysicalObjectIdentity)
+                : string.Equals(
+                    lease.PhysicalObjectIdentity,
+                    expectedPhysicalObjectIdentity,
+                    StringComparison.Ordinal);
+        }
+    }
+
     public interface IAudiobookFileRegistrationLease : IDisposable
     {
         string PublicPath { get; }
         string MetadataPath { get; }
         string PhysicalObjectIdentity { get; }
+        bool HasDurablePhysicalObjectIdentity => true;
         string? SourcePhysicalObjectIdentity { get; }
         Stream OpenMetadataReadStream() =>
             throw new NotSupportedException(

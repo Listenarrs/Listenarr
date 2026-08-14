@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Reflection;
 using Listenarr.Tests.Common;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -9,6 +11,48 @@ namespace Listenarr.Tests.Features.Api.Services;
 [Trait("Category", "FileSystem")]
 public sealed class FileMoverFileAliasRegressionTests : BaseTests
 {
+    [LinuxFact]
+    public async Task RegularFileIdentityProbe_NamedPipe_ReturnsWithoutBlockingAndRejectsSpecialFile()
+    {
+        var root = FileService.GetTempDirectory("file-alias-named-pipe");
+        var pipePath = Path.Join(root, "candidate.m4b");
+        var startInfo = new ProcessStartInfo("mkfifo")
+        {
+            UseShellExecute = false,
+            RedirectStandardError = true
+        };
+        startInfo.ArgumentList.Add(pipePath);
+        using (var process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Could not start mkfifo."))
+        {
+            await process.WaitForExitAsync();
+            Assert.Equal(0, process.ExitCode);
+        }
+
+        var method = typeof(FileMover)
+            .GetMethods(BindingFlags.NonPublic | BindingFlags.Static)
+            .Single(candidate =>
+            {
+                if (candidate.Name != "TryGetRegularFileIdentity")
+                {
+                    return false;
+                }
+
+                var parameters = candidate.GetParameters();
+                return parameters.Length == 2
+                    && parameters[0].ParameterType == typeof(string);
+            });
+        var arguments = new object?[] { pipePath, null };
+        var probeTask = Task.Run(() =>
+            Assert.IsType<bool>(method.Invoke(null, arguments)));
+        var completed = await Task.WhenAny(
+            probeTask,
+            Task.Delay(TimeSpan.FromSeconds(2)));
+
+        Assert.Same(probeTask, completed);
+        Assert.False(await probeTask);
+    }
+
     [FileLinkTheory]
     [InlineData(FileAction.Move)]
     [InlineData(FileAction.Copy)]

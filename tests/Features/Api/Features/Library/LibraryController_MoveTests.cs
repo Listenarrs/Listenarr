@@ -1477,6 +1477,169 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 It.IsAny<CancellationToken>()), Times.Never);
         }
 
+        [WindowsFact]
+        [Trait("Method", "EnqueueMove")]
+        [Trait("Scenario", "ChangedSemanticsManagedSourceRootBlocksCaseAliasFallback")]
+        public async Task MoveAudiobook_ChangedSemanticsManagedSourceRoot_BlocksCaseAliasFallback()
+        {
+            var moveQueue = CreateMoveQueueMock();
+            Init(services => services.WithSingleton(moveQueue.Object));
+            var sourceRootPath = FileService.GetTempDirectory(
+                "listenarr-move-changed-source-root");
+            var targetRootPath = FileService.GetTempDirectory(
+                "listenarr-move-changed-source-target");
+            var liveResolution = await _provider
+                .GetRequiredService<IFileSystemSemanticsResolver>()
+                .ResolveAsync(sourceRootPath);
+            Assert.Equal(PathIdentityState.Valid, liveResolution.State);
+            var persistedSensitivity = liveResolution.Semantics.CaseSensitivity
+                == FileSystemCaseSensitivity.Sensitive
+                    ? FileSystemCaseSensitivity.Insensitive
+                    : FileSystemCaseSensitivity.Sensitive;
+            var persistedSemantics = new FileSystemPathSemantics(
+                liveResolution.Semantics.Syntax,
+                persistedSensitivity);
+            var sourceDirectoryIdentity = await new DirectoryObjectIdentityResolver()
+                .ResolveAsync(sourceRootPath);
+            Assert.True(
+                sourceDirectoryIdentity.IsAvailable,
+                sourceDirectoryIdentity.UnavailableReason);
+            var sourceRoot = new RootFolderBuilder()
+                .WithName("Changed Source Root")
+                .WithPath(sourceRootPath)
+                .Build();
+            sourceRoot.CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto;
+            sourceRoot.ResolvedCaseSensitivity = persistedSensitivity;
+            sourceRoot.PathIdentityState = PathIdentityState.Valid;
+            sourceRoot.PathIdentityKey = FileSystemPathIdentity.CreateKey(
+                "root",
+                sourceRootPath,
+                persistedSemantics);
+            sourceRoot.DirectoryObjectIdentityVersion = sourceDirectoryIdentity.Version;
+            sourceRoot.DirectoryObjectIdentity = sourceDirectoryIdentity.Value;
+            await _rootFolderRepository.AddAsync(sourceRoot);
+
+            var targetDirectoryIdentity = await new DirectoryObjectIdentityResolver()
+                .ResolveAsync(targetRootPath);
+            Assert.True(
+                targetDirectoryIdentity.IsAvailable,
+                targetDirectoryIdentity.UnavailableReason);
+            var targetRoot = new RootFolderBuilder()
+                .WithName("Healthy Target Root")
+                .WithPath(targetRootPath)
+                .WithIsDefault()
+                .Build();
+            targetRoot.ResolvedCaseSensitivity =
+                FileSystemPathSemantics.CurrentHostDefault.CaseSensitivity;
+            targetRoot.PathIdentityState = PathIdentityState.Valid;
+            targetRoot.DirectoryObjectIdentityVersion = targetDirectoryIdentity.Version;
+            targetRoot.DirectoryObjectIdentity = targetDirectoryIdentity.Value;
+            await _rootFolderRepository.AddAsync(targetRoot);
+
+            var sourceAliasRoot = sourceRootPath.ToUpperInvariant();
+            if (string.Equals(sourceAliasRoot, sourceRootPath, StringComparison.Ordinal))
+            {
+                sourceAliasRoot = sourceRootPath.ToLowerInvariant();
+            }
+            Assert.NotEqual(sourceRootPath, sourceAliasRoot);
+            var sourcePath = Path.Join(sourceAliasRoot, "Author", "Title");
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Changed source semantics")
+                .WithBasePath(sourcePath)
+                .Build());
+            await AddTrackedFileAsync(
+                audiobook,
+                sourcePath,
+                identityBoundary: sourceAliasRoot);
+
+            var result = await _provider.GetRequiredService<LibraryController>().EnqueueMove(
+                audiobook.Id,
+                new LibraryController.MoveRequest
+                {
+                    DestinationPath = Path.Join(targetRootPath, "Author", "Title"),
+                    SourcePath = sourcePath,
+                    MoveFiles = true
+                });
+
+            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+            Assert.Contains(
+                "source_physical_identity_unavailable",
+                badRequest.Value?.ToString() ?? string.Empty,
+                StringComparison.OrdinalIgnoreCase);
+            moveQueue.Verify(service => service.EnqueueMoveAsync(
+                It.IsAny<MoveEnqueueCommand>(),
+                It.IsAny<CancellationToken>()), Times.Never);
+        }
+
+        [Fact]
+        [Trait("Method", "EnqueueMove")]
+        [Trait("Scenario", "UnconfirmedManagedSourceRootBlocksPhysicalMove")]
+        public async Task MoveAudiobook_UnconfirmedManagedSourceRoot_BlocksMoveToHealthyRoot()
+        {
+            var moveQueue = CreateMoveQueueMock();
+            Init(services => services.WithSingleton(moveQueue.Object));
+            var sourceRootPath = FileService.GetTempDirectory(
+                "listenarr-move-unconfirmed-source-root");
+            var targetRootPath = FileService.GetTempDirectory(
+                "listenarr-move-healthy-target-root");
+            var sourceRoot = new RootFolderBuilder()
+                .WithName("Unconfirmed Source Root")
+                .WithPath(sourceRootPath)
+                .Build();
+            sourceRoot.ResolvedCaseSensitivity =
+                FileSystemPathSemantics.CurrentHostDefault.CaseSensitivity;
+            sourceRoot.PathIdentityState = PathIdentityState.Valid;
+            sourceRoot.DirectoryObjectIdentityUnavailableReason =
+                "The source root physical directory has not been confirmed.";
+            await _rootFolderRepository.AddAsync(sourceRoot);
+
+            var targetDirectoryIdentity = await new DirectoryObjectIdentityResolver()
+                .ResolveAsync(targetRootPath);
+            Assert.True(
+                targetDirectoryIdentity.IsAvailable,
+                targetDirectoryIdentity.UnavailableReason);
+            var targetRoot = new RootFolderBuilder()
+                .WithName("Healthy Target Root")
+                .WithPath(targetRootPath)
+                .WithIsDefault()
+                .Build();
+            targetRoot.ResolvedCaseSensitivity =
+                FileSystemPathSemantics.CurrentHostDefault.CaseSensitivity;
+            targetRoot.PathIdentityState = PathIdentityState.Valid;
+            targetRoot.DirectoryObjectIdentityVersion =
+                targetDirectoryIdentity.Version;
+            targetRoot.DirectoryObjectIdentity = targetDirectoryIdentity.Value;
+            await _rootFolderRepository.AddAsync(targetRoot);
+
+            var sourcePath = Path.Join(sourceRootPath, "Author", "Source");
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Unconfirmed source authority")
+                .WithBasePath(sourcePath)
+                .Build());
+            await AddTrackedFileAsync(
+                audiobook,
+                sourcePath,
+                identityBoundary: sourceRootPath);
+
+            var result = await _provider.GetRequiredService<LibraryController>().EnqueueMove(
+                audiobook.Id,
+                new LibraryController.MoveRequest
+                {
+                    DestinationPath = Path.Join(targetRootPath, "Author", "Target"),
+                    SourcePath = sourcePath,
+                    MoveFiles = true
+                });
+
+            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+            Assert.Contains(
+                "source_physical_identity_unavailable",
+                badRequest.Value?.ToString() ?? string.Empty,
+                StringComparison.OrdinalIgnoreCase);
+            moveQueue.Verify(service => service.EnqueueMoveAsync(
+                It.IsAny<MoveEnqueueCommand>(),
+                It.IsAny<CancellationToken>()), Times.Never);
+        }
+
         [Fact]
         [Trait("Method", "EnqueueMove")]
         [Trait("Scenario", "AllowsAbsoluteDestinationInsideConfiguredRootFolder")]

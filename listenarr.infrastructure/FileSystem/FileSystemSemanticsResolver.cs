@@ -7,6 +7,7 @@ namespace Listenarr.Infrastructure.FileSystem;
 
 public sealed class FileSystemSemanticsResolver : IFileSystemSemanticsResolver
 {
+    private const int MaxLinuxCaseProbeCandidates = 128;
     private const uint FileReadAttributes = 0x0080;
     private const uint FileShareRead = 0x00000001;
     private const uint FileShareWrite = 0x00000002;
@@ -19,8 +20,26 @@ public sealed class FileSystemSemanticsResolver : IFileSystemSemanticsResolver
     private const int OpenReadOnly = 0;
     private const int OpenDirectory = 0x10000;
     private const int OpenCloseOnExec = 0x80000;
-    private const ulong FsIocGetFlags = 0x80086601;
+    private const ulong FsIocGetFlags64 = 0x80086601;
+    private const ulong FsIocGetFlags32 = 0x80046601;
     private const int FsCasefoldFlag = 0x40000000;
+    private const long LinuxExtFamilySuperMagic = 0x0000ef53L;
+    private const long LinuxF2fsSuperMagic = 0xf2f52010L;
+    private const int LinuxStatFsBufferBytes = 256;
+
+    private readonly Func<int, LinuxFilesystemFlagsProbe> _linuxFilesystemFlagsProbe;
+
+    public FileSystemSemanticsResolver()
+        : this(ProbeLinuxFilesystemFlags)
+    {
+    }
+
+    internal FileSystemSemanticsResolver(
+        Func<int, LinuxFilesystemFlagsProbe> linuxFilesystemFlagsProbe)
+    {
+        _linuxFilesystemFlagsProbe = linuxFilesystemFlagsProbe
+            ?? throw new ArgumentNullException(nameof(linuxFilesystemFlagsProbe));
+    }
 
     public ValueTask<FileSystemSemanticsResolution> ResolveAsync(
         string path,
@@ -66,7 +85,7 @@ public sealed class FileSystemSemanticsResolver : IFileSystemSemanticsResolver
         return ValueTask.FromResult(resolution with { CanonicalPath = fullPath });
     }
 
-    private static FileSystemSemanticsResolution ResolveReadOnly(
+    private FileSystemSemanticsResolution ResolveReadOnly(
         string boundary,
         FileSystemPathSyntax syntax)
     {
@@ -137,7 +156,7 @@ public sealed class FileSystemSemanticsResolver : IFileSystemSemanticsResolver
                 : FileSystemCaseSensitivity.Insensitive);
     }
 
-    private static FileSystemSemanticsResolution ResolveLinux(
+    private FileSystemSemanticsResolution ResolveLinux(
         string boundary,
         FileSystemPathSyntax syntax)
     {
@@ -152,26 +171,219 @@ public sealed class FileSystemSemanticsResolver : IFileSystemSemanticsResolver
                 $"Filesystem case sensitivity could not be read: {new Win32Exception(Marshal.GetLastWin32Error()).Message}");
         }
 
+        LinuxFilesystemFlagsProbe flagsProbe;
         try
         {
-            if (IoctlUnix(descriptor, FsIocGetFlags, out var flags) == 0)
+            flagsProbe = _linuxFilesystemFlagsProbe(descriptor);
+        }
+        finally
+        {
+            _ = CloseUnix(descriptor);
+        }
+
+        if (flagsProbe.Success
+            && (flagsProbe.Flags & FsCasefoldFlag) != 0)
+        {
+            // FS_CASEFOLD_FL is positive proof of case-insensitive lookup. Its
+            // absence is not portable negative proof: older kernels/filesystems
+            // can successfully expose other inode flags without reporting
+            // mount- or volume-level case-insensitive behavior. Fall through to
+            // the read-only lookup probe instead of assuming sensitivity.
+            return Valid(
+                syntax,
+                boundary,
+                FileSystemCaseSensitivity.Insensitive);
+        }
+        if (flagsProbe.Success
+            && IsDirectoryCasefoldFlagAuthoritativeFileSystem(
+                flagsProbe.FileSystemType))
+        {
+            // ext-family and F2FS case-insensitivity is enabled on the
+            // directory itself via FS_CASEFOLD_FL. On those filesystems an
+            // unset bit is therefore negative proof even when the directory
+            // is empty. Do not generalize this to mount/server-defined
+            // filesystems such as XFS, HFS+, 9P, SMB, NFS, or FUSE.
+            return Valid(
+                syntax,
+                boundary,
+                FileSystemCaseSensitivity.Sensitive);
+        }
+
+        var fallback = ProbeLinuxCaseSensitivityFromExistingEntry(
+            boundary,
+            syntax);
+        if (fallback.State == PathIdentityState.Valid)
+        {
+            return fallback;
+        }
+
+        var nativeReason = flagsProbe.Success
+            ? "the filesystem flags did not positively report case-insensitive lookup"
+            : flagsProbe.ErrorCode == 0
+                ? "the filesystem flags ioctl was unavailable"
+                : new Win32Exception(flagsProbe.ErrorCode).Message;
+        return Unavailable(
+            syntax,
+            boundary,
+            $"The filesystem flags probe could not determine case sensitivity ({nativeReason}), and the read-only existing-entry probe was inconclusive: {fallback.Reason ?? "no suitable stable entry was available"}. Select Sensitive or Insensitive explicitly.");
+    }
+
+    private static FileSystemSemanticsResolution ProbeLinuxCaseSensitivityFromExistingEntry(
+        string boundary,
+        FileSystemPathSyntax syntax)
+    {
+        try
+        {
+            using var pinned = PinnedDirectoryCreation.OpenPinnedBoundary(boundary);
+            var attempted = 0;
+            string? lastReason = null;
+            foreach (var entryPath in Directory.EnumerateFileSystemEntries(boundary))
             {
-                return Valid(
-                    syntax,
-                    boundary,
-                    (flags & FsCasefoldFlag) != 0
-                        ? FileSystemCaseSensitivity.Insensitive
-                        : FileSystemCaseSensitivity.Sensitive);
+                if (attempted >= MaxLinuxCaseProbeCandidates)
+                {
+                    break;
+                }
+
+                var name = Path.GetFileName(entryPath);
+                if (!TryCreateAsciiCaseVariant(name, out var alternateName))
+                {
+                    continue;
+                }
+
+                attempted++;
+                var outcome = pinned.ProbeLinuxCaseAlias(
+                    name,
+                    alternateName,
+                    out var reason);
+                switch (outcome)
+                {
+                    case PinnedDirectoryCreation.LinuxCaseAliasProbeOutcome.Sensitive:
+                        return Valid(
+                            syntax,
+                            boundary,
+                            FileSystemCaseSensitivity.Sensitive);
+                    case PinnedDirectoryCreation.LinuxCaseAliasProbeOutcome.Insensitive:
+                        return Valid(
+                            syntax,
+                            boundary,
+                            FileSystemCaseSensitivity.Insensitive);
+                    case PinnedDirectoryCreation.LinuxCaseAliasProbeOutcome.Unavailable:
+                        return Unavailable(
+                            syntax,
+                            boundary,
+                            reason ?? "The filesystem boundary changed during case-sensitivity probing.");
+                    default:
+                        lastReason = reason ?? lastReason;
+                        break;
+                }
             }
 
             return Unavailable(
                 syntax,
                 boundary,
-                "The filesystem does not expose read-only case-sensitivity metadata. Select Sensitive or Insensitive explicitly.");
+                lastReason
+                    ?? "No stable existing entry with an ASCII case variant was available for a read-only case-sensitivity probe.");
+        }
+        catch (Exception exception) when (exception is
+            IOException or UnauthorizedAccessException or Win32Exception
+                or InvalidOperationException or NotSupportedException)
+        {
+            return Unavailable(
+                syntax,
+                boundary,
+                exception.Message);
+        }
+    }
+
+    private static bool TryCreateAsciiCaseVariant(
+        string name,
+        out string alternateName)
+    {
+        var characters = name.ToCharArray();
+        for (var index = 0; index < characters.Length; index++)
+        {
+            var character = characters[index];
+            if (character is >= 'a' and <= 'z')
+            {
+                characters[index] = char.ToUpperInvariant(character);
+                alternateName = new string(characters);
+                return true;
+            }
+            if (character is >= 'A' and <= 'Z')
+            {
+                characters[index] = char.ToLowerInvariant(character);
+                alternateName = new string(characters);
+                return true;
+            }
+        }
+
+        alternateName = name;
+        return false;
+    }
+
+    private static LinuxFilesystemFlagsProbe ProbeLinuxFilesystemFlags(
+        int descriptor)
+    {
+        int result;
+        int flags;
+        if (IntPtr.Size == sizeof(long))
+        {
+            result = IoctlUnix64(
+                descriptor,
+                FsIocGetFlags64,
+                out var nativeFlags);
+            flags = unchecked((int)nativeFlags);
+        }
+        else
+        {
+            result = IoctlUnix32(
+                descriptor,
+                FsIocGetFlags32,
+                out flags);
+        }
+
+        if (result == 0)
+        {
+            return new LinuxFilesystemFlagsProbe(
+                true,
+                flags,
+                0,
+                TryGetLinuxFileSystemType(descriptor));
+        }
+
+        return new LinuxFilesystemFlagsProbe(
+            false,
+            0,
+            Marshal.GetLastWin32Error());
+    }
+
+    internal readonly record struct LinuxFilesystemFlagsProbe(
+        bool Success,
+        int Flags,
+        int ErrorCode,
+        long? FileSystemType = null);
+
+    private static bool IsDirectoryCasefoldFlagAuthoritativeFileSystem(
+        long? fileSystemType) =>
+        fileSystemType is LinuxExtFamilySuperMagic or LinuxF2fsSuperMagic;
+
+    private static long? TryGetLinuxFileSystemType(int descriptor)
+    {
+        var buffer = Marshal.AllocHGlobal(LinuxStatFsBufferBytes);
+        try
+        {
+            if (FStatFsUnix(descriptor, buffer) != 0)
+            {
+                return null;
+            }
+
+            return IntPtr.Size == sizeof(long)
+                ? Marshal.ReadInt64(buffer)
+                : Marshal.ReadInt32(buffer);
         }
         finally
         {
-            _ = CloseUnix(descriptor);
+            Marshal.FreeHGlobal(buffer);
         }
     }
 
@@ -243,10 +455,19 @@ public sealed class FileSystemSemanticsResolver : IFileSystemSemanticsResolver
         int flags);
 
     [DllImport("libc", EntryPoint = "ioctl", SetLastError = true)]
-    private static extern int IoctlUnix(
+    private static extern int IoctlUnix64(
+        int descriptor,
+        ulong request,
+        out long flags);
+
+    [DllImport("libc", EntryPoint = "ioctl", SetLastError = true)]
+    private static extern int IoctlUnix32(
         int descriptor,
         ulong request,
         out int flags);
+
+    [DllImport("libc", EntryPoint = "fstatfs", SetLastError = true)]
+    private static extern int FStatFsUnix(int descriptor, IntPtr buffer);
 
     [DllImport("libc", EntryPoint = "close", SetLastError = true)]
     private static extern int CloseUnix(int descriptor);

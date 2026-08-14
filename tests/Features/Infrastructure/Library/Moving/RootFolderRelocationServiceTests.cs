@@ -107,8 +107,14 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
             .Returns<string, CancellationToken>(async (path, cancellationToken) =>
             {
                 var identity = await resolver.ResolveAsync(path, cancellationToken);
-                Directory.Move(target, displacedTarget);
-                Directory.CreateDirectory(target);
+                if (string.Equals(
+                        Path.GetFullPath(path),
+                        Path.GetFullPath(target),
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    Directory.Move(target, displacedTarget);
+                    Directory.CreateDirectory(target);
+                }
                 return identity;
             });
         var service = CreateService(
@@ -180,10 +186,11 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
         Assert.Equal(relocation.Id, job.RelocationId);
         Assert.Equal(source, job.SourceCleanupBoundary);
         Assert.Equal(MoveManifestIdentity.Version, job.IdentityKeyVersion);
+        Assert.Single(job.Entries, MoveManifestIdentity.IsSourceBoundaryAuthorization);
         Assert.Single(job.Entries, MoveManifestIdentity.IsTargetBoundaryAuthorization);
         var sourceEntry = Assert.Single(
             job.Entries,
-            entry => !MoveManifestIdentity.IsTargetBoundaryAuthorization(entry));
+            entry => !MoveManifestIdentity.IsBoundaryAuthorization(entry));
         Assert.Equal("book.m4b", sourceEntry.RelativePath);
         Assert.Equal(RootFolderRelocationStatus.Pending, result.Status);
         Assert.True(await service.IsBoundaryProtectedAsync(
@@ -1069,10 +1076,11 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
         Assert.Equal(bookPath, job.SourcePath);
         Assert.Equal(Path.Join(target, "Shared Author", "Book One"), job.RequestedPath);
         Assert.Equal(source, job.SourceCleanupBoundary);
+        Assert.Single(job.Entries, MoveManifestIdentity.IsSourceBoundaryAuthorization);
         Assert.Single(job.Entries, MoveManifestIdentity.IsTargetBoundaryAuthorization);
         var entry = Assert.Single(
             job.Entries,
-            candidate => !MoveManifestIdentity.IsTargetBoundaryAuthorization(candidate));
+            candidate => !MoveManifestIdentity.IsBoundaryAuthorization(candidate));
         Assert.Equal("Book One.m4b", entry.RelativePath);
         Assert.Equal(authorPath, (await verification.Audiobooks.SingleAsync()).BasePath);
     }
@@ -1122,15 +1130,16 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
             Assert.Equal(sharedPath, job.SourcePath);
             Assert.Equal(Path.Join(target, "Shared"), job.RequestedPath);
             Assert.Equal(MoveManifestIdentity.Version, job.IdentityKeyVersion);
+            Assert.Single(job.Entries, MoveManifestIdentity.IsSourceBoundaryAuthorization);
             Assert.Single(job.Entries, MoveManifestIdentity.IsTargetBoundaryAuthorization);
             Assert.Single(
                 job.Entries,
-                entry => !MoveManifestIdentity.IsTargetBoundaryAuthorization(entry));
+                entry => !MoveManifestIdentity.IsBoundaryAuthorization(entry));
         });
         Assert.Equal(
             new[] { "First.m4b", "Second.m4b" },
             jobs.Select(job => job.Entries.Single(entry =>
-                    !MoveManifestIdentity.IsTargetBoundaryAuthorization(entry)).RelativePath)
+                    !MoveManifestIdentity.IsBoundaryAuthorization(entry)).RelativePath)
                 .OrderBy(path => path));
         Assert.NotEqual(jobs[0].ActiveDeduplicationKey, jobs[1].ActiveDeduplicationKey);
         Assert.Equal(1, manifestScopes.CreatedScopeCount);
@@ -2588,7 +2597,17 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
         Assert.Equal(PathIdentityState.Valid, sourceResolution.State);
         Assert.Equal(PathIdentityState.Valid, targetResolution.State);
         var targetBoundary = FindExistingMoveTargetBoundary(targetPath);
-        var targetDirectoryIdentity = await new DirectoryObjectIdentityResolver()
+        var directoryIdentityResolver = new DirectoryObjectIdentityResolver();
+        var sourceAuthorizationBoundary = Path.GetDirectoryName(
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(sourcePath)))
+            ?? throw new InvalidOperationException(
+                "Move test source has no parent authorization boundary.");
+        var sourceDirectoryIdentity = await directoryIdentityResolver.ResolveAsync(
+            sourceAuthorizationBoundary);
+        Assert.True(
+            sourceDirectoryIdentity.IsAvailable,
+            sourceDirectoryIdentity.UnavailableReason);
+        var targetDirectoryIdentity = await directoryIdentityResolver
             .ResolveAsync(targetBoundary);
         Assert.True(
             targetDirectoryIdentity.IsAvailable,
@@ -2615,9 +2634,12 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
                 FileSystemCaseSensitivityMode.Auto,
                 targetBoundary,
                 targetPath),
+            sourceDirectoryIdentity.Version!.Value,
+            sourceDirectoryIdentity.Value!,
             targetDirectoryIdentity.Version!.Value,
             targetDirectoryIdentity.Value!,
-            DeleteEmptySource: true);
+            DeleteEmptySource: true,
+            SourceCleanupBoundary: sourceAuthorizationBoundary);
     }
 
     private static string FindExistingMoveTargetBoundary(string targetPath)
@@ -5376,6 +5398,41 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
     }
 
     [Fact]
+    public async Task RetryAsync_NonCurrentProtocolJob_RemainsNeedsAttentionEvenWithCurrentBoundaryEvidence()
+    {
+        var (rootId, _, _, target) = await SeedRelocationScenarioAsync();
+        var service = CreateService();
+        var started = await service.StartAsync(
+            rootId,
+            BuildRelocationCommand(target));
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            var relocation = await db.RootFolderRelocations.SingleAsync();
+            var job = await db.MoveJobs.SingleAsync();
+            job.ExecutionProtocolVersion =
+                MoveExecutionProtocol.TargetBoundaryMarkerlessDatabaseState;
+            job.Status = MoveJobStatus.Failed;
+            job.Error = "Simulated legacy protocol failure.";
+            job.ActiveDeduplicationKey = null;
+            relocation.Status = RootFolderRelocationStatus.NeedsAttention;
+            relocation.Error = job.Error;
+            await db.SaveChangesAsync();
+        }
+
+        var result = await service.RetryAsync(started.RelocationId!.Value);
+
+        Assert.Equal(RootFolderRelocationStatus.NeedsAttention, result.Status);
+        await using var verification = await _factory.CreateDbContextAsync();
+        var rejected = await verification.MoveJobs.SingleAsync();
+        Assert.Equal(MoveJobStatus.NeedsAttention, rejected.Status);
+        Assert.Null(rejected.ActiveDeduplicationKey);
+        Assert.Contains(
+            "current durable database execution protocol",
+            rejected.Error ?? string.Empty,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task RetryAsync_ManifestlessJob_RemainsNeedsAttention()
     {
         var (rootId, _, _, target) = await SeedRelocationScenarioAsync();
@@ -5447,7 +5504,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
     }
 
     [Fact]
-    public async Task RetryAsync_InvalidPersistedSourceBoundary_RemainsNeedsAttention()
+    public async Task RetryAsync_InvalidPersistedSourceMutationBoundary_RemainsNeedsAttention()
     {
         var (rootId, _, _, target) = await SeedRelocationScenarioAsync();
         var service = CreateService();
@@ -5458,7 +5515,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
         {
             var relocation = await db.RootFolderRelocations.SingleAsync();
             var job = await db.MoveJobs.SingleAsync();
-            job.SourceIdentityBoundary = Path.Join(
+            job.SourceCleanupBoundary = Path.Join(
                 Path.GetTempPath(),
                 $"unrelated-boundary-{Guid.NewGuid():N}");
             job.Status = MoveJobStatus.Failed;
@@ -5474,8 +5531,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
         var rejected = await verification.MoveJobs.SingleAsync();
         Assert.Equal(MoveJobStatus.NeedsAttention, rejected.Status);
         Assert.Null(rejected.ActiveDeduplicationKey);
-        Assert.Contains("invalid persisted filesystem identity", rejected.Error, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("boundary", rejected.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("source mutation boundary", rejected.Error, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

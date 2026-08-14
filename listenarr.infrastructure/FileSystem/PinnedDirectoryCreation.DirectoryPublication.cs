@@ -8,18 +8,12 @@ internal sealed partial class PinnedDirectoryCreation
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(parentPath);
         ValidateLeafName(childName);
-        ExclusiveDirectoryCreator.InvokeBeforeOpenParentHook(parentPath);
-
-        var parentHandle = OperatingSystem.IsWindows()
-            ? OpenDirectoryWindows(parentPath, openReparsePoint: true)
-            : OpenDirectoryUnix(parentPath, noFollow: true);
+        using var parentAnchor = OpenPinnedHierarchyNoFollow(
+            parentPath,
+            createMissing: false);
+        var parentHandle = parentAnchor.DuplicateHandleForOperation();
         try
         {
-            if (OperatingSystem.IsWindows())
-            {
-                EnsureWindowsParentIsNotReparsePoint(parentHandle, parentPath);
-            }
-
             var childPath = Path.Join(parentPath, childName);
             var directoryHandle = OperatingSystem.IsWindows()
                 ? OpenRelativeDirectoryWindows(

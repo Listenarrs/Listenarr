@@ -25,10 +25,7 @@ internal sealed partial class AudiobookContentMoveService
         }
 
         if (string.IsNullOrWhiteSpace(expectedIdentity)
-            || !string.Equals(
-                sourceEntry.GetObjectIdentity(),
-                expectedIdentity,
-                StringComparison.Ordinal))
+            || !sourceEntry.MatchesObjectIdentity(expectedIdentity))
         {
             throw new MoveNeedsAttentionException(
                 $"The tracked source file identifies a different physical generation: {manifestEntry.RelativePath}");

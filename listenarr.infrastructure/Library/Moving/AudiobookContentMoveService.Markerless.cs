@@ -29,8 +29,7 @@ internal sealed partial class AudiobookContentMoveService
         }
         var targetOwnership = Directory.Exists(target)
             ? await LoadValidatedTargetDirectoryOwnershipAsync(
-                target,
-                request.TargetSemantics,
+                request,
                 cancellationToken)
             : null;
         request = request with { TargetDirectoryOwnership = targetOwnership };
@@ -48,6 +47,7 @@ internal sealed partial class AudiobookContentMoveService
         }
 
         EnsureTargetCanReceiveContents(
+            request,
             source,
             target,
             sourceInsideTarget,
@@ -125,6 +125,7 @@ internal sealed partial class AudiobookContentMoveService
             cancellationToken);
 
         ValidateExistingDestinationContents(
+            request,
             source,
             target,
             manifest,
@@ -353,7 +354,7 @@ internal sealed partial class AudiobookContentMoveService
 
     private static bool IsPhysicalManifestEntry(MoveJobEntry entry) =>
         !IsRootManifestEntry(entry)
-        && !MoveManifestIdentity.IsTargetBoundaryAuthorization(entry);
+        && !MoveManifestIdentity.IsBoundaryAuthorization(entry);
 
     private static string ResolveManifestPath(
         string root,

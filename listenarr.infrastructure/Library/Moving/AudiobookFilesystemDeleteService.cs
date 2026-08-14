@@ -440,11 +440,7 @@ namespace Listenarr.Infrastructure.Library.Moving
             AudiobookFilesystemDeleteResult result,
             IEnumerable<string> allowedRoots)
         {
-            if (!File.Exists(path))
-            {
-                return;
-            }
-
+            var observedExists = File.Exists(path);
             if (!FileSystemSafety.TryDeleteFile(
                     path,
                     allowedRoots,
@@ -463,10 +459,13 @@ namespace Listenarr.Infrastructure.Library.Moving
                 return;
             }
 
-            result.DeletedFiles++;
-            _logger.LogInformation(
-                "Deleted audiobook file {Path}",
-                LogRedaction.SanitizeFilePath(path));
+            if (observedExists)
+            {
+                result.DeletedFiles++;
+                _logger.LogInformation(
+                    "Deleted audiobook file {Path}",
+                    LogRedaction.SanitizeFilePath(path));
+            }
         }
 
     }

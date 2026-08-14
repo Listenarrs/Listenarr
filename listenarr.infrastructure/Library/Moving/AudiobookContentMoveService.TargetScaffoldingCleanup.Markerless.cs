@@ -46,7 +46,11 @@ internal sealed partial class AudiobookContentMoveService
             if (planned.State == MoveCreatedDirectoryState.Planned
                 && string.IsNullOrWhiteSpace(planned.DirectoryObjectIdentity))
             {
-                using var parent = PinnedDirectoryCreation.OpenPinnedBoundary(parentPath);
+                using var parent = OpenPinnedMoveBoundaryDescendant(
+                    request,
+                    parentPath,
+                    request.TargetSemantics,
+                    sourceBoundary: false);
                 using var directory = parent.OpenExistingChild(
                     Path.GetFileName(planned.Path));
                 if (!directory.VisiblePathMatches()
@@ -73,15 +77,17 @@ internal sealed partial class AudiobookContentMoveService
                     $"A markerless move-created directory has inconsistent durable state: {planned.Path}");
             }
 
-            using var publication = PinnedDirectoryCreation.OpenExistingForPublication(
+            using var pinnedParent = OpenPinnedMoveBoundaryDescendant(
+                request,
                 parentPath,
+                request.TargetSemantics,
+                sourceBoundary: false);
+            using var publication = pinnedParent.OpenExistingChildForPublication(
                 Path.GetFileName(planned.Path));
             using var parentAnchor = publication.OpenParentDirectoryAnchor();
             using var directoryAnchor = publication.OpenCreatedDirectoryAnchor();
-            if (!string.Equals(
-                    directoryAnchor.GetDirectoryObjectIdentity(),
-                    planned.DirectoryObjectIdentity,
-                    StringComparison.Ordinal)
+            if (!directoryAnchor.MatchesDirectoryObjectIdentity(
+                    planned.DirectoryObjectIdentity)
                 || !directoryAnchor.VisiblePathMatches()
                 || !parentAnchor.VisiblePathMatches())
             {
@@ -105,10 +111,8 @@ internal sealed partial class AudiobookContentMoveService
                 request.Source,
                 request.Target,
                 cancellationToken);
-            if (!string.Equals(
-                    directoryAnchor.GetDirectoryObjectIdentity(),
-                    planned.DirectoryObjectIdentity,
-                    StringComparison.Ordinal)
+            if (!directoryAnchor.MatchesDirectoryObjectIdentity(
+                    planned.DirectoryObjectIdentity)
                 || !directoryAnchor.VisiblePathMatches()
                 || !parentAnchor.VisiblePathMatches())
             {

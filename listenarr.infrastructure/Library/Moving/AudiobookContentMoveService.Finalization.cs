@@ -18,6 +18,7 @@ internal sealed partial class AudiobookContentMoveService
         CancellationToken cancellationToken)
     {
         await EnsureCurrentExecutionProtocolAsync(request.JobId, cancellationToken);
+        request = await WithBoundaryAuthorizationAsync(request, cancellationToken);
         request = await WithValidatedTargetDirectoryOwnershipAsync(
             request,
             cancellationToken);
@@ -66,6 +67,7 @@ internal sealed partial class AudiobookContentMoveService
         CancellationToken cancellationToken)
     {
         await EnsureCurrentExecutionProtocolAsync(request.JobId, cancellationToken);
+        request = await WithBoundaryAuthorizationAsync(request, cancellationToken);
         request = await WithValidatedTargetDirectoryOwnershipAsync(
             request,
             cancellationToken);
@@ -119,6 +121,7 @@ internal sealed partial class AudiobookContentMoveService
         CancellationToken cancellationToken)
     {
         await EnsureCurrentExecutionProtocolAsync(request.JobId, cancellationToken);
+        request = await WithBoundaryAuthorizationAsync(request, cancellationToken);
         request = await WithValidatedTargetDirectoryOwnershipAsync(
             request,
             cancellationToken);
@@ -148,45 +151,38 @@ internal sealed partial class AudiobookContentMoveService
             result.Target,
             manifest,
             request.TargetSemantics);
-        try
+        await VerifyMarkerlessTargetAsync(
+            request,
+            result.Target,
+            manifest,
+            cancellationToken,
+            progressStart: 92,
+            progressSpan: 5,
+            progressPhase: "Final verification",
+            targetVerificationLease: result.TargetVerificationLease);
+        VerifySourceCleanupState(
+            request,
+            result.Source,
+            result.Target,
+            manifest);
+        await UpdateJobPhaseAsync(
+            request.JobId,
+            request.LeaseToken,
+            MoveJobPhase.CleaningArtifacts,
+            cancellationToken);
+        foreach (var directory in await GetCreatedDirectoriesAsync(
+            request.JobId,
+            cancellationToken))
         {
-            await VerifyMarkerlessTargetAsync(
-                request,
-                result.Target,
-                manifest,
-                cancellationToken,
-                progressStart: 92,
-                progressSpan: 5,
-                progressPhase: "Final verification",
-                targetVerificationLease: result.TargetVerificationLease);
-            VerifySourceCleanupState(
-                request,
-                result.Source,
-                result.Target,
-                manifest);
-            await UpdateJobPhaseAsync(
-                request.JobId,
-                request.LeaseToken,
-                MoveJobPhase.CleaningArtifacts,
-                cancellationToken);
-            foreach (var directory in await GetCreatedDirectoriesAsync(
-                request.JobId,
-                cancellationToken))
+            if (directory.State == MoveCreatedDirectoryState.Created)
             {
-                if (directory.State == MoveCreatedDirectoryState.Created)
-                {
-                    await UpdateCreatedDirectoryStateAsync(
-                        request.JobId,
-                        request.LeaseToken,
-                        directory.Path,
-                        MoveCreatedDirectoryState.Retained,
-                        cancellationToken);
-                }
+                await UpdateCreatedDirectoryStateAsync(
+                    request.JobId,
+                    request.LeaseToken,
+                    directory.Path,
+                    MoveCreatedDirectoryState.Retained,
+                    cancellationToken);
             }
-        }
-        finally
-        {
-            result.TargetVerificationLease?.Dispose();
         }
     }
 

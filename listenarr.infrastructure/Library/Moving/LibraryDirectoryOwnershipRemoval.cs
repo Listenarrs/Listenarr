@@ -98,11 +98,10 @@ internal static class LibraryDirectoryOwnershipRemoval
         LibraryDirectoryOwnership ownership,
         PinnedDirectoryCreation.PinnedDirectoryAnchor directory)
     {
-        if (!ManagedDirectoryIdentity.Matches(
+        if (!directory.MatchesManagedDirectoryOwnershipIdentity(
                 ownership.DirectoryObjectIdentityVersion,
                 ownership.DirectoryObjectIdentity,
-                ownership.OwnershipToken,
-                directory.GetDirectoryObjectIdentity())
+                ownership.OwnershipToken)
             || !directory.VisiblePathMatches())
         {
             throw new InvalidOperationException(

@@ -7,6 +7,14 @@ internal sealed record MarkerlessMoveEndpointState(
     string? TargetDirectoryObjectIdentity,
     MoveJobEntryCleanupState SourceDirectoryCleanupState);
 
+internal sealed record MarkerlessMoveBoundaryAuthorizationState(
+    string SourceBoundaryPath,
+    int SourceDirectoryObjectIdentityVersion,
+    string SourceDirectoryObjectIdentity,
+    string TargetBoundaryPath,
+    int TargetDirectoryObjectIdentityVersion,
+    string TargetDirectoryObjectIdentity);
+
 internal interface IMoveExecutionStore
 {
     Task EnsureLeaseOwnedAsync(Guid jobId, MoveLeaseToken leaseToken, CancellationToken cancellationToken);
@@ -16,6 +24,10 @@ internal interface IMoveExecutionStore
         CancellationToken cancellationToken);
 
     Task<MarkerlessMoveEndpointState> GetEndpointObjectIdentitiesAsync(
+        Guid jobId,
+        CancellationToken cancellationToken);
+
+    Task<MarkerlessMoveBoundaryAuthorizationState> GetBoundaryAuthorizationsAsync(
         Guid jobId,
         CancellationToken cancellationToken);
 

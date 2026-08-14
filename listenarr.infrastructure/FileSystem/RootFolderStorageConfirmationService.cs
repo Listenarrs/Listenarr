@@ -155,12 +155,20 @@ internal sealed class RootFolderStorageConfirmationService(
                 "The root folder changed after it was displayed for confirmation. Refresh and review the current folder before confirming it.");
         }
 
+        var preservesAuthorizedGeneration = hasAuthorizedIdentity
+            && root.DirectoryObjectIdentityVersion
+                == ManagedDirectoryIdentity.CurrentVersion
+            && pinned.MatchesManagedDirectoryIdentity(
+                root.DirectoryObjectIdentityVersion,
+                root.DirectoryObjectIdentity);
+        var committedIdentity = preservesAuthorizedGeneration
+            ? new DirectoryObjectIdentityResolution(
+                root.DirectoryObjectIdentityVersion,
+                root.DirectoryObjectIdentity,
+                null)
+            : observedIdentity;
         var replacesAuthorizedGeneration = hasAuthorizedIdentity
-            && (root.DirectoryObjectIdentityVersion != observedIdentity.Version
-                || !string.Equals(
-                    root.DirectoryObjectIdentity,
-                    observedIdentity.Value,
-                    StringComparison.Ordinal));
+            && !preservesAuthorizedGeneration;
         var committed = false;
         try
         {
@@ -176,8 +184,8 @@ internal sealed class RootFolderStorageConfirmationService(
                     cancellationToken);
             }
 
-            root.DirectoryObjectIdentityVersion = observedIdentity.Version;
-            root.DirectoryObjectIdentity = observedIdentity.Value;
+            root.DirectoryObjectIdentityVersion = committedIdentity.Version;
+            root.DirectoryObjectIdentity = committedIdentity.Value;
             root.DirectoryObjectIdentityUnavailableReason = null;
             root.ResolvedCaseSensitivity = semantics.Semantics.CaseSensitivity;
             root.PathIdentityState = PathIdentityState.Valid;
@@ -189,7 +197,7 @@ internal sealed class RootFolderStorageConfirmationService(
             await db.SaveChangesAsync(cancellationToken);
 
             BeforeCommitForTest?.Invoke();
-            RevalidatePinnedGeneration(pinned, observedIdentity, cancellationToken);
+            RevalidatePinnedGeneration(pinned, committedIdentity, cancellationToken);
             await RevalidateFilesystemSemanticsAsync(
                 canonicalRootPath,
                 root.CaseSensitivityMode,
@@ -207,7 +215,7 @@ internal sealed class RootFolderStorageConfirmationService(
             AfterCommitForTest?.Invoke();
             RevalidatePinnedGeneration(
                 pinned,
-                observedIdentity,
+                committedIdentity,
                 CancellationToken.None);
             await RevalidateFilesystemSemanticsAsync(
                 canonicalRootPath,
@@ -223,7 +231,7 @@ internal sealed class RootFolderStorageConfirmationService(
             {
                 await MarkPostCommitConfirmationUnstableAsync(
                     rootFolderId,
-                    observedIdentity,
+                    committedIdentity,
                     exception);
             }
 
@@ -300,10 +308,9 @@ internal sealed class RootFolderStorageConfirmationService(
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (!ManagedDirectoryIdentity.MatchesNativeIdentity(
+        if (!pinned.MatchesManagedDirectoryIdentity(
                 expectedIdentity.Version,
-                expectedIdentity.Value,
-                pinned.GetDirectoryObjectIdentity())
+                expectedIdentity.Value)
             || !pinned.VisiblePathMatches())
         {
             throw new InvalidOperationException(

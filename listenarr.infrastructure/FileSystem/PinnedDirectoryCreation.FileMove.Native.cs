@@ -141,8 +141,8 @@ internal sealed partial class PinnedDirectoryCreation
     }
 
     private static int GetUnixReadFlags() => OperatingSystem.IsMacOS()
-        ? 0x100 | 0x1000000
-        : 0x20000 | 0x80000;
+        ? 0x4 | 0x100 | 0x1000000
+        : 0x800 | 0x20000 | 0x80000;
 
     private static int GetUnixReadWriteCreateFlags() => OperatingSystem.IsMacOS()
         ? 0x2 | 0x200 | 0x800 | 0x100 | 0x1000000

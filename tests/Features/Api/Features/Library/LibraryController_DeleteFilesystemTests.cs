@@ -45,7 +45,8 @@ namespace Listenarr.Tests.Features.Api.Features.Library
 
         private async Task<AudiobookFile> AddTrackedGenerationAsync(
             Audiobook audiobook,
-            string storedPath)
+            string storedPath,
+            Func<string, string>? physicalIdentityTransform = null)
         {
             var identity = await _provider
                 .GetRequiredService<IAudiobookFilePathIdentityResolver>()
@@ -58,7 +59,8 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 identity.CanonicalPath))
             {
                 file.ApplyPhysicalObjectIdentity(
-                    lease.PhysicalObjectIdentity,
+                    physicalIdentityTransform?.Invoke(lease.PhysicalObjectIdentity)
+                        ?? lease.PhysicalObjectIdentity,
                     DateTime.UtcNow);
             }
 
@@ -964,6 +966,78 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             Assert.False(Directory.Exists(bookFolder));
             Assert.True(Directory.Exists(tempRoot));
             Assert.True(deletedFolder ?? false);
+        }
+
+        [LinuxFact]
+        public async Task DeleteFilesystem_CompatibleMergedV1TrackedGeneration_RemainsIncompleteWhileFileExists()
+        {
+            var folder = FileService.GetTempDirectory(
+                "delete-compatible-v1-cleanup-proof");
+            var audioPath = Path.Join(folder, "book.m4b");
+            await File.WriteAllTextAsync(audioPath, "audio");
+            string persistedIdentity;
+            using (var lease = PinnedAudiobookFileRegistrationLease.Open(audioPath))
+            {
+                Assert.StartsWith(
+                    "linux-generation:",
+                    lease.PhysicalObjectIdentity,
+                    StringComparison.Ordinal);
+                persistedIdentity =
+                    LinuxIdentityTestHelper.ToMergedV1AugmentedIdentity(
+                        lease.PhysicalObjectIdentity);
+            }
+
+            Assert.False(
+                AudiobookFilesystemDeleteService.VerifyTrackedFileCleanupComplete(
+                    new Dictionary<string, string>
+                    {
+                        [audioPath] = persistedIdentity
+                    }));
+            Assert.True(File.Exists(audioPath));
+        }
+
+        [LinuxFact]
+        public async Task DeleteFilesystem_CompatibleMergedV1TrackedGeneration_DoesNotFalseBlockUnownedRecursiveDelete()
+        {
+            var tempRoot = FileService.GetTempDirectory(
+                "delete-compatible-v1-unowned-folder");
+            var bookFolder = Path.Join(tempRoot, "Book");
+            var audioPath = Path.Join(bookFolder, "book.m4b");
+            Directory.CreateDirectory(bookFolder);
+            await File.WriteAllTextAsync(audioPath, "audio");
+            await AddAuthorizedRootAsync(new RootFolder
+            {
+                Name = "Library",
+                Path = tempRoot,
+                IsDefault = true
+            });
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Compatible V1 Delete")
+                .WithBasePath(bookFolder)
+                .WithFilePath(audioPath)
+                .Build());
+            await AddTrackedGenerationAsync(
+                audiobook,
+                audioPath,
+                identity =>
+                {
+                    Assert.StartsWith(
+                        "linux-generation:",
+                        identity,
+                        StringComparison.Ordinal);
+                    return LinuxIdentityTestHelper.ToMergedV1AugmentedIdentity(identity);
+                });
+
+            var result = await _provider
+                .GetRequiredService<IAudiobookFilesystemDeleteService>()
+                .DeleteAsync(
+                    audiobook,
+                    deleteFolder: true,
+                    CancellationToken.None);
+
+            Assert.True(result.TrackedFileCleanupComplete);
+            Assert.False(File.Exists(audioPath));
+            Assert.False(Directory.Exists(bookFolder));
         }
 
         [Fact]

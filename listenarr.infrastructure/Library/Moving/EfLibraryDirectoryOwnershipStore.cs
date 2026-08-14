@@ -183,7 +183,7 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore(
             EnsureAuthorizedPhysicalIdentity(
                 existing,
                 managedRootFolderId,
-                directoryObjectIdentity);
+                claimedDirectory.GetDirectoryObjectIdentityCandidates());
             cancellationToken.ThrowIfCancellationRequested();
             ValidatePinnedOwnership(existing, markerCreation);
             existing.State = LibraryDirectoryOwnershipState.Owned;
@@ -281,7 +281,7 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore(
                 EnsureAuthorizedPhysicalIdentity(
                     concurrent,
                     managedRootFolderId,
-                    directoryObjectIdentity);
+                    claimedDirectory.GetDirectoryObjectIdentityCandidates());
                 cancellationToken.ThrowIfCancellationRequested();
                 ValidatePinnedOwnership(concurrent, markerCreation);
                 concurrent.State = LibraryDirectoryOwnershipState.Owned;

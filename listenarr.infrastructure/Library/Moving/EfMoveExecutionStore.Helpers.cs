@@ -118,10 +118,9 @@ internal sealed partial class EfMoveExecutionStore
             cancellationToken.ThrowIfCancellationRequested();
             if (!string.IsNullOrWhiteSpace(
                     relocation.TargetDirectoryObjectIdentityUnavailableReason)
-                || !ManagedDirectoryIdentity.MatchesNativeIdentity(
+                || !root.MatchesManagedDirectoryIdentity(
                     relocation.TargetDirectoryObjectIdentityVersion,
-                    relocation.TargetDirectoryObjectIdentity,
-                    root.GetDirectoryObjectIdentity())
+                    relocation.TargetDirectoryObjectIdentity)
                 || !root.VisiblePathMatches())
             {
                 throw new InvalidOperationException(
@@ -173,30 +172,33 @@ internal sealed partial class EfMoveExecutionStore
             using var boundary = PinnedDirectoryCreation.OpenPinnedBoundary(
                 targetBoundary);
             cancellationToken.ThrowIfCancellationRequested();
-            var nativeIdentity = boundary.GetDirectoryObjectIdentity();
+            var nativeIdentities = boundary.GetDirectoryObjectIdentityCandidates();
             var currentVersion = (int)authorizationEntries[0].Length;
-            var currentValue = ManagedDirectoryIdentity.CreateMarkerless(nativeIdentity);
-            var currentDigest = MoveManifestIdentity.ComputeTargetBoundaryAuthorizationDigest(
-                currentVersion,
-                currentValue);
-            if (!string.Equals(
-                    currentDigest,
-                    expectedDigest,
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                currentDigest = await TryResolveConfiguredRootBoundaryDigestAsync(
-                        db,
-                        targetBoundary,
-                        nativeIdentity,
+            var currentDigests = nativeIdentities
+                .Select(nativeIdentity =>
+                    MoveManifestIdentity.ComputeTargetBoundaryAuthorizationDigest(
                         currentVersion,
-                        cancellationToken)
-                    ?? currentDigest;
-            }
-            if (!string.Equals(
+                        ManagedDirectoryIdentity.CreateMarkerless(nativeIdentity)))
+                .ToArray();
+            var matchesCurrentIdentity = currentDigests.Any(currentDigest =>
+                string.Equals(
                     currentDigest,
                     expectedDigest,
-                    StringComparison.OrdinalIgnoreCase)
-                || !boundary.VisiblePathMatches())
+                    StringComparison.OrdinalIgnoreCase));
+            if (!matchesCurrentIdentity)
+            {
+                var configuredRootDigest = await TryResolveConfiguredRootBoundaryDigestAsync(
+                    db,
+                    targetBoundary,
+                    nativeIdentities,
+                    currentVersion,
+                    cancellationToken);
+                matchesCurrentIdentity = string.Equals(
+                    configuredRootDigest,
+                    expectedDigest,
+                    StringComparison.OrdinalIgnoreCase);
+            }
+            if (!matchesCurrentIdentity || !boundary.VisiblePathMatches())
             {
                 throw new MoveNeedsAttentionException(
                     "The move target boundary no longer identifies its authorized physical generation.");
@@ -219,7 +221,7 @@ internal sealed partial class EfMoveExecutionStore
     private static async Task<string?> TryResolveConfiguredRootBoundaryDigestAsync(
         ListenArrDbContext db,
         string targetBoundary,
-        string nativeIdentity,
+        IReadOnlyList<string> nativeIdentities,
         int expectedVersion,
         CancellationToken cancellationToken)
     {
@@ -232,10 +234,11 @@ internal sealed partial class EfMoveExecutionStore
             if (persisted == null
                 || root.DirectoryObjectIdentityVersion != expectedVersion
                 || string.IsNullOrWhiteSpace(root.DirectoryObjectIdentity)
-                || !ManagedDirectoryIdentity.MatchesNativeIdentity(
-                    root.DirectoryObjectIdentityVersion,
-                    root.DirectoryObjectIdentity,
-                    nativeIdentity))
+                || !nativeIdentities.Any(nativeIdentity =>
+                    ManagedDirectoryIdentity.MatchesNativeIdentity(
+                        root.DirectoryObjectIdentityVersion,
+                        root.DirectoryObjectIdentity,
+                        nativeIdentity)))
             {
                 continue;
             }

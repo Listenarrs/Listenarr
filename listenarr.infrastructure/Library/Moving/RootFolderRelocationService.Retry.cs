@@ -205,6 +205,17 @@ public sealed partial class RootFolderRelocationService
                 continue;
             }
 
+            if (!MoveExecutionProtocol.IsCurrent(job.ExecutionProtocolVersion))
+            {
+                job.Status = MoveJobStatus.NeedsAttention;
+                job.Error =
+                    "The move job does not use the current durable database execution protocol and cannot be retried safely.";
+                job.FailureKind = MoveFailureKind.Verification;
+                job.ActiveDeduplicationKey = null;
+                unsafeRetryJobs++;
+                continue;
+            }
+
             string? sourceIdentityError = null;
             if (string.IsNullOrWhiteSpace(job.SourcePath)
                 || !job.TryGetSourceIdentity(out var sourceIdentity)
@@ -216,6 +227,23 @@ public sealed partial class RootFolderRelocationService
                 job.Status = MoveJobStatus.NeedsAttention;
                 job.Error = sourceIdentityError
                     ?? "The move job has no authoritative source filesystem identity.";
+                job.FailureKind = MoveFailureKind.Verification;
+                job.ActiveDeduplicationKey = null;
+                unsafeRetryJobs++;
+                continue;
+            }
+
+            if (!MoveBoundaryAuthorization.TryResolveSourceBoundary(
+                    job.SourcePath,
+                    sourceIdentity,
+                    job.SourceCleanupBoundary,
+                    job.DeleteEmptySource,
+                    out _,
+                    out var sourceBoundaryReason))
+            {
+                job.Status = MoveJobStatus.NeedsAttention;
+                job.Error =
+                    $"The move job source mutation boundary cannot be retried safely: {sourceBoundaryReason}";
                 job.FailureKind = MoveFailureKind.Verification;
                 job.ActiveDeduplicationKey = null;
                 unsafeRetryJobs++;
@@ -249,13 +277,19 @@ public sealed partial class RootFolderRelocationService
                 unsafeRetryJobs++;
                 continue;
             }
-            if (!MoveManifestIdentity.TryGetTargetBoundaryAuthorization(
+            if (!MoveManifestIdentity.TryGetSourceBoundaryAuthorization(
                     job.Entries,
+                    out _,
+                    out _,
+                    out _)
+                || !MoveManifestIdentity.TryGetTargetBoundaryAuthorization(
+                    job.Entries,
+                    out _,
                     out _,
                     out _))
             {
                 job.Status = MoveJobStatus.NeedsAttention;
-                job.Error = "The move job has no durable target-boundary physical-generation authorization and cannot be retried safely.";
+                job.Error = "The move job has no valid durable source- or target-boundary physical-generation authorization and cannot be retried safely.";
                 job.FailureKind = MoveFailureKind.Verification;
                 job.ActiveDeduplicationKey = null;
                 unsafeRetryJobs++;

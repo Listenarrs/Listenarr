@@ -279,6 +279,310 @@ namespace Listenarr.Tests.Features.Api.Services
             Assert.Equal("M4B", result.Format);
         }
 
+        [Fact]
+        public async Task UnmatchedScanProcessor_PinnedPathOnly_DoesNotReopenFilesForMetadataEnrichment()
+        {
+            var root = FileService.GetTempDirectory("unmatched-processor-limited-root");
+            var bookDirectory = Path.Join(root, "Author", "2026 - Limited Book");
+            Directory.CreateDirectory(bookDirectory);
+            var file = await FileService.GetFileAsync(
+                bookDirectory,
+                "Limited Book.m4b",
+                "audio");
+            await File.WriteAllTextAsync(
+                Path.Join(bookDirectory, "desc.txt"),
+                "filesystem-sidecar-description");
+            await File.WriteAllTextAsync(
+                Path.Join(bookDirectory, "reader.txt"),
+                "filesystem-sidecar-narrator");
+            await File.WriteAllTextAsync(
+                Path.Join(bookDirectory, "cover.jpg"),
+                "filesystem-cover");
+            var expectedSize = new FileInfo(file).Length;
+            var semantics = FileSystemPathSemantics.CurrentHostDefault;
+            var pathIdentity = new PathIdentitySnapshot(
+                semantics.Syntax,
+                semantics.CaseSensitivity,
+                semantics.CaseSensitivity == FileSystemCaseSensitivity.Sensitive
+                    ? FileSystemCaseSensitivityMode.Sensitive
+                    : FileSystemCaseSensitivityMode.Insensitive,
+                root);
+            var authorization = new Mock<IScanPathAuthorizationService>(MockBehavior.Strict);
+            authorization
+                .Setup(service => service.AuthorizeAsync(
+                    root,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(ScanPathAuthorizationResult.Authorized(
+                    root,
+                    pathIdentity,
+                    ScanPathPhysicalIdentity.PinnedPathOnly()));
+            _services.AddSingleton(authorization.Object);
+            Init();
+            await CreateApplicationSettings();
+
+            var queue = new UnmatchedScanQueueService(
+                _provider.GetRequiredService<ILogger<UnmatchedScanQueueService>>(),
+                _provider.GetRequiredService<IFileSystemSemanticsResolver>());
+            CreateHubProxy<SettingsHub>(out var hubContext);
+            var ffmpeg = new Mock<IFfmpegService>(MockBehavior.Strict);
+            var processor = new UnmatchedScanProcessor(
+                queue,
+                _provider.GetRequiredService<IServiceScopeFactory>(),
+                _provider.GetRequiredService<ILogger<UnmatchedScanProcessor>>(),
+                hubContext.Object,
+                ffmpeg.Object,
+                _provider.GetRequiredService<IFileSystemSemanticsResolver>());
+            await queue.EnqueueAsync(root);
+            Assert.True(queue.Reader.TryRead(out var job));
+
+            await processor.ProcessJobAsync(job, CancellationToken.None);
+
+            Assert.True(queue.TryGetJob(job.Id, out var updatedJob));
+            Assert.Equal("Completed", updatedJob!.Status);
+            var result = Assert.Single(updatedJob.Results!);
+            Assert.Equal(file, result.FullPath);
+            Assert.Equal(expectedSize, result.Size);
+            Assert.Equal("Limited Book", result.Title);
+            Assert.Equal("Author", result.Author);
+            Assert.Null(result.Description);
+            Assert.Null(result.Narrator);
+            Assert.Null(result.CoverPath);
+            ffmpeg.VerifyNoOtherCalls();
+            authorization.VerifyAll();
+        }
+
+        [Fact]
+        public async Task UnmatchedScanProcessor_PinnedFolderMetadata_ReadsAuthorizedSidecarsAndCover()
+        {
+            var root = FileService.GetTempDirectory("unmatched-pinned-folder-metadata-positive");
+            var bookDirectory = Path.Join(root, "Author", "2026 - Pinned Book");
+            Directory.CreateDirectory(bookDirectory);
+            var audioPath = await FileService.GetFileAsync(
+                bookDirectory,
+                "Pinned Book.m4b",
+                "audio");
+            await File.WriteAllTextAsync(
+                Path.Join(bookDirectory, "desc.txt"),
+                "authorized description");
+            await File.WriteAllTextAsync(
+                Path.Join(bookDirectory, "reader.txt"),
+                "Authorized Narrator");
+            var coverPath = await FileService.GetFileAsync(
+                bookDirectory,
+                "cover.jpg",
+                "cover");
+            var semantics = FileSystemPathSemantics.CurrentHostDefault;
+            string directoryIdentity;
+            string fileIdentity;
+            using (var folder = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
+                bookDirectory,
+                createMissing: false))
+            {
+                directoryIdentity = folder.GetDirectoryObjectIdentity();
+                using var audio = folder.OpenExistingFile(
+                    Path.GetFileName(audioPath),
+                    requireDeleteAccess: false);
+                fileIdentity = audio.GetObjectIdentity();
+            }
+
+            var canonicalBookDirectory = FileSystemPathIdentity.Canonicalize(
+                bookDirectory,
+                semantics.Syntax);
+            var canonicalAudioPath = FileSystemPathIdentity.Canonicalize(
+                audioPath,
+                semantics.Syntax);
+            var enumeration = new ScanFileDiscovery.EnumerationResult(
+                [canonicalAudioPath],
+                [canonicalBookDirectory],
+                new Dictionary<string, string>(semantics.Comparer)
+                {
+                    [canonicalBookDirectory] = directoryIdentity
+                },
+                new Dictionary<string, string>(semantics.Comparer)
+                {
+                    [canonicalAudioPath] = fileIdentity
+                },
+                new Dictionary<string, long>(semantics.Comparer)
+                {
+                    [canonicalAudioPath] = 5
+                },
+                []);
+            var parsed = new PathParsedMetadata();
+
+            await UnmatchedScanProcessor.ApplyPinnedFolderMetadataAsync(
+                parsed,
+                bookDirectory,
+                enumeration,
+                semantics,
+                CancellationToken.None);
+
+            Assert.Equal("authorized description", parsed.Description);
+            Assert.Equal("Authorized Narrator", parsed.Narrator);
+            Assert.Equal(coverPath, parsed.CoverPath);
+        }
+
+        [Fact]
+        public async Task UnmatchedScanProcessor_PinnedFolderMetadata_NestedDiscUsesMatchedBookDirectory()
+        {
+            var root = FileService.GetTempDirectory("unmatched-pinned-folder-metadata-nested");
+            var bookDirectory = Path.Join(
+                root,
+                "Author",
+                "Series",
+                "2026 - Nested Book");
+            var discDirectory = Path.Join(bookDirectory, "CD1");
+            Directory.CreateDirectory(discDirectory);
+            var audioPath = await FileService.GetFileAsync(
+                discDirectory,
+                "01.m4b",
+                "audio");
+            await File.WriteAllTextAsync(
+                Path.Join(bookDirectory, "desc.txt"),
+                "book-level description");
+            await File.WriteAllTextAsync(
+                Path.Join(bookDirectory, "reader.txt"),
+                "Book Level Narrator");
+            var coverPath = await FileService.GetFileAsync(
+                bookDirectory,
+                "cover.jpg",
+                "cover");
+            var semantics = FileSystemPathSemantics.CurrentHostDefault;
+
+            string bookDirectoryIdentity;
+            string discDirectoryIdentity;
+            string fileIdentity;
+            using (var book = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
+                bookDirectory,
+                createMissing: false))
+            using (var disc = book.OpenExistingChild("CD1"))
+            using (var audio = disc.OpenExistingFile(
+                Path.GetFileName(audioPath),
+                requireDeleteAccess: false))
+            {
+                bookDirectoryIdentity = book.GetDirectoryObjectIdentity();
+                discDirectoryIdentity = disc.GetDirectoryObjectIdentity();
+                fileIdentity = audio.GetObjectIdentity();
+            }
+
+            var canonicalBookDirectory = FileSystemPathIdentity.Canonicalize(
+                bookDirectory,
+                semantics.Syntax);
+            var canonicalDiscDirectory = FileSystemPathIdentity.Canonicalize(
+                discDirectory,
+                semantics.Syntax);
+            var canonicalAudioPath = FileSystemPathIdentity.Canonicalize(
+                audioPath,
+                semantics.Syntax);
+            var enumeration = new ScanFileDiscovery.EnumerationResult(
+                [canonicalAudioPath],
+                [canonicalBookDirectory, canonicalDiscDirectory],
+                new Dictionary<string, string>(semantics.Comparer)
+                {
+                    [canonicalBookDirectory] = bookDirectoryIdentity,
+                    [canonicalDiscDirectory] = discDirectoryIdentity
+                },
+                new Dictionary<string, string>(semantics.Comparer)
+                {
+                    [canonicalAudioPath] = fileIdentity
+                },
+                new Dictionary<string, long>(semantics.Comparer)
+                {
+                    [canonicalAudioPath] = 5
+                },
+                []);
+            var parsed = PathMetadataParser.ParsePathOnly(
+                audioPath,
+                root,
+                semantics);
+
+            await UnmatchedScanProcessor.ApplyPinnedFolderMetadataAsync(
+                parsed,
+                parsed.BookFolderPath ?? string.Empty,
+                enumeration,
+                semantics,
+                CancellationToken.None);
+
+            Assert.Equal(bookDirectory, parsed.BookFolderPath);
+            Assert.Equal("book-level description", parsed.Description);
+            Assert.Equal("Book Level Narrator", parsed.Narrator);
+            Assert.Equal(coverPath, parsed.CoverPath);
+        }
+
+        [Fact]
+        public async Task UnmatchedScanProcessor_PinnedFolderMetadata_ReplacementGenerationIsRejected()
+        {
+            var root = FileService.GetTempDirectory("unmatched-pinned-folder-metadata");
+            var bookDirectory = Path.Join(root, "Author", "2026 - Pinned Book");
+            Directory.CreateDirectory(bookDirectory);
+            var audioPath = await FileService.GetFileAsync(
+                bookDirectory,
+                "Pinned Book.m4b",
+                "audio");
+            await File.WriteAllTextAsync(
+                Path.Join(bookDirectory, "desc.txt"),
+                "original description");
+            var displaced = Path.Join(root, "original-book-directory");
+            var semantics = FileSystemPathSemantics.CurrentHostDefault;
+            string directoryIdentity;
+            string fileIdentity;
+            using (var folder = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
+                bookDirectory,
+                createMissing: false))
+            {
+                directoryIdentity = folder.GetDirectoryObjectIdentity();
+                using var audio = folder.OpenExistingFile(
+                    Path.GetFileName(audioPath),
+                    requireDeleteAccess: false);
+                fileIdentity = audio.GetObjectIdentity();
+            }
+
+            var canonicalBookDirectory = FileSystemPathIdentity.Canonicalize(
+                bookDirectory,
+                semantics.Syntax);
+            var canonicalAudioPath = FileSystemPathIdentity.Canonicalize(
+                audioPath,
+                semantics.Syntax);
+            var enumeration = new ScanFileDiscovery.EnumerationResult(
+                [canonicalAudioPath],
+                [canonicalBookDirectory],
+                new Dictionary<string, string>(semantics.Comparer)
+                {
+                    [canonicalBookDirectory] = directoryIdentity
+                },
+                new Dictionary<string, string>(semantics.Comparer)
+                {
+                    [canonicalAudioPath] = fileIdentity
+                },
+                new Dictionary<string, long>(semantics.Comparer)
+                {
+                    [canonicalAudioPath] = 5
+                },
+                []);
+
+            Directory.Move(bookDirectory, displaced);
+            Directory.CreateDirectory(bookDirectory);
+            await File.WriteAllTextAsync(
+                Path.Join(bookDirectory, "desc.txt"),
+                "replacement description");
+            var parsed = new PathParsedMetadata();
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                UnmatchedScanProcessor.ApplyPinnedFolderMetadataAsync(
+                    parsed,
+                    bookDirectory,
+                    enumeration,
+                    semantics,
+                    CancellationToken.None));
+
+            Assert.Null(parsed.Description);
+            Assert.Equal(
+                "original description",
+                await File.ReadAllTextAsync(Path.Join(displaced, "desc.txt")));
+            Assert.Equal(
+                "replacement description",
+                await File.ReadAllTextAsync(Path.Join(bookDirectory, "desc.txt")));
+        }
+
         [WindowsFact]
         public async Task UnmatchedScanProcessor_ForeignRootSyntax_DoesNotScanWindowsAlias()
         {

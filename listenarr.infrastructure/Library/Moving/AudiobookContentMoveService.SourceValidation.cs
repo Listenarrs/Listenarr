@@ -98,4 +98,198 @@ internal sealed partial class AudiobookContentMoveService
             RootManifestRelativePath,
             StringComparison.Ordinal);
 
+    private static PinnedDirectoryCreation.PinnedDirectoryAnchor OpenPinnedMoveDescendant(
+        AudiobookContentMoveRequest request,
+        string endpointRoot,
+        string directoryPath,
+        FileSystemPathSemantics semantics,
+        string expectedEndpointIdentity,
+        bool sourceEndpoint)
+    {
+        var authorization = request.BoundaryAuthorization
+            ?? throw new MoveNeedsAttentionException(
+                "The move lacks loaded filesystem boundary authorization.");
+        var boundaryPath = sourceEndpoint
+            ? authorization.SourceBoundaryPath
+            : authorization.TargetBoundaryPath;
+        var boundaryIdentityVersion = sourceEndpoint
+            ? authorization.SourceDirectoryObjectIdentityVersion
+            : authorization.TargetDirectoryObjectIdentityVersion;
+        var boundaryIdentity = sourceEndpoint
+            ? authorization.SourceDirectoryObjectIdentity
+            : authorization.TargetDirectoryObjectIdentity;
+
+        if (!FileSystemPathIdentity.TryGetRelativePathWithinBase(
+                endpointRoot,
+                directoryPath,
+                semantics,
+                out var relativePath))
+        {
+            throw new MoveNeedsAttentionException(
+                "A move descendant escaped its pinned endpoint.");
+        }
+
+        var current = OpenPinnedMoveBoundaryDescendant(
+            boundaryPath,
+            endpointRoot,
+            semantics,
+            boundaryIdentityVersion,
+            boundaryIdentity,
+            sourceEndpoint ? "source boundary" : "target boundary");
+        try
+        {
+            if (!current.MatchesDirectoryObjectIdentity(expectedEndpointIdentity)
+                || !current.VisiblePathMatches())
+            {
+                throw new MoveNeedsAttentionException(
+                    "A move endpoint changed physical generation.");
+            }
+
+            foreach (var segment in SplitMovePathSegments(relativePath, semantics))
+            {
+                var next = OpenPinnedMoveChild(
+                    current,
+                    segment,
+                    "move endpoint");
+                current.Dispose();
+                current = next;
+            }
+
+            return current;
+        }
+        catch
+        {
+            current.Dispose();
+            throw;
+        }
+    }
+
+    private static PinnedDirectoryCreation.PinnedDirectoryAnchor OpenPinnedMoveBoundaryDescendant(
+        AudiobookContentMoveRequest request,
+        string directoryPath,
+        FileSystemPathSemantics semantics,
+        bool sourceBoundary)
+    {
+        var authorization = request.BoundaryAuthorization
+            ?? throw new MoveNeedsAttentionException(
+                "The move lacks loaded filesystem boundary authorization.");
+        return OpenPinnedMoveBoundaryDescendant(
+            sourceBoundary
+                ? authorization.SourceBoundaryPath
+                : authorization.TargetBoundaryPath,
+            directoryPath,
+            semantics,
+            sourceBoundary
+                ? authorization.SourceDirectoryObjectIdentityVersion
+                : authorization.TargetDirectoryObjectIdentityVersion,
+            sourceBoundary
+                ? authorization.SourceDirectoryObjectIdentity
+                : authorization.TargetDirectoryObjectIdentity,
+            sourceBoundary ? "source boundary" : "target boundary");
+    }
+
+    private static PinnedDirectoryCreation.PinnedDirectoryAnchor OpenPinnedMoveBoundaryDescendant(
+        string boundaryPath,
+        string directoryPath,
+        FileSystemPathSemantics semantics,
+        int boundaryIdentityVersion,
+        string boundaryIdentity,
+        string boundaryDescription)
+    {
+        if (!FileSystemPathIdentity.TryGetRelativePathWithinBase(
+                boundaryPath,
+                directoryPath,
+                semantics,
+                out var relativePath))
+        {
+            throw new MoveNeedsAttentionException(
+                $"A move directory escaped its authorized {boundaryDescription}.");
+        }
+
+        var current = PinnedDirectoryCreation.OpenPinnedBoundary(boundaryPath);
+        try
+        {
+            if (!current.MatchesManagedDirectoryIdentity(
+                    boundaryIdentityVersion,
+                    boundaryIdentity)
+                || !current.VisiblePathMatches())
+            {
+                throw new MoveNeedsAttentionException(
+                    $"The move {boundaryDescription} changed physical generation.");
+            }
+
+            foreach (var segment in SplitMovePathSegments(relativePath, semantics))
+            {
+                var next = OpenPinnedMoveChild(
+                    current,
+                    segment,
+                    boundaryDescription);
+                current.Dispose();
+                current = next;
+            }
+
+            return current;
+        }
+        catch
+        {
+            current.Dispose();
+            throw;
+        }
+    }
+
+    private static PinnedDirectoryCreation.PinnedDirectoryAnchor OpenPinnedMoveChild(
+        PinnedDirectoryCreation.PinnedDirectoryAnchor current,
+        string segment,
+        string authorityDescription)
+    {
+        try
+        {
+            return current.OpenExistingChild(segment);
+        }
+        catch (Exception exception) when (
+            IsPinnedMoveHierarchyReplacementError(exception))
+        {
+            throw new MoveNeedsAttentionException(
+                $"A directory beneath the authorized {authorityDescription} changed while its pinned hierarchy was being opened: {exception.Message}");
+        }
+    }
+
+    private static bool IsPinnedMoveHierarchyReplacementError(Exception exception)
+    {
+        if (exception is InvalidOperationException)
+        {
+            return true;
+        }
+
+        if (exception is not System.ComponentModel.Win32Exception native)
+        {
+            return false;
+        }
+
+        return OperatingSystem.IsWindows()
+            ? native.NativeErrorCode is 2 or 3
+            : OperatingSystem.IsLinux()
+                ? native.NativeErrorCode is 2 or 20 or 40
+                : OperatingSystem.IsMacOS()
+                    && native.NativeErrorCode is 2 or 20 or 62;
+    }
+
+    private static IEnumerable<string> SplitMovePathSegments(
+        string relativePath,
+        FileSystemPathSemantics semantics)
+    {
+        if (string.IsNullOrWhiteSpace(relativePath)
+            || string.Equals(relativePath, ".", StringComparison.Ordinal))
+        {
+            return [];
+        }
+
+        var separators = semantics.Syntax == FileSystemPathSyntax.Windows
+            ? new[] { '\\', '/' }
+            : new[] { '/' };
+        return relativePath.Split(
+            separators,
+            StringSplitOptions.RemoveEmptyEntries);
+    }
+
 }

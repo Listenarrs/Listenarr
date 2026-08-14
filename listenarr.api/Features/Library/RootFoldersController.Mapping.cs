@@ -39,8 +39,11 @@ public partial class RootFoldersController
                     ? filesystem.ErrorMessage
                         ?? "Library filesystem initialization failed. Filesystem operations are disabled."
                     : "Library filesystem initialization is in progress.",
+                StorageDetail: null,
                 CanConfirmCurrentFolder: false,
                 CanChangePath: false,
+                CanReadFilesystem: false,
+                CanScanFilesystem: false,
                 CanMutateFilesystem: false,
                 ConfirmationToken: null,
                 root.CreatedAt,
@@ -66,8 +69,11 @@ public partial class RootFoldersController
             storage.State.ToString(),
             storage.Reason.ToString(),
             storage.Message,
+            storage.Detail,
             storage.CanConfirmCurrentFolder,
             storage.CanChangePath && active == null,
+            storage.CanReadFilesystem,
+            storage.CanScanFilesystem,
             storage.CanMutateFilesystem,
             storage.ConfirmationToken,
             root.CreatedAt,

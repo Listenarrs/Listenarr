@@ -297,6 +297,7 @@ export interface RootFolder {
   pathIdentityState?: 'Valid' | 'Conflict' | 'Unavailable'
   storageState?:
     | 'Healthy'
+    | 'Limited'
     | 'Missing'
     | 'Changed'
     | 'Unavailable'
@@ -313,14 +314,19 @@ export interface RootFolder {
     | 'IdentityUnstable'
     | 'FilesystemSemanticsUnavailable'
     | 'FilesystemSemanticsChanged'
+    | 'ReadOnlyFilesystem'
+    | 'MutationCapabilityUnavailable'
     | 'NoAuthorizedIdentity'
     | 'InvalidPath'
     | 'Initializing'
     | 'InitializationFailed'
     | 'Unknown'
   storageMessage?: string | null
+  storageDetail?: string | null
   canConfirmCurrentFolder?: boolean
   canChangePath?: boolean
+  canReadFilesystem?: boolean
+  canScanFilesystem?: boolean
   canMutateFilesystem?: boolean
   confirmationToken?: string | null
   activeRelocation?: RootFolderPathChangeResult | null

@@ -281,10 +281,7 @@ public sealed class FileRenameRecoveryReconciler(
             using var file = parent.OpenExistingFileForStableRead(Path.GetFileName(fullPath));
             return file.VisiblePathMatches()
                 && parent.VisiblePathMatches()
-                && string.Equals(
-                    file.GetObjectIdentity(),
-                    expectedPhysicalObjectIdentity,
-                    StringComparison.Ordinal);
+                && file.MatchesObjectIdentity(expectedPhysicalObjectIdentity);
         }
         catch (Exception exception) when (exception is
             IOException or UnauthorizedAccessException

@@ -98,10 +98,8 @@ namespace Listenarr.Infrastructure.Library.Moving
                     if (trackedPhysicalObjectIdentities.TryGetValue(
                             entryPath,
                             out var expectedTrackedPhysicalObjectIdentity)
-                        && !string.Equals(
-                            physicalObjectIdentity,
-                            expectedTrackedPhysicalObjectIdentity,
-                            StringComparison.Ordinal))
+                        && !file.MatchesObjectIdentity(
+                            expectedTrackedPhysicalObjectIdentity))
                     {
                         reason =
                             "A tracked audiobook file physical generation changed before recursive-delete preflight.";
@@ -194,10 +192,8 @@ namespace Listenarr.Infrastructure.Library.Moving
                         if (!preflightIdentities.TryGetValue(
                                 relativeEntry,
                                 out var expectedChildIdentity)
-                            || !string.Equals(
-                                child.GetDirectoryObjectIdentity(),
-                                expectedChildIdentity,
-                                StringComparison.Ordinal))
+                            || !child.MatchesDirectoryObjectIdentity(
+                                expectedChildIdentity))
                         {
                             reason =
                                 "A directory generation changed after recursive-delete preflight.";
@@ -251,10 +247,7 @@ namespace Listenarr.Infrastructure.Library.Moving
                     if (!preflightIdentities.TryGetValue(
                             relativeFile,
                             out var expectedFileIdentity)
-                        || !string.Equals(
-                            file.GetObjectIdentity(),
-                            expectedFileIdentity,
-                            StringComparison.Ordinal))
+                        || !file.MatchesObjectIdentity(expectedFileIdentity))
                     {
                         reason =
                             "A file generation changed after recursive-delete preflight.";
@@ -370,11 +363,7 @@ namespace Listenarr.Infrastructure.Library.Moving
                         return false;
                     }
 
-                    if (!preflightIdentities.TryGetValue(relativePath, out var observedIdentity)
-                        || !string.Equals(
-                            observedIdentity,
-                            expected.Value,
-                            StringComparison.Ordinal))
+                    if (!preflightIdentities.ContainsKey(relativePath))
                     {
                         reason =
                             "A tracked audiobook file generation is missing or changed in the unowned audiobook folder.";

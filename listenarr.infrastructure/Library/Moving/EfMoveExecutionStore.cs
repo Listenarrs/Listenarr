@@ -209,7 +209,7 @@ internal sealed partial class EfMoveExecutionStore(
                     .ToListAsync(cancellationToken);
                 return entries
                     .Where(entry =>
-                        !MoveManifestIdentity.IsTargetBoundaryAuthorization(entry))
+                        !MoveManifestIdentity.IsBoundaryAuthorization(entry))
                     .ToList();
             },
             cancellationToken);

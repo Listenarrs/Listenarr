@@ -124,21 +124,18 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
         using var liveDirectory = authorization.ParentAnchor.OpenExistingChild(
             Path.GetFileName(canonicalPath));
         var liveIdentity = liveDirectory.GetDirectoryObjectIdentity();
-        if (!string.Equals(
-                liveIdentity,
-                replacementDirectoryObjectIdentity,
-                StringComparison.Ordinal)
+        if (!liveDirectory.MatchesDirectoryObjectIdentity(
+                replacementDirectoryObjectIdentity)
             || !liveDirectory.VisiblePathMatches()
             || !authorization.ParentAnchor.VisiblePathMatches())
         {
             throw new InvalidOperationException(
                 "The markerless replacement directory no longer matches its persisted move generation.");
         }
-        if (ManagedDirectoryIdentity.Matches(
+        if (liveDirectory.MatchesManagedDirectoryOwnershipIdentity(
                 stale.DirectoryObjectIdentityVersion,
                 stale.DirectoryObjectIdentity,
-                stale.OwnershipToken,
-                liveIdentity))
+                stale.OwnershipToken))
         {
             return false;
         }
@@ -166,10 +163,8 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
         }
 
         AfterMarkerlessReplacementCommitForTest?.Invoke();
-        if (!string.Equals(
-                liveDirectory.GetDirectoryObjectIdentity(),
-                replacementDirectoryObjectIdentity,
-                StringComparison.Ordinal)
+        if (!liveDirectory.MatchesDirectoryObjectIdentity(
+                replacementDirectoryObjectIdentity)
             || !liveDirectory.VisiblePathMatches()
             || !authorization.ParentAnchor.VisiblePathMatches())
         {

@@ -11,18 +11,22 @@ internal sealed partial class AudiobookContentMoveService
         IReadOnlyCollection<MoveJobEntry> manifest,
         CancellationToken cancellationToken)
     {
-        using (var root = PinnedDirectoryCreation.OpenPinnedBoundary(source))
+        string sourceEndpointIdentity;
+        using (var root = OpenPinnedMoveBoundaryDescendant(
+            request,
+            source,
+            request.SourceSemantics,
+            sourceBoundary: true))
         {
             var rootIdentity = root.GetDirectoryObjectIdentity();
+            sourceEndpointIdentity = rootIdentity;
             var endpoints = await GetEndpointObjectIdentitiesAsync(
                 request.JobId,
                 cancellationToken);
             if (!string.IsNullOrWhiteSpace(
                     endpoints.SourceDirectoryObjectIdentity)
-                && !string.Equals(
-                    endpoints.SourceDirectoryObjectIdentity,
-                    rootIdentity,
-                    StringComparison.Ordinal))
+                && !root.MatchesDirectoryObjectIdentity(
+                    endpoints.SourceDirectoryObjectIdentity))
             {
                 throw new MoveNeedsAttentionException(
                     "The markerless move source root changed physical generation.");
@@ -62,14 +66,23 @@ internal sealed partial class AudiobookContentMoveService
             var parentPath = Path.GetDirectoryName(fullPath)
                 ?? throw new MoveNeedsAttentionException(
                     "A source manifest entry has no parent directory.");
-            using var parent = PinnedDirectoryCreation.OpenPinnedBoundary(parentPath);
+            using var parent = OpenPinnedMoveDescendant(
+                request,
+                source,
+                parentPath,
+                request.SourceSemantics,
+                sourceEndpointIdentity,
+                sourceEndpoint: true);
             string identity;
             if (entry.EntryType == MoveJobEntryType.Directory)
             {
                 using var directory = parent.OpenExistingChild(
                     Path.GetFileName(fullPath));
                 identity = directory.GetDirectoryObjectIdentity();
-                if (!directory.VisiblePathMatches())
+                if (!directory.VisiblePathMatches()
+                    || (!string.IsNullOrWhiteSpace(entry.SourcePhysicalObjectIdentity)
+                        && !directory.MatchesDirectoryObjectIdentity(
+                            entry.SourcePhysicalObjectIdentity)))
                 {
                     throw new MoveNeedsAttentionException(
                         $"Source directory changed while pinned: {entry.RelativePath}");
@@ -87,16 +100,13 @@ internal sealed partial class AudiobookContentMoveService
                         $"Source file changed while its generation was captured: {entry.RelativePath}");
                 }
                 identity = file.GetObjectIdentity();
-            }
-
-            if (!string.IsNullOrWhiteSpace(entry.SourcePhysicalObjectIdentity)
-                && !string.Equals(
-                    entry.SourcePhysicalObjectIdentity,
-                    identity,
-                    StringComparison.Ordinal))
-            {
-                throw new MoveNeedsAttentionException(
-                    $"Source entry changed physical generation: {entry.RelativePath}");
+                if (!string.IsNullOrWhiteSpace(entry.SourcePhysicalObjectIdentity)
+                    && !file.MatchesObjectIdentity(
+                        entry.SourcePhysicalObjectIdentity))
+                {
+                    throw new MoveNeedsAttentionException(
+                        $"Source entry changed physical generation: {entry.RelativePath}");
+                }
             }
             if (string.IsNullOrWhiteSpace(entry.SourcePhysicalObjectIdentity))
             {
@@ -121,7 +131,7 @@ internal sealed partial class AudiobookContentMoveService
         long totalWorkUnits,
         CancellationToken cancellationToken)
     {
-        var initialLastWriteTimeUtc = File.GetLastWriteTimeUtc(fullPath);
+        var initialLastWriteTimeUtc = file.GetLastWriteTimeUtc();
         await using var stream = file.OpenReadStream(
             bufferSize: 1024 * 1024,
             asynchronous: false);
@@ -170,7 +180,7 @@ internal sealed partial class AudiobookContentMoveService
 
             if (hashed != entry.Length
                 || !file.VisiblePathMatches()
-                || File.GetLastWriteTimeUtc(fullPath) != initialLastWriteTimeUtc)
+                || file.GetLastWriteTimeUtc() != initialLastWriteTimeUtc)
             {
                 throw new MoveNeedsAttentionException(
                     $"Source file changed while its content proof was being captured: {entry.RelativePath}");

@@ -219,6 +219,8 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             Assert.Equal("Initializing", root.StorageReason);
             Assert.False(root.CanConfirmCurrentFolder);
             Assert.False(root.CanChangePath);
+            Assert.False(root.CanReadFilesystem);
+            Assert.False(root.CanScanFilesystem);
             Assert.False(root.CanMutateFilesystem);
             Assert.Null(root.ConfirmationToken);
             storageHealthResolver.Verify(
@@ -270,6 +272,58 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         }
 
         [Fact]
+        public async Task GetAll_LimitedStorage_PreservesFriendlyMessageTechnicalDetailAndScanCapability()
+        {
+            var svc = new FakeService();
+            svc.Store.Add(new RootFolder
+            {
+                Id = 9,
+                Name = "Unsupported Storage Root",
+                Path = FileUtils.GetAbsolutePath("unsupported-storage-root")
+            });
+            using var db = CreateDb();
+            const string detail =
+                "statx omitted birth time and name_to_handle_at returned operation not permitted.";
+            var storageHealthResolver = new Mock<IRootFolderStorageHealthResolver>(MockBehavior.Strict);
+            storageHealthResolver
+                .Setup(resolver => resolver.ResolveAsync(
+                    It.IsAny<RootFolder>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new RootFolderStorageObservation(
+                    RootFolderStorageState.Limited,
+                    RootFolderStorageReason.IdentityUnsupported,
+                    "This storage can be read and scanned, but it does not expose the durable file identity required for crash-safe moves and deletions.",
+                    CanConfirmCurrentFolder: false,
+                    CanChangePath: true,
+                    CanMutateFilesystem: false,
+                    ConfirmationToken: null,
+                    Detail: detail));
+            var controller = new RootFoldersController(
+                svc,
+                _fakeQueue,
+                new EfAudiobookFileRepository(db),
+                new AudiobookRepository(db),
+                new LocalFileSystem(),
+                storageHealthResolver: storageHealthResolver.Object);
+
+            var result = await controller.GetAll();
+
+            var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(result);
+            var root = Assert.Single(Assert.IsAssignableFrom<List<RootFolderDto>>(ok.Value));
+            Assert.Equal("Limited", root.StorageState);
+            Assert.Equal("IdentityUnsupported", root.StorageReason);
+            Assert.Contains(
+                "read and scanned",
+                root.StorageMessage ?? string.Empty,
+                StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(detail, root.StorageDetail);
+            Assert.True(root.CanReadFilesystem);
+            Assert.True(root.CanScanFilesystem);
+            Assert.False(root.CanMutateFilesystem);
+            storageHealthResolver.VerifyAll();
+        }
+
+        [Fact]
         public async Task GetAll_AmbiguousPersistedRoot_DoesNotExposeBorrowedHostSyntax()
         {
             var svc = new FakeService();
@@ -293,6 +347,92 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(result);
             var root = Assert.Single(Assert.IsAssignableFrom<List<RootFolderDto>>(ok.Value));
             Assert.Null(root.PathSyntax);
+        }
+
+        [Fact]
+        public async Task ScanUnmatched_NonScannableStorage_RejectsBeforeQueuePublication()
+        {
+            var svc = new FakeService();
+            svc.Store.Add(new RootFolder
+            {
+                Id = 10,
+                Name = "Unconfirmed Root",
+                Path = FileUtils.GetAbsolutePath("unconfirmed-scan-root")
+            });
+            using var db = CreateDb();
+            var queue = new Mock<IUnmatchedScanQueueService>(MockBehavior.Strict);
+            var storageHealthResolver = new Mock<IRootFolderStorageHealthResolver>(MockBehavior.Strict);
+            storageHealthResolver
+                .Setup(resolver => resolver.ResolveAsync(
+                    svc.Store[0],
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new RootFolderStorageObservation(
+                    RootFolderStorageState.Unconfirmed,
+                    RootFolderStorageReason.NoAuthorizedIdentity,
+                    "This folder must be confirmed before it can be scanned.",
+                    CanConfirmCurrentFolder: true,
+                    CanChangePath: true,
+                    CanMutateFilesystem: false,
+                    ConfirmationToken: "confirmation-token"));
+            var controller = new RootFoldersController(
+                svc,
+                queue.Object,
+                new EfAudiobookFileRepository(db),
+                new AudiobookRepository(db),
+                new LocalFileSystem(),
+                storageHealthResolver: storageHealthResolver.Object);
+
+            var result = await controller.ScanUnmatched(10);
+
+            var conflict = Assert.IsType<Microsoft.AspNetCore.Mvc.ConflictObjectResult>(result);
+            var payload = JsonSerializer.Serialize(conflict.Value);
+            Assert.Contains("root_folder_scan_unavailable", payload, StringComparison.Ordinal);
+            queue.VerifyNoOtherCalls();
+            storageHealthResolver.VerifyAll();
+        }
+
+        [Fact]
+        public async Task ScanUnmatched_LimitedScanOnlyStorage_EnqueuesScan()
+        {
+            var svc = new FakeService();
+            svc.Store.Add(new RootFolder
+            {
+                Id = 11,
+                Name = "Limited Root",
+                Path = FileUtils.GetAbsolutePath("limited-scan-root")
+            });
+            using var db = CreateDb();
+            var queue = new Mock<IUnmatchedScanQueueService>(MockBehavior.Strict);
+            var expectedJobId = Guid.NewGuid();
+            queue.Setup(service => service.EnqueueAsync(svc.Store[0].Path))
+                .ReturnsAsync(expectedJobId);
+            var storageHealthResolver = new Mock<IRootFolderStorageHealthResolver>(MockBehavior.Strict);
+            storageHealthResolver
+                .Setup(resolver => resolver.ResolveAsync(
+                    svc.Store[0],
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new RootFolderStorageObservation(
+                    RootFolderStorageState.Limited,
+                    RootFolderStorageReason.IdentityUnsupported,
+                    "This storage can be read and scanned, but filesystem mutations are disabled.",
+                    CanConfirmCurrentFolder: false,
+                    CanChangePath: true,
+                    CanMutateFilesystem: false,
+                    ConfirmationToken: null));
+            var controller = new RootFoldersController(
+                svc,
+                queue.Object,
+                new EfAudiobookFileRepository(db),
+                new AudiobookRepository(db),
+                new LocalFileSystem(),
+                storageHealthResolver: storageHealthResolver.Object);
+
+            var result = await controller.ScanUnmatched(11);
+
+            var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(result);
+            Assert.Contains(expectedJobId.ToString(), JsonSerializer.Serialize(ok.Value), StringComparison.Ordinal);
+            queue.VerifyAll();
+            storageHealthResolver.VerifyAll();
         }
 
         [Fact]

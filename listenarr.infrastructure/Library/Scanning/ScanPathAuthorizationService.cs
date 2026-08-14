@@ -3,10 +3,11 @@ using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.Library.Scanning;
 
-internal sealed class ScanPathAuthorizationService(
+internal sealed partial class ScanPathAuthorizationService(
     IConfigurationService configurationService,
     IRootFolderService rootFolderService,
     IFileSystemSemanticsResolver semanticsResolver,
+    IDirectoryObjectIdentityResolver directoryObjectIdentityResolver,
     ILogger<ScanPathAuthorizationService> logger) : IScanPathAuthorizationService
 {
     public async Task<ScanPathAuthorizationResult> AuthorizeAsync(
@@ -239,36 +240,7 @@ internal sealed class ScanPathAuthorizationService(
         return roots;
     }
 
-    private void LogUnavailableCandidate(
-        RootCandidate candidate,
-        string message,
-        string? reason = null)
-    {
-        var sanitizedPath = LogRedaction.SanitizeFilePath(candidate.Path);
-        if (candidate.RequiresEnrollment)
-        {
-            if (reason == null)
-            {
-                logger.LogWarning(message, sanitizedPath);
-            }
-            else
-            {
-                logger.LogWarning(message, sanitizedPath, reason);
-            }
-            return;
-        }
-
-        if (reason == null)
-        {
-            logger.LogDebug(message, sanitizedPath);
-        }
-        else
-        {
-            logger.LogDebug(message, sanitizedPath, reason);
-        }
-    }
-
-    private static async Task<PhysicalIdentityCapture> TryCapturePhysicalIdentityAsync(
+    private async Task<PhysicalIdentityCapture> TryCapturePhysicalIdentityAsync(
         AuthorizedRoot authorizedRoot,
         string scanPath,
         CancellationToken cancellationToken)
@@ -281,19 +253,112 @@ internal sealed class ScanPathAuthorizationService(
             var canonicalScanPath = FileSystemPathIdentity.Canonicalize(
                 scanPath,
                 authorizedRoot.Semantics.Syntax);
+
+            var limitedBoundary = false;
+            DirectoryObjectIdentityResolution? verifiedBoundaryIdentity = null;
+            if (authorizedRoot.RequiresEnrollment
+                && authorizedRoot.DirectoryObjectIdentityVersion.HasValue
+                && !string.IsNullOrWhiteSpace(authorizedRoot.DirectoryObjectIdentity))
+            {
+                var enrolled = await directoryObjectIdentityResolver.ResolveExistingAsync(
+                    canonicalBoundary,
+                    authorizedRoot.DirectoryObjectIdentityVersion.Value,
+                    authorizedRoot.DirectoryObjectIdentity,
+                    cancellationToken);
+                if (enrolled.IsAvailable)
+                {
+                    verifiedBoundaryIdentity = enrolled;
+                }
+                else
+                {
+                    var liveBoundary = await directoryObjectIdentityResolver.ResolveAsync(
+                        canonicalBoundary,
+                        cancellationToken);
+                    if (enrolled.FailureKind
+                        == DirectoryObjectIdentityFailureKind.LegacyWeakIdentity)
+                    {
+                        if (!liveBoundary.IsAvailable)
+                        {
+                            return PhysicalIdentityCapture.Failed(
+                                liveBoundary.UnavailableReason
+                                    ?? enrolled.UnavailableReason
+                                    ?? "The configured scan root physical identity cannot be verified.");
+                        }
+
+                        verifiedBoundaryIdentity = liveBoundary;
+                        limitedBoundary = true;
+                    }
+                    else if (enrolled.FailureKind
+                        == DirectoryObjectIdentityFailureKind.IdentityUnsupported)
+                    {
+                        // Distinguish an unsupported historical identity version from a
+                        // live filesystem that genuinely lacks durable generation support.
+                        if (liveBoundary.IsAvailable
+                            || liveBoundary.FailureKind
+                                != DirectoryObjectIdentityFailureKind.IdentityUnsupported)
+                        {
+                            return PhysicalIdentityCapture.Failed(
+                                enrolled.UnavailableReason
+                                    ?? "The configured scan root physical identity cannot be verified.");
+                        }
+
+                        limitedBoundary = true;
+                    }
+                    else
+                    {
+                        return PhysicalIdentityCapture.Failed(
+                            enrolled.UnavailableReason
+                                ?? "The configured scan root no longer identifies its enrolled physical generation.");
+                    }
+                }
+            }
+            else if (authorizedRoot.RequiresEnrollment)
+            {
+                var liveBoundary = await directoryObjectIdentityResolver.ResolveAsync(
+                    canonicalBoundary,
+                    cancellationToken);
+                if (liveBoundary.IsAvailable)
+                {
+                    return PhysicalIdentityCapture.Failed(
+                        "The configured scan root has not been enrolled with its available physical generation.");
+                }
+                if (liveBoundary.FailureKind
+                    != DirectoryObjectIdentityFailureKind.IdentityUnsupported)
+                {
+                    return PhysicalIdentityCapture.Failed(
+                        liveBoundary.UnavailableReason
+                            ?? "The configured scan root physical identity is unavailable.");
+                }
+
+                limitedBoundary = true;
+            }
+
+            var scanRootResolution = await directoryObjectIdentityResolver.ResolveAsync(
+                canonicalScanPath,
+                cancellationToken);
+            if (!scanRootResolution.IsAvailable
+                && scanRootResolution.FailureKind
+                    != DirectoryObjectIdentityFailureKind.IdentityUnsupported)
+            {
+                return PhysicalIdentityCapture.Failed(
+                    scanRootResolution.UnavailableReason
+                        ?? "The scan root physical identity is unavailable.");
+            }
+            var limitedScan = limitedBoundary || !scanRootResolution.IsAvailable;
+
             using var boundary = PinnedDirectoryCreation.OpenPinnedBoundary(
                 canonicalBoundary);
             cancellationToken.ThrowIfCancellationRequested();
-            var boundaryIdentity = boundary.GetDirectoryObjectIdentity();
-            if (authorizedRoot.RequiresEnrollment
-                && !ManagedDirectoryIdentity.MatchesNativeIdentity(
-                    authorizedRoot.DirectoryObjectIdentityVersion,
-                    authorizedRoot.DirectoryObjectIdentity,
-                    boundaryIdentity))
+            if (!boundary.VisiblePathMatches()
+                || (verifiedBoundaryIdentity?.IsAvailable == true
+                    && !boundary.MatchesManagedDirectoryIdentity(
+                        verifiedBoundaryIdentity.Version,
+                        verifiedBoundaryIdentity.Value)))
             {
-                throw new InvalidOperationException(
-                    "The configured scan root no longer identifies its authorized physical generation.");
+                return PhysicalIdentityCapture.Failed(
+                    "The configured scan boundary changed after its enrolled physical identity was verified.");
             }
+
             using var scanRoot = OpenRelativeScanRoot(
                 boundary,
                 canonicalBoundary,
@@ -305,10 +370,27 @@ internal sealed class ScanPathAuthorizationService(
                     "The configured scan boundary changed while its physical identity was being captured.");
             }
 
+            if (limitedScan)
+            {
+                // Operation-local pinned path authority never authorizes destructive
+                // reconciliation or filesystem mutation.
+                return PhysicalIdentityCapture.Captured(
+                    ScanPathPhysicalIdentity.PinnedPathOnly());
+            }
+
+            var boundaryIdentity = boundary.GetDirectoryObjectIdentity();
+            var scanRootIdentity = scanRoot.GetDirectoryObjectIdentity();
+            if (!boundary.VisiblePathMatches()
+                || !scanRoot.VisiblePathMatches())
+            {
+                return PhysicalIdentityCapture.Failed(
+                    "The configured scan boundary changed while its physical identity was being captured.");
+            }
+
             return PhysicalIdentityCapture.Captured(
                 new ScanPathPhysicalIdentity(
                     boundaryIdentity,
-                    scanRoot.GetDirectoryObjectIdentity()));
+                    scanRootIdentity));
         }
         catch (Exception exception) when (exception is not (
             OperationCanceledException or OutOfMemoryException or StackOverflowException))
@@ -322,45 +404,6 @@ internal sealed class ScanPathAuthorizationService(
                 _ =>
                     "The scan path contains a linked, replaced, or unavailable directory component."
             });
-        }
-    }
-
-    private static PinnedDirectoryCreation.PinnedDirectoryAnchor
-        OpenRelativeScanRoot(
-            PinnedDirectoryCreation.PinnedDirectoryAnchor boundary,
-            string boundaryPath,
-            string scanPath)
-    {
-        var current = boundary.Duplicate();
-        try
-        {
-            var relative = Path.GetRelativePath(boundaryPath, scanPath);
-            if (relative == ".")
-            {
-                return current;
-            }
-
-            foreach (var segment in relative.Split(
-                [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
-                StringSplitOptions.RemoveEmptyEntries))
-            {
-                if (segment is "." or "..")
-                {
-                    throw new InvalidOperationException(
-                        "The scan path contains navigation segments outside its configured root.");
-                }
-
-                var next = current.OpenExistingChild(segment);
-                current.Dispose();
-                current = next;
-            }
-
-            return current;
-        }
-        catch
-        {
-            current.Dispose();
-            throw;
         }
     }
 

@@ -29,7 +29,6 @@ internal partial class MoveJobProcessor(
     IServiceScopeFactory scopeFactory,
     IAppMetricsService metrics,
     IFileSystemSemanticsResolver semanticsResolver,
-    IMoveCleanupBoundaryResolver cleanupBoundaryResolver,
     IMoveScanHandoffStore moveScanHandoffStore,
     TimeProvider timeProvider,
     IFilesystemMutationCoordinator filesystemMutationCoordinator,

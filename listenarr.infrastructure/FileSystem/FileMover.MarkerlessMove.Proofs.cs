@@ -43,10 +43,8 @@ public partial class FileMover
             return journal;
         }
         if (!source.VisiblePathMatches()
-            || !string.Equals(
-                source.GetObjectIdentity(),
-                journal.SourcePhysicalObjectIdentity,
-                StringComparison.Ordinal))
+            || !source.MatchesObjectIdentity(
+                journal.SourcePhysicalObjectIdentity))
         {
             throw new IOException(
                 "The markerless move source changed before content hashing.");
@@ -82,10 +80,8 @@ public partial class FileMover
                 ? !MatchesHardlinkSourceIdentity(
                     source,
                     journal.SourcePhysicalObjectIdentity)
-                : !string.Equals(
-                    source.GetObjectIdentity(),
-                    journal.SourcePhysicalObjectIdentity,
-                    StringComparison.Ordinal)))
+                : !source.MatchesObjectIdentity(
+                    journal.SourcePhysicalObjectIdentity)))
         {
             return false;
         }
@@ -107,10 +103,8 @@ public partial class FileMover
                 ? !MatchesHardlinkSourceIdentity(
                     target,
                     journal.SourcePhysicalObjectIdentity)
-                : !string.Equals(
-                    target.GetObjectIdentity(),
-                    journal.SourcePhysicalObjectIdentity,
-                    StringComparison.Ordinal)))
+                : !target.MatchesObjectIdentity(
+                    journal.SourcePhysicalObjectIdentity)))
         {
             return false;
         }
@@ -148,10 +142,8 @@ public partial class FileMover
         target.VisiblePathMatches()
         && !string.IsNullOrWhiteSpace(
             journal.TargetPhysicalObjectIdentity)
-        && string.Equals(
-            target.GetObjectIdentity(),
-            journal.TargetPhysicalObjectIdentity,
-            StringComparison.Ordinal);
+        && target.MatchesObjectIdentity(
+            journal.TargetPhysicalObjectIdentity);
 
     private static bool OwnerMetadataReconciledTargetMatches(
         FileMoveGateLease gate,

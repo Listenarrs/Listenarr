@@ -58,6 +58,24 @@ namespace Listenarr.Infrastructure.Library.Moving
             return identity;
         }
 
+        private static MoveCleanupBoundaryResolution GetPersistedCleanupBoundary(
+            MoveJob job)
+        {
+            if (string.IsNullOrWhiteSpace(job.SourceCleanupBoundary))
+            {
+                return new MoveCleanupBoundaryResolution(
+                    Boundary: null,
+                    MoveCleanupBoundaryKind.Unavailable,
+                    job.DeleteEmptySource
+                        ? "The current move protocol has no persisted source cleanup boundary."
+                        : "Source ancestor cleanup is disabled for this move.");
+            }
+
+            return new MoveCleanupBoundaryResolution(
+                job.SourceCleanupBoundary,
+                MoveCleanupBoundaryKind.Persisted);
+        }
+
         private static MoveLeaseToken CreateLeaseToken(MoveJob job)
         {
             if (string.IsNullOrWhiteSpace(job.LeaseOwner) || job.LeaseGeneration <= 0)
@@ -303,6 +321,7 @@ namespace Listenarr.Infrastructure.Library.Moving
             string target,
             AudiobookContentMoveService contentMoveService,
             AudiobookContentMoveRequest moveRequest,
+            MarkerlessTargetVerificationLease? targetVerificationLease,
             Action<MovePostCommitContext> registerPostCommit,
             CancellationToken cancellationToken)
         {
@@ -315,6 +334,7 @@ namespace Listenarr.Infrastructure.Library.Moving
                     target,
                     contentMoveService,
                     moveRequest,
+                    targetVerificationLease,
                     registerPostCommit,
                     cancellationToken);
                 return true;

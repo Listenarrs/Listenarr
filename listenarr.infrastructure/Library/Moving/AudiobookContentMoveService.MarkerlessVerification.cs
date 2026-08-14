@@ -19,7 +19,16 @@ internal sealed partial class AudiobookContentMoveService
             request,
             target,
             cancellationToken);
+        var endpoints = await GetEndpointObjectIdentitiesAsync(
+            request.JobId,
+            cancellationToken);
+        if (string.IsNullOrWhiteSpace(endpoints.TargetDirectoryObjectIdentity))
+        {
+            throw new MoveNeedsAttentionException(
+                "Markerless target verification requires a persisted target endpoint generation.");
+        }
         ValidateExistingDestinationContents(
+            request,
             request.Source,
             target,
             manifest,
@@ -55,7 +64,13 @@ internal sealed partial class AudiobookContentMoveService
             var parentPath = Path.GetDirectoryName(targetPath)
                 ?? throw new MoveNeedsAttentionException(
                     "A markerless target file has no parent.");
-            using var parent = PinnedDirectoryCreation.OpenPinnedBoundary(parentPath);
+            using var parent = OpenPinnedMoveDescendant(
+                request,
+                target,
+                parentPath,
+                request.TargetSemantics,
+                endpoints.TargetDirectoryObjectIdentity,
+                sourceEndpoint: false);
             using var file = parent.OpenExistingFile(
                 Path.GetFileName(targetPath),
                 requireDeleteAccess: false);
@@ -70,10 +85,8 @@ internal sealed partial class AudiobookContentMoveService
                 if (leasedTargetEntry == null
                     || !leasedTargetEntry.VisiblePathMatches()
                     || !leasedTargetEntry.IdentifiesSameEntry(file)
-                    || !string.Equals(
-                        leasedTargetEntry.GetObjectIdentity(),
-                        entry.TargetPhysicalObjectIdentity,
-                        StringComparison.Ordinal)
+                    || !leasedTargetEntry.MatchesObjectIdentity(
+                        entry.TargetPhysicalObjectIdentity)
                     || !leasedTargetEntry.MatchesMetadata(
                         entry.Length,
                         entry.LastWriteTimeUtc))
@@ -138,10 +151,8 @@ internal sealed partial class AudiobookContentMoveService
     {
         ValidatePinnedSourcePhysicalIdentity(request, entry, sourceEntry);
         if (string.IsNullOrWhiteSpace(entry.SourcePhysicalObjectIdentity)
-            || !string.Equals(
-                entry.SourcePhysicalObjectIdentity,
-                sourceEntry.GetObjectIdentity(),
-                StringComparison.Ordinal)
+            || !sourceEntry.MatchesObjectIdentity(
+                entry.SourcePhysicalObjectIdentity)
             || !sourceEntry.VisiblePathMatches())
         {
             throw new MoveNeedsAttentionException(
@@ -154,10 +165,8 @@ internal sealed partial class AudiobookContentMoveService
         PinnedDirectoryCreation.PinnedFileEntry targetEntry)
     {
         if (string.IsNullOrWhiteSpace(entry.TargetPhysicalObjectIdentity)
-            || !string.Equals(
-                entry.TargetPhysicalObjectIdentity,
-                targetEntry.GetObjectIdentity(),
-                StringComparison.Ordinal)
+            || !targetEntry.MatchesObjectIdentity(
+                entry.TargetPhysicalObjectIdentity)
             || !targetEntry.VisiblePathMatches())
         {
             throw new MoveNeedsAttentionException(

@@ -260,10 +260,9 @@ public sealed partial class LibraryDirectoryOwnershipBoundaryAuthorizer(
         {
             cancellationToken.ThrowIfCancellationRequested();
             var liveIdentity = anchor.GetDirectoryObjectIdentity();
-            if (!ManagedDirectoryIdentity.MatchesNativeIdentity(
+            if (!anchor.MatchesManagedDirectoryIdentity(
                     rootMatch.Root.DirectoryObjectIdentityVersion,
-                    rootMatch.Root.DirectoryObjectIdentity,
-                    liveIdentity)
+                    rootMatch.Root.DirectoryObjectIdentity)
                 || !anchor.VisiblePathMatches())
             {
                 throw new InvalidOperationException(
@@ -389,10 +388,9 @@ public sealed partial class LibraryDirectoryOwnershipBoundaryAuthorizer(
             cancellationToken.ThrowIfCancellationRequested();
             if ((!ignoreUnavailableReason
                     && !string.IsNullOrWhiteSpace(identityUnavailableReason))
-                || !ManagedDirectoryIdentity.MatchesNativeIdentity(
+                || !boundary.MatchesManagedDirectoryIdentity(
                     expectedIdentityVersion,
-                    expectedIdentity,
-                    boundary.GetDirectoryObjectIdentity())
+                    expectedIdentity)
                 || !boundary.VisiblePathMatches())
             {
                 throw new InvalidOperationException(

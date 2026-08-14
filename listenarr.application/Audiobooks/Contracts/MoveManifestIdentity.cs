@@ -5,9 +5,11 @@ using Listenarr.Domain.Common;
 
 namespace Listenarr.Application.Audiobooks.Contracts;
 
-public static class MoveManifestIdentity
+public static partial class MoveManifestIdentity
 {
     public const int Version = 1;
+    private const string SourceBoundaryAuthorizationDomain =
+        "LISTENARR-MOVE-SOURCE-BOUNDARY";
     private const string TargetBoundaryAuthorizationDomain =
         "LISTENARR-MOVE-TARGET-BOUNDARY";
 
@@ -21,13 +23,19 @@ public static class MoveManifestIdentity
     {
         ArgumentNullException.ThrowIfNull(entries);
         var persistedEntries = entries.ToList();
-        if (!TryGetTargetBoundaryAuthorization(
+        if (!TryGetSourceBoundaryAuthorization(
                 persistedEntries,
+                out _,
+                out _,
+                out _)
+            || !TryGetTargetBoundaryAuthorization(
+                persistedEntries,
+                out _,
                 out _,
                 out _))
         {
             throw new InvalidOperationException(
-                "A durable move identity requires target-boundary physical-generation authorization.");
+                "A durable move identity requires source- and target-boundary physical-generation authorization.");
         }
 
         return CreateDeduplicationKeyCore(
@@ -85,7 +93,7 @@ public static class MoveManifestIdentity
                 semantics),
             ComputeManifestDigest(
                 persistedEntries
-                    .Where(entry => !IsTargetBoundaryAuthorization(entry))
+                    .Where(entry => !IsBoundaryAuthorization(entry))
                     .Select(ToIdentityEntry),
                 semantics),
             StringComparison.Ordinal);
@@ -106,11 +114,36 @@ public static class MoveManifestIdentity
                 semantics),
             ComputeManifestDigest(
                 persistedEntries
-                    .Where(entry => !IsTargetBoundaryAuthorization(entry))
+                    .Where(entry => !IsBoundaryAuthorization(entry))
                     .Select(ToIdentityEntry)
                     .Select(entry => entry with { Sha256 = null }),
                 semantics),
             StringComparison.Ordinal);
+    }
+
+    public static MoveJobEntry CreateSourceBoundaryAuthorization(
+        int directoryIdentityVersion,
+        string directoryIdentity)
+    {
+        if (directoryIdentityVersion <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(directoryIdentityVersion));
+        }
+        ArgumentException.ThrowIfNullOrWhiteSpace(directoryIdentity);
+        return new MoveJobEntry
+        {
+            RelativePath = ".",
+            EntryType = MoveJobEntryType.Directory,
+            Length = directoryIdentityVersion,
+            LastWriteTimeUtc = DateTime.UnixEpoch,
+            Sha256 = ComputeSourceBoundaryAuthorizationDigest(
+                directoryIdentityVersion,
+                directoryIdentity),
+            SourcePhysicalObjectIdentity = directoryIdentity,
+            CopyState = MoveJobEntryCopyState.Pending,
+            CleanupState = MoveJobEntryCleanupState.Pending
+        };
     }
 
     public static MoveJobEntry CreateTargetBoundaryAuthorization(
@@ -132,21 +165,67 @@ public static class MoveManifestIdentity
             Sha256 = ComputeTargetBoundaryAuthorizationDigest(
                 directoryIdentityVersion,
                 directoryIdentity),
+            TargetPhysicalObjectIdentity = directoryIdentity,
             CopyState = MoveJobEntryCopyState.Pending,
             CleanupState = MoveJobEntryCleanupState.Pending
         };
     }
 
+    public static bool IsSourceBoundaryAuthorization(MoveJobEntry entry) =>
+        entry.EntryType == MoveJobEntryType.Directory
+        && string.Equals(entry.RelativePath, ".", StringComparison.Ordinal);
+
     public static bool IsTargetBoundaryAuthorization(MoveJobEntry entry) =>
         entry.EntryType == MoveJobEntryType.Directory
-        && string.IsNullOrEmpty(entry.RelativePath)
-        && entry.Length > 0
-        && entry.Sha256 is { Length: 64 } digest
-        && digest.All(Uri.IsHexDigit);
+        && string.IsNullOrEmpty(entry.RelativePath);
+
+    public static bool TryGetSourceBoundaryAuthorization(
+        IEnumerable<MoveJobEntry> entries,
+        out int directoryIdentityVersion,
+        out string directoryIdentity,
+        out string digest)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+        var matches = entries
+            .Where(IsSourceBoundaryAuthorization)
+            .Take(2)
+            .ToList();
+        if (matches.Count != 1
+            || matches[0].Length <= 0
+            || matches[0].Length > int.MaxValue
+            || string.IsNullOrWhiteSpace(
+                matches[0].SourcePhysicalObjectIdentity)
+            || matches[0].Sha256 is not { Length: 64 } sourceDigest
+            || !sourceDigest.All(Uri.IsHexDigit))
+        {
+            directoryIdentityVersion = 0;
+            directoryIdentity = string.Empty;
+            digest = string.Empty;
+            return false;
+        }
+
+        directoryIdentityVersion = (int)matches[0].Length;
+        directoryIdentity = matches[0].SourcePhysicalObjectIdentity!;
+        digest = matches[0].Sha256!.ToUpperInvariant();
+        if (!string.Equals(
+                digest,
+                ComputeSourceBoundaryAuthorizationDigest(
+                    directoryIdentityVersion,
+                    directoryIdentity),
+                StringComparison.Ordinal))
+        {
+            directoryIdentityVersion = 0;
+            directoryIdentity = string.Empty;
+            digest = string.Empty;
+            return false;
+        }
+        return true;
+    }
 
     public static bool TryGetTargetBoundaryAuthorization(
         IEnumerable<MoveJobEntry> entries,
         out int directoryIdentityVersion,
+        out string directoryIdentity,
         out string digest)
     {
         ArgumentNullException.ThrowIfNull(entries);
@@ -155,19 +234,47 @@ public static class MoveManifestIdentity
             .Take(2)
             .ToList();
         if (matches.Count != 1
-            || matches[0].Length > int.MaxValue)
+            || matches[0].Length <= 0
+            || matches[0].Length > int.MaxValue
+            || string.IsNullOrWhiteSpace(
+                matches[0].TargetPhysicalObjectIdentity)
+            || matches[0].Sha256 is not { Length: 64 } targetDigest
+            || !targetDigest.All(Uri.IsHexDigit))
         {
             directoryIdentityVersion = 0;
+            directoryIdentity = string.Empty;
             digest = string.Empty;
             return false;
         }
 
         directoryIdentityVersion = (int)matches[0].Length;
+        directoryIdentity = matches[0].TargetPhysicalObjectIdentity!;
         digest = matches[0].Sha256!.ToUpperInvariant();
+        if (!string.Equals(
+                digest,
+                ComputeTargetBoundaryAuthorizationDigest(
+                    directoryIdentityVersion,
+                    directoryIdentity),
+                StringComparison.Ordinal))
+        {
+            directoryIdentityVersion = 0;
+            directoryIdentity = string.Empty;
+            digest = string.Empty;
+            return false;
+        }
         return true;
     }
 
     public static string ComputeTargetBoundaryAuthorizationDigest(
+        int directoryIdentityVersion,
+        string directoryIdentity) =>
+        ComputeBoundaryAuthorizationDigest(
+            TargetBoundaryAuthorizationDomain,
+            directoryIdentityVersion,
+            directoryIdentity);
+
+    private static string ComputeBoundaryAuthorizationDigest(
+        string domain,
         int directoryIdentityVersion,
         string directoryIdentity)
     {
@@ -178,7 +285,7 @@ public static class MoveManifestIdentity
         }
         ArgumentException.ThrowIfNullOrWhiteSpace(directoryIdentity);
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        AppendUtf8(hash, TargetBoundaryAuthorizationDomain);
+        AppendUtf8(hash, domain);
         AppendInt32(hash, directoryIdentityVersion);
         AppendUtf8(hash, directoryIdentity);
         return Convert.ToHexString(hash.GetHashAndReset());
@@ -291,7 +398,8 @@ public static class MoveManifestIdentity
             semantics);
         if (entry.EntryType == MoveJobEntryType.Directory)
         {
-            if (string.IsNullOrEmpty(entry.RelativePath)
+            if ((string.IsNullOrEmpty(entry.RelativePath)
+                    || string.Equals(entry.RelativePath, ".", StringComparison.Ordinal))
                 && entry.Length > 0
                 && entry.Sha256 is { Length: 64 } authorizationDigest
                 && authorizationDigest.All(Uri.IsHexDigit))

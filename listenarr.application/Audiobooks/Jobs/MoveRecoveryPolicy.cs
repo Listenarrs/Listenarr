@@ -70,9 +70,10 @@ public static class MoveRecoveryPolicy
 
         if (!MoveExecutionProtocol.IsCurrent(job.ExecutionProtocolVersion))
         {
-            // Released pre-durable jobs and unsupported development protocols cannot
-            // carry trustworthy manifest/generation evidence. Their absence of current
-            // evidence is therefore not proof that no filesystem mutation occurred.
+            // Pre-durable jobs and older/unsupported move protocols do not carry the
+            // complete boundary-generation evidence required by the current protocol.
+            // Their absence of current evidence is therefore not proof that no filesystem
+            // mutation occurred.
             return true;
         }
 
@@ -107,7 +108,7 @@ public static class MoveRecoveryPolicy
         {
             // Failed is the legacy/manual-retry terminal state. Requeue never trusts the
             // failure classification by itself: it first requires persisted endpoint,
-            // manifest, and target-boundary authorization evidence, and the worker then
+            // manifest, and source/target boundary authorization evidence, and the worker then
             // re-verifies the exact recovery artifacts before any mutation. NeedsAttention
             // remains the state used to fence conditions that are known to require repair.
             return MoveRecoveryDisposition.RetryAvailable;

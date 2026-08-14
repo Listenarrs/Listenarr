@@ -75,10 +75,8 @@ public partial class FileMover
             if (initialDestination != null)
             {
                 if (string.IsNullOrWhiteSpace(proof.Sha256)
-                    && !string.Equals(
-                        initialDestination.GetObjectIdentity(),
-                        proof.PhysicalObjectIdentity,
-                        StringComparison.Ordinal))
+                    && !initialDestination.MatchesObjectIdentity(
+                        proof.PhysicalObjectIdentity))
                 {
                     proof = await CaptureMarkerlessSourceProofAsync(
                         initialSource,
@@ -186,24 +184,14 @@ public partial class FileMover
             }
         }
 
-        if (!string.IsNullOrWhiteSpace(expectedRegisteredPhysicalObjectIdentity)
-            && !string.Equals(
-                journal.TargetPhysicalObjectIdentity,
-                expectedRegisteredPhysicalObjectIdentity,
-                StringComparison.Ordinal))
-        {
-            await MarkMarkerlessRegistrationNeedsAttentionAsync(
-                journal,
-                "Durable audiobook ownership identifies a different destination generation.",
-                cancellationToken);
-            return new MarkerlessRegistrationPreparation(true, null);
-        }
-
         var targetEntry = gate.DestinationParent.OpenExistingFileForStableRead(
             gate.DestinationName);
         try
         {
             if (!TargetMatchesMarkerlessJournal(targetEntry, journal)
+                || (!string.IsNullOrWhiteSpace(expectedRegisteredPhysicalObjectIdentity)
+                    && !targetEntry.MatchesObjectIdentity(
+                        expectedRegisteredPhysicalObjectIdentity))
                 || !await MatchesMarkerlessTargetContentAsync(
                     targetEntry,
                     journal,

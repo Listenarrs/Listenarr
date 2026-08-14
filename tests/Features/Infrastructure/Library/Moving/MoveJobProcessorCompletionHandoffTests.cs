@@ -50,6 +50,43 @@ public partial class MoveJobProcessorTests
     }
 
     [Fact]
+    public async Task ProcessJobAsync_TargetGenerationReplacedBeforeHistoryPersist_WritesNoCompletionRecords()
+    {
+        var source = FileService.GetTempDirectory("move-processor-history-target-src");
+        await FileService.GetFileAsync(source, "book.m4b", "audio");
+        var target = Path.Join(
+            FileService.GetTempPath(),
+            $"move-processor-history-target-dst-{Guid.NewGuid():N}");
+        var audiobook = await _audiobookRepository.AddAsync(new Audiobook
+        {
+            Title = "History Target Replacement",
+            BasePath = source
+        });
+        var (queue, job) = await CreateQueuedMoveJobAsync(audiobook, target, source);
+        var contentMoveService = new AudiobookContentMoveService(
+            _provider.GetRequiredService<ILogger<AudiobookContentMoveService>>(),
+            _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>(),
+            TimeProvider.System,
+            new ReplaceTargetBeforeCompletionHistory(target));
+        var processor = ActivatorUtilities.CreateInstance<MoveJobProcessor>(
+            _provider,
+            contentMoveService);
+
+        await processor.ProcessJobAsync(job, CancellationToken.None);
+
+        var persisted = Assert.IsType<MoveJob>(
+            await queue.GetJobAsync(job.Id));
+        Assert.Equal(MoveJobStatus.NeedsAttention, persisted.Status);
+        Assert.Empty(await _historyRepository.GetByCorrelationIdAsync($"move:{job.Id:N}"));
+        await using var db = await _provider
+            .GetRequiredService<IDbContextFactory<ListenArrDbContext>>()
+            .CreateDbContextAsync();
+        Assert.False(await db.MoveScanHandoffs.AsNoTracking()
+            .AnyAsync(candidate => candidate.MoveJobId == job.Id));
+        Assert.Equal("audio", await File.ReadAllTextAsync(Path.Join(target, "book.m4b")));
+    }
+
+    [Fact]
     public async Task ProcessJobAsync_LeaseReplacedBeforeHistoryPersist_WritesNoCompletionHistory()
     {
         var source = FileService.GetTempDirectory("move-processor-history-lease-src");
@@ -254,6 +291,30 @@ public partial class MoveJobProcessorTests
         Assert.Equal($"move:{job.Id:N}", recoveredScan.CorrelationId);
         Assert.NotNull(recoveredScan.MoveScanHandoffId);
         Assert.True(recoveredScan.PhysicalIdentity.HasValue);
+    }
+
+    private sealed class ReplaceTargetBeforeCompletionHistory(string target)
+        : IMoveFaultInjector
+    {
+        private bool _replaced;
+
+        public void OnCompletionHandoff(
+            Guid jobId,
+            CompletionHandoffFaultPoint faultPoint)
+        {
+            if (_replaced || faultPoint != CompletionHandoffFaultPoint.BeforeHistoryPersist)
+            {
+                return;
+            }
+
+            var file = Path.Join(target, "book.m4b");
+            var lastWriteTimeUtc = File.GetLastWriteTimeUtc(file);
+            var content = File.ReadAllBytes(file);
+            File.Delete(file);
+            File.WriteAllBytes(file, content);
+            File.SetLastWriteTimeUtc(file, lastWriteTimeUtc);
+            _replaced = true;
+        }
     }
 
     private sealed class ReplaceLeaseBeforeCompletionHistory(

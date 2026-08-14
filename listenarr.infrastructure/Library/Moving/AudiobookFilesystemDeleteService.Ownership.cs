@@ -39,11 +39,10 @@ public sealed partial class AudiobookFilesystemDeleteService
                 if (exactOwnership != null
                     && (!string.IsNullOrWhiteSpace(
                             exactOwnership.DirectoryObjectIdentityUnavailableReason)
-                        || !ManagedDirectoryIdentity.Matches(
+                        || !target.MatchesManagedDirectoryOwnershipIdentity(
                             exactOwnership.DirectoryObjectIdentityVersion,
                             exactOwnership.DirectoryObjectIdentity,
-                            exactOwnership.OwnershipToken,
-                            target.GetDirectoryObjectIdentity())))
+                            exactOwnership.OwnershipToken)))
                 {
                     throw new InvalidOperationException(
                         "The audiobook folder differs from its durable ownership identity.");

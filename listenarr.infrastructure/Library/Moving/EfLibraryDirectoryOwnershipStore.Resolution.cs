@@ -126,11 +126,10 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
                         cancellationToken);
                 using var live = authorization.ParentAnchor.OpenExistingChild(
                     Path.GetFileName(resolved.CanonicalPath));
-                if (!ManagedDirectoryIdentity.Matches(
+                if (!live.MatchesManagedDirectoryOwnershipIdentity(
                         resolved.DirectoryObjectIdentityVersion,
                         resolved.DirectoryObjectIdentity,
-                        resolved.OwnershipToken,
-                        live.GetDirectoryObjectIdentity())
+                        resolved.OwnershipToken)
                     || !live.VisiblePathMatches()
                     || !authorization.ParentAnchor.VisiblePathMatches())
                 {
@@ -138,11 +137,10 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
                         "The owned directory no longer matches its persisted physical identity.");
                 }
                 AfterOwnedDirectoryPhysicalIdentityPinnedForTest?.Invoke();
-                if (!ManagedDirectoryIdentity.Matches(
+                if (!live.MatchesManagedDirectoryOwnershipIdentity(
                         resolved.DirectoryObjectIdentityVersion,
                         resolved.DirectoryObjectIdentity,
-                        resolved.OwnershipToken,
-                        live.GetDirectoryObjectIdentity())
+                        resolved.OwnershipToken)
                     || !live.VisiblePathMatches()
                     || !authorization.ParentAnchor.VisiblePathMatches())
                 {
@@ -237,11 +235,10 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
                         cancellationToken);
                 using var live = authorization.ParentAnchor.OpenExistingChild(
                     Path.GetFileName(candidate.CanonicalPath));
-                if (!ManagedDirectoryIdentity.Matches(
+                if (!live.MatchesManagedDirectoryOwnershipIdentity(
                         candidate.DirectoryObjectIdentityVersion,
                         candidate.DirectoryObjectIdentity,
-                        candidate.OwnershipToken,
-                        live.GetDirectoryObjectIdentity())
+                        candidate.OwnershipToken)
                     || !live.VisiblePathMatches()
                     || !authorization.ParentAnchor.VisiblePathMatches())
                 {

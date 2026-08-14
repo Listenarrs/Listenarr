@@ -179,15 +179,216 @@ namespace Listenarr.Infrastructure.Library.Scanning
             IEnumerable<string> files,
             string ffprobePath,
             FileSystemPathSemantics semantics,
+            IReadOnlyDictionary<string, string> fileObjectIdentities,
             CancellationToken ct)
         {
             var result = new Dictionary<string, PathParsedMetadata>(semantics.Comparer);
             foreach (var file in files)
             {
-                result[file] = await PathMetadataParser.ReadEmbeddedTagsAsync(file, ffprobePath, ct);
+                var canonicalFile = FileSystemPathIdentity.Canonicalize(
+                    file,
+                    semantics.Syntax);
+                if (!fileObjectIdentities.TryGetValue(
+                        canonicalFile,
+                        out var expectedPhysicalObjectIdentity))
+                {
+                    throw new InvalidOperationException(
+                        "The unmatched metadata candidate lacks its enumerated physical generation.");
+                }
+
+                using var lease = PinnedAudiobookFileRegistrationLease.Open(
+                    file,
+                    expectedPhysicalObjectIdentity);
+                result[file] = await PathMetadataParser.ReadEmbeddedTagsAsync(
+                    lease.MetadataPath,
+                    ffprobePath,
+                    ct);
+                if (!lease.MatchesCurrentPublication())
+                {
+                    throw new InvalidOperationException(
+                        "The unmatched metadata candidate changed during embedded-tag extraction.");
+                }
             }
 
             return result;
+        }
+
+        internal static async Task ApplyPinnedFolderMetadataAsync(
+            PathParsedMetadata target,
+            string bookFolder,
+            ScanFileDiscovery.EnumerationResult enumeration,
+            FileSystemPathSemantics semantics,
+            CancellationToken ct)
+        {
+            ArgumentNullException.ThrowIfNull(target);
+            if (string.IsNullOrWhiteSpace(bookFolder))
+            {
+                return;
+            }
+
+            var canonicalFolder = FileSystemPathIdentity.Canonicalize(
+                bookFolder,
+                semantics.Syntax);
+            if (!enumeration.DirectoryObjectIdentities.TryGetValue(
+                    canonicalFolder,
+                    out var expectedDirectoryIdentity))
+            {
+                throw new InvalidOperationException(
+                    "The unmatched metadata folder lacks its authoritative enumeration proof.");
+            }
+
+            using var folder = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
+                bookFolder,
+                createMissing: false);
+            if (!folder.MatchesDirectoryObjectIdentity(expectedDirectoryIdentity))
+            {
+                throw new InvalidOperationException(
+                    "The unmatched metadata folder changed after filesystem enumeration.");
+            }
+            var expectedNamespaceChangeToken = folder.GetNamespaceChangeToken();
+            EnsurePinnedFolderMatches(
+                folder,
+                expectedDirectoryIdentity,
+                expectedNamespaceChangeToken);
+
+            var description = await TryReadPinnedTextFileAsync(
+                folder,
+                "desc.txt",
+                maxCharacters: 2000,
+                ct);
+            EnsurePinnedFolderMatches(
+                folder,
+                expectedDirectoryIdentity,
+                expectedNamespaceChangeToken);
+            if (!string.IsNullOrWhiteSpace(description))
+            {
+                target.Description = description.Trim();
+            }
+
+            var narrator = await TryReadPinnedTextFileAsync(
+                folder,
+                "reader.txt",
+                maxCharacters: 512,
+                ct);
+            EnsurePinnedFolderMatches(
+                folder,
+                expectedDirectoryIdentity,
+                expectedNamespaceChangeToken);
+            if (!string.IsNullOrWhiteSpace(narrator))
+            {
+                target.Narrator = narrator.Trim();
+            }
+
+            string[] visibleFiles;
+            try
+            {
+                visibleFiles = Directory.EnumerateFiles(folder.FullPath)
+                    .Select(Path.GetFileName)
+                    .Where(name => !string.IsNullOrWhiteSpace(name))
+                    .Cast<string>()
+                    .ToArray();
+            }
+            catch (Exception exception) when (exception is
+                IOException or UnauthorizedAccessException
+                    or System.ComponentModel.Win32Exception)
+            {
+                throw new InvalidOperationException(
+                    "The unmatched metadata folder became unavailable while locating its cover image.",
+                    exception);
+            }
+            EnsurePinnedFolderMatches(
+                folder,
+                expectedDirectoryIdentity,
+                expectedNamespaceChangeToken);
+
+            foreach (var fileName in visibleFiles)
+            {
+                if (!Path.GetFileNameWithoutExtension(fileName)
+                        .Contains("cover", StringComparison.OrdinalIgnoreCase)
+                    || !new[] { ".jpg", ".jpeg", ".png", ".webp" }
+                        .Contains(
+                            Path.GetExtension(fileName),
+                            StringComparer.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                using var cover = folder.TryOpenExistingFile(
+                    fileName,
+                    requireDeleteAccess: false);
+                if (cover == null || !cover.IsRegularFile() || !cover.VisiblePathMatches())
+                {
+                    continue;
+                }
+
+                EnsurePinnedFolderMatches(
+                    folder,
+                    expectedDirectoryIdentity,
+                    expectedNamespaceChangeToken);
+                target.CoverPath = cover.FullPath;
+                break;
+            }
+        }
+
+        private static async Task<string?> TryReadPinnedTextFileAsync(
+            PinnedDirectoryCreation.PinnedDirectoryAnchor folder,
+            string fileName,
+            int maxCharacters,
+            CancellationToken ct)
+        {
+            using var file = folder.TryOpenExistingFile(
+                fileName,
+                requireDeleteAccess: false);
+            if (file == null || !file.IsRegularFile() || !file.VisiblePathMatches())
+            {
+                return null;
+            }
+
+            await using var stream = file.OpenReadStream(
+                bufferSize: 4096,
+                asynchronous: false);
+            using var reader = new StreamReader(
+                stream,
+                detectEncodingFromByteOrderMarks: true,
+                leaveOpen: true);
+            var buffer = new char[maxCharacters + 1];
+            var totalRead = 0;
+            while (totalRead < buffer.Length)
+            {
+                var read = await reader.ReadAsync(
+                    buffer.AsMemory(totalRead, buffer.Length - totalRead),
+                    ct);
+                if (read == 0)
+                {
+                    break;
+                }
+
+                totalRead += read;
+            }
+            if (!file.VisiblePathMatches() || !folder.VisiblePathMatches())
+            {
+                throw new InvalidOperationException(
+                    "The unmatched metadata sidecar changed while it was being read.");
+            }
+
+            return new string(buffer, 0, Math.Min(totalRead, maxCharacters));
+        }
+
+        private static void EnsurePinnedFolderMatches(
+            PinnedDirectoryCreation.PinnedDirectoryAnchor folder,
+            string expectedDirectoryIdentity,
+            string expectedNamespaceChangeToken)
+        {
+            if (!folder.VisiblePathMatches()
+                || !folder.MatchesDirectoryObjectIdentity(expectedDirectoryIdentity)
+                || !string.Equals(
+                    folder.GetNamespaceChangeToken(),
+                    expectedNamespaceChangeToken,
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "The unmatched metadata folder changed after filesystem enumeration.");
+            }
         }
 
         private static void ApplyEmbeddedTags(PathParsedMetadata target, PathParsedMetadata tags)

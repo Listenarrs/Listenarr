@@ -57,6 +57,8 @@ function rootFolder(activeRelocation: RootFolderPathChangeResult | null): RootFo
     storageReason: 'None',
     canConfirmCurrentFolder: false,
     canChangePath: true,
+    canReadFilesystem: true,
+    canScanFilesystem: true,
     canMutateFilesystem: true,
     activeRelocation,
   }
@@ -267,13 +269,20 @@ describe('RootFoldersSettings', () => {
   })
 
   it.each([
-    ['Healthy', 'Healthy', true, false],
-    ['Missing', 'Missing', false, false],
-    ['Unavailable', 'Unavailable', false, false],
-    ['Unconfirmed', 'Needs confirmation', false, true],
+    ['Healthy', 'Healthy', true, false, true],
+    ['Limited', 'Limited', false, false, true],
+    ['Missing', 'Missing', false, false, false],
+    ['Unavailable', 'Unavailable', false, false, false],
+    ['Unconfirmed', 'Needs confirmation', false, true, false],
   ] as const)(
     'renders %s storage state with the correct actions',
-    async (storageState, label, canMutateFilesystem, canConfirmCurrentFolder) => {
+    async (
+      storageState,
+      label,
+      canMutateFilesystem,
+      canConfirmCurrentFolder,
+      canScanFilesystem,
+    ) => {
       const folder = {
         ...rootFolder(null),
         storageState,
@@ -284,11 +293,14 @@ describe('RootFoldersSettings', () => {
               ? ('PathMissing' as const)
               : storageState === 'Unconfirmed'
                 ? ('NoAuthorizedIdentity' as const)
-                : ('AccessDenied' as const),
+                : storageState === 'Limited'
+                  ? ('IdentityUnsupported' as const)
+                  : ('AccessDenied' as const),
         storageMessage:
           storageState === 'Healthy' ? null : `Storage is ${storageState.toLowerCase()}.`,
         canMutateFilesystem,
         canConfirmCurrentFolder,
+        canScanFilesystem,
         confirmationToken: canConfirmCurrentFolder ? 'observation-token' : null,
       }
       vi.mocked(apiService.getRootFolders).mockResolvedValue([folder])
@@ -298,12 +310,38 @@ describe('RootFoldersSettings', () => {
 
       expect(wrapper.text()).toContain(label)
       expect(wrapper.get('[data-cy="scan-unmatched"]').attributes('disabled') !== undefined).toBe(
-        !canMutateFilesystem,
+        !canScanFilesystem,
       )
       expect(wrapper.find('[data-cy="confirm-root-folder"]').exists()).toBe(canConfirmCurrentFolder)
       wrapper.unmount()
     },
   )
+
+  it('shows expandable technical storage details without replacing the user-facing message', async () => {
+    const folder = {
+      ...rootFolder(null),
+      storageState: 'Limited' as const,
+      storageReason: 'IdentityUnsupported' as const,
+      storageMessage:
+        'This storage can be read and scanned, but it does not expose the durable file identity required for crash-safe moves and deletions.',
+      storageDetail:
+        'statx omitted birth time and name_to_handle_at returned operation not permitted.',
+      canReadFilesystem: true,
+      canScanFilesystem: true,
+      canMutateFilesystem: false,
+      canConfirmCurrentFolder: false,
+    }
+    vi.mocked(apiService.getRootFolders).mockResolvedValue([folder])
+    const pinia = createReadyPinia()
+    const wrapper = mount(RootFoldersSettings, { global: { plugins: [pinia] } })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('read and scanned')
+    const details = wrapper.get('.storage-detail')
+    expect(details.text()).toContain('Technical storage details')
+    expect(details.text()).toContain('statx omitted birth time')
+    wrapper.unmount()
+  })
 
   it('shows initializing, blocks filesystem actions, and keeps metadata editing available', async () => {
     const folder = {

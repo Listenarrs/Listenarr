@@ -31,10 +31,10 @@ public sealed partial class RootFolderRelocationService
 
         if (reservation.DirectoryObjectIdentityVersion
                 != ManagedDirectoryIdentity.CurrentVersion
-            || !string.Equals(
+            || !parent.MatchesManagedDirectoryOwnershipIdentity(
+                reservation.DirectoryObjectIdentityVersion,
                 reservation.DirectoryObjectIdentity,
-                expected,
-                StringComparison.Ordinal)
+                reservation.OwnershipToken)
             || !parent.VisiblePathMatches())
         {
             throw new InvalidOperationException(
@@ -48,12 +48,10 @@ public sealed partial class RootFolderRelocationService
     {
         if (reservation.DirectoryObjectIdentityVersion
                 != ManagedDirectoryIdentity.CurrentVersion
-            || !string.Equals(
+            || !parent.MatchesManagedDirectoryOwnershipIdentity(
+                reservation.DirectoryObjectIdentityVersion,
                 reservation.DirectoryObjectIdentity,
-                ManagedDirectoryIdentity.Create(
-                    reservation.OwnershipToken,
-                    parent.GetDirectoryObjectIdentity()),
-                StringComparison.Ordinal)
+                reservation.OwnershipToken)
             || !parent.VisiblePathMatches())
         {
             throw new InvalidOperationException(

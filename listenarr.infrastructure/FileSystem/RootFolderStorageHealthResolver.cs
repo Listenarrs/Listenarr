@@ -6,12 +6,15 @@ namespace Listenarr.Infrastructure.FileSystem;
 
 internal sealed class RootFolderStorageHealthResolver(
     IDirectoryObjectIdentityResolver identityResolver,
-    IFileSystemSemanticsResolver? semanticsResolver = null)
+    IFileSystemSemanticsResolver? semanticsResolver = null,
+    Func<string, bool?>? readOnlyFileSystemProbe = null)
     : IRootFolderStorageHealthResolver
 {
     private const string ConfirmationTokenVersion = "root-storage-v1";
     private readonly IFileSystemSemanticsResolver _semanticsResolver =
         semanticsResolver ?? new FileSystemSemanticsResolver();
+    private readonly Func<string, bool?> _readOnlyFileSystemProbe =
+        readOnlyFileSystemProbe ?? ProbeReadOnlyFileSystem;
 
     public async Task<RootFolderStorageObservation> ResolveAsync(
         RootFolder root,
@@ -39,6 +42,15 @@ internal sealed class RootFolderStorageHealthResolver(
             var current = await identityResolver.ResolveAsync(canonicalPath, cancellationToken);
             if (!current.IsAvailable)
             {
+                if (current.FailureKind == DirectoryObjectIdentityFailureKind.IdentityUnsupported)
+                {
+                    return await ValidateFilesystemSemanticsAsync(
+                        root,
+                        canonicalPath,
+                        LimitedIdentityUnsupported(current.UnavailableReason),
+                        cancellationToken);
+                }
+
                 return FromFailure(current);
             }
 
@@ -74,6 +86,59 @@ internal sealed class RootFolderStorageHealthResolver(
                     CanChangePath: true,
                     CanMutateFilesystem: true,
                     ConfirmationToken: null),
+                cancellationToken);
+        }
+
+        if (expected.FailureKind == DirectoryObjectIdentityFailureKind.IdentityUnsupported)
+        {
+            var unsupportedCurrentGeneration = await identityResolver.ResolveAsync(
+                canonicalPath,
+                cancellationToken);
+            if (unsupportedCurrentGeneration.IsAvailable)
+            {
+                return await ValidateFilesystemSemanticsAsync(
+                    root,
+                    canonicalPath,
+                    UnsupportedPersistedIdentity(
+                        root,
+                        canonicalPath,
+                        unsupportedCurrentGeneration,
+                        expected.UnavailableReason),
+                    cancellationToken);
+            }
+            if (unsupportedCurrentGeneration.FailureKind
+                != DirectoryObjectIdentityFailureKind.IdentityUnsupported)
+            {
+                return FromFailure(unsupportedCurrentGeneration);
+            }
+
+            return await ValidateFilesystemSemanticsAsync(
+                root,
+                canonicalPath,
+                LimitedIdentityUnsupported(
+                    unsupportedCurrentGeneration.UnavailableReason
+                        ?? expected.UnavailableReason),
+                cancellationToken);
+        }
+
+        if (expected.FailureKind == DirectoryObjectIdentityFailureKind.LegacyWeakIdentity)
+        {
+            var legacyCurrentGeneration = await identityResolver.ResolveAsync(
+                canonicalPath,
+                cancellationToken);
+            if (!legacyCurrentGeneration.IsAvailable)
+            {
+                return FromFailure(legacyCurrentGeneration);
+            }
+
+            return await ValidateFilesystemSemanticsAsync(
+                root,
+                canonicalPath,
+                LimitedLegacyIdentity(
+                    root,
+                    canonicalPath,
+                    legacyCurrentGeneration,
+                    expected.UnavailableReason),
                 cancellationToken);
         }
 
@@ -118,7 +183,8 @@ internal sealed class RootFolderStorageHealthResolver(
         {
             return SemanticsUnavailable(
                 observation,
-                RootFolderStorageReason.FilesystemSemanticsUnavailable);
+                RootFolderStorageReason.FilesystemSemanticsUnavailable,
+                currentSemantics.Reason);
         }
 
         var persistedSemantics = RootFolderPathSemantics.ResolvePersisted(root);
@@ -132,7 +198,8 @@ internal sealed class RootFolderStorageHealthResolver(
                 ? observation
                 : SemanticsUnavailable(
                     observation,
-                    RootFolderStorageReason.FilesystemSemanticsUnavailable);
+                    RootFolderStorageReason.FilesystemSemanticsUnavailable,
+                    "The root folder has no persisted filesystem case-sensitivity authority.");
         }
 
         if (persistedSemantics.Value.Semantics.CaseSensitivity
@@ -140,15 +207,76 @@ internal sealed class RootFolderStorageHealthResolver(
         {
             return SemanticsUnavailable(
                 observation,
-                RootFolderStorageReason.FilesystemSemanticsChanged);
+                RootFolderStorageReason.FilesystemSemanticsChanged,
+                $"Persisted case sensitivity is {persistedSemantics.Value.Semantics.CaseSensitivity}, but the live storage resolves as {currentSemantics.Semantics.CaseSensitivity}.");
         }
 
-        return observation;
+        return observation.State == RootFolderStorageState.Healthy
+            ? ApplyMutationCapability(
+                canonicalPath,
+                observation,
+                _readOnlyFileSystemProbe(canonicalPath))
+            : observation;
+    }
+
+    private static RootFolderStorageObservation ApplyMutationCapability(
+        string canonicalPath,
+        RootFolderStorageObservation observation,
+        bool? isReadOnly)
+    {
+        if (isReadOnly == false)
+        {
+            return observation;
+        }
+
+        return observation with
+        {
+            State = RootFolderStorageState.Limited,
+            Reason = isReadOnly == true
+                ? RootFolderStorageReason.ReadOnlyFilesystem
+                : RootFolderStorageReason.MutationCapabilityUnavailable,
+            Message = isReadOnly == true
+                ? "This storage is mounted read-only. Listenarr can read and scan it, but filesystem mutations are disabled."
+                : "Listenarr can read and scan this storage, but it cannot verify that filesystem mutations are available safely.",
+            CanConfirmCurrentFolder = false,
+            CanMutateFilesystem = false,
+            ConfirmationToken = null,
+            Detail = isReadOnly == true
+                ? "The filesystem reports the ST_RDONLY mount flag."
+                : $"The mount access mode could not be determined for {LogRedaction.SanitizeFilePath(canonicalPath)}."
+        };
+    }
+
+    private static bool? ProbeReadOnlyFileSystem(string canonicalPath)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return false;
+        }
+
+        try
+        {
+            using var boundary = PinnedDirectoryCreation.OpenPinnedBoundary(canonicalPath);
+            if (!boundary.VisiblePathMatches())
+            {
+                return null;
+            }
+
+            return boundary.IsLinuxFileSystemReadOnly();
+        }
+        catch (Exception exception) when (exception is
+            IOException or UnauthorizedAccessException
+                or System.ComponentModel.Win32Exception
+                or InvalidOperationException or PlatformNotSupportedException)
+        {
+            return null;
+        }
     }
 
     private static RootFolderStorageObservation SemanticsUnavailable(
         RootFolderStorageObservation observation,
-        RootFolderStorageReason reason)
+        RootFolderStorageReason reason,
+        string? detail)
     {
         if (observation.State == RootFolderStorageState.Changed)
         {
@@ -160,11 +288,12 @@ internal sealed class RootFolderStorageHealthResolver(
                     : "The folder at this location changed and Listenarr cannot verify its path rules safely. Review the root folder settings.",
                 CanConfirmCurrentFolder = false,
                 CanMutateFilesystem = false,
-                ConfirmationToken = null
+                ConfirmationToken = null,
+                Detail = detail
             };
         }
 
-        return Unavailable(reason, null);
+        return Unavailable(reason, detail);
     }
 
     internal static string CreateConfirmationToken(
@@ -185,6 +314,54 @@ internal sealed class RootFolderStorageHealthResolver(
             .ToLowerInvariant();
     }
 
+    private static RootFolderStorageObservation LimitedIdentityUnsupported(
+        string? detail) =>
+        new(
+            RootFolderStorageState.Limited,
+            RootFolderStorageReason.IdentityUnsupported,
+            "This storage can be read and scanned, but it does not expose the durable file identity required for crash-safe moves and deletions.",
+            CanConfirmCurrentFolder: false,
+            CanChangePath: true,
+            CanMutateFilesystem: false,
+            ConfirmationToken: null,
+            Detail: detail);
+
+    private static RootFolderStorageObservation UnsupportedPersistedIdentity(
+        RootFolder root,
+        string canonicalPath,
+        DirectoryObjectIdentityResolution currentGeneration,
+        string? detail) =>
+        new(
+            RootFolderStorageState.Unconfirmed,
+            RootFolderStorageReason.IdentityUnsupported,
+            "This folder's saved physical identity version is no longer supported. Review and confirm the current folder before scanning or changing files.",
+            CanConfirmCurrentFolder: true,
+            CanChangePath: true,
+            CanMutateFilesystem: false,
+            ConfirmationToken: CreateConfirmationToken(
+                root,
+                canonicalPath,
+                currentGeneration),
+            Detail: detail);
+
+    private static RootFolderStorageObservation LimitedLegacyIdentity(
+        RootFolder root,
+        string canonicalPath,
+        DirectoryObjectIdentityResolution currentGeneration,
+        string? detail) =>
+        new(
+            RootFolderStorageState.Limited,
+            RootFolderStorageReason.IdentityUnsupported,
+            "This folder uses a legacy Linux identity that is no longer strong enough for safe moves and deletions. Listenarr can still read and scan it; review and confirm the current folder to upgrade its identity.",
+            CanConfirmCurrentFolder: true,
+            CanChangePath: true,
+            CanMutateFilesystem: false,
+            ConfirmationToken: CreateConfirmationToken(
+                root,
+                canonicalPath,
+                currentGeneration),
+            Detail: detail);
+
     private static RootFolderStorageObservation FromFailure(
         DirectoryObjectIdentityResolution resolution)
     {
@@ -204,6 +381,8 @@ internal sealed class RootFolderStorageHealthResolver(
                 Unavailable(RootFolderStorageReason.AccessDenied, resolution.UnavailableReason),
             DirectoryObjectIdentityFailureKind.IdentityUnsupported =>
                 Unavailable(RootFolderStorageReason.IdentityUnsupported, resolution.UnavailableReason),
+            DirectoryObjectIdentityFailureKind.LegacyWeakIdentity =>
+                Unavailable(RootFolderStorageReason.IdentityUnsupported, resolution.UnavailableReason),
             DirectoryObjectIdentityFailureKind.IdentityUnstable =>
                 Unavailable(RootFolderStorageReason.IdentityUnstable, resolution.UnavailableReason),
             DirectoryObjectIdentityFailureKind.InvalidPath =>
@@ -214,7 +393,7 @@ internal sealed class RootFolderStorageHealthResolver(
 
     private static RootFolderStorageObservation Unavailable(
         RootFolderStorageReason reason,
-        string? _) =>
+        string? detail) =>
         new(
             RootFolderStorageState.Unavailable,
             reason,
@@ -239,5 +418,6 @@ internal sealed class RootFolderStorageHealthResolver(
             CanConfirmCurrentFolder: false,
             CanChangePath: true,
             CanMutateFilesystem: false,
-            ConfirmationToken: null);
+            ConfirmationToken: null,
+            Detail: detail);
 }

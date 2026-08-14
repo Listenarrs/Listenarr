@@ -18,10 +18,14 @@ internal sealed partial class AudiobookContentMoveService
                 "The published target physical identities cannot be captured without a persisted move manifest.");
         }
 
+        var authorization = await GetBoundaryAuthorizationsAsync(
+            jobId,
+            cancellationToken);
         return await CapturePublishedTargetPhysicalIdentitiesAsync(
             target,
             manifest,
             targetSemantics,
+            authorization,
             cancellationToken);
     }
 
@@ -66,6 +70,7 @@ internal sealed partial class AudiobookContentMoveService
             string target,
             IReadOnlyCollection<MoveJobEntry> manifest,
             FileSystemPathSemantics targetSemantics,
+            MarkerlessMoveBoundaryAuthorizationState authorization,
             CancellationToken cancellationToken)
     {
         var identities = new Dictionary<string, string>(targetSemantics.Comparer);
@@ -77,7 +82,11 @@ internal sealed partial class AudiobookContentMoveService
                 entry.RelativePath,
                 targetSemantics);
             using var targetPath = PinnedMoveDirectoryPath.OpenExisting(
+                authorization.TargetBoundaryPath,
                 target,
+                targetSemantics,
+                authorization.TargetDirectoryObjectIdentityVersion,
+                authorization.TargetDirectoryObjectIdentity,
                 directorySegments);
             using var targetEntry = targetPath.Current.OpenExistingFile(
                 fileName,

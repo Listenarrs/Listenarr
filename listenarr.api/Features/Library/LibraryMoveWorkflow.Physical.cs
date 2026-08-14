@@ -202,6 +202,27 @@ public sealed partial class LibraryMoveWorkflow
                     var manifest = await manifestService.BuildPlanAsync(
                         currentAudiobook,
                         lockedToken);
+                    var configuredManagedSourceRoot = FindConfiguredManagedSourceRoot(
+                        manifest.SourceRoot,
+                        manifest.SourceIdentity,
+                        rootFolders);
+                    var sourceManagedBoundary = configuredManagedSourceRoot == null
+                        ? null
+                        : FindExactManagedMoveRoot(
+                            configuredManagedSourceRoot,
+                            allowedMoveRoots);
+                    if (configuredManagedSourceRoot != null
+                        && (sourceManagedBoundary == null
+                            || !sourceManagedBoundary.DirectoryIdentity.IsAvailable
+                            || !FileSystemPathIdentity.AreEquivalent(
+                                manifest.SourceIdentity.BoundaryPath,
+                                sourceManagedBoundary.Path,
+                                sourceManagedBoundary.Semantics)))
+                    {
+                        throw new ApplicationValidationException(
+                            "source_physical_identity_unavailable",
+                            "Source root physical identity is unavailable or changed.");
+                    }
 
                     if (!string.IsNullOrWhiteSpace(request.SourcePath))
                     {
@@ -242,27 +263,61 @@ public sealed partial class LibraryMoveWorkflow
                     string? sourceCleanupBoundary = null;
                     if (deleteEmptySource)
                     {
-                        var cleanupBoundary = await _cleanupBoundaryResolver.ResolveAsync(
-                            manifest.SourceRoot,
-                            final,
-                            rootFolders,
-                            cancellationToken: lockedToken);
-                        sourceCleanupBoundary = cleanupBoundary.Boundary;
-                        if (!cleanupBoundary.IsAvailable)
+                        if (sourceManagedBoundary != null)
                         {
-                            _logger.LogWarning(
-                                "Move for audiobook {AudiobookId} has no safe source cleanup boundary: {Reason}",
-                                id,
-                                cleanupBoundary.Reason ?? "boundary unavailable");
+                            sourceCleanupBoundary = sourceManagedBoundary.Path;
                         }
                         else
                         {
-                            _logger.LogInformation(
-                                "Resolved {BoundaryKind} source cleanup boundary {Boundary} for audiobook {AudiobookId}",
-                                cleanupBoundary.Kind,
-                                LogRedaction.SanitizeFilePath(sourceCleanupBoundary),
-                                id);
+                            var cleanupBoundary = await _cleanupBoundaryResolver.ResolveAsync(
+                                manifest.SourceRoot,
+                                final,
+                                rootFolders,
+                                cancellationToken: lockedToken);
+                            sourceCleanupBoundary = cleanupBoundary.Boundary;
+                            if (!cleanupBoundary.IsAvailable)
+                            {
+                                sourceCleanupBoundary = Path.GetDirectoryName(
+                                    manifest.SourceRoot);
+                                _logger.LogWarning(
+                                    "Move for audiobook {AudiobookId} has no broader safe source cleanup boundary: {Reason}. Falling back to the source parent boundary.",
+                                    id,
+                                    cleanupBoundary.Reason ?? "boundary unavailable");
+                            }
+                            else
+                            {
+                                _logger.LogInformation(
+                                    "Resolved {BoundaryKind} source cleanup boundary {Boundary} for audiobook {AudiobookId}",
+                                    cleanupBoundary.Kind,
+                                    LogRedaction.SanitizeFilePath(sourceCleanupBoundary),
+                                    id);
+                            }
                         }
+                    }
+
+                    var sourceAuthorizationBoundary = sourceCleanupBoundary
+                        ?? sourceManagedBoundary?.Path
+                        ?? manifest.SourceIdentity.BoundaryPath;
+                    DirectoryObjectIdentityResolution sourceDirectoryIdentity;
+                    if (sourceManagedBoundary != null
+                        && FileSystemPathIdentity.AreEquivalent(
+                            sourceAuthorizationBoundary,
+                            sourceManagedBoundary.Path,
+                            sourceManagedBoundary.Semantics))
+                    {
+                        sourceDirectoryIdentity = sourceManagedBoundary.DirectoryIdentity;
+                    }
+                    else
+                    {
+                        sourceDirectoryIdentity = await directoryIdentityResolver.ResolveAsync(
+                            sourceAuthorizationBoundary,
+                            lockedToken);
+                    }
+                    if (!sourceDirectoryIdentity.IsAvailable)
+                    {
+                        throw new ApplicationValidationException(
+                            "source_physical_identity_unavailable",
+                            "Source root physical identity is unavailable or changed.");
                     }
 
                     return await _moveQueueService!.EnqueueMoveAsync(
@@ -273,6 +328,8 @@ public sealed partial class LibraryMoveWorkflow
                             manifest.Entries,
                             final,
                             targetIdentity,
+                            sourceDirectoryIdentity.Version!.Value,
+                            sourceDirectoryIdentity.Value!,
                             targetBoundary.DirectoryIdentity.Version!.Value,
                             targetBoundary.DirectoryIdentity.Value!,
                             deleteEmptySource,

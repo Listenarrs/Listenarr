@@ -5,6 +5,7 @@ namespace Listenarr.Infrastructure.Library.Moving;
 internal sealed partial class AudiobookContentMoveService
 {
     private void ValidateExistingDestinationContents(
+        AudiobookContentMoveRequest request,
         string source,
         string destinationRoot,
         IReadOnlyCollection<MoveJobEntry> manifest,
@@ -16,7 +17,7 @@ internal sealed partial class AudiobookContentMoveService
             return;
         }
 
-        RevalidateTargetDirectoryOwnership(targetDirectoryOwnership);
+        RevalidateTargetDirectoryOwnership(request, targetDirectoryOwnership);
         if (!FileSystemSafety.TryEnumerateTreeWithoutLinks(
                 destinationRoot,
                 out var files,

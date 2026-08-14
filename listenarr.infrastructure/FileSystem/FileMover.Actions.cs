@@ -247,10 +247,9 @@ public partial class FileMover
         if (journal.AudiobookId.HasValue
             || journal.State == FileMutationJournalState.NeedsAttention
             || journal.State < FileMutationJournalState.TargetVerified
-            || !string.Equals(
-                journal.TargetPhysicalObjectIdentity,
-                lease.PhysicalObjectIdentity,
-                StringComparison.Ordinal))
+            || string.IsNullOrWhiteSpace(journal.TargetPhysicalObjectIdentity)
+            || !lease.MatchesPhysicalObjectIdentity(
+                journal.TargetPhysicalObjectIdentity))
         {
             return false;
         }
@@ -260,7 +259,7 @@ public partial class FileMover
             journal = await _fileMutationJournalStore.AdvanceAsync(
                 operationId,
                 FileMutationJournalState.Completed,
-                lease.PhysicalObjectIdentity,
+                journal.TargetPhysicalObjectIdentity,
                 audiobookId: null,
                 error: null,
                 cancellationToken);

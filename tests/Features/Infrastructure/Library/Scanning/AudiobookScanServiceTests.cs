@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using Microsoft.EntityFrameworkCore;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
 
@@ -298,6 +300,51 @@ public sealed class AudiobookScanServiceTests : BaseTests
             diagnostic => diagnostic.Code == "TrackedFileGenerationReplaced");
     }
 
+    [LinuxFact]
+    public async Task ScanAsync_CompatibleMergedV1PhysicalToken_DoesNotReportReplacement()
+    {
+        var root = FileService.GetTempDirectory(
+            "scan-service-compatible-v1-physical-token");
+        _ = await FileService.GetFileAsync(
+            root,
+            "Requested Book.m4b",
+            "stable-generation");
+        var audiobook = await _audiobookRepository.AddAsync(
+            new AudiobookBuilder()
+                .WithTitle("Requested Book")
+                .WithBasePath(root)
+                .Build());
+
+        var initialResult = await ScanAsync(audiobook, root);
+        Assert.Equal(1, initialResult.CreatedCount);
+        var original = Assert.Single(
+            await _audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id));
+        var preferredIdentity = Assert.IsType<string>(original.PhysicalObjectIdentity);
+        Assert.StartsWith("linux-generation:", preferredIdentity, StringComparison.Ordinal);
+        var mergedV1AugmentedIdentity =
+            LinuxIdentityTestHelper.ToMergedV1AugmentedIdentity(preferredIdentity);
+
+        var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var persisted = await db.AudiobookFiles.SingleAsync(
+                file => file.Id == original.Id);
+            persisted.ApplyPhysicalObjectIdentity(
+                mergedV1AugmentedIdentity,
+                DateTime.UtcNow);
+            await db.SaveChangesAsync();
+        }
+
+        var result = await ScanAsync(audiobook, root);
+
+        var rescanned = Assert.Single(
+            await _audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id));
+        Assert.Equal(mergedV1AugmentedIdentity, rescanned.PhysicalObjectIdentity);
+        Assert.DoesNotContain(
+            result.Diagnostics,
+            diagnostic => diagnostic.Code == "TrackedFileGenerationReplaced");
+    }
+
     [Fact]
     public async Task ScanAsync_StableIdentifierBoundary_PreservesExistingOwnedOutsideFileWithoutWideningBasePath()
     {
@@ -595,6 +642,13 @@ public sealed class AudiobookScanServiceTests : BaseTests
         var root = Path.Join(parent, "library");
         var displaced = Path.Join(parent, "library-displaced");
         Directory.CreateDirectory(root);
+        var hostSemantics = FileSystemPathSemantics.CurrentHostDefault;
+        await AddAuthorizedRootAsync(
+            root,
+            caseSensitivityMode: hostSemantics.CaseSensitivity
+                == FileSystemCaseSensitivity.Sensitive
+                    ? FileSystemCaseSensitivityMode.Sensitive
+                    : FileSystemCaseSensitivityMode.Insensitive);
         var missingPath = Path.Join(root, "Missing Book.m4b");
         await _applicationSettingsRepository.SaveAsync(
             new ApplicationSettingsBuilder()
@@ -796,11 +850,292 @@ public sealed class AudiobookScanServiceTests : BaseTests
             diagnostic.Code == "ReconciliationSkippedIncompleteScan");
     }
 
+    [LinuxFact]
+    public async Task ScanAsync_AudioNamedPipe_IsSkippedAndBlocksAbsenceReconciliation()
+    {
+        var root = FileService.GetTempDirectory("scan-service-named-pipe");
+        var pipePath = Path.Join(root, "Book.m4b");
+        var missingPath = Path.Join(root, "missing.m4b");
+        var startInfo = new ProcessStartInfo("mkfifo")
+        {
+            UseShellExecute = false,
+            RedirectStandardError = true
+        };
+        startInfo.ArgumentList.Add(pipePath);
+        using (var process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Could not start mkfifo."))
+        {
+            await process.WaitForExitAsync();
+            Assert.Equal(0, process.ExitCode);
+        }
+
+        var audiobook = await _audiobookRepository.AddAsync(
+            new AudiobookBuilder()
+                .WithTitle("Book")
+                .WithBasePath(root)
+                .Build());
+        var missing = await _audiobookFileRepository.AddAsync(
+            new AudiobookFileBuilder()
+                .WithAudiobook(audiobook)
+                .WithPath(missingPath)
+                .Build());
+
+        var result = await ScanAsync(audiobook, root);
+
+        Assert.Equal(0, result.CreatedCount);
+        Assert.False(result.ReconciliationPerformed);
+        Assert.DoesNotContain(pipePath, result.AttributedFiles);
+        Assert.Contains(
+            await _audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id),
+            file => file.Id == missing.Id);
+        Assert.Contains(result.Diagnostics, diagnostic =>
+            diagnostic.Code == "LinkSkipped"
+            && diagnostic.Path == pipePath
+            && diagnostic.Message.Contains(
+                "Non-regular files",
+                StringComparison.Ordinal));
+    }
+
+    [LinuxFact]
+    public async Task ScanAsync_PinnedPathOnly_ClaimsVisiblePathWithoutPhysicalIdentityAndPreservesMissingRows()
+    {
+        var root = FileService.GetTempDirectory("scan-service-limited-storage");
+        var bookDirectory = Path.Join(root, "Author", "Book");
+        Directory.CreateDirectory(bookDirectory);
+        var visiblePath = await FileService.GetFileAsync(
+            bookDirectory,
+            "Book.m4b",
+            "audio");
+        var missingPath = Path.Join(bookDirectory, "missing.m4b");
+        var semantics = FileSystemPathSemantics.CurrentHostDefault;
+        var pathIdentity = new PathIdentitySnapshot(
+            semantics.Syntax,
+            semantics.CaseSensitivity,
+            semantics.CaseSensitivity == FileSystemCaseSensitivity.Sensitive
+                ? FileSystemCaseSensitivityMode.Sensitive
+                : FileSystemCaseSensitivityMode.Insensitive,
+            root);
+        var physicalIdentity = ScanPathPhysicalIdentity.PinnedPathOnly();
+        var authorization = new Mock<IScanPathAuthorizationService>(MockBehavior.Strict);
+        authorization
+            .Setup(service => service.AuthorizeAsync(
+                root,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ScanPathAuthorizationResult.Authorized(
+                root,
+                pathIdentity,
+                physicalIdentity));
+        _services.AddSingleton(authorization.Object);
+        Init();
+        var settings = await _applicationSettingsRepository.GetAsync()
+            ?? await _applicationSettingsRepository.InitializeIfMissingAsync(
+                new ApplicationSettingsBuilder().Build());
+        settings.OutputPath = root;
+        await _applicationSettingsRepository.SaveAsync(settings);
+        var audiobook = await _audiobookRepository.AddAsync(
+            new AudiobookBuilder()
+                .WithTitle("Book")
+                .WithAuthor("Author")
+                .WithBasePath(root)
+                .Build());
+        var missing = await _audiobookFileRepository.AddAsync(
+            new AudiobookFileBuilder()
+                .WithAudiobook(audiobook)
+                .WithPath(missingPath)
+                .Build());
+
+        var result = await _provider.GetRequiredService<IAudiobookScanService>()
+            .ScanAsync(new AudiobookScanCommand(
+                audiobook.Id,
+                root,
+                pathIdentity,
+                physicalIdentity));
+
+        var tracked = await _audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id);
+        Assert.Contains(tracked, file => file.Id == missing.Id);
+        var visible = Assert.Single(tracked, file => file.Path == visiblePath);
+        Assert.Null(visible.PhysicalObjectIdentity);
+        Assert.False(result.ReconciliationPerformed);
+        Assert.Empty(result.RemovedFiles);
+        Assert.Contains(result.Diagnostics, diagnostic =>
+            diagnostic.Code == "ReconciliationNotAuthorized");
+        Assert.Contains(result.Diagnostics, diagnostic =>
+            diagnostic.Code == "MetadataEnrichmentSkippedLimitedStorage");
+        authorization.VerifyAll();
+    }
+
+    [LinuxFact]
+    public async Task ScanAsync_PinnedPathOnly_RegularCandidateReplacedByNamedPipe_DoesNotReadOrClaimReplacement()
+    {
+        var root = FileService.GetTempDirectory("scan-service-limited-fifo-replacement");
+        var candidate = await FileService.GetFileAsync(
+            root,
+            "Requested Book.m4b",
+            "original-generation");
+        var displaced = Path.Join(root, "original-generation.displaced");
+        var semantics = FileSystemPathSemantics.CurrentHostDefault;
+        var pathIdentity = new PathIdentitySnapshot(
+            semantics.Syntax,
+            semantics.CaseSensitivity,
+            semantics.CaseSensitivity == FileSystemCaseSensitivity.Sensitive
+                ? FileSystemCaseSensitivityMode.Sensitive
+                : FileSystemCaseSensitivityMode.Insensitive,
+            root);
+        var physicalIdentity = ScanPathPhysicalIdentity.PinnedPathOnly();
+        var authorization = new Mock<IScanPathAuthorizationService>(MockBehavior.Strict);
+        authorization
+            .Setup(service => service.AuthorizeAsync(
+                root,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ScanPathAuthorizationResult.Authorized(
+                root,
+                pathIdentity,
+                physicalIdentity));
+        var metadata = new Mock<IMetadataService>(MockBehavior.Strict);
+        _services.AddSingleton(authorization.Object);
+        _services.AddSingleton(metadata.Object);
+        Init();
+        var settings = await _applicationSettingsRepository.GetAsync()
+            ?? await _applicationSettingsRepository.InitializeIfMissingAsync(
+                new ApplicationSettingsBuilder().Build());
+        settings.OutputPath = root;
+        await _applicationSettingsRepository.SaveAsync(settings);
+        var audiobook = await _audiobookRepository.AddAsync(
+            new AudiobookBuilder()
+                .WithTitle("Requested Book")
+                .WithBasePath(root)
+                .Build());
+        var candidateOpenCount = 0;
+        using var hook = ExclusiveDirectoryCreator.PushBeforeOpenParentHook(path =>
+        {
+            if (!StringComparer.Ordinal.Equals(
+                    Path.GetFullPath(path),
+                    Path.GetFullPath(candidate)))
+            {
+                return;
+            }
+
+            candidateOpenCount++;
+            if (candidateOpenCount != 2)
+            {
+                return;
+            }
+
+            File.Move(candidate, displaced);
+            var startInfo = new ProcessStartInfo("mkfifo")
+            {
+                UseShellExecute = false,
+                RedirectStandardError = true
+            };
+            startInfo.ArgumentList.Add(candidate);
+            using var process = Process.Start(startInfo)
+                ?? throw new InvalidOperationException("Could not start mkfifo.");
+            process.WaitForExit();
+            Assert.Equal(0, process.ExitCode);
+        });
+
+        var result = await _provider.GetRequiredService<IAudiobookScanService>()
+            .ScanAsync(new AudiobookScanCommand(
+                audiobook.Id,
+                root,
+                pathIdentity,
+                physicalIdentity));
+
+        Assert.Contains(candidate, result.AttributedFiles);
+        Assert.Equal(0, result.CreatedCount);
+        Assert.Empty(await _audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id));
+        Assert.Equal("original-generation", await File.ReadAllTextAsync(displaced));
+        metadata.VerifyNoOtherCalls();
+        authorization.VerifyAll();
+    }
+
+    [LinuxFact]
+    public async Task ScanAsync_PinnedPathOnly_PublicationReplacedDuringMetadataRead_DoesNotClaimReplacement()
+    {
+        var root = FileService.GetTempDirectory("scan-service-limited-claim-aba");
+        var candidate = await FileService.GetFileAsync(
+            root,
+            "Requested Book.m4b",
+            "original-generation");
+        var displaced = Path.Join(root, "original-generation.displaced");
+        var semantics = FileSystemPathSemantics.CurrentHostDefault;
+        var pathIdentity = new PathIdentitySnapshot(
+            semantics.Syntax,
+            semantics.CaseSensitivity,
+            semantics.CaseSensitivity == FileSystemCaseSensitivity.Sensitive
+                ? FileSystemCaseSensitivityMode.Sensitive
+                : FileSystemCaseSensitivityMode.Insensitive,
+            root);
+        var physicalIdentity = ScanPathPhysicalIdentity.PinnedPathOnly();
+        var authorization = new Mock<IScanPathAuthorizationService>(MockBehavior.Strict);
+        authorization
+            .Setup(service => service.AuthorizeAsync(
+                root,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ScanPathAuthorizationResult.Authorized(
+                root,
+                pathIdentity,
+                physicalIdentity));
+        var metadata = new Mock<IMetadataService>(MockBehavior.Strict);
+        metadata.Setup(service => service.ExtractFileMetadataAsync(
+                It.IsAny<MetadataFileSource>()))
+            .Returns<MetadataFileSource>(async fileSource =>
+            {
+                File.Move(candidate, displaced);
+                await File.WriteAllTextAsync(candidate, "replacement-generation");
+                var observed = await File.ReadAllTextAsync(fileSource.ReadPath);
+                return new AudioMetadata
+                {
+                    Title = "Requested Book",
+                    Duration = TimeSpan.FromSeconds(1),
+                    Format = observed
+                };
+            });
+        _services.AddSingleton(authorization.Object);
+        _services.AddSingleton(metadata.Object);
+        Init();
+        var settings = await _applicationSettingsRepository.GetAsync()
+            ?? await _applicationSettingsRepository.InitializeIfMissingAsync(
+                new ApplicationSettingsBuilder().Build());
+        settings.OutputPath = root;
+        await _applicationSettingsRepository.SaveAsync(settings);
+        var audiobook = await _audiobookRepository.AddAsync(
+            new AudiobookBuilder()
+                .WithTitle("Requested Book")
+                .WithBasePath(root)
+                .Build());
+
+        var result = await _provider.GetRequiredService<IAudiobookScanService>()
+            .ScanAsync(new AudiobookScanCommand(
+                audiobook.Id,
+                root,
+                pathIdentity,
+                physicalIdentity));
+
+        Assert.Contains(candidate, result.AttributedFiles);
+        Assert.Equal(0, result.CreatedCount);
+        Assert.Empty(await _audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id));
+        Assert.Equal("replacement-generation", await File.ReadAllTextAsync(candidate));
+        Assert.Equal("original-generation", await File.ReadAllTextAsync(displaced));
+        metadata.Verify(service => service.ExtractFileMetadataAsync(
+            It.Is<MetadataFileSource>(source =>
+                source.PublicPath == candidate
+                && source.ReadPath != candidate)), Times.Once);
+        authorization.VerifyAll();
+    }
+
     private async Task<AudiobookScanResult> ScanAsync(
         Audiobook audiobook,
         string scanRoot,
         bool isAuthoritativeScope = true)
     {
+        var hostSemantics = FileSystemPathSemantics.CurrentHostDefault;
+        await AddAuthorizedRootAsync(
+            scanRoot,
+            caseSensitivityMode: hostSemantics.CaseSensitivity
+                == FileSystemCaseSensitivity.Sensitive
+                    ? FileSystemCaseSensitivityMode.Sensitive
+                    : FileSystemCaseSensitivityMode.Insensitive);
         var settings = await _applicationSettingsRepository.GetAsync()
             ?? await _applicationSettingsRepository.InitializeIfMissingAsync(
                 new ApplicationSettingsBuilder().Build());

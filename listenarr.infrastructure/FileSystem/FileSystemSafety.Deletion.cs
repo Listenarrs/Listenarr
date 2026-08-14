@@ -20,29 +20,6 @@ internal static partial class FileSystemSafety
                 return false;
             }
 
-            if (!Directory.Exists(normalizedDirectory))
-            {
-                if (!File.Exists(normalizedDirectory))
-                {
-                    return true;
-                }
-
-                reason = "Directory deletion was blocked because the target path is occupied by a file.";
-                return false;
-            }
-
-            if ((File.GetAttributes(normalizedDirectory) & FileAttributes.ReparsePoint) != 0)
-            {
-                reason = "Directory deletion was blocked because the target is a symbolic link or reparse point.";
-                return false;
-            }
-
-            if (Directory.EnumerateFileSystemEntries(normalizedDirectory).Any())
-            {
-                reason = "Directory deletion was blocked because the target is not empty.";
-                return false;
-            }
-
             var parentPath = Path.GetDirectoryName(normalizedDirectory);
             var directoryName = Path.GetFileName(normalizedDirectory);
             if (string.IsNullOrWhiteSpace(parentPath)
@@ -52,34 +29,45 @@ internal static partial class FileSystemSafety
                 return false;
             }
 
-            using var pinnedDirectory =
-                PinnedDirectoryCreation.OpenExistingForPublication(
+            PinnedDirectoryCreation pinnedDirectory;
+            try
+            {
+                pinnedDirectory = PinnedDirectoryCreation.OpenExistingForPublication(
                     parentPath,
                     directoryName);
-            if (!TryValidateMutationTarget(
+            }
+            catch (Exception exception) when (IsProvenMissingPathException(exception))
+            {
+                return true;
+            }
+
+            using (pinnedDirectory)
+            {
+                if (!TryValidateMutationTarget(
                     normalizedDirectory,
                     roots,
                     out var revalidatedDirectory,
                     out reason)
                 || !StringComparer.Ordinal.Equals(normalizedDirectory, revalidatedDirectory)
-                || !pinnedDirectory.VisiblePathMatches())
-            {
-                reason = string.IsNullOrWhiteSpace(reason)
-                    ? "Directory deletion was blocked because the validated path changed."
-                    : reason;
-                return false;
-            }
+                    || !pinnedDirectory.VisiblePathMatches())
+                {
+                    reason = string.IsNullOrWhiteSpace(reason)
+                        ? "Directory deletion was blocked because the validated path changed."
+                        : reason;
+                    return false;
+                }
 
-            using var pinnedAnchor = pinnedDirectory.OpenCreatedDirectoryAnchor();
-            if (Directory.EnumerateFileSystemEntries(pinnedAnchor.FullPath).Any()
-                || !pinnedAnchor.VisiblePathMatches())
-            {
-                reason = "Directory deletion was blocked because the pinned target changed or is not empty.";
-                return false;
-            }
+                using var pinnedAnchor = pinnedDirectory.OpenCreatedDirectoryAnchor();
+                if (Directory.EnumerateFileSystemEntries(pinnedAnchor.FullPath).Any()
+                    || !pinnedAnchor.VisiblePathMatches())
+                {
+                    reason = "Directory deletion was blocked because the pinned target changed or is not empty.";
+                    return false;
+                }
 
-            pinnedDirectory.DeletePinnedEmptyDirectory(directoryName);
-            return true;
+                pinnedDirectory.DeletePinnedEmptyDirectory(directoryName);
+                return true;
+            }
         }
         catch (Exception exception) when (exception is not (
             OperationCanceledException or OutOfMemoryException or StackOverflowException))
@@ -118,11 +106,6 @@ internal static partial class FileSystemSafety
                 return false;
             }
 
-            if (!File.Exists(normalizedFile))
-            {
-                return !Directory.Exists(normalizedFile);
-            }
-
             var parentPath = Path.GetDirectoryName(normalizedFile);
             var fileName = Path.GetFileName(normalizedFile);
             if (string.IsNullOrWhiteSpace(parentPath)
@@ -132,39 +115,65 @@ internal static partial class FileSystemSafety
                 return false;
             }
 
-            using var parent =
-                PinnedDirectoryCreation.OpenPinnedDirectoryNoFollow(parentPath);
-            using var entry = parent.OpenExistingFile(
-                fileName,
-                requireDeleteAccess: true);
-            if (!string.IsNullOrWhiteSpace(expectedPhysicalObjectIdentity)
-                && !string.Equals(
-                    entry.GetObjectIdentity(),
-                    expectedPhysicalObjectIdentity,
-                    StringComparison.Ordinal))
+            PinnedDirectoryCreation.PinnedDirectoryAnchor parent;
+            try
             {
-                reason =
-                    "File deletion was blocked because the target physical generation no longer matches the tracked audiobook file.";
-                return false;
+                parent = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
+                    parentPath,
+                    createMissing: false);
+            }
+            catch (Exception exception) when (IsProvenMissingPathException(exception))
+            {
+                return true;
             }
 
-            if (!TryValidateMutationTarget(
-                    normalizedFile,
-                    roots,
-                    out var revalidatedFile,
-                    out reason)
-                || !StringComparer.Ordinal.Equals(normalizedFile, revalidatedFile)
-                || !parent.VisiblePathMatches()
-                || !entry.VisiblePathMatches())
+            using (parent)
             {
-                reason = string.IsNullOrWhiteSpace(reason)
-                    ? "File deletion was blocked because the validated path changed."
-                    : reason;
-                return false;
-            }
+                var outcome = parent.TryOpenExistingFileForStableDeleteWithOutcome(
+                    fileName,
+                    out var openedEntry);
+                using var entry = openedEntry;
+                if (outcome == PinnedFileOpenOutcome.NotFound)
+                {
+                    if (!parent.VisiblePathMatches())
+                    {
+                        reason = "File deletion was blocked because its parent changed while absence was being proved.";
+                        return false;
+                    }
 
-            entry.Delete();
-            return true;
+                    return true;
+                }
+                if (outcome != PinnedFileOpenOutcome.Opened || entry == null)
+                {
+                    reason = "File deletion was blocked because the target could not be inspected safely.";
+                    return false;
+                }
+                if (!string.IsNullOrWhiteSpace(expectedPhysicalObjectIdentity)
+                    && !entry.MatchesObjectIdentity(expectedPhysicalObjectIdentity))
+                {
+                    reason =
+                        "File deletion was blocked because the target physical generation no longer matches the tracked audiobook file.";
+                    return false;
+                }
+
+                if (!TryValidateMutationTarget(
+                        normalizedFile,
+                        roots,
+                        out var revalidatedFile,
+                        out reason)
+                    || !StringComparer.Ordinal.Equals(normalizedFile, revalidatedFile)
+                    || !parent.VisiblePathMatches()
+                    || !entry.VisiblePathMatches())
+                {
+                    reason = string.IsNullOrWhiteSpace(reason)
+                        ? "File deletion was blocked because the validated path changed."
+                        : reason;
+                    return false;
+                }
+
+                entry.Delete();
+                return true;
+            }
         }
         catch (Exception exception) when (exception is not (
             OperationCanceledException or OutOfMemoryException or StackOverflowException))
@@ -173,4 +182,11 @@ internal static partial class FileSystemSafety
             return false;
         }
     }
+
+    internal static bool IsProvenMissingPathException(Exception exception) =>
+        exception is DirectoryNotFoundException or FileNotFoundException
+        || exception is System.ComponentModel.Win32Exception win32
+            && (OperatingSystem.IsWindows()
+                ? win32.NativeErrorCode is 2 or 3
+                : win32.NativeErrorCode == 2);
 }

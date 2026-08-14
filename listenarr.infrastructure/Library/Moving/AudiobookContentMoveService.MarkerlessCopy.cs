@@ -13,6 +13,16 @@ internal sealed partial class AudiobookContentMoveService
         MarkerlessTargetVerificationLease targetVerificationLease,
         CancellationToken cancellationToken)
     {
+        var endpoints = await GetEndpointObjectIdentitiesAsync(
+            request.JobId,
+            cancellationToken);
+        if (string.IsNullOrWhiteSpace(endpoints.SourceDirectoryObjectIdentity)
+            || string.IsNullOrWhiteSpace(endpoints.TargetDirectoryObjectIdentity))
+        {
+            throw new MoveNeedsAttentionException(
+                "Markerless copy requires persisted source and target endpoint generations.");
+        }
+
         var files = manifest
             .Where(candidate => candidate.EntryType == MoveJobEntryType.File)
             .Where(IsPhysicalManifestEntry)
@@ -42,10 +52,20 @@ internal sealed partial class AudiobookContentMoveService
                 ?? throw new MoveNeedsAttentionException(
                     "A markerless target file has no parent.");
 
-            using var sourceParent = PinnedDirectoryCreation.OpenPinnedBoundary(
-                sourceParentPath);
-            using var targetParent = PinnedDirectoryCreation.OpenPinnedBoundary(
-                targetParentPath);
+            using var sourceParent = OpenPinnedMoveDescendant(
+                request,
+                source,
+                sourceParentPath,
+                request.SourceSemantics,
+                endpoints.SourceDirectoryObjectIdentity,
+                sourceEndpoint: true);
+            using var targetParent = OpenPinnedMoveDescendant(
+                request,
+                target,
+                targetParentPath,
+                request.TargetSemantics,
+                endpoints.TargetDirectoryObjectIdentity,
+                sourceEndpoint: false);
             using var existingTarget = targetParent.TryOpenExistingFile(
                 Path.GetFileName(targetPath),
                 requireDeleteAccess: false);
@@ -463,20 +483,4 @@ internal sealed partial class AudiobookContentMoveService
         entry.CopyState = MoveJobEntryCopyState.Verified;
     }
 
-    private static void TryRetireUncommittedMarkerlessFile(
-        PinnedDirectoryCreation.PinnedFileEntry file)
-    {
-        try
-        {
-            if (file.VisiblePathMatches())
-            {
-                file.Delete();
-            }
-        }
-        catch
-        {
-            // If persistence failed after final-name creation, preserve anything that
-            // cannot still be proven to be this exact newly-created file.
-        }
-    }
 }

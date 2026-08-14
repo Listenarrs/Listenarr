@@ -41,7 +41,9 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
         public async Task ProcessJobAsync_UntrackedNonAudioCompanionInManagedAudiobookFolder_MovesWithTrackedAudio()
         {
             var sourceRoot = FileService.GetTempDirectory("move-processor-companion-source-root");
-            await AddAuthorizedRootAsync(sourceRoot, "Companion Source Root");
+            var sourceRootFolder = await AddAuthorizedRootAsync(
+                sourceRoot,
+                "Companion Source Root");
             var source = Path.Join(sourceRoot, "Author", "Book");
             Directory.CreateDirectory(source);
             var audioPath = await FileService.GetFileAsync(source, "book.m4b", "audio");
@@ -56,7 +58,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                 audioPath,
                 sourceSemantics,
                 FileSystemCaseSensitivityMode.Auto,
-                source);
+                sourceRoot);
             var trackedAudio = AudiobookFile.CreateUnresolved(audioPath);
             trackedAudio.AudiobookId = audiobook.Id;
             trackedAudio.ApplyPathIdentity(audioPath, audioIdentity);
@@ -97,6 +99,8 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                     manifest.Entries,
                     target,
                     targetIdentity,
+                    sourceRootFolder.DirectoryObjectIdentityVersion!.Value,
+                    sourceRootFolder.DirectoryObjectIdentity!,
                     targetRootFolder.DirectoryObjectIdentityVersion!.Value,
                     targetRootFolder.DirectoryObjectIdentity!,
                     true,
@@ -1255,10 +1259,13 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
             var targetResolution = await semanticsResolver.ResolveAsync(requestedPath);
             Assert.Equal(PathIdentityState.Valid, sourceResolution.State);
             Assert.Equal(PathIdentityState.Valid, targetResolution.State);
+            var sourceBoundary = await FindSourceBoundaryAsync(
+                sourcePath,
+                sourceResolution.Semantics);
             var sourceIdentity = PathIdentitySnapshot.FromResolution(
                 sourceResolution.Semantics,
                 FileSystemCaseSensitivityMode.Auto,
-                sourceResolution.BoundaryPath,
+                sourceBoundary,
                 sourcePath);
             var targetBoundary = FindTargetBoundary(
                 requestedPath,
@@ -1268,8 +1275,14 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                 FileSystemCaseSensitivityMode.Auto,
                 targetBoundary,
                 requestedPath);
-            var targetDirectoryIdentity = await _provider
-                .GetRequiredService<IDirectoryObjectIdentityResolver>()
+            var directoryIdentityResolver = _provider
+                .GetRequiredService<IDirectoryObjectIdentityResolver>();
+            var sourceDirectoryIdentity = await directoryIdentityResolver
+                .ResolveAsync(sourceBoundary);
+            Assert.True(
+                sourceDirectoryIdentity.IsAvailable,
+                sourceDirectoryIdentity.UnavailableReason);
+            var targetDirectoryIdentity = await directoryIdentityResolver
                 .ResolveAsync(targetBoundary);
             Assert.True(
                 targetDirectoryIdentity.IsAvailable,
@@ -1288,9 +1301,12 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                     manifest,
                     requestedPath,
                     targetIdentity,
+                    sourceDirectoryIdentity.Version!.Value,
+                    sourceDirectoryIdentity.Value!,
                     targetDirectoryIdentity.Version!.Value,
                     targetDirectoryIdentity.Value!,
-                    deleteEmptySource));
+                    deleteEmptySource,
+                    deleteEmptySource ? sourceBoundary : null));
             var job = Assert.IsType<MoveJob>(
                 await queue.GetJobAsync(jobId));
             if (job.ExecutionProtocolVersion != executionProtocolVersion)
@@ -1306,6 +1322,47 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
             }
             await PrepareJobForProcessingAsync(queue, job);
             return (queue, job);
+        }
+
+        private async Task<string> FindSourceBoundaryAsync(
+            string sourcePath,
+            FileSystemPathSemantics sourceSemantics)
+        {
+            var source = Path.GetFullPath(sourcePath);
+            var factory = _provider.GetRequiredService<
+                IDbContextFactory<ListenArrDbContext>>();
+            await using var db = await factory.CreateDbContextAsync();
+            var roots = await db.RootFolders.AsNoTracking().ToListAsync();
+            var matchingRoot = roots
+                .Select(root => FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                        root.Path,
+                        out var canonical,
+                        out _)
+                    ? canonical
+                    : null)
+                .Where(path => path != null
+                    && FileSystemPathIdentity.IsSameOrInside(
+                        source,
+                        path,
+                        sourceSemantics))
+                .OrderByDescending(path => path!.Length)
+                .FirstOrDefault();
+            if (matchingRoot != null)
+            {
+                return matchingRoot;
+            }
+
+            var managedRoot = Path.GetFullPath(FileService.GetTempPath());
+            if (FileSystemPathIdentity.IsSameOrInside(
+                    source,
+                    managedRoot,
+                    sourceSemantics))
+            {
+                return managedRoot;
+            }
+
+            return Path.GetDirectoryName(source)
+                ?? source;
         }
 
         private string FindTargetBoundary(

@@ -78,7 +78,7 @@ internal sealed partial class AudiobookContentMoveService
                     throw new MoveNeedsAttentionException(
                         $"A planned markerless target directory has inconsistent persisted state: {path}");
                 }
-                ValidateMarkerlessCreatedDirectory(planned);
+                ValidateMarkerlessCreatedDirectory(request, planned);
                 continue;
             }
 
@@ -92,7 +92,11 @@ internal sealed partial class AudiobookContentMoveService
             var parentPath = Path.GetDirectoryName(path)
                 ?? throw new MoveNeedsAttentionException(
                     "A markerless target directory has no parent.");
-            using var parent = PinnedDirectoryCreation.OpenPinnedBoundary(parentPath);
+            using var parent = OpenPinnedMoveBoundaryDescendant(
+                request,
+                parentPath,
+                request.TargetSemantics,
+                sourceBoundary: false);
             await EnsureMutationAuthorizedAsync(
                 request,
                 request.Source,
@@ -164,7 +168,11 @@ internal sealed partial class AudiobookContentMoveService
         var parentPath = Path.GetDirectoryName(planned.Path)
             ?? throw new MoveNeedsAttentionException(
                 "An unproven markerless target directory has no parent.");
-        using var parent = PinnedDirectoryCreation.OpenPinnedBoundary(parentPath);
+        using var parent = OpenPinnedMoveBoundaryDescendant(
+            request,
+            parentPath,
+            request.TargetSemantics,
+            sourceBoundary: false);
         using var directory = parent.OpenExistingChild(Path.GetFileName(planned.Path));
         if (!directory.VisiblePathMatches()
             || !parent.VisiblePathMatches()
@@ -301,17 +309,21 @@ internal sealed partial class AudiobookContentMoveService
     }
 
     private static void ValidateMarkerlessCreatedDirectory(
+        AudiobookContentMoveRequest request,
         MoveJobCreatedDirectory planned)
     {
         var parentPath = Path.GetDirectoryName(planned.Path)
             ?? throw new MoveNeedsAttentionException(
                 "A persisted target directory has no parent.");
-        using var parent = PinnedDirectoryCreation.OpenPinnedBoundary(parentPath);
+        using var parent = OpenPinnedMoveBoundaryDescendant(
+            request,
+            parentPath,
+            request.TargetSemantics,
+            sourceBoundary: false);
         using var directory = parent.OpenExistingChild(Path.GetFileName(planned.Path));
-        if (!string.Equals(
-                directory.GetDirectoryObjectIdentity(),
-                planned.DirectoryObjectIdentity,
-                StringComparison.Ordinal)
+        if (string.IsNullOrWhiteSpace(planned.DirectoryObjectIdentity)
+            || !directory.MatchesDirectoryObjectIdentity(
+                planned.DirectoryObjectIdentity)
             || !directory.VisiblePathMatches()
             || !parent.VisiblePathMatches())
         {
@@ -345,16 +357,18 @@ internal sealed partial class AudiobookContentMoveService
         string target,
         CancellationToken cancellationToken)
     {
-        using var root = PinnedDirectoryCreation.OpenPinnedBoundary(target);
+        using var root = OpenPinnedMoveBoundaryDescendant(
+            request,
+            target,
+            request.TargetSemantics,
+            sourceBoundary: false);
         var identity = root.GetDirectoryObjectIdentity();
         var endpoints = await GetEndpointObjectIdentitiesAsync(
             request.JobId,
             cancellationToken);
         if (!string.IsNullOrWhiteSpace(endpoints.TargetDirectoryObjectIdentity)
-            && !string.Equals(
-                endpoints.TargetDirectoryObjectIdentity,
-                identity,
-                StringComparison.Ordinal))
+            && !root.MatchesDirectoryObjectIdentity(
+                endpoints.TargetDirectoryObjectIdentity))
         {
             throw new MoveNeedsAttentionException(
                 "The markerless move target root changed physical generation.");

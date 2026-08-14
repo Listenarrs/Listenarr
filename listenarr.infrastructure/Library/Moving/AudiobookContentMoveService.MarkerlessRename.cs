@@ -9,6 +9,10 @@ internal sealed partial class AudiobookContentMoveService
         IReadOnlyCollection<MoveJobEntry> manifest,
         CancellationToken cancellationToken)
     {
+        var endpoints = await GetEndpointObjectIdentitiesAsync(
+            request.JobId,
+            cancellationToken);
+
         foreach (var entry in manifest
             .Where(candidate => candidate.EntryType == MoveJobEntryType.File)
             .Where(IsPhysicalManifestEntry))
@@ -35,8 +39,18 @@ internal sealed partial class AudiobookContentMoveService
                 continue;
             }
 
-            using var targetParent = PinnedDirectoryCreation.OpenPinnedBoundary(
-                targetParentPath);
+            if (string.IsNullOrWhiteSpace(endpoints.TargetDirectoryObjectIdentity))
+            {
+                throw new MoveNeedsAttentionException(
+                    "Interrupted native-rename recovery requires a persisted target endpoint generation.");
+            }
+            using var targetParent = OpenPinnedMoveDescendant(
+                request,
+                target,
+                targetParentPath,
+                request.TargetSemantics,
+                endpoints.TargetDirectoryObjectIdentity,
+                sourceEndpoint: false);
             using var targetEntry = targetParent.TryOpenExistingFile(
                 Path.GetFileName(targetPath),
                 requireDeleteAccess: false);
@@ -71,10 +85,9 @@ internal sealed partial class AudiobookContentMoveService
         if (!stableEntry.IdentifiesSameEntry(sourceEntry)
             || !stableEntry.VisiblePathMatches()
             || !stableEntry.MatchesMetadata(entry.Length, entry.LastWriteTimeUtc)
-            || !string.Equals(
-                stableEntry.GetObjectIdentity(),
-                entry.SourcePhysicalObjectIdentity,
-                StringComparison.Ordinal))
+            || string.IsNullOrWhiteSpace(entry.SourcePhysicalObjectIdentity)
+            || !stableEntry.MatchesObjectIdentity(
+                entry.SourcePhysicalObjectIdentity))
         {
             stableEntry.Dispose();
             return null;
@@ -117,10 +130,9 @@ internal sealed partial class AudiobookContentMoveService
             if (renameEntry == null
                 || !renameEntry.IdentifiesSameEntry(sourceEntry)
                 || !renameEntry.VisiblePathMatches()
-                || !string.Equals(
-                    renameEntry.GetObjectIdentity(),
-                    entry.SourcePhysicalObjectIdentity,
-                    StringComparison.Ordinal))
+                || string.IsNullOrWhiteSpace(entry.SourcePhysicalObjectIdentity)
+                || !renameEntry.MatchesObjectIdentity(
+                    entry.SourcePhysicalObjectIdentity))
             {
                 return (false, null);
             }
@@ -149,12 +161,9 @@ internal sealed partial class AudiobookContentMoveService
             faultInjector?.OnCopyMutation(
                 request.JobId,
                 CopyMutationFaultPoint.AfterMarkerlessNativeRenameBeforeStateUpdate);
-            var targetIdentity = renameEntry.GetObjectIdentity();
             if (!renameEntry.VisiblePathMatches()
-                || !string.Equals(
-                    targetIdentity,
-                    entry.SourcePhysicalObjectIdentity,
-                    StringComparison.Ordinal))
+                || !renameEntry.MatchesObjectIdentity(
+                    entry.SourcePhysicalObjectIdentity!))
             {
                 throw new MoveNeedsAttentionException(
                     $"The markerless native rename target changed physical generation: {entry.RelativePath}");
@@ -172,15 +181,16 @@ internal sealed partial class AudiobookContentMoveService
                 }
             }
 
+            var durableTargetIdentity = entry.SourcePhysicalObjectIdentity!;
             await UpdateTargetEntryStateAsync(
                 request.JobId,
                 request.LeaseToken,
                 entry.RelativePath,
                 MoveJobEntryCopyState.Verified,
-                targetIdentity,
+                durableTargetIdentity,
                 cancellationToken);
             entry.CopyState = MoveJobEntryCopyState.Verified;
-            entry.TargetPhysicalObjectIdentity = targetIdentity;
+            entry.TargetPhysicalObjectIdentity = durableTargetIdentity;
             var result = (Published: true, VerificationLease: verificationLease);
             verificationLease = null;
             return result;
@@ -200,20 +210,17 @@ internal sealed partial class AudiobookContentMoveService
     {
         if (string.IsNullOrWhiteSpace(entry.SourcePhysicalObjectIdentity)
             || !targetEntry.VisiblePathMatches()
-            || !string.Equals(
-                targetEntry.GetObjectIdentity(),
-                entry.SourcePhysicalObjectIdentity,
-                StringComparison.Ordinal)
+            || !targetEntry.MatchesObjectIdentity(
+                entry.SourcePhysicalObjectIdentity)
             || entry.CopyState is not (
                 MoveJobEntryCopyState.Pending or MoveJobEntryCopyState.Verified)
             || (entry.CopyState == MoveJobEntryCopyState.Pending
                 && !string.IsNullOrWhiteSpace(
                     entry.TargetPhysicalObjectIdentity))
             || (entry.CopyState == MoveJobEntryCopyState.Verified
-                && !string.Equals(
-                    entry.TargetPhysicalObjectIdentity,
-                    entry.SourcePhysicalObjectIdentity,
-                    StringComparison.Ordinal))
+                && (string.IsNullOrWhiteSpace(entry.TargetPhysicalObjectIdentity)
+                    || !targetEntry.MatchesObjectIdentity(
+                        entry.TargetPhysicalObjectIdentity)))
             || !targetEntry.MatchesMetadata(
                 entry.Length,
                 entry.LastWriteTimeUtc))
@@ -246,10 +253,7 @@ internal sealed partial class AudiobookContentMoveService
     {
         if (entry.CopyState != MoveJobEntryCopyState.Verified
             || string.IsNullOrWhiteSpace(entry.SourcePhysicalObjectIdentity)
-            || !string.Equals(
-                entry.SourcePhysicalObjectIdentity,
-                entry.TargetPhysicalObjectIdentity,
-                StringComparison.Ordinal))
+            || string.IsNullOrWhiteSpace(entry.TargetPhysicalObjectIdentity))
         {
             return false;
         }
@@ -257,8 +261,20 @@ internal sealed partial class AudiobookContentMoveService
         var targetParentPath = Path.GetDirectoryName(targetPath)
             ?? throw new MoveNeedsAttentionException(
                 "A markerless native-rename target has no parent.");
-        using var targetParent = PinnedDirectoryCreation.OpenPinnedBoundary(
-            targetParentPath);
+        var endpoints = await GetEndpointObjectIdentitiesAsync(
+            request.JobId,
+            cancellationToken);
+        if (string.IsNullOrWhiteSpace(endpoints.TargetDirectoryObjectIdentity))
+        {
+            return false;
+        }
+        using var targetParent = OpenPinnedMoveDescendant(
+            request,
+            request.Target,
+            targetParentPath,
+            request.TargetSemantics,
+            endpoints.TargetDirectoryObjectIdentity,
+            sourceEndpoint: false);
         using var targetEntry = targetParent.TryOpenExistingFile(
             Path.GetFileName(targetPath),
             requireDeleteAccess: false);
@@ -292,12 +308,8 @@ internal sealed partial class AudiobookContentMoveService
         MoveJobEntry entry,
         PinnedDirectoryCreation.PinnedFileEntry targetEntry) =>
         targetEntry.VisiblePathMatches()
-        && string.Equals(
-            targetEntry.GetObjectIdentity(),
-            entry.SourcePhysicalObjectIdentity,
-            StringComparison.Ordinal)
-        && string.Equals(
-            targetEntry.GetObjectIdentity(),
-            entry.TargetPhysicalObjectIdentity,
-            StringComparison.Ordinal);
+        && !string.IsNullOrWhiteSpace(entry.SourcePhysicalObjectIdentity)
+        && !string.IsNullOrWhiteSpace(entry.TargetPhysicalObjectIdentity)
+        && targetEntry.MatchesObjectIdentity(entry.SourcePhysicalObjectIdentity)
+        && targetEntry.MatchesObjectIdentity(entry.TargetPhysicalObjectIdentity);
 }

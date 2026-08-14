@@ -251,6 +251,26 @@ internal sealed partial class PinnedDirectoryCreation
             return GetDirectoryObjectIdentity(_fileHandle);
         }
 
+        internal IReadOnlyList<string> GetObjectIdentityCandidates()
+        {
+            ThrowIfDisposed();
+            return OperatingSystem.IsLinux()
+                ? GetLinuxObjectIdentityCandidates(_fileHandle)
+                : [GetDirectoryObjectIdentity(_fileHandle)];
+        }
+
+        internal bool MatchesObjectIdentity(string expectedIdentity)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(expectedIdentity);
+            var candidates = GetObjectIdentityCandidates();
+            return candidates.Contains(expectedIdentity, StringComparer.Ordinal)
+                || (OperatingSystem.IsLinux()
+                    && candidates.Any(candidate =>
+                        PinnedDirectoryCreation.ArePersistedObjectIdentitiesDurablyEquivalent(
+                            expectedIdentity,
+                            candidate)));
+        }
+
         internal bool IsOnSameVolume(PinnedDirectoryAnchor directory)
         {
             ThrowIfDisposed();

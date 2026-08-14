@@ -167,10 +167,7 @@ internal sealed partial class MoveSourceManifestService(
                 createMissing: false);
             using var file = parent.OpenExistingFileForStableRead(
                 Path.GetFileName(path));
-            if (!string.Equals(
-                    file.GetObjectIdentity(),
-                    expectedPhysicalObjectIdentity,
-                    StringComparison.Ordinal))
+            if (!file.MatchesObjectIdentity(expectedPhysicalObjectIdentity))
             {
                 throw Conflict(
                     $"Tracked file {audiobookFileId} identifies a different physical file generation and must be rescanned before moving.");
@@ -180,18 +177,15 @@ internal sealed partial class MoveSourceManifestService(
                 bufferSize: 128 * 1024,
                 asynchronous: false);
             var length = stream.Length;
-            var lastWriteTimeUtc = File.GetLastWriteTimeUtc(path);
+            var lastWriteTimeUtc = file.GetLastWriteTimeUtc();
             var hash = includeContentHash
                 ? Convert.ToHexString(
                     await SHA256.HashDataAsync(stream, cancellationToken))
                 : null;
             if (!file.VisiblePathMatches()
-                || !string.Equals(
-                    file.GetObjectIdentity(),
-                    expectedPhysicalObjectIdentity,
-                    StringComparison.Ordinal)
+                || !file.MatchesObjectIdentity(expectedPhysicalObjectIdentity)
                 || stream.Length != length
-                || File.GetLastWriteTimeUtc(path) != lastWriteTimeUtc)
+                || file.GetLastWriteTimeUtc() != lastWriteTimeUtc)
             {
                 throw Conflict(
                     $"Tracked file {audiobookFileId} changed while its move manifest was being created.");

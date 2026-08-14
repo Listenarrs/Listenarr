@@ -38,7 +38,7 @@ internal sealed partial class AudiobookContentMoveService
         foreach (var entry in manifest)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (MoveManifestIdentity.IsTargetBoundaryAuthorization(entry))
+            if (MoveManifestIdentity.IsBoundaryAuthorization(entry))
             {
                 continue;
             }
@@ -120,10 +120,10 @@ internal sealed partial class AudiobookContentMoveService
         entry.EntryType == MoveJobEntryType.File
         && entry.CopyState == MoveJobEntryCopyState.Verified
         && !string.IsNullOrWhiteSpace(entry.SourcePhysicalObjectIdentity)
-        && string.Equals(
+        && !string.IsNullOrWhiteSpace(entry.TargetPhysicalObjectIdentity)
+        && PinnedDirectoryCreation.ArePersistedObjectIdentitiesDurablyEquivalent(
             entry.SourcePhysicalObjectIdentity,
-            entry.TargetPhysicalObjectIdentity,
-            StringComparison.Ordinal);
+            entry.TargetPhysicalObjectIdentity);
 
     private static bool FileMetadataMatchesManifest(
         string path,

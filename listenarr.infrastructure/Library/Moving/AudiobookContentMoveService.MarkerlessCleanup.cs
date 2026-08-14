@@ -10,6 +10,16 @@ internal sealed partial class AudiobookContentMoveService
         IReadOnlyCollection<MoveJobEntry> manifest,
         CancellationToken cancellationToken)
     {
+        var endpoints = await GetEndpointObjectIdentitiesAsync(
+            request.JobId,
+            cancellationToken);
+        if (string.IsNullOrWhiteSpace(endpoints.SourceDirectoryObjectIdentity)
+            || string.IsNullOrWhiteSpace(endpoints.TargetDirectoryObjectIdentity))
+        {
+            throw new MoveNeedsAttentionException(
+                "Markerless cleanup requires persisted source and target endpoint generations.");
+        }
+
         var files = manifest
             .Where(candidate => candidate.EntryType == MoveJobEntryType.File)
             .Where(IsPhysicalManifestEntry)
@@ -34,6 +44,8 @@ internal sealed partial class AudiobookContentMoveService
                 source,
                 target,
                 entry,
+                endpoints.SourceDirectoryObjectIdentity,
+                endpoints.TargetDirectoryObjectIdentity,
                 cancellationToken);
             if (!wasComplete && entry.CleanupState is
                 MoveJobEntryCleanupState.Deleted or MoveJobEntryCleanupState.Retained)
@@ -58,6 +70,7 @@ internal sealed partial class AudiobookContentMoveService
                 target,
                 targetInsideSource,
                 entry,
+                endpoints.SourceDirectoryObjectIdentity,
                 cancellationToken);
         }
 
@@ -75,6 +88,8 @@ internal sealed partial class AudiobookContentMoveService
         string source,
         string target,
         MoveJobEntry entry,
+        string sourceEndpointIdentity,
+        string targetEndpointIdentity,
         CancellationToken cancellationToken)
     {
         var sourcePath = ResolveManifestPath(
@@ -132,8 +147,13 @@ internal sealed partial class AudiobookContentMoveService
         var targetParentPath = Path.GetDirectoryName(targetPath)
             ?? throw new MoveNeedsAttentionException(
                 "A markerless target file has no parent.");
-        using var sourceParent = PinnedDirectoryCreation.OpenPinnedBoundary(
-            sourceParentPath);
+        using var sourceParent = OpenPinnedMoveDescendant(
+            request,
+            source,
+            sourceParentPath,
+            request.SourceSemantics,
+            sourceEndpointIdentity,
+            sourceEndpoint: true);
         using var sourceEntry = sourceParent.OpenExistingFile(
             Path.GetFileName(sourcePath),
             requireDeleteAccess: true);
@@ -147,8 +167,13 @@ internal sealed partial class AudiobookContentMoveService
                 $"A source file changed before markerless deletion: {entry.RelativePath}");
         }
 
-        using var targetParent = PinnedDirectoryCreation.OpenPinnedBoundary(
-            targetParentPath);
+        using var targetParent = OpenPinnedMoveDescendant(
+            request,
+            target,
+            targetParentPath,
+            request.TargetSemantics,
+            targetEndpointIdentity,
+            sourceEndpoint: false);
         using var targetEntry = targetParent.OpenExistingFile(
             Path.GetFileName(targetPath),
             requireDeleteAccess: false);
@@ -218,10 +243,8 @@ internal sealed partial class AudiobookContentMoveService
         PinnedDirectoryCreation.PinnedDirectoryAnchor directory)
     {
         if (string.IsNullOrWhiteSpace(entry.SourcePhysicalObjectIdentity)
-            || !string.Equals(
-                entry.SourcePhysicalObjectIdentity,
-                directory.GetDirectoryObjectIdentity(),
-                StringComparison.Ordinal)
+            || !directory.MatchesDirectoryObjectIdentity(
+                entry.SourcePhysicalObjectIdentity)
             || !directory.VisiblePathMatches())
         {
             throw new MoveNeedsAttentionException(

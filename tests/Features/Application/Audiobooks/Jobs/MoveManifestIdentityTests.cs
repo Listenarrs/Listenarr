@@ -13,7 +13,7 @@ public sealed class MoveManifestIdentityTests : BaseTests
     }
 
     [Fact]
-    public void SourceManifestsMatch_TargetBoundaryAuthorization_IsNotSourceContent()
+    public void SourceManifestsMatch_BoundaryAuthorizations_AreNotSourceContent()
     {
         var semantics = new FileSystemPathSemantics(
             FileSystemPathSyntax.Unix,
@@ -22,6 +22,9 @@ public sealed class MoveManifestIdentityTests : BaseTests
         var persisted = new List<MoveJobEntry>
         {
             PersistedFile("book.m4b", 1, 2, 'A'),
+            MoveManifestIdentity.CreateSourceBoundaryAuthorization(
+                1,
+                "source-generation"),
             MoveManifestIdentity.CreateTargetBoundaryAuthorization(
                 1,
                 "target-generation")
@@ -54,11 +57,13 @@ public sealed class MoveManifestIdentityTests : BaseTests
         var firstEntries = new List<MoveJobEntry>
         {
             PersistedFile("book.m4b", 1, 2, 'A'),
+            MoveManifestIdentity.CreateSourceBoundaryAuthorization(1, "source-generation"),
             MoveManifestIdentity.CreateTargetBoundaryAuthorization(1, "generation-a")
         };
         var secondEntries = new List<MoveJobEntry>
         {
             PersistedFile("book.m4b", 1, 2, 'A'),
+            MoveManifestIdentity.CreateSourceBoundaryAuthorization(1, "source-generation"),
             MoveManifestIdentity.CreateTargetBoundaryAuthorization(1, "generation-b")
         };
 
@@ -78,6 +83,38 @@ public sealed class MoveManifestIdentityTests : BaseTests
             secondEntries);
 
         Assert.NotEqual(first, second);
+    }
+
+    [Fact]
+    public void TryGetSourceBoundaryAuthorization_RawIdentityChangedWithoutDigestChange_IsRejected()
+    {
+        var authorization = MoveManifestIdentity.CreateSourceBoundaryAuthorization(
+            1,
+            "source-generation-a");
+        authorization.SourcePhysicalObjectIdentity = "source-generation-b";
+
+        Assert.True(MoveManifestIdentity.IsBoundaryAuthorization(authorization));
+        Assert.False(MoveManifestIdentity.TryGetSourceBoundaryAuthorization(
+            [authorization],
+            out _,
+            out _,
+            out _));
+    }
+
+    [Fact]
+    public void TryGetTargetBoundaryAuthorization_RawIdentityChangedWithoutDigestChange_IsRejected()
+    {
+        var authorization = MoveManifestIdentity.CreateTargetBoundaryAuthorization(
+            1,
+            "target-generation-a");
+        authorization.TargetPhysicalObjectIdentity = "target-generation-b";
+
+        Assert.True(MoveManifestIdentity.IsBoundaryAuthorization(authorization));
+        Assert.False(MoveManifestIdentity.TryGetTargetBoundaryAuthorization(
+            [authorization],
+            out _,
+            out _,
+            out _));
     }
 
     [Fact]

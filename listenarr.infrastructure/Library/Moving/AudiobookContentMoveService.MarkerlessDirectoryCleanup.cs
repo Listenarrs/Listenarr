@@ -8,6 +8,7 @@ internal sealed partial class AudiobookContentMoveService
         string target,
         bool targetInsideSource,
         MoveJobEntry entry,
+        string sourceEndpointIdentity,
         CancellationToken cancellationToken)
     {
         var sourcePath = ResolveManifestPath(
@@ -93,7 +94,13 @@ internal sealed partial class AudiobookContentMoveService
         var parentPath = Path.GetDirectoryName(sourcePath)
             ?? throw new MoveNeedsAttentionException(
                 "A markerless source directory has no parent.");
-        using (var parent = PinnedDirectoryCreation.OpenPinnedBoundary(parentPath))
+        using (var parent = OpenPinnedMoveDescendant(
+            request,
+            source,
+            parentPath,
+            request.SourceSemantics,
+            sourceEndpointIdentity,
+            sourceEndpoint: true))
         using (var publication = parent.OpenExistingChildForPublication(
             Path.GetFileName(sourcePath)))
         using (var directory = publication.OpenCreatedDirectoryAnchor())
@@ -256,16 +263,18 @@ internal sealed partial class AudiobookContentMoveService
         var parentPath = Path.GetDirectoryName(source)
             ?? throw new MoveNeedsAttentionException(
                 "The markerless source directory has no parent.");
-        using (var parent = PinnedDirectoryCreation.OpenPinnedBoundary(parentPath))
+        using (var parent = OpenPinnedMoveBoundaryDescendant(
+            request,
+            parentPath,
+            request.SourceSemantics,
+            sourceBoundary: true))
         using (var publication = parent.OpenExistingChildForPublication(
             Path.GetFileName(source)))
         using (var directory = publication.OpenCreatedDirectoryAnchor())
         {
             if (string.IsNullOrWhiteSpace(endpoints.SourceDirectoryObjectIdentity)
-                || !string.Equals(
-                    endpoints.SourceDirectoryObjectIdentity,
-                    directory.GetDirectoryObjectIdentity(),
-                    StringComparison.Ordinal)
+                || !directory.MatchesDirectoryObjectIdentity(
+                    endpoints.SourceDirectoryObjectIdentity)
                 || !directory.VisiblePathMatches())
             {
                 throw new MoveNeedsAttentionException(

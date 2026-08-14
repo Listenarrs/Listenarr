@@ -30,10 +30,13 @@ public partial class AudiobookContentMoveServiceTests
         var persistedEntries = await LoadPersistedManifestAsync(request.JobId);
         Assert.Single(
             persistedEntries,
+            MoveManifestIdentity.IsSourceBoundaryAuthorization);
+        Assert.Single(
+            persistedEntries,
             MoveManifestIdentity.IsTargetBoundaryAuthorization);
         Assert.DoesNotContain(
             persistedEntries,
-            entry => !MoveManifestIdentity.IsTargetBoundaryAuthorization(entry));
+            entry => !MoveManifestIdentity.IsBoundaryAuthorization(entry));
     }
 
     private async Task<List<MoveJobEntry>> LoadPersistedManifestAsync(Guid jobId)

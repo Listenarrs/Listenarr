@@ -58,7 +58,8 @@ internal sealed partial class AudiobookScanService(
             semantics,
             resolvedExistingPaths.Values,
             ownershipMap,
-            pinnedAuthority.Root);
+            pinnedAuthority.Root,
+            command.ScanPhysicalIdentity.HasDurableGenerationProof);
         discovery = await EnrichWithMetadataAsync(
             command,
             pinnedAuthority,
@@ -170,6 +171,7 @@ internal sealed partial class AudiobookScanService(
             discovery.IsComplete,
             command.AllowReconciliation
                 && command.IsAuthoritativeScope
+                && command.ScanPhysicalIdentity.HasDurableGenerationProof
                 && discovery.CanReconcile,
             diagnostics);
     }
@@ -272,11 +274,13 @@ internal sealed partial class AudiobookScanService(
                     pinnedAuthority,
                     discovery,
                     filePath);
-                if (await fileService.EnsureAudiobookFileAsync(
-                        audiobook,
-                        registrationLease,
-                        source,
-                        cancellationToken))
+                var createdFile = await fileService.EnsureAudiobookFileAsync(
+                    audiobook,
+                    registrationLease,
+                    source,
+                    cancellationToken);
+
+                if (createdFile)
                 {
                     created++;
                 }

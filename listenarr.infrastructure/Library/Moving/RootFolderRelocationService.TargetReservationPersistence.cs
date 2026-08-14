@@ -77,11 +77,10 @@ public sealed partial class RootFolderRelocationService
         if (reservation.State is not (
                 RootFolderRelocationCreatedDirectoryState.Created
                     or RootFolderRelocationCreatedDirectoryState.Retained)
-            || !ManagedDirectoryIdentity.Matches(
+            || !directory.MatchesManagedDirectoryOwnershipIdentity(
                 reservation.DirectoryObjectIdentityVersion,
                 reservation.DirectoryObjectIdentity,
-                reservation.OwnershipToken,
-                directory.GetDirectoryObjectIdentity())
+                reservation.OwnershipToken)
             || !directory.VisiblePathMatches())
         {
             throw new InvalidOperationException(

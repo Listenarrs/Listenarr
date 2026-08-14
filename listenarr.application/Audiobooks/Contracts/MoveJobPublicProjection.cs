@@ -87,7 +87,7 @@ public static class MoveJobPublicProjection
         var phase = job?.Phase ?? MoveJobPhase.None;
         var files = job?.Entries
             .Where(entry => entry.EntryType == MoveJobEntryType.File
-                && !MoveManifestIdentity.IsTargetBoundaryAuthorization(entry))
+                && !MoveManifestIdentity.IsBoundaryAuthorization(entry))
             .ToList() ?? [];
         var totalBytes = files.Sum(entry => Math.Max(entry.Length, 1));
         var copiedBytes = files

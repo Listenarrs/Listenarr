@@ -19,8 +19,7 @@ internal sealed partial class AudiobookContentMoveService
             cancellationToken);
 
         var ownership = await LoadValidatedTargetDirectoryOwnershipAsync(
-            request.Target,
-            request.TargetSemantics,
+            request,
             cancellationToken);
         return request with { TargetDirectoryOwnership = ownership };
     }
@@ -64,13 +63,12 @@ internal sealed partial class AudiobookContentMoveService
     }
 
     private async Task<LibraryDirectoryOwnership?> LoadValidatedTargetDirectoryOwnershipAsync(
-        string target,
-        FileSystemPathSemantics targetSemantics,
+        AudiobookContentMoveRequest request,
         CancellationToken cancellationToken)
     {
         var resolution = await directoryOwnershipStore.ResolveOwnedAsync(
-            target,
-            targetSemantics,
+            request.Target,
+            request.TargetSemantics,
             cancellationToken);
         if (resolution.State == LibraryDirectoryOwnershipResolutionState.Unowned)
         {
@@ -87,19 +85,20 @@ internal sealed partial class AudiobookContentMoveService
         var ownership = resolution.Ownership;
         if (!FileSystemPathIdentity.AreEquivalent(
                 ownership.CanonicalPath,
-                target,
-                targetSemantics)
+                request.Target,
+                request.TargetSemantics)
             || ownership.State == LibraryDirectoryOwnershipState.Removing)
         {
             throw new MoveNeedsAttentionException(
                 "Durable target-directory ownership does not match the exact move target.");
         }
 
-        RevalidateTargetDirectoryOwnership(ownership);
+        RevalidateTargetDirectoryOwnership(request, ownership);
         return ownership;
     }
 
     private static void RevalidateTargetDirectoryOwnership(
+        AudiobookContentMoveRequest request,
         LibraryDirectoryOwnership? ownership)
     {
         if (ownership == null)
@@ -112,14 +111,17 @@ internal sealed partial class AudiobookContentMoveService
             var parentPath = Path.GetDirectoryName(ownership.CanonicalPath)
                 ?? throw new InvalidOperationException(
                     "The target ownership path has no parent directory.");
-            using var parent = PinnedDirectoryCreation.OpenPinnedBoundary(parentPath);
+            using var parent = OpenPinnedMoveBoundaryDescendant(
+                request,
+                parentPath,
+                request.TargetSemantics,
+                sourceBoundary: false);
             using var directory = parent.OpenExistingChild(
                 Path.GetFileName(ownership.CanonicalPath));
-            if (!ManagedDirectoryIdentity.Matches(
+            if (!directory.MatchesManagedDirectoryOwnershipIdentity(
                     ownership.DirectoryObjectIdentityVersion,
                     ownership.DirectoryObjectIdentity,
-                    ownership.OwnershipToken,
-                    directory.GetDirectoryObjectIdentity())
+                    ownership.OwnershipToken)
                 || !directory.VisiblePathMatches()
                 || !parent.VisiblePathMatches())
             {

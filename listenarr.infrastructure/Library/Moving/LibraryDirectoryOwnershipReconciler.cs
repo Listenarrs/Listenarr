@@ -82,14 +82,12 @@ public sealed class LibraryDirectoryOwnershipReconciler(
                     ?? throw new InvalidOperationException(
                         "The owned directory is missing.");
                 using var directory = publication.OpenCreatedDirectoryAnchor();
-                var liveIdentity = directory.GetDirectoryObjectIdentity();
                 if (ownership.DirectoryObjectIdentityVersion
                     != ManagedDirectoryIdentity.CurrentVersion
-                    || !ManagedDirectoryIdentity.Matches(
+                    || !directory.MatchesManagedDirectoryOwnershipIdentity(
                         ownership.DirectoryObjectIdentityVersion,
                         ownership.DirectoryObjectIdentity,
-                        ownership.OwnershipToken,
-                        liveIdentity))
+                        ownership.OwnershipToken))
                 {
                     throw new InvalidOperationException(
                         "The persisted directory ownership identity is not the current supported generation.");

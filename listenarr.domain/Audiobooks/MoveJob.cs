@@ -79,7 +79,8 @@ namespace Listenarr.Domain.Audiobooks
     public static class MoveExecutionProtocol
     {
         public const int PreDurableReleased = 0;
-        public const int MarkerlessDatabaseState = 1;
+        public const int TargetBoundaryMarkerlessDatabaseState = 1;
+        public const int MarkerlessDatabaseState = 2;
         public const int Current = MarkerlessDatabaseState;
 
         public static bool IsCurrent(int version) => version == Current;

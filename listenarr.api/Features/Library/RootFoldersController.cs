@@ -33,8 +33,11 @@ namespace Listenarr.Api.Features.Library
         string StorageState,
         string StorageReason,
         string? StorageMessage,
+        string? StorageDetail,
         bool CanConfirmCurrentFolder,
         bool CanChangePath,
+        bool CanReadFilesystem,
+        bool CanScanFilesystem,
         bool CanMutateFilesystem,
         string? ConfirmationToken,
         DateTime CreatedAt,
@@ -376,6 +379,17 @@ namespace Listenarr.Api.Features.Library
 
             var folder = await _service.GetByIdAsync(id);
             if (folder == null) return NotFound(new { message = "Root folder not found" });
+
+            var storage = await _storageHealthResolver.ResolveAsync(folder);
+            if (!storage.CanScanFilesystem)
+            {
+                return Conflict(new
+                {
+                    message = storage.Message
+                        ?? "The root folder cannot be scanned in its current storage state.",
+                    code = "root_folder_scan_unavailable"
+                });
+            }
 
             var jobId = await _unmatchedQueue.EnqueueAsync(folder.Path);
             return Ok(new { jobId = jobId.ToString() });

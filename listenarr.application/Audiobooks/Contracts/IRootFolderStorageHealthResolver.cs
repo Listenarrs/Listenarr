@@ -3,6 +3,7 @@ namespace Listenarr.Application.Audiobooks.Contracts;
 public enum RootFolderStorageState
 {
     Healthy,
+    Limited,
     Missing,
     Changed,
     Unavailable,
@@ -20,6 +21,8 @@ public enum RootFolderStorageReason
     IdentityUnstable,
     FilesystemSemanticsUnavailable,
     FilesystemSemanticsChanged,
+    ReadOnlyFilesystem,
+    MutationCapabilityUnavailable,
     NoAuthorizedIdentity,
     InvalidPath,
     Unknown
@@ -32,7 +35,15 @@ public sealed record RootFolderStorageObservation(
     bool CanConfirmCurrentFolder,
     bool CanChangePath,
     bool CanMutateFilesystem,
-    string? ConfirmationToken);
+    string? ConfirmationToken,
+    string? Detail = null)
+{
+    public bool CanReadFilesystem =>
+        State is RootFolderStorageState.Healthy or RootFolderStorageState.Limited;
+
+    public bool CanScanFilesystem =>
+        State is RootFolderStorageState.Healthy or RootFolderStorageState.Limited;
+}
 
 public interface IRootFolderStorageHealthResolver
 {

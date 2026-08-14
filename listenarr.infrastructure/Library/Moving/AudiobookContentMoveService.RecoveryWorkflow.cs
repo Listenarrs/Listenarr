@@ -37,6 +37,7 @@ internal sealed partial class AudiobookContentMoveService
             targetSemantics,
             request.LeaseToken,
             cancellationToken);
+        request = await WithBoundaryAuthorizationAsync(request, cancellationToken);
         request = await WithValidatedTargetDirectoryOwnershipAsync(
             request,
             cancellationToken);
@@ -56,6 +57,7 @@ internal sealed partial class AudiobookContentMoveService
         ArgumentNullException.ThrowIfNull(result);
         await EnsureLeaseOwnedAsync(request.JobId, request.LeaseToken, cancellationToken);
         await EnsureCurrentExecutionProtocolAsync(request.JobId, cancellationToken);
+        request = await WithBoundaryAuthorizationAsync(request, cancellationToken);
         request = await WithValidatedTargetDirectoryOwnershipAsync(
             request,
             cancellationToken);

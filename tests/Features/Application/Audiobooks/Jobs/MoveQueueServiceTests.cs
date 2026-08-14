@@ -877,7 +877,9 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
                 sourceCleanupBoundary: "/downloads");
 
             var job = Assert.Single(jobs, candidate => candidate.Id == jobId);
-            Assert.Equal("/downloads", job.SourceCleanupBoundary);
+            Assert.Equal(
+                FileSystemPathIdentity.ResolveNativeAbsolutePath("/downloads"),
+                job.SourceCleanupBoundary);
         }
 
         [Fact]
@@ -965,6 +967,8 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
                         FileSystemCaseSensitivityMode.Auto,
                         boundary,
                         target),
+                    SourceBoundaryDirectoryObjectIdentityVersion: 2,
+                    SourceBoundaryDirectoryObjectIdentity: "test-source-boundary-identity",
                     TargetBoundaryDirectoryObjectIdentityVersion: 2,
                     TargetBoundaryDirectoryObjectIdentity: "test-target-boundary-identity",
                     DeleteEmptySource: true,
@@ -1232,6 +1236,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
                 RequestedPath = targetPath,
                 Status = MoveJobStatus.Failed,
                 Phase = MoveJobPhase.CleaningSource,
+                SourceCleanupBoundary = Path.GetDirectoryName(sourcePath),
                 Error = "verification failed",
                 FailureKind = MoveFailureKind.Verification,
                 AttemptCount = MoveTimingPolicy.MaxTransientAttempts,
@@ -1248,6 +1253,9 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
                         LastWriteTimeUtc = DateTime.UnixEpoch,
                         Sha256 = new string('A', 64)
                     },
+                    MoveManifestIdentity.CreateSourceBoundaryAuthorization(
+                        2,
+                        "test-source-generation"),
                     MoveManifestIdentity.CreateTargetBoundaryAuthorization(
                         2,
                         "test-target-generation")
@@ -1281,6 +1289,77 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
                     && command.TargetPath == targetPath
                     && !string.IsNullOrWhiteSpace(command.DeduplicationKey)),
                 It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [Fact]
+        public async Task RequeueMoveAsync_SourceMutationBoundaryOutsideSourceParent_RequiresAttention()
+        {
+            var tempRoot = Path.GetFullPath(Path.Join(
+                Path.GetTempPath(),
+                $"listenarr-requeue-boundary-{Guid.NewGuid():N}"));
+            var sourcePath = Path.Join(tempRoot, "source", "Title");
+            var targetPath = Path.Join(tempRoot, "target", "Title");
+            var invalidBoundary = Path.Join(tempRoot, "unrelated");
+            var semantics = FileSystemPathSemantics.CurrentHostDefault;
+            var sourceIdentity = new PathIdentitySnapshot(
+                semantics.Syntax,
+                semantics.CaseSensitivity,
+                FileSystemCaseSensitivityMode.Auto,
+                tempRoot);
+            var targetIdentity = sourceIdentity;
+            var job = new MoveJob
+            {
+                Id = Guid.NewGuid(),
+                AudiobookId = 9,
+                SourcePath = sourcePath,
+                RequestedPath = targetPath,
+                SourceCleanupBoundary = invalidBoundary,
+                DeleteEmptySource = true,
+                Status = MoveJobStatus.Failed,
+                Phase = MoveJobPhase.Copying,
+                FailureKind = MoveFailureKind.Transient,
+                Error = "Simulated transient failure.",
+                Entries =
+                [
+                    new MoveJobEntry
+                    {
+                        RelativePath = "book.m4b",
+                        EntryType = MoveJobEntryType.File,
+                        Length = 1,
+                        LastWriteTimeUtc = DateTime.UnixEpoch,
+                        Sha256 = new string('A', 64)
+                    },
+                    MoveManifestIdentity.CreateSourceBoundaryAuthorization(
+                        2,
+                        "test-source-generation"),
+                    MoveManifestIdentity.CreateTargetBoundaryAuthorization(
+                        2,
+                        "test-target-generation")
+                ]
+            };
+            job.SetSourceIdentity(sourceIdentity);
+            job.SetTargetIdentity(targetIdentity);
+            var persistence = CreateInMemoryPersistence([job]);
+            var service = new MoveQueueService(
+                NullLogger<MoveQueueService>.Instance,
+                persistence.Object,
+                new NoopHubBroadcaster(),
+                TimeProvider.System,
+                BuildSemanticsResolver());
+
+            var requeuedJobId = await service.RequeueMoveAsync(job.Id);
+
+            Assert.Null(requeuedJobId);
+            Assert.Equal(MoveJobStatus.NeedsAttention, job.Status);
+            Assert.Equal(MoveFailureKind.Verification, job.FailureKind);
+            Assert.Null(job.ActiveDeduplicationKey);
+            Assert.Contains(
+                "source mutation boundary",
+                job.Error ?? string.Empty,
+                StringComparison.OrdinalIgnoreCase);
+            persistence.Verify(store => store.RequeueAsync(
+                It.IsAny<RequeueMoveCommand>(),
+                It.IsAny<CancellationToken>()), Times.Never);
         }
 
         [Fact]
@@ -1319,6 +1398,9 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
                         CopyState = MoveJobEntryCopyState.Verified,
                         CleanupState = MoveJobEntryCleanupState.Deleted
                     },
+                    MoveManifestIdentity.CreateSourceBoundaryAuthorization(
+                        2,
+                        "test-source-generation"),
                     MoveManifestIdentity.CreateTargetBoundaryAuthorization(
                         2,
                         "test-target-generation")
@@ -2035,6 +2117,19 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
                 FileSystemCaseSensitivityMode.Auto,
                 sourceResolution.BoundaryPath,
                 source);
+            var effectiveSourceCleanupBoundary = sourceCleanupBoundary;
+            if (deleteEmptySource && string.IsNullOrWhiteSpace(effectiveSourceCleanupBoundary))
+            {
+                effectiveSourceCleanupBoundary = Path.GetDirectoryName(
+                    Path.TrimEndingDirectorySeparator(source))
+                    ?? sourceIdentity.BoundaryPath;
+            }
+            else if (!string.IsNullOrWhiteSpace(effectiveSourceCleanupBoundary))
+            {
+                effectiveSourceCleanupBoundary =
+                    FileSystemPathIdentity.ResolveNativeAbsolutePath(
+                        effectiveSourceCleanupBoundary);
+            }
             var targetIdentity = PathIdentitySnapshot.FromResolution(
                 targetResolution.Semantics,
                 FileSystemCaseSensitivityMode.Auto,
@@ -2052,10 +2147,12 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
                     new string('A', 64))],
                 target,
                 targetIdentity,
+                SourceBoundaryDirectoryObjectIdentityVersion: 2,
+                SourceBoundaryDirectoryObjectIdentity: "test-source-boundary-identity",
                 TargetBoundaryDirectoryObjectIdentityVersion: 2,
                 TargetBoundaryDirectoryObjectIdentity: "test-target-boundary-identity",
                 DeleteEmptySource: deleteEmptySource,
-                SourceCleanupBoundary: sourceCleanupBoundary));
+                SourceCleanupBoundary: effectiveSourceCleanupBoundary));
         }
     }
 }

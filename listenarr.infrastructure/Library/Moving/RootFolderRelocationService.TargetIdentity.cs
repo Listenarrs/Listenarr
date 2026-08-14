@@ -79,10 +79,9 @@ public sealed partial class RootFolderRelocationService
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (!string.IsNullOrWhiteSpace(unavailableReason)
-            || !ManagedDirectoryIdentity.MatchesNativeIdentity(
+            || !target.MatchesManagedDirectoryIdentity(
                 expectedVersion,
-                expectedValue,
-                target.GetDirectoryObjectIdentity())
+                expectedValue)
             || !target.VisiblePathMatches())
         {
             throw new InvalidOperationException(
@@ -179,14 +178,12 @@ public sealed partial class RootFolderRelocationService
         {
             using var anchor = PinnedDirectoryCreation.OpenPinnedBoundary(path);
             cancellationToken.ThrowIfCancellationRequested();
-            var nativeIdentity = anchor.GetDirectoryObjectIdentity();
             if (expectedVersion.HasValue && expectedValue != null)
             {
                 return Task.FromResult(
-                    ManagedDirectoryIdentity.MatchesNativeIdentity(
+                    anchor.MatchesManagedDirectoryIdentity(
                         expectedVersion,
-                        expectedValue,
-                        nativeIdentity)
+                        expectedValue)
                         ? new DirectoryObjectIdentityResolution(
                             expectedVersion,
                             expectedValue,

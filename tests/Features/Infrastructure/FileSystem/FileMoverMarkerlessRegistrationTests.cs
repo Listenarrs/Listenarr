@@ -223,6 +223,73 @@ public sealed class FileMoverMarkerlessRegistrationTests : BaseTests
         AssertNoLibraryArtifacts(scenario.Root);
     }
 
+    [LinuxFact]
+    public async Task PrepareMove_RetryAcceptsCompatibleMergedV1JournalAndPreferredExpectedToken()
+    {
+        var scenario = await CreateScenarioAsync(
+            "registration-compatible-v1-retry");
+        var firstMover = CreateMover();
+        string preferredTargetIdentity;
+        using (var firstLease = await firstMover.PrepareActionForRegistrationAsync(
+            FileAction.Move,
+            scenario.Source,
+            scenario.Destination,
+            scenario.OperationId))
+        {
+            Assert.NotNull(firstLease);
+            preferredTargetIdentity = firstLease.PhysicalObjectIdentity;
+        }
+
+        Assert.StartsWith(
+            "linux-generation:",
+            preferredTargetIdentity,
+            StringComparison.Ordinal);
+        var mergedV1TargetIdentity =
+            LinuxIdentityTestHelper.ToMergedV1AugmentedIdentity(
+                preferredTargetIdentity);
+        var factory = _provider.GetRequiredService<
+            IDbContextFactory<ListenArrDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var journal = await db.FileMutationJournals.SingleAsync(
+                candidate => candidate.OperationId == scenario.OperationId);
+            Assert.Equal(
+                FileMutationJournalState.TargetVerified,
+                journal.State);
+            journal.TargetPhysicalObjectIdentity = mergedV1TargetIdentity;
+            await db.SaveChangesAsync();
+        }
+
+        var retryMover = CreateMover();
+        using var retryLease = await retryMover.PrepareActionForRegistrationAsync(
+            FileAction.Move,
+            scenario.Source,
+            scenario.Destination,
+            scenario.OperationId,
+            preferredTargetIdentity);
+
+        Assert.NotNull(retryLease);
+        Assert.True(retryLease.MatchesPhysicalObjectIdentity(
+            mergedV1TargetIdentity));
+        Assert.True(retryLease.MatchesCurrentPublication());
+        Assert.True(retryLease.PrepareCleanupRecovery(30));
+        Assert.Equal(
+            RegistrationPublicationCompletion.Completed,
+            retryLease.CompletePublication());
+        Assert.True(await retryMover.CompletePreparedMoveAsync(
+            scenario.Source,
+            scenario.Destination,
+            retryLease,
+            scenario.OperationId));
+        await AssertJournalStateAsync(
+            scenario.OperationId,
+            FileMutationJournalState.Completed,
+            audiobookId: 30);
+        Assert.False(File.Exists(scenario.Source));
+        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Destination));
+        AssertNoLibraryArtifacts(scenario.Root);
+    }
+
     [Fact]
     public async Task PrepareMove_RetryAfterOwnershipCommitGapReusesVerifiedGeneration()
     {

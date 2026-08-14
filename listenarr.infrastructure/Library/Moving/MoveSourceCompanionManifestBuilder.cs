@@ -319,12 +319,18 @@ internal static class MoveSourceCompanionManifestBuilder
         CancellationToken cancellationToken)
     {
         using var file = parent.OpenExistingFileForStableRead(fileName);
+        if (!file.IsRegularFile())
+        {
+            throw Conflict(
+                $"Audiobook companion entry is not a regular file: {fileName}");
+        }
+
         var physicalObjectIdentity = file.GetObjectIdentity();
         await using var stream = file.OpenReadStream(
             bufferSize: 128 * 1024,
             asynchronous: false);
         var length = stream.Length;
-        var lastWriteTimeUtc = File.GetLastWriteTimeUtc(file.FullPath);
+        var lastWriteTimeUtc = file.GetLastWriteTimeUtc();
         var hash = includeContentHash
             ? Convert.ToHexString(
                 await SHA256.HashDataAsync(stream, cancellationToken))
@@ -332,12 +338,9 @@ internal static class MoveSourceCompanionManifestBuilder
         if (!root.VisiblePathMatches()
             || !parent.VisiblePathMatches()
             || !file.VisiblePathMatches()
-            || !string.Equals(
-                file.GetObjectIdentity(),
-                physicalObjectIdentity,
-                StringComparison.Ordinal)
+            || !file.MatchesObjectIdentity(physicalObjectIdentity)
             || stream.Length != length
-            || File.GetLastWriteTimeUtc(file.FullPath) != lastWriteTimeUtc)
+            || file.GetLastWriteTimeUtc() != lastWriteTimeUtc)
         {
             throw Conflict(
                 $"Audiobook companion file changed while its move manifest was being created: {fileName}");

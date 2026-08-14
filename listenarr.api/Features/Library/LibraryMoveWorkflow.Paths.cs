@@ -189,6 +189,88 @@ public sealed partial class LibraryMoveWorkflow
             .ThenByDescending(root => root.IsManagedRoot)
             .FirstOrDefault();
 
+    private string? FindConfiguredManagedSourceRoot(
+        string source,
+        PathIdentitySnapshot sourceIdentity,
+        IReadOnlyCollection<RootFolder> rootFolders)
+    {
+        var candidates = new List<string>();
+        foreach (var rootFolder in rootFolders)
+        {
+            var rootPath = TryNormalizeMoveRoot(
+                rootFolder.Path,
+                $"root folder {rootFolder.Id}");
+            if (rootPath == null)
+            {
+                continue;
+            }
+
+            var persistedSemantics = RootFolderPathSemantics.ResolvePersisted(rootFolder);
+            var semanticsCandidates = persistedSemantics.HasValue
+                ? new[] { persistedSemantics.Value.Semantics, sourceIdentity.Semantics }
+                : new[] { sourceIdentity.Semantics };
+            var containsSource = false;
+            foreach (var semantics in semanticsCandidates)
+            {
+                if (semantics.Syntax != sourceIdentity.Syntax)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    if (FileSystemPathIdentity.IsSameOrInside(
+                            source,
+                            rootPath,
+                            semantics))
+                    {
+                        containsSource = true;
+                        break;
+                    }
+                }
+                catch (Exception exception) when (exception is
+                    ArgumentException or InvalidOperationException
+                        or NotSupportedException or PathTooLongException
+                        or System.Security.SecurityException)
+                {
+                    // An unsafe comparison cannot grant source mutation authority.
+                }
+            }
+
+            if (containsSource)
+            {
+                candidates.Add(rootPath);
+            }
+        }
+
+        return candidates
+            .OrderByDescending(path => path.Length)
+            .FirstOrDefault();
+    }
+
+    private static MoveRootBoundary? FindExactManagedMoveRoot(
+        string configuredRoot,
+        IReadOnlyCollection<MoveRootBoundary> allowedRoots) =>
+        allowedRoots
+            .Where(root => root.IsManagedRoot)
+            .FirstOrDefault(root =>
+            {
+                try
+                {
+                    return FileSystemPathIdentity.AreEquivalent(
+                        configuredRoot,
+                        root.Path,
+                        root.Semantics);
+                }
+                catch (Exception exception) when (exception is
+                    ArgumentException or InvalidOperationException
+                        or NotSupportedException or PathTooLongException
+                        or System.Security.SecurityException)
+                {
+                    return false;
+                }
+            });
+
     private static bool SourceStateMatches(
         string currentPath,
         string expectedPath,

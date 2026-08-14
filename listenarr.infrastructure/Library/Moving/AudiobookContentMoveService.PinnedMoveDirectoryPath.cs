@@ -1,3 +1,5 @@
+using Listenarr.Domain.Common;
+
 namespace Listenarr.Infrastructure.Library.Moving;
 
 internal sealed partial class AudiobookContentMoveService
@@ -23,13 +25,23 @@ internal sealed partial class AudiobookContentMoveService
         }
 
         internal static PinnedMoveDirectoryPath OpenExisting(
+            string boundaryPath,
             string root,
+            FileSystemPathSemantics semantics,
+            int boundaryIdentityVersion,
+            string boundaryIdentity,
             IReadOnlyList<string> segments)
         {
             var anchors = new List<PinnedDirectoryCreation.PinnedDirectoryAnchor>();
             try
             {
-                var current = PinnedDirectoryCreation.OpenPinnedDirectoryNoFollow(root);
+                var current = OpenPinnedMoveBoundaryDescendant(
+                    boundaryPath,
+                    root,
+                    semantics,
+                    boundaryIdentityVersion,
+                    boundaryIdentity,
+                    "target boundary");
                 anchors.Add(current);
                 foreach (var segment in segments)
                 {

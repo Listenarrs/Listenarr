@@ -326,7 +326,7 @@ public sealed partial class EfMoveScanHandoffStore(
                 .ToListAsync(cancellationToken);
             var targetManifest = persistedEntries
                 .Where(entry =>
-                    !MoveManifestIdentity.IsTargetBoundaryAuthorization(entry))
+                    !MoveManifestIdentity.IsBoundaryAuthorization(entry))
                 .ToList();
             if (!targetManifest.Any(entry =>
                     entry.EntryType == MoveJobEntryType.File))

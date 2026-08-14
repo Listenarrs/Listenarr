@@ -12,6 +12,7 @@ internal partial class MoveJobProcessor
         string target,
         AudiobookContentMoveService contentMoveService,
         AudiobookContentMoveRequest moveRequest,
+        MarkerlessTargetVerificationLease? targetVerificationLease,
         Action<MovePostCommitContext> registerPostCommit,
         CancellationToken cancellationToken)
     {
@@ -19,6 +20,10 @@ internal partial class MoveJobProcessor
         contentMoveService.OnCompletionHandoff(
             job.Id,
             CompletionHandoffFaultPoint.BeforeHistoryPersist);
+        await contentMoveService.VerifyFinalizedMoveAsync(
+            moveRequest,
+            cancellationToken,
+            targetVerificationLease);
 
         var now = timeProvider.GetUtcNow();
         var completion = await moveScanHandoffStore.CommitMoveCompletionAsync(

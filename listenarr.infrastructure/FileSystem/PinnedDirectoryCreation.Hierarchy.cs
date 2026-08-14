@@ -135,6 +135,60 @@ internal sealed partial class PinnedDirectoryCreation
             return PinnedDirectoryCreation.GetDirectoryObjectIdentity(_handle);
         }
 
+        internal string GetNamespaceChangeToken()
+        {
+            ThrowIfDisposed();
+            return PinnedDirectoryCreation.GetDirectoryNamespaceChangeToken(_handle);
+        }
+
+        internal IReadOnlyList<string> GetDirectoryObjectIdentityCandidates()
+        {
+            ThrowIfDisposed();
+            return OperatingSystem.IsLinux()
+                ? PinnedDirectoryCreation.GetLinuxObjectIdentityCandidates(_handle)
+                : [PinnedDirectoryCreation.GetDirectoryObjectIdentity(_handle)];
+        }
+
+        internal bool MatchesManagedDirectoryIdentity(
+            int? expectedVersion,
+            string? expectedValue)
+        {
+            ThrowIfDisposed();
+            return GetDirectoryObjectIdentityCandidates().Any(nativeIdentity =>
+                ManagedDirectoryIdentity.MatchesNativeIdentity(
+                    expectedVersion,
+                    expectedValue,
+                    nativeIdentity));
+        }
+
+        internal bool MatchesDirectoryObjectIdentity(string expectedIdentity)
+        {
+            ThrowIfDisposed();
+            ArgumentException.ThrowIfNullOrWhiteSpace(expectedIdentity);
+            var candidates = GetDirectoryObjectIdentityCandidates();
+            return candidates.Contains(expectedIdentity, StringComparer.Ordinal)
+                || (OperatingSystem.IsLinux()
+                    && candidates.Any(candidate =>
+                        PinnedDirectoryCreation.ArePersistedObjectIdentitiesDurablyEquivalent(
+                            expectedIdentity,
+                            candidate)));
+        }
+
+        internal bool MatchesManagedDirectoryOwnershipIdentity(
+            int? expectedVersion,
+            string? expectedValue,
+            string ownershipToken)
+        {
+            ThrowIfDisposed();
+            ArgumentException.ThrowIfNullOrWhiteSpace(ownershipToken);
+            return GetDirectoryObjectIdentityCandidates().Any(nativeIdentity =>
+                ManagedDirectoryIdentity.Matches(
+                    expectedVersion,
+                    expectedValue,
+                    ownershipToken,
+                    nativeIdentity));
+        }
+
         internal SafeFileHandle DuplicateHandleForOperation()
         {
             ThrowIfDisposed();

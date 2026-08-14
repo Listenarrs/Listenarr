@@ -8,6 +8,11 @@ internal sealed partial class PinnedDirectoryCreation
 {
     private static LinuxFileIdentity GetLinuxIdentity(SafeFileHandle handle)
     {
+        if (TryGetLinuxProcFdIdentity(handle, out var procIdentity))
+        {
+            return procIdentity;
+        }
+
         if (Statx(
                 handle.DangerousGetHandle().ToInt32(),
                 string.Empty,
@@ -23,6 +28,59 @@ internal sealed partial class PinnedDirectoryCreation
             information.DeviceMinor,
             information.Inode,
             information.MountId);
+    }
+
+    private static bool TryGetLinuxProcFdIdentity(
+        SafeFileHandle handle,
+        out LinuxFileIdentity identity)
+    {
+        identity = default;
+        var descriptor = handle.DangerousGetHandle().ToInt32();
+        var fdInfoPath = FormattableString.Invariant(
+            $"/proc/{Environment.ProcessId}/fdinfo/{descriptor}");
+        try
+        {
+            ulong? mountId = null;
+            ulong? inode = null;
+            foreach (var line in File.ReadLines(fdInfoPath))
+            {
+                if (line.StartsWith("mnt_id:", StringComparison.Ordinal)
+                    && ulong.TryParse(
+                        line.AsSpan("mnt_id:".Length).Trim(),
+                        System.Globalization.NumberStyles.None,
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        out var parsedMountId))
+                {
+                    mountId = parsedMountId;
+                }
+                else if (line.StartsWith("ino:", StringComparison.Ordinal)
+                    && ulong.TryParse(
+                        line.AsSpan("ino:".Length).Trim(),
+                        System.Globalization.NumberStyles.None,
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        out var parsedInode))
+                {
+                    inode = parsedInode;
+                }
+            }
+
+            if (!mountId.HasValue || !inode.HasValue)
+            {
+                return false;
+            }
+
+            // Mount ID + inode are sufficient for operation-local handle/path
+            // equality while the pinned handle remains open. Durable mutation
+            // authority is captured separately and never derives from this tuple.
+            identity = new LinuxFileIdentity(0, 0, inode.Value, mountId.Value);
+            return true;
+        }
+        catch (Exception exception) when (exception is
+            IOException or UnauthorizedAccessException
+                or FormatException or OverflowException)
+        {
+            return false;
+        }
     }
 
     private static string GetMacHandlePath(SafeFileHandle handle)

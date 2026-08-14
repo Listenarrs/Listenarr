@@ -38,7 +38,7 @@ public sealed partial class EfMoveQueuePersistence
                 {
                     MarkIdentityConflict(
                         job,
-                        "This move job predates the durable database execution protocol and cannot resume filesystem mutation safely.");
+                        "This move job does not use the current durable database execution protocol and cannot resume filesystem mutation safely.");
                     continue;
                 }
                 if (job.Entries.Count == 0
@@ -110,6 +110,17 @@ public sealed partial class EfMoveQueuePersistence
                         targetPath,
                         target: true,
                         cancellationToken);
+                    if (!MoveBoundaryAuthorization.TryResolveSourceBoundary(
+                            sourcePath,
+                            sourceIdentity,
+                            job.SourceCleanupBoundary,
+                            job.DeleteEmptySource,
+                            out _,
+                            out var sourceBoundaryReason))
+                    {
+                        throw new InvalidOperationException(
+                            $"Source mutation boundary cannot be reconciled: {sourceBoundaryReason}");
+                    }
 
                     // Persist endpoint rewrites only after both paths and identities have been
                     // validated. A foreign or relative legacy endpoint must remain intact as
@@ -192,12 +203,18 @@ public sealed partial class EfMoveQueuePersistence
                 var canonical = evidenceBearing.Count == 1
                     ? evidenceBearing[0]
                     : candidates[0];
-                var canonicalHasTargetAuthorization =
-                    MoveManifestIdentity.TryGetTargetBoundaryAuthorization(
+                var canonicalHasBoundaryAuthorization =
+                    MoveManifestIdentity.TryGetSourceBoundaryAuthorization(
                         canonical.Job.Entries,
                         out _,
+                        out _,
+                        out _)
+                    && MoveManifestIdentity.TryGetTargetBoundaryAuthorization(
+                        canonical.Job.Entries,
+                        out _,
+                        out _,
                         out _);
-                if (canonicalHasTargetAuthorization)
+                if (canonicalHasBoundaryAuthorization)
                 {
                     canonical.Job.ActiveDeduplicationKey = group.Key;
                     canonical.Job.IdentityKeyVersion = MoveManifestIdentity.Version;
@@ -206,7 +223,7 @@ public sealed partial class EfMoveQueuePersistence
                 {
                     MarkIdentityConflict(
                         canonical.Job,
-                        "The move job has no durable target-boundary physical-generation authorization and cannot be reconciled safely.");
+                        "The move job has no valid durable source- or target-boundary physical-generation authorization and cannot be reconciled safely.");
                 }
 
                 foreach (var duplicate in candidates.Where(item => item.Job.Id != canonical.Job.Id))

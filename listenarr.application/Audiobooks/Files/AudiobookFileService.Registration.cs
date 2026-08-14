@@ -55,6 +55,11 @@ public partial class AudiobookFileService
     {
         ArgumentNullException.ThrowIfNull(audiobook);
         ArgumentNullException.ThrowIfNull(registrationLease);
+        if (!registrationLease.HasDurablePhysicalObjectIdentity)
+        {
+            throw new InvalidOperationException(
+                "Published-generation registration requires durable physical identity evidence.");
+        }
         if (!registrationLease.MatchesCurrentPublication()
             || !registrationLease.PrepareCleanupRecovery(audiobook.Id))
         {
@@ -115,10 +120,10 @@ public partial class AudiobookFileService
                             return false;
                         }
 
-                        if (string.Equals(
-                                existingFile.PhysicalObjectIdentity,
-                                registrationLease.PhysicalObjectIdentity,
-                                StringComparison.Ordinal))
+                        if (!string.IsNullOrWhiteSpace(
+                                existingFile.PhysicalObjectIdentity)
+                            && registrationLease.MatchesPhysicalObjectIdentity(
+                                existingFile.PhysicalObjectIdentity))
                         {
                             var basePathCommit = authoritativeBasePath == null
                                 ? new BasePathRegistrationOutcome(true, null)
@@ -227,10 +232,9 @@ public partial class AudiobookFileService
             ? ownership.ExistingFile
             : null;
         if (existingFile == null
-            || !string.Equals(
-                existingFile.PhysicalObjectIdentity,
-                registrationLease.PhysicalObjectIdentity,
-                StringComparison.Ordinal))
+            || string.IsNullOrWhiteSpace(existingFile.PhysicalObjectIdentity)
+            || !registrationLease.MatchesPhysicalObjectIdentity(
+                existingFile.PhysicalObjectIdentity))
         {
             return;
         }
@@ -242,7 +246,7 @@ public partial class AudiobookFileService
                     existingFile.Id,
                     audiobook.Id,
                     existingFile.Path,
-                    registrationLease.PhysicalObjectIdentity,
+                    existingFile.PhysicalObjectIdentity,
                     basePathMutation),
                 globalToken),
             CancellationToken.None);

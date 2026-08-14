@@ -134,10 +134,8 @@ public partial class FileMover
                 {
                     if (observedTarget == null
                         || !observedTarget.VisiblePathMatches()
-                        || !string.Equals(
-                            observedTarget.GetObjectIdentity(),
-                            journal.SourcePhysicalObjectIdentity,
-                            StringComparison.Ordinal)
+                        || !observedTarget.MatchesObjectIdentity(
+                            journal.SourcePhysicalObjectIdentity)
                         || !await MatchesMarkerlessTargetContentAsync(
                             observedTarget,
                             journal,
@@ -153,7 +151,7 @@ public partial class FileMover
                     journal = await _fileMutationJournalStore.AdvanceAsync(
                         journal.OperationId,
                         FileMutationJournalState.TargetIdentityPersisted,
-                        observedTarget.GetObjectIdentity(),
+                        journal.SourcePhysicalObjectIdentity,
                         audiobookId: null,
                         error: null,
                         cancellationToken);
@@ -208,16 +206,14 @@ public partial class FileMover
                 {
                     pathLock.DestinationParent.FlushDirectoryEntry();
                 }
-                targetIdentity = sourceEntry.GetObjectIdentity();
                 if (!sourceEntry.VisiblePathMatches()
-                    || !string.Equals(
-                        targetIdentity,
-                        journal.SourcePhysicalObjectIdentity,
-                        StringComparison.Ordinal))
+                    || !sourceEntry.MatchesObjectIdentity(
+                        journal.SourcePhysicalObjectIdentity))
                 {
                     throw new IOException(
                         "The markerless native move target could not be verified.");
                 }
+                targetIdentity = journal.SourcePhysicalObjectIdentity;
                 if (AfterMarkerlessMovePublishedBeforeTargetStateForTestAsync != null)
                 {
                     await AfterMarkerlessMovePublishedBeforeTargetStateForTestAsync();

@@ -125,6 +125,12 @@ public sealed partial class RootFolderRelocationService(
                 nameof(command));
         }
 
+        var sourceObjectIdentity =
+            await ResolveRelocationSourceObjectIdentityAsync(
+                root,
+                command,
+                cancellationToken);
+
         var storedSourcePathSemantics = sourcePathSemantics.StoredSourcePathSemantics;
         var metadataSourcePathSemantics = sourcePathSemantics.MetadataSourcePathSemantics;
         var allowContextualAmbiguousMetadataSyntax =
@@ -135,55 +141,13 @@ public sealed partial class RootFolderRelocationService(
             "root",
             targetPath,
             targetResolution.Semantics);
-        var otherRoots = await db.RootFolders
-            .Where(candidate => candidate.Id != rootFolderId)
-            .AsNoTracking()
-            .ToListAsync(cancellationToken);
-        var activeBoundaries = await db.RootFolderRelocations
-            .Where(relocation => relocation.ActiveRootFolderId != null)
-            .AsNoTracking()
-            .Select(relocation => new
-            {
-                relocation.Mode,
-                relocation.SourcePath,
-                relocation.SourceCaseSensitivityMode,
-                relocation.TargetPath,
-                relocation.TargetCaseSensitivityMode
-            })
-            .ToListAsync(cancellationToken);
-        var targetConflict = otherRoots.Any(candidate =>
-            RootBoundaryConflictsWithTarget(candidate, targetPath, targetIdentityKey, targetResolution.Semantics));
-        foreach (var boundary in activeBoundaries)
-        {
-            var sourceSyntaxHint = TryResolveMetadataSourceSyntaxHint(
-                boundary.Mode,
-                boundary.TargetPath);
-            targetConflict = targetConflict
-                || await ActiveBoundaryConflictsWithTargetAsync(
-                    targetPath,
-                    targetResolution.Semantics,
-                    boundary.SourcePath,
-                    boundary.SourceCaseSensitivityMode,
-                    cancellationToken,
-                    sourceSyntaxHint)
-                || await ActiveBoundaryConflictsWithTargetAsync(
-                    targetPath,
-                    targetResolution.Semantics,
-                    boundary.TargetPath,
-                    boundary.TargetCaseSensitivityMode,
-                    cancellationToken);
-            if (targetConflict)
-            {
-                break;
-            }
-        }
-        if (targetConflict)
-        {
-            throw new RootFolderPathChangeRejectedException(
-                "root_folder_target_conflict",
-                "The selected destination overlaps another root folder or an active root-folder path change. Choose a different destination and try again.",
-                "A root folder with that filesystem identity already exists.");
-        }
+        await EnsureNoTargetBoundaryConflictAsync(
+            db,
+            rootFolderId,
+            targetPath,
+            targetIdentityKey,
+            targetResolution.Semantics,
+            cancellationToken);
 
         var audiobookRows = await db.Audiobooks
             .Where(audiobook => audiobook.BasePath != null)
@@ -240,6 +204,14 @@ public sealed partial class RootFolderRelocationService(
                 {
                     throw new InvalidOperationException(
                         "A tracked audiobook move source escaped the relocating root folder.");
+                }
+                if (!FileSystemPathIdentity.AreEquivalent(
+                        manifest.SourceIdentity.BoundaryPath,
+                        root.Path,
+                        sourceOperationSemantics.Value))
+                {
+                    throw new InvalidOperationException(
+                        "A tracked audiobook move source is not authorized by the relocating root folder boundary.");
                 }
 
                 var requestedPath = MapTargetPath(
@@ -394,10 +366,12 @@ public sealed partial class RootFolderRelocationService(
             foreach (var plan in movePlans)
             {
                 var audiobook = plan.Candidate.Audiobook;
-                if (!targetObjectIdentity.IsAvailable)
+                if (sourceObjectIdentity == null
+                    || !sourceObjectIdentity.IsAvailable
+                    || !targetObjectIdentity.IsAvailable)
                 {
                     throw new InvalidOperationException(
-                        "Relocation move jobs require durable target-boundary generation authorization.");
+                        "Relocation move jobs require durable source- and target-boundary generation authorization.");
                 }
 
                 var entries = plan.Manifest.Entries
@@ -412,6 +386,10 @@ public sealed partial class RootFolderRelocationService(
                         CleanupState = MoveJobEntryCleanupState.Pending
                     })
                     .ToList();
+                entries.Add(
+                    MoveManifestIdentity.CreateSourceBoundaryAuthorization(
+                        sourceObjectIdentity.Version!.Value,
+                        sourceObjectIdentity.Value!));
                 entries.Add(
                     MoveManifestIdentity.CreateTargetBoundaryAuthorization(
                         targetObjectIdentity.Version!.Value,

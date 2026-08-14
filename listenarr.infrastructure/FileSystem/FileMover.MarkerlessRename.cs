@@ -49,10 +49,8 @@ public partial class FileMover
             if (initialSource == null
                 || initialDestination != null
                 || !initialSource.VisiblePathMatches()
-                || !string.Equals(
-                    initialSource.GetObjectIdentity(),
-                    expectedSourcePhysicalObjectIdentity,
-                    StringComparison.Ordinal)
+                || !initialSource.MatchesObjectIdentity(
+                    expectedSourcePhysicalObjectIdentity)
                 || !initialSource.IsOnSameVolume(
                     pathLock.DestinationParent))
             {
@@ -131,10 +129,8 @@ public partial class FileMover
         {
             if (journal.State != FileMutationJournalState.Planned
                 || !sourceEntry.VisiblePathMatches()
-                || !string.Equals(
-                    sourceEntry.GetObjectIdentity(),
-                    expectedSourcePhysicalObjectIdentity,
-                    StringComparison.Ordinal)
+                || !sourceEntry.MatchesObjectIdentity(
+                    expectedSourcePhysicalObjectIdentity)
                 || !sourceEntry.IsOnSameVolume(
                     pathLock.DestinationParent))
             {
@@ -158,10 +154,8 @@ public partial class FileMover
             }
             targetPhysicalObjectIdentity = sourceEntry.GetObjectIdentity();
             if (!sourceEntry.VisiblePathMatches()
-                || !string.Equals(
-                    targetPhysicalObjectIdentity,
-                    expectedSourcePhysicalObjectIdentity,
-                    StringComparison.Ordinal))
+                || !sourceEntry.MatchesObjectIdentity(
+                    expectedSourcePhysicalObjectIdentity))
             {
                 throw new IOException(
                     "The markerless rename target could not be verified after publication.");
@@ -183,10 +177,8 @@ public partial class FileMover
                 return false;
             }
             targetPhysicalObjectIdentity = destinationEntry.GetObjectIdentity();
-            if (!string.Equals(
-                    targetPhysicalObjectIdentity,
-                    expectedSourcePhysicalObjectIdentity,
-                    StringComparison.Ordinal))
+            if (!destinationEntry.MatchesObjectIdentity(
+                    expectedSourcePhysicalObjectIdentity))
             {
                 await MarkMarkerlessRenameNeedsAttentionAsync(
                     journal,
@@ -196,12 +188,11 @@ public partial class FileMover
             }
         }
 
+        var publishedTarget = sourceEntry ?? destinationEntry!;
         if (!string.IsNullOrWhiteSpace(
                 journal.TargetPhysicalObjectIdentity)
-            && !string.Equals(
-                journal.TargetPhysicalObjectIdentity,
-                targetPhysicalObjectIdentity,
-                StringComparison.Ordinal))
+            && !publishedTarget.MatchesObjectIdentity(
+                journal.TargetPhysicalObjectIdentity))
         {
             await MarkMarkerlessRenameNeedsAttentionAsync(
                 journal,
@@ -210,12 +201,14 @@ public partial class FileMover
             return false;
         }
 
+        var durableTargetPhysicalObjectIdentity =
+            journal.TargetPhysicalObjectIdentity ?? expectedSourcePhysicalObjectIdentity;
         if (journal.State < FileMutationJournalState.TargetIdentityPersisted)
         {
             journal = await _fileMutationJournalStore.AdvanceAsync(
                 operationId,
                 FileMutationJournalState.TargetIdentityPersisted,
-                targetPhysicalObjectIdentity,
+                durableTargetPhysicalObjectIdentity,
                 audiobookId: null,
                 error: null,
                 cancellationToken);
@@ -229,7 +222,7 @@ public partial class FileMover
             journal = await _fileMutationJournalStore.AdvanceAsync(
                 operationId,
                 FileMutationJournalState.TargetVerified,
-                targetPhysicalObjectIdentity,
+                durableTargetPhysicalObjectIdentity,
                 audiobookId: null,
                 error: null,
                 cancellationToken);
@@ -239,7 +232,7 @@ public partial class FileMover
             journal = await _fileMutationJournalStore.AdvanceAsync(
                 operationId,
                 FileMutationJournalState.SourceDeletionAuthorized,
-                targetPhysicalObjectIdentity,
+                durableTargetPhysicalObjectIdentity,
                 audiobookId: null,
                 error: null,
                 cancellationToken);
@@ -249,7 +242,7 @@ public partial class FileMover
             journal = await _fileMutationJournalStore.AdvanceAsync(
                 operationId,
                 FileMutationJournalState.SourceDeleted,
-                targetPhysicalObjectIdentity,
+                durableTargetPhysicalObjectIdentity,
                 audiobookId: null,
                 error: null,
                 cancellationToken);
@@ -259,7 +252,7 @@ public partial class FileMover
             _ = await _fileMutationJournalStore.AdvanceAsync(
                 operationId,
                 FileMutationJournalState.Completed,
-                targetPhysicalObjectIdentity,
+                durableTargetPhysicalObjectIdentity,
                 audiobookId: null,
                 error: null,
                 cancellationToken);

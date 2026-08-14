@@ -25,6 +25,7 @@ internal sealed class LibraryFilesystemStartupReconciliationService(
         await Task.Yield();
 
         string? phase = null;
+        AudiobookFileIdentityReconciliationResult? fileIdentityResult = null;
         try
         {
             phase = "RootFolderObjectIdentities";
@@ -60,14 +61,18 @@ internal sealed class LibraryFilesystemStartupReconciliationService(
             phase = "AudiobookFileIdentities";
             readiness.MarkRunning(phase);
             await RunScopedAsync<IAudiobookFileIdentityReconciler>(
-                static async (service, token) =>
+                async (service, token) =>
                 {
-                    _ = await service.ReconcileAsync(token);
+                    fileIdentityResult = await service.ReconcileAsync(token);
                 },
                 stoppingToken);
 
             readiness.MarkReady();
-            logger.LogInformation("Library filesystem startup reconciliation completed; filesystem mutations are now enabled");
+            logger.LogInformation(
+                "Library filesystem startup reconciliation completed. Filesystem operations remain subject to per-root and per-object authorization. Audiobook file paths: {Valid} valid, {Conflicted} conflicted, {Unavailable} unavailable",
+                fileIdentityResult?.Valid ?? 0,
+                fileIdentityResult?.Conflicted ?? 0,
+                fileIdentityResult?.Unavailable ?? 0);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {

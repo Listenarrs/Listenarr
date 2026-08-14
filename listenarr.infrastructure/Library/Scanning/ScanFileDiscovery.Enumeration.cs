@@ -5,13 +5,16 @@ namespace Listenarr.Infrastructure.Library.Scanning;
 
 internal static partial class ScanFileDiscovery
 {
+    private const string PinnedPathOnlyIdentity = "scan:pinned-path-only";
+
     internal static EnumerationResult CollectCandidates(
         IFileSystem fileSystem,
         string scanRoot,
         Guid jobId,
         ILogger logger,
         FileSystemPathSemantics semantics,
-        PinnedDirectoryCreation.PinnedDirectoryAnchor? pinnedScanRoot)
+        PinnedDirectoryCreation.PinnedDirectoryAnchor? pinnedScanRoot,
+        bool requireDurableGenerationProof = true)
     {
         var candidates = new HashSet<string>(semantics.Comparer);
         var enumeratedDirectories = new HashSet<string>(semantics.Comparer);
@@ -19,13 +22,14 @@ internal static partial class ScanFileDiscovery
             semantics.Comparer);
         var fileObjectIdentities = new Dictionary<string, string>(
             semantics.Comparer);
+        var fileLengths = new Dictionary<string, long>(semantics.Comparer);
         var issues = new List<ScanDiscoveryIssue>();
         var directories = new Stack<DirectoryEnumerationAnchor>();
         var root = pinnedScanRoot?.Duplicate()
             ?? PinnedDirectoryCreation.OpenPinnedBoundary(scanRoot);
         directories.Push(new DirectoryEnumerationAnchor(
             root,
-            root.GetDirectoryObjectIdentity()));
+            CaptureDirectoryIdentity(root, requireDurableGenerationProof)));
 
         try
         {
@@ -34,6 +38,8 @@ internal static partial class ScanFileDiscovery
                 var pending = directories.Pop();
                 using var directory = pending.Anchor;
                 var localCandidates = new Dictionary<string, string>(
+                    semantics.Comparer);
+                var localFileLengths = new Dictionary<string, long>(
                     semantics.Comparer);
                 var localChildren = new List<DirectoryEnumerationAnchor>();
                 try
@@ -47,6 +53,9 @@ internal static partial class ScanFileDiscovery
                             directory.FullPath);
                         continue;
                     }
+                    var namespaceChangeToken = requireDurableGenerationProof
+                        ? directory.GetNamespaceChangeToken()
+                        : null;
 
                     foreach (var visibleFile in fileSystem
                         .EnumerateFiles(directory.FullPath)
@@ -63,6 +72,11 @@ internal static partial class ScanFileDiscovery
                                 continue;
                             }
 
+                            if (!FileUtils.IsAudioFile(visibleFile))
+                            {
+                                continue;
+                            }
+
                             var fileName = Path.GetFileName(visibleFile);
                             using var pinnedFile = directory.OpenExistingFile(
                                 fileName,
@@ -76,16 +90,35 @@ internal static partial class ScanFileDiscovery
                                     visibleFile);
                                 continue;
                             }
-
-                            if (FileUtils.IsAudioFile(visibleFile))
+                            if (!pinnedFile.IsRegularFile())
                             {
-                                var canonicalFile =
-                                    FileSystemPathIdentity.Canonicalize(
-                                        pinnedFile.FullPath,
-                                        semantics.Syntax);
-                                localCandidates[canonicalFile] =
-                                    pinnedFile.GetObjectIdentity();
+                                issues.Add(new ScanDiscoveryIssue(
+                                    ScanDiscoveryIssueKind.LinkSkipped,
+                                    visibleFile,
+                                    "Non-regular files are not scanned."));
+                                continue;
                             }
+
+                            var canonicalFile =
+                                FileSystemPathIdentity.Canonicalize(
+                                    pinnedFile.FullPath,
+                                    semantics.Syntax);
+                            var length = pinnedFile.GetLength();
+                            if (!pinnedFile.VisiblePathMatches())
+                            {
+                                RecordDirectoryGenerationChange(
+                                    issues,
+                                    logger,
+                                    jobId,
+                                    visibleFile);
+                                continue;
+                            }
+
+                            localCandidates[canonicalFile] =
+                                requireDurableGenerationProof
+                                    ? pinnedFile.GetObjectIdentity()
+                                    : PinnedPathOnlyIdentity;
+                            localFileLengths[canonicalFile] = length;
                         }
                         catch (Exception exception) when (
                             IsFilesystemException(exception)
@@ -124,7 +157,9 @@ internal static partial class ScanFileDiscovery
                             var childAnchor = directory.OpenExistingChild(childName);
                             localChildren.Add(new DirectoryEnumerationAnchor(
                                 childAnchor,
-                                childAnchor.GetDirectoryObjectIdentity()));
+                                CaptureDirectoryIdentity(
+                                    childAnchor,
+                                    requireDurableGenerationProof)));
                         }
                         catch (Exception exception) when (
                             IsFilesystemException(exception)
@@ -139,7 +174,12 @@ internal static partial class ScanFileDiscovery
                         }
                     }
 
-                    if (!DirectoryIdentityMatches(directory, pending.ObjectIdentity))
+                    if (!DirectoryIdentityMatches(directory, pending.ObjectIdentity)
+                        || (namespaceChangeToken != null
+                            && !string.Equals(
+                                directory.GetNamespaceChangeToken(),
+                                namespaceChangeToken,
+                                StringComparison.Ordinal)))
                     {
                         foreach (var child in localChildren)
                         {
@@ -158,6 +198,7 @@ internal static partial class ScanFileDiscovery
                     {
                         candidates.Add(candidate.Key);
                         fileObjectIdentities[candidate.Key] = candidate.Value;
+                        fileLengths[candidate.Key] = localFileLengths[candidate.Key];
                     }
 
                     var canonicalDirectory =
@@ -203,17 +244,26 @@ internal static partial class ScanFileDiscovery
             enumeratedDirectories.OrderBy(path => path, semantics.Comparer).ToList(),
             directoryObjectIdentities,
             fileObjectIdentities,
+            fileLengths,
             issues);
     }
+
+    private static string CaptureDirectoryIdentity(
+        PinnedDirectoryCreation.PinnedDirectoryAnchor directory,
+        bool requireDurableGenerationProof) =>
+        requireDurableGenerationProof
+            ? directory.GetDirectoryObjectIdentity()
+            : PinnedPathOnlyIdentity;
 
     private static bool DirectoryIdentityMatches(
         PinnedDirectoryCreation.PinnedDirectoryAnchor directory,
         string expectedIdentity) =>
         directory.VisiblePathMatches()
-        && string.Equals(
-            directory.GetDirectoryObjectIdentity(),
-            expectedIdentity,
-            StringComparison.Ordinal);
+        && (string.Equals(
+                expectedIdentity,
+                PinnedPathOnlyIdentity,
+                StringComparison.Ordinal)
+            || directory.MatchesDirectoryObjectIdentity(expectedIdentity));
 
     private static bool IsFilesystemException(Exception exception) =>
         exception is IOException
@@ -267,5 +317,6 @@ internal static partial class ScanFileDiscovery
         IReadOnlyList<string> EnumeratedDirectories,
         IReadOnlyDictionary<string, string> DirectoryObjectIdentities,
         IReadOnlyDictionary<string, string> FileObjectIdentities,
+        IReadOnlyDictionary<string, long> FileLengths,
         IReadOnlyList<ScanDiscoveryIssue> Issues);
 }

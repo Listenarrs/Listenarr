@@ -26,6 +26,8 @@ namespace Listenarr.Application.Audiobooks.Contracts
         IReadOnlyList<MoveSourceManifestEntry> SourceEntries,
         string TargetPath,
         PathIdentitySnapshot TargetIdentity,
+        int SourceBoundaryDirectoryObjectIdentityVersion,
+        string SourceBoundaryDirectoryObjectIdentity,
         int TargetBoundaryDirectoryObjectIdentityVersion,
         string TargetBoundaryDirectoryObjectIdentity,
         bool DeleteEmptySource = true,

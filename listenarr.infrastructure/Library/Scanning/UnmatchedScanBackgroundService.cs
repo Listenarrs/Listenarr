@@ -188,6 +188,8 @@ namespace Listenarr.Infrastructure.Library.Scanning
 
             var canonicalRootFolderPath = authorization.Path;
             var semantics = authorization.Identity.Value.Semantics;
+            var hasDurableGenerationProof =
+                authorization.PhysicalIdentity.Value.HasDurableGenerationProof;
 
             // Load all tracked file paths (normalized) from DB.
             // Check BOTH AudiobookFiles (multi-file imports) AND Audiobook.FilePath (single-file imports)
@@ -210,10 +212,9 @@ namespace Listenarr.Infrastructure.Library.Scanning
             using var pinnedRoot = PinnedDirectoryCreation.OpenPinnedBoundary(
                 canonicalRootFolderPath);
             if (!pinnedRoot.VisiblePathMatches()
-                || !string.Equals(
-                    pinnedRoot.GetDirectoryObjectIdentity(),
-                    authorization.PhysicalIdentity.Value.ScanRootObjectIdentity,
-                    StringComparison.Ordinal))
+                || (authorization.PhysicalIdentity.Value.HasDurableGenerationProof
+                    && !pinnedRoot.MatchesDirectoryObjectIdentity(
+                        authorization.PhysicalIdentity.Value.ScanRootObjectIdentity!)))
             {
                 throw new InvalidOperationException(
                     "The unmatched scan root changed after authorization.");
@@ -224,7 +225,8 @@ namespace Listenarr.Infrastructure.Library.Scanning
                 jobId: Guid.Empty,
                 _logger,
                 semantics,
-                pinnedRoot);
+                pinnedRoot,
+                authorization.PhysicalIdentity.Value.HasDurableGenerationProof);
             if (enumeration.Issues.Any(issue => issue.Kind is
                     ScanDiscoveryIssueKind.DirectoryGenerationChanged
                     or ScanDiscoveryIssueKind.EnumerationFailure))
@@ -253,7 +255,10 @@ namespace Listenarr.Infrastructure.Library.Scanning
                 .ToList();
 
             // Resolve ffprobe path once for the whole scan (null = not available)
-            var ffprobePath = await _ffmpegService.GetFfprobePathAsync();
+            var ffprobePath = hasDurableGenerationProof
+                && (OperatingSystem.IsWindows() || OperatingSystem.IsLinux())
+                    ? await _ffmpegService.GetFfprobePathAsync()
+                    : null;
 
             var results = new System.Collections.Concurrent.ConcurrentBag<UnmatchedFileResult>();
 
@@ -273,6 +278,7 @@ namespace Listenarr.Infrastructure.Library.Scanning
                             folderFiles,
                             ffprobePath,
                             semantics,
+                            enumeration.FileObjectIdentities,
                             token);
                         groupedFiles = BuildGroupedFilesForFolder(
                             folderFiles,
@@ -288,10 +294,19 @@ namespace Listenarr.Infrastructure.Library.Scanning
                             semantics.Comparer);
                         var orderedFiles = plans.Select(p => p.FullPath).ToList();
                         var representative = orderedFiles.First();
-                        var parsed = PathMetadataParser.Parse(
+                        var parsed = PathMetadataParser.ParsePathOnly(
                             representative,
                             rootFolderPath,
                             semantics);
+                        if (hasDurableGenerationProof)
+                        {
+                            await ApplyPinnedFolderMetadataAsync(
+                                parsed,
+                                parsed.BookFolderPath ?? string.Empty,
+                                enumeration,
+                                semantics,
+                                token);
+                        }
 
                         PathParsedMetadata? tags = null;
                         if (embeddedTagsByFile != null && embeddedTagsByFile.TryGetValue(representative, out var cachedTags))
@@ -300,7 +315,29 @@ namespace Listenarr.Infrastructure.Library.Scanning
                         }
                         else if (!string.IsNullOrEmpty(ffprobePath))
                         {
-                            tags = await PathMetadataParser.ReadEmbeddedTagsAsync(representative, ffprobePath, token);
+                            var canonicalRepresentative = FileSystemPathIdentity.Canonicalize(
+                                representative,
+                                semantics.Syntax);
+                            if (!enumeration.FileObjectIdentities.TryGetValue(
+                                    canonicalRepresentative,
+                                    out var expectedPhysicalObjectIdentity))
+                            {
+                                throw new InvalidOperationException(
+                                    "The unmatched metadata candidate lacks its enumerated physical generation.");
+                            }
+
+                            using var lease = PinnedAudiobookFileRegistrationLease.Open(
+                                representative,
+                                expectedPhysicalObjectIdentity);
+                            tags = await PathMetadataParser.ReadEmbeddedTagsAsync(
+                                lease.MetadataPath,
+                                ffprobePath,
+                                token);
+                            if (!lease.MatchesCurrentPublication())
+                            {
+                                throw new InvalidOperationException(
+                                    "The unmatched metadata candidate changed during embedded-tag extraction.");
+                            }
                         }
 
                         if (tags != null)
@@ -312,10 +349,10 @@ namespace Listenarr.Infrastructure.Library.Scanning
                             ? bookFolder[(rootFolderPath.Length)..].TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
                             : bookFolder;
 
-                        var totalSize = files.Sum(f =>
-                        {
-                            try { return new FileInfo(f).Length; } catch (Exception ex) when (ex is not OutOfMemoryException && ex is not StackOverflowException) { return 0L; }
-                        });
+                        var totalSize = files.Sum(file =>
+                            enumeration.FileLengths.TryGetValue(file, out var length)
+                                ? length
+                                : 0L);
 
                         results.Add(new UnmatchedFileResult
                         {

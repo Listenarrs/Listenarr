@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Security.Cryptography;
 using Listenarr.Tests.Common;
 
@@ -8,6 +9,35 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving;
 [Trait("Category", "Infrastructure")]
 public sealed partial class PinnedDirectoryCreationTests : BaseTests
 {
+    [LinuxFact]
+    public async Task OpenExistingFile_LinuxNamedPipe_DoesNotBlockInspection()
+    {
+        var parent = FileService.GetTempDirectory("pinned-file-named-pipe");
+        var pipePath = Path.Join(parent, "unexpected.m4b");
+        var startInfo = new ProcessStartInfo("mkfifo")
+        {
+            UseShellExecute = false,
+            RedirectStandardError = true
+        };
+        startInfo.ArgumentList.Add(pipePath);
+        using (var process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Could not start mkfifo."))
+        {
+            await process.WaitForExitAsync();
+            Assert.Equal(0, process.ExitCode);
+        }
+
+        using var anchor = PinnedDirectoryCreation.OpenPinnedDirectoryNoFollow(parent);
+        var openTask = Task.Run(() =>
+            anchor.OpenExistingFile(Path.GetFileName(pipePath), requireDeleteAccess: false));
+        var completed = await Task.WhenAny(openTask, Task.Delay(TimeSpan.FromSeconds(2)));
+
+        Assert.Same(openTask, completed);
+        using var entry = await openTask;
+        Assert.True(entry.VisiblePathMatches());
+        Assert.False(entry.IsRegularFile());
+    }
+
     [WindowsFact]
     public void DeletePinnedEmptyDirectoryImmediately_NestedLiveAnchors_DeletesChildBeforeParent()
     {

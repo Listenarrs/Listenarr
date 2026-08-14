@@ -7,6 +7,38 @@ namespace Listenarr.Tests.Features.Infrastructure.FileSystem;
 public sealed class PinnedAudiobookFileRegistrationLeaseTests : BaseTests
 {
     [LinuxFact]
+    public async Task CreatePinnedPathOnly_PublicPathReplaced_KeepsOriginalMetadataHandleWithoutDurableAuthority()
+    {
+        var parentPath = FileService.GetTempDirectory(
+            "registration-lease-pinned-path-only");
+        var publicPath = await FileService.GetFileAsync(
+            parentPath,
+            "book.m4b",
+            "original generation");
+        var displacedPath = Path.Join(parentPath, "book-original.m4b");
+        using var parent = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
+            parentPath,
+            createMissing: false);
+        var file = parent.OpenExistingFileForStableRead(Path.GetFileName(publicPath));
+        using var lease = PinnedAudiobookFileRegistrationLease.CreatePinnedPathOnly(
+            file,
+            publicPath);
+
+        File.Move(publicPath, displacedPath);
+        await File.WriteAllTextAsync(publicPath, "replacement generation");
+
+        Assert.False(lease.HasDurablePhysicalObjectIdentity);
+        Assert.False(lease.MatchesCurrentPublication());
+        Assert.False(lease.MatchesPhysicalObjectIdentity("linux-generation:00000000:00000000:0000000000000000:gen:00000000"));
+        Assert.Equal(
+            "original generation",
+            await File.ReadAllTextAsync(lease.MetadataPath));
+        Assert.Equal(
+            "replacement generation",
+            await File.ReadAllTextAsync(publicPath));
+    }
+
+    [LinuxFact]
     public async Task OpenMetadataWriteStream_PublicPathReplaced_DoesNotOpenReplacementGeneration()
     {
         var parent = FileService.GetTempDirectory(

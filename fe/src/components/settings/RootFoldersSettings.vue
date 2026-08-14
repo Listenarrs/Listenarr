@@ -53,6 +53,9 @@
                   <div class="folder-badges">
                     <Pill variant="success" v-if="folder.isDefault">Default</Pill>
                     <Pill v-if="folder.storageState === 'Healthy'" variant="success">Healthy</Pill>
+                    <Pill v-else-if="folder.storageState === 'Limited'" variant="warning">
+                      Limited
+                    </Pill>
                     <Pill v-else-if="folder.storageState === 'Missing'" variant="warning"
                       >Missing</Pill
                     >
@@ -86,7 +89,7 @@
                   data-cy="scan-unmatched"
                   :disabled="
                     filesystemReadinessStore.filesystemReady === false ||
-                    folder.canMutateFilesystem === false ||
+                    folder.canScanFilesystem === false ||
                     !!folder.activeRelocation
                   "
                 >
@@ -141,6 +144,13 @@
             >
               {{ folder.storageMessage }}
             </p>
+            <details
+              v-if="folder.storageState !== 'Healthy' && folder.storageDetail"
+              class="storage-detail"
+            >
+              <summary>Technical storage details</summary>
+              <code>{{ folder.storageDetail }}</code>
+            </details>
             <section
               v-if="folder.activeRelocation"
               class="relocation-state"
@@ -1059,6 +1069,23 @@ defineExpose({
   color: var(--text-secondary);
   font-size: 0.85rem;
   line-height: 1.4;
+}
+
+.storage-detail {
+  margin: -1rem 1.5rem 1.5rem;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+.storage-detail summary {
+  cursor: pointer;
+}
+
+.storage-detail code {
+  display: block;
+  margin-top: 0.5rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .relocation-state {

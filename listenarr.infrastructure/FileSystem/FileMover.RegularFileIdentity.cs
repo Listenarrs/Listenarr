@@ -20,17 +20,14 @@ public partial class FileMover
         identity = default;
         try
         {
-            if (!File.Exists(path) || Directory.Exists(path))
-            {
-                return false;
-            }
-
-            using var handle = File.OpenHandle(
-                path,
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.ReadWrite | FileShare.Delete,
-                FileOptions.None);
+            using var handle = OperatingSystem.IsWindows()
+                ? File.OpenHandle(
+                    path,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.ReadWrite | FileShare.Delete,
+                    FileOptions.None)
+                : OpenRegularFileIdentityHandleUnix(path);
             return TryGetRegularFileIdentity(handle, out identity);
         }
         catch (Exception exception) when (exception is
@@ -47,10 +44,7 @@ public partial class FileMover
     {
         if (!OperatingSystem.IsWindows())
         {
-            return string.Equals(
-                entry.GetObjectIdentity(),
-                persistedPhysicalObjectIdentity,
-                StringComparison.Ordinal);
+            return entry.MatchesObjectIdentity(persistedPhysicalObjectIdentity);
         }
 
         var parts = persistedPhysicalObjectIdentity.Split(':');
@@ -88,6 +82,11 @@ public partial class FileMover
         out RegularFileIdentity identity)
     {
         identity = default;
+        if (!PinnedDirectoryCreation.HandleIsRegularFile(handle))
+        {
+            return false;
+        }
+
         if (OperatingSystem.IsWindows())
         {
             return TryGetWindowsRegularFileIdentity(handle, out identity);
@@ -169,6 +168,22 @@ public partial class FileMover
         }
     }
 
+    private static SafeFileHandle OpenRegularFileIdentityHandleUnix(string path)
+    {
+        var flags = OperatingSystem.IsMacOS()
+            ? 0x4 | 0x100 | 0x1000000
+            : 0x800 | 0x20000 | 0x80000;
+        var descriptor = OpenRegularFileIdentityUnix(path, flags);
+        if (descriptor >= 0)
+        {
+            return new SafeFileHandle(new IntPtr(descriptor), ownsHandle: true);
+        }
+
+        throw new Win32Exception(
+            Marshal.GetLastWin32Error(),
+            $"Could not open regular-file identity candidate '{path}'.");
+    }
+
     private enum RegularFileInformationClass
     {
         FileIdInfo = 18
@@ -195,6 +210,9 @@ public partial class FileMover
         RegularFileInformationClass fileInformationClass,
         out RegularFileIdInformation fileInformation,
         uint bufferSize);
+
+    [DllImport("libc", EntryPoint = "open", SetLastError = true)]
+    private static extern int OpenRegularFileIdentityUnix(string path, int flags);
 
     [DllImport("libc", EntryPoint = "fstat", SetLastError = true)]
     private static extern int FStatRegularFile(int fileDescriptor, IntPtr buffer);

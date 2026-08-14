@@ -222,28 +222,7 @@ internal sealed partial class PinnedDirectoryCreation
 
         if (OperatingSystem.IsLinux())
         {
-            const uint requiredMask = 0x00000100 | 0x00000800;
-            if (Statx(
-                    handle.DangerousGetHandle().ToInt32(),
-                    string.Empty,
-                    0x1000,
-                    requiredMask,
-                    out var information) != 0)
-            {
-                throw new Win32Exception(Marshal.GetLastWin32Error());
-            }
-            if ((information.Mask & requiredMask) != requiredMask)
-            {
-                throw new PlatformNotSupportedException(
-                    "The filesystem does not expose complete directory generation identity.");
-            }
-
-            var baseIdentity = FormattableString.Invariant(
-                $"linux:{information.DeviceMajor:x8}:{information.DeviceMinor:x8}:{information.Inode:x16}:{information.BirthTime.Seconds:x16}:{information.BirthTime.Nanoseconds:x8}");
-            var generationIdentity = TryGetLinuxGenerationIdentity(handle);
-            return string.IsNullOrWhiteSpace(generationIdentity)
-                ? baseIdentity
-                : $"{baseIdentity}:{generationIdentity}";
+            return GetLinuxObjectIdentityCandidates(handle)[0];
         }
 
         if (OperatingSystem.IsMacOS())
@@ -261,6 +240,122 @@ internal sealed partial class PinnedDirectoryCreation
 
         throw new PlatformNotSupportedException(
             "Directory object identity is supported only on Windows, Linux, and macOS.");
+    }
+
+    private static string GetDirectoryNamespaceChangeToken(SafeFileHandle handle)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            if (!GetFileBasicInformationByHandleEx(
+                    handle,
+                    FileInformationClass.FileBasicInfo,
+                    out var information,
+                    (uint)Marshal.SizeOf<FileBasicInformation>()))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+
+            return FormattableString.Invariant($"windows-change:{information.ChangeTime:x16}");
+        }
+
+        if (OperatingSystem.IsLinux())
+        {
+            const uint statxChangeTime = 0x00000080;
+            if (Statx(
+                    handle.DangerousGetHandle().ToInt32(),
+                    string.Empty,
+                    0x1000,
+                    statxChangeTime,
+                    out var information) != 0)
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+            if ((information.Mask & statxChangeTime) == 0)
+            {
+                throw new PlatformNotSupportedException(
+                    "The filesystem does not expose a pinned directory change time.");
+            }
+
+            return FormattableString.Invariant(
+                $"linux-change:{information.ChangeTime.Seconds:x16}:{information.ChangeTime.Nanoseconds:x8}");
+        }
+
+        if (OperatingSystem.IsMacOS())
+        {
+            if (FStatMac(
+                    handle.DangerousGetHandle().ToInt32(),
+                    out var information) != 0)
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+
+            return FormattableString.Invariant(
+                $"macos-change:{information.ChangeTime.Seconds:x16}:{information.ChangeTime.Nanoseconds:x16}");
+        }
+
+        throw new PlatformNotSupportedException(
+            "Pinned directory change-time inspection is supported only on Windows, Linux, and macOS.");
+    }
+
+    internal static bool HandleIsRegularFile(SafeFileHandle handle)
+    {
+        const ushort unixFileTypeMask = 0xf000;
+        const ushort unixRegularFileType = 0x8000;
+
+        if (OperatingSystem.IsWindows())
+        {
+            if (!GetFileStandardInformationByHandleEx(
+                    handle,
+                    FileInformationClass.FileStandardInfo,
+                    out var information,
+                    (uint)Marshal.SizeOf<FileStandardInformation>()))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+
+            return information.Directory == 0;
+        }
+
+        if (OperatingSystem.IsLinux())
+        {
+            try
+            {
+                var attributes = File.GetAttributes(handle);
+                if ((attributes & (FileAttributes.Directory
+                    | FileAttributes.Device
+                    | FileAttributes.ReparsePoint)) != 0)
+                {
+                    return false;
+                }
+
+                // Regular files expose a stable length through the open handle.
+                // FIFOs/sockets and other stream-like special files do not.
+                _ = RandomAccess.GetLength(handle);
+                return true;
+            }
+            catch (Exception exception) when (exception is not (
+                OutOfMemoryException or StackOverflowException))
+            {
+                // The handle is already open. If it cannot prove ordinary regular
+                // file metadata, never pass it to metadata readers or ffprobe.
+                return false;
+            }
+        }
+
+        if (OperatingSystem.IsMacOS())
+        {
+            if (FStatMac(
+                    handle.DangerousGetHandle().ToInt32(),
+                    out var information) != 0)
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+
+            return (information.Mode & unixFileTypeMask) == unixRegularFileType;
+        }
+
+        throw new PlatformNotSupportedException(
+            "Pinned file type inspection is supported only on Windows, Linux, and macOS.");
     }
 
     private static WindowsFileIdentity GetWindowsIdentity(SafeFileHandle handle)

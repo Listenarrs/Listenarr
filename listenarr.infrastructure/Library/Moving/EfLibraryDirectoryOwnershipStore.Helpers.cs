@@ -11,11 +11,10 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
     {
         using var directory = creation.OpenCreatedDirectoryAnchor();
         using var parent = creation.OpenParentDirectoryAnchor();
-        if (!ManagedDirectoryIdentity.Matches(
+        if (!directory.MatchesManagedDirectoryOwnershipIdentity(
                 ownership.DirectoryObjectIdentityVersion,
                 ownership.DirectoryObjectIdentity,
-                ownership.OwnershipToken,
-                directory.GetDirectoryObjectIdentity())
+                ownership.OwnershipToken)
             || !directory.VisiblePathMatches()
             || !parent.VisiblePathMatches())
         {
@@ -108,15 +107,16 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
     private static void EnsureAuthorizedPhysicalIdentity(
         LibraryDirectoryOwnership ownership,
         int? managedRootFolderId,
-        string directoryObjectIdentity)
+        IReadOnlyList<string> directoryObjectIdentities)
     {
         if (!managedRootFolderId.HasValue
             || ownership.ManagedRootFolderId != managedRootFolderId
-            || !ManagedDirectoryIdentity.Matches(
-                ownership.DirectoryObjectIdentityVersion,
-                ownership.DirectoryObjectIdentity,
-                ownership.OwnershipToken,
-                directoryObjectIdentity)
+            || !directoryObjectIdentities.Any(directoryObjectIdentity =>
+                ManagedDirectoryIdentity.Matches(
+                    ownership.DirectoryObjectIdentityVersion,
+                    ownership.DirectoryObjectIdentity,
+                    ownership.OwnershipToken,
+                    directoryObjectIdentity))
             || (ownership.State !=
                     LibraryDirectoryOwnershipState.Unavailable
                 && !string.IsNullOrWhiteSpace(

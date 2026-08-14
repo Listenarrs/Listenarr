@@ -52,10 +52,9 @@ public partial class FileMover
                 journal.OperationId);
             return false;
         }
-        if (!string.Equals(
-                journal.TargetPhysicalObjectIdentity,
-                registrationLease.PhysicalObjectIdentity,
-                StringComparison.Ordinal)
+        if (string.IsNullOrWhiteSpace(journal.TargetPhysicalObjectIdentity)
+            || !registrationLease.MatchesPhysicalObjectIdentity(
+                journal.TargetPhysicalObjectIdentity)
             || !string.Equals(
                 journal.SourcePhysicalObjectIdentity,
                 registrationLease.SourcePhysicalObjectIdentity,

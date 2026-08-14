@@ -16,12 +16,16 @@ internal sealed partial class AudiobookScanService
         ICollection<AudiobookScanDiagnostic> diagnostics,
         CancellationToken cancellationToken)
     {
-        if (!command.AllowReconciliation || !command.IsAuthoritativeScope)
+        if (!command.AllowReconciliation
+            || !command.IsAuthoritativeScope
+            || !command.ScanPhysicalIdentity.HasDurableGenerationProof)
         {
             diagnostics.Add(new AudiobookScanDiagnostic(
                 "ReconciliationNotAuthorized",
                 command.ScanRoot,
-                "This scan scope is not authorized to remove tracked file rows."));
+                command.ScanPhysicalIdentity.HasDurableGenerationProof
+                    ? "This scan scope is not authorized to remove tracked file rows."
+                    : "Tracked-file removal was skipped because this storage does not expose durable generation identity."));
             return [];
         }
 
@@ -93,10 +97,11 @@ internal sealed partial class AudiobookScanService
                     out var discoveredPhysicalIdentity);
                 var physicalGenerationChanged = hasDiscoveredIdentity
                     && !string.IsNullOrWhiteSpace(file.PhysicalObjectIdentity)
-                    && !string.Equals(
-                        file.PhysicalObjectIdentity,
-                        discoveredPhysicalIdentity,
-                        StringComparison.Ordinal);
+                    && !PinnedFileIdentityMatches(
+                        command,
+                        pinnedAuthority,
+                        resolvedPath,
+                        file.PhysicalObjectIdentity);
                 var physicalIdentityMissing = hasDiscoveredIdentity
                     && string.IsNullOrWhiteSpace(file.PhysicalObjectIdentity);
                 if ((physicalGenerationChanged || physicalIdentityMissing)
@@ -304,6 +309,7 @@ internal sealed partial class AudiobookScanService
 
         if (!command.AllowReconciliation
             || !command.IsAuthoritativeScope
+            || !command.ScanPhysicalIdentity.HasDurableGenerationProof
             || !discovery.CanReconcile
             || !FileSystemPathIdentity.IsSameOrInside(
                 resolvedPath,

@@ -3,7 +3,8 @@ using System.Buffers;
 namespace Listenarr.Infrastructure.FileSystem;
 
 internal sealed class PinnedAudiobookFileRegistrationLease :
-    IAudiobookFileRegistrationLease
+    IAudiobookFileRegistrationLease,
+    IAudiobookFileRegistrationIdentityVerifier
 {
     private readonly PinnedDirectoryCreation.PinnedFileEntry _file;
     private readonly Microsoft.Win32.SafeHandles.SafeFileHandle? _stableHandle;
@@ -22,6 +23,7 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
         string publicPath,
         string metadataPath,
         string physicalObjectIdentity,
+        bool hasDurablePhysicalObjectIdentity,
         string? sourcePhysicalObjectIdentity,
         Func<int, bool>? prepareCleanupRecovery,
         Func<bool>? completePublication,
@@ -35,12 +37,14 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
         PublicPath = publicPath;
         MetadataPath = metadataPath;
         PhysicalObjectIdentity = physicalObjectIdentity;
+        HasDurablePhysicalObjectIdentity = hasDurablePhysicalObjectIdentity;
         SourcePhysicalObjectIdentity = sourcePhysicalObjectIdentity;
     }
 
     public string PublicPath { get; }
     public string MetadataPath { get; }
     public string PhysicalObjectIdentity { get; }
+    public bool HasDurablePhysicalObjectIdentity { get; }
     public string? SourcePhysicalObjectIdentity { get; }
 
     public Stream OpenMetadataReadStream()
@@ -54,6 +58,12 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
     public Stream OpenMetadataWriteStream()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!HasDurablePhysicalObjectIdentity)
+        {
+            throw new NotSupportedException(
+                "Pinned path-only registration leases do not authorize metadata writes.");
+        }
+
         return _file.OpenIndependentWriteStream(
             bufferSize: 128 * 1024,
             asynchronous: false);
@@ -105,10 +115,8 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
             var physicalObjectIdentity = file.GetObjectIdentity();
             if (!file.VisiblePathMatches()
                 || (!string.IsNullOrWhiteSpace(expectedPhysicalObjectIdentity)
-                    && !string.Equals(
-                        physicalObjectIdentity,
-                        expectedPhysicalObjectIdentity,
-                        StringComparison.Ordinal)))
+                    && !file.MatchesObjectIdentity(
+                        expectedPhysicalObjectIdentity)))
             {
                 throw new InvalidOperationException(
                     "The audiobook file generation does not match the expected physical identity.");
@@ -122,6 +130,7 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
                     canonicalPath,
                     canonicalPath,
                     physicalObjectIdentity,
+                    hasDurablePhysicalObjectIdentity: true,
                     sourcePhysicalObjectIdentity,
                     prepareCleanupRecovery,
                     completePublication,
@@ -145,6 +154,7 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
                     canonicalPath,
                     metadataPath,
                     physicalObjectIdentity,
+                    hasDurablePhysicalObjectIdentity: true,
                     sourcePhysicalObjectIdentity,
                     prepareCleanupRecovery,
                     completePublication,
@@ -155,6 +165,59 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
 
             throw new PlatformNotSupportedException(
                 "Stable metadata extraction is supported only on Windows and Linux.");
+        }
+        catch
+        {
+            stableHandle?.Dispose();
+            file.Dispose();
+            throw;
+        }
+    }
+
+    internal static PinnedAudiobookFileRegistrationLease CreatePinnedPathOnly(
+        PinnedDirectoryCreation.PinnedFileEntry file,
+        string publicPath)
+    {
+        ArgumentNullException.ThrowIfNull(file);
+        ArgumentException.ThrowIfNullOrWhiteSpace(publicPath);
+        Microsoft.Win32.SafeHandles.SafeFileHandle? stableHandle = null;
+        try
+        {
+            if (!OperatingSystem.IsLinux())
+            {
+                throw new PlatformNotSupportedException(
+                    "Pinned path-only registration is supported only on Linux storage without durable generation identity.");
+            }
+
+            var canonicalPath = Path.GetFullPath(publicPath);
+            if (!file.VisiblePathMatches())
+            {
+                throw new InvalidOperationException(
+                    "The audiobook file changed before pinned path-only registration.");
+            }
+
+            stableHandle = file.DuplicateHandleForOperation();
+            var metadataPath = FormattableString.Invariant(
+                $"/proc/{Environment.ProcessId}/fd/{stableHandle.DangerousGetHandle().ToInt32()}");
+            if (!File.Exists(metadataPath))
+            {
+                throw new PlatformNotSupportedException(
+                    "The Linux proc filesystem is unavailable for stable metadata extraction.");
+            }
+
+            var result = new PinnedAudiobookFileRegistrationLease(
+                file,
+                stableHandle,
+                canonicalPath,
+                metadataPath,
+                $"scan-pinned:{Guid.NewGuid():N}",
+                hasDurablePhysicalObjectIdentity: false,
+                sourcePhysicalObjectIdentity: null,
+                prepareCleanupRecovery: null,
+                completePublication: null,
+                commitRegistration: null);
+            stableHandle = null;
+            return result;
         }
         catch
         {
@@ -221,16 +284,37 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
         }
     }
 
+    public bool MatchesPhysicalObjectIdentity(string expectedPhysicalObjectIdentity)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentException.ThrowIfNullOrWhiteSpace(expectedPhysicalObjectIdentity);
+        if (!HasDurablePhysicalObjectIdentity)
+        {
+            return false;
+        }
+
+        try
+        {
+            return _file.VisiblePathMatches()
+                && _file.MatchesObjectIdentity(expectedPhysicalObjectIdentity);
+        }
+        catch (Exception exception) when (exception is
+            IOException or UnauthorizedAccessException
+                or InvalidOperationException
+                or System.ComponentModel.Win32Exception)
+        {
+            return false;
+        }
+    }
+
     public bool MatchesCurrentPublication()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         try
         {
             return _file.VisiblePathMatches()
-                && string.Equals(
-                    _file.GetObjectIdentity(),
-                    PhysicalObjectIdentity,
-                    StringComparison.Ordinal);
+                && (!HasDurablePhysicalObjectIdentity
+                    || _file.MatchesObjectIdentity(PhysicalObjectIdentity));
         }
         catch (Exception exception) when (exception is
             IOException or UnauthorizedAccessException

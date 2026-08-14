@@ -614,6 +614,110 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Files
         }
 
         [Fact]
+        public async Task EnsureAudiobookFileAsync_NonDurablePublicationChangesAfterClaim_RollsBackPathOnlyClaim()
+        {
+            var testFile = await FileService.GetTempFileAsync(
+                $"path-only-generation-rollback-{Guid.NewGuid():N}.m4b");
+            _audiobook.BasePath = Path.GetDirectoryName(testFile);
+            await _audiobookRepository.UpdateAsync(_audiobook);
+            using var registrationLease = new SequencedRegistrationLease(
+                testFile,
+                "operation-local-path-only-token",
+                [true, true, false],
+                hasDurablePhysicalObjectIdentity: false);
+
+            var created = await _provider
+                .GetRequiredService<IAudiobookFileService>()
+                .EnsureAudiobookFileAsync(
+                    _audiobook,
+                    registrationLease,
+                    "limited-scan");
+
+            Assert.False(created);
+            Assert.Empty(await _audiobookFileRepository
+                .GetByAudiobookIdAsync(_audiobook.Id));
+        }
+
+        [Fact]
+        public async Task RegisterPublishedGenerationAsync_CompatiblePhysicalToken_DoesNotRefreshPersistedGeneration()
+        {
+            var testFile = await FileService.GetTempFileAsync(
+                $"physical-generation-compatible-registration-{Guid.NewGuid():N}.m4b");
+            _audiobook.BasePath = Path.GetDirectoryName(testFile);
+            await _audiobookRepository.UpdateAsync(_audiobook);
+            var service = _provider.GetRequiredService<IAudiobookFileService>();
+            const string persistedIdentity = "persisted-compatible-generation";
+            using (var initialLease = new SequencedRegistrationLease(
+                testFile,
+                persistedIdentity,
+                [true, true, true, true]))
+            {
+                Assert.True(await service.EnsureAudiobookFileAsync(
+                    _audiobook,
+                    initialLease,
+                    "initial"));
+            }
+
+            var ownership = await service.CheckAudiobookFileOwnershipAsync(
+                _audiobook,
+                testFile,
+                _audiobook.BasePath);
+            Assert.Equal(
+                AudiobookFileOwnershipCheckOutcome.AlreadyOwnedByAudiobook,
+                ownership.Outcome);
+            using var compatibleLease = new SequencedRegistrationLease(
+                testFile,
+                "newly-preferred-compatible-generation",
+                [true, true, true],
+                compatiblePhysicalObjectIdentities: [persistedIdentity]);
+
+            Assert.True(await service.RegisterPublishedGenerationAsync(
+                _audiobook,
+                ownership,
+                compatibleLease,
+                "should-not-refresh"));
+
+            var persisted = Assert.Single(await _audiobookFileRepository
+                .GetByAudiobookIdAsync(_audiobook.Id));
+            Assert.Equal(persistedIdentity, persisted.PhysicalObjectIdentity);
+            Assert.Equal("initial", persisted.Source);
+        }
+
+        [Fact]
+        public async Task RollbackPublishedGenerationIfStaleAsync_CompatiblePhysicalToken_UsesPersistedCasToken()
+        {
+            var testFile = await FileService.GetTempFileAsync(
+                $"physical-generation-compatible-rollback-{Guid.NewGuid():N}.m4b");
+            _audiobook.BasePath = Path.GetDirectoryName(testFile);
+            await _audiobookRepository.UpdateAsync(_audiobook);
+            var service = _provider.GetRequiredService<IAudiobookFileService>();
+            const string persistedIdentity = "persisted-rollback-generation";
+            using (var initialLease = new SequencedRegistrationLease(
+                testFile,
+                persistedIdentity,
+                [true, true, true, true]))
+            {
+                Assert.True(await service.EnsureAudiobookFileAsync(
+                    _audiobook,
+                    initialLease,
+                    "initial"));
+            }
+
+            using var staleCompatibleLease = new SequencedRegistrationLease(
+                testFile,
+                "newly-preferred-rollback-generation",
+                [false],
+                compatiblePhysicalObjectIdentities: [persistedIdentity]);
+
+            await service.RollbackPublishedGenerationIfStaleAsync(
+                _audiobook,
+                staleCompatibleLease);
+
+            Assert.Empty(await _audiobookFileRepository
+                .GetByAudiobookIdAsync(_audiobook.Id));
+        }
+
+        [Fact]
         public async Task RefreshPhysicalGenerationAsync_PublicationChangesAfterDatabaseUpdate_RestoresPredecessor()
         {
             var testFile = await FileService.GetTempFileAsync(
@@ -677,17 +781,24 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Files
             string path,
             string physicalObjectIdentity,
             IEnumerable<bool> publicationMatches,
-            Action<int>? onPublicationCheck = null) :
-            IAudiobookFileRegistrationLease
+            Action<int>? onPublicationCheck = null,
+            IEnumerable<string>? compatiblePhysicalObjectIdentities = null,
+            bool hasDurablePhysicalObjectIdentity = true) :
+            IAudiobookFileRegistrationLease,
+            IAudiobookFileRegistrationIdentityVerifier
         {
             private readonly Queue<bool> _publicationMatches =
                 new(publicationMatches);
+            private readonly HashSet<string> _compatiblePhysicalObjectIdentities =
+                new(compatiblePhysicalObjectIdentities ?? [], StringComparer.Ordinal);
             private int _publicationChecks;
 
             public string PublicPath { get; } = path;
             public string MetadataPath { get; } = path;
             public string PhysicalObjectIdentity { get; } =
                 physicalObjectIdentity;
+            public bool HasDurablePhysicalObjectIdentity { get; } =
+                hasDurablePhysicalObjectIdentity;
             public string? SourcePhysicalObjectIdentity => null;
 
             public bool MatchesCurrentPublication()
@@ -699,6 +810,15 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Files
                     ? false
                     : _publicationMatches.Dequeue();
             }
+
+            public bool MatchesPhysicalObjectIdentity(
+                string expectedPhysicalObjectIdentity) =>
+                string.Equals(
+                    PhysicalObjectIdentity,
+                    expectedPhysicalObjectIdentity,
+                    StringComparison.Ordinal)
+                || _compatiblePhysicalObjectIdentities.Contains(
+                    expectedPhysicalObjectIdentity);
 
             public bool PrepareCleanupRecovery(int audiobookId) => true;
 

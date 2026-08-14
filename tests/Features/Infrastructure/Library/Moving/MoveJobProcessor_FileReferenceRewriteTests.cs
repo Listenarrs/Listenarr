@@ -186,8 +186,14 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                 FileSystemCaseSensitivityMode.Auto,
                 targetBoundary,
                 target);
-            var targetDirectoryIdentity = await _provider
-                .GetRequiredService<IDirectoryObjectIdentityResolver>()
+            var directoryIdentityResolver = _provider
+                .GetRequiredService<IDirectoryObjectIdentityResolver>();
+            var sourceDirectoryIdentity = await directoryIdentityResolver
+                .ResolveAsync(manifest.SourceIdentity.BoundaryPath);
+            Assert.True(
+                sourceDirectoryIdentity.IsAvailable,
+                sourceDirectoryIdentity.UnavailableReason);
+            var targetDirectoryIdentity = await directoryIdentityResolver
                 .ResolveAsync(targetBoundary);
             Assert.True(
                 targetDirectoryIdentity.IsAvailable,
@@ -200,6 +206,8 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                 manifest.Entries,
                 target,
                 targetIdentity,
+                sourceDirectoryIdentity.Version!.Value,
+                sourceDirectoryIdentity.Value!,
                 targetDirectoryIdentity.Version!.Value,
                 targetDirectoryIdentity.Value!,
                 DeleteEmptySource: true));

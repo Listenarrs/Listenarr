@@ -1629,6 +1629,15 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                 result,
                 CancellationToken.None);
 
+            Assert.ThrowsAny<Exception>(() =>
+            {
+                using var writer = new FileStream(
+                    targetFile,
+                    FileMode.Open,
+                    FileAccess.Write,
+                    FileShare.ReadWrite | FileShare.Delete);
+            });
+            result.TargetVerificationLease!.Dispose();
             using (var writer = new FileStream(
                 targetFile,
                 FileMode.Open,
@@ -1638,6 +1647,182 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                 Assert.True(writer.CanWrite);
             }
             Assert.Equal("audio", await File.ReadAllTextAsync(targetFile));
+            AssertNoListenarrArtifacts(root);
+        }
+
+        [LinuxFact]
+        public async Task MoveContentsAsync_MarkerlessNativeRename_CompatibleExpectedSourceToken_PersistsSameDurableTargetToken()
+        {
+            var root = FileService.GetTempDirectory(
+                "content-move-compatible-source-token-root");
+            var source = Path.Join(root, "source");
+            Directory.CreateDirectory(source);
+            var sourceFile = await FileService.GetFileAsync(
+                source,
+                "book.m4b",
+                "audio");
+            var target = Path.Join(root, "destination", "Book");
+            var targetFile = Path.Join(target, "book.m4b");
+            var request = await CreateLeasedMoveRequestAsync(
+                source,
+                target,
+                sourceCleanupBoundary: root,
+                executionProtocolVersion:
+                    MoveExecutionProtocol.MarkerlessDatabaseState);
+            string durableSourceIdentity;
+            using (var lease = PinnedAudiobookFileRegistrationLease.Open(sourceFile))
+            {
+                Assert.StartsWith(
+                    "linux-generation:",
+                    lease.PhysicalObjectIdentity,
+                    StringComparison.Ordinal);
+                durableSourceIdentity =
+                    LinuxIdentityTestHelper.ToMergedV1AugmentedIdentity(
+                        lease.PhysicalObjectIdentity);
+            }
+            var factory = _provider.GetRequiredService<
+                IDbContextFactory<ListenArrDbContext>>();
+            await using (var db = await factory.CreateDbContextAsync())
+            {
+                var entry = await db.MoveJobEntries.SingleAsync(candidate =>
+                    candidate.MoveJobId == request.JobId
+                    && candidate.EntryType == MoveJobEntryType.File);
+                entry.SourcePhysicalObjectIdentity = durableSourceIdentity;
+                entry.Sha256 = null;
+                await db.SaveChangesAsync();
+            }
+
+            var service = _provider.GetRequiredService<AudiobookContentMoveService>();
+            var result = await service.MoveContentsAsync(
+                request,
+                CancellationToken.None);
+            await service.FinalizeMoveAsync(
+                request,
+                result,
+                CancellationToken.None);
+            await service.CleanupCompletedMoveArtifactsAsync(
+                request,
+                result,
+                CancellationToken.None);
+
+            Assert.False(Directory.Exists(source));
+            Assert.Equal("audio", await File.ReadAllTextAsync(targetFile));
+            await using (var db = await factory.CreateDbContextAsync())
+            {
+                var entry = await db.MoveJobEntries
+                    .AsNoTracking()
+                    .SingleAsync(candidate =>
+                        candidate.MoveJobId == request.JobId
+                        && candidate.EntryType == MoveJobEntryType.File);
+                Assert.Equal(MoveJobEntryCopyState.Verified, entry.CopyState);
+                Assert.Equal(durableSourceIdentity, entry.SourcePhysicalObjectIdentity);
+                Assert.Equal(durableSourceIdentity, entry.TargetPhysicalObjectIdentity);
+            }
+            AssertNoListenarrArtifacts(root);
+        }
+
+        [LinuxFact]
+        public async Task MoveContentsAsync_MarkerlessNativeRename_PersistedMergedV1TokenPair_ResumesWithMissingSource()
+        {
+            var root = FileService.GetTempDirectory(
+                "content-move-compatible-persisted-pair-root");
+            var source = Path.Join(root, "source");
+            Directory.CreateDirectory(source);
+            var sourceFile = await FileService.GetFileAsync(
+                source,
+                "book.m4b",
+                "audio");
+            var target = Path.Join(root, "destination", "Book");
+            var targetFile = Path.Join(target, "book.m4b");
+            var request = await CreateLeasedMoveRequestAsync(
+                source,
+                target,
+                sourceCleanupBoundary: root,
+                executionProtocolVersion:
+                    MoveExecutionProtocol.MarkerlessDatabaseState);
+            string durableSourceIdentity;
+            using (var lease = PinnedAudiobookFileRegistrationLease.Open(sourceFile))
+            {
+                Assert.StartsWith(
+                    "linux-generation:",
+                    lease.PhysicalObjectIdentity,
+                    StringComparison.Ordinal);
+                durableSourceIdentity =
+                    LinuxIdentityTestHelper.ToMergedV1AugmentedIdentity(
+                        lease.PhysicalObjectIdentity);
+            }
+            var factory = _provider.GetRequiredService<
+                IDbContextFactory<ListenArrDbContext>>();
+            await using (var db = await factory.CreateDbContextAsync())
+            {
+                var entry = await db.MoveJobEntries.SingleAsync(candidate =>
+                    candidate.MoveJobId == request.JobId
+                    && candidate.EntryType == MoveJobEntryType.File);
+                entry.SourcePhysicalObjectIdentity = durableSourceIdentity;
+                entry.Sha256 = null;
+                await db.SaveChangesAsync();
+            }
+            var interruptedService = new AudiobookContentMoveService(
+                _provider.GetRequiredService<
+                    ILogger<AudiobookContentMoveService>>(),
+                _provider.GetRequiredService<
+                    IDbContextFactory<ListenArrDbContext>>(),
+                TimeProvider.System,
+                new FailOnceAfterMarkerlessNativeRename());
+
+            await Assert.ThrowsAsync<IOException>(() =>
+                interruptedService.MoveContentsAsync(
+                    request,
+                    CancellationToken.None));
+            Assert.False(File.Exists(sourceFile));
+            Assert.Equal("audio", await File.ReadAllTextAsync(targetFile));
+            string preferredTargetIdentity;
+            using (var lease = PinnedAudiobookFileRegistrationLease.Open(targetFile))
+            {
+                preferredTargetIdentity = lease.PhysicalObjectIdentity;
+            }
+            Assert.NotEqual(durableSourceIdentity, preferredTargetIdentity);
+            await using (var db = await factory.CreateDbContextAsync())
+            {
+                var entry = await db.MoveJobEntries.SingleAsync(candidate =>
+                    candidate.MoveJobId == request.JobId
+                    && candidate.EntryType == MoveJobEntryType.File);
+                Assert.Equal(MoveJobEntryCopyState.Pending, entry.CopyState);
+                entry.CopyState = MoveJobEntryCopyState.Verified;
+                entry.TargetPhysicalObjectIdentity = preferredTargetIdentity;
+                await db.SaveChangesAsync();
+            }
+
+            var service = _provider.GetRequiredService<AudiobookContentMoveService>();
+            var result = await service.MoveContentsAsync(
+                request,
+                CancellationToken.None);
+            await service.FinalizeMoveAsync(
+                request,
+                result,
+                CancellationToken.None);
+            await service.CleanupCompletedMoveArtifactsAsync(
+                request,
+                result,
+                CancellationToken.None);
+
+            Assert.False(Directory.Exists(source));
+            Assert.Equal("audio", await File.ReadAllTextAsync(targetFile));
+            await using (var db = await factory.CreateDbContextAsync())
+            {
+                var entry = await db.MoveJobEntries
+                    .AsNoTracking()
+                    .SingleAsync(candidate =>
+                        candidate.MoveJobId == request.JobId
+                        && candidate.EntryType == MoveJobEntryType.File);
+                Assert.Equal(MoveJobEntryCopyState.Verified, entry.CopyState);
+                Assert.Equal(durableSourceIdentity, entry.SourcePhysicalObjectIdentity);
+                Assert.Equal(preferredTargetIdentity, entry.TargetPhysicalObjectIdentity);
+                Assert.True(
+                    PinnedDirectoryCreation.ArePersistedObjectIdentitiesDurablyEquivalent(
+                        entry.SourcePhysicalObjectIdentity!,
+                        entry.TargetPhysicalObjectIdentity!));
+            }
             AssertNoListenarrArtifacts(root);
         }
 
@@ -2387,7 +2572,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                 .Where(entry => entry.MoveJobId == jobId)
                 .ToListAsync();
             db.MoveJobEntries.RemoveRange(existing.Where(entry =>
-                !MoveManifestIdentity.IsTargetBoundaryAuthorization(entry)));
+                !MoveManifestIdentity.IsBoundaryAuthorization(entry)));
             db.MoveJobEntries.Add(new MoveJobEntry
             {
                 MoveJobId = jobId,
@@ -2416,9 +2601,20 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                 targetSemantics
                 ?? sourceSemantics
                 ?? FileSystemPathSemantics.CurrentHostDefault;
+            var effectiveSourceSemantics =
+                sourceSemantics ?? FileSystemPathSemantics.CurrentHostDefault;
+            var sourceBoundary = IsTestFilesystemRoot(source, effectiveSourceSemantics)
+                ? Path.GetFullPath(source)
+                : FindMoveTargetBoundary(source, effectiveSourceSemantics);
             var targetBoundary = FindMoveTargetBoundary(target, effectiveTargetSemantics);
-            var targetDirectoryIdentity = await _provider
-                .GetRequiredService<IDirectoryObjectIdentityResolver>()
+            var directoryIdentityResolver = _provider
+                .GetRequiredService<IDirectoryObjectIdentityResolver>();
+            var sourceDirectoryIdentity = await directoryIdentityResolver
+                .ResolveAsync(sourceBoundary);
+            Assert.True(
+                sourceDirectoryIdentity.IsAvailable,
+                sourceDirectoryIdentity.UnavailableReason);
+            var targetDirectoryIdentity = await directoryIdentityResolver
                 .ResolveAsync(targetBoundary);
             Assert.True(
                 targetDirectoryIdentity.IsAvailable,
@@ -2440,18 +2636,19 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                 ExecutionProtocolVersion = executionProtocolVersion,
                 Entries =
                 [
+                    MoveManifestIdentity.CreateSourceBoundaryAuthorization(
+                        sourceDirectoryIdentity.Version!.Value,
+                        sourceDirectoryIdentity.Value!),
                     MoveManifestIdentity.CreateTargetBoundaryAuthorization(
                         targetDirectoryIdentity.Version!.Value,
                         targetDirectoryIdentity.Value!)
                 ]
             };
-            var effectiveSourceSemantics =
-                sourceSemantics ?? FileSystemPathSemantics.CurrentHostDefault;
             job.SetSourceIdentity(new PathIdentitySnapshot(
                 effectiveSourceSemantics.Syntax,
                 effectiveSourceSemantics.CaseSensitivity,
                 FileSystemCaseSensitivityMode.Auto,
-                source));
+                sourceBoundary));
             job.SetTargetIdentity(new PathIdentitySnapshot(
                 effectiveTargetSemantics.Syntax,
                 effectiveTargetSemantics.CaseSensitivity,
@@ -2519,7 +2716,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                 .Where(entry => entry.MoveJobId == jobId)
                 .ToListAsync();
             db.MoveJobEntries.RemoveRange(entries.Where(entry =>
-                !MoveManifestIdentity.IsTargetBoundaryAuthorization(entry)));
+                !MoveManifestIdentity.IsBoundaryAuthorization(entry)));
             await db.SaveChangesAsync();
         }
 
