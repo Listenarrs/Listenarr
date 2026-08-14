@@ -15,7 +15,6 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using System.Text.RegularExpressions;
 using Listenarr.Domain.Common;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -50,35 +49,13 @@ namespace Listenarr.Infrastructure.Library.Scanning
                         metrics.Increment("worker.unmatchedscanbackgroundservice.job.skipped");
                         throw;
                     }
-                    catch (IOException ex)
+                    catch (OperationCanceledException ex)
                     {
                         await HandleJobFailureAsync(job.Id, ex, stoppingToken);
                     }
-                    catch (UnauthorizedAccessException ex)
+                    catch (Exception ex) when (WorkerExceptionClassifier.IsNonFatal(ex))
                     {
                         await HandleJobFailureAsync(job.Id, ex, stoppingToken);
-                    }
-                    catch (ArgumentException ex)
-                    {
-                        await HandleJobFailureAsync(job.Id, ex, stoppingToken);
-                    }
-                    catch (RegexMatchTimeoutException ex)
-                    {
-                        await HandleJobFailureAsync(job.Id, ex, stoppingToken);
-                    }
-                    catch (PersistenceException ex)
-                    {
-                        await HandleJobFailureAsync(job.Id, ex, stoppingToken);
-                    }
-                    catch (HubException ex)
-                    {
-                        await HandleJobFailureAsync(job.Id, ex, stoppingToken);
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                    {
-                        metrics.Increment("worker.unmatchedscanbackgroundservice.job.failed");
-                        logger.LogError(ex, "Unexpected unmatched scan job {JobId} failure", job.Id);
-                        throw;
                     }
                 }
             }
@@ -90,19 +67,98 @@ namespace Listenarr.Infrastructure.Library.Scanning
 
         private async Task HandleJobFailureAsync(Guid jobId, Exception ex, CancellationToken stoppingToken)
         {
+            if (TryGetTerminalJobStatus(jobId, out var terminalStatus)
+                && string.Equals(terminalStatus, "Completed", StringComparison.Ordinal))
+            {
+                // The processor commits results before publishing its SignalR notification.
+                // A post-completion notification failure must never downgrade a successful scan.
+                metrics.Increment("worker.unmatchedscanbackgroundservice.job.completed");
+                logger.LogWarning(
+                    ex,
+                    "Unmatched scan job {JobId} completed, but a post-completion side effect failed",
+                    jobId);
+                return;
+            }
+
             metrics.Increment("worker.unmatchedscanbackgroundservice.job.failed");
             logger.LogError(ex, "Unmatched scan job {JobId} failed", jobId);
-            queue.UpdateJob(jobId, "Failed", error: ex.Message);
-
-            await hubContext.Clients.All.SendAsync(
-                "UnmatchedScanComplete",
-                new
+            if (!string.Equals(terminalStatus, "Failed", StringComparison.Ordinal))
+            {
+                try
                 {
-                    jobId = jobId.ToString(),
-                    count = 0,
-                    error = UnmatchedScanPublicError.FromInternal(ex.Message)
-                },
-                stoppingToken);
+                    queue.UpdateJob(jobId, "Failed", error: ex.Message);
+                }
+                catch (OperationCanceledException statusException) when (
+                    !stoppingToken.IsCancellationRequested)
+                {
+                    logger.LogWarning(
+                        statusException,
+                        "Unmatched scan job {JobId} failed, but its failed status update was canceled internally",
+                        jobId);
+                }
+                catch (Exception statusException) when (
+                    WorkerExceptionClassifier.IsNonFatal(statusException))
+                {
+                    logger.LogWarning(
+                        statusException,
+                        "Unmatched scan job {JobId} failed, but its failed status could not be recorded",
+                        jobId);
+                }
+            }
+
+            try
+            {
+                await hubContext.Clients.All.SendAsync(
+                    "UnmatchedScanComplete",
+                    new
+                    {
+                        jobId = jobId.ToString(),
+                        count = 0,
+                        error = UnmatchedScanPublicError.FromInternal(ex.Message)
+                    },
+                    stoppingToken);
+            }
+            catch (OperationCanceledException notificationException) when (
+                !stoppingToken.IsCancellationRequested)
+            {
+                logger.LogWarning(
+                    notificationException,
+                    "Unmatched scan job {JobId} failed, but its completion notification was canceled internally",
+                    jobId);
+            }
+            catch (Exception notificationException) when (
+                WorkerExceptionClassifier.IsNonFatal(notificationException))
+            {
+                logger.LogWarning(
+                    notificationException,
+                    "Unmatched scan job {JobId} failed, but its completion notification could not be published",
+                    jobId);
+            }
+        }
+
+        private bool TryGetTerminalJobStatus(Guid jobId, out string? terminalStatus)
+        {
+            terminalStatus = null;
+            try
+            {
+                if (!queue.TryGetJob(jobId, out var current)
+                    || current?.Status is not ("Completed" or "Failed"))
+                {
+                    return false;
+                }
+
+                terminalStatus = current.Status;
+                return true;
+            }
+            catch (Exception statusException) when (
+                WorkerExceptionClassifier.IsNonFatal(statusException))
+            {
+                logger.LogWarning(
+                    statusException,
+                    "Could not inspect terminal state for unmatched scan job {JobId}",
+                    jobId);
+                return false;
+            }
         }
 
         internal static List<List<string>> BuildGroupedFilesForFolder(
