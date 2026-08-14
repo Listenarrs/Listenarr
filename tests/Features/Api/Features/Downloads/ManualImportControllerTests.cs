@@ -779,6 +779,237 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                 resolver.Calls,
                 call => string.Equals(call.Path, bookPath, StringComparison.Ordinal)
                     && call.Mode == FileSystemCaseSensitivityMode.Sensitive);
+            Assert.DoesNotContain(
+                resolver.Calls,
+                call => call.Mode == FileSystemCaseSensitivityMode.Auto
+                    && FileSystemPathIdentity.IsSameOrInside(
+                        call.Path,
+                        innerRoot,
+                        new FileSystemPathSemantics(
+                            FileSystemPathSemantics.CurrentHostDefault.Syntax,
+                            FileSystemCaseSensitivity.Sensitive)));
+        }
+
+        [Fact]
+        public async Task InteractiveManualImport_ExplicitInsensitiveDestination_DoesNotFallBackToAuto()
+        {
+            var destinationRoot = CreateTempDirectory("listenarr-manual-explicit-destination");
+            var sourceRoot = CreateTempDirectory("listenarr-manual-explicit-destination-source");
+            var sourceFile = Path.Join(sourceRoot, "chapter.mp3");
+            await File.WriteAllTextAsync(sourceFile, "audio");
+            var roots = new List<RootFolder>
+            {
+                new()
+                {
+                    Id = 1,
+                    Name = "CIFS Destination",
+                    Path = destinationRoot,
+                    CaseSensitivityMode = FileSystemCaseSensitivityMode.Insensitive,
+                    ResolvedCaseSensitivity = FileSystemCaseSensitivity.Insensitive,
+                    PathIdentityState = PathIdentityState.Valid
+                }
+            };
+            var resolver = new RejectAutoUnderPathSemanticsResolver(
+                destinationRoot,
+                new FileSystemSemanticsResolver());
+            var book = new Audiobook
+            {
+                Id = 45,
+                Title = "CIFS Destination Book",
+                BasePath = destinationRoot
+            };
+            var controller = GetController(
+                book,
+                new ApplicationSettings
+                {
+                    OutputPath = destinationRoot,
+                    FolderNamingPattern = "",
+                    FileNamingPattern = "{Title}"
+                },
+                rootFolders: roots,
+                semanticsResolver: resolver);
+            var request = new ManualImportRequestDto
+            {
+                Path = sourceRoot,
+                Mode = "interactive",
+                Action = FileAction.Copy,
+                Items =
+                [
+                    new ManualImportItemDto
+                    {
+                        FullPath = sourceFile,
+                        MatchedAudiobookId = book.Id
+                    }
+                ]
+            };
+
+            var action = await controller.Start(request);
+
+            var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(action.Result);
+            Assert.NotNull(ok.Value);
+            Assert.Equal(
+                1,
+                Assert.IsType<int>(ok.Value!.GetType()
+                    .GetProperty("importedCount")!
+                    .GetValue(ok.Value)));
+            Assert.DoesNotContain(
+                resolver.Calls,
+                call => call.Mode == FileSystemCaseSensitivityMode.Auto
+                    && FileSystemPathIdentity.IsSameOrInside(
+                        call.Path,
+                        destinationRoot,
+                        new FileSystemPathSemantics(
+                            FileSystemPathSemantics.CurrentHostDefault.Syntax,
+                            FileSystemCaseSensitivity.Insensitive)));
+        }
+
+        [Fact]
+        public async Task InteractiveManualImport_ExplicitInsensitiveSource_DoesNotFallBackToAuto()
+        {
+            var sourceRoot = CreateTempDirectory("listenarr-manual-explicit-source");
+            var destinationRoot = CreateTempDirectory("listenarr-manual-explicit-source-destination");
+            var sourceFile = Path.Join(sourceRoot, "chapter.mp3");
+            await File.WriteAllTextAsync(sourceFile, "audio");
+            var roots = new List<RootFolder>
+            {
+                new()
+                {
+                    Id = 1,
+                    Name = "CIFS Source",
+                    Path = sourceRoot,
+                    CaseSensitivityMode = FileSystemCaseSensitivityMode.Insensitive,
+                    ResolvedCaseSensitivity = FileSystemCaseSensitivity.Insensitive,
+                    PathIdentityState = PathIdentityState.Valid
+                },
+                new()
+                {
+                    Id = 2,
+                    Name = "Native Destination",
+                    Path = destinationRoot,
+                    CaseSensitivityMode = FileSystemCaseSensitivityMode.Sensitive,
+                    ResolvedCaseSensitivity = FileSystemCaseSensitivity.Sensitive,
+                    PathIdentityState = PathIdentityState.Valid
+                }
+            };
+            var resolver = new RejectAutoUnderPathSemanticsResolver(
+                sourceRoot,
+                new FileSystemSemanticsResolver());
+            var book = new Audiobook
+            {
+                Id = 46,
+                Title = "CIFS Source Book",
+                BasePath = destinationRoot
+            };
+            var controller = GetController(
+                book,
+                new ApplicationSettings
+                {
+                    OutputPath = destinationRoot,
+                    FolderNamingPattern = "",
+                    FileNamingPattern = "{Title}"
+                },
+                rootFolders: roots,
+                semanticsResolver: resolver);
+            var request = new ManualImportRequestDto
+            {
+                Path = sourceRoot,
+                Mode = "interactive",
+                Action = FileAction.Copy,
+                Items =
+                [
+                    new ManualImportItemDto
+                    {
+                        FullPath = sourceFile,
+                        MatchedAudiobookId = book.Id
+                    }
+                ]
+            };
+
+            var action = await controller.Start(request);
+
+            var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(action.Result);
+            Assert.NotNull(ok.Value);
+            Assert.Equal(
+                1,
+                Assert.IsType<int>(ok.Value!.GetType()
+                    .GetProperty("importedCount")!
+                    .GetValue(ok.Value)));
+            Assert.DoesNotContain(
+                resolver.Calls,
+                call => call.Mode == FileSystemCaseSensitivityMode.Auto
+                    && FileSystemPathIdentity.IsSameOrInside(
+                        call.Path,
+                        sourceRoot,
+                        new FileSystemPathSemantics(
+                            FileSystemPathSemantics.CurrentHostDefault.Syntax,
+                            FileSystemCaseSensitivity.Insensitive)));
+        }
+
+        [Fact]
+        public async Task InteractiveManualImport_UnmanagedSourceStillRequiresAutoSemantics()
+        {
+            var sourceRoot = CreateTempDirectory("listenarr-manual-unmanaged-source");
+            var destinationRoot = CreateTempDirectory("listenarr-manual-unmanaged-source-destination");
+            var sourceFile = Path.Join(sourceRoot, "chapter.mp3");
+            await File.WriteAllTextAsync(sourceFile, "audio");
+            var roots = new List<RootFolder>
+            {
+                new()
+                {
+                    Id = 1,
+                    Name = "Managed Destination",
+                    Path = destinationRoot,
+                    CaseSensitivityMode = FileSystemCaseSensitivityMode.Sensitive,
+                    ResolvedCaseSensitivity = FileSystemCaseSensitivity.Sensitive,
+                    PathIdentityState = PathIdentityState.Valid
+                }
+            };
+            var resolver = new RejectAutoUnderPathSemanticsResolver(
+                sourceRoot,
+                new FileSystemSemanticsResolver());
+            var book = new Audiobook
+            {
+                Id = 47,
+                Title = "Unmanaged Source Book",
+                BasePath = destinationRoot
+            };
+            var controller = GetController(
+                book,
+                new ApplicationSettings
+                {
+                    OutputPath = destinationRoot,
+                    FolderNamingPattern = "",
+                    FileNamingPattern = "{Title}"
+                },
+                rootFolders: roots,
+                semanticsResolver: resolver);
+            var request = new ManualImportRequestDto
+            {
+                Path = sourceRoot,
+                Mode = "interactive",
+                Action = FileAction.Copy,
+                Items =
+                [
+                    new ManualImportItemDto
+                    {
+                        FullPath = sourceFile,
+                        MatchedAudiobookId = book.Id
+                    }
+                ]
+            };
+
+            var action = await controller.Start(request);
+
+            var error = Assert.IsType<Microsoft.AspNetCore.Mvc.ObjectResult>(
+                action.Result);
+            Assert.Equal(500, error.StatusCode);
+            Assert.Contains(
+                resolver.Calls,
+                call => call.Mode == FileSystemCaseSensitivityMode.Auto
+                    && string.Equals(
+                        call.Path,
+                        Path.GetFullPath(sourceRoot),
+                        StringComparison.Ordinal));
         }
 
         [Fact]
@@ -1025,13 +1256,31 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
             await File.WriteAllTextAsync(coverFile, "cover");
             await File.WriteAllTextAsync(notesFile, "notes");
 
-            var controller = GetController(book, new ApplicationSettings
-            {
-                OutputPath = destinationRoot,
-                FolderNamingPattern = "",
-                FileNamingPattern = "{Title}",
-                ImportBlacklistExtensions = new System.Collections.Generic.List<string>()
-            });
+            var resolver = new RejectAutoUnderPathSemanticsResolver(
+                destinationRoot,
+                new FileSystemSemanticsResolver());
+            var controller = GetController(
+                book,
+                new ApplicationSettings
+                {
+                    OutputPath = destinationRoot,
+                    FolderNamingPattern = "",
+                    FileNamingPattern = "{Title}",
+                    ImportBlacklistExtensions = new System.Collections.Generic.List<string>()
+                },
+                rootFolders:
+                [
+                    new RootFolder
+                    {
+                        Id = 1,
+                        Name = "CIFS Destination",
+                        Path = destinationRoot,
+                        CaseSensitivityMode = FileSystemCaseSensitivityMode.Insensitive,
+                        ResolvedCaseSensitivity = FileSystemCaseSensitivity.Insensitive,
+                        PathIdentityState = PathIdentityState.Valid
+                    }
+                ],
+                semanticsResolver: resolver);
 
             var request = new ManualImportRequestDto
             {
@@ -1053,6 +1302,15 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
             Assert.True(File.Exists(Path.Join(destinationRoot, "cover.jpg")));
             Assert.True(File.Exists(Path.Join(destinationRoot, "notes.txt")));
             Assert.False(Directory.Exists(sourceDir));
+            Assert.DoesNotContain(
+                resolver.Calls,
+                call => call.Mode == FileSystemCaseSensitivityMode.Auto
+                    && FileSystemPathIdentity.IsSameOrInside(
+                        call.Path,
+                        destinationRoot,
+                        new FileSystemPathSemantics(
+                            FileSystemPathSemantics.CurrentHostDefault.Syntax,
+                            FileSystemCaseSensitivity.Insensitive)));
         }
 
         [Fact]
@@ -2063,6 +2321,39 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
             {
                 Calls.Add((path, mode));
                 return inner.ResolveAsync(path, mode, cancellationToken);
+            }
+        }
+
+        private sealed class RejectAutoUnderPathSemanticsResolver(
+            string rejectedRoot,
+            IFileSystemSemanticsResolver inner) : IFileSystemSemanticsResolver
+        {
+            private readonly string _rejectedRoot = Path.GetFullPath(rejectedRoot);
+
+            public List<(string Path, FileSystemCaseSensitivityMode Mode)> Calls { get; } = [];
+
+            public ValueTask<FileSystemSemanticsResolution> ResolveAsync(
+                string path,
+                FileSystemCaseSensitivityMode mode = FileSystemCaseSensitivityMode.Auto,
+                CancellationToken cancellationToken = default)
+            {
+                var fullPath = Path.GetFullPath(path);
+                Calls.Add((fullPath, mode));
+                if (mode == FileSystemCaseSensitivityMode.Auto
+                    && FileSystemPathIdentity.IsSameOrInside(
+                        fullPath,
+                        _rejectedRoot,
+                        FileSystemPathSemantics.CurrentHostDefault))
+                {
+                    return ValueTask.FromResult(new FileSystemSemanticsResolution(
+                        FileSystemPathSemantics.CurrentHostDefault,
+                        PathIdentityState.Unavailable,
+                        _rejectedRoot,
+                        "The filesystem does not expose read-only case-sensitivity metadata. Select Sensitive or Insensitive explicitly.",
+                        CanonicalPath: fullPath));
+                }
+
+                return inner.ResolveAsync(fullPath, mode, cancellationToken);
             }
         }
     }

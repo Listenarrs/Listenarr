@@ -12,9 +12,7 @@ using Listenarr.Domain.Common;
 
 namespace Listenarr.Api.Features.Downloads;
 
-public sealed class ManualImportDestinationTracker(
-    IFileSystem fileSystem,
-    IFileSystemSemanticsResolver semanticsResolver)
+public sealed class ManualImportDestinationTracker(IFileSystem fileSystem)
 {
     private readonly Dictionary<string, HashSet<string>> _usedDestinationsByBoundary = new(StringComparer.Ordinal);
 
@@ -22,22 +20,26 @@ public sealed class ManualImportDestinationTracker(
 
     public Task<ManualImportDestinationReservation> PlanUniqueAsync(
         string desiredDestination,
+        FileSystemSemanticsResolution destinationResolution,
         CancellationToken cancellationToken = default) =>
         PlanAsync(
             sourcePath: null,
             desiredDestination,
+            destinationResolution,
             allowExistingEquivalent: false,
             cancellationToken);
 
     public Task<ManualImportDestinationReservation> PlanIdempotentOrUniqueAsync(
         string sourcePath,
         string desiredDestination,
+        FileSystemSemanticsResolution destinationResolution,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
         return PlanAsync(
             sourcePath,
             desiredDestination,
+            destinationResolution,
             allowExistingEquivalent: true,
             cancellationToken);
     }
@@ -55,6 +57,7 @@ public sealed class ManualImportDestinationTracker(
     private async Task<ManualImportDestinationReservation> PlanAsync(
         string? sourcePath,
         string desiredDestination,
+        FileSystemSemanticsResolution destinationResolution,
         bool allowExistingEquivalent,
         CancellationToken cancellationToken)
     {
@@ -63,22 +66,29 @@ public sealed class ManualImportDestinationTracker(
             throw new ArgumentException("Destination path is required.", nameof(desiredDestination));
         }
 
-        var resolution = await semanticsResolver.ResolveAsync(
-            Path.GetDirectoryName(desiredDestination) ?? desiredDestination,
-            cancellationToken: cancellationToken);
-        if (resolution.State != PathIdentityState.Valid)
+        if (destinationResolution.State != PathIdentityState.Valid
+            || string.IsNullOrWhiteSpace(destinationResolution.BoundaryPath))
         {
             throw new InvalidOperationException(
-                resolution.Reason ?? "Destination filesystem identity is unavailable.");
+                destinationResolution.Reason
+                    ?? "Destination filesystem identity is unavailable.");
+        }
+        if (!FileSystemPathIdentity.IsSameOrInside(
+                desiredDestination,
+                destinationResolution.BoundaryPath,
+                destinationResolution.Semantics))
+        {
+            throw new InvalidOperationException(
+                "Destination reservation escaped its authorized filesystem boundary.");
         }
 
         var boundaryKey = FileSystemPathIdentity.CreateKey(
             "manual-import-boundary",
-            resolution.BoundaryPath,
-            resolution.Semantics);
+            destinationResolution.BoundaryPath,
+            destinationResolution.Semantics);
         if (!_usedDestinationsByBoundary.TryGetValue(boundaryKey, out var usedDestinations))
         {
-            usedDestinations = new HashSet<string>(resolution.Semantics.Comparer);
+            usedDestinations = new HashSet<string>(destinationResolution.Semantics.Comparer);
             _usedDestinationsByBoundary[boundaryKey] = usedDestinations;
         }
 

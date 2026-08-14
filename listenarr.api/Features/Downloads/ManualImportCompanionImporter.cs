@@ -23,7 +23,6 @@ public sealed class ManualImportCompanionImporter
     private readonly IMetadataService _metadataService;
     private readonly IFileMover _fileMover;
     private readonly IFileSystem _fileSystem;
-    private readonly IFileSystemSemanticsResolver _semanticsResolver;
     private readonly ILibraryDirectoryOwnershipStore _directoryOwnershipStore;
     private readonly ILogger<ManualImportCompanionImporter> _logger;
     private readonly IAudiobookFileService? _audiobookFileService;
@@ -32,7 +31,6 @@ public sealed class ManualImportCompanionImporter
         IMetadataService metadataService,
         IFileMover fileMover,
         IFileSystem fileSystem,
-        IFileSystemSemanticsResolver semanticsResolver,
         ILibraryDirectoryOwnershipStore directoryOwnershipStore,
         ILogger<ManualImportCompanionImporter> logger,
         IAudiobookFileService? audiobookFileService = null)
@@ -40,7 +38,6 @@ public sealed class ManualImportCompanionImporter
         _metadataService = metadataService;
         _fileMover = fileMover;
         _fileSystem = fileSystem;
-        _semanticsResolver = semanticsResolver;
         _directoryOwnershipStore = directoryOwnershipStore;
         _logger = logger;
         _audiobookFileService = audiobookFileService;
@@ -73,6 +70,7 @@ public sealed class ManualImportCompanionImporter
         IReadOnlyCollection<FileUtils.AudioMatchProfile> selectedAudioProfiles,
         ManualImportDestinationTracker destinationTracker,
         FileSystemPathSemantics sourceSemantics,
+        IReadOnlyDictionary<int, FileSystemSemanticsResolution> destinationResolutionsByAudiobook,
         IEnumerable<string> importBlacklist,
         CancellationToken cancellationToken = default)
     {
@@ -85,6 +83,16 @@ public sealed class ManualImportCompanionImporter
         if (audiobookIds.Count != 1)
         {
             _logger.LogDebug("Skipping companion-file import because the batch contains {Count} audiobook targets", audiobookIds.Count);
+            return 0;
+        }
+        if (!destinationResolutionsByAudiobook.TryGetValue(
+                audiobookIds[0],
+                out var destinationResolution)
+            || destinationResolution.State != PathIdentityState.Valid)
+        {
+            _logger.LogWarning(
+                "Skipping companion-file import because no authoritative destination filesystem semantics are available for audiobook {AudiobookId}",
+                audiobookIds[0]);
             return 0;
         }
 
@@ -124,15 +132,14 @@ public sealed class ManualImportCompanionImporter
             .Distinct(sourceSemantics.Comparer)
             .ToList();
 
-        var destinationResolution = await _semanticsResolver.ResolveAsync(
-            destinationRoot,
-            cancellationToken: cancellationToken);
-        if (destinationResolution.State != PathIdentityState.Valid)
+        if (!FileSystemPathIdentity.IsSameOrInside(
+                destinationRoot,
+                destinationResolution.BoundaryPath,
+                destinationResolution.Semantics))
         {
             _logger.LogWarning(
-                "Skipping companion-file import because destination filesystem identity is unavailable for {DestinationRoot}: {Reason}",
-                destinationRoot,
-                destinationResolution.Reason);
+                "Skipping companion-file import because destination root {DestinationRoot} escaped its authorized filesystem boundary",
+                destinationRoot);
             return 0;
         }
 
@@ -172,6 +179,7 @@ public sealed class ManualImportCompanionImporter
 
                 var destinationReservation = await destinationTracker.PlanUniqueAsync(
                     destinationPath,
+                    destinationResolution,
                     cancellationToken);
                 destinationPath = destinationReservation.Path;
                 var operationId = FileMoveOperationIdentity.CreateForPaths(

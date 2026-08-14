@@ -86,14 +86,14 @@ public sealed class ManualImportCompanionOwnershipTests : BaseTests
             metadataService.Object,
             mover.Object,
             new LocalFileSystem(),
-            semanticsResolver,
             ownershipStore.Object,
             NullLogger<ManualImportCompanionImporter>.Instance,
             fileService);
         var tracker = new ManualImportDestinationTracker(
-            new LocalFileSystem(),
-            semanticsResolver);
+            new LocalFileSystem());
         var sourceResolution = await semanticsResolver.ResolveAsync(sourceDirectory);
+        var destinationResolution = await semanticsResolver.ResolveAsync(
+            Path.GetDirectoryName(selectedDestination)!);
         var selectedProfiles = new[]
         {
             FileUtils.CreateAudioMatchProfile(selectedSource, metadata)
@@ -125,6 +125,10 @@ public sealed class ManualImportCompanionOwnershipTests : BaseTests
             selectedProfiles,
             tracker,
             sourceResolution.Semantics,
+            new Dictionary<int, FileSystemSemanticsResolution>
+            {
+                [targetAudiobook.Id] = destinationResolution
+            },
             importBlacklist: []);
 
         Assert.Equal(0, imported);

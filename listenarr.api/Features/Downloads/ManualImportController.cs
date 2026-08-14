@@ -92,7 +92,6 @@ public partial class ManualImportController : ControllerBase
             metadataService,
             fileMover,
             fileSystem,
-            semanticsResolver,
             directoryOwnershipStore,
             Microsoft.Extensions.Logging.Abstractions.NullLogger<ManualImportCompanionImporter>.Instance,
             audiobookFileService);
@@ -185,7 +184,7 @@ public partial class ManualImportController : ControllerBase
         _filesystemMutationGate.EnsureReady();
 
         var results = new List<ManualImportResultDto>();
-        var destinationTracker = new ManualImportDestinationTracker(_fileSystem, _semanticsResolver);
+        var destinationTracker = new ManualImportDestinationTracker(_fileSystem);
 
         try
         {
@@ -194,6 +193,7 @@ public partial class ManualImportController : ControllerBase
             var appSettings = await _configService.GetApplicationSettingsAsync();
             var sourceSemantics = await ResolvePathSemanticsAsync(
                 sourceDirectory,
+                rootFolders,
                 "Source filesystem identity is unavailable.",
                 cancellationToken);
             var orderedItems = ManualImportPathPlanner.BuildOrderedItems(
@@ -218,6 +218,8 @@ public partial class ManualImportController : ControllerBase
                 async operationToken =>
                 {
                     var planningBasePaths = new Dictionary<int, string>();
+                    var planningDestinationResolutions =
+                        new Dictionary<int, FileSystemSemanticsResolution>();
                     try
                     {
                         foreach (var item in orderedItems)
@@ -238,6 +240,7 @@ public partial class ManualImportController : ControllerBase
                                 sourceSemantics,
                                 destinationTracker,
                                 planningBasePaths,
+                                planningDestinationResolutions,
                                 rootFolders,
                                 appSettings,
                                 fileCount > 1,
@@ -261,6 +264,7 @@ public partial class ManualImportController : ControllerBase
                                 selectedAudioProfiles,
                                 destinationTracker,
                                 sourceSemantics,
+                                planningDestinationResolutions,
                                 appSettings.ImportBlacklistExtensions,
                                 operationToken);
                             _logger.LogInformation(

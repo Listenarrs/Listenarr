@@ -12,6 +12,7 @@ public partial class ManualImportController
         FileSystemPathSemantics sourceSemantics,
         ManualImportDestinationTracker destinationTracker,
         IDictionary<int, string> planningBasePaths,
+        IDictionary<int, FileSystemSemanticsResolution> planningDestinationResolutions,
         List<RootFolder> rootFolders,
         ApplicationSettings settings,
         bool hasMultipleFile,
@@ -101,9 +102,18 @@ public partial class ManualImportController
                     item.FullPath);
             }
 
-            var destinationResolution = await ResolveDestinationResolutionAsync(
-                managedBasePath,
-                cancellationToken);
+            if (!planningDestinationResolutions.TryGetValue(
+                    audiobook.Id,
+                    out var destinationResolution))
+            {
+                destinationResolution = await ResolveDestinationResolutionAsync(
+                    managedBasePath,
+                    rootFolders,
+                    cancellationToken);
+                planningDestinationResolutions.Add(
+                    audiobook.Id,
+                    destinationResolution);
+            }
             var destinationSemantics = destinationResolution.Semantics;
             var pathPlan = await _pathPlanner.GeneratePathAsync(
                 audiobook,
@@ -134,6 +144,7 @@ public partial class ManualImportController
                 await destinationTracker.PlanIdempotentOrUniqueAsync(
                     item.FullPath,
                     destinationPath,
+                    destinationResolution,
                     cancellationToken);
             destinationPath = destinationReservation.Path;
             var authoritativeBasePath = pathPlan.AudiobookBasePath;

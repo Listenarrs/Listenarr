@@ -46,8 +46,9 @@ public partial class ManualImportController
         return true;
     }
 
-    private async Task<FileSystemSemanticsResolution> ResolveDestinationResolutionAsync(
+    private Task<FileSystemSemanticsResolution> ResolveDestinationResolutionAsync(
         string? basePath,
+        IReadOnlyCollection<RootFolder> rootFolders,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(basePath))
@@ -55,10 +56,41 @@ public partial class ManualImportController
             throw new InvalidOperationException("Destination base path is unavailable.");
         }
 
-        RootFolder? bestRoot = null;
+        return ResolvePathResolutionAsync(
+            basePath,
+            rootFolders,
+            "Destination filesystem identity is unavailable.",
+            cancellationToken);
+    }
+
+    private async Task<FileSystemPathSemantics> ResolvePathSemanticsAsync(
+        string path,
+        IReadOnlyCollection<RootFolder> rootFolders,
+        string defaultReason,
+        CancellationToken cancellationToken)
+    {
+        var resolution = await ResolvePathResolutionAsync(
+            path,
+            rootFolders,
+            defaultReason,
+            cancellationToken);
+        return resolution.Semantics;
+    }
+
+    private async Task<FileSystemSemanticsResolution> ResolvePathResolutionAsync(
+        string path,
+        IReadOnlyCollection<RootFolder> rootFolders,
+        string defaultReason,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        ArgumentNullException.ThrowIfNull(rootFolders);
+
+        FileSystemSemanticsResolution? bestRootResolution = null;
         var bestRootLength = -1;
-        foreach (var root in await _rootFolderService.GetAllAsync())
+        foreach (var root in rootFolders)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
                     root.Path,
                     out var canonicalRoot,
@@ -67,13 +99,13 @@ public partial class ManualImportController
                 continue;
             }
 
-            var rootResolution = await _semanticsResolver.ResolveAsync(
+            var rootResolution = await ResolveConfiguredRootSemanticsAsync(
+                root,
                 canonicalRoot,
-                root.CaseSensitivityMode,
                 cancellationToken);
             if (rootResolution.State != PathIdentityState.Valid
                 || !FileSystemPathIdentity.IsSameOrInside(
-                    basePath,
+                    path,
                     canonicalRoot,
                     rootResolution.Semantics))
             {
@@ -82,38 +114,59 @@ public partial class ManualImportController
 
             if (canonicalRoot.Length > bestRootLength)
             {
-                bestRoot = root;
+                bestRootResolution = rootResolution;
                 bestRootLength = canonicalRoot.Length;
             }
         }
 
-        var resolution = await _semanticsResolver.ResolveAsync(
-            basePath,
-            bestRoot?.CaseSensitivityMode ?? FileSystemCaseSensitivityMode.Auto,
-            cancellationToken);
-        if (resolution.State != PathIdentityState.Valid)
+        FileSystemSemanticsResolution resolution;
+        if (bestRootResolution != null)
         {
-            throw new InvalidOperationException(
-                resolution.Reason ?? "Destination filesystem identity is unavailable.");
+            var resolvedMode = bestRootResolution.Semantics.CaseSensitivity
+                == FileSystemCaseSensitivity.Sensitive
+                    ? FileSystemCaseSensitivityMode.Sensitive
+                    : FileSystemCaseSensitivityMode.Insensitive;
+            resolution = await _semanticsResolver.ResolveAsync(
+                path,
+                resolvedMode,
+                cancellationToken);
+        }
+        else
+        {
+            resolution = await _semanticsResolver.ResolveAsync(
+                path,
+                FileSystemCaseSensitivityMode.Auto,
+                cancellationToken);
         }
 
-        return resolution;
-    }
-
-    private async Task<FileSystemPathSemantics> ResolvePathSemanticsAsync(
-        string path,
-        string defaultReason,
-        CancellationToken cancellationToken)
-    {
-        var resolution = await _semanticsResolver.ResolveAsync(
-            path,
-            cancellationToken: cancellationToken);
         if (resolution.State != PathIdentityState.Valid)
         {
             throw new InvalidOperationException(resolution.Reason ?? defaultReason);
         }
 
-        return resolution.Semantics;
+        return resolution;
+    }
+
+    private async Task<FileSystemSemanticsResolution> ResolveConfiguredRootSemanticsAsync(
+        RootFolder root,
+        string canonicalRoot,
+        CancellationToken cancellationToken)
+    {
+        var persisted = RootFolderPathSemantics.ResolvePersisted(root);
+        if (persisted.HasValue
+            && !persisted.Value.DetectAmbiguousCaseMatches)
+        {
+            return new FileSystemSemanticsResolution(
+                persisted.Value.Semantics,
+                PathIdentityState.Valid,
+                canonicalRoot,
+                CanonicalPath: canonicalRoot);
+        }
+
+        return await _semanticsResolver.ResolveAsync(
+            canonicalRoot,
+            root.CaseSensitivityMode,
+            cancellationToken);
     }
 
     private async Task<bool> IsInsideAnyConfiguredRootAsync(
@@ -131,9 +184,9 @@ public partial class ManualImportController
                 continue;
             }
 
-            var resolution = await _semanticsResolver.ResolveAsync(
+            var resolution = await ResolveConfiguredRootSemanticsAsync(
+                rootFolder,
                 canonicalRoot,
-                rootFolder.CaseSensitivityMode,
                 cancellationToken);
             if (resolution.State == PathIdentityState.Valid
                 && FileSystemPathIdentity.IsSameOrInside(

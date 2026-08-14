@@ -60,14 +60,13 @@ public sealed class ManualImportCompanionImporterTests : BaseTests
                 Mock.Of<IMetadataService>(),
                 mover.Object,
                 new LocalFileSystem(),
-                semanticsResolver,
                 ownershipStore.Object,
                 NullLogger<ManualImportCompanionImporter>.Instance,
                 fileService.Object);
             var tracker = new ManualImportDestinationTracker(
-                new LocalFileSystem(),
-                semanticsResolver);
+                new LocalFileSystem());
             var sourceResolution = await semanticsResolver.ResolveAsync(sourceDirectory);
+            var destinationResolution = await semanticsResolver.ResolveAsync(destinationDirectory);
             var items = new[]
             {
                 new ManualImportItemDto
@@ -95,6 +94,10 @@ public sealed class ManualImportCompanionImporterTests : BaseTests
                 selectedAudioProfiles: [],
                 tracker,
                 sourceResolution.Semantics,
+                new Dictionary<int, FileSystemSemanticsResolution>
+                {
+                    [audiobook.Id] = destinationResolution
+                },
                 importBlacklist: [],
                 cancellationToken: cancellation.Token));
 
@@ -199,14 +202,14 @@ public sealed class ManualImportCompanionImporterTests : BaseTests
                 metadataService.Object,
                 mover.Object,
                 new LocalFileSystem(),
-                semanticsResolver,
                 ownershipStore.Object,
                 NullLogger<ManualImportCompanionImporter>.Instance,
                 fileService.Object);
             var tracker = new ManualImportDestinationTracker(
-                new LocalFileSystem(),
-                semanticsResolver);
+                new LocalFileSystem());
             var sourceResolution = await semanticsResolver.ResolveAsync(sourceDirectory);
+            var destinationResolution = await semanticsResolver.ResolveAsync(
+                Path.GetDirectoryName(selectedDestination)!);
             var selectedProfiles = new[]
             {
                 FileUtils.CreateAudioMatchProfile(selectedSource, metadata)
@@ -238,6 +241,10 @@ public sealed class ManualImportCompanionImporterTests : BaseTests
                 selectedProfiles,
                 tracker,
                 sourceResolution.Semantics,
+                new Dictionary<int, FileSystemSemanticsResolution>
+                {
+                    [audiobook.Id] = destinationResolution
+                },
                 importBlacklist: []);
 
             Assert.Equal(0, imported);
@@ -321,14 +328,13 @@ public sealed class ManualImportCompanionImporterTests : BaseTests
                 Mock.Of<IMetadataService>(),
                 mover.Object,
                 new LocalFileSystem(),
-                semanticsResolver,
                 directoryOwnershipStore.Object,
                 NullLogger<ManualImportCompanionImporter>.Instance,
                 fileService.Object);
             var tracker = new ManualImportDestinationTracker(
-                new LocalFileSystem(),
-                semanticsResolver);
+                new LocalFileSystem());
             var sourceResolution = await semanticsResolver.ResolveAsync(requestedRoot);
+            var destinationResolution = await semanticsResolver.ResolveAsync(destinationDirectory);
             Assert.Equal(PathIdentityState.Valid, sourceResolution.State);
             var items = new[]
             {
@@ -357,6 +363,10 @@ public sealed class ManualImportCompanionImporterTests : BaseTests
                 selectedAudioProfiles: [],
                 tracker,
                 sourceResolution.Semantics,
+                new Dictionary<int, FileSystemSemanticsResolution>
+                {
+                    [audiobook.Id] = destinationResolution
+                },
                 importBlacklist: []);
 
             Assert.Equal(1, imported);
