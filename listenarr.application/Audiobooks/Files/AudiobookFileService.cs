@@ -327,10 +327,11 @@ namespace Listenarr.Application.Audiobooks.Files
                     cacheIdentity,
                     filePath);
 
-                var fi = new FileInfo(metadataPath);
                 var fileRecord = AudiobookFile.CreateUnresolved(filePath);
                 fileRecord.AudiobookId = audiobook.Id;
-                fileRecord.Size = fi.Exists ? fi.Length : null;
+                fileRecord.Size = ResolveRegisteredLength(
+                    registrationLease,
+                    metadataPath);
                 fileRecord.Source = source;
                 fileRecord.CreatedAt = DateTime.UtcNow;
                 fileRecord.DurationSeconds = meta?.Duration.TotalSeconds;
