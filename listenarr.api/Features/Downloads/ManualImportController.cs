@@ -276,7 +276,18 @@ public partial class ManualImportController : ControllerBase
                             && request.CleanupEmptySourceFolders)
                         {
                             operationToken.ThrowIfCancellationRequested();
-                            _fileSystem.DeleteEmptyDirectories(sourceDirectory);
+                            if (IsPotentiallyInsideAnyConfiguredRoot(
+                                    sourceDirectory,
+                                    rootFolders))
+                            {
+                                _logger.LogDebug(
+                                    "Skipped generic empty-directory cleanup for managed manual-import source {SourceRoot}; managed library paths require explicit filesystem mutation authority.",
+                                    LogRedaction.SanitizeFilePath(sourceDirectory));
+                            }
+                            else
+                            {
+                                _fileSystem.DeleteEmptyDirectories(sourceDirectory);
+                            }
                         }
                     }
                     catch (OperationCanceledException) when (

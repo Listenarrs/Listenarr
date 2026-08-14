@@ -205,10 +205,15 @@ public sealed partial class RootFolderRelocationService(
                     throw new InvalidOperationException(
                         "A tracked audiobook move source escaped the relocating root folder.");
                 }
-                if (!FileSystemPathIdentity.AreEquivalent(
+                if (manifest.SourceIdentity.Syntax != sourceOperationSemantics.Value.Syntax
+                    || !FileSystemPathIdentity.IsSameOrInside(
                         manifest.SourceIdentity.BoundaryPath,
                         root.Path,
-                        sourceOperationSemantics.Value))
+                        sourceOperationSemantics.Value)
+                    || !FileSystemPathIdentity.IsSameOrInside(
+                        manifest.SourceIdentity.BoundaryPath,
+                        root.Path,
+                        manifest.SourceIdentity.Semantics))
                 {
                     throw new InvalidOperationException(
                         "A tracked audiobook move source is not authorized by the relocating root folder boundary.");

@@ -869,7 +869,9 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
             var sourceRoot = CreateTempDirectory("listenarr-manual-explicit-source");
             var destinationRoot = CreateTempDirectory("listenarr-manual-explicit-source-destination");
             var sourceFile = Path.Join(sourceRoot, "chapter.mp3");
+            var managedEmptyDirectory = Path.Join(sourceRoot, "empty");
             await File.WriteAllTextAsync(sourceFile, "audio");
+            Directory.CreateDirectory(managedEmptyDirectory);
             var roots = new List<RootFolder>
             {
                 new()
@@ -915,6 +917,7 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                 Path = sourceRoot,
                 Mode = "interactive",
                 Action = FileAction.Copy,
+                CleanupEmptySourceFolders = true,
                 Items =
                 [
                     new ManualImportItemDto
@@ -943,6 +946,7 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                         new FileSystemPathSemantics(
                             FileSystemPathSemantics.CurrentHostDefault.Syntax,
                             FileSystemCaseSensitivity.Insensitive)));
+            Assert.True(Directory.Exists(managedEmptyDirectory));
         }
 
         [Fact]

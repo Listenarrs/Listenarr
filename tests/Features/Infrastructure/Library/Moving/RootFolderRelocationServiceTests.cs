@@ -153,7 +153,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
                 db,
                 audiobook,
                 Path.Join(audiobook.BasePath!, "book.m4b"),
-                source);
+                audiobook.BasePath!);
             rootId = root.Id;
         }
 
@@ -185,6 +185,8 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
         Assert.Equal(rootId, relocation.ActiveRootFolderId);
         Assert.Equal(relocation.Id, job.RelocationId);
         Assert.Equal(source, job.SourceCleanupBoundary);
+        Assert.True(job.TryGetSourceIdentity(out var sourceIdentity));
+        Assert.Equal(Path.Join(source, "Author", "Title"), sourceIdentity.BoundaryPath);
         Assert.Equal(MoveManifestIdentity.Version, job.IdentityKeyVersion);
         Assert.Single(job.Entries, MoveManifestIdentity.IsSourceBoundaryAuthorization);
         Assert.Single(job.Entries, MoveManifestIdentity.IsTargetBoundaryAuthorization);
@@ -201,6 +203,53 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
             FileSystemPathSemantics.CurrentHostDefault));
         Assert.Equal(1, manifestScopes.CreatedScopeCount);
         Assert.Equal(1, manifestScopes.DisposedScopeCount);
+    }
+
+    [Fact]
+    public async Task StartRelocation_TrackedIdentityBoundaryOutsideRoot_RejectsBeforeCreatingSaga()
+    {
+        var authorityParent = Path.Join(
+            TempRoot,
+            $"outside-authority-{Guid.NewGuid():N}");
+        var source = Path.Join(authorityParent, "library");
+        var target = Path.Join(
+            TempRoot,
+            $"outside-authority-target-{Guid.NewGuid():N}");
+        var audiobookPath = Path.Join(source, "Author", "Title");
+        Directory.CreateDirectory(audiobookPath);
+        int rootId;
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            var root = new RootFolder { Name = "Library", Path = source };
+            var audiobook = new Audiobook
+            {
+                Title = "Title",
+                BasePath = audiobookPath
+            };
+            db.RootFolders.Add(root);
+            db.Audiobooks.Add(audiobook);
+            await db.SaveChangesAsync();
+            await AddTrackedFileAsync(
+                db,
+                audiobook,
+                Path.Join(audiobookPath, "book.m4b"),
+                authorityParent);
+            rootId = root.Id;
+        }
+
+        var service = CreateService(CreateMoveSourceManifestService());
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.StartAsync(rootId, BuildRelocationCommand(target)));
+
+        Assert.Contains(
+            "not authorized by the relocating root folder boundary",
+            exception.Message,
+            StringComparison.OrdinalIgnoreCase);
+        await using var verification = await _factory.CreateDbContextAsync();
+        Assert.Empty(verification.RootFolderRelocations);
+        Assert.Empty(verification.MoveJobs);
+        Assert.Equal(source, (await verification.RootFolders.SingleAsync()).Path);
     }
 
     [Fact]

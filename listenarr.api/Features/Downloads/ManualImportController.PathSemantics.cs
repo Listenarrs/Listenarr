@@ -169,6 +169,57 @@ public partial class ManualImportController
             cancellationToken);
     }
 
+    private static bool IsPotentiallyInsideAnyConfiguredRoot(
+        string path,
+        IEnumerable<RootFolder> rootFolders)
+    {
+        if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                path,
+                out var canonicalPath,
+                out _)
+            || !FileSystemPathIdentity.TryDetectAbsoluteSyntaxForHost(
+                canonicalPath,
+                out var pathSyntax))
+        {
+            return true;
+        }
+
+        foreach (var root in rootFolders)
+        {
+            if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                    root.Path,
+                    out var canonicalRoot,
+                    out _)
+                || !FileSystemPathIdentity.TryDetectAbsoluteSyntaxForHost(
+                    canonicalRoot,
+                    out var rootSyntax)
+                || rootSyntax != pathSyntax)
+            {
+                continue;
+            }
+
+            var sensitive = new FileSystemPathSemantics(
+                pathSyntax,
+                FileSystemCaseSensitivity.Sensitive);
+            var insensitive = new FileSystemPathSemantics(
+                pathSyntax,
+                FileSystemCaseSensitivity.Insensitive);
+            if (FileSystemPathIdentity.IsSameOrInside(
+                    canonicalPath,
+                    canonicalRoot,
+                    sensitive)
+                || FileSystemPathIdentity.IsSameOrInside(
+                    canonicalPath,
+                    canonicalRoot,
+                    insensitive))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private async Task<bool> IsInsideAnyConfiguredRootAsync(
         string path,
         IEnumerable<RootFolder> rootFolders,
