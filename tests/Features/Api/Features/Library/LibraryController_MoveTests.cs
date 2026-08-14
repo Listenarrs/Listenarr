@@ -1477,6 +1477,95 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 It.IsAny<CancellationToken>()), Times.Never);
         }
 
+        [Fact]
+        [Trait("Method", "EnqueueMove")]
+        [Trait("Scenario", "NarrowTrackedIdentityBoundaryUsesManagedRootMutationAuthority")]
+        public async Task MoveAudiobook_NarrowTrackedIdentityBoundary_UsesManagedRootMutationAuthority()
+        {
+            var moveQueue = CreateMoveQueueMock();
+            moveQueue.Setup(service => service.EnqueueMoveAsync(
+                    It.IsAny<MoveEnqueueCommand>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Guid.NewGuid());
+            Init(services => services.WithSingleton(moveQueue.Object));
+            var rootPath = FileService.GetTempDirectory(
+                "listenarr-move-managed-source-root");
+            await AddAuthorizedRootAsync(rootPath, "Managed Source Root");
+
+            var sourcePath = Path.Join(rootPath, "Author", "BookMoved");
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Moved source")
+                .WithBasePath(sourcePath)
+                .Build());
+            await AddTrackedFileAsync(
+                audiobook,
+                sourcePath,
+                identityBoundary: sourcePath);
+            var targetPath = Path.Join(rootPath, "Author", "BookReturned");
+
+            var result = await _provider.GetRequiredService<LibraryController>().EnqueueMove(
+                audiobook.Id,
+                new LibraryController.MoveRequest
+                {
+                    DestinationPath = targetPath,
+                    SourcePath = sourcePath,
+                    MoveFiles = true,
+                    DeleteEmptySource = true
+                });
+
+            Assert.IsType<AcceptedResult>(result);
+            moveQueue.Verify(service => service.EnqueueMoveAsync(
+                It.Is<MoveEnqueueCommand>(command =>
+                    command.SourcePath == sourcePath
+                    && command.SourceIdentity.BoundaryPath == sourcePath
+                    && command.SourceCleanupBoundary == rootPath
+                    && command.SourceBoundaryDirectoryObjectIdentityVersion > 0
+                    && !string.IsNullOrWhiteSpace(
+                        command.SourceBoundaryDirectoryObjectIdentity)),
+                It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [Fact]
+        [Trait("Method", "EnqueueMove")]
+        [Trait("Scenario", "TrackedIdentityBoundaryOutsideManagedRootIsRejected")]
+        public async Task MoveAudiobook_TrackedIdentityBoundaryOutsideManagedRoot_IsRejected()
+        {
+            var moveQueue = CreateMoveQueueMock();
+            Init(services => services.WithSingleton(moveQueue.Object));
+            var authorityParent = FileService.GetTempDirectory(
+                "listenarr-move-outside-source-authority");
+            var rootPath = Path.Join(authorityParent, "ManagedRoot");
+            await AddAuthorizedRootAsync(rootPath, "Managed Source Root");
+
+            var sourcePath = Path.Join(rootPath, "Author", "Book");
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Overbroad source authority")
+                .WithBasePath(sourcePath)
+                .Build());
+            await AddTrackedFileAsync(
+                audiobook,
+                sourcePath,
+                identityBoundary: authorityParent);
+
+            var result = await _provider.GetRequiredService<LibraryController>().EnqueueMove(
+                audiobook.Id,
+                new LibraryController.MoveRequest
+                {
+                    DestinationPath = Path.Join(rootPath, "Author", "Target"),
+                    SourcePath = sourcePath,
+                    MoveFiles = true
+                });
+
+            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+            Assert.Contains(
+                "source_physical_identity_unavailable",
+                badRequest.Value?.ToString() ?? string.Empty,
+                StringComparison.OrdinalIgnoreCase);
+            moveQueue.Verify(service => service.EnqueueMoveAsync(
+                It.IsAny<MoveEnqueueCommand>(),
+                It.IsAny<CancellationToken>()), Times.Never);
+        }
+
         [WindowsFact]
         [Trait("Method", "EnqueueMove")]
         [Trait("Scenario", "ChangedSemanticsManagedSourceRootBlocksCaseAliasFallback")]

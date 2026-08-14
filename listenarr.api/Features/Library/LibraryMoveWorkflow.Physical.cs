@@ -214,7 +214,11 @@ public sealed partial class LibraryMoveWorkflow
                     if (configuredManagedSourceRoot != null
                         && (sourceManagedBoundary == null
                             || !sourceManagedBoundary.DirectoryIdentity.IsAvailable
-                            || !FileSystemPathIdentity.AreEquivalent(
+                            || sourceManagedBoundary.Semantics.Syntax
+                                != manifest.SourceIdentity.Syntax
+                            || sourceManagedBoundary.Semantics.CaseSensitivity
+                                != manifest.SourceIdentity.CaseSensitivity
+                            || !FileSystemPathIdentity.IsSameOrInside(
                                 manifest.SourceIdentity.BoundaryPath,
                                 sourceManagedBoundary.Path,
                                 sourceManagedBoundary.Semantics)))
