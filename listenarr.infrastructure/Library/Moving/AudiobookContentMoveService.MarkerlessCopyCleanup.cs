@@ -12,7 +12,8 @@ internal sealed partial class AudiobookContentMoveService
                 file.Delete();
             }
         }
-        catch
+        catch (Exception exception) when (
+            WorkerExceptionClassifier.IsNonFatal(exception))
         {
             // If persistence failed after final-name creation, preserve anything that
             // cannot still be proven to be this exact newly-created file.

@@ -171,15 +171,11 @@ public sealed class FileSystemSemanticsResolver : IFileSystemSemanticsResolver
                 $"Filesystem case sensitivity could not be read: {new Win32Exception(Marshal.GetLastWin32Error()).Message}");
         }
 
-        LinuxFilesystemFlagsProbe flagsProbe;
-        try
-        {
-            flagsProbe = _linuxFilesystemFlagsProbe(descriptor);
-        }
-        finally
-        {
-            _ = CloseUnix(descriptor);
-        }
+        using var descriptorHandle = new SafeFileHandle(
+            new IntPtr(descriptor),
+            ownsHandle: true);
+        var flagsProbe = _linuxFilesystemFlagsProbe(
+            descriptorHandle.DangerousGetHandle().ToInt32());
 
         if (flagsProbe.Success
             && (flagsProbe.Flags & FsCasefoldFlag) != 0)
@@ -468,7 +464,4 @@ public sealed class FileSystemSemanticsResolver : IFileSystemSemanticsResolver
 
     [DllImport("libc", EntryPoint = "fstatfs", SetLastError = true)]
     private static extern int FStatFsUnix(int descriptor, IntPtr buffer);
-
-    [DllImport("libc", EntryPoint = "close", SetLastError = true)]
-    private static extern int CloseUnix(int descriptor);
 }
